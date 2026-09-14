@@ -1,0 +1,55 @@
+[package]
+name = "rasc"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.93"
+description = "Native Rust CLI for APK and DEX analysis"
+license = "Apache-2.0"
+
+[workspace]
+# The CLI package (this one) plus the decompiler library. `vendor/axmldecoder` is
+# deliberately excluded: upstream code with its own lockfile and patch series
+# (see its PATCHES.md) that must not inherit this workspace's lints.
+members = ["crates/dexdec", "crates/rusty-dex"]
+exclude = ["vendor/axmldecoder"]
+
+[dependencies]
+anyhow = "1.0"
+axmldecoder = "0.5"
+clap = { version = "4.6", features = ["derive"] }
+# Java emitter for `getclass` (vendored fork; see crates/dexdec/FORK.md). It
+# builds for wasm too: rayon's wasm fallback runs its parallel iterators
+# sequentially, and dexdec never uses `rayon::spawn`.
+dexdec = { path = "crates/dexdec" }
+memchr = "2.7"
+memmap2 = "0.9"
+rayon = "1.12"
+
+# Deflate backends are target-specific. Native keeps the C implementations (zlib for
+# the streaming prefix decoder, libdeflate for whole-entry inflation). Neither builds
+# for a wasm target: cc-rs has no wasm sysroot headers, so the C sources fail on
+# `#include <string.h>`. wasm targets therefore use flate2's pure Rust backend.
+[target.'cfg(not(target_family = "wasm"))'.dependencies]
+flate2 = { version = "1", default-features = false, features = ["zlib"] }
+libdeflater = "1.26"
+
+[target.'cfg(target_family = "wasm")'.dependencies]
+flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[profile.release]
+# Thin LTO: within ~1-3% of fat LTO on this workload, but it links an order of
+# magnitude faster. The benchmark table in README.md was measured with fat LTO;
+# treat its numbers as that build's, not this one's.
+lto = "thin"
+codegen-units = 16
+panic = "abort"
+strip = true
+
+# axmldecoder 0.5.0 panics on manifests whose string pool uses the extended length
+# forms, which real APKs do. The vendored copy implements them; see
+# vendor/axmldecoder/PATCHES.md.
+[patch.crates-io]
+axmldecoder = { path = "vendor/axmldecoder" }

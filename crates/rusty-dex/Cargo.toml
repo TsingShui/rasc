@@ -1,0 +1,28 @@
+[package]
+name = "rusty-dex"
+version = "0.2.0"
+edition = "2024"
+license = "Apache-2.0"
+description = "`rusty-dex` is a parser for DEX files"
+homepage = "https://github.com/rusty-rs/rusty-dex"
+repository = "https://github.com/rusty-rs/rusty-dex"
+readme = "README.md"
+
+# Fork-only edit relative to upstream (see FORK.md): the zip-based APK reader is
+# behind the `apk` feature so the crate builds without native compression
+# backends. rasc and dexdec both consume DEX bytes, not archives.
+[dependencies]
+byteorder = "1.4.3"
+zip = { version = "0.6.4", optional = true, default-features = false, features = ["deflate-zlib", "bzip2", "zstd"] }
+lazy_static = "1.4.0"
+regex = "1.7.3"
+log = "0.4.21"
+thiserror = "2.0.12"
+
+[features]
+default = []
+apk = ["dep:zip"]
+
+# Vendored upstream code: see crates/dexdec/PATCHES.md, patch 7.
+[lints.rust]
+warnings = "allow"

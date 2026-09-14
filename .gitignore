@@ -1,0 +1,27 @@
+/target/
+*.apk
+*.dex
+*.jar
+*.zip
+.DS_Store
+
+# Fetched corpora live here: free-software APKs that are used, never redistributed, plus the
+# alias-to-APK mapping. Nothing under .cache/ enters the tree.
+/.cache/
+
+# `bench/` (native contract suites, reference benchmark, corpus fetcher) and `.auto/` (experiment
+# notes, harness scripts) stay on disk for local use but are not part of the tree.
+/bench/
+/.auto/
+
+# Profiling builds (unstripped, frame pointers) are not part of the tree.
+/target-prof/
+__pycache__/
+
+# javac drops these in its working directory; the decompiler harness runs javac from the
+# repository root (the subtree has its own rule for its own directory).
+javac.*.args
+
+# Agent-harness state (goal text, session ledger). It quotes notes verbatim, so it can
+# carry corpus identity that must not enter the tree - see tools/audit/desensitize_check.py.
+/.pi/

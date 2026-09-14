@@ -1,0 +1,20 @@
+# Tokens that must not enter the repository.
+#
+# One literal token per line, matched case-insensitively as a substring; '#' starts
+# a comment. This file is the gate's own word list and is the ONE path the gate does
+# not scan (its purpose is to hold these tokens) - keep it short enough to audit by
+# eye. Everything else must keep real corpus identity out of the tree; see AGENT.md,
+# the corpus bullets under "1. Gates".
+#
+# Adding a corpus that must not be named here? Add its tokens below and refer to it by
+# an alias in anything committed; the alias-to-APK mapping lives in the untracked
+# `.cache/corpus/local.json`.
+douyin
+抖音
+tiktok
+com.ss.android
+ss.android
+ss/android
+com.bytedance
+com/bytedance
+/Users/bytedance

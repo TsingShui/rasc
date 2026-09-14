@@ -1,0 +1,114 @@
+name: Release
+
+# Tag-driven: pushing a `v*` tag builds the macOS artefacts and publishes one
+# GitHub Release carrying them. `workflow_dispatch` builds and packages the same
+# artefacts without releasing, so the workflow can be exercised before a tag.
+#
+# Both targets build on the arm64 runner: the macOS SDK is universal, so the
+# x86_64 `cc` dependencies (libdeflater, libz-sys) cross-compile with the target
+# triple. Tests run once, on the host target, before anything is published.
+#
+# Release notes come from `docs/releases/<tag>.md`, which is reviewed like any
+# other file, rather than from `generate_release_notes` - the history is not part
+# of the desensitization-checked tree.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: macOS ${{ matrix.target }}
+    runs-on: macos-14
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [aarch64-apple-darwin, x86_64-apple-darwin]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Toolchain
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          rustup target add ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      - name: Tests (host target only)
+        if: matrix.target == 'aarch64-apple-darwin'
+        run: cargo test --quiet
+
+      - name: Build
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Smoke test
+        run: |
+          BIN=target/${{ matrix.target }}/release/rasc
+          "$BIN" --version
+          "$BIN" --help > /dev/null
+
+      - name: Package
+        run: |
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            VERSION="${GITHUB_REF_NAME#v}"
+          else
+            VERSION="$(grep -m1 '^version = ' Cargo.toml | cut -d'"' -f2)"
+          fi
+          NAME="rasc-${VERSION}-${{ matrix.target }}"
+          mkdir -p "$NAME"
+          cp "target/${{ matrix.target }}/release/rasc" "$NAME/"
+          cp LICENSE NOTICE README.md README.zh-CN.md "$NAME/"
+          tar -czf "$NAME.tar.gz" "$NAME"
+          shasum -a 256 "$NAME.tar.gz" > "$NAME.tar.gz.sha256"
+          rm -rf "$NAME"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.target }}
+          path: |
+            rasc-*.tar.gz
+            rasc-*.tar.gz.sha256
+
+  release:
+    name: Publish
+    if: github.ref_type == 'tag'
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          NOTES="docs/releases/${GITHUB_REF_NAME}.md"
+          if [ -f "$NOTES" ]; then
+            NOTES_ARGS=(--notes-file "$NOTES")
+          else
+            NOTES_ARGS=(--notes "macOS artefacts (aarch64 + x86_64).")
+          fi
+          # Idempotent: re-pushing a tag (or a re-run) must refresh the assets of an
+          # existing release instead of failing on "release already exists".
+          if gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
+            gh release upload "${GITHUB_REF_NAME}" artifacts/* --clobber
+          else
+            gh release create "${GITHUB_REF_NAME}" \
+              --title "rasc ${GITHUB_REF_NAME}" \
+              "${NOTES_ARGS[@]}" \
+              artifacts/*
+          fi

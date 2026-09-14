@@ -1,0 +1,23 @@
+rasc
+Copyright 2026 the rasc authors
+
+Licensed under the Apache License, Version 2.0; see LICENSE for the full text.
+
+This product bundles the following third-party components in-tree, each under its
+own license, with the license text next to it:
+
+  vendor/axmldecoder/    Apache-2.0 OR MIT     vendor/axmldecoder/LICENSE.APACHE
+                                               vendor/axmldecoder/LICENSE.MIT
+
+  crates/dexdec/         Apache-2.0            crates/dexdec/LICENSE
+  crates/rusty-dex/      Apache-2.0            crates/rusty-dex/LICENSE
+
+crates/dexdec is a fork of https://github.com/asLody/dexdec (Apache-2.0).
+crates/rusty-dex carries upstream https://github.com/rusty-rs/rusty-dex
+(Apache-2.0) plus that repository's extensions. Their fork notes and patch lists
+travel with the crates (FORK.md, PATCHES.md).
+
+Those license texts and copyright notices must travel with binary distributions.
+
+Dependencies that are not vendored keep their own licenses, as recorded in
+Cargo.lock.

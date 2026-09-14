@@ -1,0 +1,40 @@
+[package]
+name = "dexdec"
+version = "1.0.2"
+edition = "2021"
+license = "Apache-2.0"
+description = "Dex decompiler core library (forked from asLody/dexdec; Java emitter used by rasc's `getclass`)"
+repository = "https://github.com/asLody/dexdec"
+keywords = ["android", "dex", "decompiler", "reverse-engineering"]
+categories = ["development-tools"]
+readme = "README.md"
+
+# Fork-only edits relative to upstream (see FORK.md and PATCHES.md):
+#   * literal package fields (upstream inherits them from its workspace root);
+#   * no `cli`/`bin`, no embedded `.dexsym` database, no symbol builder, no
+#     mimalloc: rasc drives the library through `Decompiler::from_bytes`;
+#   * `[lib] test = false` - upstream's unit tests stay in-tree for reference
+#     but are not run by rasc's `cargo test --workspace`.
+[dependencies]
+rusty-dex = { path = "../rusty-dex", version = "0.2.0" }
+bitflags = "2"
+rayon = "1"
+hotpath = { version = "0.17.0", default-features = false, features = ["hotpath"], optional = true }
+
+[features]
+default = []
+debug-switch = []
+profiling = ["dep:hotpath"]
+# Load DEX files out of APK/ZIP archives. Off by default: rasc finds the DEX
+# entry itself and passes the bytes. Turning it on re-enables the zip path in
+# `rusty-dex` (and its native compression backends).
+apk = ["rusty-dex/apk"]
+
+[lib]
+test = false
+
+# Vendored upstream code: its warnings are upstream's style, not this repository's
+# regressions, and the zero-warning build gate counts every `warning:` line cargo
+# prints for a workspace member. Allowed here so the gate keeps testing rasc.
+[lints.rust]
+warnings = "allow"

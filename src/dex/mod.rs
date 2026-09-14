@@ -1,0 +1,1087 @@
+//! Borrowed-buffer DEX reader and reference scanner.
+//!
+//! The scanner deliberately avoids a full DEX object model: it reads the tables it
+//! needs straight out of the inflated bytes, walks class data with checked bounds
+//! and decodes only instructions that can carry a reference. Two invariants keep
+//! that fast and correct - every reference instruction stores its index as a
+//! little-endian operand at `pc + 2` (which is what the target pre-filter relies
+//! on), and the opcode width/kind tables are mirrored by independently written
+//! transcriptions in the tests.
+
+pub(crate) mod container;
+mod filter;
+mod mutf8;
+mod opcodes;
+pub(crate) mod prefix;
+
+use crate::bytes::{read_u16, read_u32};
+use crate::query::{ClassQuery, MemberQuery, Query};
+use anyhow::{Context, Result, bail};
+use filter::Targets;
+use memchr::memmem::Finder;
+use rayon::prelude::*;
+use std::collections::BTreeSet;
+
+/// Class lists at least this large are split across workers during the scan.
+const PARALLEL_SCAN_CLASSES: usize = 64;
+/// Minimum classes per split; keeps splitting overhead negligible on huge DEXes.
+const PARALLEL_SCAN_MIN_CHUNK: usize = 8;
+
+#[derive(Clone, Copy, Debug)]
+struct Header {
+    strings_size: usize,
+    strings_off: usize,
+    types_size: usize,
+    types_off: usize,
+    fields_size: usize,
+    fields_off: usize,
+    methods_size: usize,
+    methods_off: usize,
+    classes_size: usize,
+    classes_off: usize,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct MemberId {
+    class_idx: u16,
+    name_idx: u32,
+}
+
+pub fn defines_class(data: &[u8], descriptor: &[u8]) -> Result<bool> {
+    let dex = Dex::parse(data)?;
+    // Resolve each class_def's own type id rather than looking up "the" type id
+    // for the descriptor: a DEX may repeat a descriptor across several type ids
+    // (the spec only requires them to be sorted, and crafted or merged files do
+    // repeat one), and `class_names` reads each class_def's own id. A
+    // first-match-only lookup would make `classes` list a class that `getclass`
+    // then cannot find.
+    for index in 0..dex.header.classes_size {
+        let offset = dex.header.classes_off + index * 32;
+        let type_idx = dex.u32(offset)? as usize;
+        if let Ok(string_idx) = dex.type_string_idx(type_idx)
+            && dex.string_bytes(string_idx)? == descriptor
+        {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+/// How many strings the table holds, without reading any of them.
+///
+/// A host that wants the number for a label should not have to receive half a million
+/// values to count them, and the count is in the header: `string_ids_size`.
+pub fn string_count(data: &[u8]) -> Result<usize> {
+    Ok(Dex::parse(data)?.header.strings_size)
+}
+
+/// How many distinct methods reference each string, for every string a method references.
+///
+/// The strings table's XREFS column, answered in one pass instead of one pass per row: a
+/// targeted query scans the whole archive (22 ms measured), and a page of five hundred rows
+/// cannot pay that five hundred times. The target set is every string index, so the scanner's
+/// own match walk does the work - the same walk `findrefs` uses - and the count is of
+/// *methods*, which is what `findrefs` reports a row per, so the two agree by construction.
+pub fn string_reference_counts(data: &[u8]) -> Result<Vec<(u32, u32)>> {
+    let dex = Dex::parse(data)?;
+    if dex.header.strings_size == 0 {
+        return Ok(Vec::new());
+    }
+    let targets = Targets::new((0..dex.header.strings_size as u32).collect::<Vec<u32>>());
+    let mut hits = dex.scan_all_classes(RefKind::String, &targets)?;
+    // The hits arrive sorted by method and deduplicated. The counts are keyed by target, and
+    // a (method, target) pair is unique, so equal targets in this order are distinct methods.
+    hits.sort_unstable_by_key(|(method, target)| (*target, *method));
+    let mut counts: Vec<(u32, u32)> = Vec::new();
+    for (_method, target) in hits {
+        match counts.last_mut() {
+            Some((index, count)) if *index == target => *count += 1,
+            _ => counts.push((target, 1)),
+        }
+    }
+    Ok(counts)
+}
+
+/// Visits every string's raw MUTF-8 bytes, in index order, decoding nothing.
+///
+/// A search over the table does not need the values it rejects: decoding half a million
+/// strings to throw almost all of them away is most of what a filtered query costs, and
+/// an ASCII needle can be matched against ASCII-compatible bytes without decoding
+/// anything. The visitor returns `false` to stop, which is what lets a page stop once it
+/// holds what it asked for.
+pub fn for_each_string(
+    data: &[u8],
+    mut visit: impl FnMut(usize, &[u8]) -> Result<bool>,
+) -> Result<()> {
+    let dex = Dex::parse(data)?;
+    for index in 0..dex.header.strings_size {
+        if !visit(index, dex.string_bytes(index)?)? {
+            return Ok(());
+        }
+    }
+    Ok(())
+}
+
+/// One string's bytes as the table means them, MUTF-8 and all.
+pub fn decode_string(bytes: &[u8]) -> String {
+    mutf8::decode_owned(bytes)
+}
+
+pub fn class_names(data: &[u8]) -> Result<Vec<String>> {
+    let dex = Dex::parse(data)?;
+    let mut names = Vec::with_capacity(dex.header.classes_size);
+    for index in 0..dex.header.classes_size {
+        let class_def = dex.header.classes_off + index * 32;
+        names.push(dex.type_name(dex.u32(class_def)? as usize)?);
+    }
+    Ok(names)
+}
+
+/// One scan hit: the referencing method's index and one target index it references.
+///
+/// The scan accumulates these in a flat vector rather than a `BTreeMap<u32,
+/// BTreeSet<u32>>`. The map was written once per hit - a tree lookup, an allocation per
+/// method with a hit, and a tree insert - and a wide query is hundreds of thousands of
+/// hits (170,923 for `field INSTANCE` on the 343 MiB corpus), so the accumulator cost
+/// more than the instruction decode it feeds. Sorting the pairs once at the end gives
+/// the same ordered, deduplicated view the map did (`(method_idx, index)` ascending).
+type Hit = (u32, u32);
+
+/// One reference hit: where it was found, what references the target, and which
+/// of the query's targets that method references.
+///
+/// The scanner returns these as data; rendering them into output lines is the
+/// CLI's job, so the output format lives in exactly one place.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ReferenceRow {
+    /// The referencing member as `Lcom/foo/Main;->name`: the defining class's descriptor,
+    /// `->`, and the method name.
+    ///
+    /// The renderer prints exactly this pair as one field (`{class}->{method}`), so building
+    /// it as one `String` saves an allocation per row - the class and the name are appended
+    /// as they are decoded, the same way `push_target_name` does for the matched targets.
+    pub member: String,
+    /// Names of the referenced targets, in ascending index order.
+    /// The referenced targets, joined by `; ` in ascending index order.
+    ///
+    /// This is the shape the row prints, so building it here saves a `Vec` allocation per
+    /// row plus one owned `String` per matched index - the names are appended as they are
+    /// decoded instead.
+    pub matched: String,
+}
+
+pub fn find_references(data: &[u8], query: &Query) -> Result<Vec<ReferenceRow>> {
+    let dex = Dex::parse(data)?;
+    let (kind, targets) = dex.resolve_targets(query)?;    if targets.is_empty() {
+        return Ok(Vec::new());
+    }
+    let targets = Targets::new(targets);
+    let hits = dex.scan_all_classes(kind, &targets)?;
+    let mut rows: Vec<ReferenceRow> = Vec::new();
+    // The hits arrive sorted by method and deduplicated, so one pass groups them: a run
+    // of equal method indices is that method's matched set, in ascending index order.
+    let mut at = 0usize;
+    while at < hits.len() {
+        let method_idx = hits[at].0;
+        let start = at;
+        while at < hits.len() && hits[at].0 == method_idx {
+            at += 1;
+        }
+        let method = dex.method(method_idx as usize)?;
+        let mut matched_names = String::new();
+        for &(_, index) in &hits[start..at] {
+            if !matched_names.is_empty() {
+                matched_names.push_str("; ");
+            }
+            dex.push_target_name(kind, index as usize, &mut matched_names)?;
+        }
+        rows.push(ReferenceRow {
+            member: dex.member_name(method.class_idx as usize, method.name_idx as usize)?,
+            matched: matched_names,
+        });
+    }
+    Ok(rows)
+}
+
+/// Whether a *prefix* of a DEX can hold a reference for `query`, or `None` when the
+/// prefix cannot answer.
+///
+/// Targets are DEX-local indices resolved from the string table, so a DEX whose target
+/// set is empty cannot produce a row - and the set can be resolved from a prefix, which
+/// reaches past the string data long before the code section is inflated. That is what
+/// lets a class-constrained query skip an entry without inflating or scanning it.
+///
+/// `None` is the caller's signal to fall back to the full path: the prefix was too
+/// short for one of the strings the query touches (a crafted or unusual layout), or it
+/// is not a readable DEX at all. A wrong "no" would lose rows, so nothing here guesses.
+pub fn prefix_has_targets(prefix: &[u8], query: &Query) -> Result<Option<bool>> {
+    let Ok(dex) = Dex::parse(prefix) else {
+        return Ok(None);
+    };
+    match dex.resolve_targets(query) {
+        Ok((_kind, targets)) => Ok(Some(!targets.is_empty())),
+        Err(_error) => Ok(None),
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum RefKind {
+    String,
+    Type,
+    Method,
+    Field,
+}
+
+impl RefKind {
+    /// Bit used by the per-opcode kind mask.
+    const fn bit(self) -> u8 {
+        match self {
+            RefKind::String => 1,
+            RefKind::Type => 2,
+            RefKind::Method => 4,
+            RefKind::Field => 8,
+        }
+    }
+}
+
+struct Dex<'a> {
+    data: &'a [u8],
+    header: Header,
+}
+
+impl<'a> Dex<'a> {
+    fn parse(data: &'a [u8]) -> Result<Self> {
+        if data.len() < 0x70 || !data.starts_with(b"dex\n") {
+            bail!("invalid DEX header");
+        }
+        let header = Header {
+            strings_size: read_u32(data, 0x38)? as usize,
+            strings_off: read_u32(data, 0x3c)? as usize,
+            types_size: read_u32(data, 0x40)? as usize,
+            types_off: read_u32(data, 0x44)? as usize,
+            fields_size: read_u32(data, 0x50)? as usize,
+            fields_off: read_u32(data, 0x54)? as usize,
+            methods_size: read_u32(data, 0x58)? as usize,
+            methods_off: read_u32(data, 0x5c)? as usize,
+            classes_size: read_u32(data, 0x60)? as usize,
+            classes_off: read_u32(data, 0x64)? as usize,
+        };
+        for (offset, count, width, name) in [
+            (header.strings_off, header.strings_size, 4, "string_ids"),
+            (header.types_off, header.types_size, 4, "type_ids"),
+            (header.fields_off, header.fields_size, 8, "field_ids"),
+            (header.methods_off, header.methods_size, 8, "method_ids"),
+            (header.classes_off, header.classes_size, 32, "class_defs"),
+        ] {
+            check_table(data, offset, count, width, name)?;
+        }
+        Ok(Self { data, header })
+    }
+
+    fn u32(&self, offset: usize) -> Result<u32> {
+        read_u32(self.data, offset)
+    }
+
+    fn string_bytes(&self, index: usize) -> Result<&'a [u8]> {
+        if index >= self.header.strings_size {
+            bail!("string index out of range");
+        }
+        let mut offset = self.u32(self.header.strings_off + index * 4)? as usize;
+        if offset >= self.data.len() {
+            bail!("string_data_off outside DEX");
+        }
+        read_uleb(self.data, &mut offset)?;
+        let tail = self.data.get(offset..).context("bad string data offset")?;
+        let end = memchr::memchr(0, tail).context("unterminated DEX string")?;
+        Ok(&tail[..end])
+    }
+
+    fn string(&self, index: usize) -> Result<String> {
+        let bytes = self.string_bytes(index)?;
+        Ok(mutf8::decode_owned(bytes))
+    }
+
+    fn type_string_idx(&self, index: usize) -> Result<usize> {
+        if index >= self.header.types_size {
+            bail!("type index out of range");
+        }
+        Ok(self.u32(self.header.types_off + index * 4)? as usize)
+    }
+
+    /// `Lcom/foo/Main;->name` in one allocation; see [`ReferenceRow::member`].
+    fn member_name(&self, class_idx: usize, name_idx: usize) -> Result<String> {
+        let class = self.string_bytes(self.type_string_idx(class_idx)?)?;
+        let name = self.string_bytes(name_idx)?;
+        let mut out = String::with_capacity(class.len() + name.len() + 2);
+        mutf8::push_decoded(&mut out, class);
+        out.push_str("->");
+        mutf8::push_decoded(&mut out, name);
+        Ok(out)
+    }
+
+    fn type_name(&self, index: usize) -> Result<String> {
+        self.string(self.type_string_idx(index)?)
+    }
+
+    fn method(&self, index: usize) -> Result<MemberId> {
+        self.member(self.header.methods_off, self.header.methods_size, index)
+    }
+
+    fn field(&self, index: usize) -> Result<MemberId> {
+        self.member(self.header.fields_off, self.header.fields_size, index)
+    }
+
+    fn member(&self, base: usize, size: usize, index: usize) -> Result<MemberId> {
+        if index >= size {
+            bail!("member index out of range");
+        }
+        let offset = base + index * 8;
+        Ok(MemberId {
+            class_idx: read_u16(self.data, offset)?,
+            name_idx: self.u32(offset + 4)?,
+        })
+    }
+
+    fn matching_strings(&self, pattern: &str) -> Result<Vec<u32>> {
+        if pattern.is_empty() {
+            return Ok(Vec::new());
+        }
+        let needle = mutf8::encode_mutf8(pattern);
+        let finder = Finder::new(&needle);
+        let mut out = Vec::new();
+        for index in 0..self.header.strings_size {
+            if finder.find(self.string_bytes(index)?).is_some() {
+                out.push(index as u32);
+            }
+        }
+        Ok(out)
+    }
+
+    fn matching_types(&self, pattern: &str) -> Result<Vec<u32>> {
+        let strings: BTreeSet<u32> = self.matching_strings(pattern)?.into_iter().collect();
+        let mut out = Vec::new();
+        for index in 0..self.header.types_size {
+            if strings.contains(&(self.type_string_idx(index)? as u32)) {
+                out.push(index as u32);
+            }
+        }
+        Ok(out)
+    }
+
+    fn resolve_targets(&self, query: &Query) -> Result<(RefKind, Vec<u32>)> {
+        match query {
+            Query::String(pattern) => Ok((RefKind::String, self.matching_strings(pattern)?)),
+            Query::Type(pattern) => Ok((RefKind::Type, self.matching_types(pattern)?)),
+            Query::Method(query) => Ok((RefKind::Method, self.matching_members(query, true)?)),
+            Query::Field(query) => Ok((RefKind::Field, self.matching_members(query, false)?)),
+        }
+    }
+
+    fn matching_members(&self, query: &MemberQuery, methods: bool) -> Result<Vec<u32>> {
+        let (base, size) = if methods {
+            (self.header.methods_off, self.header.methods_size)
+        } else {
+            (self.header.fields_off, self.header.fields_size)
+        };
+        let name_finder = query
+            .name
+            .as_deref()
+            .map(|pattern| Finder::new(pattern.as_bytes()));
+        let class_finder = match &query.class {
+            Some(ClassQuery::Fuzzy(pattern)) => Some(Finder::new(pattern.as_bytes())),
+            _ => None,
+        };
+        let mut out = Vec::new();
+        for index in 0..size {
+            let member = self.member(base, size, index)?;
+            let name_matches = match &name_finder {
+                Some(finder) => finder
+                    .find(self.string_bytes(member.name_idx as usize)?)
+                    .is_some(),
+                None => true,
+            };
+            if !name_matches {
+                continue;
+            }
+            let class_name_idx = self.type_string_idx(member.class_idx as usize)?;
+            let class_bytes = self.string_bytes(class_name_idx)?;
+            let class_matches = match &query.class {
+                None => true,
+                Some(ClassQuery::Exact(name)) => class_bytes == name.as_bytes(),
+                Some(ClassQuery::Fuzzy(_)) => class_finder
+                    .as_ref()
+                    .is_some_and(|finder| finder.find(class_bytes).is_some()),
+            };
+            if class_matches {
+                out.push(index as u32);
+            }
+        }
+        Ok(out)
+    }
+
+    fn push_target_name(&self, kind: RefKind, index: usize, out: &mut String) -> Result<()> {
+        match kind {
+            RefKind::String => {
+                mutf8::push_decoded(out, self.string_bytes(index)?);
+                Ok(())
+            }
+            RefKind::Type => {
+                mutf8::push_decoded(out, self.string_bytes(self.type_string_idx(index)?)?);
+                Ok(())
+            }
+            RefKind::Method | RefKind::Field => {
+                let member = if kind == RefKind::Method {
+                    self.method(index)?
+                } else {
+                    self.field(index)?
+                };
+                // One allocation instead of three: the class and the member name are
+                // appended to the result as they are decoded (no intermediate `String`
+                // each), and a member query renders one of these per matched index.
+                let class = self.string_bytes(self.type_string_idx(member.class_idx as usize)?)?;
+                let name = self.string_bytes(member.name_idx as usize)?;
+                mutf8::push_decoded(out, class);
+                out.push_str("->");
+                mutf8::push_decoded(out, name);
+                Ok(())
+            }
+        }
+    }
+
+    /// Scans every class definition, optionally splitting the class list across
+    /// idle workers.
+    ///
+    /// A single large DEX otherwise owns one worker for the whole scan while the
+    /// rest of the pool waits, which shows up as tail latency once the smaller
+    /// entries are done. Hit sets are unioned, so the merged result does not
+    /// depend on how the split happened to be stolen.
+    fn scan_all_classes(&self, kind: RefKind, targets: &Targets) -> Result<Vec<Hit>> {
+        // wasm has no threads (rayon cannot build its pool there), so the class list is
+        // never split. The split exists to shorten tail latency, not to change results:
+        // both paths are sorted and deduplicated below, so the answer is the same either
+        // way.
+        let mut hits = if cfg!(target_family = "wasm")
+            || self.header.classes_size < PARALLEL_SCAN_CLASSES
+        {
+            self.scan_all_classes_sequential(kind, targets)?
+        } else {
+            self.scan_all_classes_parallel(kind, targets)?
+        };
+        // A method can reach the same target from several instructions, and the classes
+        // are visited in index order rather than method order, so the sorted pairs are
+        // what turns the raw pushes into `(method, ascending match)` groups.
+        hits.sort_unstable();
+        hits.dedup();
+        Ok(hits)
+    }
+
+    fn scan_all_classes_sequential(&self, kind: RefKind, targets: &Targets) -> Result<Vec<Hit>> {
+        let mut hits = Vec::new();
+        for class_index in 0..self.header.classes_size {
+            self.scan_class_index(class_index, kind, targets, &mut hits)?;
+        }
+        Ok(hits)
+    }
+
+    fn scan_all_classes_parallel(&self, kind: RefKind, targets: &Targets) -> Result<Vec<Hit>> {
+        (0..self.header.classes_size)
+            .into_par_iter()
+            .with_min_len(PARALLEL_SCAN_MIN_CHUNK)
+            .try_fold(Vec::new, |mut hits, class_index| {
+                self.scan_class_index(class_index, kind, targets, &mut hits)?;
+                Ok(hits)
+            })
+            .try_reduce(Vec::new, |mut left, mut right| {
+                left.append(&mut right);
+                Ok(left)
+            })
+    }
+
+    fn scan_class_index(
+        &self,
+        class_index: usize,
+        kind: RefKind,
+        targets: &Targets,
+        hits: &mut Vec<Hit>,
+    ) -> Result<()> {
+        let class_def = self.header.classes_off + class_index * 32;
+        let class_data_off = self.u32(class_def + 24)? as usize;
+        if class_data_off != 0 {
+            self.scan_class_data(class_data_off, kind, targets, hits)?;
+        }
+        Ok(())
+    }
+
+    fn scan_class_data(
+        &self,
+        offset: usize,
+        kind: RefKind,
+        targets: &Targets,
+        hits: &mut Vec<Hit>,
+    ) -> Result<()> {
+        let mut cursor = offset;
+        let static_fields = read_uleb(self.data, &mut cursor)? as usize;
+        let instance_fields = read_uleb(self.data, &mut cursor)? as usize;
+        let direct_methods = read_uleb(self.data, &mut cursor)? as usize;
+        let virtual_methods = read_uleb(self.data, &mut cursor)? as usize;
+        for _ in 0..static_fields + instance_fields {
+            read_uleb(self.data, &mut cursor)?;
+            read_uleb(self.data, &mut cursor)?;
+        }
+        for count in [direct_methods, virtual_methods] {
+            let mut method_idx = 0u32;
+            for _ in 0..count {
+                method_idx = method_idx
+                    .checked_add(read_uleb(self.data, &mut cursor)?)
+                    .context("method index overflow")?;
+                read_uleb(self.data, &mut cursor)?;
+                let code_off = read_uleb(self.data, &mut cursor)? as usize;
+                if code_off != 0 {
+                    self.scan_code(method_idx, code_off, kind, targets, hits)?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn scan_code(
+        &self,
+        method_idx: u32,
+        code_off: usize,
+        kind: RefKind,
+        targets: &Targets,
+        hits: &mut Vec<Hit>,
+    ) -> Result<()> {
+        let insns_size = self.u32(code_off + 12)? as usize;
+        let start = code_off.checked_add(16).context("code offset overflow")?;
+        let end = start
+            .checked_add(insns_size.checked_mul(2).context("code size overflow")?)
+            .context("code range overflow")?;
+        let code = self.data.get(start..end).context("code item outside DEX")?;
+        if !targets.might_reference(code) {
+            return Ok(());
+        }
+        let kind_bit = kind.bit();
+        let mut pc = 0usize;
+        while pc + 2 <= code.len() {
+            let opcode = code[pc];
+            // One load gives both the width and the reference-kind mask: the loop is
+            // latency-bound, and the two tables used to be two dependent loads from
+            // different cache lines.
+            let info = opcodes::OPCODE_INFO[opcode as usize];
+            let units = (info & 0xff) as usize;
+            let units = if units == 0 {
+                opcodes::instruction_units(code, pc)?
+            } else {
+                units
+            };
+            // `instruction_units` never returns 0: the payload idents all decode to at
+            // least one unit, and an unsupported opcode is an error there. So this is
+            // the width bound alone - one compare per instruction instead of two.
+            if pc + units * 2 > code.len() {
+                bail!("invalid instruction width at code offset {}", start + pc);
+            }
+            // 0x1b is the only reference instruction with a 32-bit index, and
+            // only the string mask can reach it.
+            if info & u16::from(kind_bit) << 8 != 0 {
+                let index = if opcode == 0x1b {
+                    read_u32(code, pc + 2)?
+                } else {
+                    read_u16(code, pc + 2)? as u32
+                };
+                // A method's instructions are walked in order, so all of its hits are
+                // adjacent: skipping a repeat of the previous pair drops the duplicates
+                // the accumulator used to absorb, before they reach the sort.
+                if targets.contains(index) && hits.last() != Some(&(method_idx, index)) {
+                    hits.push((method_idx, index));
+                }
+            }
+            pc += units * 2;
+        }
+        Ok(())
+    }
+}
+
+fn check_table(data: &[u8], offset: usize, count: usize, width: usize, name: &str) -> Result<()> {
+    let end = offset
+        .checked_add(count.checked_mul(width).context("table size overflow")?)
+        .context("table range overflow")?;
+    if end > data.len() {
+        bail!("bad {name} range");
+    }
+    Ok(())
+}
+
+fn read_uleb(data: &[u8], offset: &mut usize) -> Result<u32> {
+    let mut result = 0u32;
+    for shift in [0, 7, 14, 21, 28] {
+        let byte = *data.get(*offset).context("truncated ULEB128")?;
+        *offset += 1;
+        result |= u32::from(byte & 0x7f) << shift;
+        if byte < 0x80 {
+            return Ok(result);
+        }
+    }
+    bail!("ULEB128 exceeds 5 bytes")
+}
+
+#[cfg(test)]
+pub(crate) mod tests {
+    use super::*;
+
+    fn write_u32(data: &mut [u8], offset: usize, value: u32) {
+        data[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
+    }
+
+    fn write_u16(data: &mut [u8], offset: usize, value: u16) {
+        data[offset..offset + 2].copy_from_slice(&value.to_le_bytes());
+    }
+
+    fn push_uleb(out: &mut Vec<u8>, mut value: u32) {
+        loop {
+            let mut byte = (value & 0x7f) as u8;
+            value >>= 7;
+            if value != 0 {
+                byte |= 0x80;
+            }
+            out.push(byte);
+            if value == 0 {
+                return;
+            }
+        }
+    }
+
+    /// Builds a DEX 041 container holding one fixture per entry of `class_counts`.
+    ///
+    /// Each logical DEX gets a 0x78-byte header whose section offsets point into
+    /// the container, and every header records the container size and its own
+    /// offset, which is what `logical_dexes` validates.
+    pub(crate) fn dex041_container(class_counts: &[usize]) -> Vec<u8> {
+        let mut out: Vec<u8> = Vec::new();
+        let mut headers = Vec::new();
+        for &count in class_counts {
+            let offset = out.len();
+            out.extend_from_slice(&const_string_fixture_041(count, offset as u32));
+            out[offset..offset + 8].copy_from_slice(b"dex\n041\0");
+            write_u32(&mut out, offset + 0x74, offset as u32);
+            headers.push(offset);
+        }
+        let total = out.len() as u32;
+        for header in headers {
+            // `container_size` is the whole container; each member keeps its own
+            // `file_size`, which is what enumerates the members (the reference
+            // implementation advances the same way).
+            write_u32(&mut out, header + 0x70, total);
+        }
+        out
+    }
+
+    /// Builds a DEX where every class has one direct method whose body is
+    /// `const-string v0, "Authorization"` followed by `return-void`.
+    ///
+    /// The class count is the knob that selects the sequential or the parallel
+    /// scan path, so the same fixture can be used to compare the two directly.
+    /// DEX header checksum, as rasc-dex validates it before parsing.
+    fn adler32(bytes: &[u8]) -> u32 {
+        let (mut a, mut b) = (1u32, 0u32);
+        for byte in bytes {
+            a = (a + u32::from(*byte)) % 65521;
+            b = (b + a) % 65521;
+        }
+        (b << 16) | a
+    }
+
+    pub(crate) fn const_string_fixture(class_count: usize) -> Vec<u8> {
+        const_string_fixture_with(class_count, 0, 0x70)
+    }
+
+    /// `const_string_fixture` with a 0x78-byte DEX 041 header, its section offsets
+    /// shifted by `base` so the fixture can sit at that container offset.
+    fn const_string_fixture_041(class_count: usize, base: u32) -> Vec<u8> {
+        const_string_fixture_with(class_count, base, 0x78)
+    }
+
+    fn const_string_fixture_with(class_count: usize, base: u32, header_size: usize) -> Vec<u8> {
+        assert!(class_count > 0);
+        let mut strings = vec!["Authorization".to_owned()];
+        for index in 0..class_count {
+            strings.push(format!("LFixture{index};"));
+        }
+        for index in 0..class_count {
+            strings.push(format!("m{index}"));
+        }
+        // "V" (void) backs the single method prototype; without a proto_ids
+        // section the decompiler rejects the fixture before decompiling.
+        strings.insert(class_count + 1, "V".to_owned());
+        let n_strings = strings.len();
+        let n_types = class_count + 2;
+
+        let string_ids_off = header_size;
+        let type_ids_off = string_ids_off + n_strings * 4;
+        let proto_ids_off = type_ids_off + n_types * 4;
+        let method_ids_off = proto_ids_off + 12;
+        let class_defs_off = method_ids_off + class_count * 8;
+        let data_off = class_defs_off + class_count * 32;
+
+        let mut data = Vec::new();
+        let mut string_offsets = Vec::with_capacity(n_strings);
+        for value in &strings {
+            string_offsets.push(data_off + data.len());
+            push_uleb(&mut data, value.len() as u32);
+            data.extend_from_slice(value.as_bytes());
+            data.push(0);
+        }
+
+        let mut class_data_offsets = Vec::with_capacity(class_count);
+        for index in 0..class_count {
+            while !(data_off + data.len()).is_multiple_of(4) {
+                data.push(0);
+            }
+            let code_off = ((data_off + data.len()) as u32) + base;
+            data.extend_from_slice(&1_u16.to_le_bytes()); // registers_size: v0
+            data.extend_from_slice(&0_u16.to_le_bytes()); // ins_size
+            data.extend_from_slice(&0_u16.to_le_bytes()); // outs_size
+            data.extend_from_slice(&0_u16.to_le_bytes()); // tries_size
+            data.extend_from_slice(&0_u32.to_le_bytes()); // debug_info_off
+            // Two loads of the same string in one method. A count of *uses* would say two
+            // and a count of *methods* says one, so a fixture with a single load per method
+            // cannot tell the two rules apart - and the census is supposed to report methods.
+            data.extend_from_slice(&5_u32.to_le_bytes()); // insns_size in code units
+            data.extend_from_slice(&0x001a_u16.to_le_bytes()); // const-string v0, #0
+            data.extend_from_slice(&0_u16.to_le_bytes());
+            data.extend_from_slice(&0x001a_u16.to_le_bytes()); // const-string v0, #0
+            data.extend_from_slice(&0_u16.to_le_bytes());
+            data.extend_from_slice(&0x000e_u16.to_le_bytes()); // return-void
+
+            class_data_offsets.push(data_off + data.len());
+            data.push(0); // static_fields_size
+            data.push(0); // instance_fields_size
+            data.push(1); // direct_methods_size
+            data.push(0); // virtual_methods_size
+            push_uleb(&mut data, index as u32); // method_idx_diff
+            push_uleb(&mut data, 0); // access_flags
+            push_uleb(&mut data, code_off);
+        }
+
+        let total = data_off + data.len();
+        let mut out = vec![0_u8; total];
+        out[..8].copy_from_slice(b"dex\n039\0");
+        write_u32(&mut out, 0x20, total as u32);
+        write_u32(&mut out, 0x24, header_size as u32);
+        write_u32(&mut out, 0x28, 0x1234_5678);
+        write_u32(&mut out, 0x38, n_strings as u32);
+        write_u32(&mut out, 0x3c, (string_ids_off as u32) + base);
+        write_u32(&mut out, 0x40, n_types as u32);
+        write_u32(&mut out, 0x44, (type_ids_off as u32) + base);
+        write_u32(&mut out, 0x48, 1); // proto_ids_size
+        write_u32(&mut out, 0x4c, (proto_ids_off as u32) + base);
+        write_u32(&mut out, 0x58, class_count as u32);
+        write_u32(&mut out, 0x5c, (method_ids_off as u32) + base);
+        write_u32(&mut out, 0x60, class_count as u32);
+        write_u32(&mut out, 0x64, (class_defs_off as u32) + base);
+
+        for (index, offset) in string_offsets.iter().enumerate() {
+            write_u32(
+                &mut out,
+                string_ids_off + index * 4,
+                (*offset as u32) + base,
+            );
+        }
+        write_u32(&mut out, type_ids_off, 0);
+        // type_ids[class_count + 1] -> "V", the prototype's return type.
+        write_u32(
+            &mut out,
+            type_ids_off + (class_count + 1) * 4,
+            (1 + class_count) as u32,
+        );
+        // One prototype: shorty "V", returns void, takes no parameters.
+        write_u32(&mut out, proto_ids_off, (1 + class_count) as u32);
+        write_u32(&mut out, proto_ids_off + 4, (class_count + 1) as u32);
+        write_u32(&mut out, proto_ids_off + 8, 0);
+        for (index, class_data_off) in class_data_offsets.iter().enumerate() {
+            write_u32(&mut out, type_ids_off + (index + 1) * 4, (index + 1) as u32);
+
+            let method = method_ids_off + index * 8;
+            write_u16(&mut out, method, (index + 1) as u16);
+            write_u16(&mut out, method + 2, 0);
+            write_u32(&mut out, method + 4, (2 + class_count + index) as u32);
+
+            let class_def = class_defs_off + index * 32;
+            write_u32(&mut out, class_def, (index + 1) as u32);
+            write_u32(&mut out, class_def + 8, u32::MAX);
+            write_u32(&mut out, class_def + 16, u32::MAX);
+            write_u32(&mut out, class_def + 24, (*class_data_off as u32) + base);
+        }
+        out[data_off..].copy_from_slice(&data);
+        // The scanner ignores the checksum, but the decompiler validates it before
+        // parsing, so the fixture carries a correct Adler-32 over the payload
+        // (everything after the 12-byte checksum/signature prefix).
+        let checksum = adler32(&out[12..]);
+        write_u32(&mut out, 0x08, checksum);
+        out
+    }
+
+    /// Builds a DEX with one class whose static method makes an
+    /// `invoke-static/range` call with eight argument registers.
+    ///
+    /// The `/range` wire form names more registers than the five the vendored
+    /// decoder keeps inline (see rasc-dex's `PATCHES.md`, https://github.com/TsingShui/rasc-dex,
+    /// "5. `/range` register lists"), so this is the fixture for the
+    /// decompiler regression: the decompiled call must keep all eight.
+    pub(crate) fn range_invoke_fixture() -> Vec<u8> {
+        let header_size = 0x70usize;
+        let strings = ["LFixture0;", "V", "VIIIIIIII", "call", "target", "I"];
+        let string_ids_off = header_size;
+        let type_ids_off = string_ids_off + strings.len() * 4;
+        let proto_ids_off = type_ids_off + 3 * 4;
+        let method_ids_off = proto_ids_off + 2 * 12;
+        let class_defs_off = method_ids_off + 2 * 8;
+        let data_off = class_defs_off + 32;
+
+        let mut data = Vec::new();
+        let mut string_offsets = Vec::with_capacity(strings.len());
+        for value in strings {
+            string_offsets.push(data_off + data.len());
+            push_uleb(&mut data, value.len() as u32);
+            data.extend_from_slice(value.as_bytes());
+            data.push(0);
+        }
+        // The eight `I` parameters of `target`'s prototype, 4-byte aligned.
+        while !(data_off + data.len()).is_multiple_of(4) {
+            data.push(0);
+        }
+        let type_list_off = data_off + data.len();
+        data.extend_from_slice(&8_u32.to_le_bytes());
+        for _ in 0..8 {
+            data.extend_from_slice(&2_u16.to_le_bytes());
+        }
+        // `call`'s code: eight `const/4` definitions, one range invoke, return.
+        while !(data_off + data.len()).is_multiple_of(4) {
+            data.push(0);
+        }
+        let code_off = data_off + data.len();
+        data.extend_from_slice(&9_u16.to_le_bytes()); // registers_size (v0..v8)
+        data.extend_from_slice(&0_u16.to_le_bytes()); // ins_size
+        data.extend_from_slice(&8_u16.to_le_bytes()); // outs_size
+        data.extend_from_slice(&0_u16.to_le_bytes()); // tries_size
+        data.extend_from_slice(&0_u32.to_le_bytes()); // debug_info_off
+        data.extend_from_slice(&12_u32.to_le_bytes()); // insns_size
+        for register in 1..=8_u16 {
+            // const/4 vN, #(N-1): -8..=7 is the nibble's range.
+            let unit = 0x12 | (register << 8) | ((register - 1) << 12);
+            data.extend_from_slice(&unit.to_le_bytes());
+        }
+        data.extend_from_slice(&0x0877_u16.to_le_bytes()); // invoke-static/range, AA=8
+        data.extend_from_slice(&1_u16.to_le_bytes()); // method@1 = target
+        data.extend_from_slice(&1_u16.to_le_bytes()); // start register v1
+        data.extend_from_slice(&0x000e_u16.to_le_bytes()); // return-void
+
+        // class_data: one direct static method, `call`.
+        let class_data_off = data_off + data.len();
+        data.push(0); // static_fields_size
+        data.push(0); // instance_fields_size
+        data.push(1); // direct_methods_size
+        data.push(0); // virtual_methods_size
+        push_uleb(&mut data, 0); // method_idx_diff -> method 0 (`call`)
+        push_uleb(&mut data, 0x9); // ACC_PUBLIC | ACC_STATIC
+        push_uleb(&mut data, code_off as u32);
+
+        let total = data_off + data.len();
+        let mut out = vec![0_u8; total];
+        out[..8].copy_from_slice(b"dex\n039\0");
+        write_u32(&mut out, 0x20, total as u32);
+        write_u32(&mut out, 0x24, header_size as u32);
+        write_u32(&mut out, 0x28, 0x1234_5678);
+        write_u32(&mut out, 0x38, strings.len() as u32);
+        write_u32(&mut out, 0x3c, string_ids_off as u32);
+        write_u32(&mut out, 0x40, 3); // type_ids_size
+        write_u32(&mut out, 0x44, type_ids_off as u32);
+        write_u32(&mut out, 0x48, 2); // proto_ids_size
+        write_u32(&mut out, 0x4c, proto_ids_off as u32);
+        write_u32(&mut out, 0x58, 2); // method_ids_size
+        write_u32(&mut out, 0x5c, method_ids_off as u32);
+        write_u32(&mut out, 0x60, 1); // class_defs_size
+        write_u32(&mut out, 0x64, class_defs_off as u32);
+
+        for (index, offset) in string_offsets.iter().enumerate() {
+            write_u32(&mut out, string_ids_off + index * 4, *offset as u32);
+        }
+        // type_ids: the class, void, int.
+        write_u32(&mut out, type_ids_off, 0);
+        write_u32(&mut out, type_ids_off + 4, 1);
+        write_u32(&mut out, type_ids_off + 8, 5);
+        // protos: ()V and (IIIIIIII)V.
+        write_u32(&mut out, proto_ids_off, 1);
+        write_u32(&mut out, proto_ids_off + 4, 1);
+        write_u32(&mut out, proto_ids_off + 8, 0);
+        write_u32(&mut out, proto_ids_off + 12, 2);
+        write_u32(&mut out, proto_ids_off + 16, 1);
+        write_u32(&mut out, proto_ids_off + 20, type_list_off as u32);
+        // methods: Fixture0.call()V, Fixture0.target(IIIIIIII)V.
+        write_u16(&mut out, method_ids_off, 0);
+        write_u16(&mut out, method_ids_off + 2, 0);
+        write_u32(&mut out, method_ids_off + 4, 3);
+        write_u16(&mut out, method_ids_off + 8, 0);
+        write_u16(&mut out, method_ids_off + 10, 1);
+        write_u32(&mut out, method_ids_off + 12, 4);
+        // One public class, no superclass row, code in `class_data`.
+        write_u32(&mut out, class_defs_off, 0);
+        write_u32(&mut out, class_defs_off + 4, 1);
+        write_u32(&mut out, class_defs_off + 8, u32::MAX);
+        write_u32(&mut out, class_defs_off + 16, u32::MAX);
+        write_u32(&mut out, class_defs_off + 24, class_data_off as u32);
+
+        out[data_off..].copy_from_slice(&data);
+        let checksum = adler32(&out[12..]);
+        write_u32(&mut out, 0x08, checksum);
+        out
+    }
+
+    /// Rows for `find_references` are grouped by ascending method index, which is
+    /// the order the hit map iterates in. Cross-DEX ordering/aggregation happens
+    /// later in the APK layer.
+    fn expected_rows(class_count: usize) -> Vec<ReferenceRow> {
+        (0..class_count)
+            .map(|index| ReferenceRow {
+                member: format!("LFixture{index};->m{index}"),
+                matched: "Authorization".to_owned(),
+            })
+            .collect()
+    }
+
+    /// In-process timing for the scan core.
+    ///
+    /// The end-to-end harness pays ~2.7 ms of `fork/exec` plus ~1.1 ms of CLI start-up per
+    /// stage, which is what limits it to ~1% (SAMPLES=8) or ~0.5% (SAMPLES=24) resolution.
+    /// A change inside the scanner - a table, a membership test, an allocation in the row
+    /// path - is better judged here, where nothing but the code under test is in the loop.
+    ///
+    /// Run explicitly:
+    ///   cargo test --release -- --ignored --nocapture inproc
+    ///
+    /// Compare the printed us/call before and after a change; the fixture is fixed, so the
+    /// workload is constant and the only noise is the machine's.
+    #[test]
+    #[ignore = "timing harness: run with --release --ignored --nocapture"]
+    fn inproc_scan_timings() {
+        let data = const_string_fixture(2000);
+        // One query per shape: a string match (every class's const-string), a type match
+        // (every class descriptor), and a member name match (a handful of methods). They
+        // exercise the same scanner through different resolve paths, which is where the
+        // per-query differences live.
+        let queries = [
+            ("string", Query::String("Authorization".to_owned())),
+            ("type", Query::Type("Fixture".to_owned())),
+            (
+                "method",
+                Query::Method(crate::query::MemberQuery {
+                    name: Some("m0".to_owned()),
+                    class: None,
+                }),
+            ),
+        ];
+        let mut rows = 0usize;
+        for (label, query) in &queries {
+            // Warm the caches and the allocator. The first round pays for both, so the
+            // comparable figure is the last one.
+            for _ in 0..5 {
+                rows += find_references(&data, query).unwrap().len();
+            }
+            let mut last = 0.0;
+            for _ in 0..5 {
+                let started = std::time::Instant::now();
+                const CALLS: u32 = 20;
+                for _ in 0..CALLS {
+                    rows += find_references(&data, query).unwrap().len();
+                }
+                last = started.elapsed().as_secs_f64() * 1e6 / f64::from(CALLS);
+            }
+            println!("[inproc] find_references {label}: {last:.1} us/call (rows seen {rows})");
+        }
+    }
+
+    #[test]
+    fn parallel_and_sequential_scans_produce_identical_hits() {
+        let data = const_string_fixture(PARALLEL_SCAN_CLASSES);
+        let dex = Dex::parse(&data).unwrap();
+        let (kind, targets) = dex
+            .resolve_targets(&Query::String("Authorization".to_owned()))
+            .unwrap();
+        let targets = Targets::new(targets);
+        let sequential = dex.scan_all_classes_sequential(kind, &targets).unwrap();
+        let parallel = dex.scan_all_classes_parallel(kind, &targets).unwrap();
+        assert_eq!(sequential.len(), PARALLEL_SCAN_CLASSES);
+        assert_eq!(sequential, parallel);
+    }
+
+    #[test]
+    fn multi_chunk_parallel_scan_keeps_every_hit() {
+        let class_count = PARALLEL_SCAN_CLASSES * 3 + 1;
+        let data = const_string_fixture(class_count);
+        let rows = find_references(&data, &Query::String("Authorization".to_owned())).unwrap();
+        assert_eq!(rows, expected_rows(class_count));
+    }
+
+    fn minimal_class_dex(descriptor: &[u8]) -> Vec<u8> {
+        let string_ids_off = 0x70;
+        let type_ids_off = 0x74;
+        let class_defs_off = 0x78;
+        let string_data_off = 0x98;
+        let mut data = vec![0; string_data_off + descriptor.len() + 2];
+        data[..8].copy_from_slice(b"dex\n039\0");
+        data[0x38..0x3c].copy_from_slice(&1_u32.to_le_bytes());
+        data[0x3c..0x40].copy_from_slice(&(string_ids_off as u32).to_le_bytes());
+        data[0x40..0x44].copy_from_slice(&1_u32.to_le_bytes());
+        data[0x44..0x48].copy_from_slice(&(type_ids_off as u32).to_le_bytes());
+        data[0x60..0x64].copy_from_slice(&1_u32.to_le_bytes());
+        data[0x64..0x68].copy_from_slice(&(class_defs_off as u32).to_le_bytes());
+        data[string_ids_off..string_ids_off + 4]
+            .copy_from_slice(&(string_data_off as u32).to_le_bytes());
+        data[string_data_off] = descriptor.len() as u8;
+        data[string_data_off + 1..string_data_off + 1 + descriptor.len()]
+            .copy_from_slice(descriptor);
+        data
+    }
+
+    #[test]
+    fn lists_defined_classes_from_class_defs() {
+        let data = minimal_class_dex(b"Lcom/example/Main;");
+        assert_eq!(class_names(&data).unwrap(), ["Lcom/example/Main;"]);
+        assert!(defines_class(&data, b"Lcom/example/Main;").unwrap());
+    }
+
+    #[test]
+    fn fuzzy_patterns_are_literal_substrings() {
+        assert!(Finder::new(b".b[").find(b"a.b[c]").is_some());
+        assert!(Finder::new(b"a.c").find(b"abc").is_none());
+    }
+    /// The count has to be what `findrefs` reports a row per: methods, not instructions.
+    #[test]
+    fn string_reference_counts_agree_with_find_references() {
+        let data = const_string_fixture(3);
+        let counts: std::collections::HashMap<u32, u32> =
+            string_reference_counts(&data).unwrap().into_iter().collect();
+        assert!(!counts.is_empty(), "the fixture's methods load a string");
+
+        // Every string the census names has exactly as many references as a targeted query
+        // reports rows for its value - the rule the strings table's column is checked by.
+        let dex = Dex::parse(&data).unwrap();
+        for (index, count) in &counts {
+            let value = dex.string(*index as usize).unwrap();
+            let rows = find_references(&data, &Query::String(value.clone())).unwrap();
+            assert_eq!(*count as usize, rows.len(), "{value:?}: {count} vs {} rows", rows.len());
+        }
+        // A string nothing loads is absent rather than zero.
+        for index in 0..dex.header.strings_size as u32 {
+            if counts.contains_key(&index) {
+                continue;
+            }
+            let value = dex.string(index as usize).unwrap();
+            assert!(
+                find_references(&data, &Query::String(value.clone())).unwrap().is_empty(),
+                "{value:?} is referenced but was not counted"
+            );
+        }
+    }
+
+}
