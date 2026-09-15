@@ -26,13 +26,10 @@ What each gate **proves**:
 
 | Command | Proves |
 |---|---|
-| `cargo test` | 98 + 4 unit/integration tests |
+| `cargo test` | 86 + 2 unit/integration tests (re-derived after the record surface was removed; re-run to confirm) |
 | `cargo build --release` × {native, `wasm32-unknown-unknown`} | both targets build, with **zero warnings** |
 | `APK=… node js/test.mjs` | Node host SDK: the 4 command digests match native + buffer source + guarded source + read-ahead window |
 | `APK=… node js/cli-test.mjs` | `js/bin/rasc-wasm.mjs` has the same args / stdout / exit code as native |
-| `node js/web-host-test.mjs --gate` | the host boundary: 41 assertions over bare-DEX input, records, the member outline, progress, the archive listing and the string table |
-| `APK=… node js/web-host-xrefs.mjs --gate` | 10 assertions on reference queries: parseable hits, an empty answer told apart from a missing one, native parity |
-| `APK=… node js/web-host-counts.mjs --gate` | 10 assertions on per-string reference counts: methods rather than instructions, absent rather than zero |
 | `node js/check-declared-test-count.mjs` | the number beside `cargo test` in this very table is what the command prints |
 | `APK=… node js/limit-test.mjs` | the host-configurable inflation limit: a small limit is refused, a small entry still works, the default is restored |
 | `node js/bomb-test.mjs 1.5` | a decompression bomb is **rejected structurally**, not trapped |
@@ -84,28 +81,16 @@ pre-commit hook. Identifiers that really must be written down go to the untracke
 ## 2. The host boundary
 
 The host module is what a browser drives, so it has an interface of its own beyond the CLI's
-text output. The shapes a JS host reads, and the suite that holds them:
+text output: the same arguments, the same stdout bytes, the same exit code, plus the imports
+the host has to answer. The record modes (`--json`, `--outline`, `--count`, `--xrefs`) were
+removed - a host reads the CLI's own output, so the CLI's own output is the whole contract:
 
 | What | Why it exists | Where |
 |---|---|---|
-| `classes --json` | one JSON object per class (`dex`, `descriptor`, `name`); the text row is ` | `-joined and a class name can contain the separator, a quote or a newline | `src/json.rs`, `src/main.rs` |
-| `getclass --outline` | one record of member names and line ranges, then the source byte-identical to the plain command | `src/outline.rs` |
-| `getclass --json` | a failure is one `{"error":…}` record carrying the text mode's own message | `src/main.rs` |
 | `entries`, `strings` | the archive's entries and the DEX string table | `src/apk.rs`, `src/dex/` |
-| `findrefs --json` | one record per hit (`dex`, `member`, `matched`): a member name is a descriptor and can hold the separator, a quote or a newline | `src/apk.rs`, `ReferenceHit` |
-| `strings --count`, `--filter`, `--limit` | the table's size from the DEX headers, and a page of it that matches a query - a 69 MB table should not cross a boundary to populate a list | `src/apk.rs` |
-| `strings --xrefs` | how many distinct methods use each string, in one pass, so a host can fill a counts column without a scan per row | `src/dex/mod.rs` |
-| `strings --offset` | the other half of a page: with `--limit` it asks for what follows what a host already has, and the walk stops at skipped-plus-page rather than at the page, or a scrollback would be handed the first page again | `src/apk.rs` |
+| `strings --filter`, `--limit`, `--offset` | a page of the table rather than all of it | `src/apk.rs` |
 | `rasc_host_progress(done, total)` | entries walked, out of a total known before the walk; only the serial (wasm) walk reports, because only it is ordered | `src/progress.rs` |
 | clap's answers | `--help`, `--version` and a usage error return clap's status and text instead of trapping the instance | `src/main.rs` |
-
-Three suites hold the boundary:
-
-| Suite | Assertions | What it fixes |
-|---|---:|---|
-| `js/web-host-test.mjs` | 41 | the shapes above, each against an independent oracle (the native binary, the module's own text mode, the DEX header, the ZIP directory, or a second implementation of the rule in the test) |
-| `js/web-host-xrefs.mjs` | 10 | a reference query a host can parse, the empty answer told apart from a missing one, and an answer small enough to ask for on a press |
-| `js/web-host-counts.mjs` | 10 | what a per-string reference count means: methods rather than instructions, absent rather than zero, and a fraction of the table it annotates |
 
 A new host import breaks every host that does not provide it, so `js/rasc.mjs` has to grow
 with it.
@@ -173,9 +158,8 @@ js/             the wasm host side
                 ├── node.mjs    fs.readSync source + 4 MiB read-ahead window
                 ├── browser.mjs Worker: FileReaderSync(Blob) or synchronous XHR(Range)
                 ├── worker.mjs  ready-made module-worker entry
-                ├── bin/rasc-wasm.mjs     host-module CLI wrapper (no WASI)
                 ├── bin/rasc-wasm.mjs  usable directly as a CLI (same args / stdout / stderr / exit code)
-                └── *-test.mjs  11 gate scripts (see section 1)
+                └── *-test.mjs      9 gate scripts + check-declared-test-count.mjs (see section 1)
 vendor/         patched crates.io dependencies (axmldecoder comes in through [patch.crates-io] as a relative path; **do not delete**)
 crates/         workspace members. `crates/dexdec` is the vendored Java emitter used by `getclass` on native
                 (see its FORK.md for the upstream commit and the deliberate trims); `crates/rusty-dex` is the DEX

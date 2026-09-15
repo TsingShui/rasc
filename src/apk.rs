@@ -740,12 +740,6 @@ pub fn decompile_class(
 /// No filtering and no de-duplication: this is a listing of what the file contains, so
 /// two entries with the same name appear twice, in the order the directory states them.
 /// A bare DEX is one entry, the same one every other command walks.
-/// How much of an entry is read to count a plain DEX's strings.
-///
-/// The header is 0x70 bytes, so this is far more than the answer needs; it is this size
-/// because a prefix read is the unit the inflation path works in, and the smallest unit
-/// it will produce is a chunk of its own.
-const PREFIX_FOR_HEADERS: usize = 64 * 1024;
 
 /// Whether a string's raw MUTF-8 bytes contain an ASCII needle, ignoring case.
 ///
@@ -800,54 +794,6 @@ fn contains_ignore_case(haystack: &str, needle_lower: &str) -> bool {
     haystack.to_lowercase().contains(needle_lower)
 }
 
-/// One string's reference count, and which DEX it came from.
-#[derive(Clone, Debug)]
-pub struct StringReferenceCount {
-    pub dex_name: std::sync::Arc<str>,
-    /// The index in that DEX's string table.
-    pub index: u32,
-    /// How many distinct methods reference it.
-    pub count: u32,
-}
-
-/// How many methods use each string, for every string any method uses.
-///
-/// Only referenced strings appear: a string nothing uses is absent, because a zero in a
-/// table column is a claim and this cannot make one about a string it never saw used.
-pub fn list_string_reference_counts(
-    path: &Path,
-    threads: usize,
-    debug: bool,
-) -> Result<Vec<StringReferenceCount>> {
-    if threads == 0 {
-        bail!("worker count must be greater than zero");
-    }
-    let started = Instant::now();
-    let rows: Vec<StringReferenceCount> =
-        map_dex_entries(path, threads, EntryOrder::Natural, None, |inflated| {
-            let dex_name: std::sync::Arc<str> = inflated.entry.name.as_str().into();
-            let mut rows = Vec::new();
-            for logical in dex::container::logical_dexes(&inflated.entry.name, inflated.data()?)? {
-                for (index, count) in dex::string_reference_counts(&logical.data)? {
-                    rows.push(StringReferenceCount {
-                        dex_name: std::sync::Arc::clone(&dex_name),
-                        index,
-                        count,
-                    });
-                }
-            }
-            Ok(rows)
-        })?;
-    if debug {
-        crate::diag::diagnose(format_args!(
-            "[xrefs] rows={} total={:.2} ms",
-            rows.len(),
-            started.elapsed().as_secs_f64() * 1e3
-        ));
-    }
-    Ok(rows)
-}
-
 /// One string, and which DEX it came from.
 #[derive(Clone, Debug)]
 pub struct StringEntry {
@@ -858,59 +804,14 @@ pub struct StringEntry {
 }
 
 /// Every string in every root DEX, in central-directory order and table order within
-/// an entry.
+/// an entry, or the ones `filter` matches.
 ///
 /// Not sorted: a string table is indexed, the index is what a `findrefs` row resolves
 /// through, and the order the file declares is the only order that means anything.
-/// How many strings every root DEX holds, without reading any of them.
 ///
-/// The count is a header field per DEX entry, so this costs one walk and no table: a
-/// host that shows "496,435 strings" before anyone searches for one does not move the
-/// 69 MB those strings occupy.
-pub fn count_strings(path: &Path, threads: usize, debug: bool) -> Result<usize> {
-    if threads == 0 {
-        bail!("worker count must be greater than zero");
-    }
-    let started = Instant::now();
-    let counts: Vec<usize> = map_dex_entries(path, threads, EntryOrder::Natural, None, |inflated| {
-        /*
-         * The count is a header field, so the header is all that is read. A DEX's is in
-         * its first bytes and the prefix path inflates only that much, which is the
-         * difference between counting a table and reading one: on the 126 MB corpus the
-         * full inflate made this 207 ms, and there is no reason for a number to cost
-         * more than the bytes that hold it. A container whose members' headers are
-         * scattered past the prefix falls back to the whole entry, and the answer is the
-         * same either way.
-         */
-        if let Ok(header) = inflated.read_prefix(PREFIX_FOR_HEADERS)
-            && let Some(count) =
-                dex::container::plain_string_count(&header, inflated.entry.uncompressed_size)
-        {
-            return Ok(vec![count]);
-        }
-        let mut total = 0;
-        for logical in dex::container::logical_dexes(&inflated.entry.name, inflated.data()?)? {
-            total += dex::string_count(&logical.data)?;
-        }
-        Ok(vec![total])
-    })?;
-    let total: usize = counts.into_iter().sum();
-    if debug {
-        crate::diag::diagnose(format_args!(
-            "[strings] count={total} total={:.2} ms",
-            started.elapsed().as_secs_f64() * 1e3
-        ));
-    }
-    Ok(total)
-}
-
-/// Every string in every root DEX, or the ones `filter` matches.
-///
-/// `filter` is a case-insensitive substring of the value, which is the rule the
-/// workspace's own filter used: the engine's answer has to be the answer a reader would
-/// have got by filtering the whole table, or moving the filter here would change what
-/// they see. `limit` keeps the first that many matches in the order this function
-/// returns them, which is central-directory order and table order within an entry.
+/// `filter` is a case-insensitive substring of the value, `limit` keeps the first that
+/// many matches in the order this function returns them, and `offset` starts that page
+/// later in the same order.
 pub fn list_strings(
     path: &Path,
     threads: usize,
@@ -934,9 +835,8 @@ pub fn list_strings(
     // The early stop is only sound for a serial walk. Entries are walked in parallel on the
     // native side and their results are ordered afterwards, so a shared counter decides *which*
     // entries contributed before the ordering happens: with threads > 1, `--limit` returned a
-    // different page than with one thread (and than the host, which has no threads at all).
-    // Collecting everything and letting the caller's sort plus the truncation below choose
-    // restores determinism across `--threads` at no cost to the host, whose walk is serial.
+    // different page than with one thread. Collecting everything and letting the caller's sort
+    // plus the truncation below choose restores determinism across `--threads`.
     let stop_early = threads == 1;
     // How many matches the walk has produced so far. It is shared because the native
     // walk runs entries in parallel, and it only ever stops work early: the rows are
@@ -965,8 +865,7 @@ pub fn list_strings(
                 let matches = match needle.as_deref() {
                     None => true,
                     // An ASCII needle against ASCII bytes is a comparison, not a decode;
-                    // anything else takes the Unicode fold, which is what a host's own
-                    // `toLowerCase().includes()` did and therefore what this must equal.
+                    // anything else takes the Unicode fold.
                     Some(needle) => match raw_contains_ignore_case(raw, needle) {
                         Some(found) => found,
                         None => contains_ignore_case(&dex::decode_string(raw), needle),

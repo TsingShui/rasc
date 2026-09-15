@@ -25,24 +25,6 @@ pub struct Cli {
     pub command: Command,
 }
 
-impl Command {
-    /// Whether this invocation asked for records rather than the text payload.
-    ///
-    /// The failure envelope is decided by this, which is why it is a property of the
-    /// command: the same error is a record or a sentence depending on what the caller said
-    /// it wanted.
-    pub fn is_json(&self) -> bool {
-        match self {
-            Command::Classes(args) => args.json,
-            Command::Getclass(args) => args.json || args.outline,
-            Command::Entries(args) => args.json,
-            Command::Strings(args) => args.json,
-            Command::Findrefs(args) => args.json,
-            Command::Manifest(_) | Command::Skill(_) => false,
-        }
-    }
-}
-
 #[derive(Debug, Subcommand)]
 pub enum Command {
     /// Locate a class in an APK and decompile it.
@@ -84,11 +66,6 @@ pub struct ClassesArgs {
     /// Case-insensitive substring filter over Java-style class names.
     #[arg(short, long)]
     pub filter: Option<String>,
-    /// One JSON object per row, `{"dex":…,"descriptor":…,"name":…}`, instead of the text
-    /// columns. A failure is one `{"error":…}` record with the same message the text mode
-    /// prints. Hosts read records; a row a name can break is a row a host can misread.
-    #[arg(long)]
-    pub json: bool,
     #[arg(short, long)]
     pub output: Option<PathBuf>,
     /// Print phase timings on stderr.
@@ -99,32 +76,16 @@ pub struct ClassesArgs {
 
 #[derive(Debug, Args)]
 pub struct StringsArgs {
-    /// One JSON object per string, `{"dex":…,"index":…,"value":…}`. String data holds
-    /// whatever the file holds — newlines, quotes, any UTF-16 — and the text row cannot
-    /// carry that without a host guessing where one ends.
-    #[arg(long)]
-    pub json: bool,
-    /// Print only how many strings there are, as `{"count":N}`. The number is a DEX
-    /// header field, so this reads no string data at all.
-    #[arg(long, conflicts_with_all = ["filter", "limit"])]
-    pub count: bool,
-    /// Only strings containing this text, ignoring case. The same rule the workspace's
-    /// own filter used, so a host that moves its filter here shows what it showed before.
+    /// Only strings containing this text, ignoring case.
     #[arg(long)]
     pub filter: Option<String>,
     /// At most this many strings, counted in the order they are printed.
     #[arg(long)]
     pub limit: Option<usize>,
     /// Start at this match instead of the first, counted in the order they are printed: with
-    /// `--limit` this is the other half of a page, so a host that scrolls a searched table asks
-    /// for what follows what it already has.
-    #[arg(long, conflicts_with = "count")]
+    /// `--limit` this is the other half of a page.
+    #[arg(long)]
     pub offset: Option<usize>,
-    /// How many methods use each string, as `{"dex":…,"index":…,"count":…}` records: one per
-    /// *referenced* string, counted by distinct referencing methods, which is the rule
-    /// `findrefs` reports a row per. A string nothing uses is absent rather than zero.
-    #[arg(long, conflicts_with_all = ["count", "filter", "limit", "offset"])]
-    pub xrefs: bool,
     #[arg(long, alias = "thread", default_value_t = default_threads())]
     pub threads: usize,
     #[arg(short, long)]
@@ -137,12 +98,6 @@ pub struct StringsArgs {
 
 #[derive(Debug, Args)]
 pub struct EntriesArgs {
-    /// One JSON object per entry, `{"name":…,"method":…,"compressed":…,"uncompressed":…,
-    /// "offset":…}`, where `method` is the ZIP compression method (0 stored, 8 deflated)
-    /// and `offset` is the entry's local header. A host that lists what an archive
-    /// contains reads records; entry names are paths and hold anything.
-    #[arg(long)]
-    pub json: bool,
     #[arg(short, long)]
     pub output: Option<PathBuf>,
     pub apk_path: PathBuf,
@@ -157,16 +112,6 @@ pub struct ManifestArgs {
 
 #[derive(Debug, Args)]
 pub struct GetClassArgs {
-    /// One `{"members":[…]}` record before the source, describing the parts the document
-    /// is made of: every declaration with its name and line range, plus the header and
-    /// footer that no declaration owns. The source after the record is byte-identical to
-    /// the source without this flag. A failure is one `{"error":…}` record.
-    #[arg(long)]
-    pub outline: bool,
-    /// One `{"members":[…]}` record before the source, describing what the source contains.
-    /// A failure is one `{"error":…}` record instead of the source.
-    #[arg(long)]
-    pub json: bool,
     #[arg(long)]
     pub debug: bool,
     #[arg(long, alias = "thread", default_value_t = default_threads())]
@@ -179,13 +124,6 @@ pub struct GetClassArgs {
 
 #[derive(Debug, Args)]
 pub struct FindRefsArgs {
-    /// One JSON object per row, `{"dex":…,"member":…,"matched":…}`, instead of the text
-    /// columns. A member name is a descriptor and a method name, and any of them can hold
-    /// the separator, a quote or a newline; a host reads records for the same reason it
-    /// does everywhere else. `matched` is the text mode's `matched=(…)` contents, without
-    /// the wrapper. A failure is one `{"error":…}` record.
-    #[arg(long)]
-    pub json: bool,
     #[arg(long)]
     pub debug: bool,
     #[arg(long, alias = "thread", default_value_t = default_threads())]

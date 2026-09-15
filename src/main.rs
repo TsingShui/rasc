@@ -11,8 +11,6 @@ mod clock;
 mod dex;
 mod diag;
 mod emitter;
-mod json;
-mod outline;
 mod progress;
 mod manifest;
 mod query;
@@ -270,18 +268,8 @@ fn dispatch(args: Vec<String>) -> Result<i32> {
         Err(error) => return Ok(cli_message(&error)),
     };
 
-    // What a failure looks like depends on what the caller asked for: a record in JSON mode,
-    // a sentence otherwise. The message itself is the same either way.
-    let json = args.command.is_json();
     match run_command(args, started) {
         Ok(()) => Ok(0),
-        Err(error) if is_broken_pipe(&error) => Err(error),
-        Err(error) if json => {
-            let mut payload = String::with_capacity(64);
-            json::error(&format!("{error:#}"), &mut payload);
-            emit(&payload, None)?;
-            Ok(1)
-        }
         Err(error) => Err(error),
     }
 }
@@ -291,7 +279,6 @@ fn run_command(args: Cli, started: Instant) -> Result<()> {
     match args.command {
         Command::Findrefs(args) => {
             let query = args.query()?;
-            let json = args.json;
             let scan_started = Instant::now();
             let mut hits = apk::find_reference_hits(&args.apk_path, &query, args.threads, args.debug)?;
             let scanned = scan_started.elapsed();
@@ -311,16 +298,6 @@ fn run_command(args: Cli, started: Instant) -> Result<()> {
             // place), so the length pass is not worth it.
             let mut payload = String::new();
             for hit in &hits {
-                if json {
-                    payload.push_str("{\"dex\":");
-                    json::escape(&hit.dex_name, &mut payload);
-                    payload.push_str(",\"member\":");
-                    json::escape(&hit.member, &mut payload);
-                    payload.push_str(",\"matched\":");
-                    json::escape(&hit.matched, &mut payload);
-                    payload.push_str("}\n");
-                    continue;
-                }
                 payload.push_str(&hit.render());
                 payload.push('\n');
             }
@@ -349,7 +326,6 @@ fn run_command(args: Cli, started: Instant) -> Result<()> {
             // filter, the row format and the resulting bytes are unchanged. wasm has no
             // threads, so it renders the same chunks serially in the same order.
             const RENDER_CHUNK: usize = 8192;
-            let json = args.json;
             let render = |chunk: &[apk::ClassEntry]| -> String {
                 let mut payload = String::with_capacity(chunk.len() * 128);
                 for class in chunk {
@@ -360,19 +336,6 @@ fn run_command(args: Cli, started: Instant) -> Result<()> {
                     if let Some(pattern) = filter.as_ref()
                         && !class.java_name().replace('/', ".").to_lowercase().contains(pattern)
                     {
-                        continue;
-                    }
-                    if json {
-                        // Written straight into the payload: the dotted name and the line
-                        // were two allocations per class, and on a 76,982-class index that
-                        // was the whole of the render's 47 ms in the host build.
-                        payload.push_str("{\"dex\":");
-                        json::escape(&class.dex_name, &mut payload);
-                        payload.push_str(",\"descriptor\":");
-                        json::escape(&class.descriptor, &mut payload);
-                        payload.push_str(",\"name\":");
-                        json::escape_dotted(class.java_name(), &mut payload);
-                        payload.push_str("}\n");
                         continue;
                     }
                     payload.push_str(&class.dex_name);
@@ -414,37 +377,6 @@ fn run_command(args: Cli, started: Instant) -> Result<()> {
             }
         }
         Command::Strings(args) => {
-            if args.count {
-                // A header field per DEX entry: no string data is read, which is the
-                // difference between a label and a table.
-                let count = apk::count_strings(&args.apk_path, args.threads, args.debug)?;
-                emit(&format!("{{\"count\":{count}}}\n"), args.output.as_deref())?;
-                return Ok(());
-            }
-            if args.xrefs {
-                let counts = apk::list_string_reference_counts(&args.apk_path, args.threads, args.debug)?;
-                let mut payload = String::with_capacity(counts.len() * 48);
-                for entry in &counts {
-                    if args.json {
-                        payload.push_str("{\"dex\":");
-                        crate::json::escape(&entry.dex_name, &mut payload);
-                        payload.push_str(",\"index\":");
-                        payload.push_str(&entry.index.to_string());
-                        payload.push_str(",\"count\":");
-                        payload.push_str(&entry.count.to_string());
-                        payload.push_str("}\n");
-                        continue;
-                    }
-                    payload.push_str(&entry.dex_name);
-                    payload.push_str(" | ");
-                    payload.push_str(&entry.index.to_string());
-                    payload.push_str(" | ");
-                    payload.push_str(&entry.count.to_string());
-                    payload.push('\n');
-                }
-                emit(&payload, args.output.as_deref())?;
-                return Ok(());
-            }
             let strings = apk::list_strings(
                 &args.apk_path,
                 args.threads,
@@ -455,16 +387,6 @@ fn run_command(args: Cli, started: Instant) -> Result<()> {
             )?;
             let mut payload = String::with_capacity(strings.len() * 48);
             for entry in &strings {
-                if args.json {
-                    payload.push_str("{\"dex\":");
-                    crate::json::escape(&entry.dex_name, &mut payload);
-                    payload.push_str(",\"index\":");
-                    payload.push_str(&entry.index.to_string());
-                    payload.push_str(",\"value\":");
-                    crate::json::escape(&entry.value, &mut payload);
-                    payload.push_str("}\n");
-                    continue;
-                }
                 payload.push_str(&entry.dex_name);
                 payload.push_str(" | ");
                 payload.push_str(&entry.index.to_string());
@@ -478,20 +400,6 @@ fn run_command(args: Cli, started: Instant) -> Result<()> {
             let entries = apk::list_entries(&args.apk_path)?;
             let mut payload = String::with_capacity(entries.len() * 96);
             for entry in &entries {
-                if args.json {
-                    payload.push_str("{\"name\":");
-                    crate::json::escape(&entry.name, &mut payload);
-                    payload.push_str(",\"method\":");
-                    payload.push_str(&entry.compression.to_string());
-                    payload.push_str(",\"compressed\":");
-                    payload.push_str(&entry.compressed_size.to_string());
-                    payload.push_str(",\"uncompressed\":");
-                    payload.push_str(&entry.uncompressed_size.to_string());
-                    payload.push_str(",\"offset\":");
-                    payload.push_str(&entry.local_header_offset.to_string());
-                    payload.push_str("}\n");
-                    continue;
-                }
                 payload.push_str(&entry.name);
                 payload.push_str(" | ");
                 payload.push_str(match entry.compression {
@@ -547,13 +455,6 @@ fn run_command(args: Cli, started: Instant) -> Result<()> {
                 crate::diag::diagnose(format_args!("{}", "-".repeat(50)));
             }
             let mut payload = String::with_capacity(source.len() + 256);
-            if args.outline {
-                // The record first, then the document exactly as `getclass` prints it: a
-                // host that wants only the source reads the rest of the payload, and a
-                // host that wants the boundaries does not run a scanner of its own.
-                outline::render(&source, &mut payload);
-                payload.push('\n');
-            }
             payload.push_str(&source);
             payload.push('\n');
             emit(&payload, args.output.as_deref())?;

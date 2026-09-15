@@ -53,36 +53,6 @@ fn adler32(bytes: &[u8]) -> u32 {
     (b << 16) | a
 }
 
-/// The string count of a plain DEX, or `None` when these bytes cannot answer.
-///
-/// A container's members each hold their own table, so its count needs every member's
-/// header and the caller falls back to the whole entry for one. Anything that is not a
-/// plain DEX also answers `None`, so a short or odd prefix costs a fallback and never a
-/// wrong number.
-///
-/// **The prefix does not have to hold the string_ids table, only the header.** The check
-/// used to be `table_end <= data.len()`, which meant a 64 KiB header read could not answer
-/// for a real DEX: the table is 278 KiB in the 76,982-class corpus, so entries whose table
-/// did not fit the read fell back to inflating the whole 13 MB entry to count its strings.
-/// The table's presence is checkable without its bytes - the header declares the file's
-/// size at 0x20, and the entry says how big it really is - and that is the honest test:
-/// the tables are inside the declared file, and the declared file is the entry.
-pub(crate) fn plain_string_count(data: &[u8], entry_size: usize) -> Option<usize> {
-    /// The fields this needs end with the string count and its table offset.
-    const FIELDS_END: usize = 0x40;
-    if data.len() < FIELDS_END || data.get(..8) == Some(b"dex\n041\0") {
-        return None;
-    }
-    if !data.starts_with(b"dex\n") {
-        return None;
-    }
-    let count = read_u32(data, 0x38).ok()? as usize;
-    let strings_off = read_u32(data, 0x3c).ok()? as usize;
-    let declared = read_u32(data, 0x20).ok()? as usize;
-    let table_end = strings_off.checked_add(count.checked_mul(4)?)?;
-    (table_end <= declared && declared <= entry_size).then_some(count)
-}
-
 /// Iterator over the logical DEXes of one entry, produced one member at a time.
 ///
 /// Every container member needs its own copy of the container with its header
@@ -195,27 +165,6 @@ mod tests {
 
     fn write_u32(data: &mut [u8], offset: usize, value: u32) {
         data[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
-    }
-
-    /// The count a header can answer, and the cases where it must not.
-    #[test]
-    fn a_plain_dex_answers_its_string_count_from_a_header() {
-        let dex = crate::dex::tests::const_string_fixture(3);
-        let size = dex.len();
-        assert_eq!(plain_string_count(&dex, size), Some(3 + 3 + 2));
-        // The header alone is enough: the tables' presence is what the declared file size
-        // says, and the entry confirms the file is really that big.
-        assert_eq!(plain_string_count(&dex[..0x40], size), Some(3 + 3 + 2));
-        // A header claiming a file bigger than the entry is a lie, and the caller's full
-        // read is where it is caught.
-        assert_eq!(plain_string_count(&dex, size - 1), None);
-        // A prefix too short to hold the header answers nothing.
-        assert_eq!(plain_string_count(&dex[..0x20], size), None);
-        // A container's members each carry a table, so one header is not the count.
-        let container = crate::dex::tests::dex041_container(&[3, 4]);
-        assert_eq!(plain_string_count(&container, container.len()), None);
-        // Not a DEX at all.
-        assert_eq!(plain_string_count(b"not a dex at all, no", 20), None);
     }
 
     #[test]

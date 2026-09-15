@@ -67,41 +67,6 @@ pub fn defines_class(data: &[u8], descriptor: &[u8]) -> Result<bool> {
     Ok(false)
 }
 
-/// How many strings the table holds, without reading any of them.
-///
-/// A host that wants the number for a label should not have to receive half a million
-/// values to count them, and the count is in the header: `string_ids_size`.
-pub fn string_count(data: &[u8]) -> Result<usize> {
-    Ok(Dex::parse(data)?.header.strings_size)
-}
-
-/// How many distinct methods reference each string, for every string a method references.
-///
-/// The strings table's XREFS column, answered in one pass instead of one pass per row: a
-/// targeted query scans the whole archive (22 ms measured), and a page of five hundred rows
-/// cannot pay that five hundred times. The target set is every string index, so the scanner's
-/// own match walk does the work - the same walk `findrefs` uses - and the count is of
-/// *methods*, which is what `findrefs` reports a row per, so the two agree by construction.
-pub fn string_reference_counts(data: &[u8]) -> Result<Vec<(u32, u32)>> {
-    let dex = Dex::parse(data)?;
-    if dex.header.strings_size == 0 {
-        return Ok(Vec::new());
-    }
-    let targets = Targets::new((0..dex.header.strings_size as u32).collect::<Vec<u32>>());
-    let mut hits = dex.scan_all_classes(RefKind::String, &targets)?;
-    // The hits arrive sorted by method and deduplicated. The counts are keyed by target, and
-    // a (method, target) pair is unique, so equal targets in this order are distinct methods.
-    hits.sort_unstable_by_key(|(method, target)| (*target, *method));
-    let mut counts: Vec<(u32, u32)> = Vec::new();
-    for (_method, target) in hits {
-        match counts.last_mut() {
-            Some((index, count)) if *index == target => *count += 1,
-            _ => counts.push((target, 1)),
-        }
-    }
-    Ok(counts)
-}
-
 /// Visits every string's raw MUTF-8 bytes, in index order, decoding nothing.
 ///
 /// A search over the table does not need the values it rejects: decoding half a million
@@ -1055,33 +1020,4 @@ pub(crate) mod tests {
         assert!(Finder::new(b".b[").find(b"a.b[c]").is_some());
         assert!(Finder::new(b"a.c").find(b"abc").is_none());
     }
-    /// The count has to be what `findrefs` reports a row per: methods, not instructions.
-    #[test]
-    fn string_reference_counts_agree_with_find_references() {
-        let data = const_string_fixture(3);
-        let counts: std::collections::HashMap<u32, u32> =
-            string_reference_counts(&data).unwrap().into_iter().collect();
-        assert!(!counts.is_empty(), "the fixture's methods load a string");
-
-        // Every string the census names has exactly as many references as a targeted query
-        // reports rows for its value - the rule the strings table's column is checked by.
-        let dex = Dex::parse(&data).unwrap();
-        for (index, count) in &counts {
-            let value = dex.string(*index as usize).unwrap();
-            let rows = find_references(&data, &Query::String(value.clone())).unwrap();
-            assert_eq!(*count as usize, rows.len(), "{value:?}: {count} vs {} rows", rows.len());
-        }
-        // A string nothing loads is absent rather than zero.
-        for index in 0..dex.header.strings_size as u32 {
-            if counts.contains_key(&index) {
-                continue;
-            }
-            let value = dex.string(index as usize).unwrap();
-            assert!(
-                find_references(&data, &Query::String(value.clone())).unwrap().is_empty(),
-                "{value:?} is referenced but was not counted"
-            );
-        }
-    }
-
 }
