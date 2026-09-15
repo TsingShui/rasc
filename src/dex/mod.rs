@@ -421,7 +421,7 @@ impl<'a> Dex<'a> {
     /// entries are done. Hit sets are unioned, so the merged result does not
     /// depend on how the split happened to be stolen.
     fn scan_all_classes(&self, kind: RefKind, targets: &Targets) -> Result<Vec<Hit>> {
-        // wasm has no threads (rayon cannot build its pool there), so the class list is
+        // This wasm target has no threads (rayon cannot build its pool there), so the class list is
         // never split. The split exists to shorten tail latency, not to change results:
         // both paths are sorted and deduplicated below, so the answer is the same either
         // way.

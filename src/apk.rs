@@ -3,13 +3,12 @@
 //!
 //! Everything that reads the archive goes through [`map_dex_entries`], which owns
 //! the byte source, the worker pool, entry ordering and the `--debug` inflate
-//! timings. The source itself is [`Archive`]: a mapping on native, and on wasm - which
-//! has no `mmap` - a file read in ranges on demand.
+//! timings. The source itself is [`Archive`]: a mapping on native, and under WASI -
+//! which has no `mmap` - a file read in ranges on demand.
 //! Results are flattened in central-directory order, so output is deterministic
 //! no matter which worker stole which entry. Nothing here shells out to Python, a
 //! JVM or an external decompiler.
 
-use crate::clock::Instant;
 use crate::dex;
 use crate::query::Query;
 use crate::zip::{ZipEntry, inflate_entry};
@@ -23,17 +22,16 @@ use std::fs::File;
 use std::path::Path;
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 /// The bytes of an APK.
 ///
 /// Native maps the file, so the OS keeps the pages it needs and a 342 MiB archive costs
 /// no heap; `mmap` is also what lets a class lookup touch only the entries it has to.
-/// wasm has no `mmap` (memmap2's wasm build returns `unsupported`), so there the archive
-/// is read in ranges on demand instead: the parser asks for the EOCD tail, one central
-/// directory entry at a time, and an entry's compressed bytes, and nothing else is ever
-/// read. This is also the shape a host-supplied byte source (range requests, `Blob.slice`)
-/// would plug into.
+/// WASI has no `mmap`, so there the archive is read in ranges on demand instead: the parser
+/// asks for the EOCD tail, one central directory entry at a time, and an entry's compressed
+/// bytes, and nothing else is ever read. That is also the shape a host with a byte source of
+/// its own would plug into, and the one a browser can serve.
 enum Archive {
     #[cfg(not(target_family = "wasm"))]
     Mapped(Mmap),
@@ -41,15 +39,10 @@ enum Archive {
     Ranged {
         // `Mutex` because `range` takes `&self`: `std::os::wasi::fs::FileExt::read_at`
         // is still unstable, so the file has to be seeked. It also keeps the value
-        // `Sync`, which the parallel entry walk type-checks even on wasm.
+        // `Sync`, which the parallel entry walk type-checks even where it is serial.
         file: std::sync::Mutex<std::fs::File>,
         len: usize,
     },
-    /// wasm without a filesystem (unknown-unknown): the bytes come from the host, which is
-    /// asked for exactly the ranges the parser needs. This is the shape a browser needs
-    /// too - only the fetch there is asynchronous, which the host side has to solve.
-    #[cfg(all(target_family = "wasm", not(target_os = "wasi")))]
-    Host,
 }
 
 impl Archive {
@@ -74,29 +67,8 @@ impl Archive {
                 len,
             }
         };
-        #[cfg(all(target_family = "wasm", not(target_os = "wasi")))]
-        let archive = {
-            // There is no filesystem to open: the host owns the archive and answers the
-            // range requests. The path argument is only a label here.
-            let _ = path;
-            Archive::Host
-        };
         Ok(archive)
     }
-}
-
-// The byte source a JS host implements.
-//
-// `wasm_import_module` is what makes rustc emit these as imports instead of asking the
-// linker to find definitions.
-#[cfg(all(target_family = "wasm", not(target_os = "wasi")))]
-#[link(wasm_import_module = "env")]
-unsafe extern "C" {
-    // Copies `len` bytes of the archive starting at `offset` into wasm memory at `ptr`,
-    // returning how many bytes were written.
-    fn rasc_host_read(offset: u32, len: u32, ptr: u32) -> u32;
-    // Total archive length, which the host announces before anything is read.
-    fn rasc_host_archive_len() -> u32;
 }
 
 /// One positioned read, with a short-read loop: a wasi `read` may return fewer bytes
@@ -134,8 +106,6 @@ impl crate::zip::BytesSource for Archive {
             Archive::Mapped(mapped) => mapped.len(),
             #[cfg(target_os = "wasi")]
             Archive::Ranged { len, .. } => *len,
-            #[cfg(all(target_family = "wasm", not(target_os = "wasi")))]
-            Archive::Host => host_source_len(),
         }
     }
 
@@ -153,34 +123,7 @@ impl crate::zip::BytesSource for Archive {
                 read_exact_at(file, &mut buffer, offset as u64)?;
                 Ok(std::borrow::Cow::Owned(buffer))
             }
-            #[cfg(all(target_family = "wasm", not(target_os = "wasi")))]
-            Archive::Host => {
-                let mut buffer = vec![0u8; len];
-                let written = host_read(offset, &mut buffer);
-                if written != len {
-                    bail!("host returned {written} of {len} bytes at {offset}");
-                }
-                Ok(std::borrow::Cow::Owned(buffer))
-            }
         }
-    }
-}
-
-/// The archive length announced by a JS host.
-#[cfg(all(target_family = "wasm", not(target_os = "wasi")))]
-fn host_source_len() -> usize {
-    unsafe { rasc_host_archive_len() as usize }
-}
-
-/// Fills `buffer` from the host's archive and returns how many bytes arrived.
-#[cfg(all(target_family = "wasm", not(target_os = "wasi")))]
-fn host_read(offset: usize, buffer: &mut [u8]) -> usize {
-    unsafe {
-        rasc_host_read(
-            offset as u32,
-            buffer.len() as u32,
-            buffer.as_mut_ptr() as u32,
-        ) as usize
     }
 }
 
@@ -363,24 +306,15 @@ fn map_dex_entries<T: Send>(
             data: OnceCell::new(),
         })
     };
-    // wasm has no threads: rayon cannot even build a pool there, because
-    // `std::thread::spawn` returns ENOTSUP under wasi. Entries are then walked serially.
+    // `wasm32-wasip1` has no threads: rayon cannot even build a pool there, because
+    // `std::thread::spawn` returns ENOTSUP. Entries are then walked serially. The `-threads`
+    // variant of the target exists and would give `std::thread` back, but it needs a shared
+    // memory import and a host that implements `wasi_thread_spawn` - Wasmtime behind a flag
+    // today, and no browser WASI shim at all.
     // Results stay in central-directory order either way and the caller sorts, so the
     // output does not depend on which path ran.
-    //
-    // The serial path also reports progress, entry by entry: it is ordered, so `done` of
-    // `total` is a statement about the walk rather than about which worker finished.
     let results: Vec<Result<Vec<T>>> = if cfg!(target_family = "wasm") {
-        let total = entries.len();
-        entries
-            .iter()
-            .enumerate()
-            .map(|(index, entry)| {
-                let result = run_entry(entry);
-                crate::progress::report(index + 1, total);
-                result
-            })
-            .collect()
+        entries.iter().map(run_entry).collect()
     } else {
         let pool = rayon::ThreadPoolBuilder::new()
             .num_threads(threads)
@@ -509,7 +443,7 @@ pub fn list_classes(path: &Path, threads: usize, debug: bool) -> Result<Vec<Clas
     let extracted = started.elapsed();
     // The comparator is the type's total order, so an unstable parallel sort produces
     // exactly the order a stable sort would - the index has no ties to preserve. wasm
-    // has no threads and takes the serial sort; the order is the same either way.
+    // target has no threads and takes the serial sort; the order is the same either way.
     if cfg!(target_family = "wasm") {
         classes.sort_unstable();
     } else {

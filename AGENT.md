@@ -1,11 +1,17 @@
 # AGENT.md — Working in this repository
 
-rasc is the Rust rewrite of ASC (an APK/DEX analysis tool). **One core** now has several hosts:
+rasc is the Rust rewrite of ASC (an APK/DEX analysis tool). **One core, two targets**, and the
+second one is a program like the first:
 
-| Host | Product | Byte source | Output / diagnostics / clock |
-|---|---|---|---|
-| native CLI | `target/release/rasc` | `mmap` | stdout / stderr / `std::time::Instant` |
-| host module | `target/wasm32-unknown-unknown/release/rasc.wasm` | host callback `rasc_host_read` | `rasc_host_write` / `rasc_host_write_err` / `rasc_host_now_ms` / `rasc_host_progress` |
+| Target | Product | Reading the archive | Output / diagnostics | Entries |
+|---|---|---|---|---|
+| native | `target/release/rasc` | `mmap` | stdout / stderr | rayon pool |
+| `wasm32-wasip1` | `target/wasm32-wasip1/release/rasc.wasm` | `open` + `seek` + `read`, in ranges | stdout / stderr | serial |
+
+The `wasm32-unknown-unknown` **host module is gone**: no `rasc_host_*` imports, no `rasc_run`,
+no record modes (`--json`, `--outline`, `--count`, `--xrefs`), no `js/` SDK and no byte-source
+protocol. A host starts the program with `argv` and a mounted directory; everything a host can
+observe is in §2. `git log` has the old shape.
 
 Read this page before changing anything: it records **how to prove you did not break something**
 (the gates) and **the traps already stepped on**.
@@ -14,49 +20,30 @@ Read this page before changing anything: it records **how to prove you did not b
 
 ## 1. Gates
 
-**The CLI comes first; wasm only after the CLI is green.** A change is judged by the native CLI it
-ships, so `cargo test` and the native release build come first, and the wasm build and the host
-suites follow. A red CLI gate is fixed before minutes are spent on a wasm build that cannot change
-the failure.
-
-**Two targets: native and wasm.** `wasm32-wasip1` (a WASI CLI) was a development aid and is gone;
-the wasm product is the `wasm32-unknown-unknown` host module.
+**The CLI comes first; wasm only after the CLI is green.** A change is judged by the native CLI
+it ships, so `cargo test` and the native release build come first, and the wasm build and the
+WASI suites follow. A red CLI gate is fixed before minutes are spent on a wasm build that cannot
+change the failure.
 
 What each gate **proves**:
 
 | Command | Proves |
 |---|---|
-| `cargo test` | 86 + 2 unit/integration tests (re-derived after the record surface was removed; re-run to confirm) |
-| `cargo build --release` × {native, `wasm32-unknown-unknown`} | both targets build, with **zero warnings** |
-| `APK=… node js/test.mjs` | Node host SDK: the 4 command digests match native + buffer source + guarded source + read-ahead window |
-| `APK=… node js/cli-test.mjs` | `js/bin/rasc-wasm.mjs` has the same args / stdout / exit code as native |
-| `node js/check-declared-test-count.mjs` | the number beside `cargo test` in this very table is what the command prints |
-| `APK=… node js/limit-test.mjs` | the host-configurable inflation limit: a small limit is refused, a small entry still works, the default is restored |
-| `node js/bomb-test.mjs 1.5` | a decompression bomb is **rejected structurally**, not trapped |
-| `APK=… node js/mutation-test.mjs 40` | archive-level mutation: 200 runs with no trap / no panic |
-| `APK=… node js/dex-corpus-test.mjs` | DEX-level mutation: 135 runs (real DEXes repacked as stored entries) |
-| `APK=… node js/axml-corpus-test.mjs` | 24 structural AXML mutations, each compared with native |
-| `APK=… node js/dex041-corpus-test.mjs` | 36 runs over 041 containers, each compared with native |
-| `APK=… node js/zip-craft-corpus-test.mjs` | 60 runs of hand-crafted ZIP consistency attacks, each compared with native |
-| `APK=… MODES=file,url node js/browser-test.mjs` | a **real browser** (headless Chrome): both byte sources, 4 commands each, SHA-256 identical to native |
-
-`bench/` holds the native CLI contract (`contracts.sh`), the wasm contract (`contracts-wasm.sh`),
-the reference benchmark and the corpus fetcher. It stays on disk for local runs but is **not part of
-the tree** - do not commit it. The row whose number `js/check-declared-test-count.mjs` checks against
-`cargo test` has load-bearing shape: keep `` | `cargo test` | <unit> + <integration> unit/integration
-tests | ``.
+| `cargo test` | 86 + 2 unit/integration tests |
+| `cargo build --release` × {native, `wasm32-wasip1`} | both targets build, with **zero warnings** |
+| `APK=… node js/wasi-test.mjs` | 15 comparisons of the two targets: same stdout, same stderr, same exit code — commands, `getclass` decompilation, clap's answers, a usage error, a missing file, and the inflation ceiling |
+| `APK=… node js/torture-test.mjs 40` | hostile input: a decompression bomb is refused with a message, 40 deterministic mutations and 3 truncations end in an exit code and never in a trap, and every one of them agrees with native |
 
 Environment requirements:
 
-- The wasm target must be installed: `rustup target add wasm32-unknown-unknown`
-- The browser tier needs Chrome (`CHROME=` points at another path); without Chrome that tier skips
-  cleanly
-- **Sample archives do not travel with the repository**: the suites marked `APK=` need one of your
-  own, and any corpus whose identity must not appear in the tree is referred to by alias (see
-  "Desensitization" below).
-- **The gates hold for any APK**: the probes (concrete `type`/`method`/`field`/`string` values, "a
-  class from the latest DEX") are taken from the archive itself, not tied to a particular sample -
-  see `latestDexClass()` in `js/*.mjs`.
+- The wasm target must be installed: `rustup target add wasm32-wasip1`
+- The suites start the module through Node's WASI, which needs
+  `--experimental-wasi-unstable-preview1`; the scripts pass it themselves
+- **Sample archives do not travel with the repository**: the suites marked `APK=` need one of
+  your own, and any corpus whose identity must not appear in the tree is referred to by alias
+  (see "Desensitization" below)
+- **The gates hold for any APK**: the probes (a class, a string, a type) come from the archive
+  itself, never from a table in this repository
 
 ### Desensitization (pre-commit)
 
@@ -80,46 +67,64 @@ pre-commit hook. Identifiers that really must be written down go to the untracke
 
 ## 2. The host boundary
 
-The host module is what a browser drives, so it has an interface of its own beyond the CLI's
-text output: the same arguments, the same stdout bytes, the same exit code, plus the imports
-the host has to answer. The record modes (`--json`, `--outline`, `--count`, `--xrefs`) were
-removed - a host reads the CLI's own output, so the CLI's own output is the whole contract:
+There is no ABI to keep in sync, which is the point of the WASI target. What a host owns:
 
-| What | Why it exists | Where |
-|---|---|---|
-| `entries`, `strings` | the archive's entries and the DEX string table | `src/apk.rs`, `src/dex/` |
-| `strings --filter`, `--limit`, `--offset` | a page of the table rather than all of it | `src/apk.rs` |
-| `rasc_host_progress(done, total)` | entries walked, out of a total known before the walk; only the serial (wasm) walk reports, because only it is ordered | `src/progress.rs` |
-| clap's answers | `--help`, `--version` and a usage error return clap's status and text instead of trapping the instance | `src/main.rs` |
+| Channel | Meaning |
+|---|---|
+| `argv` | The command line, unchanged. The archive argument is a **real path** the guest opens; there is no label-only mode. |
+| the preopened directory | Where the archive and any `-o` output live. A host holding the bytes in memory mounts them at a path instead of writing them out. |
+| `RASC_MAX_INFLATED_ENTRY` | The per-entry inflation ceiling, in bytes, read once at startup. Host policy rather than command-line policy — a browser tab has a memory budget and the argument line belongs to whatever wrote it. |
+| stdout / stderr | Payload and diagnostics, split exactly as natively: redirecting stdout can never capture a `--debug` line, a panic or an error. |
+| the exit code | `0` success, `1` a failed command, `2` a usage error — clap's own code, never a trap. |
+| instance lifetime | A WASI call cannot be interrupted from outside, so cancellation is killing the instance. One run per instance is the cheap way to have that. |
 
-A new host import breaks every host that does not provide it, so `js/rasc.mjs` has to grow
-with it.
+`js/wasi-run.mjs` is the reference host and the smallest expression of this table; `js/README.md`
+carries the same contract from the host's side. `-o`, `skill` and bare-DEX input all work through
+the mounted directory, so a host does not implement output files itself any more.
 
 ---
 
 ## 3. Invariants that must not be broken
 
-1. **Native output is the baseline.** No change on the wasm side may alter native byte output. How to
-   check: the `manifest` / `classes` md5s are unchanged and the contract suites pass.
+1. **Native output is the baseline.** No change may alter native byte output. How to check: the
+   `manifest` / `classes` md5s are unchanged and the parity suite passes.
    - `manifest` = `7756cac7a9cc02b74cffe9ecb1fe5eb8`
    - `classes --threads 1` = `d839067e5a8d95fafdda2e006acc3b8e`
-2. **Error text is a contract too.** wasm must match native word for word — so messages are
-   **generated** in the core (`zip.rs` and friends) rather than paraphrasing a backend (libdeflate and
-   miniz_oxide word things differently; `incomplete_stream()` exists for exactly that).
-3. **The core only sees `&[u8]` and `BytesSource`.** Host differences are allowed only in `Archive` in
-   `src/apk.rs`, the two writers in `src/main.rs`, and `src/clock.rs` / `src/diag.rs` /
-   `src/progress.rs`. Do not leak
-   `cfg(target…)` into the parsing logic of `zip.rs` / `dex/` / `manifest.rs` (the deflate backends
-   and the branches that already exist are the exceptions).
-4. **`wasm32-unknown-unknown` has no threads.** `std::thread::spawn` returns `ENOTSUP` there, so
-   rasc's own parallel call sites take the serial branch under `cfg!(target_family = "wasm")`, and
-   **both branches must keep compiling** (`cfg!()`, not `#[cfg]`). Vendored code may lean on
-   `rayon`'s own fallback instead (it runs `par_iter` sequentially when threading is unsupported);
-   `crates/dexdec` does, and it never calls `rayon::spawn`, so no work is dropped.
-5. **The inflation limit is host policy**: 256 MiB per entry by default, and a host may lower it; do
-   not remove the "**decide before the first allocation**" semantics.
-6. **`skill/SKILL.md` is the payload of `rasc skill --print`** (embedded with `include_str!`): editing
-   it edits the CLI's output bytes, and native and wasm must agree — `js/cli-test.mjs` has a
+2. **Error text is a contract too.** Both targets must match word for word, so messages are
+   **generated in the core** rather than paraphrasing a backend: libdeflate and the Rust decoder
+   word things differently, and `incomplete_stream()` exists for exactly that. Where a decoder
+   folds two different failures into one answer, the core has to tell them apart itself — the
+   whole-entry inflate path in `zip.rs` walks `flate2::Decompress` by hand for this reason.
+3. **The core only sees `&[u8]` and `BytesSource`.** Host differences are allowed only in `Archive`
+   in `src/apk.rs`, the writer in `src/main.rs`, and `src/diag.rs`. Do not leak `cfg(target…)` into
+   the parsing logic of `zip.rs` / `dex/` / `manifest.rs`; the deflate backends and the branches
+   that already exist are the exceptions.
+4. **This wasm target has no threads.** `std::thread::spawn` returns `ENOTSUP`, so rasc's own
+   parallel call sites take the serial branch under `cfg!(target_family = "wasm")`, and **both
+   branches must keep compiling** (`cfg!()`, not `#[cfg]`). Vendored code may lean on `rayon`'s own
+   fallback instead (it runs `par_iter` sequentially when threading is unsupported); `crates/dexdec`
+   does, and it never calls `rayon::spawn`, so no work is dropped.
+   - `wasm32-wasip1-threads` does exist (tier 2, full `std`), and `wasi_threads` is a real proposal,
+     so "WASI cannot do threads" is the wrong sentence. What is true is narrower: this target is not
+     the `-threads` variant, the module imports no shared memory, and neither host we run on
+     implements `wasi_thread_spawn` — Node's `node:wasi` does not export it, and
+     `browser_wasi_shim` does not mention it. See the trap row below before reaching for it.
+   - Order of work matters more than the feature: the WASI build is serial *and* on the Rust
+     inflate backend, and measured on the same archive `classes` is 320 ms there against 33 ms
+     natively. Threads would split the serial half; a real deflate backend would shrink both.
+   - **Decided: stay on plain `wasm32-wasip1`.** The threads variant compiles (`rustup target add
+     wasm32-wasip1-threads`, 46 s, zero warnings) but its module then imports `env.memory` (shared)
+     and `wasi.thread-spawn`, and no host we run on implements the second one — Node's `node:wasi`
+     does not export it and `browser_wasi_shim` does not mention it. Plain WASI runs in every host,
+     which is worth more here than the parallel walk. If it ever matters, the path is the
+     `-threads` variant plus ~80 lines of host glue that instantiates the module again on a shared
+     memory and calls the exported `wasi_thread_start`; **not** wasm-bindgen-rayon, which would cost
+     the program model, a nightly `build-std`, and COOP/COEP on a host that cannot set headers.
+5. **The inflation limit is host policy**: 256 MiB per entry by default, lowered by the host
+   through the environment, and it keeps its "**decide before the first allocation**" semantics —
+   it is read once before dispatch, never per entry.
+6. **`skill/SKILL.md` is the payload of `rasc skill --print`** (embedded with `include_str!`):
+   editing it edits the CLI's output bytes, and both targets must agree — the parity suite has a
    `skill --print` comparison.
 
 ---
@@ -128,53 +133,43 @@ with it.
 
 | Symptom | Cause / correct approach |
 |---|---|
-| wasm link fails with `undefined symbol: rasc_host_*` | the `extern` block must carry `#[link(wasm_import_module = "env")]`, or the linker goes looking for a definition |
 | a measurement says "no improvement / a regression", but it is false | confirm first that the **build succeeded** and the product is **newer than the sources**. I once drew a wrong conclusion from an old binary whose build had failed — scripts must assert both |
-| a bare `RuntimeError: unreachable` in wasm, with no information | `std::time::Instant::now()` panics outright on `wasm32-unknown-unknown` → use `src/clock.rs` (host clock); vendored dexdec carries a `crate::timing::Instant` shim for the same reason (see its PATCHES.md); `rasc_run` installs a panic hook, so a panic appears in host output as `PANIC: …` |
-| `--debug` prints nothing | `eprintln!` cannot write on `wasm32-unknown-unknown` (silently dropped) → use the host channel in `src/diag.rs` |
+| the same corrupt entry gives two different messages on the two targets | a decoder that reports "ended early" and "wrong size" with one return value folds two claims into one. `read_to_end` over a truncated deflate stream does exactly this; walk `flate2::Decompress` and break on `Status::StreamEnd` instead |
+| inflating a legitimate entry suddenly reports an incomplete stream | `FlushDecompress::Finish` tells the decoder the output buffer must be able to complete the stream in one call. A loop that grows its buffer must pass `None` |
+| a size test that only ever passes | a stream that produces *more* than the declared size cannot be finished natively either (libdeflate reports `InsufficientSpace` past the declared size) — it is an incomplete stream, not a size mismatch, and the wasm path has to say the same |
+| native and WASI stderr differ on a missing file | the errno number belongs to the host's table (`os error 2` natively, `os error 44` under WASI). The wording, the stream and the exit code are the contract; fold only the number away when comparing |
+| a WASI run cannot open the archive it was pointed at | a WASI guest has no working directory: hand it an absolute path its preopens cover |
 | a large payload is truncated (especially through a pipe) | `process.exit()` does not wait for stdout to flush → use `process.exitCode` and let Node finish naturally |
-| `-o` reports `operation not supported on this platform` | the host module has no filesystem → `-o` is implemented by the CLI wrapper (`js/bin/rasc-wasm.mjs`, which deletes the half-written file on failure) |
-| wasm inflation reports `deflate decompression error` | `flate2::Decompress` **does not remember** input consumed across calls → split the input by `total_in()` (the current implementation uses `bufread::DeflateDecoder` instead) |
 | native memory numbers jump around, by as much as 4× | macOS malloc's large-block cache → set `MallocLargeCache=0` when comparing native memory, or you are measuring the allocator instead of the program |
 | a corpus is "all green" but tested nothing | every corpus needs a **control** (the unmutated input must really parse) and a count of whether the comparison actually happened. This rule has caught 5 false conclusions in this repository |
 | after installing a wasm target, the build still fails with a basic error inside a dependency (e.g. `IndexMap<K, V, S>` generic count) | the target was missing on the first build and **the build script's probe result was already cached**: indexmap only declares `rerun-if-changed=build.rs`, so a changed environment does not make it re-run → `cargo clean -p <that crate>` and build again. check the exit status as well as the warnings, or a "failed build with 0 warnings" can look green |
-| a custom harness reports a "mismatch" | suspect the harness first: a different error stream (wasm has no stderr), a misspelled argv, comparing bytes from different sources. Core and harness can both be wrong, and the harness is wrong more often |
+| a custom harness reports a "mismatch" | suspect the harness first: a different error stream, a misspelled argv, comparing bytes from different sources, or a path the guest cannot resolve. Core and harness can both be wrong, and the harness is wrong more often |
 
 ---
 
 ## 5. Layout
 
 ```
-src/            core (one copy for native and wasm)
-                ├── apk.rs      Archive: Mapped / Ranged / Host, plus entry scheduling
+src/            core (one copy for native and WASI)
+                ├── apk.rs      Archive: Mapped (native) / Ranged (WASI), plus entry scheduling
                 ├── zip.rs      BytesSource, ZIP parsing, inflation and its limit
                 ├── dex/        scanner (mod/container/filter/mutf8/opcodes/prefix)
                 ├── manifest.rs binary AndroidManifest → XML
-                ├── clock.rs    ★ host clock (Instant panics on unknown-unknown)
                 ├── skill.rs    `rasc skill`: installs the embedded SKILL.md for pi / Codex / Claude Code
-                └── diag.rs     ★ diagnostic channel (--debug is no longer dropped in host builds)
-js/             the wasm host side
-                ├── rasc.mjs    shared host: 5 imports + configurable limit + diagnostics; imports nothing (loadable in a browser)
-                ├── node.mjs    fs.readSync source + 4 MiB read-ahead window
-                ├── browser.mjs Worker: FileReaderSync(Blob) or synchronous XHR(Range)
-                ├── worker.mjs  ready-made module-worker entry
-                ├── bin/rasc-wasm.mjs  usable directly as a CLI (same args / stdout / stderr / exit code)
-                └── *-test.mjs      9 gate scripts + check-declared-test-count.mjs (see section 1)
+                └── diag.rs     diagnostics: stderr, on both targets
+js/             the host side, three files
+                ├── wasi-run.mjs     the reference WASI host, also a usable command line
+                ├── wasi-test.mjs    the parity gate: WASI against native
+                └── torture-test.mjs hostile input: bomb, mutations, truncations
 vendor/         patched crates.io dependencies (axmldecoder comes in through [patch.crates-io] as a relative path; **do not delete**)
-crates/         workspace members. `crates/dexdec` is the vendored Java emitter used by `getclass` on native
+crates/         workspace members. `crates/dexdec` is the vendored Java emitter used by `getclass`
                 (see its FORK.md for the upstream commit and the deliberate trims); `crates/rusty-dex` is the DEX
-                parser it was built against. `--emitter` was removed with the last `rasc-dex` dependency: the CLI
-                now has one native emitter, and wasm builds of `getclass` report that they have none.
-tools/audit/    the desensitization gate only: `desensitize_check.py` and its word list. The
-                rasc-dex audit harness (cohort ledger, screens, elegance counters, criteria
-                checker) went away with `crates/rasc-dex`.
-docs/           release notes (`docs/releases/`). The rasc-dex trail - bug records
-                (`todo-bug-XXXX-*.md`), audit logs (`audit-*.md`), the elegance baseline and
-                Agent-Test-Imporve-Method.md - was deleted on 2026-09-14; `git log` has it.
+                parser it was built against.
+tools/audit/    the desensitization gate only: `desensitize_check.py` and its word list.
+docs/           release notes (`docs/releases/`).
 tests/          self_contained.rs (no process spawning, no Python/JVM bindings)
 skill/          the SKILL.md that `rasc skill` writes (embedded in the binary and the payload of `--print`)
 ```
 
-When adding a host, wire it up at `Archive` in `src/apk.rs` and the writers in `src/main.rs` first,
-then add the adapter in `js/` — the parsing logic should not change at all.
-
+When adding a target, wire it up at `Archive` in `src/apk.rs` and the writer in `src/main.rs`
+first — the parsing logic should not change at all.

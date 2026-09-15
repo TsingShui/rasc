@@ -7,17 +7,14 @@
 mod apk;
 mod bytes;
 mod cli;
-mod clock;
 mod dex;
 mod diag;
 mod emitter;
-mod progress;
 mod manifest;
 mod query;
 mod skill;
 mod zip;
 
-use crate::clock::Instant;
 use anyhow::{Context, Result, bail};
 use clap::Parser;
 use cli::{Cli, Command};
@@ -25,111 +22,38 @@ use rayon::prelude::*;
 use std::fs;
 use std::io::{self, Write};
 use std::path::Path;
+use std::time::Instant;
 
-/// Where a command's payload goes.
-///
-/// Native and WASI write to stdout. Under a JS host there is no stdout, so the bytes go
-/// back to the host through an imported function instead.
-#[cfg(not(all(target_family = "wasm", not(target_os = "wasi"))))]
+/// Where a command's payload goes: stdout, on both targets that remain.
 fn payload_writer() -> impl Write {
     io::BufWriter::new(io::stdout().lock())
 }
 
-#[cfg(all(target_family = "wasm", not(target_os = "wasi")))]
-fn payload_writer() -> HostWriter {
-    HostWriter
-}
-
-#[cfg(all(target_family = "wasm", not(target_os = "wasi")))]
-struct HostWriter;
-
-#[cfg(all(target_family = "wasm", not(target_os = "wasi")))]
-impl Write for HostWriter {
-    fn write(&mut self, buffer: &[u8]) -> io::Result<usize> {
-        unsafe { rasc_host_write(buffer.as_ptr() as u32, buffer.len() as u32) };
-        Ok(buffer.len())
-    }
-
-    fn flush(&mut self) -> io::Result<()> {
-        Ok(())
-    }
-}
-
-// What a JS host has to provide.
-//
-// `wasm_import_module` is what makes rustc emit these as imports instead of asking the
-// linker to find definitions.
-#[cfg(all(target_family = "wasm", not(target_os = "wasi")))]
-#[link(wasm_import_module = "env")]
-unsafe extern "C" {
-    // Hands `len` bytes of payload back to the host.
-    fn rasc_host_write(ptr: u32, len: u32) -> u32;
-    // Writes the `index`-th argument into wasm memory at `ptr`, up to `capacity` bytes and
-    // unterminated, returning its full length so the caller can grow and retry.
-    fn rasc_host_arg(index: u32, ptr: u32, capacity: u32) -> u32;
-    // How far a walk over the archive's entries has got. A host that wants a fraction
-    // installs a handler; one that does not ignores the calls.
-    fn rasc_host_progress(done: u32, total: u32);
-}
-
-/// Sets the per-entry inflation ceiling before a command runs, returning the previous value.
+/// Reads the host's per-entry inflation ceiling from the environment.
 ///
-/// A host with a tighter memory budget than the default (a browser holding this instance)
-/// uses this; passing 0 restores the built-in default. The CLI and the WASI build leave it
-/// alone.
-#[cfg(all(target_family = "wasm", not(target_os = "wasi")))]
-#[unsafe(no_mangle)]
-pub extern "C" fn rasc_set_max_inflated_entry(bytes: u32) -> u32 {
-    let requested = if bytes == 0 {
-        crate::zip::DEFAULT_MAX_INFLATED_ENTRY
-    } else {
-        bytes as usize
+/// The ceiling is host policy, not command-line policy: a browser tab holding this instance
+/// has a memory budget of its own, and the argument line belongs to whatever wrote it. The
+/// environment is the one channel a WASI host owns, so the value is read from there.
+///
+/// It is applied before `dispatch`, because "decide before the first allocation" is the whole
+/// point of the limit: a ceiling installed after a decompression has already run was never a
+/// ceiling for that entry.
+fn apply_inflation_limit_from_env() {
+    let Ok(value) = std::env::var("RASC_MAX_INFLATED_ENTRY") else {
+        return;
     };
-    crate::zip::set_max_inflated_entry(requested) as u32
-}
-
-/// C-ABI entry point for a JS host.
-///
-/// The host announces the archive length, implements the `rasc_host_*` imports, and calls
-/// this with the argument count (`argv[0]` included, as `Cli` expects). The return value is
-/// the exit code the CLI would have used.
-#[cfg(all(target_family = "wasm", not(target_os = "wasi")))]
-#[unsafe(no_mangle)]
-pub extern "C" fn rasc_run(argc: u32) -> i32 {
-    // A trap in wasm says nothing about why, so a panic has to be reported through the
-    // host before `panic = "abort"` turns it into `unreachable`.
-    std::panic::set_hook(Box::new(|info| {
-        let _ = writeln!(payload_writer(), "PANIC: {info}");
-    }));
-    let mut args = Vec::with_capacity(argc as usize);
-    for index in 0..argc {
-        let mut buffer = vec![0u8; 256];
-        loop {
-            let length = unsafe {
-                rasc_host_arg(index, buffer.as_mut_ptr() as u32, buffer.len() as u32) as usize
-            };
-            if length <= buffer.len() {
-                buffer.truncate(length);
-                break;
-            }
-            buffer = vec![0u8; length];
-        }
-        args.push(String::from_utf8_lossy(&buffer).into_owned());
-    }
-    match dispatch(args) {
-        Ok(code) => code,
-        Err(error) => {
-            if is_broken_pipe(&error) {
-                return 0;
-            }
-            let _ = writeln!(payload_writer(), "Error: {error:#}");
-            1
+    // `0` restores the built-in default; anything unparseable leaves it in force rather than
+    // guessing at an intent.
+    match value.trim().parse::<usize>() {
+        Ok(0) | Err(_) => {}
+        Ok(bytes) => {
+            crate::zip::set_max_inflated_entry(bytes);
         }
     }
 }
-
 fn main() {
     restore_default_sigpipe();
+    apply_inflation_limit_from_env();
     match dispatch(std::env::args().collect()) {
         Ok(code) => std::process::exit(code),
         Err(error) => {
@@ -150,26 +74,14 @@ fn main() {
 /// clap's own text, on clap's own stream, with clap's own status.
 ///
 /// `--help`, `--version` and a usage error are all *answers*, not failures: they carry a
-/// status of their own (0, 0, 2) and text a user asked for. Letting clap's `exit()` decide
-/// froze them into whatever the platform does with a process exit, and on
-/// `wasm32-unknown-unknown` that is `unreachable` - so a host that passed one bad argument
-/// got a trap and an instance it could no longer use, with no message at all. Returning the
-/// status and writing the text is the same behaviour on every target.
+/// status of their own (0, 0, 2) and text a user asked for. clap's own `exit()` decides that
+/// by ending the process, which hides the status from the caller that wants it; returning it
+/// keeps the decision where the caller can see it, and `print()` still puts each answer on
+/// the stream clap chose for it.
 fn cli_message(error: &clap::Error) -> i32 {
-    #[cfg(all(target_family = "wasm", not(target_os = "wasi")))]
-    {
-        // No stderr to write to here, so the message goes where the host reads: the payload.
-        // The text is still clap's, which is what keeps the two hosts saying one thing.
-        let mut out = payload_writer();
-        let _ = out.write_all(error.render().to_string().as_bytes());
-        let _ = out.flush();
-    }
-    #[cfg(not(all(target_family = "wasm", not(target_os = "wasi"))))]
-    {
-        let _ = error.print();
-        let _ = std::io::stdout().flush();
-        let _ = std::io::stderr().flush();
-    }
+    let _ = error.print();
+    let _ = std::io::stdout().flush();
+    let _ = std::io::stderr().flush();
     error.exit_code()
 }
 
@@ -256,13 +168,13 @@ fn debug_timing(started: Instant) {
 
 /// Parses and runs one command, returning the status the process should exit with.
 ///
-/// A JS host supplies the vector through [`rasc_run`] instead of the process environment;
-/// both entry points reach the same dispatch, so a target can never drift from another in
-/// what it accepts or what it says.
+/// The vector is the process's own arguments; there is no second entry point, so a target
+/// cannot drift from another in what it accepts or in what it says.
 fn dispatch(args: Vec<String>) -> Result<i32> {
     let started = Instant::now();
-    // `try_parse_from`, not `parse_from`: clap's error path calls `exit()`, and `exit()` on
-    // a target without processes is a trap that takes the host's instance with it.
+    // `try_parse_from`, not `parse_from`: clap's own error path ends the process, which
+    // makes its status unobservable to the caller that wants it. Returning it keeps the
+    // answer - `--help`, `--version`, a usage error - in one place for both targets.
     let args = match Cli::try_parse_from(args) {
         Ok(args) => args,
         Err(error) => return Ok(cli_message(&error)),
@@ -285,7 +197,7 @@ fn run_command(args: Cli, started: Instant) -> Result<()> {
             // The comparator is the string order, so an unstable sort produces exactly the
             // bytes a stable one would: equal lines are identical lines, and there is
             // nothing else to tie-break. Sorting a wide query's ~90k lines in parallel is
-            // what keeps it off the main thread. wasm has no threads and takes the serial
+            // what keeps it off the main thread. This wasm target has no threads and takes the serial
             // sort; the output is the same either way.
             if cfg!(target_family = "wasm") {
                 hits.sort_unstable();
