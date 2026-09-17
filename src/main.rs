@@ -234,10 +234,19 @@ fn run_command(args: Cli, started: Instant) -> Result<i32> {
         Command::FieldsPlan(args) => {
             // Accept what a user types; the DEX carries descriptors.
             let descriptor = crate::query::format_class_name(&args.descriptor)?;
-            match apk::field_plan(&args.apk, &descriptor, args.threads)? {
+            let lookup = apk::field_plan(&args.apk, &descriptor, args.threads)?;
+            match &lookup.plan {
                 Some(plan) => emit(&format!("{plan}\n"), args.output.as_deref())?,
-                None => bail!("{descriptor} is not defined in the supplied code inputs"),
+                None if lookup.definitions.is_empty() => {
+                    eprintln!("Error: {descriptor} is not defined in the supplied code inputs");
+                }
+                None => eprintln!(
+                    "Error: {descriptor} is defined {} times ({}); a plan must name one definition",
+                    lookup.definitions.len(),
+                    lookup.definitions.join(", ")
+                ),
             }
+            status = apk::lookup_status(lookup.definitions.len());
             if args.debug {
                 debug_timing(started);
             }

@@ -839,26 +839,46 @@ pub fn list_strings(
 /// central-directory order, so "first" is a property of the arguments rather than of
 /// which worker happened to finish first. `None` means no input defines the class,
 /// which is a different answer from an empty field list.
-pub fn field_plan(paths: &[PathBuf], descriptor: &str, threads: usize) -> Result<Option<String>> {
+pub fn field_plan(paths: &[PathBuf], descriptor: &str, threads: usize) -> Result<FieldPlanLookup> {
+    let mut definitions: Vec<String> = Vec::new();
+    let mut candidates: Vec<String> = Vec::new();
     for path in paths {
-        let plans = map_dex_entries(path, threads, EntryOrder::Natural, None, |inflated| {
-            let mut plans = Vec::new();
+        let found = map_dex_entries(path, threads, EntryOrder::Natural, None, |inflated| {
+            let mut found = Vec::new();
             for logical in dex::container::logical_dexes(&inflated.entry.name, inflated.data()?)? {
                 // A DEX 041 container carries an extra-long header; the reader wants the
                 // standard view, exactly as `getclass` does.
                 let normalized = dex::container::standard_header_view(&logical.data);
                 let data = normalized.as_deref().unwrap_or(&logical.data);
                 if let Some(plan) = dex::members::field_plan(data, descriptor)? {
-                    plans.push(plan.render_json());
+                    found.push((logical.name.clone(), plan.render_json()));
                 }
             }
-            Ok(plans)
+            Ok(found)
         })?;
-        if let Some(plan) = plans.into_iter().next() {
-            return Ok(Some(plan));
+        for (name, plan) in found {
+            definitions.push(name);
+            candidates.push(plan);
         }
     }
-    Ok(None)
+    Ok(FieldPlanLookup {
+        plan: (definitions.len() == 1).then(|| candidates.remove(0)),
+        definitions,
+    })
+}
+
+/// What a `fields-plan` lookup found.
+///
+/// `plan` is present only when exactly one input and entry defines the class. A class name
+/// is not an identity - two entries can define it with different field layouts - and this
+/// plan decides which instance slots a collector may dereference as pointers, so handing a
+/// caller the first of two would be choosing a layout at random. The caller answers that
+/// with the same three-way status the index lookups use.
+#[derive(Debug, Default)]
+pub struct FieldPlanLookup {
+    /// Entry names that define the class, in the order inputs and entries were walked.
+    pub definitions: Vec<String>,
+    pub plan: Option<String>,
 }
 
 /// Which member table a lookup reads.
@@ -1058,6 +1078,45 @@ mod tests {
     }
 
     /// The three statuses are distinct answers, not a bool.
+    /// A class name is not an identity. Two entries defining it must not produce a plan:
+    /// the plan decides which instance slots a collector dereferences.
+    #[test]
+    fn fields_plan_refuses_to_pick_between_two_definitions() {
+        let dex = dex::tests::const_string_fixture(1);
+        let zip = build_zip(&[("classes.dex", &dex, true), ("classes2.dex", &dex, true)]);
+        let path = temp_apk("fields-plan-ambiguous", &zip);
+
+        let lookup = field_plan(&[path.clone()], "LFixture0;", 2).unwrap();
+        assert_eq!(lookup.definitions.len(), 2, "both entries define the class");
+        assert!(
+            lookup.plan.is_none(),
+            "an ambiguous plan must not be handed out"
+        );
+        assert_eq!(lookup_status(lookup.definitions.len()), 4);
+        std::fs::remove_file(&path).unwrap();
+    }
+
+    #[test]
+    fn fields_plan_returns_the_one_definition_and_nothing_otherwise() {
+        let dex = dex::tests::const_string_fixture(1);
+        let zip = build_zip(&[("classes.dex", &dex, true)]);
+        let path = temp_apk("fields-plan-single", &zip);
+
+        let lookup = field_plan(&[path.clone()], "LFixture0;", 2).unwrap();
+        assert_eq!(lookup.definitions, ["classes.dex"]);
+        let plan = lookup.plan.expect("exactly one definition");
+        assert!(plan.starts_with(
+            "{\"schema\":\"rasc.fields-plan/v1\",\"descriptor\":\"LFixture0;\""
+        ));
+        assert_eq!(lookup_status(lookup.definitions.len()), 0);
+
+        let missing = field_plan(&[path.clone()], "LNo/Such;", 2).unwrap();
+        assert!(missing.definitions.is_empty());
+        assert!(missing.plan.is_none());
+        assert_eq!(lookup_status(missing.definitions.len()), 3);
+        std::fs::remove_file(&path).unwrap();
+    }
+
     #[test]
     fn member_verdict_separates_none_from_several() {
         assert_eq!(lookup_status(1), 0);
@@ -1170,13 +1229,14 @@ mod tests {
     #[ignore = "需要真实多 DEX APK；设 RASC_REAL_APK 后用 --ignored 显式运行"]
     fn real_apk_fields_plan_reports_a_known_class() {
         let path = std::env::var("RASC_REAL_APK").expect("set RASC_REAL_APK");
-        let plan = field_plan(
+        let lookup = field_plan(
             &[PathBuf::from(path)],
             "Lcom/termux/terminal/TerminalSession;",
             4,
         )
-        .expect("read the plan")
-        .expect("the class is defined");
+        .expect("read the plan");
+        assert_eq!(lookup.definitions, ["classes14.dex"]);
+        let plan = lookup.plan.expect("exactly one definition");
         assert!(plan.starts_with(
             "{\"schema\":\"rasc.fields-plan/v1\",\"descriptor\":\"Lcom/termux/terminal/TerminalSession;\""
         ));

@@ -101,6 +101,9 @@ rasc findrefs app.apk method onCreate --class com.example.Main
 rasc findrefs app.apk field INSTANCE --class example --fuzzy-class
 rasc classes app.apk                                   # class index
 rasc manifest app.apk                                  # binary AndroidManifest.xml -> XML
+rasc fields-plan app.apk --descriptor 'Lcom/example/Foo;'       # field layout + instance ref mask (JSON)
+rasc field-by-index app.apk --descriptor 'Lcom/example/Foo;' --field-index 3
+rasc method-by-index app.apk --descriptor 'Lcom/example/Foo;' --method-index 339
 rasc skill                                             # install the rasc skill for coding agents
 ```
 

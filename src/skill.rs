@@ -241,10 +241,26 @@ mod tests {
         let description = frontmatter("description");
         assert!(!description.is_empty() && description.chars().count() <= 1024);
         // The whole point of the file is telling an agent which commands exist.
-        for command in ["getclass", "findrefs", "classes", "manifest"] {
+        for command in [
+            "getclass",
+            "findrefs",
+            "classes",
+            "manifest",
+            "fields-plan",
+            "field-by-index",
+            "method-by-index",
+        ] {
             assert!(
                 SKILL_MD.contains(command),
                 "the skill no longer mentions `{command}`"
+            );
+        }
+        // The three index faces answer with a status, not with a best guess, and an agent
+        // that does not know that will read exit 4 as a failure to be retried.
+        for phrase in ["Exit status is the verdict", "3` none", "4` more than one"] {
+            assert!(
+                SKILL_MD.contains(phrase),
+                "the skill no longer states the exit-code contract (`{phrase}`)"
             );
         }
     }

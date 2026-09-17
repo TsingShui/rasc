@@ -19,7 +19,33 @@ rasc findrefs app.apk method onCreate --class com.example.Main
 rasc findrefs app.apk field INSTANCE --class example --fuzzy-class
 rasc classes app.apk [-f substring]                   # class index
 rasc manifest app.apk                                 # binary AndroidManifest.xml -> XML
+rasc fields-plan app.apk --descriptor 'Lcom/example/Foo;'      # field layout + instance reference mask
+rasc field-by-index app.apk --descriptor 'Lcom/example/Foo;' --field-index 3
+rasc method-by-index app.apk --descriptor 'Lcom/example/Foo;' --method-index 339
 ```
+
+## Indices a runtime trace hands back
+
+A trace from a runtime carries indices, not names. These three commands turn one into the
+member behind it:
+
+```sh
+rasc fields-plan app.apk --descriptor 'Lcom/example/Foo;'
+rasc field-by-index app.apk --descriptor 'Lcom/example/Foo;' --field-index 3
+rasc method-by-index app.apk --descriptor 'Lcom/example/Foo;' --method-index 339
+```
+
+- `fields-plan` prints one JSON record: `dex_class_def_idx`, `dex_type_idx`,
+  `class_access_flags`, the instance and static fields in DEX declaration order, and
+  `instance_ref_mask` (bit *j* = instance field *j* is a reference). It is the one command
+  whose consumer is a program, which is why it is JSON.
+- `field-by-index` takes the index a runtime reports: instance fields first, then statics.
+  That is **not** the `field_ids` index, so the row prints `field_ids=` too.
+  `method-by-index` takes the `method_ids` index, which is what a runtime stores.
+- Exit status is the verdict for all three: `0` one answer, `3` none (no input defines the
+  class, or it declares no such index), `4` more than one input defines the class. On `4` the
+  index lookups print every candidate, and `fields-plan` prints nothing: a plan decides which
+  instance slots a collector may dereference, so picking one of two layouts would be arbitrary.
 
 ## Notes
 

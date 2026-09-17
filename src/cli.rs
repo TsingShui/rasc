@@ -40,10 +40,21 @@ pub enum Command {
     /// List classes defined across every DEX in an APK.
     Classes(ClassesArgs),
     /// Print one class's DEX field layout as one JSON record.
+    ///
+    /// Exit status: 0 = exactly one definition of the class; 3 = no input defines it;
+    /// 4 = more than one does (nothing is printed, and stderr names them). A plan decides
+    /// which instance slots a collector may dereference, so an ambiguous one is refused
+    /// rather than resolved by taking the first.
     FieldsPlan(FieldsPlanArgs),
     /// Resolve a runtime field index to the DEX field behind it.
+    ///
+    /// Exit status: 0 = one hit; 3 = the class is not defined, or declares no field with
+    /// that index; 4 = more than one input defines the class (all candidates are printed).
     FieldByIndex(FieldByIndexArgs),
     /// Resolve a runtime method index to the DEX method behind it.
+    ///
+    /// Exit status: 0 = one hit; 3 = the class is not defined, or declares no method with
+    /// that index; 4 = more than one input defines the class (all candidates are printed).
     MethodByIndex(MethodByIndexArgs),
     /// Install the rasc skill so coding agents know how to use rasc.
     Skill(SkillArgs),
