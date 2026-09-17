@@ -21,8 +21,8 @@ rasc findrefs app.apk field INSTANCE --class example --fuzzy-class
 rasc classes app.apk [-f substring]                   # class index
 rasc manifest app.apk                                 # binary AndroidManifest.xml -> XML
 rasc fields-plan app.apk --descriptor 'Lcom/example/Foo;'      # field layout + instance reference mask
-rasc field-by-index app.apk --descriptor 'Lcom/example/Foo;' --field-index 3
-rasc method-by-index app.apk --descriptor 'Lcom/example/Foo;' --method-index 339
+rasc member-by-index app.apk --descriptor 'Lcom/example/Foo;' --field-index 3
+rasc member-by-index app.apk --descriptor 'Lcom/example/Foo;' --method-index 339
 ```
 
 ## Indices a runtime trace hands back
@@ -32,8 +32,8 @@ member behind it:
 
 ```sh
 rasc fields-plan app.apk --descriptor 'Lcom/example/Foo;'
-rasc field-by-index app.apk --descriptor 'Lcom/example/Foo;' --field-index 3
-rasc method-by-index app.apk --descriptor 'Lcom/example/Foo;' --method-index 339
+rasc member-by-index app.apk --descriptor 'Lcom/example/Foo;' --field-index 3
+rasc member-by-index app.apk --descriptor 'Lcom/example/Foo;' --method-index 339
 ```
 
 - `fields-plan` prints one JSON record: `dex_class_def_idx`, `dex_type_idx`,
@@ -46,13 +46,15 @@ rasc method-by-index app.apk --descriptor 'Lcom/example/Foo;' --method-index 339
   and `# members methods: method_ids=339 proto=(…)V flags=0x10001 name=<init>`. The prototype is
   what identifies one method among overloads, and on an obfuscated build the name is no help at
   all. Without the flag the output is byte-for-byte what it has always been.
-- `field-by-index` takes the index a runtime reports: instance fields first, then statics.
-  That is **not** the `field_ids` index, so the row prints `field_ids=` too.
-  `method-by-index` takes the `method_ids` index, which is what a runtime stores.
-- Exit status is the verdict for all three: `0` one answer, `3` none (no input defines the
-  class, or it declares no such index), `4` more than one input defines the class. On `4` the
-  index lookups print every candidate, and `fields-plan` prints nothing: a plan decides which
-  instance slots a collector may dereference, so picking one of two layouts would be arbitrary.
+- `member-by-index` takes exactly one index, because the two live in different spaces.
+  `--field-index` is the position a runtime reports - instance fields first, then statics -
+  which is **not** the `field_ids` index, so the row prints `field_ids=` too.
+  `--method-index` is the `method_ids` index, which is what a runtime stores.
+- Exit status is the verdict for both index commands: `0` one answer, `3` none (no input
+  defines the class, or it declares no such index), `4` more than one input defines the class.
+  On `4` `member-by-index` prints every candidate, and `fields-plan` prints nothing: a plan
+  decides which instance slots a collector may dereference, so picking one of two layouts
+  would be arbitrary.
 
 ## Notes
 

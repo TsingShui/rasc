@@ -247,8 +247,7 @@ mod tests {
             "classes",
             "manifest",
             "fields-plan",
-            "field-by-index",
-            "method-by-index",
+            "member-by-index",
         ] {
             assert!(
                 SKILL_MD.contains(command),

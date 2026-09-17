@@ -248,33 +248,17 @@ fn run_command(args: Cli, started: Instant) -> Result<i32> {
                 debug_timing(started);
             }
         }
-        Command::FieldByIndex(args) => {
+        Command::MemberByIndex(args) => {
             let descriptor = crate::query::format_class_name(&args.descriptor)?;
-            let lookup = apk::member_by_index(
-                &args.apk,
-                &descriptor,
-                args.field_index,
-                apk::MemberKind::Field,
-                args.threads,
-            )?;
+            // clap's group already rejects both or neither; this keeps the arm total.
+            let (kind, index, name) = match (args.method_index, args.field_index) {
+                (Some(index), None) => (apk::MemberKind::Method, index, "method"),
+                (None, Some(index)) => (apk::MemberKind::Field, index, "field"),
+                _ => bail!("pass exactly one of --method-index or --field-index"),
+            };
+            let lookup = apk::member_by_index(&args.apk, &descriptor, index, kind, args.threads)?;
             emit_member_rows(&lookup.rows, args.output.as_deref())?;
-            report_member_verdict(&lookup, "field", args.field_index, &descriptor);
-            status = apk::lookup_status(lookup.rows.len());
-            if args.debug {
-                debug_timing(started);
-            }
-        }
-        Command::MethodByIndex(args) => {
-            let descriptor = crate::query::format_class_name(&args.descriptor)?;
-            let lookup = apk::member_by_index(
-                &args.apk,
-                &descriptor,
-                args.method_index,
-                apk::MemberKind::Method,
-                args.threads,
-            )?;
-            emit_member_rows(&lookup.rows, args.output.as_deref())?;
-            report_member_verdict(&lookup, "method", args.method_index, &descriptor);
+            report_member_verdict(&lookup, name, index, &descriptor);
             status = apk::lookup_status(lookup.rows.len());
             if args.debug {
                 debug_timing(started);

@@ -126,8 +126,8 @@ the mounted directory, so a host does not implement output files itself any more
 5. **The inflation limit is host policy**: 256 MiB per entry by default, lowered by the host
    through the environment, and it keeps its "**decide before the first allocation**" semantics —
    it is read once before dispatch, never per entry.
-7. **Ambiguity is never resolved by picking one.** `field-by-index`, `method-by-index` and
-   `fields-plan` answer with a three-way status — `0` one answer, `3` none, `4` more than one —
+7. **Ambiguity is never resolved by picking one.** `member-by-index` and `fields-plan`
+   answer with a three-way status — `0` one answer, `3` none, `4` more than one —
    and on `4` the index lookups print every candidate while `fields-plan` prints nothing,
    because a plan decides which instance slots a collector dereferences. A descriptor is not an
    identity: two DEX entries in one archive can define the same class name, which is why a plan

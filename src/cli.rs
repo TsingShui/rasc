@@ -46,16 +46,16 @@ pub enum Command {
     /// which instance slots a collector may dereference, so an ambiguous one is refused
     /// rather than resolved by taking the first.
     FieldsPlan(FieldsPlanArgs),
-    /// Resolve a runtime field index to the DEX field behind it.
+    /// Resolve a runtime index - field or method - to the DEX member behind it.
     ///
-    /// Exit status: 0 = one hit; 3 = the class is not defined, or declares no field with
-    /// that index; 4 = more than one input defines the class (all candidates are printed).
-    FieldByIndex(FieldByIndexArgs),
-    /// Resolve a runtime method index to the DEX method behind it.
+    /// Exactly one index is taken. `--method-index N` is the `method_ids` index a runtime
+    /// stores; `--field-index N` is the position a field probe reports, instance fields
+    /// first and then statics, which is *not* the `field_ids` index (the row prints that
+    /// one too, so the two can be told apart).
     ///
-    /// Exit status: 0 = one hit; 3 = the class is not defined, or declares no method with
+    /// Exit status: 0 = one hit; 3 = the class is not defined, or declares no member with
     /// that index; 4 = more than one input defines the class (all candidates are printed).
-    MethodByIndex(MethodByIndexArgs),
+    MemberByIndex(MemberByIndexArgs),
     /// Install the rasc skill so coding agents know how to use rasc.
     Skill(SkillArgs),
 }
@@ -109,29 +109,13 @@ pub struct FieldsPlanArgs {
 }
 
 #[derive(Debug, Args)]
-pub struct FieldByIndexArgs {
-    /// One or more code inputs - an APK, or bare DEX files - tried in this order.
-    #[arg(long = "apk", required = true, num_args = 1.., value_name = "FILE")]
-    pub apk: Vec<PathBuf>,
-    /// Declaring class: `Lcom/foo/Bar;` or `com.foo.Bar`.
-    #[arg(long)]
-    pub descriptor: String,
-    /// The index a runtime reports for a field: instance fields first, then statics
-    /// (`ifields_` then `sfields_` order). Not the `field_ids` index - the row prints
-    /// that one too, so the two can be told apart.
-    #[arg(long)]
-    pub field_index: u32,
-    #[arg(short, long)]
-    pub output: Option<PathBuf>,
-    #[arg(long, alias = "thread", default_value_t = default_threads())]
-    pub threads: usize,
-    /// Print phase timings on stderr.
-    #[arg(long)]
-    pub debug: bool,
-}
-
-#[derive(Debug, Args)]
-pub struct MethodByIndexArgs {
+#[command(group(
+    clap::ArgGroup::new("index")
+        .required(true)
+        .multiple(false)
+        .args(["method_index", "field_index"])
+))]
+pub struct MemberByIndexArgs {
     /// One or more code inputs - an APK, or bare DEX files - tried in this order.
     #[arg(long = "apk", required = true, num_args = 1.., value_name = "FILE")]
     pub apk: Vec<PathBuf>,
@@ -140,7 +124,12 @@ pub struct MethodByIndexArgs {
     pub descriptor: String,
     /// The index a runtime reports for a method: the `method_ids` index.
     #[arg(long)]
-    pub method_index: u32,
+    pub method_index: Option<u32>,
+    /// The index a runtime reports for a field: instance fields first, then statics
+    /// (`ifields_` then `sfields_` order). Not the `field_ids` index - the row prints
+    /// that one too, so the two can be told apart.
+    #[arg(long)]
+    pub field_index: Option<u32>,
     #[arg(short, long)]
     pub output: Option<PathBuf>,
     #[arg(long, alias = "thread", default_value_t = default_threads())]
