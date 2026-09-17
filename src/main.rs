@@ -228,6 +228,17 @@ fn run_command(args: Cli, started: Instant) -> Result<()> {
                 debug_timing(started);
             }
         }
+        Command::FieldsPlan(args) => {
+            // Accept what a user types; the DEX carries descriptors.
+            let descriptor = crate::query::format_class_name(&args.descriptor)?;
+            match apk::field_plan(&args.apk, &descriptor, args.threads)? {
+                Some(plan) => emit(&format!("{plan}\n"), args.output.as_deref())?,
+                None => bail!("{descriptor} is not defined in the supplied code inputs"),
+            }
+            if args.debug {
+                debug_timing(started);
+            }
+        }
         Command::Classes(args) => {
             let filter = args.filter.as_deref().map(str::to_lowercase);
             let started = Instant::now();

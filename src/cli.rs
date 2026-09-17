@@ -39,6 +39,8 @@ pub enum Command {
     Manifest(ManifestArgs),
     /// List classes defined across every DEX in an APK.
     Classes(ClassesArgs),
+    /// Print one class's DEX field layout as one JSON record.
+    FieldsPlan(FieldsPlanArgs),
     /// Install the rasc skill so coding agents know how to use rasc.
     Skill(SkillArgs),
 }
@@ -72,6 +74,23 @@ pub struct ClassesArgs {
     #[arg(long)]
     pub debug: bool,
     pub apk_path: PathBuf,
+}
+
+#[derive(Debug, Args)]
+pub struct FieldsPlanArgs {
+    /// One or more code inputs - an APK, or bare DEX files - tried in this order.
+    #[arg(long = "apk", required = true, num_args = 1.., value_name = "FILE")]
+    pub apk: Vec<PathBuf>,
+    /// Class to plan: `Lcom/foo/Bar;` or `com.foo.Bar`.
+    #[arg(long)]
+    pub descriptor: String,
+    #[arg(short, long)]
+    pub output: Option<PathBuf>,
+    #[arg(long, alias = "thread", default_value_t = default_threads())]
+    pub threads: usize,
+    /// Print phase timings on stderr.
+    #[arg(long)]
+    pub debug: bool,
 }
 
 #[derive(Debug, Args)]

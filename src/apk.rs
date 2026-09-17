@@ -19,7 +19,7 @@ use rayon::prelude::*;
 use std::cell::OnceCell;
 #[cfg(not(target_family = "wasm"))]
 use std::fs::File;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
@@ -833,6 +833,34 @@ pub fn list_strings(
     Ok(rows)
 }
 
+/// The DEX field layout of `descriptor`, from the first input and entry that defines it.
+///
+/// Inputs are tried in the order given, and within one archive the entries keep their
+/// central-directory order, so "first" is a property of the arguments rather than of
+/// which worker happened to finish first. `None` means no input defines the class,
+/// which is a different answer from an empty field list.
+pub fn field_plan(paths: &[PathBuf], descriptor: &str, threads: usize) -> Result<Option<String>> {
+    for path in paths {
+        let plans = map_dex_entries(path, threads, EntryOrder::Natural, None, |inflated| {
+            let mut plans = Vec::new();
+            for logical in dex::container::logical_dexes(&inflated.entry.name, inflated.data()?)? {
+                // A DEX 041 container carries an extra-long header; the reader wants the
+                // standard view, exactly as `getclass` does.
+                let normalized = dex::container::standard_header_view(&logical.data);
+                let data = normalized.as_deref().unwrap_or(&logical.data);
+                if let Some(plan) = dex::fields::field_plan(data, descriptor)? {
+                    plans.push(plan.render_json());
+                }
+            }
+            Ok(plans)
+        })?;
+        if let Some(plan) = plans.into_iter().next() {
+            return Ok(Some(plan));
+        }
+    }
+    Ok(None)
+}
+
 pub fn list_entries(path: &Path) -> Result<Vec<ZipEntry>> {
     let archive = Archive::open(path)?;
     if is_bare_dex(&archive) {
@@ -929,6 +957,32 @@ mod tests {
             .iter()
             .map(ReferenceHit::render)
             .collect())
+    }
+
+    /// Real-data check: one class's plan against values taken from the same APK with
+    /// the DEX-metadata reader CheapTrick used before this moved here.
+    ///
+    /// Gated like the other real-data checks - an absent fixture must not read as a
+    /// pass. Run: `RASC_REAL_APK=… cargo test -- --ignored real_apk_fields_plan`.
+    #[test]
+    #[ignore = "需要真实多 DEX APK；设 RASC_REAL_APK 后用 --ignored 显式运行"]
+    fn real_apk_fields_plan_reports_a_known_class() {
+        let path = std::env::var("RASC_REAL_APK").expect("set RASC_REAL_APK");
+        let plan = field_plan(
+            &[PathBuf::from(path)],
+            "Lcom/termux/terminal/TerminalSession;",
+            4,
+        )
+        .expect("read the plan")
+        .expect("the class is defined");
+        assert!(plan.starts_with(
+            "{\"schema\":\"rasc.fields-plan/v1\",\"descriptor\":\"Lcom/termux/terminal/TerminalSession;\""
+        ));
+        assert!(plan.contains("\"counts\":{\"instance\":16,\"static\":3}"));
+        assert!(plan.contains("\"instance_ref_mask\":\"0xe5ff\""));
+        assert!(plan.contains(
+            "{\"field_index\":175,\"name\":\"mArgs\",\"type\":\"[Ljava/lang/String;\",\"access_flags\":18}"
+        ));
     }
 
     #[test]
