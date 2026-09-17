@@ -1181,6 +1181,9 @@ mod tests {
             "{\"schema\":\"rasc.fields-plan/v1\",\"descriptor\":\"Lcom/termux/terminal/TerminalSession;\""
         ));
         assert!(plan.contains("\"counts\":{\"instance\":16,\"static\":3}"));
+        assert!(plan.contains("\"dex_class_def_idx\":"));
+        assert!(plan.contains("\"dex_type_idx\":"));
+        assert!(plan.contains("\"class_access_flags\":"));
         assert!(plan.contains("\"instance_ref_mask\":\"0xe5ff\""));
         assert!(plan.contains(
             "{\"field_index\":175,\"name\":\"mArgs\",\"type\":\"[Ljava/lang/String;\",\"access_flags\":18}"

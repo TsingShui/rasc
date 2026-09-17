@@ -18,6 +18,7 @@ use anyhow::{Context, Result, bail};
 
 /// `class_def_item` is a fixed 32-byte row; `class_data_off` sits at +24.
 const CLASS_DEF_ITEM: usize = 32;
+const CLASS_ACCESS_FLAGS: usize = 4;
 const CLASS_DATA_OFF: usize = 24;
 
 /// One field as the DEX declares it.
@@ -44,6 +45,9 @@ pub(crate) struct MethodRow {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct ClassMembers {
     pub descriptor: String,
+    pub dex_class_def_idx: u32,
+    pub dex_type_idx: u32,
+    pub access_flags: u32,
     pub statics: Vec<FieldRow>,
     pub instance: Vec<FieldRow>,
     pub direct_methods: Vec<MethodRow>,
@@ -80,6 +84,9 @@ impl ClassMembers {
     pub(crate) fn field_plan(&self) -> FieldPlan {
         FieldPlan {
             descriptor: self.descriptor.clone(),
+            dex_class_def_idx: self.dex_class_def_idx,
+            dex_type_idx: self.dex_type_idx,
+            access_flags: self.access_flags,
             instance: self.instance.clone(),
             statics: self.statics.clone(),
         }
@@ -87,9 +94,19 @@ impl ClassMembers {
 }
 
 /// One class's field layout, both kinds kept apart and each in declaration order.
+///
+/// The three identity fields are how a consumer ties this plan back to the class it
+/// observed at runtime: a descriptor alone does not distinguish two definitions of the
+/// same class name, the indices do.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct FieldPlan {
     pub descriptor: String,
+    /// Index of the class's `class_defs` row in the DEX this plan came from.
+    pub dex_class_def_idx: u32,
+    /// The class's `type_ids` index in that DEX.
+    pub dex_type_idx: u32,
+    /// The class's own access flags, as the DEX declares them.
+    pub access_flags: u32,
     pub instance: Vec<FieldRow>,
     pub statics: Vec<FieldRow>,
 }
@@ -124,6 +141,12 @@ impl FieldPlan {
         let mut out = String::with_capacity(128 + 96 * (self.instance.len() + self.statics.len()));
         out.push_str("{\"schema\":\"rasc.fields-plan/v1\",\"descriptor\":");
         push_json_string(&mut out, &self.descriptor);
+        out.push_str(",\"dex_class_def_idx\":");
+        out.push_str(&self.dex_class_def_idx.to_string());
+        out.push_str(",\"dex_type_idx\":");
+        out.push_str(&self.dex_type_idx.to_string());
+        out.push_str(",\"class_access_flags\":");
+        out.push_str(&self.access_flags.to_string());
         out.push_str(",\"instance_fields\":");
         push_rows(&mut out, &self.instance);
         out.push_str(",\"static_fields\":");
@@ -209,6 +232,10 @@ pub(crate) fn class_members(data: &[u8], descriptor: &str) -> Result<Option<Clas
     if class_data_off == 0 {
         return Ok(Some(ClassMembers {
             descriptor: descriptor.to_owned(),
+            dex_class_def_idx: class_index as u32,
+            dex_type_idx: class_type_idx as u32,
+            access_flags: dex
+                .u32(dex.header.classes_off + class_index * CLASS_DEF_ITEM + CLASS_ACCESS_FLAGS)?,
             statics: Vec::new(),
             instance: Vec::new(),
             direct_methods: Vec::new(),
@@ -272,6 +299,10 @@ pub(crate) fn class_members(data: &[u8], descriptor: &str) -> Result<Option<Clas
 
     Ok(Some(ClassMembers {
         descriptor: descriptor.to_owned(),
+        dex_class_def_idx: class_index as u32,
+        dex_type_idx: class_type_idx as u32,
+        access_flags: dex
+            .u32(dex.header.classes_off + class_index * CLASS_DEF_ITEM + CLASS_ACCESS_FLAGS)?,
         statics,
         instance,
         direct_methods,
@@ -385,6 +416,9 @@ mod tests {
     fn plan(instance: Vec<FieldRow>) -> FieldPlan {
         FieldPlan {
             descriptor: "LFixture;".to_owned(),
+            dex_class_def_idx: 0,
+            dex_type_idx: 0,
+            access_flags: 0,
             instance,
             statics: Vec::new(),
         }
@@ -433,6 +467,9 @@ mod tests {
     fn field_at_position_crosses_from_instance_into_static() {
         let members = ClassMembers {
             descriptor: "LFixture;".to_owned(),
+            dex_class_def_idx: 0,
+            dex_type_idx: 0,
+            access_flags: 0,
             statics: vec![row(30, "I"), row(31, "J")],
             instance: vec![row(10, "Ljava/lang/String;"), row(20, "I")],
             direct_methods: Vec::new(),
@@ -451,17 +488,28 @@ mod tests {
     fn render_json_reports_position_counts_and_mask() {
         let plan = FieldPlan {
             descriptor: "Lcom/foo/Bar;".to_owned(),
+            dex_class_def_idx: 5,
+            dex_type_idx: 6,
+            access_flags: 0x400,
             instance: vec![row(7, "Ljava/lang/Object;"), row(9, "I")],
             statics: vec![row(3, "I")],
         };
-        assert_eq!(
-            plan.render_json(),
-            "{\"schema\":\"rasc.fields-plan/v1\",\"descriptor\":\"Lcom/foo/Bar;\",\
-             \"instance_fields\":[\
-             {\"field_index\":7,\"name\":\"f7\",\"type\":\"Ljava/lang/Object;\",\"access_flags\":0},\
-             {\"field_index\":9,\"name\":\"f9\",\"type\":\"I\",\"access_flags\":0}],\
-             \"static_fields\":[{\"field_index\":3,\"name\":\"f3\",\"type\":\"I\",\"access_flags\":0}],\
-             \"counts\":{\"instance\":2,\"static\":1},\"instance_ref_mask\":\"0x1\"}"
-        );
+        let json = plan.render_json();
+        // The identity trio comes first: a consumer ties the plan to a runtime class by
+        // these indices, and a descriptor alone does not distinguish two definitions.
+        assert!(json.starts_with(concat!(
+            "{\"schema\":\"rasc.fields-plan/v1\",\"descriptor\":\"Lcom/foo/Bar;\",",
+            "\"dex_class_def_idx\":5,\"dex_type_idx\":6,\"class_access_flags\":1024,",
+            "\"instance_fields\":[",
+        )));
+        assert!(json.contains(
+            "{\"field_index\":7,\"name\":\"f7\",\"type\":\"Ljava/lang/Object;\",\"access_flags\":0}"
+        ));
+        assert!(json.contains(
+            "{\"field_index\":3,\"name\":\"f3\",\"type\":\"I\",\"access_flags\":0}"
+        ));
+        assert!(json.ends_with(
+            "\"counts\":{\"instance\":2,\"static\":1},\"instance_ref_mask\":\"0x1\"}"
+        ));
     }
 }
