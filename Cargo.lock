@@ -889,9 +889,7 @@ name = "rusty-dex"
 version = "0.2.0"
 dependencies = [
  "byteorder",
- "lazy_static",
  "log",
- "regex",
  "thiserror 2.0.20",
  "zip",
 ]

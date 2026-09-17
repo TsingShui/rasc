@@ -1,8 +1,5 @@
 //! Representation of a class and encoded methods
 
-use lazy_static::lazy_static;
-use log::{debug, warn};
-use regex::Regex;
 use std::collections::HashMap;
 use std::io::{Seek, SeekFrom};
 use std::sync::OnceLock;
@@ -24,16 +21,6 @@ use crate::error::DexError;
 
 /// Constant to represent the absence of index
 const NO_INDEX: u32 = 0xffffffff;
-
-lazy_static! {
-    /// Regex for method prototypes
-    static ref METHOD_REGEX: Regex = Regex::new(r"(?x)
-        (?P<class>L[a-zA-Z/$0-9]+;)
-        (->)
-        (?P<method><?[a-zA-Z0-9]+>?[\$\d+]*)
-        (?P<args>\(.*\).*)
-    ").unwrap();
-}
 
 /// Class definition item
 ///
@@ -107,6 +94,9 @@ pub struct InnerClassAnnotation {
 #[derive(Debug)]
 pub struct EncodedField {
     field: String,
+    /// Index into the file's `field_ids` table. The rendered text does not carry it,
+    /// and both the reported field index and the reference-field bit order need it.
+    pub field_idx: u32,
     access_flags_raw: u32,
     access_flags: Vec<AccessFlag>,
     initial_value: Option<EncodedValue>,
@@ -120,6 +110,9 @@ pub struct EncodedField {
 #[derive(Debug)]
 pub struct EncodedMethod {
     pub method_idx: u32,
+    /// Method name, taken from `method_ids.name_idx` while parsing: see
+    /// [`DexMethods::name`].
+    pub name: String,
     pub proto: String,
     pub access_flags_raw: u32,
     pub access_flags: Vec<AccessFlag>,
@@ -331,6 +324,7 @@ impl DexClasses {
 
                     static_fields.push(EncodedField {
                         field: decoded_field,
+                        field_idx,
                         access_flags_raw: access_flags,
                         access_flags: decoded_flags,
                         initial_value: static_values.get(i as usize).cloned(),
@@ -357,6 +351,7 @@ impl DexClasses {
 
                     instance_fields.push(EncodedField {
                         field: decoded_field,
+                        field_idx,
                         access_flags_raw: access_flags,
                         access_flags: decoded_flags,
                         initial_value: None,
@@ -381,12 +376,16 @@ impl DexClasses {
                     let proto = methods_list
                         .render(types_list, protos_list, strings_list, method_idx)
                         .ok_or(DexError::InvalidMethodIdx)?;
+                    let name = methods_list
+                        .name(strings_list, method_idx)
+                        .ok_or(DexError::InvalidMethodIdx)?;
                     let decoded_flags = AccessFlag::parse(access_flags, AccessFlagType::Method);
 
                     if code_offset == 0 {
                         // Abstract or native methods have no code
                         direct_methods.push(EncodedMethod {
                             method_idx,
+                            name: name.clone(),
                             proto,
                             access_flags_raw: access_flags,
                             access_flags: decoded_flags,
@@ -422,6 +421,7 @@ impl DexClasses {
 
                         direct_methods.push(EncodedMethod {
                             method_idx,
+                            name: name.clone(),
                             proto,
                             access_flags_raw: access_flags,
                             access_flags: decoded_flags,
@@ -458,12 +458,16 @@ impl DexClasses {
                     let proto = methods_list
                         .render(types_list, protos_list, strings_list, method_idx)
                         .ok_or(DexError::InvalidMethodIdx)?;
+                    let name = methods_list
+                        .name(strings_list, method_idx)
+                        .ok_or(DexError::InvalidMethodIdx)?;
                     let decoded_flags = AccessFlag::parse(access_flags, AccessFlagType::Method);
 
                     if code_offset == 0 {
                         // Abstract or native methods have no code
                         virtual_methods.push(EncodedMethod {
                             method_idx,
+                            name: name.clone(),
                             proto,
                             access_flags_raw: access_flags,
                             access_flags: decoded_flags,
@@ -499,6 +503,7 @@ impl DexClasses {
 
                         virtual_methods.push(EncodedMethod {
                             method_idx,
+                            name: name.clone(),
                             proto,
                             access_flags_raw: access_flags,
                             access_flags: decoded_flags,
@@ -1270,22 +1275,11 @@ impl EncodedMethod {
     }
 
     /// Get the name of a method
+    ///
+    /// The name is captured from `method_ids.name_idx` while parsing (see
+    /// [`DexMethods::name`]); it is never derived from the rendered `proto` text.
     pub fn get_method_name(&self) -> &str {
-        let matches = METHOD_REGEX.captures(&self.proto);
-        let method_name = match matches {
-            Some(matched) => match matched.name("method") {
-                Some(name) => name.as_str(),
-                None => "",
-            },
-            None => "",
-        };
-
-        if method_name.is_empty() {
-            warn!("Cannot retrieve method name from prototype");
-            debug!("Prototype: {}", &self.proto);
-        };
-
-        method_name
+        &self.name
     }
 
     /// Get the access flags of a method

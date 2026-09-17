@@ -8,8 +8,6 @@
 //! sorted (the actual sorting method depends on the type of content being sorted -- see the
 //! classes documentations for details).
 
-use log::info;
-
 use crate::dex::classes::{ClassDecodeLevel, ClassDefItem, ClassNestedMetadata, DexClasses, EncodedMethod};
 use crate::dex::code_item::CodeItem;
 use crate::dex::fields::DexFields;
