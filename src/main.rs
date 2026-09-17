@@ -181,13 +181,16 @@ fn dispatch(args: Vec<String>) -> Result<i32> {
     };
 
     match run_command(args, started) {
-        Ok(()) => Ok(0),
+        Ok(status) => Ok(status),
         Err(error) => Err(error),
     }
 }
 
 /// Runs the parsed command.
-fn run_command(args: Cli, started: Instant) -> Result<()> {
+fn run_command(args: Cli, started: Instant) -> Result<i32> {
+    // Only a member lookup has a verdict of its own (one hit, none, several); every
+    // other command either produced its payload or failed.
+    let mut status = 0;
     match args.command {
         Command::Findrefs(args) => {
             let query = args.query()?;
@@ -235,6 +238,38 @@ fn run_command(args: Cli, started: Instant) -> Result<()> {
                 Some(plan) => emit(&format!("{plan}\n"), args.output.as_deref())?,
                 None => bail!("{descriptor} is not defined in the supplied code inputs"),
             }
+            if args.debug {
+                debug_timing(started);
+            }
+        }
+        Command::FieldByIndex(args) => {
+            let descriptor = crate::query::format_class_name(&args.descriptor)?;
+            let lookup = apk::member_by_index(
+                &args.apk,
+                &descriptor,
+                args.field_index,
+                apk::MemberKind::Field,
+                args.threads,
+            )?;
+            emit_member_rows(&lookup.rows, args.output.as_deref())?;
+            report_member_verdict(&lookup, "field", args.field_index, &descriptor);
+            status = apk::lookup_status(lookup.rows.len());
+            if args.debug {
+                debug_timing(started);
+            }
+        }
+        Command::MethodByIndex(args) => {
+            let descriptor = crate::query::format_class_name(&args.descriptor)?;
+            let lookup = apk::member_by_index(
+                &args.apk,
+                &descriptor,
+                args.method_index,
+                apk::MemberKind::Method,
+                args.threads,
+            )?;
+            emit_member_rows(&lookup.rows, args.output.as_deref())?;
+            report_member_verdict(&lookup, "method", args.method_index, &descriptor);
+            status = apk::lookup_status(lookup.rows.len());
             if args.debug {
                 debug_timing(started);
             }
@@ -383,5 +418,32 @@ fn run_command(args: Cli, started: Instant) -> Result<()> {
             emit(&payload, args.output.as_deref())?;
         }
     }
-    Ok(())
+    Ok(status)
+}
+
+/// Writes member rows, one per line.
+fn emit_member_rows(rows: &[String], output: Option<&Path>) -> Result<()> {
+    let mut payload = String::with_capacity(rows.iter().map(|row| row.len() + 1).sum());
+    for row in rows {
+        payload.push_str(row);
+        payload.push('\n');
+    }
+    emit(&payload, output)
+}
+
+/// Says why a lookup that did not end in exactly one hit did not.
+///
+/// The rows are already on stdout; this is the explanation, and it goes to stderr so a
+/// caller reading the payload never has to filter it out.
+fn report_member_verdict(lookup: &apk::MemberLookup, kind: &str, index: u32, descriptor: &str) {
+    match lookup.rows.len() {
+        0 if lookup.definitions == 0 => {
+            eprintln!("Error: {descriptor} is not defined in the supplied code inputs");
+        }
+        0 => eprintln!("Error: no {kind} index {index} is declared by {descriptor}"),
+        1 => {}
+        count => eprintln!(
+            "Error: {kind} index {index} of {descriptor} is declared {count} times; the rows above are the candidates"
+        ),
+    }
 }

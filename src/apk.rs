@@ -848,7 +848,7 @@ pub fn field_plan(paths: &[PathBuf], descriptor: &str, threads: usize) -> Result
                 // standard view, exactly as `getclass` does.
                 let normalized = dex::container::standard_header_view(&logical.data);
                 let data = normalized.as_deref().unwrap_or(&logical.data);
-                if let Some(plan) = dex::fields::field_plan(data, descriptor)? {
+                if let Some(plan) = dex::members::field_plan(data, descriptor)? {
                     plans.push(plan.render_json());
                 }
             }
@@ -859,6 +859,104 @@ pub fn field_plan(paths: &[PathBuf], descriptor: &str, threads: usize) -> Result
         }
     }
     Ok(None)
+}
+
+/// Which member table a lookup reads.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MemberKind {
+    /// A runtime field index: `ifields_` first, then `sfields_`.
+    Field,
+    /// A runtime method index: the `method_ids` index.
+    Method,
+}
+
+/// The status a lookup ends with: exactly one hit, none, or more than one.
+///
+/// Three answers rather than a bool because "not found" and "found twice" mean
+/// different things. More than one hit means more than one input defines the class, and
+/// a caller that silently kept the first would be choosing one of two layouts at random.
+pub fn lookup_status(hits: usize) -> i32 {
+    match hits {
+        0 => 3,
+        1 => 0,
+        _ => 4,
+    }
+}
+
+/// The rows a member lookup found, and how many definitions of the class were seen.
+///
+/// `definitions` is what tells the two empty-looking outcomes apart: no input defines the
+/// class at all, versus an input defines it and it declares no member with that index.
+/// Both resolve nothing, but only one of them means the descriptor is wrong.
+#[derive(Debug, Default)]
+pub struct MemberLookup {
+    pub definitions: usize,
+    pub rows: Vec<String>,
+}
+
+/// Every member `index` names, one row per definition of the class.
+///
+/// `index` is the runtime's own numbering, which for fields is the instance-first
+/// position and for methods the `method_ids` index; both are printed with the row, so a
+/// caller can see which DEX index the runtime index resolved to rather than assume.
+pub fn member_by_index(
+    paths: &[PathBuf],
+    descriptor: &str,
+    index: u32,
+    kind: MemberKind,
+    threads: usize,
+) -> Result<MemberLookup> {
+    let mut lookup = MemberLookup::default();
+    for path in paths {
+        let found = map_dex_entries(path, threads, EntryOrder::Natural, None, |inflated| {
+            let mut found: Vec<(bool, Vec<String>)> = Vec::new();
+            for logical in dex::container::logical_dexes(&inflated.entry.name, inflated.data()?)? {
+                let normalized = dex::container::standard_header_view(&logical.data);
+                let data = normalized.as_deref().unwrap_or(&logical.data);
+                let Some(members) = dex::members::class_members(data, descriptor)? else {
+                    continue;
+                };
+                let mut rows = Vec::new();
+                match kind {
+                    MemberKind::Field => {
+                        if let Some((field, is_static)) = members.field_at_position(index) {
+                            rows.push(format!(
+                                "{} | {}->{} | type={} | flags=0x{:x} | static={} | field_ids={}",
+                                logical.name,
+                                descriptor,
+                                field.name,
+                                field.type_descriptor,
+                                field.access_flags,
+                                is_static,
+                                field.field_index,
+                            ));
+                        }
+                    }
+                    MemberKind::Method => {
+                        if let Some(method) = members.method(index) {
+                            rows.push(format!(
+                                "{} | {}->{} | flags=0x{:x} | method_ids={}",
+                                logical.name,
+                                descriptor,
+                                method.name,
+                                method.access_flags,
+                                method.method_index,
+                            ));
+                        }
+                    }
+                }
+                found.push((true, rows));
+            }
+            Ok(found)
+        })?;
+        for (defined, rows) in found {
+            if defined {
+                lookup.definitions += 1;
+            }
+            lookup.rows.extend(rows);
+        }
+    }
+    Ok(lookup)
 }
 
 pub fn list_entries(path: &Path) -> Result<Vec<ZipEntry>> {
@@ -957,6 +1055,110 @@ mod tests {
             .iter()
             .map(ReferenceHit::render)
             .collect())
+    }
+
+    /// The three statuses are distinct answers, not a bool.
+    #[test]
+    fn member_verdict_separates_none_from_several() {
+        assert_eq!(lookup_status(1), 0);
+        assert_eq!(lookup_status(0), 3);
+        assert_eq!(lookup_status(2), 4);
+        assert_eq!(lookup_status(7), 4);
+    }
+
+    /// Real-data round trip: every member the DEX walk finds must be reachable from the
+    /// runtime index the lookup takes, and the position must cross from instance fields
+    /// into statics exactly where the field blocks meet.
+    ///
+    /// Gated like the other real-data checks. Run:
+    /// `RASC_REAL_APK=… cargo test --bin rasc -- --ignored --nocapture real_apk_member_lookup`.
+    #[test]
+    #[ignore = "需要真实多 DEX APK；设 RASC_REAL_APK 后用 --ignored 显式运行"]
+    fn real_apk_member_lookup_round_trips() {
+        let path = PathBuf::from(std::env::var("RASC_REAL_APK").expect("set RASC_REAL_APK"));
+        let descriptor = "Lcom/termux/terminal/TerminalSession;";
+        let mut checked_fields = 0usize;
+        let mut checked_methods = 0usize;
+        let mut dexes = 0usize;
+
+        for entry in list_entries(&path).expect("list entries") {
+            if !entry.name.ends_with(".dex") {
+                continue;
+            }
+            let bytes = read_entry(&path, &entry.name).expect("read entry");
+            let Some(members) = dex::members::class_members(&bytes, descriptor).expect("walk class")
+            else {
+                continue;
+            };
+            dexes += 1;
+            // A bare DEX is what the lookup takes; the container path is covered above.
+            let file = crate::zip::tests::temp_apk("member-round-trip", &bytes);
+
+            for (position, field) in members.instance.iter().enumerate() {
+                let rows = member_by_index(
+                    &[file.clone()],
+                    descriptor,
+                    position as u32,
+                    MemberKind::Field,
+                    1,
+                )
+                .expect("lookup")
+                .rows;
+                assert_eq!(rows.len(), 1, "position {position} must resolve once");
+                assert!(
+                    rows[0].ends_with(&format!("| field_ids={}", field.field_index)),
+                    "position {position} resolved to {}",
+                    rows[0]
+                );
+                assert!(rows[0].contains("| static=false |"));
+                assert!(rows[0].contains(&format!("->{} |", field.name)));
+                checked_fields += 1;
+            }
+            for (offset, field) in members.statics.iter().enumerate() {
+                let position = (members.instance.len() + offset) as u32;
+                let rows =
+                    member_by_index(&[file.clone()], descriptor, position, MemberKind::Field, 1)
+                        .expect("lookup")
+                        .rows;
+                assert_eq!(rows.len(), 1);
+                assert!(rows[0].contains("| static=true |"));
+                assert!(rows[0].contains(&format!("->{} |", field.name)));
+                checked_fields += 1;
+            }
+            // One past the last field is nothing, not the first field of something else.
+            let past = (members.instance.len() + members.statics.len()) as u32;
+            let past_lookup =
+                member_by_index(&[file.clone()], descriptor, past, MemberKind::Field, 1)
+                    .expect("lookup");
+            assert!(past_lookup.rows.is_empty());
+            assert_eq!(past_lookup.definitions, 1, "the class was defined here");
+
+            let mut methods: Vec<&dex::members::MethodRow> = members.direct_methods.iter().collect();
+            methods.extend(&members.virtual_methods);
+            for method in methods {
+                let rows = member_by_index(
+                    &[file.clone()],
+                    descriptor,
+                    method.method_index,
+                    MemberKind::Method,
+                    1,
+                )
+                .expect("lookup")
+                .rows;
+                assert_eq!(rows.len(), 1, "method {} must resolve once", method.method_index);
+                assert!(rows[0].contains(&format!("->{} |", method.name)));
+                if checked_methods == 0 {
+                    println!("sample method row: {}", rows[0]);
+                }
+                checked_methods += 1;
+            }
+            std::fs::remove_file(&file).ok();
+        }
+
+        assert!(dexes > 0, "the class was not found in any dex");
+        assert!(checked_fields >= 19, "only {checked_fields} fields round-tripped");
+        assert!(checked_methods > 0, "no methods round-tripped");
+        println!("round-tripped {checked_fields} fields and {checked_methods} methods");
     }
 
     /// Real-data check: one class's plan against values taken from the same APK with

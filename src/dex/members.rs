@@ -1,15 +1,16 @@
-//! The DEX field layout of one class, in the order the runtime lays the fields out.
+//! Class members in DEX order, and the lookups that go from an index to a member.
 //!
-//! Two consumers need this and neither can guess it: a script that has to know which
-//! instance slots hold references before it dereferences them, and a reader that has
-//! an index from the runtime and wants the field behind it. Both are answered from
-//! the DEX the class actually came from, not from a signature someone typed.
+//! Three callers need this and none of them can guess it: a script that has to know
+//! which instance slots hold references before it dereferences them, and a reader that
+//! holds a `field_ids` or `method_ids` index from the runtime and wants the member
+//! behind it. Everything here is answered from the DEX the class actually came from.
 //!
-//! The order is the load-bearing part. `class_data_item` stores static fields and then
-//! instance fields, each as a chain of `field_idx` deltas, so the sequence below is
-//! ascending `field_ids` order within each kind - which is exactly the order the
-//! runtime's own field arrays follow. The instance reference mask is defined over that
-//! sequence: bit *j* describes the *j*-th instance field.
+//! The order is the load-bearing part. `class_data_item` stores static fields, instance
+//! fields, direct methods and virtual methods, each as a chain of index deltas, so every
+//! sequence below is ascending `field_ids` / `method_ids` order within its kind - which is
+//! exactly the order the runtime's own field and method arrays follow. The instance
+//! reference mask is defined over the instance sequence: bit *j* describes the *j*-th
+//! instance field.
 
 use super::{Dex, read_uleb};
 use crate::bytes::read_u16;
@@ -28,6 +29,61 @@ pub(crate) struct FieldRow {
     pub name: String,
     pub type_descriptor: String,
     pub access_flags: u32,
+}
+
+/// One method as the DEX declares it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct MethodRow {
+    /// The `method_ids` index - the value a runtime reports as its method index.
+    pub method_index: u32,
+    pub name: String,
+    pub access_flags: u32,
+}
+
+/// One class's members, every kind kept apart and each in declaration order.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct ClassMembers {
+    pub descriptor: String,
+    pub statics: Vec<FieldRow>,
+    pub instance: Vec<FieldRow>,
+    pub direct_methods: Vec<MethodRow>,
+    pub virtual_methods: Vec<MethodRow>,
+}
+
+impl ClassMembers {
+    /// The field at the position a runtime reports: instance fields first, then
+    /// statics.
+    ///
+    /// This is the numbering a field probe carries (`ifields_` then `sfields_` order),
+    /// and it is deliberately not the `field_ids` index each row also carries. The
+    /// second element says whether the position landed in the static block.
+    pub(crate) fn field_at_position(&self, position: u32) -> Option<(&FieldRow, bool)> {
+        let position = position as usize;
+        if position < self.instance.len() {
+            return Some((&self.instance[position], false));
+        }
+        self.statics
+            .get(position - self.instance.len())
+            .map(|row| (row, true))
+    }
+
+    /// The method carrying `index`. Direct and virtual methods share one `method_ids`
+    /// table, so the two sequences cannot both match.
+    pub(crate) fn method(&self, index: u32) -> Option<&MethodRow> {
+        self.direct_methods
+            .iter()
+            .chain(self.virtual_methods.iter())
+            .find(|row| row.method_index == index)
+    }
+
+    /// The instance-fields-only view `field_plan` publishes.
+    pub(crate) fn field_plan(&self) -> FieldPlan {
+        FieldPlan {
+            descriptor: self.descriptor.clone(),
+            instance: self.instance.clone(),
+            statics: self.statics.clone(),
+        }
+    }
 }
 
 /// One class's field layout, both kinds kept apart and each in declaration order.
@@ -132,50 +188,94 @@ fn push_json_string(out: &mut String, value: &str) {
 /// Builds the field plan for `descriptor`, or `None` when this DEX does not define it.
 ///
 /// `descriptor` must already be in DEX form (`Lcom/foo/Bar;`); the CLI normalizes what
-/// a user types before calling. Rows come from the class's own `class_data`, so a
-/// malformed entry - one that points at a `field_ids` row belonging to another class -
-/// is an error rather than a row from the wrong class.
+/// a user types before calling.
 pub(crate) fn field_plan(data: &[u8], descriptor: &str) -> Result<Option<FieldPlan>> {
+    Ok(class_members(data, descriptor)?.map(|members| members.field_plan()))
+}
+
+/// Walks one class's `class_data_item`: every field and method it declares.
+///
+/// Rows come from the class's own `class_data`, so a malformed entry - one that points
+/// at a `field_ids` or `method_ids` row belonging to another class - is an error rather
+/// than a row from the wrong class.
+pub(crate) fn class_members(data: &[u8], descriptor: &str) -> Result<Option<ClassMembers>> {
     let dex = Dex::parse(data)?;
     let Some((class_index, class_type_idx)) = find_class(&dex, descriptor)? else {
         return Ok(None);
     };
     let class_data_off =
         dex.u32(dex.header.classes_off + class_index * CLASS_DEF_ITEM + CLASS_DATA_OFF)?;
-    // A class with no fields and no methods has no class_data at all.
+    // A class with no members at all has no class_data.
     if class_data_off == 0 {
-        return Ok(Some(FieldPlan {
+        return Ok(Some(ClassMembers {
             descriptor: descriptor.to_owned(),
-            instance: Vec::new(),
             statics: Vec::new(),
+            instance: Vec::new(),
+            direct_methods: Vec::new(),
+            virtual_methods: Vec::new(),
         }));
     }
 
     let mut offset = class_data_off as usize;
     let static_size = read_uleb(data, &mut offset)?;
     let instance_size = read_uleb(data, &mut offset)?;
-    // The two method counts follow the fields; the methods themselves are not walked.
-    let _direct_size = read_uleb(data, &mut offset)?;
-    let _virtual_size = read_uleb(data, &mut offset)?;
+    let direct_size = read_uleb(data, &mut offset)?;
+    let virtual_size = read_uleb(data, &mut offset)?;
 
     let mut statics = Vec::with_capacity(static_size as usize);
     let mut field_index = 0u32;
     for _ in 0..static_size {
-        let row = read_encoded_field(&dex, data, &mut offset, &mut field_index, class_type_idx)?;
-        statics.push(row);
+        statics.push(read_encoded_field(
+            &dex,
+            data,
+            &mut offset,
+            &mut field_index,
+            class_type_idx,
+        )?);
     }
 
     let mut instance = Vec::with_capacity(instance_size as usize);
     let mut field_index = 0u32;
     for _ in 0..instance_size {
-        let row = read_encoded_field(&dex, data, &mut offset, &mut field_index, class_type_idx)?;
-        instance.push(row);
+        instance.push(read_encoded_field(
+            &dex,
+            data,
+            &mut offset,
+            &mut field_index,
+            class_type_idx,
+        )?);
     }
 
-    Ok(Some(FieldPlan {
+    let mut direct_methods = Vec::with_capacity(direct_size as usize);
+    let mut method_index = 0u32;
+    for _ in 0..direct_size {
+        direct_methods.push(read_encoded_method(
+            &dex,
+            data,
+            &mut offset,
+            &mut method_index,
+            class_type_idx,
+        )?);
+    }
+
+    let mut virtual_methods = Vec::with_capacity(virtual_size as usize);
+    let mut method_index = 0u32;
+    for _ in 0..virtual_size {
+        virtual_methods.push(read_encoded_method(
+            &dex,
+            data,
+            &mut offset,
+            &mut method_index,
+            class_type_idx,
+        )?);
+    }
+
+    Ok(Some(ClassMembers {
         descriptor: descriptor.to_owned(),
-        instance,
         statics,
+        instance,
+        direct_methods,
+        virtual_methods,
     }))
 }
 
@@ -215,6 +315,45 @@ fn read_encoded_field(
         field_index: *field_index,
         name: dex.string(name_idx)?,
         type_descriptor: dex.type_name(type_idx)?,
+        access_flags,
+    })
+}
+
+/// Reads one `encoded_method` (`method_idx_diff`, `access_flags`, `code_off`) and
+/// resolves its name through `method_ids.name_idx`.
+///
+/// The name is not parsed out of a rendered prototype: a name may contain characters
+/// that no separated text form can carry unambiguously.
+fn read_encoded_method(
+    dex: &Dex<'_>,
+    data: &[u8],
+    offset: &mut usize,
+    method_index: &mut u32,
+    class_type_idx: usize,
+) -> Result<MethodRow> {
+    let difference = read_uleb(data, offset)?;
+    let access_flags = read_uleb(data, offset)?;
+    let _code_off = read_uleb(data, offset)?;
+    *method_index = method_index
+        .checked_add(difference)
+        .context("method index overflow in class_data")?;
+
+    let row_off = dex
+        .header
+        .methods_off
+        .checked_add(*method_index as usize * 8)
+        .context("method_ids row offset overflow")?;
+    let row_class = read_u16(data, row_off)? as usize;
+    if row_class != class_type_idx {
+        bail!(
+            "class_data of type {class_type_idx} references method_ids[{method_index}] of type {row_class}"
+        );
+    }
+    let name_idx = dex.u32(row_off + 4)? as usize;
+
+    Ok(MethodRow {
+        method_index: *method_index,
+        name: dex.string(name_idx)?,
         access_flags,
     })
 }
@@ -287,6 +426,25 @@ mod tests {
         let mut out = String::new();
         push_json_string(&mut out, "a\"b\\c\nd\te\u{1}f\u{2028}g");
         assert_eq!(out, "\"a\\\"b\\\\c\\nd\\te\\u0001f\u{2028}g\"");
+    }
+
+    /// The runtime position counts statics straight on after the instance fields.
+    #[test]
+    fn field_at_position_crosses_from_instance_into_static() {
+        let members = ClassMembers {
+            descriptor: "LFixture;".to_owned(),
+            statics: vec![row(30, "I"), row(31, "J")],
+            instance: vec![row(10, "Ljava/lang/String;"), row(20, "I")],
+            direct_methods: Vec::new(),
+            virtual_methods: Vec::new(),
+        };
+        assert_eq!(members.field_at_position(0).unwrap().0.field_index, 10);
+        assert!(!members.field_at_position(0).unwrap().1);
+        assert_eq!(members.field_at_position(1).unwrap().0.field_index, 20);
+        assert_eq!(members.field_at_position(2).unwrap().0.field_index, 30);
+        assert!(members.field_at_position(2).unwrap().1);
+        assert_eq!(members.field_at_position(3).unwrap().0.field_index, 31);
+        assert!(members.field_at_position(4).is_none());
     }
 
     #[test]

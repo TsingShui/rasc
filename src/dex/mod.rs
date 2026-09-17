@@ -9,7 +9,7 @@
 //! transcriptions in the tests.
 
 pub(crate) mod container;
-pub(crate) mod fields;
+pub(crate) mod members;
 mod filter;
 mod mutf8;
 mod opcodes;

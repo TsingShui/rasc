@@ -41,6 +41,10 @@ pub enum Command {
     Classes(ClassesArgs),
     /// Print one class's DEX field layout as one JSON record.
     FieldsPlan(FieldsPlanArgs),
+    /// Resolve a runtime field index to the DEX field behind it.
+    FieldByIndex(FieldByIndexArgs),
+    /// Resolve a runtime method index to the DEX method behind it.
+    MethodByIndex(MethodByIndexArgs),
     /// Install the rasc skill so coding agents know how to use rasc.
     Skill(SkillArgs),
 }
@@ -84,6 +88,48 @@ pub struct FieldsPlanArgs {
     /// Class to plan: `Lcom/foo/Bar;` or `com.foo.Bar`.
     #[arg(long)]
     pub descriptor: String,
+    #[arg(short, long)]
+    pub output: Option<PathBuf>,
+    #[arg(long, alias = "thread", default_value_t = default_threads())]
+    pub threads: usize,
+    /// Print phase timings on stderr.
+    #[arg(long)]
+    pub debug: bool,
+}
+
+#[derive(Debug, Args)]
+pub struct FieldByIndexArgs {
+    /// One or more code inputs - an APK, or bare DEX files - tried in this order.
+    #[arg(long = "apk", required = true, num_args = 1.., value_name = "FILE")]
+    pub apk: Vec<PathBuf>,
+    /// Declaring class: `Lcom/foo/Bar;` or `com.foo.Bar`.
+    #[arg(long)]
+    pub descriptor: String,
+    /// The index a runtime reports for a field: instance fields first, then statics
+    /// (`ifields_` then `sfields_` order). Not the `field_ids` index - the row prints
+    /// that one too, so the two can be told apart.
+    #[arg(long)]
+    pub field_index: u32,
+    #[arg(short, long)]
+    pub output: Option<PathBuf>,
+    #[arg(long, alias = "thread", default_value_t = default_threads())]
+    pub threads: usize,
+    /// Print phase timings on stderr.
+    #[arg(long)]
+    pub debug: bool,
+}
+
+#[derive(Debug, Args)]
+pub struct MethodByIndexArgs {
+    /// One or more code inputs - an APK, or bare DEX files - tried in this order.
+    #[arg(long = "apk", required = true, num_args = 1.., value_name = "FILE")]
+    pub apk: Vec<PathBuf>,
+    /// Declaring class: `Lcom/foo/Bar;` or `com.foo.Bar`.
+    #[arg(long)]
+    pub descriptor: String,
+    /// The index a runtime reports for a method: the `method_ids` index.
+    #[arg(long)]
+    pub method_index: u32,
     #[arg(short, long)]
     pub output: Option<PathBuf>,
     #[arg(long, alias = "thread", default_value_t = default_threads())]
