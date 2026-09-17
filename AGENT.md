@@ -90,6 +90,9 @@ the mounted directory, so a host does not implement output files itself any more
    `manifest` / `classes` md5s are unchanged and the parity suite passes.
    - `manifest` = `7756cac7a9cc02b74cffe9ecb1fe5eb8`
    - `classes --threads 1` = `d839067e5a8d95fafdda2e006acc3b8e`
+   - `getclass --members` is opt-in for the same reason: with the flag the source is prefixed by
+     the member table, without it the bytes are unchanged (checked by md5 over three classes of
+     the Termux APK when the flag was added).
 2. **Error text is a contract too.** Both targets must match word for word, so messages are
    **generated in the core** rather than paraphrasing a backend: libdeflate and the Rust decoder
    word things differently, and `incomplete_stream()` exists for exactly that. Where a decoder

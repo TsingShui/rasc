@@ -188,6 +188,13 @@ pub struct ManifestArgs {
 
 #[derive(Debug, Args)]
 pub struct GetClassArgs {
+    /// Also print a machine-readable member table before the source.
+    ///
+    /// One line per field (`field_ids`, the runtime `slot`, static flag, type) and per
+    /// method (`method_ids`, prototype, flags), which is what maps a runtime index to the
+    /// member in the source below. Without this flag the output is unchanged.
+    #[arg(long)]
+    pub members: bool,
     #[arg(long)]
     pub debug: bool,
     #[arg(long, alias = "thread", default_value_t = default_threads())]

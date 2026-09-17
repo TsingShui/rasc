@@ -34,6 +34,8 @@ struct Header {
     strings_off: usize,
     types_size: usize,
     types_off: usize,
+    protos_size: usize,
+    protos_off: usize,
     fields_size: usize,
     fields_off: usize,
     methods_size: usize,
@@ -225,6 +227,8 @@ impl<'a> Dex<'a> {
             strings_off: read_u32(data, 0x3c)? as usize,
             types_size: read_u32(data, 0x40)? as usize,
             types_off: read_u32(data, 0x44)? as usize,
+            protos_size: read_u32(data, 0x48)? as usize,
+            protos_off: read_u32(data, 0x4c)? as usize,
             fields_size: read_u32(data, 0x50)? as usize,
             fields_off: read_u32(data, 0x54)? as usize,
             methods_size: read_u32(data, 0x58)? as usize,
@@ -235,6 +239,7 @@ impl<'a> Dex<'a> {
         for (offset, count, width, name) in [
             (header.strings_off, header.strings_size, 4, "string_ids"),
             (header.types_off, header.types_size, 4, "type_ids"),
+            (header.protos_off, header.protos_size, 12, "proto_ids"),
             (header.fields_off, header.fields_size, 8, "field_ids"),
             (header.methods_off, header.methods_size, 8, "method_ids"),
             (header.classes_off, header.classes_size, 32, "class_defs"),
@@ -287,6 +292,34 @@ impl<'a> Dex<'a> {
 
     fn type_name(&self, index: usize) -> Result<String> {
         self.string(self.type_string_idx(index)?)
+    }
+
+    /// A method prototype in DEX descriptor form, e.g. `(ILjava/lang/String;)V`.
+    ///
+    /// This is the only way to name *one* method exactly: a name plus its prototype is
+    /// unique within a class, which a name alone is not (`a(II)V` and `a()V` are
+    /// different methods), and obfuscated names carry no information at all.
+    fn proto(&self, index: usize) -> Result<String> {
+        if index >= self.header.protos_size {
+            bail!("proto index out of range");
+        }
+        let row = self.header.protos_off + index * 12;
+        let return_type_idx = self.u32(row + 4)? as usize;
+        let parameters_off = self.u32(row + 8)? as usize;
+
+        let mut out = String::from("(");
+        if parameters_off != 0 {
+            let size = self.u32(parameters_off)? as usize;
+            // `type_list`: a u32 count followed by that many u16 type indices.
+            let list = parameters_off + 4;
+            check_table(self.data, list, size, 2, "type_list")?;
+            for position in 0..size {
+                out.push_str(&self.type_name(read_u16(self.data, list + position * 2)? as usize)?);
+            }
+        }
+        out.push(')');
+        out.push_str(&self.type_name(return_type_idx)?);
+        Ok(out)
     }
 
     fn method(&self, index: usize) -> Result<MemberId> {

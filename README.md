@@ -96,6 +96,7 @@ rasc --help
 ```sh
 rasc getclass app.apk com.example.Main                 # one class -> Java-like source
 rasc getclass --threads 16 -o Main.java app.apk 'Lcom/example/Main;'
+rasc getclass --members app.apk com.example.Main       # source prefixed by per-member indices
 rasc findrefs app.apk string Authorization             # references across every root DEX
 rasc findrefs app.apk method onCreate --class com.example.Main
 rasc findrefs app.apk field INSTANCE --class example --fuzzy-class

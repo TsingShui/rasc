@@ -13,6 +13,7 @@ payload to stdout and diagnostics to stderr, so results pipe cleanly into `grep`
 
 ```sh
 rasc getclass app.apk com.example.Main                # one class -> Java-like source
+rasc getclass --members app.apk com.example.Main      # the same, prefixed by its member indices
 rasc findrefs app.apk string Authorization            # references in every root DEX
 rasc findrefs app.apk type Gson
 rasc findrefs app.apk method onCreate --class com.example.Main
@@ -39,6 +40,12 @@ rasc method-by-index app.apk --descriptor 'Lcom/example/Foo;' --method-index 339
   `class_access_flags`, the instance and static fields in DEX declaration order, and
   `instance_ref_mask` (bit *j* = instance field *j* is a reference). It is the one command
   whose consumer is a program, which is why it is JSON.
+- `getclass --members` prefixes the source with one line per member, so a runtime index can be
+  matched to the member in the source in the same call:
+  `# members fields: field_ids=175 slot=0 static=false flags=0x12 type=[Ljava/lang/String; name=mArgs`
+  and `# members methods: method_ids=339 proto=(…)V flags=0x10001 name=<init>`. The prototype is
+  what identifies one method among overloads, and on an obfuscated build the name is no help at
+  all. Without the flag the output is byte-for-byte what it has always been.
 - `field-by-index` takes the index a runtime reports: instance fields first, then statics.
   That is **not** the `field_ids` index, so the row prints `field_ids=` too.
   `method-by-index` takes the `method_ids` index, which is what a runtime stores.

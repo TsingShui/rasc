@@ -37,6 +37,8 @@ pub(crate) struct FieldRow {
 pub(crate) struct MethodRow {
     /// The `method_ids` index - the value a runtime reports as its method index.
     pub method_index: u32,
+    /// The `proto_ids` index, for rendering the prototype on demand.
+    pub proto_idx: u32,
     pub name: String,
     pub access_flags: u32,
 }
@@ -380,13 +382,67 @@ fn read_encoded_method(
             "class_data of type {class_type_idx} references method_ids[{method_index}] of type {row_class}"
         );
     }
+    let proto_idx = u32::from(read_u16(data, row_off + 2)?);
     let name_idx = dex.u32(row_off + 4)? as usize;
 
     Ok(MethodRow {
         method_index: *method_index,
+        proto_idx,
         name: dex.string(name_idx)?,
         access_flags,
     })
+}
+
+/// The machine-readable member table for one class: one line per field and per method.
+///
+/// The lines read as comments to a human and as records to a program, which is what lets
+/// them sit in front of unchanged source. They exist because a *name* is not an identity:
+/// `a(II)V` and `a()V` are different methods, and on an obfuscated build the name carries
+/// no information at all, so a runtime index cannot be matched to a member without the
+/// prototype. `slot` is the position a runtime field index refers to (instance fields
+/// first, then statics); `field_ids`/`method_ids` are the DEX indices.
+///
+/// `name=` is written last on purpose: a DEX member name may contain spaces, so everything
+/// after the first `name=` is the name.
+pub(crate) fn member_lines(data: &[u8], descriptor: &str) -> Result<Option<Vec<String>>> {
+    let Some(members) = class_members(data, descriptor)? else {
+        return Ok(None);
+    };
+    let dex = Dex::parse(data)?;
+    let mut lines = Vec::with_capacity(
+        members.instance.len()
+            + members.statics.len()
+            + members.direct_methods.len()
+            + members.virtual_methods.len(),
+    );
+    for (slot, field) in members.instance.iter().enumerate() {
+        lines.push(field_line(field, slot as u32, false));
+    }
+    let statics_base = members.instance.len() as u32;
+    for (offset, field) in members.statics.iter().enumerate() {
+        lines.push(field_line(field, statics_base + offset as u32, true));
+    }
+    for method in members
+        .direct_methods
+        .iter()
+        .chain(members.virtual_methods.iter())
+    {
+        lines.push(format!(
+            "# members methods: method_ids={} proto={} flags=0x{:x} name={}",
+            method.method_index,
+            dex.proto(method.proto_idx as usize)?,
+            method.access_flags,
+            method.name
+        ));
+    }
+    Ok(Some(lines))
+}
+
+fn field_line(field: &FieldRow, slot: u32, is_static: bool) -> String {
+    format!(
+        "# members fields: field_ids={} slot={} static={} flags=0x{:x} type={} name={}",
+        field.field_index, slot, is_static, field.access_flags, field.type_descriptor, field.name
+    )
 }
 
 /// The `class_defs` row index and the class's `type_ids` index, for `descriptor`.

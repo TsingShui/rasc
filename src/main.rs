@@ -180,10 +180,7 @@ fn dispatch(args: Vec<String>) -> Result<i32> {
         Err(error) => return Ok(cli_message(&error)),
     };
 
-    match run_command(args, started) {
-        Ok(status) => Ok(status),
-        Err(error) => Err(error),
-    }
+    run_command(args, started)
 }
 
 /// Runs the parsed command.
@@ -411,20 +408,49 @@ fn run_command(args: Cli, started: Instant) -> Result<i32> {
         }
         Command::Getclass(args) => {
             let class_name = query::format_class_name(&args.dalvik_class)?;
-            let hit =
-                apk::decompile_class(&args.apk_path, &class_name, args.threads, args.debug)?;
-            let Some((dex_name, source)) = hit else {
-                bail!("Class {class_name} not found in APK.");
-            };
-            if args.debug {
-                crate::diag::diagnose(format_args!("[DEBUG] Hit DEX: {dex_name}"));
-                debug_timing(started);
-                crate::diag::diagnose(format_args!("{}", "-".repeat(50)));
+            // `--members` prefixes the index table. It has to describe the same definition
+            // the source came from, so a class defined more than once is refused rather
+            // than resolved by taking the first - the table would otherwise annotate one
+            // definition while the decompiler rendered another.
+            let mut table: Vec<String> = Vec::new();
+            if args.members {
+                let inputs = [args.apk_path.clone()];
+                let lookup = apk::member_lines(&inputs, &class_name, args.threads)?;
+                match lookup.lines {
+                    Some(lines) => table = lines,
+                    None if lookup.definitions.is_empty() => {
+                        bail!("Class {class_name} not found in APK.");
+                    }
+                    None => {
+                        eprintln!(
+                            "Error: {class_name} is defined {} times ({}); --members must name one definition",
+                            lookup.definitions.len(),
+                            lookup.definitions.join(", ")
+                        );
+                        status = apk::lookup_status(lookup.definitions.len());
+                    }
+                }
             }
-            let mut payload = String::with_capacity(source.len() + 256);
-            payload.push_str(&source);
-            payload.push('\n');
-            emit(&payload, args.output.as_deref())?;
+            if status == 0 {
+                let hit =
+                    apk::decompile_class(&args.apk_path, &class_name, args.threads, args.debug)?;
+                let Some((dex_name, source)) = hit else {
+                    bail!("Class {class_name} not found in APK.");
+                };
+                if args.debug {
+                    crate::diag::diagnose(format_args!("[DEBUG] Hit DEX: {dex_name}"));
+                    debug_timing(started);
+                    crate::diag::diagnose(format_args!("{}", "-".repeat(50)));
+                }
+                let mut payload = String::with_capacity(source.len() + 256);
+                for line in &table {
+                    payload.push_str(line);
+                    payload.push('\n');
+                }
+                payload.push_str(&source);
+                payload.push('\n');
+                emit(&payload, args.output.as_deref())?;
+            }
         }
     }
     Ok(status)

@@ -669,12 +669,6 @@ pub fn decompile_class(
     })
 }
 
-/// Every entry the archive holds, in central-directory order.
-///
-/// No filtering and no de-duplication: this is a listing of what the file contains, so
-/// two entries with the same name appear twice, in the order the directory states them.
-/// A bare DEX is one entry, the same one every other command walks.
-
 /// Whether a string's raw MUTF-8 bytes contain an ASCII needle, ignoring case.
 ///
 /// `None` means this pair cannot be answered from the bytes — the value is not ASCII, or
@@ -840,8 +834,56 @@ pub fn list_strings(
 /// which worker happened to finish first. `None` means no input defines the class,
 /// which is a different answer from an empty field list.
 pub fn field_plan(paths: &[PathBuf], descriptor: &str, threads: usize) -> Result<FieldPlanLookup> {
-    let mut definitions: Vec<String> = Vec::new();
-    let mut candidates: Vec<String> = Vec::new();
+    let (definitions, plan) = walk_definitions(paths, descriptor, threads, |data, descriptor| {
+        Ok(dex::members::field_plan(data, descriptor)?.map(|plan| plan.render_json()))
+    })?
+    .unique();
+    Ok(FieldPlanLookup { definitions, plan })
+}
+
+/// The member table for one class, from the one definition that exists.
+pub fn member_lines(
+    paths: &[PathBuf],
+    descriptor: &str,
+    threads: usize,
+) -> Result<MemberLinesLookup> {
+    let (definitions, lines) =
+        walk_definitions(paths, descriptor, threads, dex::members::member_lines)?.unique();
+    Ok(MemberLinesLookup { definitions, lines })
+}
+
+/// What a member-table lookup found; `lines` only when exactly one definition exists.
+#[derive(Debug, Default)]
+pub struct MemberLinesLookup {
+    pub definitions: Vec<String>,
+    pub lines: Option<Vec<String>>,
+}
+
+/// One class's definition sites: the entry names, and one extracted value per site.
+struct Definitions<T> {
+    names: Vec<String>,
+    values: Vec<T>,
+}
+
+impl<T> Definitions<T> {
+    /// The single value, when the class is defined exactly once.
+    fn unique(mut self) -> (Vec<String>, Option<T>) {
+        let value = (self.names.len() == 1).then(|| self.values.remove(0));
+        (self.names, value)
+    }
+}
+
+/// Runs `extract` over every DEX a class is defined in, in input and entry order.
+fn walk_definitions<T: Send>(
+    paths: &[PathBuf],
+    descriptor: &str,
+    threads: usize,
+    extract: impl Fn(&[u8], &str) -> Result<Option<T>> + Sync,
+) -> Result<Definitions<T>> {
+    let mut definitions = Definitions {
+        names: Vec::new(),
+        values: Vec::new(),
+    };
     for path in paths {
         let found = map_dex_entries(path, threads, EntryOrder::Natural, None, |inflated| {
             let mut found = Vec::new();
@@ -850,21 +892,18 @@ pub fn field_plan(paths: &[PathBuf], descriptor: &str, threads: usize) -> Result
                 // standard view, exactly as `getclass` does.
                 let normalized = dex::container::standard_header_view(&logical.data);
                 let data = normalized.as_deref().unwrap_or(&logical.data);
-                if let Some(plan) = dex::members::field_plan(data, descriptor)? {
-                    found.push((logical.name.clone(), plan.render_json()));
+                if let Some(value) = extract(data, descriptor)? {
+                    found.push((logical.name.clone(), value));
                 }
             }
             Ok(found)
         })?;
-        for (name, plan) in found {
-            definitions.push(name);
-            candidates.push(plan);
+        for (name, value) in found {
+            definitions.names.push(name);
+            definitions.values.push(value);
         }
     }
-    Ok(FieldPlanLookup {
-        plan: (definitions.len() == 1).then(|| candidates.remove(0)),
-        definitions,
-    })
+    Ok(definitions)
 }
 
 /// What a `fields-plan` lookup found.
@@ -979,6 +1018,11 @@ pub fn member_by_index(
     Ok(lookup)
 }
 
+/// Every entry the archive holds, in central-directory order.
+///
+/// No filtering and no de-duplication: this is a listing of what the file contains, so
+/// two entries with the same name appear twice, in the order the directory states them.
+/// A bare DEX is one entry, the same one every other command walks.
 pub fn list_entries(path: &Path) -> Result<Vec<ZipEntry>> {
     let archive = Archive::open(path)?;
     if is_bare_dex(&archive) {
@@ -1078,6 +1122,122 @@ mod tests {
     }
 
     /// The three statuses are distinct answers, not a bool.
+    /// A member table that annotates a different member than the index lookup resolves
+    /// would send a reader to the wrong code - exactly the failure it exists to prevent -
+    /// so every line is checked against the lookup face.
+    #[test]
+    fn member_lines_match_the_index_lookups() {
+        let dex = dex::tests::const_string_fixture(1);
+        let zip = build_zip(&[("classes.dex", &dex, true)]);
+        let path = temp_apk("member-lines", &zip);
+
+        let lookup = member_lines(std::slice::from_ref(&path), "LFixture0;", 2).unwrap();
+        assert_eq!(lookup.definitions, ["classes.dex"]);
+        let lines = lookup.lines.expect("exactly one definition");
+        assert!(!lines.is_empty(), "the fixture class declares members");
+
+        for line in &lines {
+            if let Some(rest) = line.strip_prefix("# members fields: ") {
+                let field_ids = value_of(rest, "field_ids=").unwrap();
+                let slot: u32 = value_of(rest, "slot=").unwrap().parse().unwrap();
+                let rows = member_by_index(
+                    std::slice::from_ref(&path),
+                    "LFixture0;",
+                    slot,
+                    MemberKind::Field,
+                    2,
+                )
+                .unwrap()
+                .rows;
+                assert_eq!(rows.len(), 1, "{line}");
+                assert!(
+                    rows[0].ends_with(&format!("| field_ids={field_ids}")),
+                    "{} vs {line}",
+                    rows[0]
+                );
+            } else if let Some(rest) = line.strip_prefix("# members methods: ") {
+                assert!(
+                    rest.contains("proto=("),
+                    "a method line without its prototype cannot identify an overload: {line}"
+                );
+                let method_ids: u32 = value_of(rest, "method_ids=").unwrap().parse().unwrap();
+                let rows = member_by_index(
+                    std::slice::from_ref(&path),
+                    "LFixture0;",
+                    method_ids,
+                    MemberKind::Method,
+                    2,
+                )
+                .unwrap()
+                .rows;
+                assert_eq!(rows.len(), 1, "{line}");
+                assert!(
+                    rows[0].ends_with(&format!("| method_ids={method_ids}")),
+                    "{} vs {line}",
+                    rows[0]
+                );
+            } else {
+                panic!("unexpected member line: {line}");
+            }
+        }
+        std::fs::remove_file(&path).unwrap();
+    }
+
+    /// The value of a `key=value` field of a member line; the value ends at the next space.
+    fn value_of<'a>(line: &'a str, key: &str) -> Option<&'a str> {
+        let start = line.find(key)? + key.len();
+        let rest = &line[start..];
+        Some(rest.split(' ').next().unwrap_or(rest))
+    }
+
+    /// Real-data check for the member table, against the same class the index faces use.
+    ///
+    /// Gated like the other real-data checks. Run:
+    /// `RASC_REAL_APK=… cargo test --bin rasc -- --ignored real_apk_member_lines`.
+    #[test]
+    #[ignore = "需要真实多 DEX APK；设 RASC_REAL_APK 后用 --ignored 显式运行"]
+    fn real_apk_member_lines_annotate_the_known_class() {
+        let path = PathBuf::from(std::env::var("RASC_REAL_APK").expect("set RASC_REAL_APK"));
+        let descriptor = "Lcom/termux/terminal/TerminalSession;";
+        let lookup = member_lines(std::slice::from_ref(&path), descriptor, 4).expect("read the table");
+        assert_eq!(lookup.definitions, ["classes14.dex"]);
+        let lines = lookup.lines.expect("exactly one definition");
+
+        let fields: Vec<&String> = lines
+            .iter()
+            .filter(|line| line.starts_with("# members fields: "))
+            .collect();
+        let methods: Vec<&String> = lines
+            .iter()
+            .filter(|line| line.starts_with("# members methods: "))
+            .collect();
+        assert_eq!(fields.len(), 19, "16 instance + 3 static fields");
+        assert!(fields[0].contains("field_ids=175 slot=0 static=false"));
+        assert!(fields[15].contains("slot=15 static=false"));
+        assert!(fields[16].contains("slot=16 static=true"));
+        assert!(fields[18].contains("slot=18 static=true"));
+
+        let init = methods
+            .iter()
+            .find(|line| line.contains("method_ids=339 "))
+            .expect("method index 339");
+        assert!(init.contains("name=<init>"), "{init}");
+        assert!(
+            init.contains(
+                "proto=(Ljava/lang/String;Ljava/lang/String;[Ljava/lang/String;[Ljava/lang/String;Ljava/lang/Integer;Lcom/termux/terminal/TerminalSessionClient;)V"
+            ),
+            "the prototype is what identifies this overload: {init}"
+        );
+
+        for line in methods {
+            let index: u32 = value_of(line, "method_ids=").unwrap().parse().unwrap();
+            let rows = member_by_index(std::slice::from_ref(&path), descriptor, index, MemberKind::Method, 4)
+                .unwrap()
+                .rows;
+            assert_eq!(rows.len(), 1, "{line}");
+        }
+    }
+
     /// A class name is not an identity. Two entries defining it must not produce a plan:
     /// the plan decides which instance slots a collector dereferences.
     #[test]
@@ -1086,7 +1246,7 @@ mod tests {
         let zip = build_zip(&[("classes.dex", &dex, true), ("classes2.dex", &dex, true)]);
         let path = temp_apk("fields-plan-ambiguous", &zip);
 
-        let lookup = field_plan(&[path.clone()], "LFixture0;", 2).unwrap();
+        let lookup = field_plan(std::slice::from_ref(&path), "LFixture0;", 2).unwrap();
         assert_eq!(lookup.definitions.len(), 2, "both entries define the class");
         assert!(
             lookup.plan.is_none(),
@@ -1102,7 +1262,7 @@ mod tests {
         let zip = build_zip(&[("classes.dex", &dex, true)]);
         let path = temp_apk("fields-plan-single", &zip);
 
-        let lookup = field_plan(&[path.clone()], "LFixture0;", 2).unwrap();
+        let lookup = field_plan(std::slice::from_ref(&path), "LFixture0;", 2).unwrap();
         assert_eq!(lookup.definitions, ["classes.dex"]);
         let plan = lookup.plan.expect("exactly one definition");
         assert!(plan.starts_with(
@@ -1110,7 +1270,7 @@ mod tests {
         ));
         assert_eq!(lookup_status(lookup.definitions.len()), 0);
 
-        let missing = field_plan(&[path.clone()], "LNo/Such;", 2).unwrap();
+        let missing = field_plan(std::slice::from_ref(&path), "LNo/Such;", 2).unwrap();
         assert!(missing.definitions.is_empty());
         assert!(missing.plan.is_none());
         assert_eq!(lookup_status(missing.definitions.len()), 3);
@@ -1155,7 +1315,7 @@ mod tests {
 
             for (position, field) in members.instance.iter().enumerate() {
                 let rows = member_by_index(
-                    &[file.clone()],
+                    std::slice::from_ref(&file),
                     descriptor,
                     position as u32,
                     MemberKind::Field,
@@ -1176,7 +1336,7 @@ mod tests {
             for (offset, field) in members.statics.iter().enumerate() {
                 let position = (members.instance.len() + offset) as u32;
                 let rows =
-                    member_by_index(&[file.clone()], descriptor, position, MemberKind::Field, 1)
+                    member_by_index(std::slice::from_ref(&file), descriptor, position, MemberKind::Field, 1)
                         .expect("lookup")
                         .rows;
                 assert_eq!(rows.len(), 1);
@@ -1187,7 +1347,7 @@ mod tests {
             // One past the last field is nothing, not the first field of something else.
             let past = (members.instance.len() + members.statics.len()) as u32;
             let past_lookup =
-                member_by_index(&[file.clone()], descriptor, past, MemberKind::Field, 1)
+                member_by_index(std::slice::from_ref(&file), descriptor, past, MemberKind::Field, 1)
                     .expect("lookup");
             assert!(past_lookup.rows.is_empty());
             assert_eq!(past_lookup.definitions, 1, "the class was defined here");
@@ -1196,7 +1356,7 @@ mod tests {
             methods.extend(&members.virtual_methods);
             for method in methods {
                 let rows = member_by_index(
-                    &[file.clone()],
+                    std::slice::from_ref(&file),
                     descriptor,
                     method.method_index,
                     MemberKind::Method,
