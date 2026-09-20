@@ -34,13 +34,25 @@ fn main() {
         .expect("methods");
     mark("methods", &mut t);
     let c = DexClasses::build_with_level(
-        &mut r, h.class_defs_off, h.class_defs_size, &f, &ty, &p, &s, &m,
+        &mut r,
+        h.class_defs_off,
+        h.class_defs_size,
+        &f,
+        &ty,
+        &p,
+        &s,
+        &m,
         ClassDecodeLevel::Declaration,
     )
     .expect("classes");
     mark("classes(declaration)", &mut t);
     eprintln!(
         "[counts] strings={} types={} protos={} fields={} methods={} classes={}",
-        s.strings.len(), ty.items.len(), p.items.len(), f.items.len(), m.items.len(), c.items.len()
+        s.strings.len(),
+        ty.items.len(),
+        p.items.len(),
+        f.items.len(),
+        m.items.len(),
+        c.items.len()
     );
 }

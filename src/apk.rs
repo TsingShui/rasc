@@ -3,21 +3,17 @@
 //!
 //! Everything that reads the archive goes through [`map_dex_entries`], which owns
 //! the byte source, the worker pool, entry ordering and the `--debug` inflate
-//! timings. The source itself is [`Archive`]: a mapping on native, and under WASI -
-//! which has no `mmap` - a file read in ranges on demand.
-//! Results are flattened in central-directory order, so output is deterministic
-//! no matter which worker stole which entry. Nothing here shells out to Python, a
-//! JVM or an external decompiler.
+//! timings. Results are flattened in central-directory order, so output is
+//! deterministic no matter which worker stole which entry. Nothing here shells out
+//! to Python, a JVM or an external decompiler.
 
 use crate::dex;
 use crate::query::Query;
 use crate::zip::{ZipEntry, inflate_entry};
 use anyhow::{Context, Result, bail};
-#[cfg(not(target_family = "wasm"))]
 use memmap2::Mmap;
 use rayon::prelude::*;
 use std::cell::OnceCell;
-#[cfg(not(target_family = "wasm"))]
 use std::fs::File;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
@@ -26,86 +22,40 @@ use std::time::{Duration, Instant};
 
 /// The bytes of an APK.
 ///
-/// Native maps the file, so the OS keeps the pages it needs and a 342 MiB archive costs
-/// no heap; `mmap` is also what lets a class lookup touch only the entries it has to.
-/// WASI has no `mmap`, so there the archive is read in ranges on demand instead: the parser
-/// asks for the EOCD tail, one central directory entry at a time, and an entry's compressed
-/// bytes, and nothing else is ever read. That is also the shape a host with a byte source of
-/// its own would plug into, and the one a browser can serve.
+/// The archive is memory-mapped so the OS keeps only touched pages resident; a 342 MiB
+/// archive therefore costs no equivalent heap allocation.
 enum Archive {
-    #[cfg(not(target_family = "wasm"))]
     Mapped(Mmap),
-    #[cfg(target_os = "wasi")]
-    Ranged {
-        // `Mutex` because `range` takes `&self`: `std::os::wasi::fs::FileExt::read_at`
-        // is still unstable, so the file has to be seeked. It also keeps the value
-        // `Sync`, which the parallel entry walk type-checks even where it is serial.
-        file: std::sync::Mutex<std::fs::File>,
-        len: usize,
-    },
+}
+
+/// Immutable limits applied while reading one archive command.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct ArchivePolicy {
+    pub(crate) max_inflated_entry: usize,
+}
+
+impl Default for ArchivePolicy {
+    fn default() -> Self {
+        Self {
+            max_inflated_entry: crate::zip::DEFAULT_MAX_INFLATED_ENTRY,
+        }
+    }
 }
 
 impl Archive {
     fn open(path: &Path) -> Result<Self> {
-        #[cfg(not(target_family = "wasm"))]
-        let archive = {
-            let file = File::open(path).with_context(|| format!("open {}", path.display()))?;
-            // SAFETY: unchanged from the inline mapping this replaces. The mapping
-            // must not outlive the file, which is why it is owned by this value.
-            Archive::Mapped(unsafe { Mmap::map(&file) }.context("map APK")?)
-        };
-        #[cfg(target_os = "wasi")]
-        let archive = {
-            let file =
-                std::fs::File::open(path).with_context(|| format!("open {}", path.display()))?;
-            let len = file
-                .metadata()
-                .with_context(|| format!("stat {}", path.display()))?
-                .len() as usize;
-            Archive::Ranged {
-                file: std::sync::Mutex::new(file),
-                len,
-            }
-        };
-        Ok(archive)
+        let file = File::open(path).with_context(|| format!("open {}", path.display()))?;
+        // SAFETY: the mapping is owned by this value and therefore cannot outlive the file.
+        Ok(Archive::Mapped(
+            unsafe { Mmap::map(&file) }.context("map APK")?,
+        ))
     }
-}
-
-/// One positioned read, with a short-read loop: a wasi `read` may return fewer bytes
-/// than asked for.
-#[cfg(target_os = "wasi")]
-fn read_exact_at(
-    file: &std::sync::Mutex<std::fs::File>,
-    mut buffer: &mut [u8],
-    mut offset: u64,
-) -> Result<()> {
-    use std::io::{Read, Seek, SeekFrom};
-
-    // A poisoned lock would mean a panic elsewhere; `panic = "abort"` in release makes
-    // that unreachable, and recovering is safer than panicking in a parser.
-    let mut file = file.lock().unwrap_or_else(|poison| poison.into_inner());
-    while !buffer.is_empty() {
-        file.seek(SeekFrom::Start(offset))
-            .with_context(|| format!("seek to {offset}"))?;
-        let read = file
-            .read(buffer)
-            .with_context(|| format!("read at {offset}"))?;
-        if read == 0 {
-            bail!("unexpected end of file at {offset}");
-        }
-        buffer = &mut buffer[read..];
-        offset += read as u64;
-    }
-    Ok(())
 }
 
 impl crate::zip::BytesSource for Archive {
     fn source_len(&self) -> usize {
         match self {
-            #[cfg(not(target_family = "wasm"))]
             Archive::Mapped(mapped) => mapped.len(),
-            #[cfg(target_os = "wasi")]
-            Archive::Ranged { len, .. } => *len,
         }
     }
 
@@ -115,14 +65,7 @@ impl crate::zip::BytesSource for Archive {
             bail!("range out of bounds");
         }
         match self {
-            #[cfg(not(target_family = "wasm"))]
             Archive::Mapped(mapped) => Ok(std::borrow::Cow::Borrowed(&mapped[offset..end])),
-            #[cfg(target_os = "wasi")]
-            Archive::Ranged { file, .. } => {
-                let mut buffer = vec![0u8; len];
-                read_exact_at(file, &mut buffer, offset as u64)?;
-                Ok(std::borrow::Cow::Owned(buffer))
-            }
         }
     }
 }
@@ -228,7 +171,7 @@ struct InflatedDex<'a> {
     entry: &'a ZipEntry,
     source: &'a Archive,
     started: Instant,
-    /// Per-entry inflation ceiling for this command, read from the host policy once.
+    /// Per-entry inflation ceiling for this command.
     max_inflated: usize,
     data: OnceCell<(Vec<u8>, Duration)>,
 }
@@ -276,6 +219,7 @@ enum EntryOrder {
 /// hit rather than cancelling it.
 fn map_dex_entries<T: Send>(
     path: &Path,
+    policy: ArchivePolicy,
     threads: usize,
     order: EntryOrder,
     stop: Option<&AtomicBool>,
@@ -291,9 +235,7 @@ fn map_dex_entries<T: Send>(
         EntryOrder::SmallestFirst => entries.sort_by_key(|entry| entry.compressed_size),
     }
     // One entry, walked the same way whether the caller drives it in parallel or not.
-    // The host may have lowered the per-entry ceiling (a browser holding this instance);
-    // read it once and hand it to every entry.
-    let max_inflated = crate::zip::max_inflated_entry();
+    let max_inflated = policy.max_inflated_entry;
     let run_entry = |entry: &ZipEntry| -> Result<Vec<T>> {
         if stop.is_some_and(|flag| flag.load(Ordering::Relaxed)) {
             return Ok(Vec::new());
@@ -306,21 +248,10 @@ fn map_dex_entries<T: Send>(
             data: OnceCell::new(),
         })
     };
-    // `wasm32-wasip1` has no threads: rayon cannot even build a pool there, because
-    // `std::thread::spawn` returns ENOTSUP. Entries are then walked serially. The `-threads`
-    // variant of the target exists and would give `std::thread` back, but it needs a shared
-    // memory import and a host that implements `wasi_thread_spawn` - Wasmtime behind a flag
-    // today, and no browser WASI shim at all.
-    // Results stay in central-directory order either way and the caller sorts, so the
-    // output does not depend on which path ran.
-    let results: Vec<Result<Vec<T>>> = if cfg!(target_family = "wasm") {
-        entries.iter().map(run_entry).collect()
-    } else {
-        let pool = rayon::ThreadPoolBuilder::new()
-            .num_threads(threads)
-            .build()?;
-        pool.install(|| entries.par_iter().map(run_entry).collect())
-    };
+    let pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(threads)
+        .build()?;
+    let results: Vec<Result<Vec<T>>> = pool.install(|| entries.par_iter().map(run_entry).collect());
     let mut out = Vec::new();
     for result in results {
         out.extend(result?);
@@ -335,10 +266,8 @@ fn map_dex_entries<T: Send>(
 /// them on the main thread costs more than the whole instruction scan.
 /// One reference hit, structured.
 ///
-/// The text mode renders these and the record mode prints them, so a host reads the same
-/// rows a person does. The order of the fields is the order the rows are sorted in, and
-/// it is the same order the rendered lines sort in - the separator and the `matched=(`
-/// between them are constants - which is what keeps the two modes' row order identical.
+/// The order of the fields is also the rendered-line sort order: the separator and
+/// `matched=(` wrapper are constants, so sorting structured rows preserves CLI ordering.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct ReferenceHit {
     pub dex_name: String,
@@ -354,8 +283,9 @@ impl ReferenceHit {
         // `join` allocated an intermediate string and `format!` the line, and a wide query
         // is hundreds of thousands of rows (170,923 for `field INSTANCE` on the 343 MiB
         // corpus). The row's shape is still written in exactly one place - here.
-        let mut line =
-            String::with_capacity(self.dex_name.len() + self.member.len() + self.matched.len() + 24);
+        let mut line = String::with_capacity(
+            self.dex_name.len() + self.member.len() + self.matched.len() + 24,
+        );
         line.push_str(&self.dex_name);
         line.push_str(" | ");
         line.push_str(&self.member);
@@ -372,83 +302,113 @@ impl ReferenceHit {
 /// order independent of how the work was stolen.
 /// Every reference hit, in central-directory order inside an entry and method order within
 /// an entry; the caller sorts, because the sort is what decides the printed order.
+#[cfg(test)]
 pub fn find_reference_hits(
     path: &Path,
     query: &Query,
     threads: usize,
     debug: bool,
 ) -> Result<Vec<ReferenceHit>> {
+    find_reference_hits_with_policy(path, ArchivePolicy::default(), query, threads, debug)
+}
+
+pub(crate) fn find_reference_hits_with_policy(
+    path: &Path,
+    policy: ArchivePolicy,
+    query: &Query,
+    threads: usize,
+    debug: bool,
+) -> Result<Vec<ReferenceHit>> {
     // One probe decides the prefix policy for the archive, for the pre-check below.
-    let policy: OnceLock<PrefixPolicy> = OnceLock::new();
+    let prefix_policy: OnceLock<PrefixPolicy> = OnceLock::new();
     // A query that names one class is the case where a per-entry pre-check pays: the
     // class usually lives in one entry of dozens, so every other entry can be skipped
     // after a prefix read instead of an inflate and a full scan. Wide queries match
     // almost every entry, where the same prefix read is pure overhead - so they are not
     // pre-checked at all (see `Query::names_one_class`).
     let needs_targets = query.names_one_class();
-    let rows = map_dex_entries(path, threads, EntryOrder::SmallestFirst, None, |inflated| {
-        if needs_targets
-            && let Some(prefix) = prefix_probe(&inflated, &policy)?
-            && dex::prefix_has_targets(&prefix, query)? == Some(false)
-        {
+    let rows = map_dex_entries(
+        path,
+        policy,
+        threads,
+        EntryOrder::SmallestFirst,
+        None,
+        |inflated| {
+            if needs_targets
+                && let Some(prefix) = prefix_probe(&inflated, &prefix_policy)?
+                && dex::prefix_has_targets(&prefix, query)? == Some(false)
+            {
+                if debug {
+                    crate::diag::diagnose(format_args!(
+                        "[APK] '{}' skipped (no target in prefix) total={:.2} us",
+                        inflated.entry.name,
+                        inflated.started.elapsed().as_secs_f64() * 1_000_000.0
+                    ));
+                }
+                return Ok(Vec::new());
+            }
+            let mut rows = Vec::new();
+            for logical in dex::container::logical_dexes(&inflated.entry.name, inflated.data()?)? {
+                for row in dex::find_references(&logical.data, query)? {
+                    rows.push(ReferenceHit {
+                        dex_name: logical.name.clone(),
+                        member: row.member,
+                        matched: row.matched,
+                    });
+                }
+            }
             if debug {
                 crate::diag::diagnose(format_args!(
-                    "[APK] '{}' skipped (no target in prefix) total={:.2} us",
+                    "[APK] '{}' inflate={:.2} us process={:.2} us",
                     inflated.entry.name,
-                    inflated.started.elapsed().as_secs_f64() * 1_000_000.0
+                    inflated.inflate_elapsed().as_secs_f64() * 1_000_000.0,
+                    (inflated.started.elapsed() - inflated.inflate_elapsed()).as_secs_f64()
+                        * 1_000_000.0
                 ));
             }
-            return Ok(Vec::new());
-        }
-        let mut rows = Vec::new();
-        for logical in dex::container::logical_dexes(&inflated.entry.name, inflated.data()?)? {
-            for row in dex::find_references(&logical.data, query)? {
-                rows.push(ReferenceHit {
-                    dex_name: logical.name.clone(),
-                    member: row.member,
-                    matched: row.matched,
-                });
-            }
-        }
-        if debug {
-            crate::diag::diagnose(format_args!(
-                "[APK] '{}' inflate={:.2} us process={:.2} us",
-                inflated.entry.name,
-                inflated.inflate_elapsed().as_secs_f64() * 1_000_000.0,
-                (inflated.started.elapsed() - inflated.inflate_elapsed()).as_secs_f64()
-                    * 1_000_000.0
-            ));
-        }
-        Ok(rows)
-    })?;
+            Ok(rows)
+        },
+    )?;
     Ok(rows)
 }
 
+#[cfg(test)]
 pub fn list_classes(path: &Path, threads: usize, debug: bool) -> Result<Vec<ClassEntry>> {
+    list_classes_with_policy(path, ArchivePolicy::default(), threads, debug)
+}
+
+pub(crate) fn list_classes_with_policy(
+    path: &Path,
+    policy: ArchivePolicy,
+    threads: usize,
+    debug: bool,
+) -> Result<Vec<ClassEntry>> {
     let started = Instant::now();
     // One probe decides the prefix policy for the whole archive (see PrefixPolicy).
-    let policy: OnceLock<PrefixPolicy> = OnceLock::new();
-    let mut classes = map_dex_entries(path, threads, EntryOrder::Natural, None, |inflated| {
-        if let Some(entries) = prefix_class_entries(&inflated, &policy)? {
-            return Ok(entries);
-        }
-        let mut classes = Vec::new();
-        for logical in dex::container::logical_dexes(&inflated.entry.name, inflated.data()?)? {
-            for descriptor in dex::class_names(&logical.data)? {
-                classes.push(ClassEntry::new(descriptor, logical.name.as_str().into()));
+    let prefix_policy: OnceLock<PrefixPolicy> = OnceLock::new();
+    let mut classes = map_dex_entries(
+        path,
+        policy,
+        threads,
+        EntryOrder::Natural,
+        None,
+        |inflated| {
+            if let Some(entries) = prefix_class_entries(&inflated, &prefix_policy)? {
+                return Ok(entries);
             }
-        }
-        Ok(classes)
-    })?;
+            let mut classes = Vec::new();
+            for logical in dex::container::logical_dexes(&inflated.entry.name, inflated.data()?)? {
+                for descriptor in dex::class_names(&logical.data)? {
+                    classes.push(ClassEntry::new(descriptor, logical.name.as_str().into()));
+                }
+            }
+            Ok(classes)
+        },
+    )?;
     let extracted = started.elapsed();
     // The comparator is the type's total order, so an unstable parallel sort produces
-    // exactly the order a stable sort would - the index has no ties to preserve. wasm
-    // target has no threads and takes the serial sort; the order is the same either way.
-    if cfg!(target_family = "wasm") {
-        classes.sort_unstable();
-    } else {
-        classes.par_sort_unstable();
-    }
+    // exactly the order a stable sort would - the index has no ties to preserve.
+    classes.par_sort_unstable();
     let sorted = started.elapsed();
     classes.dedup_by(|left, right| left.descriptor == right.descriptor);
     if debug {
@@ -586,6 +546,7 @@ fn prefix_class_entries(
 /// allocation used to be pure added cost on every `getclass`.
 fn map_class_hit<T: Send>(
     path: &Path,
+    policy: ArchivePolicy,
     descriptor: &str,
     threads: usize,
     debug: bool,
@@ -593,16 +554,17 @@ fn map_class_hit<T: Send>(
 ) -> Result<Option<(String, T)>> {
     let stop = AtomicBool::new(false);
     // One probe decides the prefix policy for the archive (see PrefixPolicy).
-    let policy: OnceLock<PrefixPolicy> = OnceLock::new();
+    let prefix_policy: OnceLock<PrefixPolicy> = OnceLock::new();
     let hits = map_dex_entries(
         path,
+        policy,
         threads,
         EntryOrder::SmallestFirst,
         Some(&stop),
         |inflated| {
             // Entries that do not define the class only need the prefix, so the code
             // section is never decompressed for them. `None` means "cannot tell".
-            match prefix_defines_class(&inflated, descriptor.as_bytes(), &policy)? {
+            match prefix_defines_class(&inflated, descriptor.as_bytes(), &prefix_policy)? {
                 Some(false) => {
                     if debug {
                         crate::diag::diagnose(format_args!(
@@ -654,13 +616,24 @@ fn map_class_hit<T: Send>(
 
 /// Decompiles `descriptor` to Java-like source, returning the DEX entry it was
 /// found in and the source. `None` when no DEX defines the class.
+#[cfg(test)]
 pub fn decompile_class(
     path: &Path,
     descriptor: &str,
     threads: usize,
     debug: bool,
 ) -> Result<Option<(String, String)>> {
-    map_class_hit(path, descriptor, threads, debug, |entry| {
+    decompile_class_with_policy(path, ArchivePolicy::default(), descriptor, threads, debug)
+}
+
+pub(crate) fn decompile_class_with_policy(
+    path: &Path,
+    policy: ArchivePolicy,
+    descriptor: &str,
+    threads: usize,
+    debug: bool,
+) -> Result<Option<(String, String)>> {
+    map_class_hit(path, policy, descriptor, threads, debug, |entry| {
         // DEX 041 containers carry an extra-long header and a container-wide
         // checksum, which the decompiler rejects; hand it a normalized view.
         let normalized = dex::container::standard_header_view(entry);
@@ -700,8 +673,7 @@ fn raw_contains_ignore_case(raw: &[u8], needle_lower: &str) -> Option<bool> {
 /// string, and a search over the corpus is half a million of them. ASCII is the case
 /// that happens (descriptors, member names, URLs, messages) and it lowercases byte by
 /// byte, so it needs no copy at all; anything non-ASCII falls back to the Unicode fold,
-/// which is what a host's own `toLowerCase().includes()` did and therefore what the
-/// engine has to reproduce.
+/// preserving the existing case-insensitive filter semantics.
 fn contains_ignore_case(haystack: &str, needle_lower: &str) -> bool {
     if haystack.is_ascii() && needle_lower.is_ascii() {
         let hay = haystack.as_bytes();
@@ -740,8 +712,29 @@ pub struct StringEntry {
 /// `filter` is a case-insensitive substring of the value, `limit` keeps the first that
 /// many matches in the order this function returns them, and `offset` starts that page
 /// later in the same order.
+#[cfg(test)]
 pub fn list_strings(
     path: &Path,
+    threads: usize,
+    debug: bool,
+    filter: Option<&str>,
+    limit: Option<usize>,
+    offset: Option<usize>,
+) -> Result<Vec<StringEntry>> {
+    list_strings_with_policy(
+        path,
+        ArchivePolicy::default(),
+        threads,
+        debug,
+        filter,
+        limit,
+        offset,
+    )
+}
+
+pub(crate) fn list_strings_with_policy(
+    path: &Path,
+    policy: ArchivePolicy,
     threads: usize,
     debug: bool,
     filter: Option<&str>,
@@ -768,50 +761,57 @@ pub fn list_strings(
     let stop_early = threads == 1;
     // How many matches the walk has produced so far. It is shared because the native
     // walk runs entries in parallel, and it only ever stops work early: the rows are
-    // truncated to `take` in print order either way, so both hosts print the same bytes.
+    // truncated to `take` in print order either way.
     let found = std::sync::atomic::AtomicUsize::new(0);
     let started = Instant::now();
-    let rows: Vec<StringEntry> = map_dex_entries(path, threads, EntryOrder::Natural, None, |inflated| {
-        let stop = std::sync::atomic::Ordering::Relaxed;
-        // A page that is already full has nothing to learn from the entries below it, and
-        // *inflating* one to find that out is the expensive half of the walk: this check
-        // has to come before `data()`, not inside the loop it feeds. It did not, and the
-        // skipped entries were still inflated - which is most of what a searched page cost.
-        if stop_early && found.load(stop) >= fill {
-            return Ok(Vec::new());
-        }
-        let dex_name: std::sync::Arc<str> = inflated.entry.name.as_str().into();
-        let mut rows = Vec::new();
-        for logical in dex::container::logical_dexes(&inflated.entry.name, inflated.data()?)? {
+    let rows: Vec<StringEntry> = map_dex_entries(
+        path,
+        policy,
+        threads,
+        EntryOrder::Natural,
+        None,
+        |inflated| {
+            let stop = std::sync::atomic::Ordering::Relaxed;
+            // A page that is already full has nothing to learn from the entries below it, and
+            // *inflating* one to find that out is the expensive half of the walk: this check
+            // has to come before `data()`, not inside the loop it feeds. It did not, and the
+            // skipped entries were still inflated - which is most of what a searched page cost.
             if stop_early && found.load(stop) >= fill {
-                break;
+                return Ok(Vec::new());
             }
-            dex::for_each_string(&logical.data, |index, raw| {
+            let dex_name: std::sync::Arc<str> = inflated.entry.name.as_str().into();
+            let mut rows = Vec::new();
+            for logical in dex::container::logical_dexes(&inflated.entry.name, inflated.data()?)? {
                 if stop_early && found.load(stop) >= fill {
-                    return Ok(false);
+                    break;
                 }
-                let matches = match needle.as_deref() {
-                    None => true,
-                    // An ASCII needle against ASCII bytes is a comparison, not a decode;
-                    // anything else takes the Unicode fold.
-                    Some(needle) => match raw_contains_ignore_case(raw, needle) {
-                        Some(found) => found,
-                        None => contains_ignore_case(&dex::decode_string(raw), needle),
-                    },
-                };
-                if matches {
-                    found.fetch_add(1, stop);
-                    rows.push(StringEntry {
-                        dex_name: std::sync::Arc::clone(&dex_name),
-                        index,
-                        value: dex::decode_string(raw),
-                    });
-                }
-                Ok(true)
-            })?;
-        }
-        Ok(rows)
-    })?;
+                dex::for_each_string(&logical.data, |index, raw| {
+                    if stop_early && found.load(stop) >= fill {
+                        return Ok(false);
+                    }
+                    let matches = match needle.as_deref() {
+                        None => true,
+                        // An ASCII needle against ASCII bytes is a comparison, not a decode;
+                        // anything else takes the Unicode fold.
+                        Some(needle) => match raw_contains_ignore_case(raw, needle) {
+                            Some(found) => found,
+                            None => contains_ignore_case(&dex::decode_string(raw), needle),
+                        },
+                    };
+                    if matches {
+                        found.fetch_add(1, stop);
+                        rows.push(StringEntry {
+                            dex_name: std::sync::Arc::clone(&dex_name),
+                            index,
+                            value: dex::decode_string(raw),
+                        });
+                    }
+                    Ok(true)
+                })?;
+            }
+            Ok(rows)
+        },
+    )?;
     let mut rows = rows;
     if skip > 0 {
         rows.drain(..skip.min(rows.len()));
@@ -833,22 +833,49 @@ pub fn list_strings(
 /// central-directory order, so "first" is a property of the arguments rather than of
 /// which worker happened to finish first. `None` means no input defines the class,
 /// which is a different answer from an empty field list.
+#[cfg(test)]
 pub fn field_plan(paths: &[PathBuf], descriptor: &str, threads: usize) -> Result<FieldPlanLookup> {
-    let (definitions, plan) = walk_definitions(paths, descriptor, threads, |data, descriptor| {
-        Ok(dex::members::field_plan(data, descriptor)?.map(|plan| plan.render_json()))
-    })?
-    .unique();
+    field_plan_with_policy(paths, ArchivePolicy::default(), descriptor, threads)
+}
+
+pub(crate) fn field_plan_with_policy(
+    paths: &[PathBuf],
+    policy: ArchivePolicy,
+    descriptor: &str,
+    threads: usize,
+) -> Result<FieldPlanLookup> {
+    let (definitions, plan) =
+        walk_definitions(paths, policy, descriptor, threads, |data, descriptor| {
+            Ok(dex::members::field_plan(data, descriptor)?.map(|plan| plan.render_json()))
+        })?
+        .unique();
     Ok(FieldPlanLookup { definitions, plan })
 }
 
 /// The member table for one class, from the one definition that exists.
+#[cfg(test)]
 pub fn member_lines(
     paths: &[PathBuf],
     descriptor: &str,
     threads: usize,
 ) -> Result<MemberLinesLookup> {
-    let (definitions, lines) =
-        walk_definitions(paths, descriptor, threads, dex::members::member_lines)?.unique();
+    member_lines_with_policy(paths, ArchivePolicy::default(), descriptor, threads)
+}
+
+pub(crate) fn member_lines_with_policy(
+    paths: &[PathBuf],
+    policy: ArchivePolicy,
+    descriptor: &str,
+    threads: usize,
+) -> Result<MemberLinesLookup> {
+    let (definitions, lines) = walk_definitions(
+        paths,
+        policy,
+        descriptor,
+        threads,
+        dex::members::member_lines,
+    )?
+    .unique();
     Ok(MemberLinesLookup { definitions, lines })
 }
 
@@ -876,6 +903,7 @@ impl<T> Definitions<T> {
 /// Runs `extract` over every DEX a class is defined in, in input and entry order.
 fn walk_definitions<T: Send>(
     paths: &[PathBuf],
+    policy: ArchivePolicy,
     descriptor: &str,
     threads: usize,
     extract: impl Fn(&[u8], &str) -> Result<Option<T>> + Sync,
@@ -885,19 +913,28 @@ fn walk_definitions<T: Send>(
         values: Vec::new(),
     };
     for path in paths {
-        let found = map_dex_entries(path, threads, EntryOrder::Natural, None, |inflated| {
-            let mut found = Vec::new();
-            for logical in dex::container::logical_dexes(&inflated.entry.name, inflated.data()?)? {
-                // A DEX 041 container carries an extra-long header; the reader wants the
-                // standard view, exactly as `getclass` does.
-                let normalized = dex::container::standard_header_view(&logical.data);
-                let data = normalized.as_deref().unwrap_or(&logical.data);
-                if let Some(value) = extract(data, descriptor)? {
-                    found.push((logical.name.clone(), value));
+        let found = map_dex_entries(
+            path,
+            policy,
+            threads,
+            EntryOrder::Natural,
+            None,
+            |inflated| {
+                let mut found = Vec::new();
+                for logical in
+                    dex::container::logical_dexes(&inflated.entry.name, inflated.data()?)?
+                {
+                    // A DEX 041 container carries an extra-long header; the reader wants the
+                    // standard view, exactly as `getclass` does.
+                    let normalized = dex::container::standard_header_view(&logical.data);
+                    let data = normalized.as_deref().unwrap_or(&logical.data);
+                    if let Some(value) = extract(data, descriptor)? {
+                        found.push((logical.name.clone(), value));
+                    }
                 }
-            }
-            Ok(found)
-        })?;
+                Ok(found)
+            },
+        )?;
         for (name, value) in found {
             definitions.names.push(name);
             definitions.values.push(value);
@@ -958,6 +995,7 @@ pub struct MemberLookup {
 /// `index` is the runtime's own numbering, which for fields is the instance-first
 /// position and for methods the `method_ids` index; both are printed with the row, so a
 /// caller can see which DEX index the runtime index resolved to rather than assume.
+#[cfg(test)]
 pub fn member_by_index(
     paths: &[PathBuf],
     descriptor: &str,
@@ -965,21 +1003,47 @@ pub fn member_by_index(
     kind: MemberKind,
     threads: usize,
 ) -> Result<MemberLookup> {
+    member_by_index_with_policy(
+        paths,
+        ArchivePolicy::default(),
+        descriptor,
+        index,
+        kind,
+        threads,
+    )
+}
+
+pub(crate) fn member_by_index_with_policy(
+    paths: &[PathBuf],
+    policy: ArchivePolicy,
+    descriptor: &str,
+    index: u32,
+    kind: MemberKind,
+    threads: usize,
+) -> Result<MemberLookup> {
     let mut lookup = MemberLookup::default();
     for path in paths {
-        let found = map_dex_entries(path, threads, EntryOrder::Natural, None, |inflated| {
-            let mut found: Vec<(bool, Vec<String>)> = Vec::new();
-            for logical in dex::container::logical_dexes(&inflated.entry.name, inflated.data()?)? {
-                let normalized = dex::container::standard_header_view(&logical.data);
-                let data = normalized.as_deref().unwrap_or(&logical.data);
-                let Some(members) = dex::members::class_members(data, descriptor)? else {
-                    continue;
-                };
-                let mut rows = Vec::new();
-                match kind {
-                    MemberKind::Field => {
-                        if let Some((field, is_static)) = members.field_at_position(index) {
-                            rows.push(format!(
+        let found = map_dex_entries(
+            path,
+            policy,
+            threads,
+            EntryOrder::Natural,
+            None,
+            |inflated| {
+                let mut found: Vec<(bool, Vec<String>)> = Vec::new();
+                for logical in
+                    dex::container::logical_dexes(&inflated.entry.name, inflated.data()?)?
+                {
+                    let normalized = dex::container::standard_header_view(&logical.data);
+                    let data = normalized.as_deref().unwrap_or(&logical.data);
+                    let Some(members) = dex::members::class_members(data, descriptor)? else {
+                        continue;
+                    };
+                    let mut rows = Vec::new();
+                    match kind {
+                        MemberKind::Field => {
+                            if let Some((field, is_static)) = members.field_at_position(index) {
+                                rows.push(format!(
                                 "{} | {}->{} | type={} | flags=0x{:x} | static={} | field_ids={}",
                                 logical.name,
                                 descriptor,
@@ -989,25 +1053,26 @@ pub fn member_by_index(
                                 is_static,
                                 field.field_index,
                             ));
+                            }
+                        }
+                        MemberKind::Method => {
+                            if let Some(method) = members.method(index) {
+                                rows.push(format!(
+                                    "{} | {}->{} | flags=0x{:x} | method_ids={}",
+                                    logical.name,
+                                    descriptor,
+                                    method.name,
+                                    method.access_flags,
+                                    method.method_index,
+                                ));
+                            }
                         }
                     }
-                    MemberKind::Method => {
-                        if let Some(method) = members.method(index) {
-                            rows.push(format!(
-                                "{} | {}->{} | flags=0x{:x} | method_ids={}",
-                                logical.name,
-                                descriptor,
-                                method.name,
-                                method.access_flags,
-                                method.method_index,
-                            ));
-                        }
-                    }
+                    found.push((true, rows));
                 }
-                found.push((true, rows));
-            }
-            Ok(found)
-        })?;
+                Ok(found)
+            },
+        )?;
         for (defined, rows) in found {
             if defined {
                 lookup.definitions += 1;
@@ -1035,7 +1100,16 @@ pub fn list_entries(path: &Path) -> Result<Vec<ZipEntry>> {
     crate::zip::parse_zip_entries(&archive, |_| true)
 }
 
+#[cfg(test)]
 pub fn read_entry(path: &Path, wanted: &str) -> Result<Vec<u8>> {
+    read_entry_with_policy(path, ArchivePolicy::default(), wanted)
+}
+
+pub(crate) fn read_entry_with_policy(
+    path: &Path,
+    policy: ArchivePolicy,
+    wanted: &str,
+) -> Result<Vec<u8>> {
     let archive = Archive::open(path)?;
     // CPython's `zipfile` resolves a name to the *last* central-directory record
     // carrying it, and the reference implementation reads the manifest through
@@ -1045,7 +1119,7 @@ pub fn read_entry(path: &Path, wanted: &str) -> Result<Vec<u8>> {
         .into_iter()
         .last()
         .with_context(|| format!("{wanted} not found in APK"))?;
-    inflate_entry(&archive, &entry, crate::zip::max_inflated_entry())
+    inflate_entry(&archive, &entry, policy.max_inflated_entry)
 }
 
 /// Whether the source is a DEX file rather than an archive.
@@ -1071,8 +1145,7 @@ fn is_bare_dex<S: crate::zip::BytesSource + ?Sized>(source: &S) -> bool {
 ///
 /// A bare DEX is one entry. Every command addresses an archive, and rather than
 /// teach each of them a second input shape, the file is presented as the entry it
-/// would have been inside one - named `classes.dex`, which is the name a host
-/// shows and the name the reference would have found.
+/// would have been inside one - named `classes.dex`, matching the reference command.
 fn parse_dex_entries<S: crate::zip::BytesSource + ?Sized>(source: &S) -> Result<Vec<ZipEntry>> {
     if is_bare_dex(source) {
         return Ok(vec![ZipEntry::bare("classes.dex", source.source_len())]);
@@ -1199,7 +1272,8 @@ mod tests {
     fn real_apk_member_lines_annotate_the_known_class() {
         let path = PathBuf::from(std::env::var("RASC_REAL_APK").expect("set RASC_REAL_APK"));
         let descriptor = "Lcom/termux/terminal/TerminalSession;";
-        let lookup = member_lines(std::slice::from_ref(&path), descriptor, 4).expect("read the table");
+        let lookup =
+            member_lines(std::slice::from_ref(&path), descriptor, 4).expect("read the table");
         assert_eq!(lookup.definitions, ["classes14.dex"]);
         let lines = lookup.lines.expect("exactly one definition");
 
@@ -1231,9 +1305,15 @@ mod tests {
 
         for line in methods {
             let index: u32 = value_of(line, "method_ids=").unwrap().parse().unwrap();
-            let rows = member_by_index(std::slice::from_ref(&path), descriptor, index, MemberKind::Method, 4)
-                .unwrap()
-                .rows;
+            let rows = member_by_index(
+                std::slice::from_ref(&path),
+                descriptor,
+                index,
+                MemberKind::Method,
+                4,
+            )
+            .unwrap()
+            .rows;
             assert_eq!(rows.len(), 1, "{line}");
         }
     }
@@ -1265,9 +1345,9 @@ mod tests {
         let lookup = field_plan(std::slice::from_ref(&path), "LFixture0;", 2).unwrap();
         assert_eq!(lookup.definitions, ["classes.dex"]);
         let plan = lookup.plan.expect("exactly one definition");
-        assert!(plan.starts_with(
-            "{\"schema\":\"rasc.fields-plan/v1\",\"descriptor\":\"LFixture0;\""
-        ));
+        assert!(
+            plan.starts_with("{\"schema\":\"rasc.fields-plan/v1\",\"descriptor\":\"LFixture0;\"")
+        );
         assert_eq!(lookup_status(lookup.definitions.len()), 0);
 
         let missing = field_plan(std::slice::from_ref(&path), "LNo/Such;", 2).unwrap();
@@ -1305,7 +1385,8 @@ mod tests {
                 continue;
             }
             let bytes = read_entry(&path, &entry.name).expect("read entry");
-            let Some(members) = dex::members::class_members(&bytes, descriptor).expect("walk class")
+            let Some(members) =
+                dex::members::class_members(&bytes, descriptor).expect("walk class")
             else {
                 continue;
             };
@@ -1335,10 +1416,15 @@ mod tests {
             }
             for (offset, field) in members.statics.iter().enumerate() {
                 let position = (members.instance.len() + offset) as u32;
-                let rows =
-                    member_by_index(std::slice::from_ref(&file), descriptor, position, MemberKind::Field, 1)
-                        .expect("lookup")
-                        .rows;
+                let rows = member_by_index(
+                    std::slice::from_ref(&file),
+                    descriptor,
+                    position,
+                    MemberKind::Field,
+                    1,
+                )
+                .expect("lookup")
+                .rows;
                 assert_eq!(rows.len(), 1);
                 assert!(rows[0].contains("| static=true |"));
                 assert!(rows[0].contains(&format!("->{} |", field.name)));
@@ -1346,13 +1432,19 @@ mod tests {
             }
             // One past the last field is nothing, not the first field of something else.
             let past = (members.instance.len() + members.statics.len()) as u32;
-            let past_lookup =
-                member_by_index(std::slice::from_ref(&file), descriptor, past, MemberKind::Field, 1)
-                    .expect("lookup");
+            let past_lookup = member_by_index(
+                std::slice::from_ref(&file),
+                descriptor,
+                past,
+                MemberKind::Field,
+                1,
+            )
+            .expect("lookup");
             assert!(past_lookup.rows.is_empty());
             assert_eq!(past_lookup.definitions, 1, "the class was defined here");
 
-            let mut methods: Vec<&dex::members::MethodRow> = members.direct_methods.iter().collect();
+            let mut methods: Vec<&dex::members::MethodRow> =
+                members.direct_methods.iter().collect();
             methods.extend(&members.virtual_methods);
             for method in methods {
                 let rows = member_by_index(
@@ -1364,7 +1456,12 @@ mod tests {
                 )
                 .expect("lookup")
                 .rows;
-                assert_eq!(rows.len(), 1, "method {} must resolve once", method.method_index);
+                assert_eq!(
+                    rows.len(),
+                    1,
+                    "method {} must resolve once",
+                    method.method_index
+                );
                 assert!(rows[0].contains(&format!("->{} |", method.name)));
                 if checked_methods == 0 {
                     println!("sample method row: {}", rows[0]);
@@ -1375,7 +1472,10 @@ mod tests {
         }
 
         assert!(dexes > 0, "the class was not found in any dex");
-        assert!(checked_fields >= 19, "only {checked_fields} fields round-tripped");
+        assert!(
+            checked_fields >= 19,
+            "only {checked_fields} fields round-tripped"
+        );
         assert!(checked_methods > 0, "no methods round-tripped");
         println!("round-tripped {checked_fields} fields and {checked_methods} methods");
     }
@@ -1451,7 +1551,7 @@ mod tests {
         std::fs::remove_file(&path).unwrap();
     }
 
-    /// The filter a host moves into the engine has to keep showing what it showed.
+    /// Filtering must preserve the established case-insensitive results.
     #[test]
     fn the_filter_ignores_case_without_changing_the_answer() {
         for (haystack, needle, expected) in [
@@ -1478,10 +1578,19 @@ mod tests {
     #[test]
     fn the_raw_filter_defers_anything_it_cannot_answer() {
         // ASCII on both sides is a comparison.
-        assert_eq!(raw_contains_ignore_case(b"Authorization header", "auth"), Some(true));
-        assert_eq!(raw_contains_ignore_case(b"Authorization header", "zzz"), Some(false));
+        assert_eq!(
+            raw_contains_ignore_case(b"Authorization header", "auth"),
+            Some(true)
+        );
+        assert_eq!(
+            raw_contains_ignore_case(b"Authorization header", "zzz"),
+            Some(false)
+        );
         assert_eq!(raw_contains_ignore_case(b"anything", ""), Some(true));
-        assert_eq!(raw_contains_ignore_case(b"short", "much longer needle"), Some(false));
+        assert_eq!(
+            raw_contains_ignore_case(b"short", "much longer needle"),
+            Some(false)
+        );
         // Anything else is the caller's to decode and fold, never a guess.
         assert_eq!(raw_contains_ignore_case("ключ".as_bytes(), "ключ"), None);
         assert_eq!(raw_contains_ignore_case(b"plain ascii", "ключ"), None);
@@ -1504,27 +1613,40 @@ mod tests {
                 .collect()
         };
 
-        for (needle, limit) in [("fixture", 3usize), ("m", 2), ("AUTHORIZATION", 1), ("nothing", 5)] {
+        for (needle, limit) in [
+            ("fixture", 3usize),
+            ("m", 2),
+            ("AUTHORIZATION", 1),
+            ("nothing", 5),
+        ] {
             let page = list_strings(&path, 2, false, Some(needle), Some(limit), None).unwrap();
             let expected: Vec<String> = every(needle).into_iter().take(limit).collect();
             assert_eq!(
-                page.iter().map(|entry| entry.value.clone()).collect::<Vec<_>>(),
+                page.iter()
+                    .map(|entry| entry.value.clone())
+                    .collect::<Vec<_>>(),
                 expected,
                 "{needle:?} limit {limit}"
             );
         }
 
         // An offset with a filter is the next page of the same search, which is the whole
-        // reason it exists: a host that scrolls asks for what follows what it has. An offset
+        // reason it exists: pagination asks for what follows the current page. An offset
         // past the end is an empty page, not an error.
-        for (needle, offset, limit) in
-            [("fixture", 1usize, 2usize), ("m", 2, 1), ("AUTHORIZATION", 0, 1), ("fixture", 99, 5)]
-        {
+        for (needle, offset, limit) in [
+            ("fixture", 1usize, 2usize),
+            ("m", 2, 1),
+            ("AUTHORIZATION", 0, 1),
+            ("fixture", 99, 5),
+        ] {
             let page =
                 list_strings(&path, 2, false, Some(needle), Some(limit), Some(offset)).unwrap();
-            let expected: Vec<String> = every(needle).into_iter().skip(offset).take(limit).collect();
+            let expected: Vec<String> =
+                every(needle).into_iter().skip(offset).take(limit).collect();
             assert_eq!(
-                page.iter().map(|entry| entry.value.clone()).collect::<Vec<_>>(),
+                page.iter()
+                    .map(|entry| entry.value.clone())
+                    .collect::<Vec<_>>(),
                 expected,
                 "{needle:?} offset {offset} limit {limit}"
             );
@@ -1548,10 +1670,7 @@ mod tests {
     #[test]
     fn a_full_page_never_reads_the_entries_below_it() {
         let dex = dex::tests::const_string_fixture(2);
-        let mut zip = build_zip(&[
-            ("classes.dex", &dex, true),
-            ("classes2.dex", &dex, true),
-        ]);
+        let mut zip = build_zip(&[("classes.dex", &dex, true), ("classes2.dex", &dex, true)]);
         overstate_second_entry_size(&mut zip);
         let path = temp_apk("strings-stop", &zip);
 
@@ -1573,7 +1692,8 @@ mod tests {
             if zip[offset..offset + 4] == [0x50, 0x4b, 0x01, 0x02] {
                 seen += 1;
                 if seen == 2 {
-                    let size = u32::from_le_bytes(zip[offset + 24..offset + 28].try_into().unwrap()) + 1;
+                    let size =
+                        u32::from_le_bytes(zip[offset + 24..offset + 28].try_into().unwrap()) + 1;
                     zip[offset + 24..offset + 28].copy_from_slice(&size.to_le_bytes());
                     return;
                 }
@@ -1650,6 +1770,37 @@ mod tests {
         ]);
         let path = temp_apk("duplicate-manifest", &zip);
         assert_eq!(read_entry(&path, "AndroidManifest.xml").unwrap(), b"second");
+        std::fs::remove_file(&path).unwrap();
+    }
+
+    #[test]
+    fn archive_policies_are_isolated_across_calls_and_threads() {
+        let payload = vec![7u8; 128 * 1024];
+        let zip = build_zip(&[("AndroidManifest.xml", payload.as_slice(), true)]);
+        let path = temp_apk("policy-isolation", &zip);
+        let restrictive = ArchivePolicy {
+            max_inflated_entry: 1024,
+        };
+        let permissive = ArchivePolicy {
+            max_inflated_entry: usize::MAX,
+        };
+
+        assert!(read_entry_with_policy(&path, restrictive, "AndroidManifest.xml").is_err());
+        assert_eq!(
+            read_entry_with_policy(&path, permissive, "AndroidManifest.xml").unwrap(),
+            payload
+        );
+
+        std::thread::scope(|scope| {
+            let rejected = scope.spawn(|| {
+                read_entry_with_policy(&path, restrictive, "AndroidManifest.xml").is_err()
+            });
+            let accepted = scope.spawn(|| {
+                read_entry_with_policy(&path, permissive, "AndroidManifest.xml").unwrap()
+            });
+            assert!(rejected.join().unwrap());
+            assert_eq!(accepted.join().unwrap(), payload);
+        });
         std::fs::remove_file(&path).unwrap();
     }
 
@@ -1786,7 +1937,15 @@ mod tests {
             listed.iter().any(|entry| entry.descriptor == "LFixture0;"),
             "fixture stopped listing the class: {listed:?}"
         );
-        let hit = map_class_hit(&path, "LFixture0;", 2, false, |data| Ok(data.to_vec())).unwrap();
+        let hit = map_class_hit(
+            &path,
+            ArchivePolicy::default(),
+            "LFixture0;",
+            2,
+            false,
+            |data| Ok(data.to_vec()),
+        )
+        .unwrap();
         assert!(
             hit.is_some(),
             "listed by classes but missing from the lookup"
@@ -1901,7 +2060,10 @@ mod tests {
             .iter()
             .enumerate()
             .map(|(index, descriptor)| {
-                ClassEntry::new((*descriptor).to_owned(), format!("classes{index}.dex").into())
+                ClassEntry::new(
+                    (*descriptor).to_owned(),
+                    format!("classes{index}.dex").into(),
+                )
             })
             .collect();
         for left in &entries {

@@ -62,19 +62,14 @@ impl JavaCompilationUnitLowering {
         let package = package_name.as_ref().map(ToString::to_string);
         let current_type = class.declaration.current_type();
         let (field_references, method_references) =
-            crate::profile_scope!("java_backend.lower.references", {
-                (class.field_references(), class.method_references())
-            });
-        let (generic_fields, generic_methods, referenced_overloads, referenced_constructors) =
-            crate::profile_scope!("java_backend.lower.abi", {
-                (
-                    source_abi.generic_fields(field_references.iter()),
-                    source_abi.generic_methods(method_references.iter()),
-                    source_abi.referenced_overloads(method_references.iter()),
-                    source_abi.referenced_constructors(method_references.iter()),
-                )
-            });
-        let type_uses = crate::profile_scope!("java_backend.lower.type_uses", {
+            (class.field_references(), class.method_references());
+        let (generic_fields, generic_methods, referenced_overloads, referenced_constructors) = (
+            source_abi.generic_fields(field_references.iter()),
+            source_abi.generic_methods(method_references.iter()),
+            source_abi.referenced_overloads(method_references.iter()),
+            source_abi.referenced_constructors(method_references.iter()),
+        );
+        let type_uses = {
             let mut type_uses = ClassTypeUses::collect(class);
             for contract in generic_fields.values() {
                 GenericTypeUses::field_contract(contract, &mut type_uses);
@@ -83,7 +78,7 @@ impl JavaCompilationUnitLowering {
                 GenericTypeUses::method_contract(contract, &mut type_uses);
             }
             type_uses
-        });
+        };
         let local_function_object_types = FunctionObjectTypeCatalog::collect(class);
         let cu_types = CompilationUnitAbiTypes::collect(
             Some(class),
@@ -93,21 +88,17 @@ impl JavaCompilationUnitLowering {
             current_type.as_ref(),
             &local_function_object_types,
         );
-        let names = crate::profile_scope!("java_backend.lower.type_names", {
-            JavaTypeNameResolver::for_class(
-                class,
-                package.as_deref(),
-                current_type.as_ref(),
-                type_uses,
-            )
-        })?;
-        let members = crate::profile_scope!("java_backend.lower.member_names", {
-            std::sync::Arc::new(
-                ClassMemberNames::collect(class)
-                    .with_constructor_layouts(referenced_constructors)
-                    .with_overloads(referenced_overloads),
-            )
-        });
+        let names = JavaTypeNameResolver::for_class(
+            class,
+            package.as_deref(),
+            current_type.as_ref(),
+            type_uses,
+        )?;
+        let members = std::sync::Arc::new(
+            ClassMemberNames::collect(class)
+                .with_constructor_layouts(referenced_constructors)
+                .with_overloads(referenced_overloads),
+        );
         let constructor_method_return_types = method_references
             .iter()
             .filter(|reference| {
@@ -183,24 +174,22 @@ impl JavaCompilationUnitLowering {
             .imports()
             .filter(|import| source_abi.import_is_accessible(import))
             .collect();
-        let declaration = crate::profile_scope!("java_backend.lower.declaration", {
-            JavaTypeLowering::new(
-                &names,
-                members.as_ref(),
-                members.clone(),
-                source_abi.as_ref(),
-                source_abi.clone(),
-                hierarchy,
-                source_field_types,
-                generic_fields,
-                generic_methods,
-                constructor_method_return_types,
-                source_object_types,
-                outer_instances,
-                observer,
-            )
-            .lower(class)
-        })?;
+        let declaration = JavaTypeLowering::new(
+            &names,
+            members.as_ref(),
+            members.clone(),
+            source_abi.as_ref(),
+            source_abi.clone(),
+            hierarchy,
+            source_field_types,
+            generic_fields,
+            generic_methods,
+            constructor_method_return_types,
+            source_object_types,
+            outer_instances,
+            observer,
+        )
+        .lower(class)?;
         Ok(JavaCompilationUnit {
             package: package_name,
             imports,
@@ -794,15 +783,13 @@ impl<'a> JavaTypeLowering<'a> {
             if method.declaration.source_bridge {
                 continue;
             }
-            let lowered = crate::profile_scope!("java_backend.lower.method", {
-                self.method(
-                    method,
-                    owner.as_ref(),
-                    class.declaration.signature.as_ref(),
-                    source_super_type.as_ref(),
-                    &source_field_types,
-                )
-            });
+            let lowered = self.method(
+                method,
+                owner.as_ref(),
+                class.declaration.signature.as_ref(),
+                source_super_type.as_ref(),
+                &source_field_types,
+            );
             let lowered = match lowered {
                 Ok(lowered) => lowered,
                 Err(error) if error.is_cancelled() => return Err(error),
@@ -857,13 +844,11 @@ impl<'a> JavaTypeLowering<'a> {
             }
             methods.push(lowered);
         }
-        let mut fields = crate::profile_scope!("java_backend.lower.fields", {
-            class
-                .fields
-                .iter()
-                .map(|field| self.field(field, owner.as_ref()))
-                .collect::<Result<Vec<_>, _>>()
-        })?;
+        let mut fields = class
+            .fields
+            .iter()
+            .map(|field| self.field(field, owner.as_ref()))
+            .collect::<Result<Vec<_>, _>>()?;
         let synthetic_final_fields = class
             .fields
             .iter()
@@ -1293,39 +1278,37 @@ impl<'a> JavaTypeLowering<'a> {
                             .unwrap_or_else(|| self.names.resolve_type(outer))?;
                         outer_instances.insert(field.clone(), source);
                     }
-                    crate::profile_scope!("java_backend.lower.method_body", {
-                        body.lower(
-                            &parameter_names,
-                            self.names,
-                            self.shared_members.clone(),
-                            source_field_types.clone(),
-                            self.generic_fields.clone(),
-                            self.generic_methods.clone(),
-                            self.source_object_types.clone(),
-                            self.generic_type_projection.clone(),
-                            source_current_type.clone(),
-                            source_super_type.cloned(),
-                            &source_parameter_types,
-                            return_type.clone(),
-                            source_type_erasures.clone(),
-                            source_type_bounds.clone(),
-                            generic_throw_types.clone(),
-                            outer_instances,
-                            {
-                                let mut reserved = reserved_type_qualifiers.clone();
-                                if declaration.kind.is_class_initializer() {
-                                    reserved.extend(
-                                        owner
-                                            .map(|owner| self.members.field_names(owner))
-                                            .unwrap_or_default(),
-                                    );
-                                }
-                                reserved
-                            },
-                            declaration.kind.is_class_initializer(),
-                            self.observer.clone(),
-                        )
-                    })
+                    body.lower(
+                        &parameter_names,
+                        self.names,
+                        self.shared_members.clone(),
+                        source_field_types.clone(),
+                        self.generic_fields.clone(),
+                        self.generic_methods.clone(),
+                        self.source_object_types.clone(),
+                        self.generic_type_projection.clone(),
+                        source_current_type.clone(),
+                        source_super_type.cloned(),
+                        &source_parameter_types,
+                        return_type.clone(),
+                        source_type_erasures.clone(),
+                        source_type_bounds.clone(),
+                        generic_throw_types.clone(),
+                        outer_instances,
+                        {
+                            let mut reserved = reserved_type_qualifiers.clone();
+                            if declaration.kind.is_class_initializer() {
+                                reserved.extend(
+                                    owner
+                                        .map(|owner| self.members.field_names(owner))
+                                        .unwrap_or_default(),
+                                );
+                            }
+                            reserved
+                        },
+                        declaration.kind.is_class_initializer(),
+                        self.observer.clone(),
+                    )
                 })
             })
             .transpose()?;

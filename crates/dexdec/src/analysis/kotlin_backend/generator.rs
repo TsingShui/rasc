@@ -188,9 +188,7 @@ impl KotlinDecompiler {
         methods: &mut [ClassMethodInput],
         inner: Vec<NestedClassInput>,
     ) -> Result<String, KotlinDecompilerError> {
-        crate::profile_scope!("kotlin_backend.class.total", {
-            self.generate_class_with_nested_impl(class, methods, inner)
-        })
+        self.generate_class_with_nested_impl(class, methods, inner)
     }
 
     fn generate_class_with_nested_impl(
@@ -206,27 +204,20 @@ impl KotlinDecompiler {
             &inner,
         );
         let (outer_methods, outer_instance) =
-            crate::profile_scope!("kotlin_backend.class.outer_methods", {
-                self.build_class_methods(class, methods, &source_signatures)
-            })?;
+            self.build_class_methods(class, methods, &source_signatures)?;
         self.observer.checkpoint()?;
         self.class_stage(class.type_descriptor(), "build_outer_methods:done");
-        let nested_models = crate::profile_scope!("kotlin_backend.class.nested_models", {
-            self.build_nested_class_models(inner, &source_signatures)
-        })?;
+        let nested_models = self.build_nested_class_models(inner, &source_signatures)?;
         self.observer.checkpoint()?;
         self.class_stage(class.type_descriptor(), "build_nested_models:done");
-        let mut class_model = crate::profile_scope!("kotlin_backend.class.model", {
+        let mut class_model =
             KotlinClassModel::from_class_node(class, outer_methods, outer_instance)
-                .map(|model| model.with_nested(nested_models))
-        })?;
+                .map(|model| model.with_nested(nested_models))?;
         self.observer.checkpoint()?;
         class_model.assign_lexical_type_names(&self.source_abi);
         self.class_stage(class.type_descriptor(), "class_model:done");
-        crate::profile_scope!("kotlin_backend.class.render", {
-            self.observer.checkpoint()?;
-            self.render_class_model(&class_model)
-        })
+        self.observer.checkpoint()?;
+        self.render_class_model(&class_model)
     }
 
     fn build_nested_class_models(
@@ -443,18 +434,16 @@ impl KotlinDecompiler {
         function_interface: Option<&crate::ir::generic_types::JvmTypeSignature>,
         outer_instance: Option<&OuterInstanceField>,
     ) -> Result<KotlinMethodModel, KotlinDecompilerError> {
-        crate::profile_scope!("kotlin_backend.method.total", {
-            self.build_method_model_from_node_impl(
-                class,
-                method,
-                cfg,
-                inferred_exceptions,
-                inferred_parameter_types,
-                inferred_return_type,
-                function_interface,
-                outer_instance,
-            )
-        })
+        self.build_method_model_from_node_impl(
+            class,
+            method,
+            cfg,
+            inferred_exceptions,
+            inferred_parameter_types,
+            inferred_return_type,
+            function_interface,
+            outer_instance,
+        )
     }
 
     fn build_method_model_from_node_impl(
@@ -468,9 +457,7 @@ impl KotlinDecompiler {
         function_interface: Option<&crate::ir::generic_types::JvmTypeSignature>,
         outer_instance: Option<&OuterInstanceField>,
     ) -> Result<KotlinMethodModel, KotlinDecompilerError> {
-        let mut declaration = crate::profile_scope!("kotlin_backend.method.declaration", {
-            KotlinMethodDeclaration::from_method_node(class, method)
-        })?;
+        let mut declaration = KotlinMethodDeclaration::from_method_node(class, method)?;
         if declaration.throws.is_empty() {
             declaration
                 .throws
@@ -489,44 +476,34 @@ impl KotlinDecompiler {
         // `from_method_node` does not see the decoded debug stream, so attach
         // source parameter names here. SSA bindings remain owned exclusively
         // by MethodBodyAnalysis.
-        crate::profile_scope!("kotlin_backend.method.debug_params", {
-            let param_names = collect_param_debug_names(cfg);
-            for (idx, parameter) in declaration.parameters.iter_mut().enumerate() {
-                parameter.name = param_names
-                    .get(idx)
-                    .and_then(|name| name.as_deref())
-                    .map(crate::language::kotlin::KotlinIdentifier::from_dex);
-            }
-        });
+        let param_names = collect_param_debug_names(cfg);
+        for (idx, parameter) in declaration.parameters.iter_mut().enumerate() {
+            parameter.name = param_names
+                .get(idx)
+                .and_then(|name| name.as_deref())
+                .map(crate::language::kotlin::KotlinIdentifier::from_dex);
+        }
         let mut options = declaration.body_options(Some(class));
         if let Some(outer_instance) = outer_instance {
             options.outer_instance = Some(outer_instance.clone());
         }
-        let body = crate::profile_scope!("kotlin_backend.method.pipeline", {
-            MethodBodyPipeline::new(self.type_hierarchy.as_ref(), self.observer.as_ref())
-                .analyze(cfg)
-        })?;
-        crate::profile_scope!("kotlin_backend.method.kotlin_model", {
-            KotlinMethodModel::from_body_analysis_with_options(declaration, body, options)
-        })
+        let body = MethodBodyPipeline::new(self.type_hierarchy.as_ref(), self.observer.as_ref())
+            .analyze(cfg)?;
+        KotlinMethodModel::from_body_analysis_with_options(declaration, body, options)
     }
 
     fn render_class_model(
         &self,
         class: &KotlinClassModel,
     ) -> Result<String, KotlinDecompilerError> {
-        let unit = crate::profile_scope!("kotlin_backend.class.lower", {
-            KotlinCompilationUnitLowering::lower(
-                class,
-                &self.source_abi,
-                self.type_hierarchy.clone(),
-                self.observer.clone(),
-                self.config.parallel_methods,
-            )
-        })?;
-        crate::profile_scope!("kotlin_backend.class.print", {
-            Ok(KotlinPrinter::new(self.config.indent.clone()).print_compilation_unit(&unit)?)
-        })
+        let unit = KotlinCompilationUnitLowering::lower(
+            class,
+            &self.source_abi,
+            self.type_hierarchy.clone(),
+            self.observer.clone(),
+            self.config.parallel_methods,
+        )?;
+        Ok(KotlinPrinter::new(self.config.indent.clone()).print_compilation_unit(&unit)?)
     }
 
     fn class_stage(&self, class: &str, stage: &'static str) {

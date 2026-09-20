@@ -54,11 +54,8 @@ impl<'ir> FlowCollector<'ir> {
         mut self,
         root: &'ir SemanticNode,
     ) -> Result<ValueFlowGraph<'ir>, ValueRecoveryError> {
-        self.fallthrough_domains = crate::profile_scope!(
-            "value.collect.fallthrough",
-            ControlFallthrough::analyze(root, &mut self.graph.logic)
-        )?;
-        crate::profile_scope!("value.collect.walk", self.collect_facts(root))?;
+        self.fallthrough_domains = ControlFallthrough::analyze(root, &mut self.graph.logic)?;
+        self.collect_facts(root)?;
         Ok(self.graph)
     }
 

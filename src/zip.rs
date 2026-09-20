@@ -7,7 +7,6 @@
 
 use crate::bytes::{read_u16, read_u32};
 use anyhow::{Context, Result, bail};
-#[cfg(not(target_family = "wasm"))]
 use libdeflater::{DecompressionError, Decompressor};
 use std::borrow::Cow;
 
@@ -43,10 +42,8 @@ impl ZipEntry {
 
 /// Random access to an archive's bytes.
 ///
-/// Native maps the file and hands out borrowed slices, so a 342 MiB archive costs no heap
-/// and the parser never copies it. A wasm build has no `mmap`, and its source reads just
-/// the ranges the parser asks for, so the archive never has to exist in memory as a whole.
-/// Returning `Cow` is what lets one parser serve both.
+/// The native archive source hands out borrowed slices from its memory mapping, so a 342 MiB
+/// archive costs no equivalent heap allocation and the parser never copies it.
 pub(crate) trait BytesSource {
     /// Total length of the archive.
     fn source_len(&self) -> usize;
@@ -137,39 +134,16 @@ pub(crate) fn parse_zip_entries<S: BytesSource + ?Sized>(
 ///
 /// The first allocation is bounded by the *compressed* size, but the buffer still grows with
 /// whatever the deflate stream really produces, so a few megabytes of input can expand to
-/// gigabytes (a "zip bomb"). On wasm that ends in a failed allocation, which kills the
-/// instance instead of reporting anything; here it is bounded and reported as an error.
+/// gigabytes (a "zip bomb"). The limit makes this a reported error instead of an allocation
+/// failure.
 /// Real DEX entries are tens of MiB - the largest in the 343 MiB sample APK is 11.4 MiB - so
 /// this is far above any legitimate archive while keeping the worst case survivable.
 pub(crate) const DEFAULT_MAX_INFLATED_ENTRY: usize = 256 << 20;
 
-/// The ceiling in force.
-///
-/// A host with a tighter memory budget - a browser holding the WASI instance - lowers this
-/// before its first command through `RASC_MAX_INFLATED_ENTRY`, and the CLI leaves the
-/// default. Kept as a process global because the limit is read once per command and threaded
-/// down from there, so no parse function has to look it up per entry.
-static MAX_INFLATED_ENTRY: std::sync::atomic::AtomicUsize =
-    std::sync::atomic::AtomicUsize::new(DEFAULT_MAX_INFLATED_ENTRY);
-
-/// Sets the per-entry ceiling and returns the previous one.
-///
-/// Called once at startup from the environment, before any command runs: the limit has to be
-/// in force before the first allocation, so this is not something a command can reach.
-pub(crate) fn set_max_inflated_entry(bytes: usize) -> usize {
-    MAX_INFLATED_ENTRY.swap(bytes, std::sync::atomic::Ordering::Relaxed)
-}
-
-/// The ceiling in force, read once per command rather than per entry.
-pub(crate) fn max_inflated_entry() -> usize {
-    MAX_INFLATED_ENTRY.load(std::sync::atomic::Ordering::Relaxed)
-}
-
 /// The message for an entry that needs more room than the ceiling allows.
 ///
-/// The ceiling is host policy and may be far below a mebibyte - that is what a host with a
-/// tight budget asks for - and "0 MiB" is a number a reader cannot act on, so a ceiling that
-/// small is reported exactly.
+/// The ceiling may be far below a mebibyte, and "0 MiB" is a number a reader cannot act on,
+/// so a ceiling that small is reported exactly.
 fn over_limit(entry: &ZipEntry, max_inflated: usize) -> anyhow::Error {
     let limit = if max_inflated < 1 << 20 {
         format!("{max_inflated} bytes")
@@ -181,10 +155,8 @@ fn over_limit(entry: &ZipEntry, max_inflated: usize) -> anyhow::Error {
 
 /// The message for a deflate stream that cannot be decoded.
 ///
-/// libdeflate and miniz_oxide word this differently, and the host-driven builds have to
-/// report what the native build reports: the error text is part of the CLI's behaviour, and
-/// the corpora assert that the wasm build matches it. So it is generated here instead of
-/// being taken from whichever backend is compiled in.
+/// The error text is part of the CLI's behaviour, so it is generated here instead of being
+/// taken from the decoder backend.
 fn incomplete_stream(entry: &ZipEntry) -> anyhow::Error {
     anyhow::anyhow!("{} is not a complete deflate stream", entry.name)
 }
@@ -219,84 +191,17 @@ fn compressed_slice<'a, S: BytesSource + ?Sized>(
         .context("bad compressed range")
 }
 
-/// Reads `entry` through the streaming decoder, stopping once `aim` bytes are out.
-///
-/// This is wasm's prefix path: with no libdeflate the stream is decoded in 256 KiB
-/// steps and the caller's decision is never needed, because the target is a byte count
-/// the caller derived from the header and the id tables. Chunking is what keeps a
-/// browser's linear memory bounded - the prefix grows to `aim`, not to the entry.
-#[cfg(target_family = "wasm")]
-fn inflate_prefix_streaming<S: BytesSource + ?Sized>(
-    source: &S,
-    entry: &ZipEntry,
-    max_inflated: usize,
-    aim: usize,
-) -> Result<Vec<u8>> {
-    const CHUNK: usize = 1 << 18;
-    let target = aim.min(entry.uncompressed_size);
-    if target > max_inflated {
-        return Err(over_limit(entry, max_inflated));
-    }
-    let compressed = compressed_slice(source, entry)?;
-    let compressed: &[u8] = &compressed;
-    let mut decompressor = flate2::Decompress::new(false);
-    let mut output: Vec<u8> = Vec::new();
-    loop {
-        let base = output.len();
-        output.resize(base + CHUNK, 0);
-        let consumed = decompressor.total_in() as usize;
-        let status = decompressor
-            .decompress(
-                compressed.get(consumed..).context("compressed range")?,
-                &mut output[base..],
-                flate2::FlushDecompress::None,
-            )
-            .with_context(|| format!("inflate prefix of {}", entry.name))?;
-        let written = decompressor.total_out() as usize - base;
-        output.truncate(base + written);
-        // The prefix path needs its own ceiling: a stream that never reaches `target`
-        // would otherwise grow the buffer until the allocation fails.
-        if output.len() > max_inflated {
-            return Err(over_limit(entry, max_inflated));
-        }
-        if output.len() >= target || status == flate2::Status::StreamEnd {
-            return Ok(output);
-        }
-        if written == 0 && decompressor.total_in() as usize == consumed {
-            bail!("deflate made no progress for {}", entry.name);
-        }
-    }
-}
-
 /// Reads the first `aim` bytes of `entry` (or all of it when it is shorter).
 ///
-/// This is what the prefix paths - the class index, a class lookup, and the
-/// archive-wide policy probe that decides whether those are worth it - read a DEX
-/// with. Everything they look at (the header, the id tables, the string data up to
-/// the last string's offset, the class_defs) sits before the code section, which is
-/// most of a DEX, so a prefix read is where a string-only command's speed comes from.
-///
-/// The bytes returned are a correct prefix of the entry in every case; a caller that
-/// needs more than it got has to say so, and every reader in [`crate::dex::prefix`]
-/// answers `None` rather than guessing, so a short prefix costs a fallback and never
-/// a wrong answer.
-#[cfg(not(target_family = "wasm"))]
+/// libdeflate cannot stream, so a margin accounts for its maximum shortfall when the
+/// requested prefix ends inside a match or stored block.
 pub(crate) fn inflate_prefix<S: BytesSource + ?Sized>(
     source: &S,
     entry: &ZipEntry,
     max_inflated: usize,
     aim: usize,
 ) -> Result<Vec<u8>> {
-    // libdeflate cannot stream: one call decodes into a fixed-size buffer and stops when
-    // it is full, reporting only `InsufficientSpace` - not how much it wrote. The bytes it
-    // did write are a correct prefix, but it stops *before* a match or a stored block that
-    // would not fit (max match 258 bytes, max stored block 65535), so up to 65534 bytes
-    // short of the buffer size are on the table. Asking for `aim + MARGIN` is therefore
-    // what makes the first `aim` bytes trustworthy; compiled-in as a constant because it is
-    // a property of the decoder, not of the data. See libdeflate's
-    // `decompress_template.h` (`LIBDEFLATE_INSUFFICIENT_SPACE` paths).
     const MARGIN: usize = 64 * 1024;
-
     if entry.compression != 8 {
         return inflate_entry(source, entry, max_inflated);
     }
@@ -305,46 +210,17 @@ pub(crate) fn inflate_prefix<S: BytesSource + ?Sized>(
         return Err(over_limit(entry, max_inflated));
     }
     let compressed = compressed_slice(source, entry)?;
-    // An empty deflate stream is the one case where libdeflate and the streaming decoder
-    // would disagree on the wording: libdeflate reports it as bad data, while the stream
-    // reaches the end of its input without producing a byte and says so. The contract is
-    // that both backends report the same text (see the crafted-archive corpus), and the
-    // streaming path's wording is the one this file has always produced, so it is
-    // reproduced here rather than relayed from the backend.
     if compressed.is_empty() {
         bail!("deflate made no progress for {}", entry.name);
     }
-    // The first allocation is the prefix plus the decoder's worst-case shortfall, so a
-    // crafted stream cannot make this grow: it either fits or it is a prefix.
     let mut buffer = vec![0u8; aim + MARGIN];
     let mut decompressor = Decompressor::new();
     match decompressor.deflate_decompress(&compressed, &mut buffer) {
-        Ok(written) => {
-            buffer.truncate(written);
-        }
-        // The stream is longer than `aim`: the first `aim` bytes are exact (see MARGIN).
+        Ok(written) => buffer.truncate(written),
         Err(DecompressionError::InsufficientSpace) => buffer.truncate(aim),
         Err(_error) => return Err(incomplete_stream(entry)),
     }
     Ok(buffer)
-}
-
-/// Reads the first `aim` bytes of `entry` (or all of it when it is shorter).
-///
-/// wasm has no libdeflate, so the streaming decoder does the work and stops at the
-/// target. The chunked loop is what keeps a browser's linear memory bounded: the
-/// prefix grows in 256 KiB steps and the caller's decision is asked after each one.
-#[cfg(target_family = "wasm")]
-pub(crate) fn inflate_prefix<S: BytesSource + ?Sized>(
-    source: &S,
-    entry: &ZipEntry,
-    max_inflated: usize,
-    aim: usize,
-) -> Result<Vec<u8>> {
-    if entry.compression != 8 {
-        return inflate_entry(source, entry, max_inflated);
-    }
-    inflate_prefix_streaming(source, entry, max_inflated, aim)
 }
 
 pub(crate) fn inflate_entry<S: BytesSource + ?Sized>(
@@ -353,8 +229,6 @@ pub(crate) fn inflate_entry<S: BytesSource + ?Sized>(
     max_inflated: usize,
 ) -> Result<Vec<u8>> {
     let compressed = compressed_slice(source, entry)?;
-    // The rest of the function works on plain bytes; the `Cow` stays alive as the
-    // shadowed binding, so a borrowed range still means zero copies on native.
     let compressed: &[u8] = &compressed;
     match entry.compression {
         0 => {
@@ -369,20 +243,11 @@ pub(crate) fn inflate_entry<S: BytesSource + ?Sized>(
             Ok(compressed.to_vec())
         }
         8 => {
-            // A declared uncompressed size is attacker-controlled, and a ZIP64
-            // placeholder (0xFFFFFFF0) used to reserve ~4 GiB before any
-            // validation could run. Grow the buffer on demand instead: the first
-            // capacity is four times the compressed size, which covers the ratios
-            // real entries show (the benchmark's is 2.8), and a larger entry pays
-            // one retry per doubling.
             let declared = entry.uncompressed_size;
             let initial = declared.min(entry.compressed_size.saturating_mul(4).max(64 * 1024));
-            // Reject before allocating: a host that set a ceiling below the first estimate
-            // wants the entry reported, not a smaller guess at its size.
             if initial > max_inflated {
                 return Err(over_limit(entry, max_inflated));
             }
-            #[cfg(not(target_family = "wasm"))]
             let (output, written) = {
                 let mut output = vec![0; initial];
                 let mut decompressor = Decompressor::new();
@@ -396,90 +261,11 @@ pub(crate) fn inflate_entry<S: BytesSource + ?Sized>(
                             }
                             output = vec![0; grown];
                         }
-                        Err(_error) => {
-                            return Err(incomplete_stream(entry));
-                        }
+                        Err(_error) => return Err(incomplete_stream(entry)),
                     }
                 };
                 (output, written)
             };
-            // wasm targets have no C deflate, so the pure Rust decoder does the work. The
-            // safety property is unchanged: the first capacity is bounded by the
-            // *compressed* size rather than by the declared one, the decoder grows the
-            // buffer to whatever the stream really produces, and the declared size is
-            // checked against that below exactly as on native.
-            //
-            // The low-level `Decompress` API rather than a `Read` adapter, because the two
-            // failures it can report are not the same claim and the message says which one
-            // happened: a stream that ends without its final block is
-            // [`incomplete_stream`], exactly as libdeflate reports it natively, while a
-            // stream that ends properly and still disagrees with the declared size is a
-            // size mismatch. `read_to_end` cannot tell them apart - it returns however many
-            // bytes arrived - which made a truncated entry read as a wrong size here and as
-            // an incomplete stream on native.
-            #[cfg(target_family = "wasm")]
-            let (output, written) = {
-                let mut output = vec![0u8; initial];
-                let mut decompressor = flate2::Decompress::new(false);
-                let written = loop {
-                    let before_in = decompressor.total_in() as usize;
-                    let before_out = decompressor.total_out() as usize;
-                    // `None`, not `Finish`: `Finish` tells the decoder that the output
-                    // buffer must be big enough to complete the stream in one call, which
-                    // is exactly the assumption this loop is here to avoid.
-                    let status = decompressor
-                        .decompress(
-                            &compressed[before_in..],
-                            &mut output[before_out..],
-                            flate2::FlushDecompress::None,
-                        )
-                        .map_err(|_error| incomplete_stream(entry))?;
-                    let produced = decompressor.total_out() as usize;
-                    if status == flate2::Status::StreamEnd {
-                        break produced;
-                    }
-                    if produced == output.len() {
-                        // The buffer is full and the stream is not finished, so it needs more
-                        // room. The declared size is the ceiling for that, exactly as it is
-                        // for libdeflate natively: past it there is no larger buffer to hand
-                        // over, and the two targets have to agree on what that means. One
-                        // byte above it is the last attempt, so that a legitimate stream
-                        // ending exactly at the declared size can say so with `StreamEnd`.
-                        let grown = if output.len() >= declared {
-                            declared.saturating_add(1)
-                        } else {
-                            output
-                                .len()
-                                .saturating_mul(2)
-                                .max(64 * 1024)
-                                .min(declared)
-                        };
-                        if grown > max_inflated {
-                            return Err(over_limit(entry, max_inflated));
-                        }
-                        if grown <= output.len() {
-                            return Err(incomplete_stream(entry));
-                        }
-                        output.resize(grown, 0);
-                        continue;
-                    }
-                    // Input exhausted, or nothing moved at all: either way the stream did not
-                    // reach its end, and there is nothing further to try.
-                    let stalled = produced == before_out && before_in == decompressor.total_in() as usize;
-                    if stalled || decompressor.total_in() as usize == compressed.len() {
-                        return Err(incomplete_stream(entry));
-                    }
-                };
-                output.truncate(written);
-                (output, written)
-            };
-            // A stream that produces *more* than the declared size cannot be finished with
-            // the room the header asked for, which is the same wall libdeflate hits
-            // natively; both report it as an incomplete stream rather than as a wrong size.
-            #[cfg(target_family = "wasm")]
-            if written > declared {
-                return Err(incomplete_stream(entry));
-            }
             if written != declared {
                 bail!(
                     "size mismatch for {}: expected {declared}, got {written}",
@@ -491,7 +277,6 @@ pub(crate) fn inflate_entry<S: BytesSource + ?Sized>(
         method => bail!("unsupported compression method {method} for {}", entry.name),
     }
 }
-
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;

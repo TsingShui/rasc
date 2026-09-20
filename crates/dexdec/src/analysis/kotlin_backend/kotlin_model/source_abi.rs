@@ -990,14 +990,12 @@ impl KotlinSourceAbi {
                 (String, crate::ir::MethodDescriptor),
                 Vec<(ArgType, GenericMethodContract)>,
             >::new();
-            crate::profile_scope!("abi.bridge_index_build", {
-                for (method, contract) in &generic_methods {
-                    declarations
-                        .entry((method.name.clone(), method.descriptor.clone()))
-                        .or_default()
-                        .push((method.owner.clone(), contract.clone()));
-                }
-            });
+            for (method, contract) in &generic_methods {
+                declarations
+                    .entry((method.name.clone(), method.descriptor.clone()))
+                    .or_default()
+                    .push((method.owner.clone(), contract.clone()));
+            }
             let mut owner_ancestors =
                 std::collections::BTreeMap::<ArgType, std::collections::BTreeSet<ArgType>>::new();
             for class in classes {

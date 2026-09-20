@@ -281,7 +281,6 @@ impl DexClasses {
                 AnnotationsDirectory::default()
             };
 
-
             // If class_data_off == 0 then we have no class data
             let mut class_data = None;
             if level != ClassDecodeLevel::Declaration && class_data_off != 0 {

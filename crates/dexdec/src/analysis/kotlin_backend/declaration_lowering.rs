@@ -47,25 +47,21 @@ impl KotlinCompilationUnitLowering {
         let package = package_name.as_ref().map(ToString::to_string);
         let current_type = class.declaration.current_type();
         let (field_references, method_references) =
-            crate::profile_scope!("kotlin_backend.lower.references", {
-                (class.field_references(), class.method_references())
-            });
+            (class.field_references(), class.method_references());
         let (
             generic_fields,
             generic_methods,
             method_nullability,
             referenced_overloads,
             referenced_constructors,
-        ) = crate::profile_scope!("kotlin_backend.lower.abi", {
-            (
-                source_abi.generic_fields(field_references.iter()),
-                source_abi.generic_methods(method_references.iter()),
-                source_abi.referenced_nullability(method_references.iter()),
-                source_abi.referenced_overloads(method_references.iter()),
-                source_abi.referenced_constructors(method_references.iter()),
-            )
-        });
-        let type_uses = crate::profile_scope!("kotlin_backend.lower.type_uses", {
+        ) = (
+            source_abi.generic_fields(field_references.iter()),
+            source_abi.generic_methods(method_references.iter()),
+            source_abi.referenced_nullability(method_references.iter()),
+            source_abi.referenced_overloads(method_references.iter()),
+            source_abi.referenced_constructors(method_references.iter()),
+        );
+        let type_uses = {
             let mut type_uses = ClassTypeUses::collect(class);
             if let Some(owner) = current_type.as_ref() {
                 type_uses.extend(source_abi.declared_source_types(owner));
@@ -78,40 +74,34 @@ impl KotlinCompilationUnitLowering {
                 GenericTypeUses::method_contract(contract, &mut type_uses);
             }
             type_uses
-        });
+        };
         // Enclosing-instance entries scoped to the unit's referenced types
         // (mirroring the Java backend) instead of the whole archive catalog.
-        let outer_instances = crate::profile_scope!("kotlin_backend.lower.outer_instances", {
-            source_abi
-                .referenced_outer_instances(type_uses.iter())
-                .into_iter()
-                .chain(
-                    class
-                        .outer_instances()
-                        .map(|(field, outer)| (field.clone(), outer.clone())),
+        let outer_instances = source_abi
+            .referenced_outer_instances(type_uses.iter())
+            .into_iter()
+            .chain(
+                class
+                    .outer_instances()
+                    .map(|(field, outer)| (field.clone(), outer.clone())),
+            )
+            .collect();
+        let names = KotlinTypeNameResolver::for_class(
+            class,
+            package.as_deref(),
+            current_type.as_ref(),
+            type_uses,
+        )?;
+        let members = std::sync::Arc::new(
+            ClassMemberNames::collect(class)
+                .with_source_names(source_abi.declared_source_names())
+                .with_property_accessors(
+                    source_abi.declared_property_getters(),
+                    source_abi.declared_property_setters(),
                 )
-                .collect()
-        });
-        let names = crate::profile_scope!("kotlin_backend.lower.type_names", {
-            KotlinTypeNameResolver::for_class(
-                class,
-                package.as_deref(),
-                current_type.as_ref(),
-                type_uses,
-            )
-        })?;
-        let members = crate::profile_scope!("kotlin_backend.lower.member_names", {
-            std::sync::Arc::new(
-                ClassMemberNames::collect(class)
-                    .with_source_names(source_abi.declared_source_names())
-                    .with_property_accessors(
-                        source_abi.declared_property_getters(),
-                        source_abi.declared_property_setters(),
-                    )
-                    .with_constructor_layouts(referenced_constructors)
-                    .with_overloads(referenced_overloads),
-            )
-        });
+                .with_constructor_layouts(referenced_constructors)
+                .with_overloads(referenced_overloads),
+        );
         let source_field_types = generic_fields
             .iter()
             .map(|(field, contract)| {
@@ -131,25 +121,23 @@ impl KotlinCompilationUnitLowering {
             .imports()
             .filter(|import| source_abi.import_is_accessible(import))
             .collect();
-        let mut declaration = crate::profile_scope!("kotlin_backend.lower.declaration", {
-            KotlinTypeLowering::new(
-                &names,
-                members.as_ref(),
-                members.clone(),
-                source_abi.as_ref(),
-                source_abi.clone(),
-                hierarchy,
-                source_field_types,
-                generic_fields,
-                generic_methods,
-                method_nullability,
-                source_object_types,
-                outer_instances,
-                observer,
-                parallel_methods,
-            )
-            .lower(class)
-        })?;
+        let mut declaration = KotlinTypeLowering::new(
+            &names,
+            members.as_ref(),
+            members.clone(),
+            source_abi.as_ref(),
+            source_abi.clone(),
+            hierarchy,
+            source_field_types,
+            generic_fields,
+            generic_methods,
+            method_nullability,
+            source_object_types,
+            outer_instances,
+            observer,
+            parallel_methods,
+        )
+        .lower(class)?;
         crate::language::kotlin::KotlinImportAnalysis::retain_used(&mut imports, &mut declaration);
         Ok(KotlinCompilationUnit {
             package: package_name,
@@ -853,12 +841,10 @@ impl<'a> KotlinTypeLowering<'a> {
                 })
             })
             .collect::<Vec<_>>();
-        let mut fields = crate::profile_scope!("kotlin_backend.lower.fields", {
-            field_models
-                .iter()
-                .map(|field| self.field(field, owner.as_ref()))
-                .collect::<Result<Vec<_>, _>>()
-        })?;
+        let mut fields = field_models
+            .iter()
+            .map(|field| self.field(field, owner.as_ref()))
+            .collect::<Result<Vec<_>, _>>()?;
         let synthetic_final_fields = field_models
             .iter()
             .zip(&fields)
@@ -1020,15 +1006,13 @@ impl<'a> KotlinTypeLowering<'a> {
         {
             return Ok(None);
         }
-        let lowered = crate::profile_scope!("kotlin_backend.lower.method", {
-            self.method(
-                method,
-                owner,
-                class.declaration.signature.as_ref(),
-                source_super_type,
-                source_field_types,
-            )
-        });
+        let lowered = self.method(
+            method,
+            owner,
+            class.declaration.signature.as_ref(),
+            source_super_type,
+            source_field_types,
+        );
         let lowered = match lowered {
             Ok(lowered) => lowered,
             Err(error) if error.is_cancelled() => return Err(error),
@@ -1390,8 +1374,7 @@ impl<'a> KotlinTypeLowering<'a> {
     ) -> Result<KotlinMethodDeclaration, KotlinDecompilerError> {
         let declaration = &method.declaration;
         let signature = declaration.signature.as_ref();
-        let annotations =
-            crate::profile_scope!("lower.m.annotations", self.method_annotations(declaration))?;
+        let annotations = self.method_annotations(declaration)?;
         // The contract is keyed by the DEX member, so the reference has to be
         // rebuilt from the DEX name rather than from the Kotlin identifier the
         // model already renamed and escaped.
@@ -1411,21 +1394,18 @@ impl<'a> KotlinTypeLowering<'a> {
                 return_type: declaration.return_type.clone().unwrap_or(ArgType::VOID),
             },
         });
-        let (nullability_contract, extension_receiver_index, suspend_declaration) =
-            crate::profile_scope!("lower.m.abi", {
-                (
-                    method_reference
-                        .as_ref()
-                        .and_then(|method| self.source_abi.method_nullability(method)),
-                    method_reference
-                        .as_ref()
-                        .and_then(|method| self.source_abi.declared_extension_receiver(method)),
-                    method_reference
-                        .as_ref()
-                        .and_then(|method| self.source_abi.declared_suspend_function(method))
-                        .cloned(),
-                )
-            });
+        let (nullability_contract, extension_receiver_index, suspend_declaration) = (
+            method_reference
+                .as_ref()
+                .and_then(|method| self.source_abi.method_nullability(method)),
+            method_reference
+                .as_ref()
+                .and_then(|method| self.source_abi.declared_extension_receiver(method)),
+            method_reference
+                .as_ref()
+                .and_then(|method| self.source_abi.declared_suspend_function(method))
+                .cloned(),
+        );
         let mut name_scope = crate::language::kotlin::KotlinNameScope::default();
         let parameter_naming = super::semantic_naming::ParameterNameRecovery::new(self.names);
         let mut visible_parameter = 0usize;
@@ -1465,91 +1445,74 @@ impl<'a> KotlinTypeLowering<'a> {
             })
             .collect::<Vec<_>>();
         let mut visible_index = 0usize;
-        let parameters = crate::profile_scope!(
-            "lower.m.params",
-            declaration
-                .parameters
-                .iter()
-                .enumerate()
-                .filter(|(_, parameter)| !parameter.hidden)
-                .map(|(parameter_index, parameter)| {
-                    let signature_index = visible_index;
-                    visible_index += 1;
-                    let declared_type = method_reference.as_ref().and_then(|method| {
-                        self.source_abi
-                            .declared_parameter_type(method, parameter_index)
-                    });
-                    let vararg_element_nullable = method_reference.as_ref().and_then(|method| {
-                        self.source_abi
-                            .declared_vararg_element_nullable(method, parameter_index)
-                    });
-                    let mut ty = self.method_parameter_type(
-                        signature,
-                        signature_index,
-                        &parameter.ty,
-                        declaration
-                            .source_parameter_types
-                            .get(parameter_index)
-                            .and_then(Option::as_ref),
-                    )?;
-                    if let Some(declared_type) = declared_type {
-                        Self::apply_declared_type_qualifiers(&mut ty, declared_type);
-                    }
-                    Ok(KotlinMethodParameter {
-                        annotations: self.constants.annotations(&parameter.annotations)?,
-                        ty,
-                        name: parameter_names[parameter_index].clone(),
-                        nullable: vararg_element_nullable.unwrap_or_else(|| {
-                            !nullability_contract.is_some_and(|contract| {
-                                contract.parameter_is_non_null(parameter_index)
-                            })
-                        }),
-                        varargs: parameter.varargs || vararg_element_nullable.is_some(),
-                        default_value: None,
-                    })
+        let parameters = declaration
+            .parameters
+            .iter()
+            .enumerate()
+            .filter(|(_, parameter)| !parameter.hidden)
+            .map(|(parameter_index, parameter)| {
+                let signature_index = visible_index;
+                visible_index += 1;
+                let declared_type = method_reference.as_ref().and_then(|method| {
+                    self.source_abi
+                        .declared_parameter_type(method, parameter_index)
+                });
+                let vararg_element_nullable = method_reference.as_ref().and_then(|method| {
+                    self.source_abi
+                        .declared_vararg_element_nullable(method, parameter_index)
+                });
+                let mut ty = self.method_parameter_type(
+                    signature,
+                    signature_index,
+                    &parameter.ty,
+                    declaration
+                        .source_parameter_types
+                        .get(parameter_index)
+                        .and_then(Option::as_ref),
+                )?;
+                if let Some(declared_type) = declared_type {
+                    Self::apply_declared_type_qualifiers(&mut ty, declared_type);
+                }
+                Ok(KotlinMethodParameter {
+                    annotations: self.constants.annotations(&parameter.annotations)?,
+                    ty,
+                    name: parameter_names[parameter_index].clone(),
+                    nullable: vararg_element_nullable.unwrap_or_else(|| {
+                        !nullability_contract
+                            .is_some_and(|contract| contract.parameter_is_non_null(parameter_index))
+                    }),
+                    varargs: parameter.varargs || vararg_element_nullable.is_some(),
+                    default_value: None,
                 })
-                .collect::<Result<Vec<_>, KotlinDecompilerError>>()?
-        );
+            })
+            .collect::<Result<Vec<_>, KotlinDecompilerError>>()?;
         let extension_receiver_position = extension_receiver_index
             .and_then(|receiver| visible_parameter_position(&declaration.parameters, receiver));
         let suspend_continuation_position = suspend_declaration.as_ref().and_then(|suspend| {
             visible_parameter_position(&declaration.parameters, suspend.continuation_parameter)
         });
-        let (mut return_type, throws) = crate::profile_scope!("lower.m.signature", {
-            let declared_return_type = method_reference
-                .as_ref()
-                .and_then(|method| self.source_abi.declared_return_type(method));
-            let mut return_type = self.method_return_type(declaration, signature)?;
-            if let (Some(return_type), Some(declared_type)) =
-                (return_type.as_mut(), declared_return_type)
-            {
-                let return_type = &mut *return_type;
-                Self::apply_declared_type_qualifiers(return_type, declared_type);
-            }
-            let throws = self.method_throws(declaration, signature)?;
-            Ok::<_, KotlinDecompilerError>((return_type, throws))
-        })?;
+        let declared_return_type = method_reference
+            .as_ref()
+            .and_then(|method| self.source_abi.declared_return_type(method));
+        let mut return_type = self.method_return_type(declaration, signature)?;
+        if let (Some(return_type), Some(declared_type)) =
+            (return_type.as_mut(), declared_return_type)
+        {
+            let return_type = &mut *return_type;
+            Self::apply_declared_type_qualifiers(return_type, declared_type);
+        }
+        let throws = self.method_throws(declaration, signature)?;
         let instance_scope = declaration.kind != MethodModelKind::ClassInitializer
             && !declaration.modifiers.contains(&KotlinModifier::Static);
         let lexical_owner = instance_scope.then_some(owner).flatten();
         let lexical_class_signature = instance_scope.then_some(class_signature).flatten();
-        let (source_current_type, source_type_erasures, source_type_bounds, generic_throw_types) =
-            crate::profile_scope!("lower.m.typevars", {
-                let source_current_type =
-                    self.source_current_type(lexical_owner, lexical_class_signature)?;
-                let source_type_erasures =
-                    self.type_variable_erasures(lexical_owner, lexical_class_signature, signature);
-                let source_type_bounds =
-                    self.type_variable_bounds(lexical_owner, lexical_class_signature, signature)?;
-                let generic_throw_types =
-                    self.generic_throw_types(signature, lexical_class_signature)?;
-                Ok::<_, KotlinDecompilerError>((
-                    source_current_type,
-                    source_type_erasures,
-                    source_type_bounds,
-                    generic_throw_types,
-                ))
-            })?;
+        let source_current_type =
+            self.source_current_type(lexical_owner, lexical_class_signature)?;
+        let source_type_erasures =
+            self.type_variable_erasures(lexical_owner, lexical_class_signature, signature);
+        let source_type_bounds =
+            self.type_variable_bounds(lexical_owner, lexical_class_signature, signature)?;
+        let generic_throw_types = self.generic_throw_types(signature, lexical_class_signature)?;
         let mut visible_parameters = parameters.iter();
         let source_parameter_types = declaration
             .parameters
@@ -1571,7 +1534,7 @@ impl<'a> KotlinTypeLowering<'a> {
             .map(Ok)
             .or_else(|| {
                 method.body.as_ref().and_then(|body| {
-                    let resolved_outer = crate::profile_scope!("lower.m.outer", {
+                    let resolved_outer =
                         (|| -> Result<std::collections::BTreeMap<_, _>, KotlinDecompilerError> {
                             let mut outer_instances = std::collections::BTreeMap::new();
                             for (field, outer) in &self.outer_instances {
@@ -1583,46 +1546,43 @@ impl<'a> KotlinTypeLowering<'a> {
                                 outer_instances.insert(field.clone(), source);
                             }
                             Ok(outer_instances)
-                        })()
-                    });
+                        })();
                     let outer_instances = resolved_outer.ok()?;
-                    let lowered = crate::profile_scope!("kotlin_backend.lower.method_body", {
-                        body.lower(
-                            &parameter_names,
-                            self.names,
-                            self.shared_members.clone(),
-                            source_field_types.clone(),
-                            self.generic_fields.clone(),
-                            self.generic_methods.clone(),
-                            self.class_generic_uses.clone(),
-                            self.method_nullability.clone(),
-                            self.source_abi.declared_extension_receivers(),
-                            self.source_abi.declared_default_calls(),
-                            self.source_abi.declared_vararg_parameters(),
-                            self.source_abi.platform_symbols(),
-                            self.source_abi.non_null_fields(),
-                            self.source_abi.singleton_types(),
-                            self.source_abi.singleton_instances(),
-                            self.source_object_types.clone(),
-                            self.generic_type_projection.clone(),
-                            source_current_type.clone(),
-                            source_super_type.cloned(),
-                            &source_parameter_types,
-                            return_type.clone(),
-                            source_type_erasures.clone(),
-                            source_type_bounds.clone(),
-                            generic_throw_types.clone(),
-                            outer_instances,
-                            declaration
-                                .kind
-                                .is_class_initializer()
-                                .then(|| owner.map(|owner| self.members.field_names(owner)))
-                                .flatten()
-                                .unwrap_or_default(),
-                            declaration.kind.is_class_initializer(),
-                            self.observer.clone(),
-                        )
-                    });
+                    let lowered = body.lower(
+                        &parameter_names,
+                        self.names,
+                        self.shared_members.clone(),
+                        source_field_types.clone(),
+                        self.generic_fields.clone(),
+                        self.generic_methods.clone(),
+                        self.class_generic_uses.clone(),
+                        self.method_nullability.clone(),
+                        self.source_abi.declared_extension_receivers(),
+                        self.source_abi.declared_default_calls(),
+                        self.source_abi.declared_vararg_parameters(),
+                        self.source_abi.platform_symbols(),
+                        self.source_abi.non_null_fields(),
+                        self.source_abi.singleton_types(),
+                        self.source_abi.singleton_instances(),
+                        self.source_object_types.clone(),
+                        self.generic_type_projection.clone(),
+                        source_current_type.clone(),
+                        source_super_type.cloned(),
+                        &source_parameter_types,
+                        return_type.clone(),
+                        source_type_erasures.clone(),
+                        source_type_bounds.clone(),
+                        generic_throw_types.clone(),
+                        outer_instances,
+                        declaration
+                            .kind
+                            .is_class_initializer()
+                            .then(|| owner.map(|owner| self.members.field_names(owner)))
+                            .flatten()
+                            .unwrap_or_default(),
+                        declaration.kind.is_class_initializer(),
+                        self.observer.clone(),
+                    );
                     Some(lowered)
                 })
             })

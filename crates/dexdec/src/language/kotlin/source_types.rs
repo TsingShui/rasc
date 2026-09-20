@@ -200,7 +200,6 @@ pub(super) struct KotlinTypeRelations<'a> {
     hierarchy: Option<&'a dyn GenericTypeProjection>,
 }
 
-#[cfg_attr(feature = "profiling", hotpath::measure_all)]
 impl<'a> KotlinTypeRelations<'a> {
     pub(super) fn new(
         source_types: &'a BTreeMap<ArgType, KotlinType>,
@@ -335,18 +334,14 @@ impl<'a> KotlinTypeRelations<'a> {
         target: &super::KotlinClassType,
     ) -> bool {
         let (source_erasure, target_erasure) =
-            crate::profile_scope!("type_relations.class.erasures", {
-                (self.erasure_of_class(source), self.erasure_of_class(target))
+            (self.erasure_of_class(source), self.erasure_of_class(target));
+        let erased_subtype = source_erasure
+            .as_ref()
+            .zip(target_erasure.as_ref())
+            .is_some_and(|(source, target)| {
+                self.hierarchy
+                    .is_some_and(|hierarchy| hierarchy.is_subtype(source, target))
             });
-        let erased_subtype = crate::profile_scope!("type_relations.class.subtype", {
-            source_erasure
-                .as_ref()
-                .zip(target_erasure.as_ref())
-                .is_some_and(|(source, target)| {
-                    self.hierarchy
-                        .is_some_and(|hierarchy| hierarchy.is_subtype(source, target))
-                })
-        });
         if erased_subtype && Self::class_is_raw(target) {
             return true;
         }
@@ -357,10 +352,8 @@ impl<'a> KotlinTypeRelations<'a> {
             let Some(target_erasure) = target_erasure.as_ref() else {
                 return false;
             };
-            let Some(value) = crate::profile_scope!("type_relations.class.project", {
-                self.hierarchy.and_then(|hierarchy| {
-                    hierarchy.project_supertype(&KotlinType::Class(source.clone()), target_erasure)
-                })
+            let Some(value) = self.hierarchy.and_then(|hierarchy| {
+                hierarchy.project_supertype(&KotlinType::Class(source.clone()), target_erasure)
             }) else {
                 return false;
             };
@@ -509,7 +502,6 @@ enum GenericConstraintOrigin {
     Owner,
 }
 
-#[cfg_attr(feature = "profiling", hotpath::measure_all)]
 impl<'a> GenericTypeSolver<'a> {
     pub(super) fn new(source_types: &'a BTreeMap<ArgType, KotlinType>) -> Self {
         Self {
@@ -1672,7 +1664,6 @@ impl<'a> GenericTypeSolver<'a> {
 
 struct DenotableTypeProjection;
 
-#[cfg_attr(feature = "profiling", hotpath::measure_all)]
 impl DenotableTypeProjection {
     fn argument(argument: KotlinTypeArgument, captured: bool) -> KotlinTypeArgument {
         match argument {
@@ -1700,7 +1691,6 @@ enum GenericVariance {
 
 pub(super) struct GenericTypeEvidence;
 
-#[cfg_attr(feature = "profiling", hotpath::measure_all)]
 impl GenericTypeEvidence {
     fn reconcile(
         left: &KotlinTypeArgument,
@@ -1849,7 +1839,6 @@ struct GenericRequirementLattice<'a> {
     projection: Option<&'a dyn GenericTypeProjection>,
 }
 
-#[cfg_attr(feature = "profiling", hotpath::measure_all)]
 impl<'a> GenericRequirementLattice<'a> {
     fn new(
         source_types: &'a BTreeMap<ArgType, KotlinType>,
@@ -1942,7 +1931,6 @@ impl<'a> GenericRequirementLattice<'a> {
 
 pub(super) struct GenericInvocationCompatibility;
 
-#[cfg_attr(feature = "profiling", hotpath::measure_all)]
 impl GenericInvocationCompatibility {
     pub(super) fn requires_unchecked_conversion(
         formal: &JvmTypeSignature,
@@ -2069,7 +2057,6 @@ impl GenericInvocationCompatibility {
 
 pub(super) struct GenericTypeRelation;
 
-#[cfg_attr(feature = "profiling", hotpath::measure_all)]
 impl GenericTypeRelation {
     pub(super) fn converge(
         left: &mut GenericTypeSolver<'_>,
@@ -2190,7 +2177,6 @@ struct TypeEquationGraph {
     dirty_invocations: BTreeSet<usize>,
 }
 
-#[cfg_attr(feature = "profiling", hotpath::measure_all)]
 impl TypeEquationGraph {
     fn rebuild(&mut self, equations: &[TypeEquation], invocations: &[Arc<SemanticOperation>]) {
         self.dependents.clear();
@@ -2445,7 +2431,6 @@ pub(super) struct SourceTypeFlow<'a> {
     collect_diagnostics: bool,
 }
 
-#[cfg_attr(feature = "profiling", hotpath::measure_all)]
 impl<'a> SourceTypeFlow<'a> {
     pub(super) fn solve(
         root: &crate::ir::SemanticNode,
@@ -5548,7 +5533,6 @@ impl<'a> SourceTypeFlow<'a> {
     }
 }
 
-#[cfg_attr(feature = "profiling", hotpath::measure_all)]
 impl SemanticVisitor for SourceTypeFlow<'_> {
     fn enter_node(&mut self, node: &SemanticNode) {
         match node {

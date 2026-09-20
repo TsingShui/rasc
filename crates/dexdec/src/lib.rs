@@ -30,7 +30,6 @@ pub mod frontend;
 pub mod ir;
 pub mod language;
 pub mod platform_symbols;
-pub mod profiling;
 pub(crate) mod timing;
 pub mod visualizer;
 

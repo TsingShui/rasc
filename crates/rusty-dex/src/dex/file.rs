@@ -8,7 +8,9 @@
 //! sorted (the actual sorting method depends on the type of content being sorted -- see the
 //! classes documentations for details).
 
-use crate::dex::classes::{ClassDecodeLevel, ClassDefItem, ClassNestedMetadata, DexClasses, EncodedMethod};
+use crate::dex::classes::{
+    ClassDecodeLevel, ClassDefItem, ClassNestedMetadata, DexClasses, EncodedMethod,
+};
 use crate::dex::code_item::CodeItem;
 use crate::dex::fields::DexFields;
 use crate::dex::header::DexHeader;
@@ -182,10 +184,7 @@ impl DexFile {
     ///
     /// `build_metadata` leaves class annotations undecoded, so lexical analysis
     /// can ask about one class without paying for the whole directory.
-    pub fn nested_metadata(
-        &self,
-        class_index: usize,
-    ) -> Result<&ClassNestedMetadata, DexError> {
+    pub fn nested_metadata(&self, class_index: usize) -> Result<&ClassNestedMetadata, DexError> {
         let class = self
             .classes
             .items

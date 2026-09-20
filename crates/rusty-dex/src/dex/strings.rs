@@ -75,7 +75,8 @@ impl DexString {
             // The bytes are validated by `DexStrings::build` (well-formedness and
             // the UTF-16 length check), so a failure here means the image changed
             // under us; degrade to a lossy view rather than panicking.
-            crate::mutf8::decode(raw).unwrap_or_else(|_| raw.iter().map(|byte| u16::from(*byte)).collect())
+            crate::mutf8::decode(raw)
+                .unwrap_or_else(|_| raw.iter().map(|byte| u16::from(*byte)).collect())
         })
     }
 }
@@ -169,7 +170,9 @@ impl DexStrings {
                 .and_then(|start| start.checked_add(u32::try_from(header_len).ok()?))
                 .ok_or(DexError::InvalidStringIdx)?;
             let end = start
-                .checked_add(u32::try_from(raw_string.len()).map_err(|_| DexError::InvalidStringIdx)?)
+                .checked_add(
+                    u32::try_from(raw_string.len()).map_err(|_| DexError::InvalidStringIdx)?,
+                )
                 .ok_or(DexError::InvalidStringIdx)?;
             strings.push(DexString::from_source(source.clone(), start, end));
 

@@ -240,7 +240,9 @@ fn resolve_type(type_idx: i32, types: &DexTypes, strings: &DexStrings) -> Option
     if type_idx < 0 {
         return None;
     }
-    types.descriptor(strings, type_idx as u32).map(str::to_string)
+    types
+        .descriptor(strings, type_idx as u32)
+        .map(str::to_string)
 }
 
 fn is_valid_identifier(name: &str) -> bool {

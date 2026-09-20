@@ -155,15 +155,9 @@ impl CompletionPreservingRewrite {
     where
         F: FnOnce(SemanticNode) -> Result<SemanticNode, SemanticFoldError>,
     {
-        let before = crate::profile_scope!(
-            "semantic.completion.before",
-            super::SemanticCompletion::analyze(&body)
-        );
+        let before = super::SemanticCompletion::analyze(&body);
         let rewritten = rewrite(body)?;
-        let after = crate::profile_scope!(
-            "semantic.completion.after",
-            super::SemanticCompletion::analyze(&rewritten)
-        );
+        let after = super::SemanticCompletion::analyze(&rewritten);
         if before != after {
             return Err(SemanticFoldError::CompletionChanged { transform: name });
         }
@@ -178,15 +172,9 @@ impl CompletionPreservingRewrite {
     where
         F: FnOnce(SemanticNode) -> Result<SemanticNode, SemanticFoldError>,
     {
-        let before = crate::profile_scope!(
-            "semantic.completion.before",
-            super::SemanticCompletion::analyze(&body)
-        );
+        let before = super::SemanticCompletion::analyze(&body);
         let rewritten = rewrite(body)?;
-        let after = crate::profile_scope!(
-            "semantic.completion.after",
-            super::SemanticCompletion::analyze(&rewritten)
-        );
+        let after = super::SemanticCompletion::analyze(&rewritten);
         if !before.same_control_outcomes(&after) {
             return Err(SemanticFoldError::CompletionChanged { transform: name });
         }
@@ -201,15 +189,9 @@ impl CompletionPreservingRewrite {
     where
         F: FnOnce(SemanticNode) -> Result<SemanticNode, SemanticFoldError>,
     {
-        let before = crate::profile_scope!(
-            "semantic.completion.before",
-            super::SemanticCompletion::analyze(&body)
-        );
+        let before = super::SemanticCompletion::analyze(&body);
         let rewritten = rewrite(body)?;
-        let after = crate::profile_scope!(
-            "semantic.completion.after",
-            super::SemanticCompletion::analyze(&rewritten)
-        );
+        let after = super::SemanticCompletion::analyze(&rewritten);
         if !before.same_void_method_outcomes(&after) {
             return Err(SemanticFoldError::CompletionChanged { transform: name });
         }
@@ -227,10 +209,7 @@ impl SemanticNormalization {
     }
 
     fn rewrite(&mut self, body: SemanticNode) -> Result<SemanticNode, SemanticFoldError> {
-        crate::profile_scope!(
-            "semantic.normalize.fused",
-            SemanticFolder::fold_node(self, body)
-        )
+        SemanticFolder::fold_node(self, body)
     }
 }
 
@@ -736,16 +715,10 @@ impl SemanticFolder for SourceSemanticNormalizer {
             SemanticNode::BasicBlock(block) if block.statements.is_empty() => SemanticNode::Empty,
             node => node,
         };
-        let node = crate::profile_scope!(
-            "source_norm.vacuous",
-            RedundantVacuousPredicate::rewrite(node)
-        );
-        let node = crate::profile_scope!("source_norm.linearizer", BranchLinearizer::rewrite(node));
-        let node = crate::profile_scope!("source_norm.try_scope", TryLexicalScope::extend(node));
-        crate::profile_scope!(
-            "source_norm.normalizer",
-            SemanticNormalizer::new(ReachabilityMode::PruneUnreachable).finish_node(node)
-        )
+        let node = RedundantVacuousPredicate::rewrite(node);
+        let node = BranchLinearizer::rewrite(node);
+        let node = TryLexicalScope::extend(node);
+        SemanticNormalizer::new(ReachabilityMode::PruneUnreachable).finish_node(node)
     }
 }
 
@@ -1988,18 +1961,16 @@ struct LabelReferences {
 
 impl LabelReferences {
     fn count(root: &SemanticNode, label: SemanticLabel) -> usize {
-        crate::profile_scope!("label_refs.count", {
-            let mut references = Self { label, count: 0 };
-            references.visit_node(root);
-            references.count
-        })
+        let mut references = Self { label, count: 0 };
+        references.visit_node(root);
+        references.count
     }
 
     /// Zero-test with early exit: exactly `count(..) == 0`, but stops at the
     /// first matching leave. Label leaves only occur as node variants, so the
     /// descent mirrors `walk_node` without touching statements or expressions.
     fn absent(root: &SemanticNode, label: SemanticLabel) -> bool {
-        crate::profile_scope!("label_refs.absent", !Self::present(root, label))
+        !Self::present(root, label)
     }
 
     fn present(node: &SemanticNode, label: SemanticLabel) -> bool {

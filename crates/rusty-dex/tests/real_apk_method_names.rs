@@ -82,11 +82,7 @@ fn real_apk_every_method_carries_its_name() {
     println!("unnamed: {unnamed}");
     println!("names containing '$': {names_with_dollar}");
 
-    assert_eq!(
-        unnamed,
-        0,
-        "methods without a name: {unnamed_examples:#?}"
-    );
+    assert_eq!(unnamed, 0, "methods without a name: {unnamed_examples:#?}");
     assert!(
         names_with_dollar > 0,
         "no '$'-bearing name found; the regression this test guards is not being exercised"

@@ -9,8 +9,8 @@
 //! transcriptions in the tests.
 
 pub(crate) mod container;
-pub(crate) mod members;
 mod filter;
+pub(crate) mod members;
 mod mutf8;
 mod opcodes;
 pub(crate) mod prefix;
@@ -140,7 +140,8 @@ pub struct ReferenceRow {
 
 pub fn find_references(data: &[u8], query: &Query) -> Result<Vec<ReferenceRow>> {
     let dex = Dex::parse(data)?;
-    let (kind, targets) = dex.resolve_targets(query)?;    if targets.is_empty() {
+    let (kind, targets) = dex.resolve_targets(query)?;
+    if targets.is_empty() {
         return Ok(Vec::new());
     }
     let targets = Targets::new(targets);
@@ -455,13 +456,9 @@ impl<'a> Dex<'a> {
     /// entries are done. Hit sets are unioned, so the merged result does not
     /// depend on how the split happened to be stolen.
     fn scan_all_classes(&self, kind: RefKind, targets: &Targets) -> Result<Vec<Hit>> {
-        // This wasm target has no threads (rayon cannot build its pool there), so the class list is
-        // never split. The split exists to shorten tail latency, not to change results:
-        // both paths are sorted and deduplicated below, so the answer is the same either
-        // way.
-        let mut hits = if cfg!(target_family = "wasm")
-            || self.header.classes_size < PARALLEL_SCAN_CLASSES
-        {
+        // Small class lists are cheaper to scan on the current thread; larger lists are split
+        // to shorten tail latency. Both paths are sorted and deduplicated below.
+        let mut hits = if self.header.classes_size < PARALLEL_SCAN_CLASSES {
             self.scan_all_classes_sequential(kind, targets)?
         } else {
             self.scan_all_classes_parallel(kind, targets)?

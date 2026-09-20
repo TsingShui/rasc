@@ -835,23 +835,21 @@ impl GenericTypeHierarchy {
     }
 
     pub(crate) fn is_subtype(&self, subtype: &ArgType, supertype: &ArgType) -> bool {
-        crate::profile_scope!("hierarchy.is_subtype", {
-            let mut pending = VecDeque::from([subtype.clone()]);
-            let mut visited = BTreeSet::new();
-            while let Some(candidate) = pending.pop_front() {
-                if candidate == *supertype {
-                    return true;
-                }
-                if !visited.insert(candidate.clone()) {
-                    continue;
-                }
-                let Some(declared) = self.hierarchy.class_details(&candidate) else {
-                    continue;
-                };
-                pending.extend(declared.parents.iter().cloned());
+        let mut pending = VecDeque::from([subtype.clone()]);
+        let mut visited = BTreeSet::new();
+        while let Some(candidate) = pending.pop_front() {
+            if candidate == *supertype {
+                return true;
             }
-            false
-        })
+            if !visited.insert(candidate.clone()) {
+                continue;
+            }
+            let Some(declared) = self.hierarchy.class_details(&candidate) else {
+                continue;
+            };
+            pending.extend(declared.parents.iter().cloned());
+        }
+        false
     }
 
     /// Every type reachable from `ty` through parent links, including `ty`.
@@ -1330,29 +1328,25 @@ impl GenericTypeHierarchy {
         instantiated_owner: &JvmTypeSignature,
         declaring_owner: &ClassTypeSignature,
     ) -> Option<TypeSubstitution> {
-        crate::profile_scope!("hierarchy.member_substitution", {
-            let owner = self.hierarchy.class_details(&instantiated_owner.erased())?;
-            let bound = bind_class(&self.hierarchy, &owner, instantiated_owner).ok()?;
-            let super_types = collect_instantiated_super_types(&self.hierarchy, &bound).ok()?;
-            let declaring_erasure = JvmTypeSignature::ClassType(declaring_owner.clone()).erased();
-            let projected_owner =
-                std::iter::once(bound)
-                    .chain(super_types)
-                    .find_map(|candidate| {
-                        candidate.instantiated_self.filter(|candidate| {
-                            JvmTypeSignature::ClassType(candidate.clone()).erased()
-                                == declaring_erasure
-                        })
-                    })?;
-            let declaration = self.hierarchy.class_details(&declaring_erasure)?;
-            let substitutions = class_type_substitution(
-                &self.hierarchy,
-                &declaration,
-                &JvmTypeSignature::ClassType(projected_owner),
-            )
-            .ok()?;
-            Some(substitutions)
-        })
+        let owner = self.hierarchy.class_details(&instantiated_owner.erased())?;
+        let bound = bind_class(&self.hierarchy, &owner, instantiated_owner).ok()?;
+        let super_types = collect_instantiated_super_types(&self.hierarchy, &bound).ok()?;
+        let declaring_erasure = JvmTypeSignature::ClassType(declaring_owner.clone()).erased();
+        let projected_owner = std::iter::once(bound)
+            .chain(super_types)
+            .find_map(|candidate| {
+                candidate.instantiated_self.filter(|candidate| {
+                    JvmTypeSignature::ClassType(candidate.clone()).erased() == declaring_erasure
+                })
+            })?;
+        let declaration = self.hierarchy.class_details(&declaring_erasure)?;
+        let substitutions = class_type_substitution(
+            &self.hierarchy,
+            &declaration,
+            &JvmTypeSignature::ClassType(projected_owner),
+        )
+        .ok()?;
+        Some(substitutions)
     }
 }
 
@@ -2115,18 +2109,9 @@ impl MetadataDecoder {
 }
 
 pub fn analyze_loaded_method_overrides(reader: &mut DexFileReader) -> OverrideResult<()> {
-    let (loaded, diagnostics) = crate::profile_scope!(
-        "override.loaded_hierarchy",
-        LoadedClassHierarchy::decode(reader)
-    )?;
-    let hierarchy = crate::profile_scope!(
-        "override.composite_hierarchy",
-        CompositeClassHierarchy::from_loaded(loaded)
-    )?;
-    crate::profile_scope!(
-        "override.method_analysis",
-        MethodOverrideAnalyzer::new(&hierarchy).analyze_loaded(reader)
-    )?;
+    let (loaded, diagnostics) = LoadedClassHierarchy::decode(reader)?;
+    let hierarchy = CompositeClassHierarchy::from_loaded(loaded)?;
+    MethodOverrideAnalyzer::new(&hierarchy).analyze_loaded(reader)?;
     reader.replace_analysis_diagnostics(diagnostics);
     Ok(())
 }

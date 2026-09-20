@@ -6,8 +6,7 @@
 
 rasc is a Rust implementation of [ASC](https://github.com/MG1937/ASC), built to analyze APKs and
 DEX files at very high speed. Most of the implementation was carried out by agents with occasional
-human intervention, and it differs from ASC in some implementations and optimizations. It has two
-core targets, the native CLI and `wasm32-wasip1` (a program, for hosts without a filesystem of their own), with the CLI as the primary one.
+human intervention, and it differs from ASC in some implementations and optimizations. It ships as a native CLI.
 
 ## Performance and trade-offs
 

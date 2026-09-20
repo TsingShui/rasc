@@ -5,8 +5,8 @@
 
 use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
-use std::sync::OnceLock;
 use std::path::Path;
+use std::sync::OnceLock;
 
 use super::{
     AccessInfo, AnalysisDiagnostic, AnnotationNode, ClassInfo, ClassInfoError, ClassMetadata,
@@ -223,32 +223,23 @@ impl DexFileReader {
 
             // Load all DEX files (assuming APK/Zip)
             let mut archive = rusty_dex::dex::reader::DexArchive::open(&path_str)?;
-            let dex_files = crate::profile_scope!("frontend.apk.stream", {
-                std::thread::scope(|scope| {
-                    let mut jobs = Vec::new();
-                    while let Some(reader) =
-                        crate::profile_scope!("frontend.apk.extract_dex_entry", archive.next())
-                    {
-                        let reader = reader?;
-                        jobs.push(scope.spawn(move || {
-                            crate::profile_scope!("frontend.apk.metadata_entry", {
-                                rusty_dex::dex::file::DexFile::build_metadata(reader)
-                            })
-                        }));
-                    }
-                    jobs.into_iter()
-                        .map(|job| match job.join() {
-                            Ok(result) => result,
-                            Err(payload) => std::panic::resume_unwind(payload),
-                        })
-                        .collect::<Result<Vec<_>, _>>()
-                })
+            let dex_files = std::thread::scope(|scope| {
+                let mut jobs = Vec::new();
+                while let Some(reader) = archive.next() {
+                    let reader = reader?;
+                    jobs.push(
+                        scope.spawn(move || rusty_dex::dex::file::DexFile::build_metadata(reader)),
+                    );
+                }
+                jobs.into_iter()
+                    .map(|job| match job.join() {
+                        Ok(result) => result,
+                        Err(payload) => std::panic::resume_unwind(payload),
+                    })
+                    .collect::<Result<Vec<_>, _>>()
             })?;
 
-            Ok(crate::profile_scope!(
-                "frontend.apk.index",
-                Self::new(dex_files)
-            ))
+            Ok(Self::new(dex_files))
         }
 
         #[cfg(not(feature = "apk"))]
@@ -423,7 +414,10 @@ impl DexFileReader {
         class_name: &str,
     ) -> Option<&rusty_dex::dex::classes::ClassNestedMetadata> {
         let &(dex_index, class_index) = self.class_locations.get(class_name)?;
-        self.dex_files.get(dex_index)?.nested_metadata(class_index).ok()
+        self.dex_files
+            .get(dex_index)?
+            .nested_metadata(class_index)
+            .ok()
     }
 
     /// The class's declared lexical owner, from child-side DEX metadata.
@@ -1498,12 +1492,13 @@ mod tests {
                 eprintln!("parent {name}: lazy={lazy_parent:?} eager={eager_parent:?}");
                 diffs += 1;
             }
-            if reader.lexical_simple_name(name) != eager_simple.get(name).map(String::as_str) && diffs < 25 {
+            if reader.lexical_simple_name(name) != eager_simple.get(name).map(String::as_str)
+                && diffs < 25
+            {
                 eprintln!("simple {name}");
                 diffs += 1;
             }
-            let lazy_children: BTreeSet<String> =
-                reader.children_of(name).into_iter().collect();
+            let lazy_children: BTreeSet<String> = reader.children_of(name).into_iter().collect();
             let eager_children = eager_children.get(name).cloned().unwrap_or_default();
             if lazy_children != eager_children && diffs < 25 {
                 let members = reader.member_classes_of(name);

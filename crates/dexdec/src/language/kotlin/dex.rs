@@ -5782,29 +5782,27 @@ impl KotlinDialect for DexKotlinDialect {
     }
 
     fn prepare(&mut self, root: &crate::ir::SemanticNode) -> Result<(), Self::Error> {
-        crate::profile_scope!("kotlin_prepare.verify", KotlinInputVerifier::verify(root))?;
+        KotlinInputVerifier::verify(root)?;
         let diagnostics_enabled = self
             .observer
             .is_enabled(crate::ir::AnalysisEventKind::SourceTypes);
-        let source_types = crate::profile_scope!("kotlin_prepare.source_types", {
-            SourceTypeFlow::solve(
-                root,
-                &self.source_field_types,
-                &self.generic_fields,
-                &self.source_object_types,
-                &self.generic_methods,
-                self.generic_type_projection.as_deref(),
-                &self.source_types,
-                &self.source_type_erasures,
-                &self.source_type_bounds,
-                self.source_return_type.as_ref(),
-                self.current_type.as_ref(),
-                self.source_current_type.as_ref(),
-                self.this_code_var,
-                &self.source_variable_types,
-                diagnostics_enabled,
-            )
-        });
+        let source_types = SourceTypeFlow::solve(
+            root,
+            &self.source_field_types,
+            &self.generic_fields,
+            &self.source_object_types,
+            &self.generic_methods,
+            self.generic_type_projection.as_deref(),
+            &self.source_types,
+            &self.source_type_erasures,
+            &self.source_type_bounds,
+            self.source_return_type.as_ref(),
+            self.current_type.as_ref(),
+            self.source_current_type.as_ref(),
+            self.this_code_var,
+            &self.source_variable_types,
+            diagnostics_enabled,
+        );
         if diagnostics_enabled {
             let diagnostics = source_types.diagnostics();
             self.observer
@@ -5818,9 +5816,7 @@ impl KotlinDialect for DexKotlinDialect {
             self.source_variable_requirements,
             self.source_value_requirements,
         ) = source_types.into_parts();
-        let declarations = crate::profile_scope!("kotlin_prepare.declarations", {
-            DeclarationAnalysis::default().analyze(root)
-        })?;
+        let declarations = DeclarationAnalysis::default().analyze(root)?;
         self.inline_declarations = declarations.inline_variables().clone();
         let mut bindings = SourceBindings::default();
         bindings.visit_node(root);

@@ -33,49 +33,32 @@ pub(super) struct SparseValueFacts<'a> {
 
 impl<'a> SparseValueFacts<'a> {
     pub(super) fn analyze(graph: &'a ValueFlowGraph<'a>) -> Result<Self, ValueRecoveryError> {
-        let canonical = crate::profile_scope!("value.facts.canonical", graph.canonical_values());
-        let reachability = crate::profile_scope!(
-            "value.facts.reachability",
-            graph
-                .semantic_flow()
-                .filter(|flow| flow.is_complete())
-                .map(|flow| Arc::new(flow.reachability()))
-        );
-        let reaching = crate::profile_scope!(
-            "value.facts.reaching",
-            SemanticReachingAnalysis::new(graph, reachability.clone())
-        );
+        let canonical = graph.canonical_values();
+        let reachability = graph
+            .semantic_flow()
+            .filter(|flow| flow.is_complete())
+            .map(|flow| Arc::new(flow.reachability()));
+        let reaching = SemanticReachingAnalysis::new(graph, reachability.clone());
         let availability = (graph.identity() == ValueIdentity::Source)
             .then_some(&reaching as &dyn ValueAvailability);
-        let numbering = crate::profile_scope!("value.facts.numbering", {
-            ValueNumbering::analyze(
-                graph.identity(),
-                &graph.logic,
-                graph
-                    .definitions
-                    .values()
-                    .filter_map(|definitions| match definitions.as_slice() {
-                        [definition] => Some(definition),
-                        _ => None,
-                    }),
-                &canonical,
-                availability,
-            )
-        })?;
-        let uses = crate::profile_scope!(
-            "value.facts.uses",
-            Self::effective_uses(graph, &numbering.synthetic_uses)
-        );
-        let required_phi_inputs = crate::profile_scope!(
-            "value.facts.phi_inputs",
-            (graph.identity() == ValueIdentity::Ssa)
-                .then(|| graph.required_phi_inputs())
-                .unwrap_or_default()
-        );
-        let effects = crate::profile_scope!(
-            "value.facts.effects",
-            EffectVersions::new(graph, reachability)
-        );
+        let numbering = ValueNumbering::analyze(
+            graph.identity(),
+            &graph.logic,
+            graph
+                .definitions
+                .values()
+                .filter_map(|definitions| match definitions.as_slice() {
+                    [definition] => Some(definition),
+                    _ => None,
+                }),
+            &canonical,
+            availability,
+        )?;
+        let uses = Self::effective_uses(graph, &numbering.synthetic_uses);
+        let required_phi_inputs = (graph.identity() == ValueIdentity::Ssa)
+            .then(|| graph.required_phi_inputs())
+            .unwrap_or_default();
+        let effects = EffectVersions::new(graph, reachability);
         Ok(Self {
             graph,
             canonical,

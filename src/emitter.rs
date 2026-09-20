@@ -1,10 +1,8 @@
 //! `getclass`'s Java emitter: the vendored dexdec, and the seam for future emitters.
 //!
-//! `crates/dexdec` (see its FORK.md) renders the source on every target,
-//! wasm included: rayon's wasm fallback runs its parallel iterators
-//! sequentially and it never uses `rayon::spawn`, so the emitter needs no
-//! thread support. When dexdec cannot decompile a class the command fails with
-//! that error - this module never emits Java the emitter did not produce.
+//! `crates/dexdec` (see its FORK.md) renders the source. When dexdec cannot
+//! decompile a class the command fails with that error - this module never emits
+//! Java the emitter did not produce.
 //! dexdec itself degrades an unrecoverable *method* to a throwing
 //! `UnsupportedOperationException` stub, which is the honest form of the same
 //! rule at method granularity.

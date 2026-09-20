@@ -561,11 +561,13 @@ mod tests {
         assert!(json.contains(
             "{\"field_index\":7,\"name\":\"f7\",\"type\":\"Ljava/lang/Object;\",\"access_flags\":0}"
         ));
-        assert!(json.contains(
-            "{\"field_index\":3,\"name\":\"f3\",\"type\":\"I\",\"access_flags\":0}"
-        ));
-        assert!(json.ends_with(
-            "\"counts\":{\"instance\":2,\"static\":1},\"instance_ref_mask\":\"0x1\"}"
-        ));
+        assert!(
+            json.contains("{\"field_index\":3,\"name\":\"f3\",\"type\":\"I\",\"access_flags\":0}")
+        );
+        assert!(
+            json.ends_with(
+                "\"counts\":{\"instance\":2,\"static\":1},\"instance_ref_mask\":\"0x1\"}"
+            )
+        );
     }
 }

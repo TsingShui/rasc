@@ -19,12 +19,10 @@ readme = "README.md"
 rusty-dex = { path = "../rusty-dex", version = "0.2.0" }
 bitflags = "2"
 rayon = "1"
-hotpath = { version = "0.17.0", default-features = false, features = ["hotpath"], optional = true }
 
 [features]
 default = []
 debug-switch = []
-profiling = ["dep:hotpath"]
 # Load DEX files out of APK/ZIP archives. Off by default: rasc finds the DEX
 # entry itself and passes the bytes. Turning it on re-enables the zip path in
 # `rusty-dex` (and its native compression backends).

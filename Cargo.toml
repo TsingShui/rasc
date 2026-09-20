@@ -17,24 +17,14 @@ exclude = ["vendor/axmldecoder"]
 anyhow = "1.0"
 axmldecoder = "0.5"
 clap = { version = "4.6", features = ["derive"] }
-# Java emitter for `getclass` (vendored fork; see crates/dexdec/FORK.md). It
-# builds for wasm too: rayon's wasm fallback runs its parallel iterators
-# sequentially, and dexdec never uses `rayon::spawn`.
+# Java emitter for `getclass` (vendored fork; see crates/dexdec/FORK.md).
 dexdec = { path = "crates/dexdec" }
 memchr = "2.7"
 memmap2 = "0.9"
 rayon = "1.12"
 
-# Deflate backends are target-specific. Native keeps the C implementations (zlib for
-# the streaming prefix decoder, libdeflate for whole-entry inflation). Neither builds
-# for a wasm target: cc-rs has no wasm sysroot headers, so the C sources fail on
-# `#include <string.h>`. wasm targets therefore use flate2's pure Rust backend.
-[target.'cfg(not(target_family = "wasm"))'.dependencies]
 flate2 = { version = "1", default-features = false, features = ["zlib"] }
 libdeflater = "1.26"
-
-[target.'cfg(target_family = "wasm")'.dependencies]
-flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

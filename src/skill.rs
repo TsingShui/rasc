@@ -12,8 +12,6 @@
 //! | Claude Code | `~/.claude/skills` |
 //! | cross-agent | `~/.agents/skills` |
 //!
-//! Only the native and WASI hosts can write files. The JS host build has no filesystem, so
-//! it is left with `--print`, which turns the skill into the command's stdout payload.
 
 use anyhow::{Context, Result, bail};
 use std::env;

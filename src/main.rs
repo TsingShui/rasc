@@ -24,44 +24,39 @@ use std::io::{self, Write};
 use std::path::Path;
 use std::time::Instant;
 
-/// Where a command's payload goes: stdout, on both targets that remain.
+/// Where a command's payload goes: buffered stdout.
 fn payload_writer() -> impl Write {
     io::BufWriter::new(io::stdout().lock())
 }
 
-/// Reads the host's per-entry inflation ceiling from the environment.
+/// Reads the optional per-entry inflation ceiling from the environment.
 ///
-/// The ceiling is host policy, not command-line policy: a browser tab holding this instance
-/// has a memory budget of its own, and the argument line belongs to whatever wrote it. The
-/// environment is the one channel a WASI host owns, so the value is read from there.
-///
-/// It is applied before `dispatch`, because "decide before the first allocation" is the whole
-/// point of the limit: a ceiling installed after a decompression has already run was never a
-/// ceiling for that entry.
-fn apply_inflation_limit_from_env() {
-    let Ok(value) = std::env::var("RASC_MAX_INFLATED_ENTRY") else {
-        return;
-    };
-    // `0` restores the built-in default; anything unparseable leaves it in force rather than
-    // guessing at an intent.
-    match value.trim().parse::<usize>() {
-        Ok(0) | Err(_) => {}
-        Ok(bytes) => {
-            crate::zip::set_max_inflated_entry(bytes);
-        }
+/// `0` and unparseable values preserve the built-in default, matching the existing CLI
+/// contract. The returned policy is immutable and passed explicitly to archive operations.
+fn archive_policy_from_env() -> apk::ArchivePolicy {
+    archive_policy(std::env::var("RASC_MAX_INFLATED_ENTRY").ok().as_deref())
+}
+
+fn archive_policy(value: Option<&str>) -> apk::ArchivePolicy {
+    let mut policy = apk::ArchivePolicy::default();
+    if let Some(value) = value
+        && let Ok(bytes) = value.trim().parse::<usize>()
+        && bytes != 0
+    {
+        policy.max_inflated_entry = bytes;
     }
+    policy
 }
 fn main() {
     restore_default_sigpipe();
-    apply_inflation_limit_from_env();
-    match dispatch(std::env::args().collect()) {
+    let archive_policy = archive_policy_from_env();
+    match dispatch(std::env::args().collect(), archive_policy) {
         Ok(code) => std::process::exit(code),
         Err(error) => {
             // A consumer that closed the pipe early (`| head -1`) is normal filter behaviour,
             // not a failure. The native path rarely sees this because SIGPIPE kills the
-            // process first; a target without signals - the WASI build - does see it as a
-            // write error, and has to end the same way the signal would have: quietly, with
-            // status 0.
+            // process first; a target without signals does see it as a write error, and has to
+            // end the same way the signal would have: quietly, with status 0.
             if is_broken_pipe(&error) {
                 std::process::exit(0);
             }
@@ -170,21 +165,21 @@ fn debug_timing(started: Instant) {
 ///
 /// The vector is the process's own arguments; there is no second entry point, so a target
 /// cannot drift from another in what it accepts or in what it says.
-fn dispatch(args: Vec<String>) -> Result<i32> {
+fn dispatch(args: Vec<String>, archive_policy: apk::ArchivePolicy) -> Result<i32> {
     let started = Instant::now();
     // `try_parse_from`, not `parse_from`: clap's own error path ends the process, which
     // makes its status unobservable to the caller that wants it. Returning it keeps the
-    // answer - `--help`, `--version`, a usage error - in one place for both targets.
+    // answer - `--help`, `--version`, a usage error - in one place.
     let args = match Cli::try_parse_from(args) {
         Ok(args) => args,
         Err(error) => return Ok(cli_message(&error)),
     };
 
-    run_command(args, started)
+    run_command(args, archive_policy, started)
 }
 
 /// Runs the parsed command.
-fn run_command(args: Cli, started: Instant) -> Result<i32> {
+fn run_command(args: Cli, archive_policy: apk::ArchivePolicy, started: Instant) -> Result<i32> {
     // Only a member lookup has a verdict of its own (one hit, none, several); every
     // other command either produced its payload or failed.
     let mut status = 0;
@@ -192,18 +187,19 @@ fn run_command(args: Cli, started: Instant) -> Result<i32> {
         Command::Findrefs(args) => {
             let query = args.query()?;
             let scan_started = Instant::now();
-            let mut hits = apk::find_reference_hits(&args.apk_path, &query, args.threads, args.debug)?;
+            let mut hits = apk::find_reference_hits_with_policy(
+                &args.apk_path,
+                archive_policy,
+                &query,
+                args.threads,
+                args.debug,
+            )?;
             let scanned = scan_started.elapsed();
             // The comparator is the string order, so an unstable sort produces exactly the
             // bytes a stable one would: equal lines are identical lines, and there is
             // nothing else to tie-break. Sorting a wide query's ~90k lines in parallel is
-            // what keeps it off the main thread. This wasm target has no threads and takes the serial
-            // sort; the output is the same either way.
-            if cfg!(target_family = "wasm") {
-                hits.sort_unstable();
-            } else {
-                hits.par_sort_unstable();
-            }
+            // what keeps it off the main thread.
+            hits.par_sort_unstable();
             let sorted = scan_started.elapsed();
             // Assembling the payload line by line: a pre-sized buffer measured no faster
             // than letting the String grow (macOS's allocator re-extends the large block in
@@ -231,7 +227,8 @@ fn run_command(args: Cli, started: Instant) -> Result<i32> {
         Command::FieldsPlan(args) => {
             // Accept what a user types; the DEX carries descriptors.
             let descriptor = crate::query::format_class_name(&args.descriptor)?;
-            let lookup = apk::field_plan(&args.apk, &descriptor, args.threads)?;
+            let lookup =
+                apk::field_plan_with_policy(&args.apk, archive_policy, &descriptor, args.threads)?;
             match &lookup.plan {
                 Some(plan) => emit(&format!("{plan}\n"), args.output.as_deref())?,
                 None if lookup.definitions.is_empty() => {
@@ -256,7 +253,14 @@ fn run_command(args: Cli, started: Instant) -> Result<i32> {
                 (None, Some(index)) => (apk::MemberKind::Field, index, "field"),
                 _ => bail!("pass exactly one of --method-index or --field-index"),
             };
-            let lookup = apk::member_by_index(&args.apk, &descriptor, index, kind, args.threads)?;
+            let lookup = apk::member_by_index_with_policy(
+                &args.apk,
+                archive_policy,
+                &descriptor,
+                index,
+                kind,
+                args.threads,
+            )?;
             emit_member_rows(&lookup.rows, args.output.as_deref())?;
             report_member_verdict(&lookup, name, index, &descriptor);
             status = apk::lookup_status(lookup.rows.len());
@@ -267,12 +271,16 @@ fn run_command(args: Cli, started: Instant) -> Result<i32> {
         Command::Classes(args) => {
             let filter = args.filter.as_deref().map(str::to_lowercase);
             let started = Instant::now();
-            let classes = apk::list_classes(&args.apk_path, args.threads, args.debug)?;
+            let classes = apk::list_classes_with_policy(
+                &args.apk_path,
+                archive_policy,
+                args.threads,
+                args.debug,
+            )?;
             let listed = started.elapsed();
             // Rendering is per-row independent, so the rows are rendered in chunks kept in
             // the order they will be printed, and then written out chunk by chunk. The
-            // filter, the row format and the resulting bytes are unchanged. wasm has no
-            // threads, so it renders the same chunks serially in the same order.
+            // filter, the row format and the resulting bytes are unchanged.
             const RENDER_CHUNK: usize = 8192;
             let render = |chunk: &[apk::ClassEntry]| -> String {
                 let mut payload = String::with_capacity(chunk.len() * 128);
@@ -282,7 +290,11 @@ fn run_command(args: Cli, started: Instant) -> Result<i32> {
                     // string of its own. The row itself writes the dotted form in place,
                     // so the unfiltered index allocates nothing per class for it.
                     if let Some(pattern) = filter.as_ref()
-                        && !class.java_name().replace('/', ".").to_lowercase().contains(pattern)
+                        && !class
+                            .java_name()
+                            .replace('/', ".")
+                            .to_lowercase()
+                            .contains(pattern)
                     {
                         continue;
                     }
@@ -303,17 +315,9 @@ fn run_command(args: Cli, started: Instant) -> Result<i32> {
                 }
                 payload
             };
-            let payload_len = if cfg!(target_family = "wasm") {
-                // wasm renders one chunk at a time, so only one is ever live.
-                emit_rows(
-                    classes.chunks(RENDER_CHUNK).map(render),
-                    args.output.as_deref(),
-                )?
-            } else {
-                // Native renders the chunks in parallel, then streams them out in order.
-                let pieces: Vec<String> = classes.par_chunks(RENDER_CHUNK).map(render).collect();
-                emit_rows(pieces.into_iter(), args.output.as_deref())?
-            };
+            // Native renders the chunks in parallel, then streams them out in order.
+            let pieces: Vec<String> = classes.par_chunks(RENDER_CHUNK).map(render).collect();
+            let payload_len = emit_rows(pieces.into_iter(), args.output.as_deref())?;
             if args.debug {
                 // The window now covers rendering and writing, not rendering alone.
                 crate::diag::diagnose(format_args!(
@@ -325,8 +329,9 @@ fn run_command(args: Cli, started: Instant) -> Result<i32> {
             }
         }
         Command::Strings(args) => {
-            let strings = apk::list_strings(
+            let strings = apk::list_strings_with_policy(
                 &args.apk_path,
+                archive_policy,
                 args.threads,
                 args.debug,
                 args.filter.as_deref(),
@@ -364,7 +369,8 @@ fn run_command(args: Cli, started: Instant) -> Result<i32> {
             emit(&payload, args.output.as_deref())?;
         }
         Command::Manifest(args) => {
-            let data = apk::read_entry(&args.apk_path, "AndroidManifest.xml")?;
+            let data =
+                apk::read_entry_with_policy(&args.apk_path, archive_policy, "AndroidManifest.xml")?;
             let xml = manifest::decode(&data)?;
             emit(&xml, args.output.as_deref())?;
         }
@@ -375,11 +381,6 @@ fn run_command(args: Cli, started: Instant) -> Result<i32> {
                 }
                 emit(skill::SKILL_MD, None)?;
             } else {
-                // The JS host build has no filesystem of its own. Its payload path is stdout,
-                // which is what `--print` is for; only native and WASI can write files.
-                if cfg!(all(target_family = "wasm", not(target_os = "wasi"))) {
-                    bail!("the wasm host build cannot write files; use `rasc skill --print`");
-                }
                 for path in skill::targets(&args.agents, args.dir.as_deref())? {
                     let outcome = skill::install(&path)?;
                     crate::diag::diagnose(format_args!(
@@ -399,7 +400,12 @@ fn run_command(args: Cli, started: Instant) -> Result<i32> {
             let mut table: Vec<String> = Vec::new();
             if args.members {
                 let inputs = [args.apk_path.clone()];
-                let lookup = apk::member_lines(&inputs, &class_name, args.threads)?;
+                let lookup = apk::member_lines_with_policy(
+                    &inputs,
+                    archive_policy,
+                    &class_name,
+                    args.threads,
+                )?;
                 match lookup.lines {
                     Some(lines) => table = lines,
                     None if lookup.definitions.is_empty() => {
@@ -416,8 +422,13 @@ fn run_command(args: Cli, started: Instant) -> Result<i32> {
                 }
             }
             if status == 0 {
-                let hit =
-                    apk::decompile_class(&args.apk_path, &class_name, args.threads, args.debug)?;
+                let hit = apk::decompile_class_with_policy(
+                    &args.apk_path,
+                    archive_policy,
+                    &class_name,
+                    args.threads,
+                    args.debug,
+                )?;
                 let Some((dex_name, source)) = hit else {
                     bail!("Class {class_name} not found in APK.");
                 };
@@ -464,5 +475,20 @@ fn report_member_verdict(lookup: &apk::MemberLookup, kind: &str, index: u32, des
         count => eprintln!(
             "Error: {kind} index {index} of {descriptor} is declared {count} times; the rows above are the candidates"
         ),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn archive_policy_keeps_the_environment_contract() {
+        let default = crate::zip::DEFAULT_MAX_INFLATED_ENTRY;
+        assert_eq!(archive_policy(None).max_inflated_entry, default);
+        assert_eq!(archive_policy(Some("")).max_inflated_entry, default);
+        assert_eq!(archive_policy(Some("invalid")).max_inflated_entry, default);
+        assert_eq!(archive_policy(Some("0")).max_inflated_entry, default);
+        assert_eq!(archive_policy(Some(" 4096 ")).max_inflated_entry, 4096);
     }
 }

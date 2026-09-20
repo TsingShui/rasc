@@ -227,17 +227,13 @@ impl SemanticTransform<SsaSemantics> for ValueRecovery {
         &mut self,
         mut method: SemanticMethod<SsaSemantics>,
     ) -> Result<SemanticMethod<Self::Output>, Self::Error> {
-        crate::profile_scope!(
-            "value.ssa.numbering",
-            crate::ir::SemanticSiteNumbering::assign(method.body_mut())
+        crate::ir::SemanticSiteNumbering::assign(method.body_mut())?;
+        let graph = ValueFlowGraph::build_gated(
+            method.body(),
+            method.state().values(),
+            &self.ssa_constants,
         )?;
-        let graph = crate::profile_scope!("value.ssa.gated_graph", {
-            ValueFlowGraph::build_gated(method.body(), method.state().values(), &self.ssa_constants)
-        })?;
-        let recovery = crate::profile_scope!(
-            "value.ssa.gated_phis",
-            graph.recover_gated_phis(method.state().values(), &self.gated_control)
-        )?;
+        let recovery = graph.recover_gated_phis(method.state().values(), &self.gated_control)?;
         self.diagnostics = recovery.diagnostics;
         let mut recovered_phis = recovery.eliminated;
         let placement = PhiExpressionPlacement::new(recovery.expressions);
@@ -254,24 +250,13 @@ impl SemanticTransform<SsaSemantics> for ValueRecovery {
                 }
             })
             .collect::<Vec<_>>();
-        crate::profile_scope!(
-            "value.ssa.phi_placement",
-            placement.apply(method.body_mut())
-        )?;
-        let specialization_schedule = crate::profile_scope!(
-            "value.ssa.specialization_schedule",
-            ValueSchedule::compile(specialization_actions, ValueIdentity::Ssa)
-        )?;
-        crate::profile_scope!(
-            "value.ssa.specialization_apply",
-            specialization_schedule.apply(method.body_mut())
-        )?;
-        let retained = crate::profile_scope!(
-            "value.ssa.cleanup_roots",
-            cleanup_state_values(&method, &self.ssa_constants)
-        );
+        placement.apply(method.body_mut())?;
+        let specialization_schedule =
+            ValueSchedule::compile(specialization_actions, ValueIdentity::Ssa)?;
+        specialization_schedule.apply(method.body_mut())?;
+        let retained = cleanup_state_values(&method, &self.ssa_constants);
         let constants = SsaValueSolver::new(&recovered_phis, &self.ssa_constants, &retained)
-            .solve_profiled(&mut method)?;
+            .solve(&mut method)?;
         Ok(method.into_values(constants, recovered_phis))
     }
 }
@@ -450,49 +435,25 @@ impl<'a> SsaValueSolver<'a> {
         let mut constants = BTreeMap::new();
         let mut flow_cache = None;
         loop {
-            crate::profile_scope!(
-                "value.ssa.solve.numbering",
-                crate::ir::SemanticSiteNumbering::assign(method.body_mut())
-            )?;
-            let mut graph = crate::profile_scope!(
-                "value.ssa.solve.graph",
-                ValueFlowGraph::build_with_flow_cache(
-                    method.body(),
-                    method.state().values(),
-                    self.constants,
-                    &mut flow_cache
-                )
+            crate::ir::SemanticSiteNumbering::assign(method.body_mut())?;
+            let mut graph = ValueFlowGraph::build_with_flow_cache(
+                method.body(),
+                method.state().values(),
+                self.constants,
+                &mut flow_cache,
             )?;
             graph.exclude_phis(self.recovered_phis);
             graph.retain_values(self.retained_values.iter().copied());
-            let value_plan =
-                crate::profile_scope!("value.ssa.solve.plan", graph.schedule(RecoveryMode::Full))?;
+            let value_plan = graph.schedule(RecoveryMode::Full)?;
             constants.extend(value_plan.constants);
-            let schedule = crate::profile_scope!(
-                "value.ssa.solve.schedule",
-                ValueSchedule::compile(value_plan.actions, ValueIdentity::Ssa)
-            )?;
-            let changed =
-                crate::profile_scope!("value.ssa.solve.apply", schedule.apply(method.body_mut()))?;
+            let schedule = ValueSchedule::compile(value_plan.actions, ValueIdentity::Ssa)?;
+            let changed = schedule.apply(method.body_mut())?;
             if !changed {
                 break;
             }
-            crate::profile_scope!(
-                "value.ssa.solve.normalize",
-                method.normalize_before_phi_lowering()
-            )?;
+            method.normalize_before_phi_lowering()?;
         }
-        crate::profile_scope!(
-            "value.ssa.solve.numbering",
-            crate::ir::SemanticSiteNumbering::assign(method.body_mut())
-        )?;
+        crate::ir::SemanticSiteNumbering::assign(method.body_mut())?;
         Ok(constants)
-    }
-
-    fn solve_profiled(
-        self,
-        method: &mut SemanticMethod<SsaSemantics>,
-    ) -> Result<BTreeMap<SsaVar, crate::ir::InsnArg>, ValueRecoveryError> {
-        crate::profile_scope!("value.ssa.solve", self.solve(method))
     }
 }

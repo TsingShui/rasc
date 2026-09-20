@@ -190,9 +190,9 @@ where
     }
 
     pub fn lower(mut self, root: &SemanticNode) -> Result<JavaMethodBody, R::Error> {
-        crate::profile_scope!("java_lower.prepare", self.dialect.prepare(root))?;
-        self.controls = crate::profile_scope!("java_lower.controls", ControlLayout::analyze(root))?;
-        let body = crate::profile_scope!("java_lower.body", self.node(root))?;
+        self.dialect.prepare(root)?;
+        self.controls = ControlLayout::analyze(root)?;
+        let body = self.node(root)?;
         let mut statements = self.dialect.take_declarations();
         statements.extend(Self::block_statements(body));
         Ok(JavaMethodBody {

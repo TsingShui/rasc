@@ -1,9 +1,9 @@
 //! Stable, high-level decompilation interface.
 
+use crate::timing::Instant;
 use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use crate::timing::Instant;
 
 use rayon::prelude::*;
 

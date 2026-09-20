@@ -557,11 +557,7 @@ impl<'a> ExceptionAnalyzer<'a> {
             .collect::<Result<Vec<_>, _>>()?;
         let region_ms = t2c.elapsed();
         let t2d = crate::timing::Instant::now();
-        crate::profile_scope!(
-            "exception.shared_handler_domains",
-            SharedHandlerDomains::analyze(self.cfg, &regions)
-        )
-        .apply(&mut regions);
+        SharedHandlerDomains::analyze(self.cfg, &regions).apply(&mut regions);
         let mut regions =
             ExceptionScopeNormalization::new(self.cfg, &self.normal_predecessors).apply(regions)?;
         let norm_ms = t2d.elapsed();
@@ -2077,23 +2073,12 @@ impl<'cfg> ExceptionScopeNormalization<'cfg> {
         mut regions: Vec<TryRegion>,
     ) -> Result<Vec<TryRegion>, ExceptionInvariantError> {
         loop {
-            let before = crate::profile_scope!(
-                "exception.normalization.layout_before",
-                ExceptionScopeLayout::of(&regions)
-            );
-            regions = crate::profile_scope!(
-                "exception.normalization.coalescing",
-                ExceptionScopeCoalescing::new(self.cfg, self.predecessors).apply(regions)
-            )?;
-            regions = crate::profile_scope!(
-                "exception.normalization.nesting",
-                ExceptionScopeNesting::new(self.cfg).apply(regions)
-            )?
-            .without_empty_scopes();
-            let after = crate::profile_scope!(
-                "exception.normalization.layout_after",
-                ExceptionScopeLayout::of(&regions)
-            );
+            let before = ExceptionScopeLayout::of(&regions);
+            regions = ExceptionScopeCoalescing::new(self.cfg, self.predecessors).apply(regions)?;
+            regions = ExceptionScopeNesting::new(self.cfg)
+                .apply(regions)?
+                .without_empty_scopes();
+            let after = ExceptionScopeLayout::of(&regions);
             if after == before {
                 return Ok(regions);
             }
@@ -2145,55 +2130,32 @@ impl<'cfg> ExceptionScopeCoalescing<'cfg> {
         // scanners' priority order decides which rewrite applies next, so the
         // sequence of relations is part of the observable output.
         while let Some(relation) = self.relation(&regions) {
-            crate::profile_scope!("exception.coalescing.merge", {
-                self.merge(&mut regions, relation)
-            })?;
+            self.merge(&mut regions, relation)?;
         }
         Ok(regions)
     }
 
     fn relation(&self, regions: &[TryRegion]) -> Option<ScopeRewrite> {
-        if let Some((owner, nested)) = crate::profile_scope!(
-            "exception.coalescing.redundant",
-            self.redundant_nested_handler_scope(regions)
-        ) {
+        if let Some((owner, nested)) = self.redundant_nested_handler_scope(regions) {
             return Some(ScopeRewrite::Redundant { owner, nested });
         }
-        if let Some((child, parent)) = crate::profile_scope!(
-            "exception.coalescing.inherited_cleanup",
-            self.inherited_cleanup(regions)
-        ) {
+        if let Some((child, parent)) = self.inherited_cleanup(regions) {
             return Some(ScopeRewrite::InheritedCleanup { child, parent });
         }
-        if let Some((owner, extension)) = crate::profile_scope!(
-            "exception.coalescing.handler_extension",
-            self.handler_extension(regions)
-        ) {
+        if let Some((owner, extension)) = self.handler_extension(regions) {
             return Some(ScopeRewrite::HandlerExtension { owner, extension });
         }
-        if let Some(scope) = crate::profile_scope!(
-            "exception.coalescing.cleanup_alternatives",
-            self.cleanup_alternatives(regions)
-        ) {
+        if let Some(scope) = self.cleanup_alternatives(regions) {
             return Some(ScopeRewrite::CleanupAlternatives(scope));
         }
-        if let Some((left, right)) = crate::profile_scope!(
-            "exception.coalescing.cleanup_bridge",
-            self.cleanup_bridge(regions)
-        ) {
+        if let Some((left, right)) = self.cleanup_bridge(regions) {
             return Some(ScopeRewrite::CleanupBridge { left, right });
         }
-        if let Some((left, right)) = crate::profile_scope!(
-            "exception.coalescing.cleanup_continuation",
-            self.cleanup_continuation(regions)
-        ) {
+        if let Some((left, right)) = self.cleanup_continuation(regions) {
             return Some(ScopeRewrite::CleanupContinuation { left, right });
         }
-        crate::profile_scope!(
-            "exception.coalescing.connected_fragments",
-            self.connected_fragments(regions)
-        )
-        .map(|(left, right)| ScopeRewrite::Connected { left, right })
+        self.connected_fragments(regions)
+            .map(|(left, right)| ScopeRewrite::Connected { left, right })
     }
 
     fn redundant_nested_handler_scope(&self, regions: &[TryRegion]) -> Option<(u32, u32)> {
@@ -2261,13 +2223,11 @@ impl<'cfg> ExceptionScopeCoalescing<'cfg> {
     }
 
     fn connected_fragments(&self, regions: &[TryRegion]) -> Option<(u32, u32)> {
-        let index = crate::profile_scope!("exception.connected.index", RegionIndex::of(regions));
-        let signatures = crate::profile_scope!("exception.connected.signatures", {
-            regions
-                .iter()
-                .map(|region| Self::effective_handler_signature(region, &index))
-                .collect::<Vec<_>>()
-        });
+        let index = RegionIndex::of(regions);
+        let signatures = regions
+            .iter()
+            .map(|region| Self::effective_handler_signature(region, &index))
+            .collect::<Vec<_>>();
         let lexical_parents = regions
             .iter()
             .map(|region| index.parents_outside_cleanup_envelopes[&region.id])
@@ -2320,21 +2280,16 @@ impl<'cfg> ExceptionScopeCoalescing<'cfg> {
             .collect::<Vec<Option<BridgeEndpoint<'_>>>>();
         for (_, _, _, left, right, left_index, right_index) in candidates {
             if endpoints[left_index].is_none() {
-                endpoints[left_index] = Some(crate::profile_scope!(
-                    "exception.connected.endpoint",
-                    self.bridge_endpoint(&regions[left_index], &index)
-                ));
+                endpoints[left_index] = Some(self.bridge_endpoint(&regions[left_index], &index));
             }
-            if crate::profile_scope!("exception.connected.bridge", {
-                self.has_transparent_bridge(
-                    endpoints[left_index]
-                        .as_ref()
-                        .expect("connected endpoint was initialized"),
-                    &regions[left_index],
-                    &regions[right_index],
-                    &index,
-                )
-            }) {
+            if self.has_transparent_bridge(
+                endpoints[left_index]
+                    .as_ref()
+                    .expect("connected endpoint was initialized"),
+                &regions[left_index],
+                &regions[right_index],
+                &index,
+            ) {
                 return Some((left, right));
             }
         }

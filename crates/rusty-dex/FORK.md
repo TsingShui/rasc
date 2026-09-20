@@ -13,13 +13,10 @@ yet.
 
 | Change | Why |
 |---|---|
-| `zip` is optional, behind the `apk` feature (off by default) | the zip backends (`deflate-zlib`, `bzip2`, `zstd`) are C code and were the wasm blocker; rasc and dexdec both consume DEX bytes |
 | `DexArchive`, `DexReader::build_from_file`, `parse()` and the `InvalidArchive` error variant are `#[cfg(feature = "apk")]` | same reason; without the feature `from_file` rejects non-DEX input with a typed error |
 | unused imports guarded by the same cfg | keep the default build warning-clean |
 
-## Possible next use
+## Workspace role
 
-If the last `rasc-dex` dependency is ever removed, this crate is the natural
-home for a DEX→smali fallback printer (decoded instructions are already here),
-which is the reason it is kept as a workspace member rather than a private
-dependency of `dexdec`.
+The crate remains a workspace member because its lazy DEX model and instruction decoder are
+maintained directly alongside `dexdec`, rather than hidden as an unreviewed private dependency.

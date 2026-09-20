@@ -329,12 +329,8 @@ impl<'ir> ValueFlowGraph<'ir> {
         semantic_flow: bool,
         cache: &mut Option<super::source::SourceFlowCache>,
     ) -> Result<Self, ValueRecoveryError> {
-        let symbols = crate::profile_scope!(
-            "value.graph.control_symbols",
-            ControlSymbolClosure::analyze(root)
-        );
-        let logic =
-            crate::profile_scope!("value.graph.domain", DomainLogic::new(&symbols.variables));
+        let symbols = ControlSymbolClosure::analyze(root);
+        let logic = DomainLogic::new(&symbols.variables);
         let semantic_flow =
             semantic_flow.then(|| super::source::SourceFlowCache::get_or_analyze(cache, root));
         let graph = Self {
@@ -355,16 +351,10 @@ impl<'ir> ValueFlowGraph<'ir> {
             identity_statements: Vec::new(),
             semantic_flow,
         };
-        let mut graph = crate::profile_scope!(
-            "value.graph.collect",
-            FlowCollector::new(graph).collect(root)
-        )?;
+        let mut graph = FlowCollector::new(graph).collect(root)?;
         graph.phis = values.phis().to_vec();
-        graph.copies = crate::profile_scope!(
-            "value.graph.ssa_copies",
-            SsaCopyFlow::analyze(values, &graph.definitions)
-        );
-        crate::profile_scope!("value.graph.validate", graph.validate(values))?;
+        graph.copies = SsaCopyFlow::analyze(values, &graph.definitions);
+        graph.validate(values)?;
         Ok(graph)
     }
 
@@ -382,12 +372,8 @@ impl<'ir> ValueFlowGraph<'ir> {
         bindings: &BTreeSet<SsaVar>,
         cache: &mut Option<super::source::SourceFlowCache>,
     ) -> Result<Self, ValueRecoveryError> {
-        let symbols = crate::profile_scope!(
-            "value.graph.control_symbols",
-            ControlSymbolClosure::analyze(root)
-        );
-        let logic =
-            crate::profile_scope!("value.graph.domain", DomainLogic::new(&symbols.variables));
+        let symbols = ControlSymbolClosure::analyze(root);
+        let logic = DomainLogic::new(&symbols.variables);
         let semantic_flow = super::source::SourceFlowCache::get_or_analyze(cache, root);
         let graph = Self {
             identity,
@@ -407,15 +393,12 @@ impl<'ir> ValueFlowGraph<'ir> {
             identity_statements: Vec::new(),
             semantic_flow: Some(semantic_flow),
         };
-        crate::profile_scope!(
-            "value.graph.collect",
-            FlowCollector::new(graph).collect(root)
-        )
+        FlowCollector::new(graph).collect(root)
     }
 
     pub(super) fn schedule(&self, mode: RecoveryMode) -> Result<ValuePlan, ValueRecoveryError> {
-        let planner = crate::profile_scope!("value.plan.facts", ValuePlanner::new(self, mode))?;
-        crate::profile_scope!("value.plan.actions", planner.schedule())
+        let planner = ValuePlanner::new(self, mode)?;
+        planner.schedule()
     }
 
     pub(super) fn recover_gated_phis(

@@ -38,14 +38,10 @@ impl SourceFlowCache {
         let sites = SemanticSiteNumbering::fingerprint(root);
         if let Some(cached) = cache.as_ref() {
             if cached.topology == topology && cached.sites == sites {
-                return crate::profile_scope!("value.graph.semantic_flow_reuse", {
-                    Arc::clone(&cached.flow)
-                });
+                return Arc::clone(&cached.flow);
             }
         }
-        let flow = crate::profile_scope!("value.graph.semantic_flow", {
-            Arc::new(crate::ir::analysis::SemanticFlowGraph::analyze(root))
-        });
+        let flow = Arc::new(crate::ir::analysis::SemanticFlowGraph::analyze(root));
         *cache = Some(Self {
             topology,
             sites,
@@ -64,50 +60,26 @@ impl SourceValueRecovery {
         bindings: &std::collections::BTreeSet<crate::ir::analysis::SsaVar>,
         cache: &mut Option<SourceFlowCache>,
     ) -> Result<bool, ValueRecoveryError> {
-        crate::profile_scope!("value.source.normalize", method.normalize_source())?;
+        method.normalize_source()?;
         let mut changed = false;
         loop {
             loop {
-                let initialization = crate::profile_scope!(
-                    "value.source.initialization",
-                    SourceInitializationRecovery::apply(method.body_mut())
-                )?;
+                let initialization = SourceInitializationRecovery::apply(method.body_mut())?;
                 if initialization {
-                    crate::profile_scope!(
-                        "value.source.normalize_bindings",
-                        method.normalize_source_variables()
-                    )?;
+                    method.normalize_source_variables()?;
                     *cache = None;
                 }
-                crate::profile_scope!(
-                    "value.source.numbering",
-                    crate::ir::SemanticSiteNumbering::assign(method.body_mut())
-                )?;
-                let graph = crate::profile_scope!(
-                    "value.source.graph",
-                    ValueFlowGraph::build_source(method.body(), bindings, cache)
-                )?;
-                let plan = crate::profile_scope!("value.source.plan", graph.schedule(mode))?;
+                crate::ir::SemanticSiteNumbering::assign(method.body_mut())?;
+                let graph = ValueFlowGraph::build_source(method.body(), bindings, cache)?;
+                let plan = graph.schedule(mode)?;
                 #[cfg(debug_assertions)]
-                let before_schedule = crate::profile_scope!(
-                    "value.source.topology_before",
-                    crate::ir::semantic::SemanticControlTopology::analyze(method.body())
-                );
-                let schedule = crate::profile_scope!(
-                    "value.source.schedule",
-                    ValueSchedule::compile(plan.actions, ValueIdentity::Source)
-                )?;
-                let source =
-                    crate::profile_scope!("value.source.apply", schedule.apply(method.body_mut()))?;
+                let before_schedule =
+                    crate::ir::semantic::SemanticControlTopology::analyze(method.body());
+                let schedule = ValueSchedule::compile(plan.actions, ValueIdentity::Source)?;
+                let source = schedule.apply(method.body_mut())?;
                 #[cfg(debug_assertions)]
-                crate::profile_scope!(
-                    "value.source.topology_after",
-                    Self::verify_topology(method, &before_schedule, "source-value-schedule")
-                )?;
-                let motion = crate::profile_scope!(
-                    "value.source.loop_motion",
-                    LoopInvariantMotion::apply(method.body_mut())
-                )?;
+                Self::verify_topology(method, &before_schedule, "source-value-schedule")?;
+                let motion = LoopInvariantMotion::apply(method.body_mut())?;
                 if motion {
                     *cache = None;
                 }
@@ -115,18 +87,15 @@ impl SourceValueRecovery {
                 if !initialization && !source && !motion {
                     break;
                 }
-                crate::profile_scope!("value.source.normalize", method.normalize_source())?;
+                method.normalize_source()?;
             }
-            let predicates = crate::profile_scope!(
-                "value.source.predicate_regions",
-                PredicateRegionFormation::apply(method.body_mut())
-            )?;
+            let predicates = PredicateRegionFormation::apply(method.body_mut())?;
             changed |= predicates;
             if !predicates {
                 break;
             }
             *cache = None;
-            crate::profile_scope!("value.source.normalize", method.normalize_source())?;
+            method.normalize_source()?;
         }
         Ok(changed)
     }

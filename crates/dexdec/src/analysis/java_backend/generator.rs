@@ -91,9 +91,7 @@ impl JavaDecompiler {
         methods: &mut [ClassMethodInput],
         inner: Vec<NestedClassInput>,
     ) -> Result<String, JavaDecompilerError> {
-        crate::profile_scope!("java_backend.class.total", {
-            self.generate_class_with_nested_impl(class, methods, inner)
-        })
+        self.generate_class_with_nested_impl(class, methods, inner)
     }
 
     fn generate_class_with_nested_impl(
@@ -112,33 +110,25 @@ impl JavaDecompiler {
         let signature_ms = signature_started.elapsed();
         let methods_started = crate::timing::Instant::now();
         let (outer_methods, outer_instance) =
-            crate::profile_scope!("java_backend.class.outer_methods", {
-                self.build_class_methods(class, methods, &source_signatures)
-            })?;
+            self.build_class_methods(class, methods, &source_signatures)?;
         let methods_ms = methods_started.elapsed();
         self.observer.checkpoint()?;
         self.class_stage(class.type_descriptor(), "build_outer_methods:done");
         let nested_started = crate::timing::Instant::now();
-        let nested_models = crate::profile_scope!("java_backend.class.nested_models", {
-            self.build_nested_class_models(inner, &source_signatures)
-        })?;
+        let nested_models = self.build_nested_class_models(inner, &source_signatures)?;
         let nested_ms = nested_started.elapsed();
         self.observer.checkpoint()?;
         self.class_stage(class.type_descriptor(), "build_nested_models:done");
         let model_started = crate::timing::Instant::now();
-        let mut class_model = crate::profile_scope!("java_backend.class.model", {
-            JavaClassModel::from_class_node(class, outer_methods, outer_instance)
-                .map(|model| model.with_nested(nested_models))
-        })?;
+        let mut class_model = JavaClassModel::from_class_node(class, outer_methods, outer_instance)
+            .map(|model| model.with_nested(nested_models))?;
         self.observer.checkpoint()?;
         class_model.assign_lexical_type_names(&self.source_abi);
         let model_ms = model_started.elapsed();
         self.class_stage(class.type_descriptor(), "class_model:done");
         let render_started = crate::timing::Instant::now();
-        let source = crate::profile_scope!("java_backend.class.render", {
-            self.observer.checkpoint()?;
-            self.render_class_model(&class_model)
-        })?;
+        self.observer.checkpoint()?;
+        let source = self.render_class_model(&class_model)?;
         if std::env::var_os("DEXDEC_BATCH_STATS").is_some() {
             let render_ms = render_started.elapsed();
             let total = signature_ms + methods_ms + nested_ms + model_ms + render_ms;
@@ -453,18 +443,16 @@ impl JavaDecompiler {
         function_interface: Option<&crate::ir::generic_types::JvmTypeSignature>,
         outer_instance: Option<&OuterInstanceField>,
     ) -> Result<JavaMethodModel, JavaDecompilerError> {
-        crate::profile_scope!("java_backend.method.total", {
-            self.build_method_model_from_node_impl(
-                class,
-                method,
-                cfg,
-                inferred_exceptions,
-                inferred_parameter_types,
-                inferred_return_type,
-                function_interface,
-                outer_instance,
-            )
-        })
+        self.build_method_model_from_node_impl(
+            class,
+            method,
+            cfg,
+            inferred_exceptions,
+            inferred_parameter_types,
+            inferred_return_type,
+            function_interface,
+            outer_instance,
+        )
     }
 
     fn build_method_model_from_node_impl(
@@ -478,20 +466,18 @@ impl JavaDecompiler {
         function_interface: Option<&crate::ir::generic_types::JvmTypeSignature>,
         outer_instance: Option<&OuterInstanceField>,
     ) -> Result<JavaMethodModel, JavaDecompilerError> {
-        let mut declaration = crate::profile_scope!("java_backend.method.declaration", {
-            JavaMethodDeclaration::from_method_node(
-                class,
-                method,
-                self.source_abi.lexical_type_variables(class.class_type()),
-                ((class.access_flags.is_enum() || class.access_flags.is_annotation())
-                    && method.signature.is_some())
-                .then(|| {
-                    self.source_abi
-                        .inherited_declaration_signature(class, method)
-                })
-                .flatten(),
-            )
-        })?;
+        let mut declaration = JavaMethodDeclaration::from_method_node(
+            class,
+            method,
+            self.source_abi.lexical_type_variables(class.class_type()),
+            ((class.access_flags.is_enum() || class.access_flags.is_annotation())
+                && method.signature.is_some())
+            .then(|| {
+                self.source_abi
+                    .inherited_declaration_signature(class, method)
+            })
+            .flatten(),
+        )?;
         if declaration.throws.is_empty() {
             declaration
                 .throws
@@ -510,43 +496,33 @@ impl JavaDecompiler {
         // `from_method_node` does not see the decoded debug stream, so attach
         // source parameter names here. SSA bindings remain owned exclusively
         // by MethodBodyAnalysis.
-        crate::profile_scope!("java_backend.method.debug_params", {
-            let param_names = collect_param_debug_names(cfg);
-            for (idx, parameter) in declaration.parameters.iter_mut().enumerate() {
-                parameter.name = param_names
-                    .get(idx)
-                    .and_then(|name| name.as_deref())
-                    .map(crate::language::java::JavaIdentifier::from_dex);
-            }
-        });
+        let param_names = collect_param_debug_names(cfg);
+        for (idx, parameter) in declaration.parameters.iter_mut().enumerate() {
+            parameter.name = param_names
+                .get(idx)
+                .and_then(|name| name.as_deref())
+                .map(crate::language::java::JavaIdentifier::from_dex);
+        }
         let mut options = declaration.body_options(Some(class));
         if let Some(outer_instance) = outer_instance {
             options.outer_instance = Some(outer_instance.clone());
         }
-        let body = crate::profile_scope!("java_backend.method.pipeline", {
-            MethodBodyPipeline::new(self.type_hierarchy.as_ref(), self.observer.as_ref())
-                .analyze(cfg)
-        })?;
-        crate::profile_scope!("java_backend.method.java_model", {
-            JavaMethodModel::from_body_analysis_with_options(declaration, body, options)
-        })
+        let body = MethodBodyPipeline::new(self.type_hierarchy.as_ref(), self.observer.as_ref())
+            .analyze(cfg)?;
+        JavaMethodModel::from_body_analysis_with_options(declaration, body, options)
     }
 
     fn render_class_model(&self, class: &JavaClassModel) -> Result<String, JavaDecompilerError> {
         let lower_started = crate::timing::Instant::now();
-        let unit = crate::profile_scope!("java_backend.class.lower", {
-            JavaCompilationUnitLowering::lower(
-                class,
-                &self.source_abi,
-                self.type_hierarchy.clone(),
-                self.observer.clone(),
-            )
-        })?;
+        let unit = JavaCompilationUnitLowering::lower(
+            class,
+            &self.source_abi,
+            self.type_hierarchy.clone(),
+            self.observer.clone(),
+        )?;
         let lower_ms = lower_started.elapsed();
         let print_started = crate::timing::Instant::now();
-        let source = crate::profile_scope!("java_backend.class.print", {
-            JavaPrinter::new(self.config.indent.clone()).print_compilation_unit(&unit)
-        })?;
+        let source = JavaPrinter::new(self.config.indent.clone()).print_compilation_unit(&unit)?;
         if std::env::var_os("DEXDEC_BATCH_STATS").is_some() {
             let print_ms = print_started.elapsed();
             if (lower_ms + print_ms).as_millis() >= 50 {

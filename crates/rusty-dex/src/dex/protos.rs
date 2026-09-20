@@ -104,7 +104,9 @@ mod tests {
                 "V".into(),
             ],
         };
-        let types = DexTypes { items: vec![0, 1, 2] };
+        let types = DexTypes {
+            items: vec![0, 1, 2],
+        };
         let protos = DexProtos {
             items: vec![ProtoRow {
                 return_type_idx: 2,

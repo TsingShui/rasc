@@ -1034,14 +1034,12 @@ impl DecompilerContext {
         include_inner: bool,
         observer: Arc<dyn crate::ir::AnalysisObserver>,
     ) -> Result<Option<String>, DecompileError> {
-        crate::profile_scope!("api.decompile_class", {
-            self.decompile_class_with_backend::<KotlinSourceBackend>(
-                class_name,
-                config,
-                include_inner,
-                observer,
-            )
-        })
+        self.decompile_class_with_backend::<KotlinSourceBackend>(
+            class_name,
+            config,
+            include_inner,
+            observer,
+        )
     }
 
     pub fn decompile_java_class_with_inner(
@@ -1091,8 +1089,7 @@ impl DecompilerContext {
         };
         self.prepare_source_backend::<B>()?;
         observer.checkpoint()?;
-        let hierarchy =
-            crate::profile_scope!("api.source_context.hierarchy", { self.type_hierarchy() })?;
+        let hierarchy = self.type_hierarchy()?;
         observer.checkpoint()?;
         let source = B::generate_class(
             self,
@@ -1114,72 +1111,44 @@ impl DecompilerContext {
         run_termination: bool,
     ) -> Result<Option<ClassRenderInput>, DecompileError> {
         observer.checkpoint()?;
-        crate::profile_scope!("api.load_class", {
-            if self.reader.get_class(class_name).is_none() {
-                self.reader.load_class(class_name)?;
-            }
-            Ok::<(), DecompileError>(())
-        })?;
+        if self.reader.get_class(class_name).is_none() {
+            self.reader.load_class(class_name)?;
+        }
         observer.checkpoint()?;
 
-        let Some((mut class_node, methods)): Option<(ClassNode, Vec<crate::frontend::MethodNode>)> =
-            crate::profile_scope!("api.collect_class_methods", {
-                let class = match self.reader.get_class(class_name) {
-                    Some(c) => c,
-                    None => return None,
-                };
-                let methods = class
-                    .methods()
-                    .iter()
-                    .filter(|m| m.code().is_some())
-                    .cloned()
-                    .collect();
-                Some((class.clone(), methods))
-            })
-        else {
+        let Some(class) = self.reader.get_class(class_name) else {
             return Ok(None);
         };
+        let methods: Vec<crate::frontend::MethodNode> = class
+            .methods()
+            .iter()
+            .filter(|method| method.code().is_some())
+            .cloned()
+            .collect();
+        let mut class_node = class.clone();
         observer.checkpoint()?;
 
-        let mut method_models = crate::profile_scope!("api.decode_methods", {
-            let mut method_models = Vec::new();
-            for method in methods {
-                observer.checkpoint()?;
-                method_models.push(self.decode_class_method(class_name, method, !run_termination));
-            }
-            Ok::<_, DecompileError>(method_models)
-        })?;
+        let mut method_models = Vec::new();
+        for method in methods {
+            observer.checkpoint()?;
+            method_models.push(self.decode_class_method(class_name, method, !run_termination));
+        }
         observer.checkpoint()?;
 
         let mut inner: Vec<NestedClassInput> = Vec::new();
         if include_inner {
-            inner = crate::profile_scope!("api.collect_nested_class_inputs", {
-                self.collect_nested_class_inputs(&class_node, !run_termination)
-            })?;
-            crate::profile_scope!("api.sort_nested_inputs", sort_nested_inputs(&mut inner));
+            inner = self.collect_nested_class_inputs(&class_node, !run_termination)?;
+            sort_nested_inputs(&mut inner);
         }
         observer.checkpoint()?;
 
         sort_nested_input_tree(&mut inner);
-        crate::profile_scope!("api.source_dependencies", {
-            let source_dependencies = crate::profile_scope!("api.source_dependencies.collect", {
-                let mut source_dependencies = SourceAbiClosure::from_cfgs(
-                    method_models.iter().filter_map(|method| method.cfg()),
-                );
-                source_dependencies.include_class(&class_node);
-                source_dependencies.include_nested(&inner);
-                source_dependencies
-            });
-            crate::profile_scope!(
-                "api.source_dependencies.load",
-                source_dependencies.load(&mut self.reader, observer.as_ref())
-            )?;
-            crate::profile_scope!(
-                "api.source_dependencies.overrides",
-                self.reader.ensure_override_analysis()
-            )?;
-            Ok::<(), DecompileError>(())
-        })?;
+        let mut source_dependencies =
+            SourceAbiClosure::from_cfgs(method_models.iter().filter_map(|method| method.cfg()));
+        source_dependencies.include_class(&class_node);
+        source_dependencies.include_nested(&inner);
+        source_dependencies.load(&mut self.reader, observer.as_ref())?;
+        self.reader.ensure_override_analysis()?;
         observer.checkpoint()?;
         if run_termination {
             let mut termination_roots = method_models
@@ -1188,9 +1157,7 @@ impl DecompilerContext {
                 .collect::<Vec<_>>();
             collect_nested_cfgs(&inner, &mut termination_roots);
             self.set_kotlin_contract_roots(contract_roots(termination_roots.iter()));
-            let termination = crate::profile_scope!("api.method_termination", {
-                self.method_termination(termination_roots, observer.as_ref())
-            })?;
+            let termination = self.method_termination(termination_roots, observer.as_ref())?;
             for method in &mut method_models {
                 if let Some(cfg) = method.cfg_mut() {
                     termination.apply(cfg);
@@ -1211,10 +1178,8 @@ impl DecompilerContext {
     }
 
     pub(crate) fn prepare_archive_overrides(&mut self) -> Result<(), DecompileError> {
-        crate::profile_scope!("api.prepare_archive_overrides", {
-            self.reader.ensure_override_analysis()?;
-            Ok(())
-        })
+        self.reader.ensure_override_analysis()?;
+        Ok(())
     }
 
     pub(crate) fn prepare_archive_source_abi_before_termination(
@@ -1222,60 +1187,53 @@ impl DecompilerContext {
         prepare_java: bool,
         prepare_kotlin: bool,
     ) -> Result<(), DecompileError> {
-        crate::profile_scope!("api.prepare_archive_source_abi_before_termination", {
-            let stats = std::env::var_os("DEXDEC_BATCH_STATS").is_some();
-            if prepare_kotlin {
-                let roots = self
-                    .method_irs
-                    .values()
-                    .flat_map(|methods| methods.values())
-                    .collect::<Vec<_>>();
-                self.set_kotlin_contract_roots(contract_roots(roots.into_iter()));
+        let stats = std::env::var_os("DEXDEC_BATCH_STATS").is_some();
+        if prepare_kotlin {
+            let roots = self
+                .method_irs
+                .values()
+                .flat_map(|methods| methods.values())
+                .collect::<Vec<_>>();
+            self.set_kotlin_contract_roots(contract_roots(roots.into_iter()));
+        }
+        if prepare_java {
+            let started = crate::timing::Instant::now();
+            self.prepare_java_source_abi_with_cached_resolution(true)?;
+            if stats {
+                eprintln!(
+                    "dexdec batch: java_abi={:.0}ms",
+                    started.elapsed().as_secs_f64() * 1000.0
+                );
             }
-            if prepare_java {
-                let started = crate::timing::Instant::now();
-                self.prepare_java_source_abi_with_cached_resolution(true)?;
-                if stats {
-                    eprintln!(
-                        "dexdec batch: java_abi={:.0}ms",
-                        started.elapsed().as_secs_f64() * 1000.0
-                    );
-                }
-            }
-            Ok(())
-        })
+        }
+        Ok(())
     }
 
     pub(crate) fn prepare_archive_source_abi_after_termination(
         &mut self,
         prepare_kotlin: bool,
     ) -> Result<(), DecompileError> {
-        crate::profile_scope!("api.prepare_archive_source_abi_after_termination", {
-            let stats = std::env::var_os("DEXDEC_BATCH_STATS").is_some();
-            if prepare_kotlin {
-                let started = crate::timing::Instant::now();
-                self.prepare_kotlin_source_abi_from_archive_cfgs()?;
-                if stats {
-                    eprintln!(
-                        "dexdec batch: kotlin_abi={:.0}ms",
-                        started.elapsed().as_secs_f64() * 1000.0
-                    );
-                }
-            }
-            crate::profile_scope!(
-                "api.resolve_archive_method_symbols",
-                self.resolve_archive_method_symbols()
-            )?;
+        let stats = std::env::var_os("DEXDEC_BATCH_STATS").is_some();
+        if prepare_kotlin {
             let started = crate::timing::Instant::now();
-            self.type_hierarchy()?;
+            self.prepare_kotlin_source_abi_from_archive_cfgs()?;
             if stats {
                 eprintln!(
-                    "dexdec batch: hierarchy={:.0}ms",
+                    "dexdec batch: kotlin_abi={:.0}ms",
                     started.elapsed().as_secs_f64() * 1000.0
                 );
             }
-            Ok(())
-        })
+        }
+        self.resolve_archive_method_symbols()?;
+        let started = crate::timing::Instant::now();
+        self.type_hierarchy()?;
+        if stats {
+            eprintln!(
+                "dexdec batch: hierarchy={:.0}ms",
+                started.elapsed().as_secs_f64() * 1000.0
+            );
+        }
+        Ok(())
     }
 
     fn prepare_kotlin_source_abi_from_archive_cfgs(
@@ -1349,78 +1307,74 @@ impl DecompilerContext {
     }
 
     pub(crate) fn prefetch_decoded_methods(&mut self) -> Result<(), DecompileError> {
-        crate::profile_scope!("api.prefetch_decoded_methods", {
-            self.sync_method_cache_revision();
+        self.sync_method_cache_revision();
 
-            let mut specs = Vec::new();
-            for class in self.reader.classes() {
-                let class_name = class.type_descriptor();
-                let Some(dex_idx) = self.reader.get_dex_index(class_name) else {
+        let mut specs = Vec::new();
+        for class in self.reader.classes() {
+            let class_name = class.type_descriptor();
+            let Some(dex_idx) = self.reader.get_dex_index(class_name) else {
+                continue;
+            };
+            for method in class.methods() {
+                let Some(code) = method.code() else {
                     continue;
                 };
-                for method in class.methods() {
-                    let Some(code) = method.code() else {
-                        continue;
-                    };
-                    let descriptor = method.info.descriptor();
-                    let cache_key = format!("{}{}", method.info.name, descriptor);
-                    if self
-                        .method_irs
-                        .get(class_name)
-                        .is_some_and(|methods| methods.contains_key(&cache_key))
-                    {
-                        continue;
-                    }
-                    specs.push(MethodDecodeSpec {
-                        class_name,
-                        cache_key,
-                        method_name: &method.info.name,
-                        method_code: code,
-                        owner: class.class_type(),
-                        param_types: &method.info.param_types,
-                        return_type: &method.info.return_type,
-                        is_static: method.access_flags.is_static(),
-                        declared_synchronized: method.access_flags.is_declared_synchronized(),
-                        dex_idx,
-                    });
+                let descriptor = method.info.descriptor();
+                let cache_key = format!("{}{}", method.info.name, descriptor);
+                if self
+                    .method_irs
+                    .get(class_name)
+                    .is_some_and(|methods| methods.contains_key(&cache_key))
+                {
+                    continue;
                 }
+                specs.push(MethodDecodeSpec {
+                    class_name,
+                    cache_key,
+                    method_name: &method.info.name,
+                    method_code: code,
+                    owner: class.class_type(),
+                    param_types: &method.info.param_types,
+                    return_type: &method.info.return_type,
+                    is_static: method.access_flags.is_static(),
+                    declared_synchronized: method.access_flags.is_declared_synchronized(),
+                    dex_idx,
+                });
             }
+        }
 
-            let reader = &self.reader;
-            let decoded = specs
-                .into_par_iter()
-                .map(|spec| spec.decode(reader))
-                .collect::<Vec<_>>();
-            for result in decoded {
-                if let Ok((class_name, cache_key, ir)) = result {
-                    self.method_irs
-                        .entry(class_name)
-                        .or_default()
-                        .insert(cache_key, ir);
-                }
+        let reader = &self.reader;
+        let decoded = specs
+            .into_par_iter()
+            .map(|spec| spec.decode(reader))
+            .collect::<Vec<_>>();
+        for result in decoded {
+            if let Ok((class_name, cache_key, ir)) = result {
+                self.method_irs
+                    .entry(class_name)
+                    .or_default()
+                    .insert(cache_key, ir);
             }
-            Ok(())
-        })
+        }
+        Ok(())
     }
 
     pub(crate) fn apply_archive_termination(&mut self) -> Result<(), DecompileError> {
-        crate::profile_scope!("api.archive_termination", {
-            let termination = crate::ir::analysis::MethodTermination::analyze(
-                self.method_irs
-                    .values()
-                    .flat_map(|methods| methods.values()),
-            );
-            // Each CFG mutates independently, so the application order cannot
-            // matter.
+        let termination = crate::ir::analysis::MethodTermination::analyze(
             self.method_irs
-                .values_mut()
-                .flat_map(|methods| methods.values_mut())
-                .par_bridge()
-                .for_each(|cfg| {
-                    termination.apply(cfg);
-                });
-            Ok(())
-        })
+                .values()
+                .flat_map(|methods| methods.values()),
+        );
+        // Each CFG mutates independently, so the application order cannot
+        // matter.
+        self.method_irs
+            .values_mut()
+            .flat_map(|methods| methods.values_mut())
+            .par_bridge()
+            .for_each(|cfg| {
+                termination.apply(cfg);
+            });
+        Ok(())
     }
 
     /// Recovers exact calls that cannot complete normally without decoding the

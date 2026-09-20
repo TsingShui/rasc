@@ -231,7 +231,6 @@ pub(super) struct JavaTypeRelations<'a> {
     hierarchy: Option<&'a dyn GenericTypeProjection>,
 }
 
-#[cfg_attr(feature = "profiling", hotpath::measure_all)]
 impl<'a> JavaTypeRelations<'a> {
     pub(super) fn new(
         source_types: &'a BTreeMap<ArgType, JavaType>,
@@ -616,7 +615,6 @@ enum GenericConstraintOrigin {
     Owner,
 }
 
-#[cfg_attr(feature = "profiling", hotpath::measure_all)]
 impl<'a> GenericTypeSolver<'a> {
     pub(super) fn new(source_types: &'a BTreeMap<ArgType, JavaType>) -> Self {
         Self {
@@ -1890,7 +1888,6 @@ impl<'a> GenericTypeSolver<'a> {
 
 struct DenotableTypeProjection;
 
-#[cfg_attr(feature = "profiling", hotpath::measure_all)]
 impl DenotableTypeProjection {
     fn argument(argument: JavaTypeArgument, captured: bool) -> JavaTypeArgument {
         match argument {
@@ -1918,7 +1915,6 @@ enum GenericVariance {
 
 pub(super) struct GenericTypeEvidence;
 
-#[cfg_attr(feature = "profiling", hotpath::measure_all)]
 impl GenericTypeEvidence {
     fn reconcile(
         left: &JavaTypeArgument,
@@ -2063,7 +2059,6 @@ struct GenericRequirementLattice<'a> {
     projection: Option<&'a dyn GenericTypeProjection>,
 }
 
-#[cfg_attr(feature = "profiling", hotpath::measure_all)]
 impl<'a> GenericRequirementLattice<'a> {
     fn new(
         source_types: &'a BTreeMap<ArgType, JavaType>,
@@ -2156,7 +2151,6 @@ impl<'a> GenericRequirementLattice<'a> {
 
 pub(super) struct GenericInvocationCompatibility;
 
-#[cfg_attr(feature = "profiling", hotpath::measure_all)]
 impl GenericInvocationCompatibility {
     pub(super) fn requires_unchecked_conversion(
         formal: &JvmTypeSignature,
@@ -2283,7 +2277,6 @@ impl GenericInvocationCompatibility {
 
 pub(super) struct GenericTypeRelation;
 
-#[cfg_attr(feature = "profiling", hotpath::measure_all)]
 impl GenericTypeRelation {
     pub(super) fn converge(
         left: &mut GenericTypeSolver<'_>,
@@ -2404,7 +2397,6 @@ struct TypeEquationGraph {
     dirty_invocations: BTreeSet<usize>,
 }
 
-#[cfg_attr(feature = "profiling", hotpath::measure_all)]
 impl TypeEquationGraph {
     fn rebuild(&mut self, equations: &[TypeEquation], invocations: &[Arc<SemanticOperation>]) {
         self.dependents.clear();
@@ -2659,7 +2651,6 @@ pub(super) struct SourceTypeFlow<'a> {
     collect_diagnostics: bool,
 }
 
-#[cfg_attr(feature = "profiling", hotpath::measure_all)]
 impl<'a> SourceTypeFlow<'a> {
     pub(super) fn solve(
         root: &crate::ir::SemanticNode,
@@ -5759,7 +5750,6 @@ impl<'a> SourceTypeFlow<'a> {
     }
 }
 
-#[cfg_attr(feature = "profiling", hotpath::measure_all)]
 impl SemanticVisitor for SourceTypeFlow<'_> {
     fn enter_node(&mut self, node: &SemanticNode) {
         match node {

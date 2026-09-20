@@ -6,7 +6,7 @@
 
 rasc 是 asc [ASC](https://github.com/MG1937/ASC) 的 Rust 实现，用于以极快的速度分析 Apk\Dex。
 rasc 的实现主要由 Agent + 少量人工介入完成，在部分实现、优化上与 asc 不同。
-rasc 有两个核心 Target: 原生 Cli 以及 `wasm32-wasip1`（一个程序，给没有自己文件系统的宿主用），以 Cli 为主。
+rasc 以原生 CLI 形式提供。
 
 
 ## 性能与取舍

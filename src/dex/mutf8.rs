@@ -163,7 +163,13 @@ mod tests {
         }
         // Non-ASCII still goes through the MUTF-8 decoder, including the two encodings
         // that are not UTF-8.
-        for value in ["a\u{7f}b", "\u{e9}t\u{e9}", "\u{4e2d}\u{6587}", "A\u{1F600}Z", "n\0ul"] {
+        for value in [
+            "a\u{7f}b",
+            "\u{e9}t\u{e9}",
+            "\u{4e2d}\u{6587}",
+            "A\u{1F600}Z",
+            "n\0ul",
+        ] {
             let encoded = encode_mutf8(value);
             let mut pushed = String::new();
             push_decoded(&mut pushed, &encoded);

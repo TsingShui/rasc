@@ -40,7 +40,7 @@ impl<'a> MethodBodyPipeline<'a> {
         &self,
         cfg: &mut CFG,
     ) -> Result<MethodBodyAnalysis, KotlinDecompilerError> {
-        crate::profile_scope!("method_pipeline.total", self.analyze_impl(cfg))
+        self.analyze_impl(cfg)
     }
 
     fn analyze_impl(&self, cfg: &mut CFG) -> Result<MethodBodyAnalysis, KotlinDecompilerError> {
@@ -55,17 +55,14 @@ impl<'a> MethodBodyPipeline<'a> {
         self.observer.checkpoint()?;
         let cfg_pipeline = CfgPipeline::new(self.hierarchy);
         let t = crate::timing::Instant::now();
-        let cfg_analysis = crate::profile_scope!("method_pipeline.cfg_ssa", {
-            cfg_pipeline.analyze_observed(cfg, self.observer)
-        })?;
+        let cfg_analysis = cfg_pipeline.analyze_observed(cfg, self.observer)?;
         mark(&mut stages, "cfg_ssa", t);
         self.observe_stage(cfg, "cfg_ssa:done")?;
         let ssa_values = cfg_analysis.values;
 
         let t = crate::timing::Instant::now();
-        let exception_analysis = crate::profile_scope!("method_pipeline.exception_analysis", {
-            ExceptionAnalyzer::new(cfg, &ssa_values, self.hierarchy).analyze()
-        })?;
+        let exception_analysis =
+            ExceptionAnalyzer::new(cfg, &ssa_values, self.hierarchy).analyze()?;
         mark(&mut stages, "exceptions", t);
         self.observe_stage(cfg, "exceptions:done")?;
         self.observer.observe(crate::ir::AnalysisEvent::Exceptions {
@@ -85,11 +82,9 @@ impl<'a> MethodBodyPipeline<'a> {
             graph: &region_graph,
         });
         let t = crate::timing::Instant::now();
-        let body = crate::profile_scope!("method_pipeline.structure", {
-            RegionReducer::new(cfg, &region_graph, self.observer)
-                .and_then(|reducer| reducer.reduce())
-                .map_err(KotlinDecompilerError::from)
-        })?;
+        let body = RegionReducer::new(cfg, &region_graph, self.observer)
+            .and_then(|reducer| reducer.reduce())
+            .map_err(KotlinDecompilerError::from)?;
         mark(&mut stages, "structure", t);
         self.observe_stage(cfg, "structure:done")?;
         self.observe_semantics(cfg, crate::ir::SemanticStage::Structured, &body);
@@ -99,9 +94,7 @@ impl<'a> MethodBodyPipeline<'a> {
         mark(&mut stages, "verify1", t);
         let mut value_recovery = ValueRecovery::new(cfg)?;
         let t = crate::timing::Instant::now();
-        let semantic = crate::profile_scope!("method_pipeline.value_recovery", {
-            value_recovery.transform(semantic)
-        })?;
+        let semantic = value_recovery.transform(semantic)?;
         mark(&mut stages, "value_recovery", t);
         self.observer
             .observe(crate::ir::AnalysisEvent::ValueRecovery {
@@ -118,13 +111,11 @@ impl<'a> MethodBodyPipeline<'a> {
             semantic.body(),
         );
         let t = crate::timing::Instant::now();
-        let types = crate::profile_scope!("method_pipeline.type_recovery", {
-            TypeSolver::new(self.hierarchy).solve(
-                cfg,
-                semantic.state().values(),
-                semantic.state().constants(),
-            )
-        })?;
+        let types = TypeSolver::new(self.hierarchy).solve(
+            cfg,
+            semantic.state().values(),
+            semantic.state().constants(),
+        )?;
         mark(&mut stages, "types", t);
         self.observe_stage(cfg, "types:done")?;
         let t = crate::timing::Instant::now();
@@ -141,9 +132,7 @@ impl<'a> MethodBodyPipeline<'a> {
         mark(&mut stages, "source_analysis", t);
         self.observe_stage(cfg, "source_analysis:done")?;
         let t = crate::timing::Instant::now();
-        let mut semantic = crate::profile_scope!("method_pipeline.source_variables", {
-            source_variables.apply(cfg, semantic, types, self.hierarchy)
-        })?;
+        let mut semantic = source_variables.apply(cfg, semantic, types, self.hierarchy)?;
         mark(&mut stages, "source_apply", t);
         value_recovery.bind_source_inputs(cfg);
         self.observe_stage(cfg, "source_apply:done")?;
@@ -156,9 +145,7 @@ impl<'a> MethodBodyPipeline<'a> {
             semantic.body(),
         );
         let t = crate::timing::Instant::now();
-        crate::profile_scope!("method_pipeline.source_prepare", {
-            value_recovery.prepare_source(&mut semantic)
-        })?;
+        value_recovery.prepare_source(&mut semantic)?;
         if cfg.method().descriptor().return_type == ArgType::VOID {
             semantic.normalize_void_method_completion()?;
         }
@@ -173,9 +160,7 @@ impl<'a> MethodBodyPipeline<'a> {
             semantic.body(),
         );
         let t = crate::timing::Instant::now();
-        let mut semantic = crate::profile_scope!("method_pipeline.kotlin_syntax", {
-            SourceSyntaxRecovery::new(self.hierarchy).transform(semantic)
-        })?;
+        let mut semantic = SourceSyntaxRecovery::new(self.hierarchy).transform(semantic)?;
         mark(&mut stages, "kotlin_syntax", t);
         self.observe_stage(cfg, "kotlin_syntax:done")?;
         let t = crate::timing::Instant::now();
@@ -183,9 +168,7 @@ impl<'a> MethodBodyPipeline<'a> {
         mark(&mut stages, "verify5", t);
         self.observe_semantics(cfg, crate::ir::SemanticStage::SourceSyntax, semantic.body());
         let t = crate::timing::Instant::now();
-        crate::profile_scope!("method_pipeline.java_value_fixed_point", {
-            KotlinValueFixedPoint::new(&mut value_recovery, self.hierarchy).apply(&mut semantic)
-        })?;
+        KotlinValueFixedPoint::new(&mut value_recovery, self.hierarchy).apply(&mut semantic)?;
         mark(&mut stages, "kotlin_fixed_point", t);
         self.observe_stage(cfg, "kotlin_values:done")?;
         let t = crate::timing::Instant::now();
@@ -275,26 +258,15 @@ impl<'a, 'hierarchy> KotlinValueFixedPoint<'a, 'hierarchy> {
     ) -> Result<bool, KotlinDecompilerError> {
         let mut changed = false;
         loop {
-            let values_changed =
-                crate::profile_scope!("java_value.values", self.values.recover_source(method))?;
-            let building_changed = crate::profile_scope!(
-                "java_value.string_building",
-                StringBuildingRecovery::apply(method.body_mut())
-            )?;
-            let syntax_changed =
-                crate::profile_scope!("java_value.syntax", self.syntax.apply(method))?;
-            let dead_changed = crate::profile_scope!(
-                "java_value.dce",
-                SemanticDeadCodeElimination::apply(method.body_mut())
-            )?;
+            let values_changed = self.values.recover_source(method)?;
+            let building_changed = StringBuildingRecovery::apply(method.body_mut())?;
+            let syntax_changed = self.syntax.apply(method)?;
+            let dead_changed = SemanticDeadCodeElimination::apply(method.body_mut())?;
             changed |= values_changed || building_changed || syntax_changed || dead_changed;
             if building_changed || syntax_changed || dead_changed {
                 continue;
             }
-            let conditions_changed = crate::profile_scope!(
-                "java_value.conditions",
-                self.syntax.reduce_conditions(method)
-            )?;
+            let conditions_changed = self.syntax.reduce_conditions(method)?;
             changed |= conditions_changed;
             if !conditions_changed {
                 return Ok(changed);
