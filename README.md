@@ -1,6 +1,5 @@
 # rasc
 
-**Source: <https://github.com/TsingShui/rasc>**
 
 ## What rasc is for
 
