@@ -276,7 +276,7 @@ dependencies = [
 
 [[package]]
 name = "dexdec"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "bitflags",
  "rayon",
@@ -510,7 +510,7 @@ checksum = "dc33ff2d4973d518d823d61aa239014831e521c75da58e3df4840d3f47749d09"
 
 [[package]]
 name = "rasc"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "anyhow",
  "axmldecoder",
@@ -546,7 +546,7 @@ dependencies = [
 
 [[package]]
 name = "rusty-dex"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "byteorder",
  "log",
