@@ -1,8 +1,8 @@
 name: Release
 
-# Tag-driven: pushing a `v*` tag builds the macOS artefacts and publishes one
-# GitHub Release carrying them. `workflow_dispatch` builds and packages the same
-# artefacts without releasing, so the workflow can be exercised before a tag.
+# Tag-driven: pushing a version tag builds the macOS artefacts and publishes them
+# to its GitHub Release. `workflow_dispatch` can build artifacts only, or rebuild
+# and publish an existing tag when `release_tag` is provided.
 #
 # Both targets build on the arm64 runner: the macOS SDK is universal, so the
 # x86_64 `cc` dependencies (libdeflater, libz-sys) cross-compile with the target
@@ -14,8 +14,13 @@ name: Release
 
 on:
   push:
-    tags: ["v*"]
+    tags: ["v*", "rasc-v*"]
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Existing version tag to build and publish (leave empty to build artifacts only)
+        required: false
+        type: string
 
 permissions:
   contents: write
@@ -33,6 +38,8 @@ jobs:
         target: [aarch64-apple-darwin, x86_64-apple-darwin]
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.release_tag || github.ref }}
 
       - name: Toolchain
         run: |
@@ -58,9 +65,15 @@ jobs:
           "$BIN" --help > /dev/null
 
       - name: Package
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
         run: |
-          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
-            VERSION="${GITHUB_REF_NAME#v}"
+          if [ -n "$RELEASE_TAG" ]; then
+            VERSION="${RELEASE_TAG#rasc-v}"
+            VERSION="${VERSION#v}"
+          elif [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            VERSION="${GITHUB_REF_NAME#rasc-v}"
+            VERSION="${VERSION#v}"
           else
             VERSION="$(grep -m1 '^version = ' Cargo.toml | cut -d'"' -f2)"
           fi
@@ -81,11 +94,13 @@ jobs:
 
   release:
     name: Publish
-    if: github.ref_type == 'tag'
+    if: github.ref_type == 'tag' || inputs.release_tag != ''
     needs: build
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.release_tag || github.ref }}
 
       - uses: actions/download-artifact@v4
         with:
@@ -95,8 +110,9 @@ jobs:
       - name: Publish release
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
         run: |
-          NOTES="docs/releases/${GITHUB_REF_NAME}.md"
+          NOTES="docs/releases/${RELEASE_TAG}.md"
           if [ -f "$NOTES" ]; then
             NOTES_ARGS=(--notes-file "$NOTES")
           else
@@ -104,11 +120,11 @@ jobs:
           fi
           # Idempotent: re-pushing a tag (or a re-run) must refresh the assets of an
           # existing release instead of failing on "release already exists".
-          if gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
-            gh release upload "${GITHUB_REF_NAME}" artifacts/* --clobber
+          if gh release view "${RELEASE_TAG}" >/dev/null 2>&1; then
+            gh release upload "${RELEASE_TAG}" artifacts/* --clobber
           else
-            gh release create "${GITHUB_REF_NAME}" \
-              --title "rasc ${GITHUB_REF_NAME}" \
+            gh release create "${RELEASE_TAG}" \
+              --title "rasc ${RELEASE_TAG}" \
               "${NOTES_ARGS[@]}" \
               artifacts/*
           fi
