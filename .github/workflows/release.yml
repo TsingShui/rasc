@@ -118,10 +118,14 @@ jobs:
           else
             NOTES_ARGS=(--notes "macOS artefacts (aarch64 + x86_64).")
           fi
-          # Idempotent: re-pushing a tag (or a re-run) must refresh the assets of an
-          # existing release instead of failing on "release already exists".
           if gh release view "${RELEASE_TAG}" >/dev/null 2>&1; then
-            gh release upload "${RELEASE_TAG}" artifacts/* --clobber
+            IS_DRAFT="$(gh release view "${RELEASE_TAG}" --json isDraft --jq .isDraft)"
+            if [ "$IS_DRAFT" != "true" ]; then
+              echo "Release ${RELEASE_TAG} is already published and immutable; assets cannot be added." >&2
+              exit 1
+            fi
+            gh release upload "${RELEASE_TAG}" artifacts/*
+            gh release edit "${RELEASE_TAG}" --draft=false
           else
             gh release create "${RELEASE_TAG}" \
               --title "rasc ${RELEASE_TAG}" \

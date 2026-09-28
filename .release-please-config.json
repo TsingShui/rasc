@@ -1,6 +1,8 @@
 {
   "release-type": "rust",
   "include-v-in-tag": true,
+  "draft": true,
+  "force-tag-creation": true,
   "packages": {
     ".": {}
   }
