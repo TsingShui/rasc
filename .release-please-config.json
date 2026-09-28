@@ -1,0 +1,7 @@
+{
+  "release-type": "rust",
+  "include-v-in-tag": true,
+  "packages": {
+    ".": {}
+  }
+}

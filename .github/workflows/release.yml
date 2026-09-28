@@ -67,7 +67,7 @@ jobs:
           NAME="rasc-${VERSION}-${{ matrix.target }}"
           mkdir -p "$NAME"
           cp "target/${{ matrix.target }}/release/rasc" "$NAME/"
-          cp LICENSE NOTICE README.md README.zh-CN.md "$NAME/"
+          cp LICENSE NOTICE README.md "$NAME/"
           tar -czf "$NAME.tar.gz" "$NAME"
           shasum -a 256 "$NAME.tar.gz" > "$NAME.tar.gz.sha256"
           rm -rf "$NAME"
