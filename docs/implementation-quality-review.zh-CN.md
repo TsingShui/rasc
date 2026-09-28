@@ -17,7 +17,7 @@
 | `crates/rusty-dex/` | 项目维护的 DEX parser 快照 | 24 | 阅读 reader、lazy model、指令与 reference scanner |
 | `vendor/axmldecoder/` | 有明确补丁清单的 crates.io vendor | 4 | 阅读所有生产 Rust 文件及 rasc 补丁 |
 
-基线文件包括 `Cargo.toml`、各子 crate 的 `Cargo.toml`、`AGENT.md`、`FORK.md`、`PATCHES.md`、release note，以及当前 `git diff`。`dexdec` / `rusty-dex` 虽源自上游，但已作为 snapshot 由项目维护；`axmldecoder` 仅将 `PATCHES.md` 所列改动视为项目主动维护面。
+基线文件包括 `Cargo.toml`、各子 crate 的 `Cargo.toml`、`AGENTS.md`、`FORK.md`、`PATCHES.md`、release note，以及当前 `git diff`。`dexdec` / `rusty-dex` 虽源自上游，但已作为 snapshot 由项目维护；`axmldecoder` 仅将 `PATCHES.md` 所列改动视为项目主动维护面。
 
 ### 1.2 方法
 

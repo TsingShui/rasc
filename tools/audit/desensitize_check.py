@@ -172,7 +172,7 @@ def main() -> int:
             print(f"  {at}\n    token: {word}\n    line:  {excerpt}")
         print("\nKeep real corpus identity out of the tree: use the neutral alias, an"
               "\nanonymous handle, a self-made fixture, or - if it truly must be written\n"
-              "down - the untracked .cache/ directory. See AGENT.md, \"Bug records\".")
+              "down - the untracked .cache/ directory. See AGENTS.md, \"Corpus data and sensitive inputs\".")
         return 1
     print(f"desensitization gate: clean ({where}, {len(tokens())} tokens)")
     return 0
