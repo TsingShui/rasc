@@ -130,7 +130,7 @@ scratch、serde 和 dexdec 自身内存另计。release 使用 `panic=abort`，�
 
 ## 7. Pi 配置和 code mode
 
-项目级 `.pi/mcp.json` 示例（不会由 rasc 自动写入）：
+推荐在用户级 `~/.pi/agent/mcp.json` 中配置一次，供所有 Pi 项目使用（不会由 rasc 自动写入）：
 
 ```json
 {
@@ -144,6 +144,10 @@ scratch、serde 和 dexdec 自身内存另计。release 使用 `panic=abort`，�
   }
 }
 ```
+
+将 `--root` 替换为允许 rasc 打开的 APK/DEX 所在目录，然后运行 `pi mcp list` 验证连接。
+只有某个项目需要更窄的 root 或不同资源限制时，才需要用项目级 `.pi/mcp.json` 覆盖全局配置；
+正常使用不要求项目级配置。
 
 MCP tool 返回完整 `CallToolResult`。下面的 filter/sort/slice/map 和并行编排全部发生在 code mode，
 不是 MCP 参数：

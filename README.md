@@ -53,7 +53,7 @@ snapshot directly; parser/decompiler state, source, manifests, and query results
 The server exposes exactly `open`, `close`, `status`, `classes`, `strings`, `findrefs`, `getclass`,
 `manifest`, and `entries`.
 
-A project-level pi configuration can be:
+Configure rasc once for all Pi projects in the user-level `~/.pi/agent/mcp.json`:
 
 ```json
 {
@@ -67,6 +67,10 @@ A project-level pi configuration can be:
   }
 }
 ```
+
+Replace the root with the directory containing inputs that rasc may open, then run `pi mcp list`
+to verify the connection. A project-level `.pi/mcp.json` override is optional when one project needs
+a narrower root or different limits; it is not required for normal use.
 
 Call `open` once, retain its process-local `target_id`, consume complete typed results, and call
 `close`. The server does not paginate or provide generic list filters: code mode should filter,
