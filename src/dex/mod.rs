@@ -21,7 +21,6 @@ use anyhow::{Context, Result, bail};
 use filter::Targets;
 use memchr::memmem::Finder;
 use rayon::prelude::*;
-use std::collections::BTreeSet;
 
 /// Class lists at least this large are split across workers during the scan.
 const PARALLEL_SCAN_CLASSES: usize = 64;
@@ -96,13 +95,53 @@ pub fn decode_string(bytes: &[u8]) -> String {
 }
 
 pub fn class_names(data: &[u8]) -> Result<Vec<String>> {
+    Ok(class_definitions(data, 0, usize::MAX)?
+        .into_iter()
+        .map(|definition| definition.descriptor)
+        .collect())
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct ClassDefinition {
+    pub(crate) class_def_idx: usize,
+    pub(crate) descriptor: String,
+}
+
+/// A bounded slice of the class definition table, preserving its exact row identity.
+pub(crate) fn class_definitions(
+    data: &[u8],
+    start: usize,
+    limit: usize,
+) -> Result<Vec<ClassDefinition>> {
+    let mut definitions = Vec::new();
+    for_each_class_definition(data, |definition| {
+        if definition.class_def_idx >= start && definitions.len() < limit {
+            definitions.push(definition);
+        }
+        Ok(definitions.len() < limit)
+    })?;
+    Ok(definitions)
+}
+
+/// Visit class definitions in physical table order without materializing the table.
+/// Returning `false` stops immediately, which lets protocol adapters enforce a
+/// complete-response budget while the result is being built.
+pub(crate) fn for_each_class_definition(
+    data: &[u8],
+    mut visit: impl FnMut(ClassDefinition) -> Result<bool>,
+) -> Result<()> {
     let dex = Dex::parse(data)?;
-    let mut names = Vec::with_capacity(dex.header.classes_size);
     for index in 0..dex.header.classes_size {
         let class_def = dex.header.classes_off + index * 32;
-        names.push(dex.type_name(dex.u32(class_def)? as usize)?);
+        let definition = ClassDefinition {
+            class_def_idx: index,
+            descriptor: dex.type_name(dex.u32(class_def)? as usize)?,
+        };
+        if !visit(definition)? {
+            break;
+        }
     }
-    Ok(names)
+    Ok(())
 }
 
 /// One scan hit: the referencing method's index and one target index it references.
@@ -122,6 +161,8 @@ type Hit = (u32, u32);
 /// CLI's job, so the output format lives in exactly one place.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ReferenceRow {
+    /// Exact DEX method_ids identity of the referencing method.
+    pub method_index: u32,
     /// The referencing member as `Lcom/foo/Main;->name`: the defining class's descriptor,
     /// `->`, and the method name.
     ///
@@ -146,6 +187,89 @@ pub fn find_references(data: &[u8], query: &Query) -> Result<Vec<ReferenceRow>> 
     }
     let targets = Targets::new(targets);
     let hits = dex.scan_all_classes(kind, &targets)?;
+    render_reference_rows(&dex, kind, &hits)
+}
+
+/// Visit reference rows in deterministic method-index order without retaining
+/// the complete result. Returning `false` stops before scanning later classes.
+#[derive(Debug)]
+pub(crate) struct ReferenceScratchLimit;
+
+impl std::fmt::Display for ReferenceScratchLimit {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("reference scan scratch exceeds the configured result-byte budget")
+    }
+}
+
+impl std::error::Error for ReferenceScratchLimit {}
+
+pub(crate) fn for_each_reference(
+    data: &[u8],
+    query: &Query,
+    max_scratch_bytes: usize,
+    mut visit: impl FnMut(ReferenceRow) -> Result<bool>,
+) -> Result<()> {
+    let dex = Dex::parse(data)?;
+    let (kind, targets) = dex.resolve_targets_bounded(query, max_scratch_bytes)?;
+    if targets.is_empty() {
+        return Ok(());
+    }
+    let targets = Targets::new(targets);
+    let max_hits = max_scratch_bytes / std::mem::size_of::<Hit>();
+    for class_index in 0..dex.header.classes_size {
+        let mut hits = Vec::new();
+        dex.scan_class_index_bounded(class_index, kind, &targets, &mut hits, max_hits)?;
+        if hits.is_empty() {
+            continue;
+        }
+        hits.sort_unstable();
+        hits.dedup();
+        let mut at = 0usize;
+        while at < hits.len() {
+            let method_idx = hits[at].0;
+            let start = at;
+            while at < hits.len() && hits[at].0 == method_idx {
+                at += 1;
+            }
+            let method = dex.method(method_idx as usize)?;
+            let member_bound = dex
+                .string_bytes(dex.type_string_idx(method.class_idx as usize)?)?
+                .len()
+                .saturating_add(2)
+                .saturating_add(dex.string_bytes(method.name_idx as usize)?.len());
+            if member_bound > max_scratch_bytes {
+                return Err(ReferenceScratchLimit.into());
+            }
+            let member = dex.member_name(method.class_idx as usize, method.name_idx as usize)?;
+            let mut matched = String::new();
+            for &(_, index) in &hits[start..at] {
+                let separator = usize::from(!matched.is_empty()) * 2;
+                let next_bound = member
+                    .len()
+                    .saturating_add(matched.len())
+                    .saturating_add(separator)
+                    .saturating_add(dex.target_name_len_upper_bound(kind, index as usize)?);
+                if next_bound > max_scratch_bytes {
+                    return Err(ReferenceScratchLimit.into());
+                }
+                if separator != 0 {
+                    matched.push_str("; ");
+                }
+                dex.push_target_name(kind, index as usize, &mut matched)?;
+            }
+            if !visit(ReferenceRow {
+                method_index: method_idx,
+                member,
+                matched,
+            })? {
+                return Ok(());
+            }
+        }
+    }
+    Ok(())
+}
+
+fn render_reference_rows(dex: &Dex<'_>, kind: RefKind, hits: &[Hit]) -> Result<Vec<ReferenceRow>> {
     let mut rows: Vec<ReferenceRow> = Vec::new();
     // The hits arrive sorted by method and deduplicated, so one pass groups them: a run
     // of equal method indices is that method's matched set, in ascending index order.
@@ -165,6 +289,7 @@ pub fn find_references(data: &[u8], query: &Query) -> Result<Vec<ReferenceRow>> 
             dex.push_target_name(kind, index as usize, &mut matched_names)?;
         }
         rows.push(ReferenceRow {
+            method_index: method_idx,
             member: dex.member_name(method.class_idx as usize, method.name_idx as usize)?,
             matched: matched_names,
         });
@@ -342,7 +467,7 @@ impl<'a> Dex<'a> {
         })
     }
 
-    fn matching_strings(&self, pattern: &str) -> Result<Vec<u32>> {
+    fn matching_strings_bounded(&self, pattern: &str, max_targets: usize) -> Result<Vec<u32>> {
         if pattern.is_empty() {
             return Ok(Vec::new());
         }
@@ -351,17 +476,28 @@ impl<'a> Dex<'a> {
         let mut out = Vec::new();
         for index in 0..self.header.strings_size {
             if finder.find(self.string_bytes(index)?).is_some() {
+                if out.len() == max_targets {
+                    return Err(ReferenceScratchLimit.into());
+                }
                 out.push(index as u32);
             }
         }
         Ok(out)
     }
 
-    fn matching_types(&self, pattern: &str) -> Result<Vec<u32>> {
-        let strings: BTreeSet<u32> = self.matching_strings(pattern)?.into_iter().collect();
+    fn matching_types_bounded(&self, pattern: &str, max_targets: usize) -> Result<Vec<u32>> {
+        if pattern.is_empty() {
+            return Ok(Vec::new());
+        }
+        let needle = mutf8::encode_mutf8(pattern);
+        let finder = Finder::new(&needle);
         let mut out = Vec::new();
         for index in 0..self.header.types_size {
-            if strings.contains(&(self.type_string_idx(index)? as u32)) {
+            let string_index = self.type_string_idx(index)?;
+            if finder.find(self.string_bytes(string_index)?).is_some() {
+                if out.len() == max_targets {
+                    return Err(ReferenceScratchLimit.into());
+                }
                 out.push(index as u32);
             }
         }
@@ -369,15 +505,52 @@ impl<'a> Dex<'a> {
     }
 
     fn resolve_targets(&self, query: &Query) -> Result<(RefKind, Vec<u32>)> {
-        match query {
-            Query::String(pattern) => Ok((RefKind::String, self.matching_strings(pattern)?)),
-            Query::Type(pattern) => Ok((RefKind::Type, self.matching_types(pattern)?)),
-            Query::Method(query) => Ok((RefKind::Method, self.matching_members(query, true)?)),
-            Query::Field(query) => Ok((RefKind::Field, self.matching_members(query, false)?)),
-        }
+        self.resolve_targets_bounded(query, usize::MAX)
     }
 
-    fn matching_members(&self, query: &MemberQuery, methods: bool) -> Result<Vec<u32>> {
+    fn resolve_targets_bounded(
+        &self,
+        query: &Query,
+        max_scratch_bytes: usize,
+    ) -> Result<(RefKind, Vec<u32>)> {
+        if max_scratch_bytes < Targets::FIXED_BYTES {
+            return Err(ReferenceScratchLimit.into());
+        }
+        let max_targets =
+            max_scratch_bytes.saturating_sub(Targets::FIXED_BYTES) / std::mem::size_of::<u32>();
+        let (kind, targets) = match query {
+            Query::String(pattern) => (
+                RefKind::String,
+                self.matching_strings_bounded(pattern, max_targets)?,
+            ),
+            Query::Type(pattern) => (
+                RefKind::Type,
+                self.matching_types_bounded(pattern, max_targets)?,
+            ),
+            Query::Method(query) => (
+                RefKind::Method,
+                self.matching_members_bounded(query, true, max_targets)?,
+            ),
+            Query::Field(query) => (
+                RefKind::Field,
+                self.matching_members_bounded(query, false, max_targets)?,
+            ),
+        };
+        if Targets::FIXED_BYTES
+            .saturating_add(targets.len().saturating_mul(std::mem::size_of::<u32>()))
+            > max_scratch_bytes
+        {
+            return Err(ReferenceScratchLimit.into());
+        }
+        Ok((kind, targets))
+    }
+
+    fn matching_members_bounded(
+        &self,
+        query: &MemberQuery,
+        methods: bool,
+        max_targets: usize,
+    ) -> Result<Vec<u32>> {
         let (base, size) = if methods {
             (self.header.methods_off, self.header.methods_size)
         } else {
@@ -413,10 +586,32 @@ impl<'a> Dex<'a> {
                     .is_some_and(|finder| finder.find(class_bytes).is_some()),
             };
             if class_matches {
+                if out.len() == max_targets {
+                    return Err(ReferenceScratchLimit.into());
+                }
                 out.push(index as u32);
             }
         }
         Ok(out)
+    }
+
+    fn target_name_len_upper_bound(&self, kind: RefKind, index: usize) -> Result<usize> {
+        match kind {
+            RefKind::String => Ok(self.string_bytes(index)?.len()),
+            RefKind::Type => Ok(self.string_bytes(self.type_string_idx(index)?)?.len()),
+            RefKind::Method | RefKind::Field => {
+                let member = if kind == RefKind::Method {
+                    self.method(index)?
+                } else {
+                    self.field(index)?
+                };
+                Ok(self
+                    .string_bytes(self.type_string_idx(member.class_idx as usize)?)?
+                    .len()
+                    .saturating_add(2)
+                    .saturating_add(self.string_bytes(member.name_idx as usize)?.len()))
+            }
+        }
     }
 
     fn push_target_name(&self, kind: RefKind, index: usize, out: &mut String) -> Result<()> {
@@ -500,10 +695,21 @@ impl<'a> Dex<'a> {
         targets: &Targets,
         hits: &mut Vec<Hit>,
     ) -> Result<()> {
+        self.scan_class_index_bounded(class_index, kind, targets, hits, usize::MAX)
+    }
+
+    fn scan_class_index_bounded(
+        &self,
+        class_index: usize,
+        kind: RefKind,
+        targets: &Targets,
+        hits: &mut Vec<Hit>,
+        max_hits: usize,
+    ) -> Result<()> {
         let class_def = self.header.classes_off + class_index * 32;
         let class_data_off = self.u32(class_def + 24)? as usize;
         if class_data_off != 0 {
-            self.scan_class_data(class_data_off, kind, targets, hits)?;
+            self.scan_class_data(class_data_off, kind, targets, hits, max_hits)?;
         }
         Ok(())
     }
@@ -514,6 +720,7 @@ impl<'a> Dex<'a> {
         kind: RefKind,
         targets: &Targets,
         hits: &mut Vec<Hit>,
+        max_hits: usize,
     ) -> Result<()> {
         let mut cursor = offset;
         let static_fields = read_uleb(self.data, &mut cursor)? as usize;
@@ -533,7 +740,7 @@ impl<'a> Dex<'a> {
                 read_uleb(self.data, &mut cursor)?;
                 let code_off = read_uleb(self.data, &mut cursor)? as usize;
                 if code_off != 0 {
-                    self.scan_code(method_idx, code_off, kind, targets, hits)?;
+                    self.scan_code(method_idx, code_off, kind, targets, hits, max_hits)?;
                 }
             }
         }
@@ -547,6 +754,7 @@ impl<'a> Dex<'a> {
         kind: RefKind,
         targets: &Targets,
         hits: &mut Vec<Hit>,
+        max_hits: usize,
     ) -> Result<()> {
         let insns_size = self.u32(code_off + 12)? as usize;
         let start = code_off.checked_add(16).context("code offset overflow")?;
@@ -589,6 +797,9 @@ impl<'a> Dex<'a> {
                 // adjacent: skipping a repeat of the previous pair drops the duplicates
                 // the accumulator used to absorb, before they reach the sort.
                 if targets.contains(index) && hits.last() != Some(&(method_idx, index)) {
+                    if hits.len() == max_hits {
+                        return Err(ReferenceScratchLimit.into());
+                    }
                     hits.push((method_idx, index));
                 }
             }
@@ -824,6 +1035,7 @@ pub(crate) mod tests {
     /// decoder keeps inline (see rasc-dex's `PATCHES.md`, https://github.com/TsingShui/rasc-dex,
     /// "5. `/range` register lists"), so this is the fixture for the
     /// decompiler regression: the decompiled call must keep all eight.
+    #[allow(dead_code)]
     pub(crate) fn range_invoke_fixture() -> Vec<u8> {
         let header_size = 0x70usize;
         let strings = ["LFixture0;", "V", "VIIIIIIII", "call", "target", "I"];
@@ -939,6 +1151,7 @@ pub(crate) mod tests {
     fn expected_rows(class_count: usize) -> Vec<ReferenceRow> {
         (0..class_count)
             .map(|index| ReferenceRow {
+                method_index: index as u32,
                 member: format!("LFixture{index};->m{index}"),
                 matched: "Authorization".to_owned(),
             })
@@ -994,6 +1207,17 @@ pub(crate) mod tests {
             }
             println!("[inproc] find_references {label}: {last:.1} us/call (rows seen {rows})");
         }
+    }
+
+    #[test]
+    fn streaming_reference_scan_bounds_per_class_scratch() {
+        let data = const_string_fixture(2);
+        let error =
+            for_each_reference(&data, &Query::String("Authorization".to_owned()), 0, |_| {
+                Ok(true)
+            })
+            .unwrap_err();
+        assert!(error.downcast_ref::<ReferenceScratchLimit>().is_some());
     }
 
     #[test]

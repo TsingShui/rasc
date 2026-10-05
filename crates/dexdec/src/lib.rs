@@ -23,6 +23,12 @@
 //! - `analysis` - Value, type, hierarchy, and language-backend analyses
 //! - `language` - Typed target-language ASTs and printers
 
+// This is a large maintained upstream snapshot. The workspace gate checks its
+// build and tests, while focused rasc clippy covers code changed for the MCP
+// server. See FORK.md for the lint-boundary rationale.
+#![allow(warnings)]
+#![allow(clippy::all)]
+
 pub mod analysis;
 pub mod api;
 pub mod decoder;

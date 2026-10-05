@@ -12,6 +12,60 @@ use std::borrow::Cow;
 
 const HEADER_SIZE_041: usize = 0x78;
 
+/// Logical member headers without materializing a container-sized view for each one.
+pub(crate) fn logical_offsets(data: &[u8]) -> Result<Vec<usize>> {
+    if data.len() < HEADER_SIZE_041 || data.get(..8) != Some(b"dex\n041\0") {
+        return Ok(vec![0]);
+    }
+    let container_size = read_u32(data, 0x70)? as usize;
+    if container_size != data.len() {
+        bail!(
+            "DEX 041 container size mismatch: header={container_size}, actual={}",
+            data.len()
+        );
+    }
+    let mut offsets = Vec::new();
+    let mut header_offset = 0usize;
+    while header_offset + HEADER_SIZE_041 <= data.len() {
+        if data.get(header_offset..header_offset + 8) != Some(b"dex\n041\0") {
+            break;
+        }
+        let file_size = read_u32(data, header_offset + 0x20)? as usize;
+        let declared_header_offset = read_u32(data, header_offset + 0x74)? as usize;
+        let declared_container_size = read_u32(data, header_offset + 0x70)? as usize;
+        if declared_header_offset != header_offset || declared_container_size != container_size {
+            bail!("inconsistent DEX 041 logical header at {header_offset}");
+        }
+        if file_size < HEADER_SIZE_041 || file_size > data.len() - header_offset {
+            bail!("invalid DEX 041 logical file size at {header_offset}");
+        }
+        offsets.push(header_offset);
+        header_offset = header_offset
+            .checked_add(file_size)
+            .context("DEX 041 header offset overflow")?;
+    }
+    if offsets.is_empty() || header_offset != data.len() {
+        bail!("malformed DEX 041 logical container");
+    }
+    Ok(offsets)
+}
+
+pub(crate) fn logical_view(data: &[u8], header_offset: usize) -> Result<Cow<'_, [u8]>> {
+    if header_offset == 0 {
+        return Ok(Cow::Borrowed(data));
+    }
+    if data
+        .get(header_offset..header_offset + HEADER_SIZE_041)
+        .is_none()
+    {
+        bail!("DEX 041 logical header outside container");
+    }
+    let mut normalized = data.to_vec();
+    normalized[..HEADER_SIZE_041]
+        .copy_from_slice(&data[header_offset..header_offset + HEADER_SIZE_041]);
+    Ok(Cow::Owned(normalized))
+}
+
 pub(crate) struct LogicalDex<'a> {
     pub(crate) name: String,
     pub(crate) data: Cow<'a, [u8]>,
@@ -27,11 +81,23 @@ pub(crate) struct LogicalDex<'a> {
 /// Section offsets stay container-relative, which is exactly what the buffer
 /// produced by [`logical_dexes`] provides.
 pub(crate) fn standard_header_view(data: &[u8]) -> Option<Vec<u8>> {
-    const HEADER_SIZE_041: usize = 0x78;
     if data.len() < HEADER_SIZE_041 || data.get(..8) != Some(b"dex\n041\0") {
         return None;
     }
     let mut view = data.to_vec();
+    normalize_standard_header(&mut view);
+    Some(view)
+}
+
+pub(crate) fn standard_header_cow(mut data: Cow<'_, [u8]>) -> Cow<'_, [u8]> {
+    if data.len() < HEADER_SIZE_041 || data.get(..8) != Some(b"dex\n041\0") {
+        return data;
+    }
+    normalize_standard_header(data.to_mut());
+    data
+}
+
+fn normalize_standard_header(view: &mut [u8]) {
     view[0x24..0x28].copy_from_slice(&0x70u32.to_le_bytes());
     // The member's own `file_size` stops at its header/section block, while its
     // section offsets are container-relative and reach past that, so the view
@@ -40,7 +106,6 @@ pub(crate) fn standard_header_view(data: &[u8]) -> Option<Vec<u8>> {
     view[0x20..0x24].copy_from_slice(&file_size.to_le_bytes());
     let checksum = adler32(&view[12..]);
     view[0x08..0x0C].copy_from_slice(&checksum.to_le_bytes());
-    Some(view)
 }
 
 /// DEX header checksum, the value `rasc-dex` validates before parsing.
@@ -114,38 +179,9 @@ pub(crate) fn logical_dexes<'a>(name: &'a str, data: &'a [u8]) -> Result<Logical
         return Ok(plain);
     }
 
-    let container_size = read_u32(data, 0x70)? as usize;
-    if container_size != data.len() {
-        bail!(
-            "DEX 041 container size mismatch: header={container_size}, actual={}",
-            data.len()
-        );
-    }
     // Validate every member header first: metadata only, no copies, so a
     // malformed container is rejected before any member work happens.
-    let mut offsets = Vec::new();
-    let mut header_offset = 0usize;
-    while header_offset + HEADER_SIZE_041 <= data.len() {
-        if data.get(header_offset..header_offset + 8) != Some(b"dex\n041\0") {
-            break;
-        }
-        let file_size = read_u32(data, header_offset + 0x20)? as usize;
-        let declared_header_offset = read_u32(data, header_offset + 0x74)? as usize;
-        let declared_container_size = read_u32(data, header_offset + 0x70)? as usize;
-        if declared_header_offset != header_offset || declared_container_size != container_size {
-            bail!("inconsistent DEX 041 logical header at {header_offset}");
-        }
-        if file_size < HEADER_SIZE_041 || file_size > data.len() - header_offset {
-            bail!("invalid DEX 041 logical file size at {header_offset}");
-        }
-        offsets.push(header_offset);
-        header_offset = header_offset
-            .checked_add(file_size)
-            .context("DEX 041 header offset overflow")?;
-    }
-    if offsets.is_empty() || header_offset != data.len() {
-        bail!("malformed DEX 041 logical container");
-    }
+    let offsets = logical_offsets(data)?;
     if offsets.len() == 1 {
         // One member: the container is that DEX with an extra-long header, the
         // overlay would be a no-op, and the reference keeps the plain name.

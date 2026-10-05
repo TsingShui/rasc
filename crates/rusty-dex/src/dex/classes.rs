@@ -174,7 +174,10 @@ pub enum ClassDecodeLevel {
 }
 
 impl DexClasses {
-    /// Parse the DEX file to extract the classes and their content
+    /// Parse the DEX file to extract the classes and their content.
+    ///
+    /// The arguments mirror the independent DEX id tables in the file format.
+    #[allow(clippy::too_many_arguments)]
     pub fn build(
         dex_reader: &mut DexReader,
         offset: u32,
@@ -198,6 +201,7 @@ impl DexClasses {
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn build_with_level(
         dex_reader: &mut DexReader,
         offset: u32,
@@ -1223,7 +1227,7 @@ impl ClassDefItem {
     }
 
     /// Get a method from a class definition using the method name
-    pub fn get_encoded_method(&self, method_name: &String) -> Option<&EncodedMethod> {
+    pub fn get_encoded_method(&self, method_name: &str) -> Option<&EncodedMethod> {
         if let Some(class_data) = &self.class_data {
             for method in &class_data.direct_methods {
                 if method.get_method_name() == method_name {

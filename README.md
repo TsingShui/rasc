@@ -44,6 +44,52 @@ rasc skill                                             # install the rasc skill 
 
 See `rasc --help` for more usage information, or `rasc <command> --help` for command-specific options.
 
+### Headless MCP
+
+For several queries over the same compressed APK/DEX, rasc can run as a persistent stdio MCP
+server. It copies an authorized input into a private immutable snapshot and reuses only bytes that
+were actually produced by ZIP deflate decompression. Bare DEX and ZIP-stored entries borrow the
+snapshot directly; parser/decompiler state, source, manifests, and query results are not cached.
+The server exposes exactly `open`, `close`, `status`, `classes`, `strings`, `findrefs`, `getclass`,
+`manifest`, and `entries`.
+
+A project-level pi configuration can be:
+
+```json
+{
+  "mcpServers": {
+    "rasc": {
+      "command": "rasc",
+      "args": ["mcp", "--root", "/absolute/path/to/authorized-inputs"],
+      "exposure": "codemode",
+      "description": "Persistent native APK/DEX analysis"
+    }
+  }
+}
+```
+
+Call `open` once, retain its process-local `target_id`, consume complete typed results, and call
+`close`. The server does not paginate or provide generic list filters: code mode should filter,
+sort, slice, map, aggregate, and combine `structuredContent` in JavaScript. Results exceeding the
+configured item or serialized-byte budget fail atomically with `RESOURCE_LIMIT`. `classes`,
+`strings`, and `findrefs` reuse one process-wide Rayon pool and can scan independent physical DEX
+entries concurrently when internal admission thresholds predict enough parallel work; smaller or
+highly skewed workloads fall back to ordered serial traversal. Results are always committed in
+physical-entry, logical-member, then row order, and logical members of a DEX 041 container remain
+serial. This is a bounded capability, not a general latency guarantee. `--analysis-threads` sizes
+that pool (default: available CPUs). This is separate from the fail-fast
+`--max-concurrent-requests` request budget
+(default 2), so excess parallel calls return `RESOURCE_LIMIT` rather than queueing unbounded
+blocking work. Paths outside `--root` are rejected. MCP stdout is protocol-only and diagnostics use
+stderr.
+
+MCP is optional. Pi code mode can already invoke the normal CLI through `tools.bash()` (best for
+one-shot, streaming, or CLI-filtered output), while a Pi extension can register Pi-specific tools.
+Choose MCP for standard typed discovery, non-Pi clients, explicit long-lived targets, or repeated
+queries that benefit from reusing deflated entry bytes. See
+[the headless design and code-mode examples](docs/headless-mcp.zh-CN.md). The example's client-side
+composition has a reproducible Pi QuickJS check: `node tools/verify_codemode.mjs`.
+
 ### Coding agents
 
 `rasc skill` installs a single-file [skill](skill/SKILL.md) - rasc's scope plus one line per

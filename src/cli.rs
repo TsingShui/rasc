@@ -56,8 +56,38 @@ pub enum Command {
     /// Exit status: 0 = one hit; 3 = the class is not defined, or declares no member with
     /// that index; 4 = more than one input defines the class (all candidates are printed).
     MemberByIndex(MemberByIndexArgs),
+    /// Run the persistent headless MCP server over stdio.
+    Mcp(McpArgs),
     /// Install the rasc skill so coding agents know how to use rasc.
     Skill(SkillArgs),
+}
+
+#[derive(Debug, Args)]
+pub struct McpArgs {
+    /// Directory whose ordinary files may be opened; repeat for more roots.
+    #[arg(long = "root", value_name = "DIR", default_value = ".")]
+    pub roots: Vec<PathBuf>,
+    /// Maximum simultaneously open immutable input snapshots.
+    #[arg(long, default_value_t = 2)]
+    pub max_targets: usize,
+    /// Maximum bytes in one input snapshot.
+    #[arg(long, default_value_t = 2_u64 << 30)]
+    pub max_input_bytes: u64,
+    /// Worker threads in the process-wide analysis pool.
+    #[arg(long, default_value_t = default_threads())]
+    pub analysis_threads: usize,
+    /// Maximum simultaneously executing analysis requests; excess requests fail.
+    #[arg(long, default_value_t = 2)]
+    pub max_concurrent_requests: usize,
+    /// Byte budget for cached ZIP deflate output.
+    #[arg(long = "inflate-cache-bytes", default_value_t = 512_usize << 20)]
+    pub inflate_cache_bytes: usize,
+    /// Maximum elements in one complete MCP dataset response.
+    #[arg(long, default_value_t = 100_000)]
+    pub max_result_items: usize,
+    /// Maximum serialized bytes in one complete MCP result payload.
+    #[arg(long, default_value_t = 16_usize << 20)]
+    pub max_result_bytes: usize,
 }
 
 #[derive(Debug, Args)]

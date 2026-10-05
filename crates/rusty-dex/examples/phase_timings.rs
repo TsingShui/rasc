@@ -14,7 +14,7 @@ fn main() {
     let path = std::env::args().nth(1).expect("usage: phase_timings <dex>");
     let bytes = std::fs::read(&path).expect("read dex");
     let mut t = Instant::now();
-    let mut mark = |name: &str, t: &mut Instant| {
+    let mark = |name: &str, t: &mut Instant| {
         eprintln!("[phase] {name:22} {:?}", t.elapsed());
         *t = Instant::now();
     };

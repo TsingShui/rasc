@@ -39,16 +39,10 @@ pub fn get_qualified_method_names(dex: &DexFile) -> Vec<String> {
 /// Get the list of instructions for the given method
 pub fn get_bytecode_for_method(
     dex: &DexFile,
-    class_name: &String,
-    method_name: &String,
+    class_name: &str,
+    method_name: &str,
 ) -> Option<Vec<u16>> {
-    if let Some(class_def) = dex.get_class_def(class_name.as_str()) {
-        if let Some(encoded_method) = class_def.get_encoded_method(method_name) {
-            if let Some(code_item) = &encoded_method.code_item {
-                return code_item.insns.clone();
-            }
-        }
-    }
-
-    None
+    let class_def = dex.get_class_def(class_name)?;
+    let encoded_method = class_def.get_encoded_method(method_name)?;
+    encoded_method.code_item.as_ref()?.insns.clone()
 }

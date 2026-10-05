@@ -28,6 +28,8 @@ pub(super) struct Targets {
 }
 
 impl Targets {
+    pub(super) const FIXED_BYTES: usize = Self::BITMAP_INDICES / 8;
+
     /// Above this many targets the filter scans the code once per target, which
     /// costs more than the instruction decode it would skip.
     const MAX_FILTER_TARGETS: usize = 4;

@@ -165,9 +165,8 @@ impl DexStrings {
                     actual,
                 });
             }
-            let start = u32::try_from(string_offset)
-                .ok()
-                .and_then(|start| start.checked_add(u32::try_from(header_len).ok()?))
+            let start = string_offset
+                .checked_add(u32::try_from(header_len).map_err(|_| DexError::InvalidStringIdx)?)
                 .ok_or(DexError::InvalidStringIdx)?;
             let end = start
                 .checked_add(

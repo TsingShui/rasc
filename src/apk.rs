@@ -1127,7 +1127,7 @@ pub(crate) fn read_entry_with_policy(
 /// A DEX names itself in its first eight bytes (`dex\n039\0`). That magic is the whole
 /// test, and it is enough: a ZIP starts with `PK`, so no input can be both, and a file
 /// that merely begins with those bytes is reporting itself as a DEX.
-fn is_bare_dex<S: crate::zip::BytesSource + ?Sized>(source: &S) -> bool {
+pub(crate) fn is_bare_dex<S: crate::zip::BytesSource + ?Sized>(source: &S) -> bool {
     let Ok(head) = source.range(0, 8) else {
         return false;
     };
@@ -1160,6 +1160,28 @@ fn parse_dex_entries<S: crate::zip::BytesSource + ?Sized>(source: &S) -> Result<
         source,
         |name| name.ends_with(b".dex") && !name.contains(&b'/'),
     )?))
+}
+
+/// Applies the CLI's root-DEX preference to an already-read directory, returning
+/// physical entry indices so duplicate names cannot erase a session's identity.
+pub(crate) fn select_dex_entries(entries: &[ZipEntry]) -> Vec<usize> {
+    let preferred = entries.iter().any(|entry| {
+        entry.name.starts_with("classes")
+            && entry.name.ends_with(".dex")
+            && !entry.name.contains('/')
+    });
+    let mut seen = std::collections::HashSet::new();
+    entries
+        .iter()
+        .enumerate()
+        .filter(|(_, entry)| {
+            entry.name.ends_with(".dex")
+                && !entry.name.contains('/')
+                && (!preferred || entry.name.starts_with("classes"))
+                && seen.insert(entry.name.as_str())
+        })
+        .map(|(index, _)| index)
+        .collect()
 }
 
 /// Keeps the first entry for each name.

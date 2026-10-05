@@ -143,7 +143,7 @@ impl DexReader {
     /// Check if the cursor is on an even-numbered bytecode offsets
     /// and, if not, consume data until it is
     pub fn align_cursor(&mut self) -> Result<(), DexError> {
-        while self.bytes.position() % 2 != 0 {
+        while !self.bytes.position().is_multiple_of(2) {
             let _ = self.read_u8()?;
         }
 

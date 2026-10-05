@@ -23,6 +23,7 @@ rasc manifest app.apk                                 # binary AndroidManifest.x
 rasc fields-plan app.apk --descriptor 'Lcom/example/Foo;'      # field layout + instance reference mask
 rasc member-by-index app.apk --descriptor 'Lcom/example/Foo;' --field-index 3
 rasc member-by-index app.apk --descriptor 'Lcom/example/Foo;' --method-index 339
+rasc mcp --root /authorized/apks                     # persistent stdio MCP server
 ```
 
 ## Indices a runtime trace hands back
@@ -65,4 +66,17 @@ rasc member-by-index app.apk --descriptor 'Lcom/example/Foo;' --method-index 339
   is tens of MiB, so filter it (`-f`) or pipe it.
 - `-o FILE` writes exactly the stdout bytes; `--threads N` caps parallelism (default: one
   worker per CPU); `--debug` prints timings to stderr.
+- For several queries over the same compressed input, optionally configure `rasc mcp --root DIR`
+  as a typed stdio MCP server. Call `open` once, pass its `target_id` to `classes`, `strings`,
+  `findrefs`, `getclass`, `manifest`, and `entries`, then `close` it. Lists and text are complete,
+  not paged; filter/sort/slice/map/aggregate `structuredContent` in code mode. The server snapshots
+  inputs and caches only ZIP-deflated entry bytes, not parser/decompiler state or results. MCP
+  `--analysis-threads N` sizes a shared Rayon pool that `classes`, `strings`, and `findrefs` can use
+  across physical DEX entries when internal admission thresholds predict enough parallel work;
+  smaller or skewed workloads use ordered serial traversal. This is a capability, not a latency
+  guarantee, and is separate from the fail-fast `--max-concurrent-requests` request budget. Output
+  order stays physical entry, logical member, then row. Analysis concurrency and
+  complete response size are bounded; excess work fails with `RESOURCE_LIMIT`. Paths outside
+  configured roots are rejected. For one-shot or streaming work, code mode can call the
+  normal CLI with `tools.bash()`; a Pi extension tool is another Pi-only integration option.
 - Update this skill with `rasc skill` (pi, Codex, Claude Code; `--print` for anything else).

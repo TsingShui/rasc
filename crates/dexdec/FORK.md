@@ -38,6 +38,7 @@ member, and has its own `FORK.md`.
 | optional `profiling` / `hotpath` integration removed | rasc does not expose that upstream profiling interface; existing `DEXDEC_*_STATS` diagnostics remain |
 | `[lib] test = false` | upstream's unit tests stay in-tree for reference, but should not run from rasc's `cargo test --workspace` |
 | `default` features empty | the CLI features are gone |
+| crate-root warning/Clippy allowances | this large upstream snapshot is validated by build/tests; focused `rasc --no-deps` Clippy covers MCP-owned code, while the workspace-wide Rust 1.93 `-D warnings` invocation remains executable without rewriting unrelated upstream style/dead-code paths |
 
 ## Re-enabling platform symbols
 

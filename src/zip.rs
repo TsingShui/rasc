@@ -76,7 +76,18 @@ impl BytesSource for Vec<u8> {
 
 pub(crate) fn parse_zip_entries<S: BytesSource + ?Sized>(
     source: &S,
+    include: impl FnMut(&[u8]) -> bool,
+) -> Result<Vec<ZipEntry>> {
+    parse_zip_entries_bounded(source, include, usize::MAX, usize::MAX)
+}
+
+/// Session reads cap directory work before allocating names or entry records.
+/// The one-shot CLI retains its existing policy through `parse_zip_entries`.
+pub(crate) fn parse_zip_entries_bounded<S: BytesSource + ?Sized>(
+    source: &S,
     mut include: impl FnMut(&[u8]) -> bool,
+    max_entries: usize,
+    max_directory_bytes: usize,
 ) -> Result<Vec<ZipEntry>> {
     let total = source.source_len();
     let search_start = total.saturating_sub(65_557);
@@ -89,6 +100,9 @@ pub(crate) fn parse_zip_entries<S: BytesSource + ?Sized>(
         .context("EOCD not found")?;
     let cd_size = read_u32(&tail, eocd + 12)? as usize;
     let cd_offset = read_u32(&tail, eocd + 16)? as usize;
+    if cd_size > max_directory_bytes {
+        bail!("ZIP directory exceeds the {max_directory_bytes} byte limit");
+    }
     let cd_end = cd_offset
         .checked_add(cd_size)
         .context("central directory overflow")?;
@@ -97,7 +111,12 @@ pub(crate) fn parse_zip_entries<S: BytesSource + ?Sized>(
     }
     let mut entries = Vec::new();
     let mut offset = cd_offset;
+    let mut visited = 0usize;
     while offset + 46 <= cd_end {
+        if visited >= max_entries {
+            bail!("ZIP directory exceeds the {max_entries} entry limit");
+        }
+        visited += 1;
         let header = source.range(offset, 46)?;
         if header.get(..4) != Some(b"PK\x01\x02") {
             bail!("bad central directory signature at {offset}");
@@ -223,25 +242,40 @@ pub(crate) fn inflate_prefix<S: BytesSource + ?Sized>(
     Ok(buffer)
 }
 
+/// Borrow a bare or ZIP-stored entry directly from its source mapping.
+///
+/// Session callers use this path so inputs that require no decompression do not
+/// consume inflate-cache space or incur a heap copy.
+pub(crate) fn stored_entry<'a, S: BytesSource + ?Sized>(
+    source: &'a S,
+    entry: &ZipEntry,
+) -> Result<Cow<'a, [u8]>> {
+    if entry.compression != 0 {
+        bail!("{} is not a stored entry", entry.name);
+    }
+    let bytes = compressed_slice(source, entry)?;
+    if bytes.len() != entry.uncompressed_size {
+        bail!(
+            "size mismatch for {}: expected {}, got {}",
+            entry.name,
+            entry.uncompressed_size,
+            bytes.len()
+        );
+    }
+    Ok(bytes)
+}
+
 pub(crate) fn inflate_entry<S: BytesSource + ?Sized>(
     source: &S,
     entry: &ZipEntry,
     max_inflated: usize,
 ) -> Result<Vec<u8>> {
+    if entry.compression == 0 {
+        return Ok(stored_entry(source, entry)?.into_owned());
+    }
     let compressed = compressed_slice(source, entry)?;
     let compressed: &[u8] = &compressed;
     match entry.compression {
-        0 => {
-            if compressed.len() != entry.uncompressed_size {
-                bail!(
-                    "size mismatch for {}: expected {}, got {}",
-                    entry.name,
-                    entry.uncompressed_size,
-                    compressed.len()
-                );
-            }
-            Ok(compressed.to_vec())
-        }
         8 => {
             let declared = entry.uncompressed_size;
             let initial = declared.min(entry.compressed_size.saturating_mul(4).max(64 * 1024));
