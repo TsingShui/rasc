@@ -7,7 +7,7 @@
 //! does not reach far enough so the caller falls back instead of trusting a guess.
 
 use super::read_uleb;
-use crate::bytes::read_u32;
+use crate::analysis::bytes::read_u32;
 use anyhow::Result;
 
 const HEADER_SIZE: usize = 0x70;
@@ -167,7 +167,7 @@ mod tests {
     /// absolute, and the last string data item is near the end of the file.
     #[test]
     fn prefix_sizes_come_from_the_header_and_the_string_table() {
-        let dex = crate::dex::tests::const_string_fixture(4);
+        let dex = crate::analysis::dex::tests::const_string_fixture(4);
         let strings_size = read_u32(&dex, 0x38).unwrap() as usize;
         let strings_off = read_u32(&dex, 0x3c).unwrap() as usize;
         assert_eq!(
@@ -189,7 +189,7 @@ mod tests {
     /// safe.
     #[test]
     fn a_short_prefix_is_never_trusted() {
-        let dex = crate::dex::tests::const_string_fixture(4);
+        let dex = crate::analysis::dex::tests::const_string_fixture(4);
         let strings_size = read_u32(&dex, 0x38).unwrap() as usize;
         let strings_off = read_u32(&dex, 0x3c).unwrap() as usize;
         let end = string_data_end(&dex).unwrap();
@@ -213,7 +213,7 @@ mod tests {
 
     #[test]
     fn a_crafted_table_size_is_rejected_rather_than_allocated() {
-        let mut dex = crate::dex::tests::const_string_fixture(2);
+        let mut dex = crate::analysis::dex::tests::const_string_fixture(2);
         write_u32(&mut dex, 0x38, 0x00ff_ffff);
         assert!(string_ids_end(&dex).is_none() || string_ids_end(&dex).unwrap() > dex.len());
         assert!(string_data_end(&dex).is_none());

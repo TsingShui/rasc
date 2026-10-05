@@ -1,6 +1,6 @@
 //! Typed, complete query results for protocol adapters.
 use super::{AnalysisSession, Result, SessionError, Target, result_limit_error};
-use crate::query::{ClassQuery, MemberQuery, Query};
+use crate::analysis::query::{ClassQuery, MemberQuery, Query};
 use rmcp::schemars::{self, JsonSchema};
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
@@ -267,7 +267,7 @@ impl AnalysisSession {
             4 << 20,
             |logical, send, stop| {
                 let mut stopped = None;
-                crate::dex::for_each_class_definition(&logical.data, |definition| {
+                crate::analysis::dex::for_each_class_definition(&logical.data, |definition| {
                     if stop.load(Ordering::Acquire) {
                         return Ok(false);
                     }
@@ -320,7 +320,7 @@ impl AnalysisSession {
             32 << 20,
             |logical, send, stop| {
                 let mut stopped = None;
-                crate::dex::for_each_string(&logical.data, |string_index, raw| {
+                crate::analysis::dex::for_each_string(&logical.data, |string_index, raw| {
                     if stop.load(Ordering::Acquire) {
                         return Ok(false);
                     }
@@ -331,7 +331,7 @@ impl AnalysisSession {
                     Ok(send(StringItem {
                         dex_id: logical.dex_id.clone(),
                         string_index,
-                        value: crate::dex::decode_string(raw),
+                        value: crate::analysis::dex::decode_string(raw),
                     }))
                 })
                 .map_err(SessionError::invalid)?;
@@ -371,7 +371,7 @@ impl AnalysisSession {
             4 << 20,
             |logical, send, stop| {
                 let mut stopped = None;
-                crate::dex::for_each_reference(
+                crate::analysis::dex::for_each_reference(
                     &logical.data,
                     &query,
                     self.config.max_result_bytes,
@@ -393,7 +393,7 @@ impl AnalysisSession {
                 )
                 .map_err(|error| {
                     if error
-                        .downcast_ref::<crate::dex::ReferenceScratchLimit>()
+                        .downcast_ref::<crate::analysis::dex::ReferenceScratchLimit>()
                         .is_some()
                     {
                         SessionError::limit(error.to_string())
@@ -432,12 +432,12 @@ impl AnalysisSession {
             ));
         }
         let descriptor = class_name
-            .map(crate::query::format_class_name)
+            .map(crate::analysis::query::format_class_name)
             .transpose()
             .map_err(SessionError::invalid)?;
         let mut candidates = Vec::new();
         self.for_each_logical(&target, request_cancel, |logical| {
-            crate::dex::for_each_class_definition(&logical.data, |definition| {
+            crate::analysis::dex::for_each_class_definition(&logical.data, |definition| {
                 check_cancel(&target, request_cancel)?;
                 let id = format!(
                     "{}:{}:{}",
@@ -474,18 +474,18 @@ impl AnalysisSession {
         }
         let class = &candidates[0];
         let bytes = self.dex_bytes(&target, class.entry_index, request_cancel)?;
-        let offsets =
-            crate::dex::container::logical_offsets(&bytes).map_err(SessionError::invalid)?;
+        let offsets = crate::analysis::dex::container::logical_offsets(&bytes)
+            .map_err(SessionError::invalid)?;
         let offset = *offsets.get(class.logical_index).ok_or_else(|| {
             SessionError::new("INVALID_INPUT", "class_id logical member is invalid")
         })?;
-        let view =
-            crate::dex::container::logical_view(&bytes, offset).map_err(SessionError::invalid)?;
+        let view = crate::analysis::dex::container::logical_view(&bytes, offset)
+            .map_err(SessionError::invalid)?;
         check_cancel(&target, request_cancel)?;
-        let view = crate::dex::container::standard_header_cow(view);
+        let view = crate::analysis::dex::container::standard_header_cow(view);
         let source = self
             .analysis_pool
-            .install(|| crate::emitter::render(&view, &class.descriptor))
+            .install(|| crate::analysis::emitter::render(&view, &class.descriptor))
             .map_err(SessionError::invalid)?;
         check_cancel(&target, request_cancel)?;
         let result = SourceResult {
@@ -735,12 +735,12 @@ impl AnalysisSession {
     ) -> Result<()> {
         check_cancel(target, request_cancel)?;
         let bytes = self.dex_bytes(target, entry_index, request_cancel)?;
-        let offsets =
-            crate::dex::container::logical_offsets(&bytes).map_err(SessionError::invalid)?;
+        let offsets = crate::analysis::dex::container::logical_offsets(&bytes)
+            .map_err(SessionError::invalid)?;
         let multiple = offsets.len() > 1;
         for (logical_index, offset) in offsets.into_iter().enumerate() {
             check_cancel(target, request_cancel)?;
-            let data = crate::dex::container::logical_view(&bytes, offset)
+            let data = crate::analysis::dex::container::logical_view(&bytes, offset)
                 .map_err(SessionError::invalid)?;
             let base = &target.entries[entry_index].name;
             let dex_id = if multiple {
@@ -767,12 +767,12 @@ impl AnalysisSession {
         for &entry_index in &target.dex_entries {
             check_cancel(target, request_cancel)?;
             let bytes = self.dex_bytes(target, entry_index, request_cancel)?;
-            let offsets =
-                crate::dex::container::logical_offsets(&bytes).map_err(SessionError::invalid)?;
+            let offsets = crate::analysis::dex::container::logical_offsets(&bytes)
+                .map_err(SessionError::invalid)?;
             let multiple = offsets.len() > 1;
             for (logical_index, offset) in offsets.into_iter().enumerate() {
                 check_cancel(target, request_cancel)?;
-                let data = crate::dex::container::logical_view(&bytes, offset)
+                let data = crate::analysis::dex::container::logical_view(&bytes, offset)
                     .map_err(SessionError::invalid)?;
                 let base = &target.entries[entry_index].name;
                 let dex_id = if multiple {
@@ -886,9 +886,11 @@ fn make_query(
     let class = class
         .map(|class| {
             if fuzzy_class {
-                Ok(ClassQuery::Fuzzy(crate::query::fuzzy_class_pattern(class)))
+                Ok(ClassQuery::Fuzzy(
+                    crate::analysis::query::fuzzy_class_pattern(class),
+                ))
             } else {
-                crate::query::format_class_name(class)
+                crate::analysis::query::format_class_name(class)
                     .map(ClassQuery::Exact)
                     .map_err(SessionError::invalid)
             }
@@ -917,7 +919,7 @@ fn required<'a>(value: Option<&'a str>, name: &str) -> Result<&'a str> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::dex::tests::const_string_fixture;
+    use crate::analysis::dex::tests::const_string_fixture;
     use std::fs;
 
     fn fixture() -> (tempfile::TempDir, AnalysisSession, String) {
@@ -947,7 +949,7 @@ mod tests {
         let second = const_string_fixture(3);
         fs::write(
             root.path().join("fixture.apk"),
-            crate::zip::tests::build_zip(&[
+            crate::analysis::archive::tests::build_zip(&[
                 ("classes.dex", &first, false),
                 ("classes2.dex", &second, true),
             ]),
@@ -983,7 +985,7 @@ mod tests {
         let second = const_string_fixture(3);
         fs::write(
             root.path().join("fixture.apk"),
-            crate::zip::tests::build_zip(&[
+            crate::analysis::archive::tests::build_zip(&[
                 ("classes.dex", &first, false),
                 ("classes2.dex", &second, true),
             ]),
@@ -1092,7 +1094,7 @@ mod tests {
         let second = const_string_fixture(1);
         fs::write(
             root.path().join("fixture.apk"),
-            crate::zip::tests::build_zip(&[
+            crate::analysis::archive::tests::build_zip(&[
                 ("classes.dex", &first, false),
                 ("classes2.dex", &second, false),
             ]),
@@ -1118,7 +1120,7 @@ mod tests {
         malformed[0x64..0x68].copy_from_slice(&u32::MAX.to_le_bytes());
         fs::write(
             root.path().join("fixture.apk"),
-            crate::zip::tests::build_zip(&[
+            crate::analysis::archive::tests::build_zip(&[
                 ("classes.dex", &first, false),
                 ("classes2.dex", &malformed, false),
             ]),
@@ -1178,7 +1180,7 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         fs::write(
             root.path().join("container.dex"),
-            crate::dex::tests::dex041_container(&[1, 2]),
+            crate::analysis::dex::tests::dex041_container(&[1, 2]),
         )
         .unwrap();
         let session = AnalysisSession::new(super::super::SessionConfig::for_roots(vec![

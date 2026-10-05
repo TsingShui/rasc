@@ -13,7 +13,7 @@
 //! instance field.
 
 use super::{Dex, read_uleb};
-use crate::bytes::read_u16;
+use crate::analysis::bytes::read_u16;
 use anyhow::{Context, Result, bail};
 
 /// `class_def_item` is a fixed 32-byte row; `class_data_off` sits at +24.

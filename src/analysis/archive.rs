@@ -5,7 +5,7 @@
 //! Sizes come from the central directory, so a smeared local header cannot make a
 //! declared size disagree with the bytes that get inflated.
 
-use crate::bytes::{read_u16, read_u32};
+use crate::analysis::bytes::{read_u16, read_u32};
 use anyhow::{Context, Result, bail};
 use libdeflater::{DecompressionError, Decompressor};
 use std::borrow::Cow;

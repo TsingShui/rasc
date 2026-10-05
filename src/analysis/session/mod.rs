@@ -8,12 +8,9 @@ mod error;
 mod query;
 
 pub use error::{Result, SessionError};
-pub use query::{
-    ClassItem, ClassList, FindRefsKind, ManifestResult, ReferenceItem, ReferenceList, SourceResult,
-    StringItem, StringList,
-};
+pub use query::{ClassList, FindRefsKind, ManifestResult, ReferenceList, SourceResult, StringList};
 
-use crate::zip::{BytesSource, ZipEntry};
+use crate::analysis::archive::{BytesSource, ZipEntry};
 use cache::{InflateCache, InflateKey};
 use cap_std::fs::Dir;
 use memmap2::Mmap;
@@ -33,11 +30,15 @@ const DEFAULT_MAX_TARGETS: usize = 2;
 const DEFAULT_MAX_INPUT_BYTES: u64 = 2 << 30;
 const DEFAULT_MAX_ARCHIVE_ENTRIES: usize = 100_000;
 const DEFAULT_MAX_DIRECTORY_BYTES: usize = 64 << 20;
-const DEFAULT_MAX_INFLATED_ENTRY: usize = crate::zip::DEFAULT_MAX_INFLATED_ENTRY;
+const DEFAULT_MAX_INFLATED_ENTRY: usize = crate::analysis::archive::DEFAULT_MAX_INFLATED_ENTRY;
 const DEFAULT_MAX_CONCURRENT_REQUESTS: usize = 2;
 const DEFAULT_CACHE_BYTES: usize = 512 << 20;
 const DEFAULT_MAX_RESULT_ITEMS: usize = 100_000;
 const DEFAULT_MAX_RESULT_BYTES: usize = 16 << 20;
+
+fn default_analysis_threads() -> usize {
+    std::thread::available_parallelism().map_or(8, std::num::NonZero::get)
+}
 
 #[derive(Clone, Debug)]
 pub struct SessionConfig {
@@ -65,7 +66,7 @@ impl SessionConfig {
             max_archive_entries: DEFAULT_MAX_ARCHIVE_ENTRIES,
             max_directory_bytes: DEFAULT_MAX_DIRECTORY_BYTES,
             max_inflated_entry: DEFAULT_MAX_INFLATED_ENTRY,
-            analysis_threads: crate::cli::default_threads(),
+            analysis_threads: default_analysis_threads(),
             max_concurrent_requests: DEFAULT_MAX_CONCURRENT_REQUESTS,
             inflate_cache_bytes: DEFAULT_CACHE_BYTES,
             max_result_items: DEFAULT_MAX_RESULT_ITEMS,
@@ -486,7 +487,7 @@ impl AnalysisSession {
             .ok_or_else(|| SessionError::new("INVALID_INPUT", "AndroidManifest.xml not found"))?;
         let data = self.entry_bytes(&target, index, entry, request_cancel)?;
         check_target_cancel(&target, request_cancel)?;
-        let xml = crate::manifest::decode(&data).map_err(SessionError::invalid)?;
+        let xml = crate::analysis::manifest::decode(&data).map_err(SessionError::invalid)?;
         check_target_cancel(&target, request_cancel)?;
         let result = ManifestResult { xml };
         self.ensure_result(&result)?;
@@ -520,7 +521,7 @@ impl AnalysisSession {
         request_cancel: Option<&CancellationToken>,
     ) -> Result<EntryBytes<'a>> {
         match entry.compression {
-            0 => crate::zip::stored_entry(target, entry)
+            0 => crate::analysis::archive::stored_entry(target, entry)
                 .map(EntryBytes::Snapshot)
                 .map_err(SessionError::invalid),
             8 => self
@@ -534,8 +535,12 @@ impl AnalysisSession {
                     &target.cancel,
                     request_cancel,
                     || {
-                        crate::zip::inflate_entry(target, entry, self.config.max_inflated_entry)
-                            .map_err(SessionError::invalid)
+                        crate::analysis::archive::inflate_entry(
+                            target,
+                            entry,
+                            self.config.max_inflated_entry,
+                        )
+                        .map_err(SessionError::invalid)
                     },
                 )
                 .map(EntryBytes::Inflated),
@@ -623,14 +628,18 @@ fn inspect_snapshot(
     max_directory_bytes: usize,
 ) -> Result<(InputKind, Vec<ZipEntry>, Vec<usize>)> {
     let bytes: &[u8] = mapped;
-    if crate::apk::is_bare_dex(bytes) {
+    if crate::analysis::apk::is_bare_dex(bytes) {
         let entries = vec![ZipEntry::bare("classes.dex", mapped.len())];
         return Ok((InputKind::Dex, entries, vec![0]));
     }
-    let entries =
-        crate::zip::parse_zip_entries_bounded(bytes, |_| true, max_entries, max_directory_bytes)
-            .map_err(SessionError::invalid)?;
-    let dex_entries = crate::apk::select_dex_entries(&entries);
+    let entries = crate::analysis::archive::parse_zip_entries_bounded(
+        bytes,
+        |_| true,
+        max_entries,
+        max_directory_bytes,
+    )
+    .map_err(SessionError::invalid)?;
+    let dex_entries = crate::analysis::apk::select_dex_entries(&entries);
     if dex_entries.is_empty() {
         return Err(SessionError::new(
             "INVALID_INPUT",
@@ -689,8 +698,8 @@ fn absolute_clean(path: &Path) -> Result<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::dex::tests::{const_string_fixture, dex041_container};
-    use crate::zip::tests::build_zip;
+    use crate::analysis::archive::tests::build_zip;
+    use crate::analysis::dex::tests::{const_string_fixture, dex041_container};
     use std::fs;
 
     fn session_at(root: &Path) -> AnalysisSession {

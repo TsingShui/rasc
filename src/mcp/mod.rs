@@ -1,5 +1,5 @@
 //! Headless stdio MCP adapter for long-lived analysis sessions.
-use crate::session::{
+use crate::analysis::session::{
     AnalysisSession, FindRefsKind, Result as SessionResult, SessionConfig, SessionError,
 };
 use rmcp::{
@@ -73,13 +73,13 @@ struct CloseData {
 #[derive(Debug, Serialize, JsonSchema)]
 #[serde(untagged)]
 enum StatusData {
-    Session(crate::session::SessionStatus),
-    Target(crate::session::TargetStatus),
+    Session(crate::analysis::session::SessionStatus),
+    Target(crate::analysis::session::TargetStatus),
 }
 
 #[derive(Debug, Serialize, JsonSchema)]
 struct EntryList {
-    items: Vec<crate::session::EntryInfo>,
+    items: Vec<crate::analysis::session::EntryInfo>,
 }
 
 fn result<T>(value: SessionResult<T>) -> CallToolResult
@@ -136,13 +136,13 @@ impl RascMcp {
 
     /// Open an authorized APK or DEX as a private immutable snapshot.
     #[tool(
-        output_schema = output_schema::<crate::session::OpenedTarget>(),
+        output_schema = output_schema::<crate::analysis::session::OpenedTarget>(),
         annotations(title = "Open APK or DEX", read_only_hint = false, idempotent_hint = false)
     )]
     async fn open(&self, request: Parameters<OpenRequest>) -> CallToolResult {
         let _permit = match self.analysis_permit() {
             Ok(permit) => permit,
-            Err(error) => return result::<crate::session::OpenedTarget>(Err(error)),
+            Err(error) => return result::<crate::analysis::session::OpenedTarget>(Err(error)),
         };
         let session = Arc::clone(&self.session);
         result(run_blocking(move || session.open(request.0.path)).await)
@@ -175,7 +175,7 @@ impl RascMcp {
 
     /// Return every matching class definition with an exact opaque class ID.
     #[tool(
-        output_schema = output_schema::<crate::session::ClassList>(),
+        output_schema = output_schema::<crate::analysis::session::ClassList>(),
         annotations(title = "List classes", read_only_hint = true, idempotent_hint = true)
     )]
     async fn classes(
@@ -185,7 +185,7 @@ impl RascMcp {
     ) -> CallToolResult {
         let _permit = match self.analysis_permit() {
             Ok(permit) => permit,
-            Err(error) => return result::<crate::session::ClassList>(Err(error)),
+            Err(error) => return result::<crate::analysis::session::ClassList>(Err(error)),
         };
         let session = Arc::clone(&self.session);
         result(
@@ -196,7 +196,7 @@ impl RascMcp {
 
     /// Return every matching DEX string.
     #[tool(
-        output_schema = output_schema::<crate::session::StringList>(),
+        output_schema = output_schema::<crate::analysis::session::StringList>(),
         annotations(title = "List strings", read_only_hint = true, idempotent_hint = true)
     )]
     async fn strings(
@@ -206,7 +206,7 @@ impl RascMcp {
     ) -> CallToolResult {
         let _permit = match self.analysis_permit() {
             Ok(permit) => permit,
-            Err(error) => return result::<crate::session::StringList>(Err(error)),
+            Err(error) => return result::<crate::analysis::session::StringList>(Err(error)),
         };
         let session = Arc::clone(&self.session);
         result(
@@ -217,7 +217,7 @@ impl RascMcp {
 
     /// Return every literal string, type, method, or field reference in code.
     #[tool(
-        output_schema = output_schema::<crate::session::ReferenceList>(),
+        output_schema = output_schema::<crate::analysis::session::ReferenceList>(),
         annotations(title = "Find code references", read_only_hint = true, idempotent_hint = true)
     )]
     async fn findrefs(
@@ -227,7 +227,7 @@ impl RascMcp {
     ) -> CallToolResult {
         let _permit = match self.analysis_permit() {
             Ok(permit) => permit,
-            Err(error) => return result::<crate::session::ReferenceList>(Err(error)),
+            Err(error) => return result::<crate::analysis::session::ReferenceList>(Err(error)),
         };
         let session = Arc::clone(&self.session);
         result(
@@ -247,7 +247,7 @@ impl RascMcp {
 
     /// Decompile one unambiguous class and return its complete Java-like source.
     #[tool(
-        output_schema = output_schema::<crate::session::SourceResult>(),
+        output_schema = output_schema::<crate::analysis::session::SourceResult>(),
         annotations(title = "Decompile class", read_only_hint = true, idempotent_hint = true)
     )]
     async fn getclass(
@@ -257,7 +257,7 @@ impl RascMcp {
     ) -> CallToolResult {
         let _permit = match self.analysis_permit() {
             Ok(permit) => permit,
-            Err(error) => return result::<crate::session::SourceResult>(Err(error)),
+            Err(error) => return result::<crate::analysis::session::SourceResult>(Err(error)),
         };
         let session = Arc::clone(&self.session);
         result(
@@ -275,7 +275,7 @@ impl RascMcp {
 
     /// Decode and return the complete AndroidManifest.xml.
     #[tool(
-        output_schema = output_schema::<crate::session::ManifestResult>(),
+        output_schema = output_schema::<crate::analysis::session::ManifestResult>(),
         annotations(title = "Decode manifest", read_only_hint = true, idempotent_hint = true)
     )]
     async fn manifest(
@@ -285,7 +285,7 @@ impl RascMcp {
     ) -> CallToolResult {
         let _permit = match self.analysis_permit() {
             Ok(permit) => permit,
-            Err(error) => return result::<crate::session::ManifestResult>(Err(error)),
+            Err(error) => return result::<crate::analysis::session::ManifestResult>(Err(error)),
         };
         let session = Arc::clone(&self.session);
         result(
@@ -378,7 +378,7 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         std::fs::write(
             root.path().join("fixture.dex"),
-            crate::dex::tests::const_string_fixture(2),
+            crate::analysis::dex::tests::const_string_fixture(2),
         )
         .unwrap();
         let session =

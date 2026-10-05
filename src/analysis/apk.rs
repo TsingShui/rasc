@@ -7,9 +7,9 @@
 //! deterministic no matter which worker stole which entry. Nothing here shells out
 //! to Python, a JVM or an external decompiler.
 
-use crate::dex;
-use crate::query::Query;
-use crate::zip::{ZipEntry, inflate_entry};
+use crate::analysis::archive::{ZipEntry, inflate_entry};
+use crate::analysis::dex;
+use crate::analysis::query::Query;
 use anyhow::{Context, Result, bail};
 use memmap2::Mmap;
 use rayon::prelude::*;
@@ -37,7 +37,7 @@ pub(crate) struct ArchivePolicy {
 impl Default for ArchivePolicy {
     fn default() -> Self {
         Self {
-            max_inflated_entry: crate::zip::DEFAULT_MAX_INFLATED_ENTRY,
+            max_inflated_entry: crate::analysis::archive::DEFAULT_MAX_INFLATED_ENTRY,
         }
     }
 }
@@ -52,7 +52,7 @@ impl Archive {
     }
 }
 
-impl crate::zip::BytesSource for Archive {
+impl crate::analysis::archive::BytesSource for Archive {
     fn source_len(&self) -> usize {
         match self {
             Archive::Mapped(mapped) => mapped.len(),
@@ -195,9 +195,9 @@ impl InflatedDex<'_> {
     }
 
     /// The first `aim` bytes of the entry (or all of it when it is shorter); see
-    /// [`crate::zip::inflate_prefix`].
+    /// [`crate::analysis::archive::inflate_prefix`].
     fn read_prefix(&self, aim: usize) -> Result<Vec<u8>> {
-        crate::zip::inflate_prefix(self.source, self.entry, self.max_inflated, aim)
+        crate::analysis::archive::inflate_prefix(self.source, self.entry, self.max_inflated, aim)
     }
 }
 
@@ -638,7 +638,7 @@ pub(crate) fn decompile_class_with_policy(
         // checksum, which the decompiler rejects; hand it a normalized view.
         let normalized = dex::container::standard_header_view(entry);
         let data = normalized.as_deref().unwrap_or(entry);
-        crate::emitter::render(data, descriptor)
+        crate::analysis::emitter::render(data, descriptor)
     })
 }
 
@@ -1094,10 +1094,10 @@ pub fn list_entries(path: &Path) -> Result<Vec<ZipEntry>> {
         // `BytesSource` is the archive's byte-count, and every build implements it.
         return Ok(vec![ZipEntry::bare(
             "classes.dex",
-            crate::zip::BytesSource::source_len(&archive),
+            crate::analysis::archive::BytesSource::source_len(&archive),
         )]);
     }
-    crate::zip::parse_zip_entries(&archive, |_| true)
+    crate::analysis::archive::parse_zip_entries(&archive, |_| true)
 }
 
 #[cfg(test)]
@@ -1115,10 +1115,11 @@ pub(crate) fn read_entry_with_policy(
     // carrying it, and the reference implementation reads the manifest through
     // it; matching that keeps a crafted archive with two AndroidManifest.xml
     // entries resolving the same way in both tools.
-    let entry = crate::zip::parse_zip_entries(&archive, |name| name == wanted.as_bytes())?
-        .into_iter()
-        .last()
-        .with_context(|| format!("{wanted} not found in APK"))?;
+    let entry =
+        crate::analysis::archive::parse_zip_entries(&archive, |name| name == wanted.as_bytes())?
+            .into_iter()
+            .last()
+            .with_context(|| format!("{wanted} not found in APK"))?;
     inflate_entry(&archive, &entry, policy.max_inflated_entry)
 }
 
@@ -1127,7 +1128,7 @@ pub(crate) fn read_entry_with_policy(
 /// A DEX names itself in its first eight bytes (`dex\n039\0`). That magic is the whole
 /// test, and it is enough: a ZIP starts with `PK`, so no input can be both, and a file
 /// that merely begins with those bytes is reporting itself as a DEX.
-pub(crate) fn is_bare_dex<S: crate::zip::BytesSource + ?Sized>(source: &S) -> bool {
+pub(crate) fn is_bare_dex<S: crate::analysis::archive::BytesSource + ?Sized>(source: &S) -> bool {
     let Ok(head) = source.range(0, 8) else {
         return false;
     };
@@ -1146,17 +1147,19 @@ pub(crate) fn is_bare_dex<S: crate::zip::BytesSource + ?Sized>(source: &S) -> bo
 /// A bare DEX is one entry. Every command addresses an archive, and rather than
 /// teach each of them a second input shape, the file is presented as the entry it
 /// would have been inside one - named `classes.dex`, matching the reference command.
-fn parse_dex_entries<S: crate::zip::BytesSource + ?Sized>(source: &S) -> Result<Vec<ZipEntry>> {
+fn parse_dex_entries<S: crate::analysis::archive::BytesSource + ?Sized>(
+    source: &S,
+) -> Result<Vec<ZipEntry>> {
     if is_bare_dex(source) {
         return Ok(vec![ZipEntry::bare("classes.dex", source.source_len())]);
     }
-    let named = crate::zip::parse_zip_entries(source, |name| {
+    let named = crate::analysis::archive::parse_zip_entries(source, |name| {
         name.starts_with(b"classes") && name.ends_with(b".dex") && !name.contains(&b'/')
     })?;
     if !named.is_empty() {
         return Ok(dedup_names(named));
     }
-    Ok(dedup_names(crate::zip::parse_zip_entries(
+    Ok(dedup_names(crate::analysis::archive::parse_zip_entries(
         source,
         |name| name.ends_with(b".dex") && !name.contains(&b'/'),
     )?))
@@ -1191,7 +1194,9 @@ pub(crate) fn select_dex_entries(entries: &[ZipEntry]) -> Vec<usize> {
 /// while scanning the central directory, so a class defined only in a duplicate
 /// entry stays invisible there; scanning both copies would instead report every
 /// row twice and pick up classes the reference never sees.
-fn dedup_names(entries: Vec<crate::zip::ZipEntry>) -> Vec<crate::zip::ZipEntry> {
+fn dedup_names(
+    entries: Vec<crate::analysis::archive::ZipEntry>,
+) -> Vec<crate::analysis::archive::ZipEntry> {
     let mut seen = std::collections::HashSet::new();
     entries
         .into_iter()
@@ -1201,7 +1206,7 @@ fn dedup_names(entries: Vec<crate::zip::ZipEntry>) -> Vec<crate::zip::ZipEntry> 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::zip::tests::{build_zip, temp_apk};
+    use crate::analysis::archive::tests::{build_zip, temp_apk};
 
     /// The rendered lines for a query, which is what the text mode prints.
     fn find_references(
@@ -1414,7 +1419,7 @@ mod tests {
             };
             dexes += 1;
             // A bare DEX is what the lookup takes; the container path is covered above.
-            let file = crate::zip::tests::temp_apk("member-round-trip", &bytes);
+            let file = crate::analysis::archive::tests::temp_apk("member-round-trip", &bytes);
 
             for (position, field) in members.instance.iter().enumerate() {
                 let rows = member_by_index(
@@ -1735,7 +1740,7 @@ mod tests {
         assert_eq!(entry.compression, 0);
         assert_eq!(entry.uncompressed_size, dex.len());
         assert_eq!(
-            crate::zip::inflate_entry(dex.as_slice(), entry, usize::MAX).unwrap(),
+            crate::analysis::archive::inflate_entry(dex.as_slice(), entry, usize::MAX).unwrap(),
             dex
         );
     }
@@ -1946,12 +1951,12 @@ mod tests {
         // same: looking up "the" type id for the descriptor makes the two
         // commands contradict each other on such a file.
         let mut dex = dex::tests::const_string_fixture(2);
-        let header_size = crate::bytes::read_u32(&dex, 0x24).unwrap() as usize;
-        let strings = crate::bytes::read_u32(&dex, 0x38).unwrap() as usize;
+        let header_size = crate::analysis::bytes::read_u32(&dex, 0x24).unwrap() as usize;
+        let strings = crate::analysis::bytes::read_u32(&dex, 0x38).unwrap() as usize;
         // type_ids[0] belongs to no class_def; pointing it at "LFixture0;"
         // (string index 1) makes the descriptor's first match a different id than
         // the one the class's class_def carries.
-        crate::zip::tests::write_u32(&mut dex, header_size + strings * 4, 1);
+        crate::analysis::archive::tests::write_u32(&mut dex, header_size + strings * 4, 1);
         let zip = build_zip(&[("classes.dex", &dex, true)]);
         let path = temp_apk("duplicate-type-id", &zip);
         let listed = list_classes(&path, 2, false).unwrap();
@@ -2154,10 +2159,10 @@ mod tests {
         // The decode half of the manifest command, which is where the vendored AXML
         // parser's per-attribute allocations live: `read_entry` above is only the bytes.
         let manifest_bytes = read_entry(path, "AndroidManifest.xml").unwrap();
-        let _ = crate::manifest::decode(&manifest_bytes).unwrap();
+        let _ = crate::analysis::manifest::decode(&manifest_bytes).unwrap();
         let started = Instant::now();
         for _ in 0..CALLS {
-            let _ = crate::manifest::decode(&manifest_bytes).unwrap();
+            let _ = crate::analysis::manifest::decode(&manifest_bytes).unwrap();
         }
         println!(
             "[inproc] manifest::decode: {:.1} us/call ({} KiB of AXML)",

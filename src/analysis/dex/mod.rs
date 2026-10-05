@@ -15,8 +15,8 @@ mod mutf8;
 mod opcodes;
 pub(crate) mod prefix;
 
-use crate::bytes::{read_u16, read_u32};
-use crate::query::{ClassQuery, MemberQuery, Query};
+use crate::analysis::bytes::{read_u16, read_u32};
+use crate::analysis::query::{ClassQuery, MemberQuery, Query};
 use anyhow::{Context, Result, bail};
 use filter::Targets;
 use memchr::memmem::Finder;
@@ -1183,7 +1183,7 @@ pub(crate) mod tests {
             ("type", Query::Type("Fixture".to_owned())),
             (
                 "method",
-                Query::Method(crate::query::MemberQuery {
+                Query::Method(crate::analysis::query::MemberQuery {
                     name: Some("m0".to_owned()),
                     class: None,
                 }),

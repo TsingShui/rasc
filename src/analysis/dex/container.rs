@@ -6,7 +6,7 @@
 //! is overlaid on a copy of the whole container and the complete address space is
 //! kept.
 
-use crate::bytes::read_u32;
+use crate::analysis::bytes::read_u32;
 use anyhow::{Context, Result, bail};
 use std::borrow::Cow;
 
@@ -226,7 +226,7 @@ mod tests {
         // One member means the container is that DEX with an extra-long header:
         // the overlay would be a no-op and the reference yields it under the
         // entry's own name, so nothing is copied.
-        let container = crate::dex::tests::dex041_container(&[1]);
+        let container = crate::analysis::dex::tests::dex041_container(&[1]);
         let mut logical = logical_dexes("classes.dex", &container).unwrap();
         let member = logical.next().expect("one member");
         assert_eq!(member.name, "classes.dex");

@@ -4,9 +4,14 @@
 //! including `--debug` timing, goes to stderr, so redirecting a result can never
 //! capture debug lines. An `-o` file receives exactly the bytes stdout received.
 
-use crate::cli::{Cli, Command};
-use crate::{apk, manifest, query, skill};
+mod agent_skill;
+mod args;
+
+use crate::analysis::{apk, manifest, query, session};
+use crate::mcp;
+use agent_skill as skill;
 use anyhow::{Context, Result, bail};
+use args::{Cli, Command};
 use clap::Parser;
 use rayon::prelude::*;
 use std::fs;
@@ -37,7 +42,7 @@ fn archive_policy(value: Option<&str>) -> apk::ArchivePolicy {
     }
     policy
 }
-pub fn main() {
+pub(crate) fn run() {
     restore_default_sigpipe();
     let archive_policy = archive_policy_from_env();
     match dispatch(std::env::args().collect(), archive_policy) {
@@ -216,7 +221,7 @@ fn run_command(args: Cli, archive_policy: apk::ArchivePolicy, started: Instant) 
         }
         Command::FieldsPlan(args) => {
             // Accept what a user types; the DEX carries descriptors.
-            let descriptor = crate::query::format_class_name(&args.descriptor)?;
+            let descriptor = query::format_class_name(&args.descriptor)?;
             let lookup =
                 apk::field_plan_with_policy(&args.apk, archive_policy, &descriptor, args.threads)?;
             match &lookup.plan {
@@ -236,7 +241,7 @@ fn run_command(args: Cli, archive_policy: apk::ArchivePolicy, started: Instant) 
             }
         }
         Command::MemberByIndex(args) => {
-            let descriptor = crate::query::format_class_name(&args.descriptor)?;
+            let descriptor = query::format_class_name(&args.descriptor)?;
             // clap's group already rejects both or neither; this keeps the arm total.
             let (kind, index, name) = match (args.method_index, args.field_index) {
                 (Some(index), None) => (apk::MemberKind::Method, index, "method"),
@@ -365,7 +370,7 @@ fn run_command(args: Cli, archive_policy: apk::ArchivePolicy, started: Instant) 
             emit(&xml, args.output.as_deref())?;
         }
         Command::Mcp(args) => {
-            let mut config = crate::session::SessionConfig::for_roots(args.roots);
+            let mut config = session::SessionConfig::for_roots(args.roots);
             config.max_targets = args.max_targets;
             config.max_input_bytes = args.max_input_bytes;
             config.analysis_threads = args.analysis_threads;
@@ -373,7 +378,7 @@ fn run_command(args: Cli, archive_policy: apk::ArchivePolicy, started: Instant) 
             config.inflate_cache_bytes = args.inflate_cache_bytes;
             config.max_result_items = args.max_result_items;
             config.max_result_bytes = args.max_result_bytes;
-            crate::mcp::run(config)?;
+            mcp::run(config)?;
         }
         Command::Skill(args) => {
             if args.print {
@@ -485,7 +490,7 @@ mod tests {
 
     #[test]
     fn archive_policy_keeps_the_environment_contract() {
-        let default = crate::zip::DEFAULT_MAX_INFLATED_ENTRY;
+        let default = crate::analysis::archive::DEFAULT_MAX_INFLATED_ENTRY;
         assert_eq!(archive_policy(None).max_inflated_entry, default);
         assert_eq!(archive_policy(Some("")).max_inflated_entry, default);
         assert_eq!(archive_policy(Some("invalid")).max_inflated_entry, default);

@@ -15,7 +15,7 @@ dexdec::Decompiler::from_bytes(dex_entry_bytes)
 The integration seam is the **DEX entry bytes**, not rasc's own parse tree:
 dexdec's emitter is driven by its frontend/IR (`frontend::ClassNode`,
 `ir::CFG`), so there is no adapter from `rasc-dex`'s structures and none is
-planned. `src/emitter.rs` in the rasc CLI owns that seam.
+planned. `src/analysis/emitter.rs` in rasc owns that seam.
 
 ## What this tree is
 

@@ -26,7 +26,7 @@ pub const SKILL_NAME: &str = "rasc";
 /// Kept as a plain file under `skill/` so it is edited and reviewed as documentation, not
 /// escaped inside a Rust string. `--print` emits exactly these bytes, which is what makes
 /// that flag useful for agents this command does not know about.
-pub const SKILL_MD: &str = include_str!("../skill/SKILL.md");
+pub const SKILL_MD: &str = include_str!("../../skill/SKILL.md");
 
 /// An agent whose skill directory `rasc skill` knows how to write.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

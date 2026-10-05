@@ -139,9 +139,9 @@ fn contains_pair(code: &[u8], [first, second]: [u8; 2]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::dex::tests::const_string_fixture;
-    use crate::dex::{Dex, PARALLEL_SCAN_CLASSES};
-    use crate::query::Query;
+    use crate::analysis::dex::tests::const_string_fixture;
+    use crate::analysis::dex::{Dex, PARALLEL_SCAN_CLASSES};
+    use crate::analysis::query::Query;
 
     #[test]
     fn pair_filter_finds_matches_at_both_edges() {

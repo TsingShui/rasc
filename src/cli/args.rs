@@ -1,4 +1,6 @@
-use crate::query::{ClassQuery, MemberQuery, Query, format_class_name, fuzzy_class_pattern};
+use crate::analysis::query::{
+    ClassQuery, MemberQuery, Query, format_class_name, fuzzy_class_pattern,
+};
 use anyhow::{Result, bail};
 use clap::{Args, Parser, Subcommand};
 use std::path::{Path, PathBuf};

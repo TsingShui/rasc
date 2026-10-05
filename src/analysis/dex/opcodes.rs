@@ -5,7 +5,7 @@
 //! so editing a table cannot silently change how instructions decode.
 
 use super::RefKind;
-use crate::bytes::{read_u16, read_u32};
+use crate::analysis::bytes::{read_u16, read_u32};
 use anyhow::{Context, Result, bail};
 
 /// Instruction width in code units, or 0 for the opcodes that need the runtime
