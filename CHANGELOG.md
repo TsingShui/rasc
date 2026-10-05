@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.0](https://github.com/TsingShui/rasc/compare/rasc-v0.1.2...rasc-v0.2.0) (2026-10-05)
+
+
+### Features
+
+* add persistent MCP analysis server ([1303b20](https://github.com/TsingShui/rasc/commit/1303b20635537c592f6b641895c079ea3d391cce))
+
 ## [0.1.2](https://github.com/TsingShui/rasc/compare/rasc-v0.1.1...rasc-v0.1.2) (2026-09-28)
 
 
