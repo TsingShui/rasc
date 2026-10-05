@@ -46,14 +46,10 @@ See `rasc --help` for more usage information, or `rasc <command> --help` for com
 
 ### Headless MCP
 
-For several queries over the same compressed APK/DEX, rasc can run as a persistent stdio MCP
-server. It copies an authorized input into a private immutable snapshot and reuses only bytes that
-were actually produced by ZIP deflate decompression. Bare DEX and ZIP-stored entries borrow the
-snapshot directly; parser/decompiler state, source, manifests, and query results are not cached.
-The server exposes exactly `open`, `close`, `status`, `classes`, `strings`, `findrefs`, `getclass`,
-`manifest`, and `entries`.
+MCP is a quick, standard way to connect rasc to Pi and other MCP-compatible coding agents. Agents
+with code mode can call rasc tools and process their structured results in JavaScript.
 
-Configure rasc once for all Pi projects in the user-level `~/.pi/agent/mcp.json`:
+Configure rasc globally for Pi in `~/.pi/agent/mcp.json`:
 
 ```json
 {
@@ -68,31 +64,23 @@ Configure rasc once for all Pi projects in the user-level `~/.pi/agent/mcp.json`
 }
 ```
 
-Replace the root with the directory containing inputs that rasc may open, then run `pi mcp list`
-to verify the connection. A project-level `.pi/mcp.json` override is optional when one project needs
-a narrower root or different limits; it is not required for normal use.
+Replace `--root` with the directory containing the APK/DEX files that rasc may access, then run
+`pi mcp list` to verify the connection.
 
-Call `open` once, retain its process-local `target_id`, consume complete typed results, and call
-`close`. The server does not paginate or provide generic list filters: code mode should filter,
-sort, slice, map, aggregate, and combine `structuredContent` in JavaScript. Results exceeding the
-configured item or serialized-byte budget fail atomically with `RESOURCE_LIMIT`. `classes`,
-`strings`, and `findrefs` reuse one process-wide Rayon pool and can scan independent physical DEX
-entries concurrently when internal admission thresholds predict enough parallel work; smaller or
-highly skewed workloads fall back to ordered serial traversal. Results are always committed in
-physical-entry, logical-member, then row order, and logical members of a DEX 041 container remain
-serial. This is a bounded capability, not a general latency guarantee. `--analysis-threads` sizes
-that pool (default: available CPUs). This is separate from the fail-fast
-`--max-concurrent-requests` request budget
-(default 2), so excess parallel calls return `RESOURCE_LIMIT` rather than queueing unbounded
-blocking work. Paths outside `--root` are rejected. MCP stdout is protocol-only and diagnostics use
-stderr.
+Available MCP tools:
 
-MCP is optional. Pi code mode can already invoke the normal CLI through `tools.bash()` (best for
-one-shot, streaming, or CLI-filtered output), while a Pi extension can register Pi-specific tools.
-Choose MCP for standard typed discovery, non-Pi clients, explicit long-lived targets, or repeated
-queries that benefit from reusing deflated entry bytes. See
-[the headless design and code-mode examples](docs/headless-mcp.zh-CN.md). The example's client-side
-composition has a reproducible Pi QuickJS check: `node tools/verify_codemode.mjs`.
+- `open` - open an APK or DEX and return a `target_id`
+- `close` - close a target and release its resources
+- `status` - show server, target, and cache status
+- `classes` - list classes
+- `strings` - list strings
+- `findrefs` - find string, type, method, or field references
+- `getclass` - decompile one class
+- `manifest` - decode `AndroidManifest.xml`
+- `entries` - list APK archive entries
+
+The usual flow is `open` → analysis tools using the returned `target_id` → `close`. See
+[the headless MCP guide](docs/headless-mcp.zh-CN.md) for limits and code-mode examples.
 
 ### Coding agents
 
