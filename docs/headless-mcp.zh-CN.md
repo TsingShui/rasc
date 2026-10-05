@@ -137,17 +137,16 @@ scratch、serde 和 dexdec 自身内存另计。release 使用 `panic=abort`，�
   "mcpServers": {
     "rasc": {
       "command": "rasc",
-      "args": ["mcp", "--root", "/absolute/path/to/authorized-inputs"],
+      "args": ["mcp"],
       "exposure": "codemode",
-      "description": "Persistent typed APK/DEX analysis with deflate-byte reuse"
+      "description": "Analyze APK and DEX files with native rasc tools"
     }
   }
 }
 ```
 
-将 `--root` 替换为允许 rasc 打开的 APK/DEX 所在目录，然后运行 `pi mcp list` 验证连接。
-只有某个项目需要更窄的 root 或不同资源限制时，才需要用项目级 `.pi/mcp.json` 覆盖全局配置；
-正常使用不要求项目级配置。
+运行 `pi mcp list` 验证连接。默认可打开当前工作目录下的输入；只有需要显式限制访问范围时，
+才添加 `--root DIR`。某个项目需要不同资源限制时，也可以用项目级 `.pi/mcp.json` 覆盖全局配置。
 
 MCP tool 返回完整 `CallToolResult`。下面的 filter/sort/slice/map 和并行编排全部发生在 code mode，
 不是 MCP 参数：

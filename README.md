@@ -56,16 +56,16 @@ Configure rasc globally for Pi in `~/.pi/agent/mcp.json`:
   "mcpServers": {
     "rasc": {
       "command": "rasc",
-      "args": ["mcp", "--root", "/absolute/path/to/authorized-inputs"],
+      "args": ["mcp"],
       "exposure": "codemode",
-      "description": "Persistent native APK/DEX analysis"
+      "description": "Analyze APK and DEX files with native rasc tools"
     }
   }
 }
 ```
 
-Replace `--root` with the directory containing the APK/DEX files that rasc may access, then run
-`pi mcp list` to verify the connection.
+Run `pi mcp list` to verify the connection. By default, rasc can open inputs under the current
+working directory; use `--root DIR` only when an explicit access boundary is needed.
 
 Available MCP tools:
 
