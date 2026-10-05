@@ -139,7 +139,7 @@ scratch、serde 和 dexdec 自身内存另计。release 使用 `panic=abort`，�
       "command": "rasc",
       "args": ["mcp"],
       "exposure": "codemode",
-      "description": "Analyze APK and DEX files with native rasc tools"
+      "description": "High-performance native alternative to jadx for APK and DEX analysis"
     }
   }
 }
