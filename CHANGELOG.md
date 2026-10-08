@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.0](https://github.com/TsingShui/rasc/compare/rasc-v0.2.0...rasc-v0.3.0) (2026-10-08)
+
+
+### Features
+
+* support JAR and AAR inputs via d8 ([0f2d50c](https://github.com/TsingShui/rasc/commit/0f2d50c30dee15aba86c8844a5093ef1cdd60696))
+
 ## [0.2.0](https://github.com/TsingShui/rasc/compare/rasc-v0.1.2...rasc-v0.2.0) (2026-10-05)
 
 
