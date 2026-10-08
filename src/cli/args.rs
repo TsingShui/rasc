@@ -21,25 +21,35 @@ pub fn default_threads() -> usize {
 }
 
 #[derive(Debug, Parser)]
-#[command(name = "rasc", version, about = "Native Rust APK and DEX analysis CLI")]
+#[command(
+    name = "rasc",
+    version,
+    about = "Native Rust APK, DEX, JAR, and AAR analysis CLI"
+)]
 pub struct Cli {
+    /// d8 executable used to convert Java bytecode in JAR and AAR inputs.
+    #[arg(long, global = true, value_name = "FILE", conflicts_with = "no_d8")]
+    pub d8: Option<PathBuf>,
+    /// Refuse Java-bytecode conversion and accept only native DEX code inputs.
+    #[arg(long, global = true)]
+    pub no_d8: bool,
     #[command(subcommand)]
     pub command: Command,
 }
 
 #[derive(Debug, Subcommand)]
 pub enum Command {
-    /// Locate a class in an APK and decompile it.
+    /// Locate a class in an APK, DEX, JAR, or AAR and decompile it.
     Getclass(GetClassArgs),
     /// List the entries an archive holds, in central-directory order.
     Entries(EntriesArgs),
     /// List every string in every root DEX of an archive.
     Strings(StringsArgs),
-    /// Find code references across every DEX in an APK.
+    /// Find code references across an APK, DEX, JAR, or AAR.
     Findrefs(FindRefsArgs),
     /// Decode and print AndroidManifest.xml from an APK.
     Manifest(ManifestArgs),
-    /// List classes defined across every DEX in an APK.
+    /// List classes defined in an APK, DEX, JAR, or AAR.
     Classes(ClassesArgs),
     /// Print one class's DEX field layout as one JSON record.
     ///

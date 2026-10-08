@@ -7,6 +7,7 @@
 pub(crate) mod apk;
 pub(crate) mod archive;
 pub(crate) mod bytes;
+pub(crate) mod code_input;
 pub(crate) mod dex;
 pub(crate) mod emitter;
 pub(crate) mod manifest;

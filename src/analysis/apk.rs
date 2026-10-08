@@ -1083,6 +1083,15 @@ pub(crate) fn member_by_index_with_policy(
     Ok(lookup)
 }
 
+/// Read one named entry with the same bounds and duplicate-name semantics as the CLI.
+pub(crate) fn read_archive_entry_with_policy(
+    path: &Path,
+    policy: ArchivePolicy,
+    wanted: &str,
+) -> Result<Vec<u8>> {
+    read_entry_with_policy(path, policy, wanted)
+}
+
 /// Every entry the archive holds, in central-directory order.
 ///
 /// No filtering and no de-duplication: this is a listing of what the file contains, so
