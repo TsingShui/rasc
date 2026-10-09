@@ -1,6 +1,6 @@
 [package]
 name = "dexdec"
-version = "0.3.0"
+version = "0.4.0"
 edition = "2021"
 license = "Apache-2.0"
 description = "Dex decompiler core library (forked from asLody/dexdec; Java emitter used by rasc's `getclass`)"
@@ -16,7 +16,7 @@ readme = "README.md"
 #   * `[lib] test = false` - upstream's unit tests stay in-tree for reference
 #     but are not run by rasc's `cargo test --workspace`.
 [dependencies]
-rusty-dex = { path = "../rusty-dex", version = "0.3.0" }
+rusty-dex = { path = "../rusty-dex", version = "0.4.0" }
 bitflags = "2"
 rayon = "1"
 
