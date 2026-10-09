@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.0](https://github.com/TsingShui/rasc/compare/rasc-v0.3.0...rasc-v0.4.0) (2026-10-09)
+
+
+### Features
+
+* distribute Linux x86_64 musl binaries ([153efdf](https://github.com/TsingShui/rasc/commit/153efdfe01127da3c88f683ed49325e0d9de5b00))
+
 ## [0.3.0](https://github.com/TsingShui/rasc/compare/rasc-v0.2.0...rasc-v0.3.0) (2026-10-08)
 
 
