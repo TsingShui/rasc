@@ -1,12 +1,13 @@
 name: Release
 
-# Tag-driven: pushing a version tag builds the macOS artefacts and publishes them
-# to its GitHub Release. `workflow_dispatch` can build artifacts only, or rebuild
-# and publish an existing tag when `release_tag` is provided.
+# Tag-driven: pushing a version tag builds the macOS and Linux artefacts and
+# publishes them to its GitHub Release. `workflow_dispatch` can build artifacts
+# only, or rebuild and publish an existing tag when `release_tag` is provided.
 #
-# Both targets build on the arm64 runner: the macOS SDK is universal, so the
-# x86_64 `cc` dependencies (libdeflater, libz-sys) cross-compile with the target
-# triple. Tests run once, on the host target, before anything is published.
+# Both macOS targets build on the arm64 runner: the macOS SDK is universal, so
+# the x86_64 `cc` dependencies (libdeflater, libz-sys) cross-compile with the
+# target triple. Linux uses musl for a portable, statically linked x86_64 binary.
+# Tests run once, on the macOS host target, before anything is published.
 #
 # Release notes come from `docs/releases/<tag>.md`, which is reviewed like any
 # other file, rather than from `generate_release_notes` - the history is not part
@@ -30,12 +31,21 @@ env:
 
 jobs:
   build:
-    name: macOS ${{ matrix.target }}
-    runs-on: macos-14
+    name: ${{ matrix.platform }} ${{ matrix.target }}
+    runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
       matrix:
-        target: [aarch64-apple-darwin, x86_64-apple-darwin]
+        include:
+          - platform: macOS
+            runner: macos-14
+            target: aarch64-apple-darwin
+          - platform: macOS
+            runner: macos-14
+            target: x86_64-apple-darwin
+          - platform: Linux
+            runner: ubuntu-latest
+            target: x86_64-unknown-linux-musl
     steps:
       - uses: actions/checkout@v4
         with:
@@ -46,6 +56,10 @@ jobs:
           rustup toolchain install stable --profile minimal
           rustup default stable
           rustup target add ${{ matrix.target }}
+
+      - name: Install musl toolchain
+        if: matrix.target == 'x86_64-unknown-linux-musl'
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
 
       - uses: Swatinem/rust-cache@v2
         with:
@@ -116,7 +130,7 @@ jobs:
           if [ -f "$NOTES" ]; then
             NOTES_ARGS=(--notes-file "$NOTES")
           else
-            NOTES_ARGS=(--notes "macOS artefacts (aarch64 + x86_64).")
+            NOTES_ARGS=(--notes "macOS artefacts (aarch64 + x86_64) and Linux x86_64 musl artefact.")
           fi
           if gh release view "${RELEASE_TAG}" >/dev/null 2>&1; then
             IS_DRAFT="$(gh release view "${RELEASE_TAG}" --json isDraft --jq .isDraft)"

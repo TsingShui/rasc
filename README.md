@@ -21,9 +21,10 @@ an optional CLI path that requires Android SDK Build Tools and a Java runtime.
 
 ## Build and install
 
-Prebuilt macOS binaries (Apple Silicon and Intel) are on the
-[Releases](https://github.com/TsingShui/rasc/releases) page. Install the latest version directly
-from GitHub with Cargo:
+Prebuilt binaries for macOS (Apple Silicon and Intel) and Linux x86_64 (musl) are on the
+[Releases](https://github.com/TsingShui/rasc/releases) page. The Linux musl build is statically
+linked and does not require a particular glibc version. Install the latest version directly from
+GitHub with Cargo:
 
 ```sh
 cargo install --git https://github.com/TsingShui/rasc
