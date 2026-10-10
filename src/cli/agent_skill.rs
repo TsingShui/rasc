@@ -224,6 +224,22 @@ mod tests {
     }
 
     #[test]
+    fn jar_workflow_documents_explicit_conversion_and_dex_reuse() {
+        assert!(SKILL_MD.contains("rasc does not invoke d8 automatically"));
+        assert!(SKILL_MD.contains("mktemp -d /tmp/rasc/XXXXXX"));
+        assert!(SKILL_MD.contains("[ ! -L /tmp/rasc ] && [ -O /tmp/rasc ]"));
+        assert!(SKILL_MD.contains("d8 --debug --min-api 1 --output \"$dex_zip\" library.jar"));
+        for command in ["classes", "getclass", "findrefs"] {
+            assert!(SKILL_MD.contains(&format!("rasc {command} \"$dex_zip\"")));
+        }
+        assert!(SKILL_MD.contains("do not rerun d8 for each class or query"));
+        assert!(SKILL_MD.contains("Reconvert when the input"));
+        assert!(SKILL_MD.contains("record the printed absolute path"));
+        assert!(SKILL_MD.contains("rm -rf -- \"$workdir\""));
+        assert!(SKILL_MD.contains("user-selected persistent"));
+    }
+
+    #[test]
     fn the_bundled_skill_has_valid_frontmatter() {
         assert!(
             SKILL_MD.starts_with("---\n"),

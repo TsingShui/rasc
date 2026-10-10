@@ -1,6 +1,6 @@
 ---
 name: rasc
-description: Analyze APK and DEX files with the rasc CLI - decompile one class, find code references (string, type, method, field), list classes, or decode AndroidManifest.xml. Use for Android reverse engineering, for locating a class or a caller inside an APK, or when a task mentions rasc, ASC, jadx, androguard, dex or smali.
+description: Analyze APK and DEX files with the rasc CLI, or ordinary Java JAR files after explicit one-time d8 conversion - decompile one class, find code references (string, type, method, field), list classes, or decode AndroidManifest.xml. Use for Android reverse engineering, for locating a class or caller, or when a task mentions rasc, ASC, jadx, androguard, dex, smali, JAR or d8.
 ---
 
 # rasc
@@ -25,6 +25,51 @@ rasc member-by-index app.apk --descriptor 'Lcom/example/Foo;' --field-index 3
 rasc member-by-index app.apk --descriptor 'Lcom/example/Foo;' --method-index 339
 rasc mcp --root /authorized/apks                     # persistent stdio MCP server
 ```
+
+## Ordinary Java JAR files: convert once, reuse the DEX
+
+rasc does not invoke d8 automatically and cannot directly analyze `.class` bytecode in an
+ordinary JAR. Use an external d8 from Android SDK Build Tools (requires Java) to convert the
+whole JAR **once**, then reuse the resulting DEX ZIP for every query. A JAR/ZIP already holding
+root `classes*.dex` entries can be passed directly to rasc without conversion.
+
+For temporary analysis, put conversion output under `/tmp/rasc/<random-directory>/` rather
+than in the project directory. Create one private workspace per input/analysis session:
+
+```bash
+# d8 must be on PATH, or replace it with /path/to/android-sdk/build-tools/<version>/d8.
+mkdir -p -m 700 /tmp/rasc || exit 1
+# Refuse a shared base directory owned by another user or replaced with a symlink.
+[ -d /tmp/rasc ] && [ ! -L /tmp/rasc ] && [ -O /tmp/rasc ] || exit 1
+chmod 700 /tmp/rasc || exit 1
+workdir=$(mktemp -d /tmp/rasc/XXXXXX) || exit 1
+dex_zip="$workdir/library-dex.zip"
+d8 --debug --min-api 1 --output "$dex_zip" library.jar || exit 1
+printf 'Reuse this DEX ZIP: %s\n' "$dex_zip"
+
+rasc classes "$dex_zip" -f example
+rasc getclass "$dex_zip" com.example.Scanner
+rasc getclass "$dex_zip" com.example.Winnowing
+rasc findrefs "$dex_zip" method scan --class com.example.Scanner
+```
+
+- Keep conversion explicit: do not rerun d8 for each class or query. Reuse the same workspace
+  and DEX ZIP for all queries over this input. Shell variables may not survive separate tool
+  calls; record the printed absolute path and pass that path to subsequent rasc commands.
+- Reconvert when the input JAR, d8 version, library inputs, or conversion options change, or
+  when the temporary output has been removed; rasc does not manage this cache.
+- After analysis finishes, remove only the workspace created above with `rm -rf -- "$workdir"`
+  (or its recorded absolute path), not the whole `/tmp/rasc` directory. Temporary files may also
+  be removed by the system. For long-term repeated analysis, use a user-selected persistent
+  output directory instead. These are external d8 instructions, not automatic rasc behavior.
+- For Android API references, add `--lib /path/to/android-sdk/platforms/android-<api>/android.jar`
+  to the d8 command. Supply any other required dependencies with d8's `--lib` or `--classpath`
+  options as appropriate; check conversion diagnostics rather than assuming success.
+- d8 may desugar bytecode and generate lambda classes or synthetic methods. Results and member
+  indices describe the converted DEX, not the original JVM bytecode or a different APK build.
+- `--d8`, `--no-d8`, and `RASC_D8` are not supported by rasc. Conversion belongs outside rasc;
+  only pass the resulting DEX or DEX ZIP to its code commands. `manifest` does not apply to an
+  ordinary JAR or this generated DEX ZIP.
 
 ## Indices a runtime trace hands back
 
