@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.0.0](https://github.com/TsingShui/rasc/compare/rasc-v0.4.0...rasc-v1.0.0) (2026-10-10)
+
+
+### ⚠ BREAKING CHANGES
+
+* Java-bytecode JAR/AAR inputs and --d8/--no-d8 options are no longer supported. APK, DEX, and archives containing root DEX entries remain supported.
+
+### Bug Fixes
+
+* remove implicit d8 conversion for JAR and AAR inputs ([bbd3f0b](https://github.com/TsingShui/rasc/commit/bbd3f0b500f66951a47a8a5acac4f1dddf2dbeef))
+
 ## [0.4.0](https://github.com/TsingShui/rasc/compare/rasc-v0.3.0...rasc-v0.4.0) (2026-10-09)
 
 
