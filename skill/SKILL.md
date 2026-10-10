@@ -1,19 +1,18 @@
 ---
 name: rasc
-description: Analyze APK, DEX, JAR, and AAR files with the rasc CLI - decompile one class, find code references (string, type, method, field), list classes, or decode AndroidManifest.xml. Use for Android reverse engineering, for locating a class or caller, or when a task mentions rasc, ASC, jadx, androguard, dex, smali, JAR, or AAR.
+description: Analyze APK and DEX files with the rasc CLI - decompile one class, find code references (string, type, method, field), list classes, or decode AndroidManifest.xml. Use for Android reverse engineering, for locating a class or a caller inside an APK, or when a task mentions rasc, ASC, jadx, androguard, dex or smali.
 ---
 
 # rasc
 
-Fast native CLI for APK/DEX analysis, a re-implementation of ASC. Code commands also accept JAR
-and AAR inputs through a system-installed d8. Every command writes its payload to stdout and
-diagnostics to stderr, so results pipe cleanly into `grep`, `awk` or `-o FILE`.
+Fast native CLI for APK/DEX analysis, a re-implementation of ASC. Every command writes its
+payload to stdout and diagnostics to stderr, so results pipe cleanly into `grep`, `awk` or
+`-o FILE`.
 
 ## Commands
 
 ```sh
 rasc getclass app.apk com.example.Main                # one class -> Java-like source
-rasc getclass library.aar com.example.LibraryClass    # JAR/AAR through system d8
 rasc getclass --members app.apk com.example.Main      # the same, prefixed by its member indices
 rasc findrefs app.apk string Authorization            # references in every root DEX
 rasc findrefs app.apk type Gson
@@ -67,10 +66,6 @@ rasc member-by-index app.apk --descriptor 'Lcom/example/Foo;' --method-index 339
   is tens of MiB, so filter it (`-f`) or pipe it.
 - `-o FILE` writes exactly the stdout bytes; `--threads N` caps parallelism (default: one
   worker per CPU); `--debug` prints timings to stderr.
-- JAR/AAR code analysis needs Android SDK Build Tools plus Java. rasc discovers d8 through
-  `ANDROID_SDK_ROOT`, `ANDROID_HOME`, standard SDK locations, or `PATH`; override it with
-  `--d8 FILE` or `RASC_D8`. `--no-d8` refuses conversion. Conversion can expose generated lambda
-  classes and is supported by the one-shot CLI only; MCP still accepts APK/DEX.
 - For several queries over the same compressed input, optionally configure `rasc mcp --root DIR`
   as a typed stdio MCP server. Call `open` once, pass its `target_id` to `classes`, `strings`,
   `findrefs`, `getclass`, `manifest`, and `entries`, then `close` it. Lists and text are complete,

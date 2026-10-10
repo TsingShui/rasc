@@ -7,7 +7,7 @@
 mod agent_skill;
 mod args;
 
-use crate::analysis::{apk, code_input, manifest, query, session};
+use crate::analysis::{apk, manifest, query, session};
 use crate::mcp;
 use agent_skill as skill;
 use anyhow::{Context, Result, bail};
@@ -175,22 +175,15 @@ fn dispatch(args: Vec<String>, archive_policy: apk::ArchivePolicy) -> Result<i32
 
 /// Runs the parsed command.
 fn run_command(args: Cli, archive_policy: apk::ArchivePolicy, started: Instant) -> Result<i32> {
-    // Java-bytecode conversion is a one-shot CLI concern. MCP deliberately receives
-    // only the native session configuration below and continues accepting APK/DEX.
-    let input_policy = code_input::InputPolicy {
-        d8: args.d8,
-        disable_d8: args.no_d8,
-    };
     // Only a member lookup has a verdict of its own (one hit, none, several); every
     // other command either produced its payload or failed.
     let mut status = 0;
     match args.command {
         Command::Findrefs(args) => {
             let query = args.query()?;
-            let input = code_input::prepare(&args.apk_path, archive_policy, &input_policy)?;
             let scan_started = Instant::now();
             let mut hits = apk::find_reference_hits_with_policy(
-                input.path(),
+                &args.apk_path,
                 archive_policy,
                 &query,
                 args.threads,
@@ -229,17 +222,8 @@ fn run_command(args: Cli, archive_policy: apk::ArchivePolicy, started: Instant) 
         Command::FieldsPlan(args) => {
             // Accept what a user types; the DEX carries descriptors.
             let descriptor = query::format_class_name(&args.descriptor)?;
-            let inputs = args
-                .apk
-                .iter()
-                .map(|path| code_input::prepare(path, archive_policy, &input_policy))
-                .collect::<Result<Vec<_>>>()?;
-            let paths = inputs
-                .iter()
-                .map(|input| input.path().to_owned())
-                .collect::<Vec<_>>();
             let lookup =
-                apk::field_plan_with_policy(&paths, archive_policy, &descriptor, args.threads)?;
+                apk::field_plan_with_policy(&args.apk, archive_policy, &descriptor, args.threads)?;
             match &lookup.plan {
                 Some(plan) => emit(&format!("{plan}\n"), args.output.as_deref())?,
                 None if lookup.definitions.is_empty() => {
@@ -258,15 +242,6 @@ fn run_command(args: Cli, archive_policy: apk::ArchivePolicy, started: Instant) 
         }
         Command::MemberByIndex(args) => {
             let descriptor = query::format_class_name(&args.descriptor)?;
-            let inputs = args
-                .apk
-                .iter()
-                .map(|path| code_input::prepare(path, archive_policy, &input_policy))
-                .collect::<Result<Vec<_>>>()?;
-            let paths = inputs
-                .iter()
-                .map(|input| input.path().to_owned())
-                .collect::<Vec<_>>();
             // clap's group already rejects both or neither; this keeps the arm total.
             let (kind, index, name) = match (args.method_index, args.field_index) {
                 (Some(index), None) => (apk::MemberKind::Method, index, "method"),
@@ -274,7 +249,7 @@ fn run_command(args: Cli, archive_policy: apk::ArchivePolicy, started: Instant) 
                 _ => bail!("pass exactly one of --method-index or --field-index"),
             };
             let lookup = apk::member_by_index_with_policy(
-                &paths,
+                &args.apk,
                 archive_policy,
                 &descriptor,
                 index,
@@ -290,10 +265,9 @@ fn run_command(args: Cli, archive_policy: apk::ArchivePolicy, started: Instant) 
         }
         Command::Classes(args) => {
             let filter = args.filter.as_deref().map(str::to_lowercase);
-            let input = code_input::prepare(&args.apk_path, archive_policy, &input_policy)?;
             let started = Instant::now();
             let classes = apk::list_classes_with_policy(
-                input.path(),
+                &args.apk_path,
                 archive_policy,
                 args.threads,
                 args.debug,
@@ -350,9 +324,8 @@ fn run_command(args: Cli, archive_policy: apk::ArchivePolicy, started: Instant) 
             }
         }
         Command::Strings(args) => {
-            let input = code_input::prepare(&args.apk_path, archive_policy, &input_policy)?;
             let strings = apk::list_strings_with_policy(
-                input.path(),
+                &args.apk_path,
                 archive_policy,
                 args.threads,
                 args.debug,
@@ -426,14 +399,13 @@ fn run_command(args: Cli, archive_policy: apk::ArchivePolicy, started: Instant) 
         }
         Command::Getclass(args) => {
             let class_name = query::format_class_name(&args.dalvik_class)?;
-            let input = code_input::prepare(&args.apk_path, archive_policy, &input_policy)?;
             // `--members` prefixes the index table. It has to describe the same definition
             // the source came from, so a class defined more than once is refused rather
             // than resolved by taking the first - the table would otherwise annotate one
             // definition while the decompiler rendered another.
             let mut table: Vec<String> = Vec::new();
             if args.members {
-                let inputs = [input.path().to_owned()];
+                let inputs = [args.apk_path.clone()];
                 let lookup = apk::member_lines_with_policy(
                     &inputs,
                     archive_policy,
@@ -457,7 +429,7 @@ fn run_command(args: Cli, archive_policy: apk::ArchivePolicy, started: Instant) 
             }
             if status == 0 {
                 let hit = apk::decompile_class_with_policy(
-                    input.path(),
+                    &args.apk_path,
                     archive_policy,
                     &class_name,
                     args.threads,
