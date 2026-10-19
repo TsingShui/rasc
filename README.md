@@ -1,6 +1,6 @@
 # Archive
-
-https://github.com/MG1937/rust_ASC instead
+This Repo Will Stop Devlop,
+Use https://github.com/MG1937/rust_ASC instead
 
 # rasc
 
