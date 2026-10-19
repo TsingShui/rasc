@@ -1,3 +1,7 @@
+# Archive
+
+https://github.com/MG1937/rust_ASC instead
+
 # rasc
 
 
