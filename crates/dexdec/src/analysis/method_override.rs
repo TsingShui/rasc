@@ -15,11 +15,10 @@ use crate::ir::generic_types::{
     MethodSignature, SignatureSubstitutionError, TypeArgument, TypeParameter, TypeSubstitution,
 };
 use crate::ir::ty::{ArgType, MethodDescriptor};
-use crate::platform_symbols::{default_platform_symbols, PlatformClass, PlatformSymbolSet};
 
 #[derive(Debug)]
 pub enum OverrideAnalysisError {
-    PlatformSymbols(io::Error),
+    Input(io::Error),
     GenericSubstitution(SignatureSubstitutionError),
     UnresolvedType(ArgType),
     MissingErasedParent {
@@ -36,8 +35,8 @@ pub enum OverrideAnalysisError {
 impl std::fmt::Display for OverrideAnalysisError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::PlatformSymbols(source) => {
-                write!(formatter, "platform symbol metadata failed: {source}")
+            Self::Input(source) => {
+                write!(formatter, "analysis input failed: {source}")
             }
             Self::GenericSubstitution(source) => source.fmt(formatter),
             Self::UnresolvedType(ty) => {
@@ -64,7 +63,7 @@ impl std::fmt::Display for OverrideAnalysisError {
 impl std::error::Error for OverrideAnalysisError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
-            Self::PlatformSymbols(source) => Some(source),
+            Self::Input(source) => Some(source),
             Self::GenericSubstitution(source) => Some(source),
             Self::UnresolvedType(_)
             | Self::MissingErasedParent { .. }
@@ -75,7 +74,7 @@ impl std::error::Error for OverrideAnalysisError {
 
 impl From<io::Error> for OverrideAnalysisError {
     fn from(source: io::Error) -> Self {
-        Self::PlatformSymbols(source)
+        Self::Input(source)
     }
 }
 
@@ -787,7 +786,7 @@ impl GenericTypeHierarchy {
             .filter_map(|descriptor| descriptor.parse().ok())
             .collect::<Vec<_>>();
         let hierarchy = Self {
-            hierarchy: CompositeClassHierarchy::from_loaded(loaded)?,
+            hierarchy: CompositeClassHierarchy::from_loaded(loaded),
             method_overloads: Arc::new(MethodOverloadIndex::default()),
             method_contracts: Arc::new(RwLock::new(HashMap::new())),
         };
@@ -1465,13 +1464,6 @@ impl GenericHierarchyUnifier {
     }
 }
 
-pub fn platform_generic_method_contract(
-    method: &crate::ir::MethodReference,
-) -> Result<Option<GenericMethodContract>, OverrideAnalysisError> {
-    let hierarchy = GenericTypeHierarchy::from_classes(std::iter::empty::<&ClassNode>())?;
-    Ok(hierarchy.method_contract(method))
-}
-
 impl ClassHierarchy for LoadedClassHierarchy {
     fn class_details(&self, ty: &ArgType) -> Option<Arc<ClassDetails>> {
         let descriptor = ty.to_descriptor();
@@ -1482,394 +1474,22 @@ impl ClassHierarchy for LoadedClassHierarchy {
 #[derive(Debug, Clone)]
 pub(crate) struct CompositeClassHierarchy {
     loaded: LoadedClassHierarchy,
-    platform: Option<Arc<PlatformClassSet>>,
 }
 
 impl CompositeClassHierarchy {
-    fn from_loaded(loaded: LoadedClassHierarchy) -> OverrideResult<Self> {
-        Ok(Self {
-            loaded,
-            platform: Some(PlatformClassSet::default_cached()?),
-        })
+    fn from_loaded(loaded: LoadedClassHierarchy) -> Self {
+        Self { loaded }
     }
 }
 
 impl ClassHierarchy for CompositeClassHierarchy {
     fn class_details(&self, ty: &ArgType) -> Option<Arc<ClassDetails>> {
-        self.loaded.class_details(ty).or_else(|| {
-            self.platform
-                .as_ref()
-                .and_then(|platform| platform.class_details(ty))
-        })
+        self.loaded.class_details(ty)
     }
-}
-
-#[derive(Debug)]
-enum DetailsTable {
-    Filling(HashMap<String, Arc<ClassDetails>>),
-    Frozen {
-        map: Arc<HashMap<String, Arc<ClassDetails>>>,
-        extras: RwLock<HashMap<String, Arc<ClassDetails>>>,
-    },
-}
-
-#[derive(Debug)]
-pub(crate) struct PlatformClassSet {
-    symbols: Arc<PlatformSymbolSet>,
-    details: RwLock<DetailsTable>,
-}
-
-impl PlatformClassSet {
-    pub fn load_default() -> io::Result<Self> {
-        Ok(Self {
-            symbols: default_platform_symbols()?,
-            details: RwLock::new(DetailsTable::Filling(HashMap::new())),
-        })
-    }
-
-    pub fn default_cached() -> io::Result<Arc<Self>> {
-        static DEFAULT_SYMBOLS: OnceLock<Arc<PlatformClassSet>> = OnceLock::new();
-        if let Some(platform) = DEFAULT_SYMBOLS.get() {
-            return Ok(Arc::clone(platform));
-        }
-        let platform = Arc::new(Self::load_default()?);
-        match DEFAULT_SYMBOLS.set(Arc::clone(&platform)) {
-            Ok(()) => Ok(platform),
-            Err(_) => DEFAULT_SYMBOLS.get().map(Arc::clone).ok_or_else(|| {
-                io::Error::new(
-                    io::ErrorKind::Other,
-                    "platform symbol cache publication failed",
-                )
-            }),
-        }
-    }
-
-    pub(crate) fn freeze_details(&self) {
-        let Ok(mut table) = self.details.write() else {
-            return;
-        };
-        if let DetailsTable::Filling(map) = &mut *table {
-            let map = std::mem::take(map);
-            *table = DetailsTable::Frozen {
-                map: Arc::new(map),
-                extras: RwLock::new(HashMap::new()),
-            };
-        }
-    }
-
-    fn class_details(&self, ty: &ArgType) -> Option<Arc<ClassDetails>> {
-        let descriptor = ty.to_descriptor();
-        match self.details.read() {
-            Ok(table) => match &*table {
-                DetailsTable::Frozen { map, extras } => {
-                    if let Some(details) = map.get(&descriptor) {
-                        return Some(Arc::clone(details));
-                    }
-                    if let Ok(extra) = extras.read() {
-                        if let Some(details) = extra.get(&descriptor) {
-                            return Some(Arc::clone(details));
-                        }
-                    }
-                }
-                DetailsTable::Filling(map) => {
-                    if let Some(details) = map.get(&descriptor) {
-                        return Some(Arc::clone(details));
-                    }
-                }
-            },
-            Err(_) => {
-                return parse_symbol_class_details(&self.symbols, &descriptor).map(Arc::new);
-            }
-        }
-
-        let details = Arc::new(parse_symbol_class_details(&self.symbols, &descriptor)?);
-        let mut table = match self.details.write() {
-            Ok(table) => table,
-            Err(_) => return Some(details),
-        };
-        match &mut *table {
-            DetailsTable::Frozen { map, extras } => {
-                if let Some(existing) = map.get(&descriptor) {
-                    return Some(Arc::clone(existing));
-                }
-                if let Ok(mut extra) = extras.write() {
-                    extra
-                        .entry(descriptor)
-                        .or_insert_with(|| Arc::clone(&details));
-                }
-                Some(details)
-            }
-            DetailsTable::Filling(map) => {
-                Some(Arc::clone(map.entry(descriptor).or_insert_with(|| details)))
-            }
-        }
-    }
-
-    #[cfg(test)]
-    fn cached_class_count(&self) -> usize {
-        match self.details.read() {
-            Ok(table) => match &*table {
-                DetailsTable::Filling(map) => map.len(),
-                DetailsTable::Frozen { map, extras } => {
-                    map.len() + extras.read().map(|extra| extra.len()).unwrap_or(0)
-                }
-            },
-            Err(_) => 0,
-        }
-    }
-
-    fn is_frozen(&self) -> bool {
-        matches!(
-            self.details.read().as_deref(),
-            Ok(DetailsTable::Frozen { .. })
-        )
-    }
-}
-
-fn parse_symbol_class_details(
-    symbols: &PlatformSymbolSet,
-    descriptor: &str,
-) -> Option<ClassDetails> {
-    symbols
-        .class(descriptor)
-        .and_then(|class| platform_class_details(class).ok())
-}
-
-pub fn freeze_default_platform_class_details() {
-    if let Ok(platform) = PlatformClassSet::default_cached() {
-        platform.freeze_details();
-    }
-}
-
-#[doc(hidden)]
-pub fn default_platform_class_details_are_frozen() -> bool {
-    PlatformClassSet::default_cached()
-        .ok()
-        .is_some_and(|platform| platform.is_frozen())
-}
-
-fn platform_class_details(class: &PlatformClass) -> io::Result<ClassDetails> {
-    let generic_signature = class
-        .signature
-        .as_deref()
-        .map(GenericSignatures::class)
-        .transpose()
-        .map_err(platform_signature_error)?;
-    let parents = class
-        .super_class
-        .iter()
-        .chain(&class.interfaces)
-        .map(|descriptor| parse_platform_type(descriptor))
-        .collect::<io::Result<Vec<_>>>()?;
-    let generic_parents = if let Some(signature) = &generic_signature {
-        std::iter::once(&signature.super_class)
-            .chain(&signature.super_interfaces)
-            .cloned()
-            .map(JvmTypeSignature::ClassType)
-            .collect()
-    } else {
-        parents
-            .iter()
-            .map(platform_type_signature)
-            .collect::<io::Result<Vec<_>>>()?
-    };
-    if parents.len() != generic_parents.len() {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            format!(
-                "{} has inconsistent erased and generic parent lists",
-                class.descriptor
-            ),
-        ));
-    }
-    let methods = class
-        .methods
-        .iter()
-        .map(|method| {
-            let descriptor = method
-                .descriptor
-                .parse::<crate::ir::MethodDescriptor>()
-                .map_err(|source| {
-                    io::Error::new(
-                        io::ErrorKind::InvalidData,
-                        format!(
-                            "{}->{}{} has an invalid descriptor: {source}",
-                            class.descriptor, method.name, method.descriptor
-                        ),
-                    )
-                })?;
-            let generic_signature = method
-                .signature
-                .as_deref()
-                .map(GenericSignatures::method)
-                .transpose()
-                .map_err(platform_signature_error)?;
-            let throws = method
-                .exceptions
-                .iter()
-                .map(|descriptor| parse_platform_type(descriptor))
-                .collect::<io::Result<Vec<_>>>()?;
-            let mut access_flags = method.access_flags;
-            if method.name == "<init>" {
-                access_flags |= crate::frontend::access_flags::CONSTRUCTOR;
-            }
-            Ok(MethodDetails {
-                reference: MethodReference {
-                    declaring_class: class.descriptor.clone(),
-                    short_id: format!("{}{}", method.name, method.descriptor),
-                },
-                params: descriptor.parameters,
-                return_type: descriptor.return_type,
-                generic_signature,
-                throws,
-                access_flags: AccessInfo::for_method(access_flags),
-            })
-        })
-        .collect::<io::Result<Vec<_>>>()?;
-    Ok(ClassDetails {
-        descriptor: class.descriptor.clone(),
-        package: platform_package(&class.descriptor),
-        access_flags: AccessInfo::for_class(class.access_flags),
-        parents,
-        generic_parents,
-        generic_signature,
-        instantiated_self: None,
-        methods,
-        method_candidates: OnceLock::new(),
-    })
-}
-
-fn parse_platform_type(descriptor: &str) -> io::Result<ArgType> {
-    descriptor.parse::<ArgType>().map_err(|source| {
-        io::Error::new(
-            io::ErrorKind::InvalidData,
-            format!("invalid platform type descriptor {descriptor}: {source}"),
-        )
-    })
-}
-
-fn platform_type_signature(ty: &ArgType) -> io::Result<JvmTypeSignature> {
-    match ty {
-        ArgType::Object(name) => Ok(JvmTypeSignature::ClassType(parse_class_type_signature(
-            name,
-        ))),
-        _ => Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            format!("platform hierarchy parent {ty} is not a class type"),
-        )),
-    }
-}
-
-fn platform_signature_error(source: impl std::fmt::Display) -> io::Error {
-    io::Error::new(
-        io::ErrorKind::InvalidData,
-        format!("invalid platform generic signature: {source}"),
-    )
-}
-
-fn platform_package(descriptor: &str) -> String {
-    descriptor
-        .strip_prefix('L')
-        .and_then(|value| value.strip_suffix(';'))
-        .unwrap_or(descriptor)
-        .rsplit_once('/')
-        .map(|(package, _)| package.replace('/', "."))
-        .unwrap_or_default()
-}
-
-pub(crate) fn platform_exception_contracts(
-) -> io::Result<Arc<BTreeMap<crate::ir::MethodReference, Vec<ArgType>>>> {
-    static CONTRACTS: OnceLock<Arc<BTreeMap<crate::ir::MethodReference, Vec<ArgType>>>> =
-        OnceLock::new();
-    if let Some(contracts) = CONTRACTS.get() {
-        return Ok(Arc::clone(contracts));
-    }
-    let platform = default_platform_symbols()?;
-    let contracts = Arc::new(
-        platform
-            .classes()
-            .flat_map(|class| {
-                class.methods.iter().filter_map(move |method| {
-                    (!method.exceptions.is_empty()).then(|| {
-                        let owner = class.descriptor.parse().ok()?;
-                        let descriptor = method.descriptor.parse().ok()?;
-                        let throws = method
-                            .exceptions
-                            .iter()
-                            .map(|exception| exception.parse())
-                            .collect::<Result<Vec<_>, _>>()
-                            .ok()?;
-                        Some((
-                            crate::ir::MethodReference {
-                                owner,
-                                name: method.name.clone(),
-                                descriptor,
-                            },
-                            throws,
-                        ))
-                    })?
-                })
-            })
-            .collect(),
-    );
-    match CONTRACTS.set(Arc::clone(&contracts)) {
-        Ok(()) => Ok(contracts),
-        Err(_) => CONTRACTS.get().map(Arc::clone).ok_or_else(|| {
-            io::Error::new(io::ErrorKind::Other, "contract cache publication failed")
-        }),
-    }
-}
-
-pub(crate) fn preload_platform_symbols() -> OverrideResult<()> {
-    default_platform_symbols()?;
-    platform_hierarchy_index()?;
-    platform_exception_contracts()?;
-    Ok(())
-}
-
-fn platform_hierarchy_index() -> OverrideResult<Arc<ClassHierarchyIndex>> {
-    static PLATFORM_HIERARCHY: OnceLock<Arc<ClassHierarchyIndex>> = OnceLock::new();
-    PLATFORM_HIERARCHY
-        .get()
-        .map(Arc::clone)
-        .map(Ok)
-        .unwrap_or_else(|| {
-            let platform = default_platform_symbols()?;
-            let mut index = ClassHierarchyIndex::default();
-            for class in platform.classes() {
-                let class_name = hierarchy_object_name(&class.descriptor)?;
-                let parents = class
-                    .super_class
-                    .iter()
-                    .chain(&class.interfaces)
-                    .map(|parent| hierarchy_object_name(parent))
-                    .collect::<OverrideResult<Vec<_>>>()?;
-                index.add_declared_type(
-                    class_name,
-                    parents,
-                    ReferenceTypeInfo {
-                        is_interface: class.access_flags & 0x0200 != 0,
-                        is_final: class.access_flags & 0x0010 != 0,
-                    },
-                );
-            }
-            freeze_shared_hierarchy(&mut index);
-            let index = Arc::new(index);
-            match PLATFORM_HIERARCHY.set(Arc::clone(&index)) {
-                Ok(()) => Ok(index),
-                Err(_) => PLATFORM_HIERARCHY.get().map(Arc::clone).ok_or_else(|| {
-                    OverrideAnalysisError::PlatformSymbols(io::Error::new(
-                        io::ErrorKind::Other,
-                        "hierarchy cache publication failed",
-                    ))
-                }),
-            }
-        })
 }
 
 pub(crate) fn type_hierarchy_index(reader: &DexFileReader) -> OverrideResult<ClassHierarchyIndex> {
-    let platform = platform_hierarchy_index()?;
-    let mut index = ClassHierarchyIndex::layered(platform);
+    let mut index = ClassHierarchyIndex::default();
     let declarations = reader
         .hierarchy_declarations()
         .map(|(dex, class)| {
@@ -1919,7 +1539,7 @@ fn hierarchy_object_name(descriptor: &str) -> OverrideResult<String> {
         .filter(|name| !name.is_empty())
         .map(str::to_string)
         .ok_or_else(|| {
-            OverrideAnalysisError::PlatformSymbols(io::Error::new(
+            OverrideAnalysisError::Input(io::Error::new(
                 io::ErrorKind::InvalidData,
                 "invalid class descriptor",
             ))
@@ -1927,16 +1547,10 @@ fn hierarchy_object_name(descriptor: &str) -> OverrideResult<String> {
 }
 
 fn invalid_class_descriptor() -> OverrideAnalysisError {
-    OverrideAnalysisError::PlatformSymbols(io::Error::new(
+    OverrideAnalysisError::Input(io::Error::new(
         io::ErrorKind::InvalidData,
         "class type index does not name a type",
     ))
-}
-
-impl ClassHierarchy for PlatformClassSet {
-    fn class_details(&self, ty: &ArgType) -> Option<Arc<ClassDetails>> {
-        PlatformClassSet::class_details(self, ty)
-    }
 }
 
 impl OverrideAnalysisTarget for DexFileReader {
@@ -2110,12 +1724,8 @@ impl MetadataDecoder {
 
 pub fn analyze_loaded_method_overrides(reader: &mut DexFileReader) -> OverrideResult<()> {
     let (loaded, diagnostics) = LoadedClassHierarchy::decode(reader)?;
-    let hierarchy = CompositeClassHierarchy::from_loaded(loaded)?;
+    let hierarchy = CompositeClassHierarchy::from_loaded(loaded);
     MethodOverrideAnalyzer::new(&hierarchy).analyze_loaded(reader)?;
     reader.replace_analysis_diagnostics(diagnostics);
     Ok(())
 }
-
-#[cfg(test)]
-#[path = "method_override/tests.rs"]
-mod tests;

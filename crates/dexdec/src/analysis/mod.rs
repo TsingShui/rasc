@@ -8,7 +8,7 @@ pub mod semantic_transform;
 pub mod value_recovery;
 
 pub(crate) use method_input::{ClassMethodInput, MethodRecoveryFailure, MethodRecoveryStage};
-pub(crate) use name_recovery::{RelationalNameInference, TypedConstantNameInference};
+pub(crate) use name_recovery::RelationalNameInference;
 
 pub use semantic_transform::SemanticTransform;
 

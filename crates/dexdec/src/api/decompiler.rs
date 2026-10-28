@@ -170,15 +170,6 @@ pub struct Decompiler {
 }
 
 impl Decompiler {
-    pub fn open(path: impl AsRef<Path>) -> Result<Self, DecompileError> {
-        Ok(Self {
-            context: DecompilerContext::from_file(path)?,
-            options: DecompileOptions::default(),
-            observer: Arc::new(NullAnalysisObserver),
-            reference_cache: HashMap::new(),
-        })
-    }
-
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, DecompileError> {
         Ok(Self::from_reader(DexFileReader::from_bytes(bytes)?))
     }
@@ -765,7 +756,8 @@ mod tests {
     #[test]
     fn generate_classes_loads_requested_classes_without_full_archive() {
         let dex = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/testcases/classes.dex");
-        let mut decompiler = Decompiler::open(dex).expect("open test DEX");
+        let bytes = std::fs::read(dex).expect("read test DEX");
+        let mut decompiler = Decompiler::from_bytes(&bytes).expect("open test DEX");
         decompiler.set_options(DecompileOptions::default().with_isolated_requests(false));
         let results = decompiler
             .generate_classes(vec!["LHelloWorld;".into(), "LSimpleIf;".into()])
@@ -786,7 +778,8 @@ mod tests {
     #[test]
     fn isolate_class_requests_discard_loaded_graph() {
         let dex = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/testcases/classes.dex");
-        let mut decompiler = Decompiler::open(dex).expect("open test DEX");
+        let bytes = std::fs::read(dex).expect("read test DEX");
+        let mut decompiler = Decompiler::from_bytes(&bytes).expect("open test DEX");
         decompiler.set_options(DecompileOptions::default());
         decompiler
             .class("LHelloWorld;")

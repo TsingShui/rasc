@@ -640,7 +640,6 @@ pub(crate) struct JavaSourceAbi {
     generic_field_declarations:
         std::collections::BTreeMap<(String, ArgType), Vec<(ArgType, GenericFieldContract)>>,
     method_exceptions: std::collections::BTreeMap<MethodReference, Vec<ArgType>>,
-    platform_exceptions: std::sync::Arc<std::collections::BTreeMap<MethodReference, Vec<ArgType>>>,
     generic_methods: std::collections::BTreeMap<MethodReference, GenericMethodContract>,
     generic_method_declarations: std::collections::BTreeMap<
         (String, crate::ir::MethodDescriptor),
@@ -651,8 +650,6 @@ pub(crate) struct JavaSourceAbi {
     externally_referenced_nested_types: BTreeSet<ArgType>,
     inaccessible_top_level_imports: BTreeSet<String>,
     generic_hierarchy: Option<crate::analysis::method_override::GenericTypeHierarchy>,
-    platform_generic_hierarchy: Option<crate::analysis::method_override::GenericTypeHierarchy>,
-    platform_symbols: Option<std::sync::Arc<crate::platform_symbols::PlatformSymbolSet>>,
 }
 
 impl JavaSourceAbi {
@@ -766,8 +763,6 @@ impl JavaSourceAbi {
                 })
             })
             .collect();
-        let platform_exceptions =
-            crate::analysis::method_override::platform_exception_contracts().unwrap_or_default();
         let t = crate::timing::Instant::now();
         let generic_hierarchy =
             crate::analysis::method_override::GenericTypeHierarchy::from_classes(
@@ -900,12 +895,6 @@ impl JavaSourceAbi {
             }
         }
         mark("bridge_contracts", t);
-        let platform_generic_hierarchy =
-            crate::analysis::method_override::GenericTypeHierarchy::from_classes(
-                std::iter::empty::<&ClassNode>(),
-            )
-            .ok();
-        let platform_symbols = crate::platform_symbols::default_platform_symbols().ok();
         let inaccessible_top_level_imports = classes
             .iter()
             .filter(|class| !class.is_public())
@@ -940,7 +929,6 @@ impl JavaSourceAbi {
             field_types,
             generic_field_declarations,
             method_exceptions,
-            platform_exceptions,
             generic_methods,
             generic_method_declarations,
             function_object_types: std::collections::BTreeMap::new(),
@@ -948,8 +936,6 @@ impl JavaSourceAbi {
             externally_referenced_nested_types,
             inaccessible_top_level_imports,
             generic_hierarchy,
-            platform_generic_hierarchy,
-            platform_symbols,
         };
         abi.function_object_types = classes
             .iter()
@@ -1271,7 +1257,6 @@ impl JavaSourceAbi {
     pub(crate) fn method_exceptions(&self, method: &MethodReference) -> &[ArgType] {
         self.method_exceptions
             .get(method)
-            .or_else(|| self.platform_exceptions.get(method))
             .map(Vec::as_slice)
             .unwrap_or_default()
     }
@@ -1283,11 +1268,6 @@ impl JavaSourceAbi {
         self.generic_hierarchy
             .as_ref()
             .and_then(|hierarchy| hierarchy.method_contract(method))
-            .or_else(|| {
-                self.platform_generic_hierarchy
-                    .as_ref()
-                    .and_then(|hierarchy| hierarchy.method_contract(method))
-            })
             .or_else(|| {
                 if method.is_constructor() {
                     None
@@ -1399,9 +1379,6 @@ impl JavaSourceAbi {
             if let Some(hierarchy) = &self.generic_hierarchy {
                 overloads.extend(hierarchy.method_overloads(method));
             }
-            if let Some(hierarchy) = &self.platform_generic_hierarchy {
-                overloads.extend(hierarchy.method_overloads(method));
-            }
         }
         overloads
     }
@@ -1414,13 +1391,6 @@ impl JavaSourceAbi {
         self.generic_hierarchy
             .as_ref()
             .and_then(|hierarchy| hierarchy.inherited_method_signature(instantiated_type, method))
-            .or_else(|| {
-                self.platform_generic_hierarchy
-                    .as_ref()
-                    .and_then(|hierarchy| {
-                        hierarchy.inherited_method_signature(instantiated_type, method)
-                    })
-            })
     }
 
     /// Recovers a declaration signature from an immediate superclass or
@@ -1462,11 +1432,6 @@ impl JavaSourceAbi {
         self.generic_hierarchy
             .as_ref()
             .and_then(|hierarchy| hierarchy.declared_type_parameters(ty))
-            .or_else(|| {
-                self.platform_generic_hierarchy
-                    .as_ref()
-                    .and_then(|hierarchy| hierarchy.declared_type_parameters(ty))
-            })
     }
 
     pub(crate) fn is_subtype(&self, subtype: &ArgType, supertype: &ArgType) -> bool {
@@ -1475,13 +1440,6 @@ impl JavaSourceAbi {
                 .generic_hierarchy
                 .as_ref()
                 .is_some_and(|hierarchy| hierarchy.is_subtype(subtype, supertype))
-            || self
-                .platform_generic_hierarchy
-                .as_ref()
-                .is_some_and(|hierarchy| hierarchy.is_subtype(subtype, supertype))
-            || self.platform_symbols.as_deref().is_some_and(|symbols| {
-                symbols.is_subtype(&subtype.to_descriptor(), &supertype.to_descriptor())
-            })
     }
 
     pub(crate) fn specialize_subtype(
@@ -1492,11 +1450,6 @@ impl JavaSourceAbi {
         self.generic_hierarchy
             .as_ref()
             .and_then(|hierarchy| hierarchy.specialize_subtype(subtype, expected_supertype))
-            .or_else(|| {
-                self.platform_generic_hierarchy
-                    .as_ref()
-                    .and_then(|hierarchy| hierarchy.specialize_subtype(subtype, expected_supertype))
-            })
     }
 
     pub(crate) fn infer_subtype(
@@ -1507,11 +1460,6 @@ impl JavaSourceAbi {
         self.generic_hierarchy
             .as_ref()
             .and_then(|hierarchy| hierarchy.infer_subtype(subtype, expected_supertype))
-            .or_else(|| {
-                self.platform_generic_hierarchy
-                    .as_ref()
-                    .and_then(|hierarchy| hierarchy.infer_subtype(subtype, expected_supertype))
-            })
     }
 
     pub(crate) fn project_supertype(
@@ -1522,11 +1470,6 @@ impl JavaSourceAbi {
         self.generic_hierarchy
             .as_ref()
             .and_then(|hierarchy| hierarchy.project_supertype(subtype, expected_supertype))
-            .or_else(|| {
-                self.platform_generic_hierarchy
-                    .as_ref()
-                    .and_then(|hierarchy| hierarchy.project_supertype(subtype, expected_supertype))
-            })
     }
 
     pub(crate) fn functional_interface(
@@ -1535,26 +1478,13 @@ impl JavaSourceAbi {
         implementation_name: &str,
         implementation_parameters: &[ArgType],
     ) -> Option<ArgType> {
-        self.generic_hierarchy
-            .as_ref()
-            .and_then(|hierarchy| {
-                hierarchy.functional_interface(
-                    interfaces,
-                    implementation_name,
-                    implementation_parameters,
-                )
-            })
-            .or_else(|| {
-                self.platform_generic_hierarchy
-                    .as_ref()
-                    .and_then(|hierarchy| {
-                        hierarchy.functional_interface(
-                            interfaces,
-                            implementation_name,
-                            implementation_parameters,
-                        )
-                    })
-            })
+        self.generic_hierarchy.as_ref().and_then(|hierarchy| {
+            hierarchy.functional_interface(
+                interfaces,
+                implementation_name,
+                implementation_parameters,
+            )
+        })
     }
 
     fn open_owner_types(

@@ -33,17 +33,19 @@ member, and has its own `FORK.md`.
 | package fields are literal, not `*.workspace = true` | upstream inherits them from its monorepo root; this tree builds as a member of the rasc workspace |
 | `mimalloc` dropped | upstream's binary set a global allocator; nothing in the library uses it |
 | embedded platform-symbol codec, database and builder removed; the default set is empty | rasc does not ship that optional source-precision database |
-| `zip` / APK reading moved behind `rusty-dex`'s `apk` feature (default off) | rasc finds the DEX entry itself and passes bytes; archive loading is compatibility code |
+| `zip` / APK reading removed (`apk` feature, `from_file`, `from_raw_dex_file`, `Decompiler::open`, `load_dex`) | rasc finds the DEX entry itself and passes bytes; an archive-loading path in the library was dead compatibility code |
 | all stage timing goes through `crate::timing::Instant`, currently a `std::time::Instant` re-export | one import point keeps the instrumentation implementation explicit |
 | optional `profiling` / `hotpath` integration removed | rasc does not expose that upstream profiling interface; existing `DEXDEC_*_STATS` diagnostics remain |
 | `[lib] test = false` | upstream's unit tests stay in-tree for reference, but should not run from rasc's `cargo test --workspace` |
 | Kotlin source output removed (backend, printer, `@kotlin.Metadata` decoder, `SourceLanguage`, batch language selection) | rasc only ever requests Java; keeping the Kotlin half alive left a language-detection API, a Kotlin-defaulted `DecompileOptions`, and 27% dead code. DEX-level Kotlin facts that shape Java output stay in the shared IR and Java backend |
+| platform symbol database and its consumers removed (`platform_symbols/`, `PlatformClassSet`, `preload_platform_symbols`, `platform_exception_contracts`, `platform_hierarchy_index`, `TypedConstantNameInference`, the platform fallbacks in `JavaSourceAbi`) | the dexsym database was already gone, so `default_platform_symbols()` returned an empty set and every platform lookup returned `None`; the code could not affect Java output |
+| CFG/IR visualizer removed (`visualizer/`, `method_to_dot`, `method_to_text`) | rasc has no caller |
 | `default` features empty | the CLI features are gone |
 | crate-root warning/Clippy allowances | this large upstream snapshot is validated by build/tests; focused `rasc --no-deps` Clippy covers MCP-owned code, while the workspace-wide Rust 1.93 `-D warnings` invocation remains executable without rewriting unrelated upstream style/dead-code paths |
 
-## Re-enabling platform symbols
+## Platform symbols
 
-Restore `codec.rs`, `resources/symbols/platform.dexsym`, the `symbol-builder`
-feature and its modules, and turn `default_platform_symbols()` back into the
-pre-decompressed blob if platform symbol support is needed again. The upstream
-`DEXDEC_SYMBOLS=<file>` runtime override is gone with the codec.
+The platform-symbol layer is gone, not merely disabled: `platform_symbols/`, the
+symbol-driven name recovery, and the platform parents/exception contracts that
+`JavaSourceAbi` consulted are deleted. Re-enabling it means re-vendoring those
+modules from upstream and re-attaching the fallbacks; there is no runtime switch.

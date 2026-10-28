@@ -25,20 +25,18 @@ remain.
 
 ## Local examples
 
-Two small examples are retained for fork maintenance rather than as shipped products:
+One small example is retained for fork maintenance rather than as a shipped product:
 
 ```sh
 cargo run --release -p dexdec --example decompile_class -- classes.dex Lcom/example/App;
-cargo run --release -p dexdec --example phase_timings -- classes.dex \
-  Lcom/example/App; Lcom/example/Other;
 ```
 
 ## Fork maintenance
 
 - [`FORK.md`](FORK.md) records the snapshot and repository role.
 - [`PATCHES.md`](PATCHES.md) is the ordered re-vendor ledger.
-- The default feature set is empty; the optional `apk` feature retains upstream-style archive
-  loading for compatibility, while rasc normally supplies DEX bytes directly.
+- The default feature set is empty and there is no archive-loading feature: rasc supplies DEX
+  bytes directly, and the library has no file or APK entry point.
 
 ## License
 

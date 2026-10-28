@@ -11,8 +11,9 @@ readme = "README.md"
 
 # Fork-only edits relative to upstream (see FORK.md and PATCHES.md):
 #   * literal package fields (upstream inherits them from its workspace root);
-#   * no `cli`/`bin`, no embedded `.dexsym` database, no symbol builder, no
-#     mimalloc: rasc drives the library through `Decompiler::from_bytes`;
+#   * no `cli`/`bin`, no embedded `.dexsym` database or platform-symbol layer,
+#     no symbol builder, no mimalloc, and no file/APK entry point: rasc drives
+#     the library through `Decompiler::from_bytes`;
 #   * no Kotlin source backend: rasc only asks for Java, so the Kotlin printer,
 #     its `@kotlin.Metadata` decoder and the language switch are removed;
 #   * `[lib] test = false` - upstream's unit tests stay in-tree for reference
@@ -24,11 +25,6 @@ rayon = "1"
 
 [features]
 default = []
-debug-switch = []
-# Load DEX files out of APK/ZIP archives. Off by default: rasc finds the DEX
-# entry itself and passes the bytes. Turning it on re-enables the zip path in
-# `rusty-dex` (and its native compression backends).
-apk = ["rusty-dex/apk"]
 
 [lib]
 test = false

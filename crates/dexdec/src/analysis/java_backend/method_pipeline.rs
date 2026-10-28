@@ -466,8 +466,12 @@ mod tests {
         class_limit: usize,
         method_limit: usize,
     ) -> usize {
-        let mut ctx = DecompilerContext::from_file(path)
-            .unwrap_or_else(|error| panic!("load {}: {error}", path.display()));
+        let bytes =
+            std::fs::read(path).unwrap_or_else(|error| panic!("read {}: {error}", path.display()));
+        let mut ctx = DecompilerContext::from_reader(
+            crate::frontend::DexFileReader::from_bytes(&bytes)
+                .unwrap_or_else(|error| panic!("load {}: {error}", path.display())),
+        );
         let classes = ctx
             .class_names()
             .into_iter()

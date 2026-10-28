@@ -154,20 +154,6 @@ impl DecompilerContext {
             .is_some_and(|class| !class.is_inner())
     }
 
-    /// Create a new decompiler context from a DEX file
-    pub fn from_file<P: AsRef<Path>>(path: P) -> DexResult<Self> {
-        let reader = std::thread::scope(|scope| {
-            let platform = scope.spawn(crate::analysis::method_override::preload_platform_symbols);
-            let reader = DexFileReader::from_file(path);
-            match platform.join() {
-                Ok(result) => result?,
-                Err(payload) => std::panic::resume_unwind(payload),
-            }
-            reader
-        })?;
-        Ok(Self::from_reader(reader))
-    }
-
     /// Get the underlying DEX file reader
     pub fn reader(&self) -> &DexFileReader {
         &self.reader
@@ -604,7 +590,6 @@ impl DecompilerContext {
         let revision = self.reader.loaded_classes_revision();
         if let Some((cached_revision, hierarchy)) = &self.type_hierarchy_cache {
             if *cached_revision == revision {
-                crate::analysis::method_override::freeze_default_platform_class_details();
                 return Ok(Arc::clone(hierarchy));
             }
         }
@@ -613,7 +598,6 @@ impl DecompilerContext {
                 .map_err(crate::frontend::DexError::from)?,
         );
         self.type_hierarchy_cache = Some((revision, Arc::clone(&hierarchy)));
-        crate::analysis::method_override::freeze_default_platform_class_details();
         Ok(hierarchy)
     }
 
@@ -1880,11 +1864,6 @@ impl DecodedMethod {
 }
 
 // ==================== Convenience Functions ====================
-
-/// Load a DEX file and return the decompiler context
-pub fn load_dex<P: AsRef<Path>>(path: P) -> DexResult<DecompilerContext> {
-    DecompilerContext::from_file(path)
-}
 
 /// Decode a single method code into IR
 pub fn decode_method(code: &MethodCode) -> DexResult<CFG> {

@@ -207,68 +207,6 @@ pub(crate) struct DexReferenceLocation {
 }
 
 impl DexFileReader {
-    /// Load DEX file from path (supports both APK and raw DEX files)
-    pub fn from_file<P: AsRef<Path>>(path: P) -> DexResult<Self> {
-        let path_ref = path.as_ref();
-
-        // Check if it's a raw DEX file
-        if is_raw_dex(path_ref)? {
-            let data = std::fs::read(path_ref)?;
-            return Self::from_bytes(&data);
-        }
-
-        #[cfg(feature = "apk")]
-        {
-            let path_str = path_ref.to_string_lossy().to_string();
-
-            // Load all DEX files (assuming APK/Zip)
-            let mut archive = rusty_dex::dex::reader::DexArchive::open(&path_str)?;
-            let dex_files = std::thread::scope(|scope| {
-                let mut jobs = Vec::new();
-                while let Some(reader) = archive.next() {
-                    let reader = reader?;
-                    jobs.push(
-                        scope.spawn(move || rusty_dex::dex::file::DexFile::build_metadata(reader)),
-                    );
-                }
-                jobs.into_iter()
-                    .map(|job| match job.join() {
-                        Ok(result) => result,
-                        Err(payload) => std::panic::resume_unwind(payload),
-                    })
-                    .collect::<Result<Vec<_>, _>>()
-            })?;
-
-            Ok(Self::new(dex_files))
-        }
-
-        #[cfg(not(feature = "apk"))]
-        {
-            let _ = path_ref;
-            Err(DexError::IoError(std::io::Error::new(
-                std::io::ErrorKind::InvalidInput,
-                "APK input is disabled in this build (feature `apk` off); pass DEX bytes",
-            )))
-        }
-    }
-
-    /// Load a raw DEX file (not inside an APK)
-    #[cfg(feature = "apk")]
-    pub fn from_raw_dex_file<P: AsRef<Path>>(path: P) -> DexResult<Self> {
-        let path = path.as_ref().to_str().ok_or_else(|| {
-            DexError::IoError(std::io::Error::new(
-                std::io::ErrorKind::InvalidInput,
-                "DEX path is not valid UTF-8",
-            ))
-        })?;
-        let readers = rusty_dex::dex::reader::DexReader::build_from_file(path)?;
-        let mut dex_files = Vec::new();
-        for reader in readers {
-            dex_files.push(rusty_dex::dex::file::DexFile::build_metadata(reader)?);
-        }
-        Ok(Self::new(dex_files))
-    }
-
     /// Load DEX from raw bytes
     pub fn from_bytes(data: &[u8]) -> DexResult<Self> {
         let reader = rusty_dex::dex::reader::DexReader::build(data.to_vec())?;
@@ -1392,19 +1330,6 @@ fn reference_location(
 
 /// Check if a file is a raw DEX file (not APK)
 /// DEX files start with "dex\n" magic
-fn is_raw_dex(path: &Path) -> DexResult<bool> {
-    use std::io::Read;
-    let mut file = std::fs::File::open(path)?;
-    let mut magic = [0u8; 8];
-
-    if file.read(&mut magic).unwrap_or(0) < 8 {
-        return Ok(false);
-    }
-
-    // DEX magic: "dex\n" followed by version (e.g., "035\0")
-    Ok(&magic[0..4] == b"dex\n")
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

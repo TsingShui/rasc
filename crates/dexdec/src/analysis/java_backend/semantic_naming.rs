@@ -133,7 +133,6 @@ struct StructuralNameModel<'a> {
     types: &'a JavaTypeNameResolver,
     morphology: JavaIdentifierMorphology,
     methods: JavaMethodResultSemantics,
-    constants: Option<crate::analysis::TypedConstantNameInference>,
     relations: Option<crate::analysis::RelationalNameInference>,
 }
 
@@ -143,16 +142,12 @@ impl<'a> StructuralNameModel<'a> {
             types,
             morphology: JavaIdentifierMorphology,
             methods: JavaMethodResultSemantics::default(),
-            constants: None,
             relations: None,
         }
     }
 
     fn for_graph(types: &'a JavaTypeNameResolver, graph: &VariableSemanticGraph) -> Self {
         let mut model = Self::new(types);
-        model.constants = crate::platform_symbols::default_platform_symbols()
-            .ok()
-            .map(|symbols| crate::analysis::TypedConstantNameInference::analyze(graph, &symbols));
         model.relations = Some(crate::analysis::RelationalNameInference::analyze(graph));
         model
     }
@@ -300,25 +295,6 @@ impl<'a> StructuralNameModel<'a> {
             .collect()
     }
 
-    fn constant_candidates(
-        &self,
-        variable: &VariableNode,
-        _graph: &VariableSemanticGraph,
-    ) -> Vec<NameCandidate> {
-        self.constants
-            .as_ref()
-            .and_then(|constants| constants.name(variable.identity()))
-            .map(|field| field.strip_prefix("FLAG_").unwrap_or(field))
-            .map(|semantic| NameCandidate {
-                name: self
-                    .morphology
-                    .lower_camel(&JavaIdentifier::from_hint(semantic)),
-                score: 125,
-            })
-            .into_iter()
-            .collect()
-    }
-
     fn relation_candidates(&self, variable: &VariableNode) -> Vec<NameCandidate> {
         self.relations
             .as_ref()
@@ -378,7 +354,6 @@ impl VariableNameModel for StructuralNameModel<'_> {
         let field_candidates = self.field_candidates(variable, graph);
         let loop_value_candidates = self.loop_value_candidates(variable, graph);
         let method_result_candidates = self.method_result_candidates(variable, graph);
-        let constant_candidates = self.constant_candidates(variable, graph);
         let relation_candidates = self.relation_candidates(variable);
         let type_candidate = self
             .type_name(variable.ty())
@@ -389,7 +364,6 @@ impl VariableNameModel for StructuralNameModel<'_> {
                 .chain(field_candidates)
                 .chain(loop_value_candidates)
                 .chain(method_result_candidates)
-                .chain(constant_candidates)
                 .chain(relation_candidates)
                 .chain(type_candidate),
         )
