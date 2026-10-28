@@ -25,25 +25,15 @@ use crate::ir::{
     FieldReference, MemberReference, MethodReference, Utf16String,
 };
 
-mod catalog;
 mod decompiler;
-mod references;
 
-pub use catalog::{
-    ArchiveCatalog, ArchiveMemberCatalog, ClassKind, ClassOutline, ClassSummary, FieldOutline,
-    MemberKind, MemberSummary, MemberVisitor, MethodOutline,
-};
-pub use decompiler::{
-    java_source_path, source_path, BatchSummary, ClassBatch, ClassFailure, ClassSelector,
-    DecompileOptions, Decompiler, MethodOutput, MethodRequest, SourceUnit,
-};
+pub use decompiler::{DecompileOptions, Decompiler, SourceUnit};
 
 pub(crate) struct ClassRenderInput {
     pub class_node: ClassNode,
     pub methods: Vec<ClassMethodInput>,
     pub nested: Vec<NestedClassInput>,
 }
-pub use references::{ReferenceLocation, ReferenceResults, ReferenceTarget};
 
 /// Decompiler context - holds state for decompilation
 pub struct DecompilerContext {
@@ -53,9 +43,6 @@ pub struct DecompilerContext {
     method_irs: HashMap<String, HashMap<String, CFG>>,
     /// Revision of the loaded class graph captured by `method_irs`.
     method_cache_revision: u64,
-    /// Archive collect may load extra ABI types after termination; keep
-    /// already-decoded CFGs across those revision bumps.
-    retain_decoded_methods: bool,
     /// Immutable hierarchy facts shared by every method in one class-graph revision.
     type_hierarchy_cache: Option<(u64, Arc<crate::ir::analysis::ClassHierarchyIndex>)>,
     /// Immutable target-language ABI facts shared by one class-graph revision.
@@ -66,16 +53,6 @@ trait SourceBackend {
     type Config: Clone;
 
     fn prepare_context(context: &mut DecompilerContext) -> Result<(), DecompileError>;
-
-    fn generate_method(
-        context: &mut DecompilerContext,
-        config: &Self::Config,
-        observer: Arc<dyn crate::ir::AnalysisObserver>,
-        hierarchy: Arc<crate::ir::analysis::ClassHierarchyIndex>,
-        class: &ClassNode,
-        method: &crate::frontend::MethodNode,
-        cfg: &mut CFG,
-    ) -> Result<String, DecompileError>;
 
     fn generate_class(
         context: &mut DecompilerContext,
@@ -95,23 +72,6 @@ impl SourceBackend for JavaSourceBackend {
 
     fn prepare_context(context: &mut DecompilerContext) -> Result<(), DecompileError> {
         context.prepare_java_source_abi()
-    }
-
-    fn generate_method(
-        context: &mut DecompilerContext,
-        config: &Self::Config,
-        observer: Arc<dyn crate::ir::AnalysisObserver>,
-        hierarchy: Arc<crate::ir::analysis::ClassHierarchyIndex>,
-        class: &ClassNode,
-        method: &crate::frontend::MethodNode,
-        cfg: &mut CFG,
-    ) -> Result<String, DecompileError> {
-        JavaDecompiler::new(config.clone())
-            .with_shared_type_hierarchy(hierarchy)
-            .with_source_abi(context.java_source_abi())
-            .with_analysis_observer(observer)
-            .generate_method_with_context(class, method, cfg)
-            .map_err(DecompileError::from)
     }
 
     fn generate_class(
@@ -139,7 +99,6 @@ impl DecompilerContext {
             reader,
             method_irs: HashMap::new(),
             method_cache_revision: 0,
-            retain_decoded_methods: false,
             type_hierarchy_cache: None,
             java_source_abi_cache: None,
         }
@@ -167,20 +126,6 @@ impl DecompilerContext {
         &mut self.reader
     }
 
-    /// Load all classes from the DEX file
-    pub fn load_all_classes(&mut self) -> DexResult<()> {
-        self.reader.load_all_classes()?;
-        self.reader.ensure_override_analysis()?;
-        Ok(())
-    }
-
-    /// Load a specific class by name
-    pub fn load_class(&mut self, class_name: &str) -> DexResult<Option<&ClassNode>> {
-        self.reader.load_class(class_name)?;
-        self.reader.ensure_override_analysis()?;
-        Ok(self.reader.get_class(class_name))
-    }
-
     fn load_class_deferred(&mut self, class_name: &str) -> DexResult<Option<&ClassNode>> {
         self.reader.load_class(class_name)
     }
@@ -197,24 +142,9 @@ impl DecompilerContext {
         Ok(())
     }
 
-    fn load_classes_deferred<'a>(
-        &mut self,
-        class_names: impl IntoIterator<Item = &'a str>,
-    ) -> DexResult<()> {
-        for class_name in class_names {
-            self.reader.load_class(class_name)?;
-        }
-        Ok(())
-    }
-
     /// Get all class names in the DEX file
     pub fn class_names(&self) -> Vec<String> {
         self.reader.class_names()
-    }
-
-    /// Get number of classes
-    pub fn class_count(&self) -> usize {
-        self.reader.class_count()
     }
 
     /// Get a loaded class
@@ -228,57 +158,12 @@ impl DecompilerContext {
         self.method_cache_revision = self.reader.loaded_classes_revision();
     }
 
-    pub(crate) fn set_retain_decoded_methods(&mut self, retain: bool) {
-        self.retain_decoded_methods = retain;
-    }
-
     fn sync_method_cache_revision(&mut self) {
         if self.method_cache_revision == self.reader.loaded_classes_revision() {
             return;
         }
-        if !self.retain_decoded_methods {
-            self.method_irs.clear();
-        }
-        self.method_cache_revision = self.reader.loaded_classes_revision();
-    }
-
-    pub(crate) fn abandon_archive_buffers(&mut self) {
-        self.retain_decoded_methods = false;
         self.method_irs.clear();
-        self.reader.abandon_loaded_classes();
         self.method_cache_revision = self.reader.loaded_classes_revision();
-    }
-
-    pub(crate) fn load_archive_selection<'a>(
-        &mut self,
-        class_names: impl IntoIterator<Item = &'a str>,
-        include_nested: bool,
-    ) -> Result<(), DecompileError> {
-        let mut queue = class_names
-            .into_iter()
-            .map(str::to_string)
-            .collect::<std::collections::VecDeque<_>>();
-        let mut seen = queue
-            .iter()
-            .cloned()
-            .collect::<std::collections::BTreeSet<_>>();
-        while !queue.is_empty() {
-            let batch = queue.drain(..).collect::<Vec<_>>();
-            self.reader.load_classes(&batch)?;
-            if include_nested {
-                for class_name in batch {
-                    let Some(class) = self.reader.get_class(&class_name) else {
-                        continue;
-                    };
-                    for nested in class.inner_class_names() {
-                        if seen.insert(nested.to_string()) {
-                            queue.push_back(nested.to_string());
-                        }
-                    }
-                }
-            }
-        }
-        Ok(())
     }
 
     /// Begin a fresh request-local class graph without reparsing DEX metadata.
@@ -293,7 +178,7 @@ impl DecompilerContext {
     ///
     /// This converts the raw Dalvik bytecode into our IR representation
     /// with basic blocks, control flow, and typed instructions.
-    pub fn decode_method(
+    pub(crate) fn decode_method(
         &mut self,
         class_name: &str,
         method_name: &str,
@@ -534,54 +419,6 @@ impl DecompilerContext {
         Ok(())
     }
 
-    /// Decode all methods in a class
-    pub fn decode_class_methods(&mut self, class_name: &str) -> DexResult<Vec<(&str, &CFG)>> {
-        // First collect method names
-        let methods: Vec<(String, String)> = {
-            let class = match self.reader.get_class(class_name) {
-                Some(c) => c,
-                None => return Ok(Vec::new()),
-            };
-            class
-                .methods()
-                .iter()
-                .filter(|m| m.code().is_some())
-                .map(|m| (m.info.name.clone(), m.info.descriptor()))
-                .collect()
-        };
-
-        // Decode each method
-        for (method_name, descriptor) in &methods {
-            self.decode_method(class_name, method_name, Some(descriptor))?;
-        }
-
-        Ok(self
-            .method_irs
-            .get(class_name)
-            .into_iter()
-            .flat_map(|methods| methods.iter())
-            .map(|(name, cfg)| (name.as_str(), cfg))
-            .collect())
-    }
-
-    /// Get cached method IR
-    pub fn get_method_ir(
-        &self,
-        class_name: &str,
-        method_name: &str,
-        descriptor: Option<&str>,
-    ) -> Option<&CFG> {
-        let cache_key = if let Some(desc) = descriptor {
-            format!("{}{}", method_name, desc)
-        } else {
-            method_name.to_string()
-        };
-
-        self.method_irs
-            .get(class_name)
-            .and_then(|c| c.get(&cache_key))
-    }
-
     /// Return the immutable type hierarchy used by method decompilation for
     /// the current loaded-class revision.
     pub fn type_hierarchy(
@@ -710,123 +547,6 @@ impl DecompilerContext {
         Ok(cfg)
     }
 
-    pub fn decompile_java_method_with_config(
-        &mut self,
-        class_name: &str,
-        method_name: &str,
-        descriptor: Option<&str>,
-        config: &JavaDecompilerConfig,
-    ) -> Result<Option<String>, DecompileError> {
-        self.decompile_java_method_with_config_and_observer(
-            class_name,
-            method_name,
-            descriptor,
-            config,
-            Arc::new(crate::ir::NullAnalysisObserver),
-        )
-    }
-
-    pub fn decompile_java_method_with_config_and_observer(
-        &mut self,
-        class_name: &str,
-        method_name: &str,
-        descriptor: Option<&str>,
-        config: &JavaDecompilerConfig,
-        observer: Arc<dyn crate::ir::AnalysisObserver>,
-    ) -> Result<Option<String>, DecompileError> {
-        self.decompile_method_with_backend::<JavaSourceBackend>(
-            class_name,
-            method_name,
-            descriptor,
-            config,
-            observer,
-        )
-    }
-
-    fn decompile_method_with_backend<B: SourceBackend>(
-        &mut self,
-        class_name: &str,
-        method_name: &str,
-        descriptor: Option<&str>,
-        config: &B::Config,
-        observer: Arc<dyn crate::ir::AnalysisObserver>,
-    ) -> Result<Option<String>, DecompileError> {
-        self.reader.ensure_override_analysis()?;
-        let (class_node, method_node) = {
-            let class = match self.reader.get_class(class_name) {
-                Some(class) => class,
-                None => return Ok(None),
-            };
-            let method = match class.methods().iter().find(|m| {
-                if m.info.name != method_name {
-                    return false;
-                }
-                if let Some(desc) = descriptor {
-                    m.info.descriptor() == normalize_descriptor(desc)
-                } else {
-                    true
-                }
-            }) {
-                Some(method) => method,
-                None => return Ok(None),
-            };
-            (class.clone(), method.clone())
-        };
-
-        // First decode the method if not already done
-        self.decode_method(class_name, method_name, descriptor)?;
-
-        // Form cache key
-        let cache_key = if let Some(desc) = descriptor {
-            format!("{}{}", method_name, desc)
-        } else {
-            method_name.to_string()
-        };
-
-        // Get the decoded IR (need mutable for structuring)
-        let mut ir = match self
-            .method_irs
-            .get_mut(class_name)
-            .and_then(|methods| methods.remove(&cache_key))
-        {
-            Some(ir) => ir,
-            None => return Ok(None),
-        };
-
-        let mut source_dependencies = SourceAbiClosure::from_cfgs(std::iter::once(&ir));
-        source_dependencies.include_class(&class_node);
-        source_dependencies.load(&mut self.reader, observer.as_ref())?;
-        let termination = self.method_termination(vec![ir.clone()], observer.as_ref())?;
-        termination.apply(&mut ir);
-        self.prepare_source_backend::<B>()?;
-        let hierarchy = self.type_hierarchy()?;
-        let output = B::generate_method(
-            self,
-            config,
-            observer,
-            hierarchy,
-            &class_node,
-            &method_node,
-            &mut ir,
-        )?;
-
-        Ok(Some(output))
-    }
-
-    pub fn decompile_java_class_with_inner(
-        &mut self,
-        class_name: &str,
-        config: &JavaDecompilerConfig,
-        include_inner: bool,
-    ) -> Result<Option<String>, DecompileError> {
-        self.decompile_java_class_observed(
-            class_name,
-            config,
-            include_inner,
-            Arc::new(crate::ir::NullAnalysisObserver),
-        )
-    }
-
     pub(super) fn decompile_java_class_observed(
         &mut self,
         class_name: &str,
@@ -849,12 +569,8 @@ impl DecompilerContext {
         include_inner: bool,
         observer: Arc<dyn crate::ir::AnalysisObserver>,
     ) -> Result<Option<String>, DecompileError> {
-        let Some(mut input) = self.collect_class_render_input(
-            class_name,
-            include_inner,
-            Arc::clone(&observer),
-            true,
-        )?
+        let Some(mut input) =
+            self.collect_class_render_input(class_name, include_inner, Arc::clone(&observer))?
         else {
             return Ok(None);
         };
@@ -879,7 +595,6 @@ impl DecompilerContext {
         class_name: &str,
         include_inner: bool,
         observer: Arc<dyn crate::ir::AnalysisObserver>,
-        run_termination: bool,
     ) -> Result<Option<ClassRenderInput>, DecompileError> {
         observer.checkpoint()?;
         if self.reader.get_class(class_name).is_none() {
@@ -902,13 +617,13 @@ impl DecompilerContext {
         let mut method_models = Vec::new();
         for method in methods {
             observer.checkpoint()?;
-            method_models.push(self.decode_class_method(class_name, method, !run_termination));
+            method_models.push(self.decode_class_method(class_name, method, false));
         }
         observer.checkpoint()?;
 
         let mut inner: Vec<NestedClassInput> = Vec::new();
         if include_inner {
-            inner = self.collect_nested_class_inputs(&class_node, !run_termination)?;
+            inner = self.collect_nested_class_inputs(&class_node, false)?;
             sort_nested_inputs(&mut inner);
         }
         observer.checkpoint()?;
@@ -921,7 +636,7 @@ impl DecompilerContext {
         source_dependencies.load(&mut self.reader, observer.as_ref())?;
         self.reader.ensure_override_analysis()?;
         observer.checkpoint()?;
-        if run_termination {
+        {
             let mut termination_roots = method_models
                 .iter()
                 .filter_map(|method| method.cfg().cloned())
@@ -947,42 +662,6 @@ impl DecompilerContext {
         }))
     }
 
-    pub(crate) fn prepare_archive_overrides(&mut self) -> Result<(), DecompileError> {
-        self.reader.ensure_override_analysis()?;
-        Ok(())
-    }
-
-    pub(crate) fn prepare_archive_source_abi_before_termination(
-        &mut self,
-    ) -> Result<(), DecompileError> {
-        let stats = std::env::var_os("DEXDEC_BATCH_STATS").is_some();
-        let started = crate::timing::Instant::now();
-        self.prepare_java_source_abi_with_cached_resolution(true)?;
-        if stats {
-            eprintln!(
-                "dexdec batch: java_abi={:.0}ms",
-                started.elapsed().as_secs_f64() * 1000.0
-            );
-        }
-        Ok(())
-    }
-
-    pub(crate) fn resolve_archive_symbols_after_termination(
-        &mut self,
-    ) -> Result<(), DecompileError> {
-        let stats = std::env::var_os("DEXDEC_BATCH_STATS").is_some();
-        self.resolve_archive_method_symbols()?;
-        let started = crate::timing::Instant::now();
-        self.type_hierarchy()?;
-        if stats {
-            eprintln!(
-                "dexdec batch: hierarchy={:.0}ms",
-                started.elapsed().as_secs_f64() * 1000.0
-            );
-        }
-        Ok(())
-    }
-
     fn resolve_archive_method_symbols(&mut self) -> Result<(), DecompileError> {
         let reader = &self.reader;
         self.method_irs
@@ -999,80 +678,6 @@ impl DecompilerContext {
         Ok(())
     }
 
-    pub(crate) fn prefetch_decoded_methods(&mut self) -> Result<(), DecompileError> {
-        self.sync_method_cache_revision();
-
-        let mut specs = Vec::new();
-        for class in self.reader.classes() {
-            let class_name = class.type_descriptor();
-            let Some(dex_idx) = self.reader.get_dex_index(class_name) else {
-                continue;
-            };
-            for method in class.methods() {
-                let Some(code) = method.code() else {
-                    continue;
-                };
-                let descriptor = method.info.descriptor();
-                let cache_key = format!("{}{}", method.info.name, descriptor);
-                if self
-                    .method_irs
-                    .get(class_name)
-                    .is_some_and(|methods| methods.contains_key(&cache_key))
-                {
-                    continue;
-                }
-                specs.push(MethodDecodeSpec {
-                    class_name,
-                    cache_key,
-                    method_name: &method.info.name,
-                    method_code: code,
-                    owner: class.class_type(),
-                    param_types: &method.info.param_types,
-                    return_type: &method.info.return_type,
-                    is_static: method.access_flags.is_static(),
-                    declared_synchronized: method.access_flags.is_declared_synchronized(),
-                    dex_idx,
-                });
-            }
-        }
-
-        let reader = &self.reader;
-        let decoded = specs
-            .into_par_iter()
-            .map(|spec| spec.decode(reader))
-            .collect::<Vec<_>>();
-        for result in decoded {
-            if let Ok((class_name, cache_key, ir)) = result {
-                self.method_irs
-                    .entry(class_name)
-                    .or_default()
-                    .insert(cache_key, ir);
-            }
-        }
-        Ok(())
-    }
-
-    pub(crate) fn apply_archive_termination(&mut self) -> Result<(), DecompileError> {
-        let termination = crate::ir::analysis::MethodTermination::analyze(
-            self.method_irs
-                .values()
-                .flat_map(|methods| methods.values()),
-        );
-        // Each CFG mutates independently, so the application order cannot
-        // matter.
-        self.method_irs
-            .values_mut()
-            .flat_map(|methods| methods.values_mut())
-            .par_bridge()
-            .for_each(|cfg| {
-                termination.apply(cfg);
-            });
-        Ok(())
-    }
-
-    /// Recovers exact calls that cannot complete normally without decoding the
-    /// entire archive. The reachable call graph is closed transitively from
-    /// the current source unit, then solved as one interprocedural fixed point.
     fn method_termination(
         &mut self,
         roots: Vec<CFG>,
@@ -1736,18 +1341,6 @@ pub enum DecompileError {
     MalformedNestedClassStack { expected: usize, actual: usize },
     /// A requested class is not present in the input.
     ClassNotFound(String),
-    /// A requested method is not present in its declaring class.
-    MethodNotFound {
-        class: String,
-        method: String,
-        descriptor: Option<String>,
-    },
-    /// A method name identifies more than one overload and needs a descriptor.
-    AmbiguousMethod {
-        class: String,
-        method: String,
-        descriptors: Vec<String>,
-    },
 }
 
 impl std::fmt::Display for DecompileError {
@@ -1773,26 +1366,6 @@ impl std::fmt::Display for DecompileError {
                 "nested-class model stack has {actual} entries, expected at least {expected}"
             ),
             Self::ClassNotFound(class) => write!(f, "class not found: {class}"),
-            Self::MethodNotFound {
-                class,
-                method,
-                descriptor,
-            } => {
-                write!(f, "method not found: {class}->{method}")?;
-                if let Some(descriptor) = descriptor {
-                    write!(f, "{descriptor}")?;
-                }
-                Ok(())
-            }
-            Self::AmbiguousMethod {
-                class,
-                method,
-                descriptors,
-            } => write!(
-                f,
-                "method {class}->{method} is overloaded; choose one of {}",
-                descriptors.join(", ")
-            ),
         }
     }
 }
@@ -1804,8 +1377,6 @@ impl std::error::Error for DecompileError {
             Self::DexError(source) => Some(source),
             Self::Java(source) => Some(source),
             Self::ClassNotFound(_)
-            | Self::MethodNotFound { .. }
-            | Self::AmbiguousMethod { .. }
             | Self::MissingNestedClass(_)
             | Self::NestedClassCycle(_)
             | Self::MalformedNestedClassStack { .. } => None,
@@ -1831,45 +1402,6 @@ impl From<JavaDecompilerError> for DecompileError {
     }
 }
 
-/// Result of decoding a method
-#[derive(Debug)]
-pub struct DecodedMethod {
-    /// Method name
-    pub name: String,
-    /// Declaring class
-    pub declaring_class: String,
-    /// Method IR
-    pub ir: CFG,
-}
-
-impl DecodedMethod {
-    /// Create a new decoded method
-    pub fn new(name: String, declaring_class: String, ir: CFG) -> Self {
-        Self {
-            name,
-            declaring_class,
-            ir,
-        }
-    }
-
-    /// Get number of basic blocks
-    pub fn block_count(&self) -> usize {
-        self.ir.blocks.len()
-    }
-
-    /// Get number of instructions
-    pub fn insn_count(&self) -> usize {
-        self.ir.blocks.values().map(|b| b.insns.len()).sum()
-    }
-}
-
-// ==================== Convenience Functions ====================
-
-/// Decode a single method code into IR
-pub fn decode_method(code: &MethodCode) -> DexResult<CFG> {
-    DecompilerContext::decode_method_code(code)
-}
-
 // ==================== Tests ====================
 
 #[cfg(test)]
@@ -1892,7 +1424,7 @@ mod tests {
             debug_info: None,
         };
 
-        let ir = decode_method(&code).expect("Should decode");
+        let ir = DecompilerContext::decode_method_code(&code).expect("Should decode");
 
         assert_eq!(ir.blocks.len(), 1);
         let block = ir.entry_block().expect("Should have entry block");
@@ -1920,7 +1452,7 @@ mod tests {
             debug_info: None,
         };
 
-        let ir = decode_method(&code).expect("Should decode");
+        let ir = DecompilerContext::decode_method_code(&code).expect("Should decode");
 
         // Should have multiple blocks due to branch
         assert!(ir.blocks.len() >= 2);

@@ -15,10 +15,6 @@ use crate::ir::analysis::ClassHierarchyIndex;
 use crate::ir::{AnalysisObserver, NullAnalysisObserver};
 use crate::language::java::JavaIdentifier;
 
-use super::{
-    ArchiveCatalog, ArchiveMemberCatalog, ClassOutline, ReferenceLocation, ReferenceResults,
-    ReferenceTarget,
-};
 use super::{DecompileError, DecompilerContext};
 
 /// Source-generation settings shared by method and class requests.
@@ -60,105 +56,13 @@ impl Default for DecompileOptions {
     }
 }
 
-/// A deterministic class selection for batch decompilation.
-#[derive(Debug, Clone, PartialEq, Eq)]
-#[non_exhaustive]
-pub enum ClassSelector {
-    All,
-    Exact(String),
-    Matching(String),
-    Listed(BTreeSet<String>),
-}
-
-impl ClassSelector {
-    pub fn exact(descriptor: impl Into<String>) -> Self {
-        Self::Exact(descriptor.into())
-    }
-
-    pub fn matching(query: impl Into<String>) -> Self {
-        Self::Matching(query.into())
-    }
-
-    pub fn listed(classes: impl IntoIterator<Item = impl Into<String>>) -> Self {
-        Self::Listed(classes.into_iter().map(Into::into).collect())
-    }
-
-    fn explicitly_names_classes(&self) -> bool {
-        matches!(self, Self::Exact(_) | Self::Listed(_))
-    }
-}
-
-/// An exact or name-only method request.
-#[derive(Debug, Clone, PartialEq, Eq)]
-#[non_exhaustive]
-pub struct MethodRequest {
-    pub class: String,
-    pub method: String,
-    pub descriptor: Option<String>,
-}
-
-impl MethodRequest {
-    pub fn new(class: impl Into<String>, method: impl Into<String>) -> Self {
-        Self {
-            class: class.into(),
-            method: method.into(),
-            descriptor: None,
-        }
-    }
-
-    pub fn with_descriptor(mut self, descriptor: impl Into<String>) -> Self {
-        self.descriptor = Some(descriptor.into());
-        self
-    }
-}
-
 /// Output for one source compilation unit.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct SourceUnit {
     pub class: String,
-    pub path: PathBuf,
     pub method_count: usize,
     pub source: String,
-}
-
-/// Source output for a method. `source` is absent for abstract and native methods.
-#[derive(Debug, Clone, PartialEq, Eq)]
-#[non_exhaustive]
-pub struct MethodOutput {
-    pub request: MethodRequest,
-    pub source: Option<String>,
-}
-
-/// A class-local generation failure returned by [`ClassBatch`].
-#[derive(Debug)]
-#[non_exhaustive]
-pub struct ClassFailure {
-    pub class: String,
-    pub method_count: usize,
-    pub error: DecompileError,
-}
-
-impl std::fmt::Display for ClassFailure {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(formatter, "{}: {}", self.class, self.error)
-    }
-}
-
-impl std::error::Error for ClassFailure {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        Some(&self.error)
-    }
-}
-
-/// Aggregate counters collected without retaining generated source text.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-#[non_exhaustive]
-pub struct BatchSummary {
-    pub classes: usize,
-    pub methods: usize,
-    pub failures: usize,
-    pub failed_methods: usize,
 }
 
 /// Reusable decompiler service. It owns caches and is silent unless an observer is installed.
@@ -166,7 +70,6 @@ pub struct Decompiler {
     context: DecompilerContext,
     options: DecompileOptions,
     observer: Arc<dyn AnalysisObserver>,
-    reference_cache: HashMap<ReferenceTarget, Vec<ReferenceLocation>>,
 }
 
 impl Decompiler {
@@ -179,7 +82,6 @@ impl Decompiler {
             context: DecompilerContext::from_reader(reader),
             options: DecompileOptions::default(),
             observer: Arc::new(NullAnalysisObserver),
-            reference_cache: HashMap::new(),
         }
     }
 
@@ -188,21 +90,8 @@ impl Decompiler {
         self
     }
 
-    pub fn with_observer(mut self, observer: Arc<dyn AnalysisObserver>) -> Self {
-        self.observer = observer;
-        self
-    }
-
-    pub fn set_observer(&mut self, observer: Arc<dyn AnalysisObserver>) {
-        self.observer = observer;
-    }
-
-    pub fn options(&self) -> &DecompileOptions {
-        &self.options
-    }
-
-    pub fn set_options(&mut self, options: DecompileOptions) {
-        self.options = options;
+    pub fn reader(&self) -> &DexFileReader {
+        self.context.reader()
     }
 
     /// Discard request-local class and semantic caches while retaining the
@@ -211,352 +100,12 @@ impl Decompiler {
         self.context.clear_analysis_scope();
     }
 
-    pub fn reader(&self) -> &DexFileReader {
-        self.context.reader()
-    }
-
-    pub fn reader_mut(&mut self) -> &mut DexFileReader {
-        self.context.reader_mut()
-    }
-
-    /// Build the lightweight class catalog used by interactive clients.
-    ///
-    /// This only reads class definition names. It does not load class bodies,
-    /// decode methods, or generate source.
-    pub fn catalog(&self) -> ArchiveCatalog {
-        ArchiveCatalog::from_reader(self.context.reader())
-    }
-
-    /// Build the member directory used by interactive symbol search.
-    ///
-    /// This parses field and method declarations but does not decode bytecode,
-    /// construct IR, or generate source.
-    pub fn member_catalog(&self) -> Result<ArchiveMemberCatalog, DecompileError> {
-        ArchiveMemberCatalog::from_reader(self.context.reader()).map_err(Into::into)
-    }
-
-    /// Stream member declarations to a client-owned index or analysis.
-    pub fn visit_members(
-        &self,
-        visitor: &mut dyn super::MemberVisitor,
-    ) -> Result<(), DecompileError> {
-        self.context
-            .reader()
-            .visit_member_declarations(|member| visitor.visit(member.into()))
-            .map_err(Into::into)
-    }
-
-    /// Inspect one class declaration without decoding any method body.
-    pub fn class_outline(
-        &mut self,
-        class: impl Into<String>,
-    ) -> Result<ClassOutline, DecompileError> {
-        let class = class.into();
-        if self.context.load_class_deferred(&class)?.is_none() {
-            return Err(DecompileError::ClassNotFound(class));
-        }
-        Ok(ClassOutline::from_node(
-            self.context
-                .get_class(&class)
-                .expect("class was loaded immediately above"),
-        ))
-    }
-
-    /// Locate bytecode sites matching a class or member query.
-    ///
-    /// Each distinct target is scanned once per decompiler instance. The scan
-    /// reads encoded methods directly and does not load classes or generate IR.
-    pub fn references(
-        &mut self,
-        target: ReferenceTarget,
-    ) -> Result<ReferenceResults, DecompileError> {
-        if let Some(locations) = self.reference_cache.get(&target) {
-            return Ok(ReferenceResults {
-                target,
-                locations: locations.clone(),
-            });
-        }
-        let locations = self
-            .context
-            .reader()
-            .find_references(&target.dex_target())?
-            .into_iter()
-            .map(|location| ReferenceLocation {
-                class: location.class,
-                method: location.method,
-                descriptor: location.descriptor,
-                offset: location.offset,
-            })
-            .collect::<Vec<_>>();
-        self.reference_cache
-            .insert(target.clone(), locations.clone());
-        Ok(ReferenceResults { target, locations })
-    }
-
-    pub fn select(&mut self, selector: &ClassSelector) -> Result<Vec<String>, DecompileError> {
-        let explicit = selector.explicitly_names_classes();
-        let mut classes = match selector {
-            ClassSelector::All => {
-                self.context.load_all_classes()?;
-                self.context.class_names()
-            }
-            ClassSelector::Exact(class) => {
-                if self.context.load_class_deferred(class)?.is_none() {
-                    return Err(DecompileError::ClassNotFound(class.clone()));
-                }
-                vec![class.clone()]
-            }
-            ClassSelector::Matching(query) => {
-                self.context.load_all_classes()?;
-                self.context
-                    .class_names()
-                    .into_iter()
-                    .filter(|class| class.contains(query))
-                    .collect()
-            }
-            ClassSelector::Listed(classes) => {
-                self.context
-                    .load_classes_deferred(classes.iter().map(String::as_str))?;
-                for class in classes {
-                    if self.context.get_class(class).is_none() {
-                        return Err(DecompileError::ClassNotFound(class.clone()));
-                    }
-                }
-                classes.iter().cloned().collect()
-            }
-        };
-        if self.options.include_nested && !explicit {
-            classes.retain(|class| self.context.class_is_compilation_unit(class));
-        }
-        classes.sort_unstable();
-        classes.dedup();
-        Ok(classes)
-    }
-
     pub fn class(&mut self, class: impl Into<String>) -> Result<SourceUnit, DecompileError> {
         let class = class.into();
         if self.context.load_class_deferred(&class)?.is_none() {
             return Err(DecompileError::ClassNotFound(class));
         }
         self.generate_class(class)
-    }
-
-    pub fn method(&mut self, mut request: MethodRequest) -> Result<MethodOutput, DecompileError> {
-        if self.context.load_class(&request.class)?.is_none() {
-            return Err(DecompileError::ClassNotFound(request.class));
-        }
-        let class = self
-            .context
-            .get_class(&request.class)
-            .expect("loaded class");
-        let candidates = class
-            .methods()
-            .iter()
-            .filter(|method| method.info.name == request.method)
-            .map(|method| method.info.descriptor())
-            .filter(|descriptor| {
-                request
-                    .descriptor
-                    .as_ref()
-                    .is_none_or(|wanted| super::normalize_descriptor(wanted) == *descriptor)
-            })
-            .collect::<Vec<_>>();
-        let descriptor = match candidates.as_slice() {
-            [] => {
-                return Err(DecompileError::MethodNotFound {
-                    class: request.class,
-                    method: request.method,
-                    descriptor: request.descriptor,
-                });
-            }
-            [descriptor] => descriptor.clone(),
-            descriptors => {
-                return Err(DecompileError::AmbiguousMethod {
-                    class: request.class,
-                    method: request.method,
-                    descriptors: descriptors.to_vec(),
-                });
-            }
-        };
-        request.descriptor = Some(descriptor.clone());
-        let source = self
-            .context
-            .decompile_java_method_with_config_and_observer(
-                &request.class,
-                &request.method,
-                Some(&descriptor),
-                &self.options.java,
-                Arc::clone(&self.observer),
-            )?;
-        Ok(MethodOutput { request, source })
-    }
-
-    pub fn classes(&mut self, selector: ClassSelector) -> Result<ClassBatch<'_>, DecompileError> {
-        let classes = self.select(&selector)?;
-        Ok(ClassBatch {
-            decompiler: self,
-            classes: classes.into_iter(),
-            summary: BatchSummary::default(),
-        })
-    }
-
-    /// Generate many classes while reusing the loaded archive graph.
-    ///
-    /// Shared hierarchy/ABI, one decode pass, one termination solve, then
-    /// class generation in parallel. This loads the requested classes (and
-    /// nested types when `include_nested`) itself; callers need not
-    /// `load_all_classes()`. After collect, leftover frontend/IR buffers are
-    /// dropped. Later requests on the same `Decompiler` must load classes
-    /// again.
-    pub fn generate_classes(
-        &mut self,
-        classes: Vec<String>,
-    ) -> Result<Vec<Result<SourceUnit, ClassFailure>>, DecompileError> {
-        if classes.is_empty() {
-            return Ok(Vec::new());
-        }
-        if self.options.isolate_requests || classes.len() == 1 {
-            return Ok(classes
-                .into_iter()
-                .map(|class| {
-                    let class_name = class.clone();
-                    let method_count = self
-                        .context
-                        .get_class(&class)
-                        .map_or(0, |node| node.methods().len());
-                    self.class(class).map_err(|error| ClassFailure {
-                        class: class_name,
-                        method_count,
-                        error,
-                    })
-                })
-                .collect());
-        }
-
-        let include_nested = self.options.include_nested;
-        self.context
-            .load_archive_selection(classes.iter().map(String::as_str), include_nested)?;
-        self.context.set_retain_decoded_methods(true);
-        let generated = self.generate_archive_classes(classes);
-        self.context.set_retain_decoded_methods(false);
-        generated
-    }
-
-    fn generate_archive_classes(
-        &mut self,
-        classes: Vec<String>,
-    ) -> Result<Vec<Result<SourceUnit, ClassFailure>>, DecompileError> {
-        let stats = batch_stats_enabled();
-        let t0 = Instant::now();
-        self.context.prepare_archive_overrides()?;
-        let overrides_ms = t0.elapsed();
-        let t1 = Instant::now();
-        self.context.prefetch_decoded_methods()?;
-        let prefetch_ms = t1.elapsed();
-        let t2 = Instant::now();
-        self.context
-            .prepare_archive_source_abi_before_termination()?;
-        let abi_prefix_ms = t2.elapsed();
-        let t3 = Instant::now();
-        self.context.apply_archive_termination()?;
-        let termination_ms = t3.elapsed();
-        let t4 = Instant::now();
-        self.context.resolve_archive_symbols_after_termination()?;
-        let abi_ms = abi_prefix_ms + t4.elapsed();
-
-        let include_nested = self.options.include_nested;
-        let observer = Arc::clone(&self.observer);
-        let t4 = Instant::now();
-        let mut ready = Vec::new();
-        let mut finished: Vec<Option<Result<SourceUnit, ClassFailure>>> =
-            (0..classes.len()).map(|_| None).collect();
-        for (index, class) in classes.into_iter().enumerate() {
-            let method_count = self
-                .context
-                .get_class(&class)
-                .map_or(0, |node| node.methods().len());
-            match self.context.collect_class_render_input(
-                &class,
-                include_nested,
-                Arc::clone(&observer),
-                false,
-            ) {
-                Ok(Some(input)) => ready.push((
-                    index,
-                    ArchiveClassJob {
-                        class,
-                        method_count,
-                        input,
-                    },
-                )),
-                Ok(None) => {
-                    finished[index] = Some(Err(ClassFailure {
-                        class: class.clone(),
-                        method_count,
-                        error: DecompileError::ClassNotFound(class),
-                    }));
-                }
-                Err(error) => {
-                    finished[index] = Some(Err(ClassFailure {
-                        class,
-                        method_count,
-                        error,
-                    }));
-                }
-            }
-        }
-
-        let collect_ms = t4.elapsed();
-        let hierarchy = self.context.type_hierarchy()?;
-        self.context.prepare_java_source_abi()?;
-        let java_abi = self.context.java_source_abi();
-        self.context.abandon_archive_buffers();
-        let java = self.options.java.clone();
-        let observer = Arc::clone(&self.observer);
-
-        let t5 = Instant::now();
-        let rendered = ready
-            .into_par_iter()
-            .with_min_len(1)
-            .map(|(index, job)| {
-                let started = Instant::now();
-                let class = job.class.clone();
-                let result = render_archive_job(job, &java, &hierarchy, &java_abi, &observer);
-                (index, class, started.elapsed(), result)
-            })
-            .collect::<Vec<_>>();
-        let generate_ms = t5.elapsed();
-        if stats {
-            let mut slow = rendered
-                .iter()
-                .map(|(_, class, elapsed, _)| (elapsed.as_secs_f64() * 1000.0, class.as_str()))
-                .collect::<Vec<_>>();
-            slow.sort_by(|left, right| right.0.total_cmp(&left.0));
-            let top = slow
-                .into_iter()
-                .take(8)
-                .map(|(ms, class)| format!("{class}={ms:.0}ms"))
-                .collect::<Vec<_>>()
-                .join(" ");
-            eprintln!(
-                "dexdec batch: overrides={:.0}ms prefetch={:.0}ms abi={:.0}ms termination={:.0}ms collect={:.0}ms generate={:.0}ms classes={} slowest[{}]",
-                overrides_ms.as_secs_f64() * 1000.0,
-                prefetch_ms.as_secs_f64() * 1000.0,
-                abi_ms.as_secs_f64() * 1000.0,
-                termination_ms.as_secs_f64() * 1000.0,
-                collect_ms.as_secs_f64() * 1000.0,
-                generate_ms.as_secs_f64() * 1000.0,
-                finished.len(),
-                top,
-            );
-        }
-        for (index, _, _, result) in rendered {
-            finished[index] = Some(result);
-        }
-        Ok(finished
-            .into_iter()
-            .map(|result| result.expect("every archive class slot is filled"))
-            .collect())
     }
 
     fn generate_class(&mut self, class: String) -> Result<SourceUnit, DecompileError> {
@@ -585,7 +134,6 @@ impl Decompiler {
             self.clear_analysis_scope();
         }
         Ok(SourceUnit {
-            path: source_path(&class),
             class,
             method_count,
             source,
@@ -593,194 +141,15 @@ impl Decompiler {
     }
 }
 
-/// Streaming batch iterator. Each source is released before the next class is generated.
-pub struct ClassBatch<'a> {
-    decompiler: &'a mut Decompiler,
-    classes: std::vec::IntoIter<String>,
-    summary: BatchSummary,
-}
-
-impl ClassBatch<'_> {
-    pub fn len(&self) -> usize {
-        self.classes.len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.classes.len() == 0
-    }
-
-    pub fn summary(&self) -> BatchSummary {
-        self.summary
-    }
-}
-
-impl Iterator for ClassBatch<'_> {
-    type Item = Result<SourceUnit, ClassFailure>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        let class = self.classes.next()?;
-        self.summary.classes += 1;
-        Some(match self.decompiler.generate_class(class.clone()) {
-            Ok(source) => {
-                self.summary.methods += source.method_count;
-                Ok(source)
-            }
-            Err(error) => {
-                let method_count = self
-                    .decompiler
-                    .context
-                    .get_class(&class)
-                    .map_or(0, |node| node.methods().len());
-                if self.decompiler.options().isolate_requests {
-                    self.decompiler.clear_analysis_scope();
-                } else {
-                    self.decompiler.context.clear_method_cache();
-                }
-                self.summary.failures += 1;
-                self.summary.failed_methods += method_count;
-                Err(ClassFailure {
-                    class,
-                    method_count,
-                    error,
-                })
-            }
-        })
-    }
-
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        self.classes.size_hint()
-    }
-}
-
-impl ExactSizeIterator for ClassBatch<'_> {}
-
-pub fn source_path(descriptor: &str) -> PathBuf {
-    let binary_name = descriptor
-        .strip_prefix('L')
-        .and_then(|name| name.strip_suffix(';'))
-        .unwrap_or(descriptor);
-    let (package, binary_simple_name) = binary_name
-        .rsplit_once('/')
-        .map_or(("", binary_name), |(package, name)| (package, name));
-    let mut path = PathBuf::new();
-    for segment in package.split('/').filter(|segment| !segment.is_empty()) {
-        path.push(JavaIdentifier::from_dex(segment).to_string());
-    }
-    let name = JavaIdentifier::from_dex(binary_simple_name).to_string();
-    path.push(format!("{name}.java"));
-    path
-}
-
-fn batch_stats_enabled() -> bool {
-    std::env::var_os("DEXDEC_BATCH_STATS").is_some()
-}
-
-struct ArchiveClassJob {
-    class: String,
-    method_count: usize,
-    input: ClassRenderInput,
-}
-
-fn archive_java_parallel_methods() -> bool {
-    archive_java_parallel_methods_from(std::env::var_os("DEXDEC_ARCHIVE_METHOD_PARALLEL"))
-}
-
-fn archive_java_parallel_methods_from(value: Option<std::ffi::OsString>) -> bool {
-    // Nested rayon inside class-level archive jobs oversubscribed the pool
-    // (study wall 85s -> 88s). Exact "1" remains the A/B override.
-    value.as_deref() == Some(std::ffi::OsStr::new("1"))
-}
-
-fn render_archive_job(
-    mut job: ArchiveClassJob,
-    java: &JavaDecompilerConfig,
-    hierarchy: &Arc<ClassHierarchyIndex>,
-    java_abi: &Arc<JavaSourceAbi>,
-    observer: &Arc<dyn AnalysisObserver>,
-) -> Result<SourceUnit, ClassFailure> {
-    let mut decompiler = JavaDecompiler::new(java.clone())
-        .with_shared_type_hierarchy(Arc::clone(hierarchy))
-        .with_source_abi(Arc::clone(java_abi))
-        .with_analysis_observer(Arc::clone(observer))
-        .with_parallel_methods(archive_java_parallel_methods());
-    debug_assert!(
-        !decompiler.parallel_methods() || archive_java_parallel_methods(),
-        "archive Java jobs set parallel_methods=false unless DEXDEC_ARCHIVE_METHOD_PARALLEL=1"
-    );
-    match decompiler.generate_class_with_nested(
-        &job.input.class_node,
-        &mut job.input.methods,
-        job.input.nested,
-    ) {
-        Ok(source) => Ok(SourceUnit {
-            path: source_path(&job.class),
-            class: job.class,
-            method_count: job.method_count,
-            source,
-        }),
-        Err(error) => Err(ClassFailure {
-            class: job.class,
-            method_count: job.method_count,
-            error: DecompileError::from(error),
-        }),
-    }
-}
-
-/// Relative Java source path derived from a DEX class descriptor.
-pub fn java_source_path(descriptor: &str) -> PathBuf {
-    source_path(descriptor)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn listed_selection_is_sorted_and_unique() {
-        assert_eq!(
-            ClassSelector::listed(["LB;", "LA;", "LB;"]),
-            ClassSelector::Listed(BTreeSet::from(["LA;".to_string(), "LB;".to_string()]))
-        );
-    }
-
-    #[test]
-    fn archive_java_jobs_disable_method_parallelism() {
-        assert!(!archive_java_parallel_methods_from(None));
-        assert!(!archive_java_parallel_methods_from(Some("0".into())));
-        assert!(archive_java_parallel_methods_from(Some("1".into())));
-        let decompiler =
-            JavaDecompiler::new(JavaDecompilerConfig::default()).with_parallel_methods(false);
-        assert!(!decompiler.parallel_methods());
-    }
-
-    #[test]
-    fn generate_classes_loads_requested_classes_without_full_archive() {
-        let dex = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/testcases/classes.dex");
-        let bytes = std::fs::read(dex).expect("read test DEX");
-        let mut decompiler = Decompiler::from_bytes(&bytes).expect("open test DEX");
-        decompiler.set_options(DecompileOptions::default().with_isolated_requests(false));
-        let results = decompiler
-            .generate_classes(vec!["LHelloWorld;".into(), "LSimpleIf;".into()])
-            .expect("generate requested classes");
-        assert_eq!(results.len(), 2);
-        for result in results {
-            result.expect("requested class should decompile without load_all_classes");
-        }
-        let again = decompiler
-            .generate_classes(vec!["LHelloWorld;".into(), "LSimpleIf;".into()])
-            .expect("second archive pass after abandon");
-        assert_eq!(again.len(), 2);
-        for result in again {
-            result.expect("abandoned buffers must not poison a later archive pass");
-        }
-    }
 
     #[test]
     fn isolate_class_requests_discard_loaded_graph() {
         let dex = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/testcases/classes.dex");
         let bytes = std::fs::read(dex).expect("read test DEX");
         let mut decompiler = Decompiler::from_bytes(&bytes).expect("open test DEX");
-        decompiler.set_options(DecompileOptions::default());
         decompiler
             .class("LHelloWorld;")
             .expect("first isolate class");

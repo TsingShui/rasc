@@ -1,4 +1,4 @@
-//! `crate::timing::Instant` shim (rasc fork; see PATCHES.md).
+//! `crate::timing::Instant` shim (rasc fork; see FORK.md).
 //!
 //! Upstream times its stages with `crate::timing::Instant::now()`, and keeps this module so
 //! a target can substitute a clock. Every use is instrumentation: the value is passed to

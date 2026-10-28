@@ -37,13 +37,7 @@ pub mod language;
 pub(crate) mod timing;
 
 // Re-export main types for convenience
-pub use api::{
-    decode_method, java_source_path, source_path, ArchiveCatalog, ArchiveMemberCatalog,
-    BatchSummary, ClassBatch, ClassFailure, ClassKind, ClassOutline, ClassSelector, ClassSummary,
-    DecodedMethod, DecompileError, DecompileOptions, Decompiler, DecompilerContext, FieldOutline,
-    MemberKind, MemberSummary, MemberVisitor, MethodOutline, MethodOutput, MethodRequest,
-    ReferenceLocation, ReferenceResults, ReferenceTarget, SourceUnit,
-};
+pub use api::{DecompileError, DecompileOptions, Decompiler, DecompilerContext, SourceUnit};
 pub use frontend::{ClassNode, DexError, DexFileReader, DexResult, MethodCode, MethodNode};
 
 // IR types

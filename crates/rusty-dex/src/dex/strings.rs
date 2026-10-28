@@ -5,7 +5,7 @@
 //! Upstream decoded every string to UTF-16 while parsing, which costs ~15 ms on a
 //! 10 MiB DEX with 76k strings even though a single-class decompile reads a few
 //! hundred of them. rasc's fork keeps each string as a byte range into the image
-//! and decodes on first use, caching per string; see PATCHES.md.
+//! and decodes on first use, caching per string; see crates/dexdec/FORK.md.
 #![allow(missing_docs, reason = "internal")]
 
 use std::io::BufRead;

@@ -9,7 +9,7 @@ keywords = ["android", "dex", "decompiler", "reverse-engineering"]
 categories = ["development-tools"]
 readme = "README.md"
 
-# Fork-only edits relative to upstream (see FORK.md and PATCHES.md):
+# Fork-only edits relative to upstream (see FORK.md):
 #   * literal package fields (upstream inherits them from its workspace root);
 #   * no `cli`/`bin`, no embedded `.dexsym` database or platform-symbol layer,
 #     no symbol builder, no mimalloc, and no file/APK entry point: rasc drives

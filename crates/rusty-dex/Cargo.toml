@@ -21,6 +21,6 @@ thiserror = "2.0.12"
 default = []
 apk = ["dep:zip"]
 
-# Vendored upstream code: see crates/dexdec/PATCHES.md, patch 7.
+# Vendored upstream code: see crates/dexdec/FORK.md.
 [lints.rust]
 warnings = "allow"
