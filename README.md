@@ -1,15 +1,9 @@
-# Archive
-This Repo Will Stop Devlop,
-Use https://github.com/MG1937/rust_ASC instead
-
 # rasc
 
 
 ## What rasc is for
 
-rasc is a Rust implementation of [ASC](https://github.com/MG1937/ASC), built to analyze APKs and
-DEX files at very high speed. Most of the implementation was carried out by agents with occasional
-human intervention, and it differs from ASC in some implementations and optimizations. It ships as a native CLI.
+rasc is a Rust cli tool built to analyze APKs and DEX files at very high speed. 
 
 ## Build and install
 
@@ -98,5 +92,4 @@ rasc skill --print                # the skill text on stdout, nothing written
 
 ## License
 
-Apache-2.0. The full text is in [LICENSE](LICENSE); [NOTICE](NOTICE) records the attribution of
-the components bundled in the tree (`vendor/axmldecoder`, `crates/dexdec`, `crates/rusty-dex`).
+Apache-2.0. The full text is in [LICENSE](LICENSE); [NOTICE](NOTICE) 
