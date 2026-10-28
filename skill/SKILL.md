@@ -20,9 +20,6 @@ rasc findrefs app.apk method onCreate --class com.example.Main
 rasc findrefs app.apk field INSTANCE --class example --fuzzy-class
 rasc classes app.apk [-f substring]                   # class index
 rasc manifest app.apk                                 # binary AndroidManifest.xml -> XML
-rasc fields-plan app.apk --descriptor 'Lcom/example/Foo;'      # field layout + instance reference mask
-rasc member-by-index app.apk --descriptor 'Lcom/example/Foo;' --field-index 3
-rasc member-by-index app.apk --descriptor 'Lcom/example/Foo;' --method-index 339
 rasc mcp --root /authorized/apks                     # persistent stdio MCP server
 ```
 
@@ -73,34 +70,24 @@ rasc findrefs "$dex_zip" method scan --class com.example.Scanner
 
 ## Indices a runtime trace hands back
 
-A trace from a runtime carries indices, not names. These three commands turn one into the
-member behind it:
+A trace from a runtime carries member indices, not names. `getclass --members` prefixes the
+source with one line per member, so a runtime index can be matched to the member in the same
+call:
 
 ```sh
-rasc fields-plan app.apk --descriptor 'Lcom/example/Foo;'
-rasc member-by-index app.apk --descriptor 'Lcom/example/Foo;' --field-index 3
-rasc member-by-index app.apk --descriptor 'Lcom/example/Foo;' --method-index 339
+rasc getclass --members app.apk com.example.Main
 ```
 
-- `fields-plan` prints one JSON record: `dex_class_def_idx`, `dex_type_idx`,
-  `class_access_flags`, the instance and static fields in DEX declaration order, and
-  `instance_ref_mask` (bit *j* = instance field *j* is a reference). It is the one command
-  whose consumer is a program, which is why it is JSON.
-- `getclass --members` prefixes the source with one line per member, so a runtime index can be
-  matched to the member in the source in the same call:
-  `# members fields: field_ids=175 slot=0 static=false flags=0x12 type=[Ljava/lang/String; name=mArgs`
-  and `# members methods: method_ids=339 proto=(…)V flags=0x10001 name=<init>`. The prototype is
-  what identifies one method among overloads, and on an obfuscated build the name is no help at
-  all. Without the flag the output is byte-for-byte what it has always been.
-- `member-by-index` takes exactly one index, because the two live in different spaces.
-  `--field-index` is the position a runtime reports - instance fields first, then statics -
-  which is **not** the `field_ids` index, so the row prints `field_ids=` too.
-  `--method-index` is the `method_ids` index, which is what a runtime stores.
-- Exit status is the verdict for both index commands: `0` one answer, `3` none (no input
-  defines the class, or it declares no such index), `4` more than one input defines the class.
-  On `4` `member-by-index` prints every candidate, and `fields-plan` prints nothing: a plan
-  decides which instance slots a collector may dereference, so picking one of two layouts
-  would be arbitrary.
+- `# members fields: field_ids=175 slot=0 static=false flags=0x12 type=[Ljava/lang/String; name=mArgs`
+  - `slot` is the position a runtime reports: instance fields first, then statics. That is
+  **not** the `field_ids` index, so both are printed.
+- `# members methods: method_ids=339 proto=(...)V flags=0x10001 name=<init>` - the prototype is
+  what identifies one method among overloads, and on an obfuscated build the name is no help
+  at all.
+- The table must describe the same definition as the source. If more than one input defines the
+  class, the command refuses it with exit `4` and names the definitions on stderr instead of
+  annotating one definition while rendering another. Without the flag the output is
+  byte-for-byte what it has always been.
 
 ## Notes
 

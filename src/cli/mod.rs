@@ -219,50 +219,6 @@ fn run_command(args: Cli, archive_policy: apk::ArchivePolicy, started: Instant) 
                 debug_timing(started);
             }
         }
-        Command::FieldsPlan(args) => {
-            // Accept what a user types; the DEX carries descriptors.
-            let descriptor = query::format_class_name(&args.descriptor)?;
-            let lookup =
-                apk::field_plan_with_policy(&args.apk, archive_policy, &descriptor, args.threads)?;
-            match &lookup.plan {
-                Some(plan) => emit(&format!("{plan}\n"), args.output.as_deref())?,
-                None if lookup.definitions.is_empty() => {
-                    eprintln!("Error: {descriptor} is not defined in the supplied code inputs");
-                }
-                None => eprintln!(
-                    "Error: {descriptor} is defined {} times ({}); a plan must name one definition",
-                    lookup.definitions.len(),
-                    lookup.definitions.join(", ")
-                ),
-            }
-            status = apk::lookup_status(lookup.definitions.len());
-            if args.debug {
-                debug_timing(started);
-            }
-        }
-        Command::MemberByIndex(args) => {
-            let descriptor = query::format_class_name(&args.descriptor)?;
-            // clap's group already rejects both or neither; this keeps the arm total.
-            let (kind, index, name) = match (args.method_index, args.field_index) {
-                (Some(index), None) => (apk::MemberKind::Method, index, "method"),
-                (None, Some(index)) => (apk::MemberKind::Field, index, "field"),
-                _ => bail!("pass exactly one of --method-index or --field-index"),
-            };
-            let lookup = apk::member_by_index_with_policy(
-                &args.apk,
-                archive_policy,
-                &descriptor,
-                index,
-                kind,
-                args.threads,
-            )?;
-            emit_member_rows(&lookup.rows, args.output.as_deref())?;
-            report_member_verdict(&lookup, name, index, &descriptor);
-            status = apk::lookup_status(lookup.rows.len());
-            if args.debug {
-                debug_timing(started);
-            }
-        }
         Command::Classes(args) => {
             let filter = args.filter.as_deref().map(str::to_lowercase);
             let started = Instant::now();
@@ -455,33 +411,6 @@ fn run_command(args: Cli, archive_policy: apk::ArchivePolicy, started: Instant) 
         }
     }
     Ok(status)
-}
-
-/// Writes member rows, one per line.
-fn emit_member_rows(rows: &[String], output: Option<&Path>) -> Result<()> {
-    let mut payload = String::with_capacity(rows.iter().map(|row| row.len() + 1).sum());
-    for row in rows {
-        payload.push_str(row);
-        payload.push('\n');
-    }
-    emit(&payload, output)
-}
-
-/// Says why a lookup that did not end in exactly one hit did not.
-///
-/// The rows are already on stdout; this is the explanation, and it goes to stderr so a
-/// caller reading the payload never has to filter it out.
-fn report_member_verdict(lookup: &apk::MemberLookup, kind: &str, index: u32, descriptor: &str) {
-    match lookup.rows.len() {
-        0 if lookup.definitions == 0 => {
-            eprintln!("Error: {descriptor} is not defined in the supplied code inputs");
-        }
-        0 => eprintln!("Error: no {kind} index {index} is declared by {descriptor}"),
-        1 => {}
-        count => eprintln!(
-            "Error: {kind} index {index} of {descriptor} is declared {count} times; the rows above are the candidates"
-        ),
-    }
 }
 
 #[cfg(test)]

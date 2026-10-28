@@ -827,31 +827,6 @@ pub(crate) fn list_strings_with_policy(
     Ok(rows)
 }
 
-/// The DEX field layout of `descriptor`, from the first input and entry that defines it.
-///
-/// Inputs are tried in the order given, and within one archive the entries keep their
-/// central-directory order, so "first" is a property of the arguments rather than of
-/// which worker happened to finish first. `None` means no input defines the class,
-/// which is a different answer from an empty field list.
-#[cfg(test)]
-pub fn field_plan(paths: &[PathBuf], descriptor: &str, threads: usize) -> Result<FieldPlanLookup> {
-    field_plan_with_policy(paths, ArchivePolicy::default(), descriptor, threads)
-}
-
-pub(crate) fn field_plan_with_policy(
-    paths: &[PathBuf],
-    policy: ArchivePolicy,
-    descriptor: &str,
-    threads: usize,
-) -> Result<FieldPlanLookup> {
-    let (definitions, plan) =
-        walk_definitions(paths, policy, descriptor, threads, |data, descriptor| {
-            Ok(dex::members::field_plan(data, descriptor)?.map(|plan| plan.render_json()))
-        })?
-        .unique();
-    Ok(FieldPlanLookup { definitions, plan })
-}
-
 /// The member table for one class, from the one definition that exists.
 #[cfg(test)]
 pub fn member_lines(
@@ -943,29 +918,6 @@ fn walk_definitions<T: Send>(
     Ok(definitions)
 }
 
-/// What a `fields-plan` lookup found.
-///
-/// `plan` is present only when exactly one input and entry defines the class. A class name
-/// is not an identity - two entries can define it with different field layouts - and this
-/// plan decides which instance slots a collector may dereference as pointers, so handing a
-/// caller the first of two would be choosing a layout at random. The caller answers that
-/// with the same three-way status the index lookups use.
-#[derive(Debug, Default)]
-pub struct FieldPlanLookup {
-    /// Entry names that define the class, in the order inputs and entries were walked.
-    pub definitions: Vec<String>,
-    pub plan: Option<String>,
-}
-
-/// Which member table a lookup reads.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum MemberKind {
-    /// A runtime field index: `ifields_` first, then `sfields_`.
-    Field,
-    /// A runtime method index: the `method_ids` index.
-    Method,
-}
-
 /// The status a lookup ends with: exactly one hit, none, or more than one.
 ///
 /// Three answers rather than a bool because "not found" and "found twice" mean
@@ -977,110 +929,6 @@ pub fn lookup_status(hits: usize) -> i32 {
         1 => 0,
         _ => 4,
     }
-}
-
-/// The rows a member lookup found, and how many definitions of the class were seen.
-///
-/// `definitions` is what tells the two empty-looking outcomes apart: no input defines the
-/// class at all, versus an input defines it and it declares no member with that index.
-/// Both resolve nothing, but only one of them means the descriptor is wrong.
-#[derive(Debug, Default)]
-pub struct MemberLookup {
-    pub definitions: usize,
-    pub rows: Vec<String>,
-}
-
-/// Every member `index` names, one row per definition of the class.
-///
-/// `index` is the runtime's own numbering, which for fields is the instance-first
-/// position and for methods the `method_ids` index; both are printed with the row, so a
-/// caller can see which DEX index the runtime index resolved to rather than assume.
-#[cfg(test)]
-pub fn member_by_index(
-    paths: &[PathBuf],
-    descriptor: &str,
-    index: u32,
-    kind: MemberKind,
-    threads: usize,
-) -> Result<MemberLookup> {
-    member_by_index_with_policy(
-        paths,
-        ArchivePolicy::default(),
-        descriptor,
-        index,
-        kind,
-        threads,
-    )
-}
-
-pub(crate) fn member_by_index_with_policy(
-    paths: &[PathBuf],
-    policy: ArchivePolicy,
-    descriptor: &str,
-    index: u32,
-    kind: MemberKind,
-    threads: usize,
-) -> Result<MemberLookup> {
-    let mut lookup = MemberLookup::default();
-    for path in paths {
-        let found = map_dex_entries(
-            path,
-            policy,
-            threads,
-            EntryOrder::Natural,
-            None,
-            |inflated| {
-                let mut found: Vec<(bool, Vec<String>)> = Vec::new();
-                for logical in
-                    dex::container::logical_dexes(&inflated.entry.name, inflated.data()?)?
-                {
-                    let normalized = dex::container::standard_header_view(&logical.data);
-                    let data = normalized.as_deref().unwrap_or(&logical.data);
-                    let Some(members) = dex::members::class_members(data, descriptor)? else {
-                        continue;
-                    };
-                    let mut rows = Vec::new();
-                    match kind {
-                        MemberKind::Field => {
-                            if let Some((field, is_static)) = members.field_at_position(index) {
-                                rows.push(format!(
-                                "{} | {}->{} | type={} | flags=0x{:x} | static={} | field_ids={}",
-                                logical.name,
-                                descriptor,
-                                field.name,
-                                field.type_descriptor,
-                                field.access_flags,
-                                is_static,
-                                field.field_index,
-                            ));
-                            }
-                        }
-                        MemberKind::Method => {
-                            if let Some(method) = members.method(index) {
-                                rows.push(format!(
-                                    "{} | {}->{} | flags=0x{:x} | method_ids={}",
-                                    logical.name,
-                                    descriptor,
-                                    method.name,
-                                    method.access_flags,
-                                    method.method_index,
-                                ));
-                            }
-                        }
-                    }
-                    found.push((true, rows));
-                }
-                Ok(found)
-            },
-        )?;
-        for (defined, rows) in found {
-            if defined {
-                lookup.definitions += 1;
-            }
-            lookup.rows.extend(rows);
-        }
-    }
-    Ok(lookup)
 }
 
 /// Every entry the archive holds, in central-directory order.
@@ -1238,44 +1086,18 @@ mod tests {
 
         for line in &lines {
             if let Some(rest) = line.strip_prefix("# members fields: ") {
-                let field_ids = value_of(rest, "field_ids=").unwrap();
-                let slot: u32 = value_of(rest, "slot=").unwrap().parse().unwrap();
-                let rows = member_by_index(
-                    std::slice::from_ref(&path),
-                    "LFixture0;",
-                    slot,
-                    MemberKind::Field,
-                    2,
-                )
-                .unwrap()
-                .rows;
-                assert_eq!(rows.len(), 1, "{line}");
-                assert!(
-                    rows[0].ends_with(&format!("| field_ids={field_ids}")),
-                    "{} vs {line}",
-                    rows[0]
-                );
+                assert!(value_of(rest, "field_ids=").is_some(), "{line}");
+                assert!(value_of(rest, "slot=").is_some(), "{line}");
+                assert!(rest.contains(" static="), "{line}");
+                assert!(rest.contains(" type="), "{line}");
+                assert!(rest.contains(" name="), "{line}");
             } else if let Some(rest) = line.strip_prefix("# members methods: ") {
+                assert!(value_of(rest, "method_ids=").is_some(), "{line}");
                 assert!(
                     rest.contains("proto=("),
                     "a method line without its prototype cannot identify an overload: {line}"
                 );
-                let method_ids: u32 = value_of(rest, "method_ids=").unwrap().parse().unwrap();
-                let rows = member_by_index(
-                    std::slice::from_ref(&path),
-                    "LFixture0;",
-                    method_ids,
-                    MemberKind::Method,
-                    2,
-                )
-                .unwrap()
-                .rows;
-                assert_eq!(rows.len(), 1, "{line}");
-                assert!(
-                    rows[0].ends_with(&format!("| method_ids={method_ids}")),
-                    "{} vs {line}",
-                    rows[0]
-                );
+                assert!(rest.contains(" name="), "{line}");
             } else {
                 panic!("unexpected member line: {line}");
             }
@@ -1329,59 +1151,6 @@ mod tests {
             ),
             "the prototype is what identifies this overload: {init}"
         );
-
-        for line in methods {
-            let index: u32 = value_of(line, "method_ids=").unwrap().parse().unwrap();
-            let rows = member_by_index(
-                std::slice::from_ref(&path),
-                descriptor,
-                index,
-                MemberKind::Method,
-                4,
-            )
-            .unwrap()
-            .rows;
-            assert_eq!(rows.len(), 1, "{line}");
-        }
-    }
-
-    /// A class name is not an identity. Two entries defining it must not produce a plan:
-    /// the plan decides which instance slots a collector dereferences.
-    #[test]
-    fn fields_plan_refuses_to_pick_between_two_definitions() {
-        let dex = dex::tests::const_string_fixture(1);
-        let zip = build_zip(&[("classes.dex", &dex, true), ("classes2.dex", &dex, true)]);
-        let path = temp_apk("fields-plan-ambiguous", &zip);
-
-        let lookup = field_plan(std::slice::from_ref(&path), "LFixture0;", 2).unwrap();
-        assert_eq!(lookup.definitions.len(), 2, "both entries define the class");
-        assert!(
-            lookup.plan.is_none(),
-            "an ambiguous plan must not be handed out"
-        );
-        assert_eq!(lookup_status(lookup.definitions.len()), 4);
-        std::fs::remove_file(&path).unwrap();
-    }
-
-    #[test]
-    fn fields_plan_returns_the_one_definition_and_nothing_otherwise() {
-        let dex = dex::tests::const_string_fixture(1);
-        let zip = build_zip(&[("classes.dex", &dex, true)]);
-        let path = temp_apk("fields-plan-single", &zip);
-
-        let lookup = field_plan(std::slice::from_ref(&path), "LFixture0;", 2).unwrap();
-        assert_eq!(lookup.definitions, ["classes.dex"]);
-        let plan = lookup.plan.expect("exactly one definition");
-        assert!(
-            plan.starts_with("{\"schema\":\"rasc.fields-plan/v1\",\"descriptor\":\"LFixture0;\"")
-        );
-        assert_eq!(lookup_status(lookup.definitions.len()), 0);
-
-        let missing = field_plan(std::slice::from_ref(&path), "LNo/Such;", 2).unwrap();
-        assert!(missing.definitions.is_empty());
-        assert!(missing.plan.is_none());
-        assert_eq!(lookup_status(missing.definitions.len()), 3);
-        std::fs::remove_file(&path).unwrap();
     }
 
     #[test]
@@ -1390,151 +1159,6 @@ mod tests {
         assert_eq!(lookup_status(0), 3);
         assert_eq!(lookup_status(2), 4);
         assert_eq!(lookup_status(7), 4);
-    }
-
-    /// Real-data round trip: every member the DEX walk finds must be reachable from the
-    /// runtime index the lookup takes, and the position must cross from instance fields
-    /// into statics exactly where the field blocks meet.
-    ///
-    /// Gated like the other real-data checks. Run:
-    /// `RASC_REAL_APK=… cargo test --bin rasc -- --ignored --nocapture real_apk_member_lookup`.
-    #[test]
-    #[ignore = "需要真实多 DEX APK；设 RASC_REAL_APK 后用 --ignored 显式运行"]
-    fn real_apk_member_lookup_round_trips() {
-        let path = PathBuf::from(std::env::var("RASC_REAL_APK").expect("set RASC_REAL_APK"));
-        let descriptor = "Lcom/termux/terminal/TerminalSession;";
-        let mut checked_fields = 0usize;
-        let mut checked_methods = 0usize;
-        let mut dexes = 0usize;
-
-        for entry in list_entries(&path).expect("list entries") {
-            if !entry.name.ends_with(".dex") {
-                continue;
-            }
-            let bytes = read_entry(&path, &entry.name).expect("read entry");
-            let Some(members) =
-                dex::members::class_members(&bytes, descriptor).expect("walk class")
-            else {
-                continue;
-            };
-            dexes += 1;
-            // A bare DEX is what the lookup takes; the container path is covered above.
-            let file = crate::analysis::archive::tests::temp_apk("member-round-trip", &bytes);
-
-            for (position, field) in members.instance.iter().enumerate() {
-                let rows = member_by_index(
-                    std::slice::from_ref(&file),
-                    descriptor,
-                    position as u32,
-                    MemberKind::Field,
-                    1,
-                )
-                .expect("lookup")
-                .rows;
-                assert_eq!(rows.len(), 1, "position {position} must resolve once");
-                assert!(
-                    rows[0].ends_with(&format!("| field_ids={}", field.field_index)),
-                    "position {position} resolved to {}",
-                    rows[0]
-                );
-                assert!(rows[0].contains("| static=false |"));
-                assert!(rows[0].contains(&format!("->{} |", field.name)));
-                checked_fields += 1;
-            }
-            for (offset, field) in members.statics.iter().enumerate() {
-                let position = (members.instance.len() + offset) as u32;
-                let rows = member_by_index(
-                    std::slice::from_ref(&file),
-                    descriptor,
-                    position,
-                    MemberKind::Field,
-                    1,
-                )
-                .expect("lookup")
-                .rows;
-                assert_eq!(rows.len(), 1);
-                assert!(rows[0].contains("| static=true |"));
-                assert!(rows[0].contains(&format!("->{} |", field.name)));
-                checked_fields += 1;
-            }
-            // One past the last field is nothing, not the first field of something else.
-            let past = (members.instance.len() + members.statics.len()) as u32;
-            let past_lookup = member_by_index(
-                std::slice::from_ref(&file),
-                descriptor,
-                past,
-                MemberKind::Field,
-                1,
-            )
-            .expect("lookup");
-            assert!(past_lookup.rows.is_empty());
-            assert_eq!(past_lookup.definitions, 1, "the class was defined here");
-
-            let mut methods: Vec<&dex::members::MethodRow> =
-                members.direct_methods.iter().collect();
-            methods.extend(&members.virtual_methods);
-            for method in methods {
-                let rows = member_by_index(
-                    std::slice::from_ref(&file),
-                    descriptor,
-                    method.method_index,
-                    MemberKind::Method,
-                    1,
-                )
-                .expect("lookup")
-                .rows;
-                assert_eq!(
-                    rows.len(),
-                    1,
-                    "method {} must resolve once",
-                    method.method_index
-                );
-                assert!(rows[0].contains(&format!("->{} |", method.name)));
-                if checked_methods == 0 {
-                    println!("sample method row: {}", rows[0]);
-                }
-                checked_methods += 1;
-            }
-            std::fs::remove_file(&file).ok();
-        }
-
-        assert!(dexes > 0, "the class was not found in any dex");
-        assert!(
-            checked_fields >= 19,
-            "only {checked_fields} fields round-tripped"
-        );
-        assert!(checked_methods > 0, "no methods round-tripped");
-        println!("round-tripped {checked_fields} fields and {checked_methods} methods");
-    }
-
-    /// Real-data check: one class's plan against values taken from the same APK with
-    /// the DEX-metadata reader CheapTrick used before this moved here.
-    ///
-    /// Gated like the other real-data checks - an absent fixture must not read as a
-    /// pass. Run: `RASC_REAL_APK=… cargo test -- --ignored real_apk_fields_plan`.
-    #[test]
-    #[ignore = "需要真实多 DEX APK；设 RASC_REAL_APK 后用 --ignored 显式运行"]
-    fn real_apk_fields_plan_reports_a_known_class() {
-        let path = std::env::var("RASC_REAL_APK").expect("set RASC_REAL_APK");
-        let lookup = field_plan(
-            &[PathBuf::from(path)],
-            "Lcom/termux/terminal/TerminalSession;",
-            4,
-        )
-        .expect("read the plan");
-        assert_eq!(lookup.definitions, ["classes14.dex"]);
-        let plan = lookup.plan.expect("exactly one definition");
-        assert!(plan.starts_with(
-            "{\"schema\":\"rasc.fields-plan/v1\",\"descriptor\":\"Lcom/termux/terminal/TerminalSession;\""
-        ));
-        assert!(plan.contains("\"counts\":{\"instance\":16,\"static\":3}"));
-        assert!(plan.contains("\"dex_class_def_idx\":"));
-        assert!(plan.contains("\"dex_type_idx\":"));
-        assert!(plan.contains("\"class_access_flags\":"));
-        assert!(plan.contains("\"instance_ref_mask\":\"0xe5ff\""));
-        assert!(plan.contains(
-            "{\"field_index\":175,\"name\":\"mArgs\",\"type\":\"[Ljava/lang/String;\",\"access_flags\":18}"
-        ));
     }
 
     #[test]

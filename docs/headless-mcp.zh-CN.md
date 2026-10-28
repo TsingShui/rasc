@@ -16,8 +16,8 @@ MCP 只增加以下能力：
 - 同一压缩 APK 多轮查询间复用真正的 ZIP deflate 输出；
 - 可供 Pi 之外 MCP client 使用的标准协议。
 
-一次性查询、shell pipeline、超大/流式结果，以及 `fields-plan`、`member-by-index`、
-`getclass --members` 等 CLI-only 能力继续直接使用 CLI。CLI 与 MCP 相互独立，只共享 native
+一次性查询、shell pipeline、超大/流式结果，以及 `getclass --members` 等 CLI-only 能力
+继续直接使用 CLI。CLI 与 MCP 相互独立，只共享 native
 底层代码；MCP 不启动 CLI 子进程。
 
 ## 2. code mode 职责边界
