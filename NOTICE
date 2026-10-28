@@ -12,10 +12,11 @@ own license, with the license text next to it:
   crates/dexdec/         Apache-2.0            crates/dexdec/LICENSE
   crates/rusty-dex/      Apache-2.0            crates/rusty-dex/LICENSE
 
-crates/dexdec is a fork of https://github.com/asLody/dexdec (Apache-2.0).
-crates/rusty-dex carries upstream https://github.com/rusty-rs/rusty-dex
-(Apache-2.0) plus that repository's extensions. Their fork notes and patch lists
-travel with the crates (FORK.md, PATCHES.md).
+crates/dexdec is derived from https://github.com/asLody/dexdec (Apache-2.0).
+crates/rusty-dex is derived from https://github.com/rusty-rs/rusty-dex
+(Apache-2.0) plus the extensions asLody/dexdec carries. Both trees are
+maintained in this repository, and the upstream license text travels with each
+crate.
 
 Those license texts and copyright notices must travel with binary distributions.
 

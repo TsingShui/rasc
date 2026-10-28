@@ -1,18 +1,16 @@
 # rusty-dex
 
-[![GitHub Actions Workflow Status](https://img.shields.io/github/actions/workflow/status/rusty-rs/rusty-dex/ci.yml?branch=main&style=for-the-badge)](https://github.com/rusty-rs/rusty-dex/actions/workflows/ci.yml)
-[![Crates.io Version](https://img.shields.io/crates/v/rusty-dex?style=for-the-badge)](https://crates.io/crates/rusty-dex)
-[![docs.rs](https://img.shields.io/docsrs/rusty-dex?style=for-the-badge)](https://docs.rs/rusty-dex/latest/rusty_dex/)
+DEX parser used by the in-tree `dexdec` decompiler.
 
-Rust parser for DEX files
+It parses the file format and exposes the class, method, field, string and instruction
+tables; control-flow recovery and source generation live in `dexdec`.
 
-## About
+## `apk` feature
 
-The DEX file contains the bytecode of Android applications. This crate provides
-methods to extract and parse them.
+Off by default. It adds the zip-based archive reader; rasc and dexdec hand over DEX bytes
+instead, so the default build avoids native compression backends.
 
-## Current status
+## License
 
-The parser can handle most of the DEX standard (see [this
-issue](https://github.com/rusty-rs/rusty-dex/issues/3) for the up-to-date
-details). The API is under active development and might change.
+Apache-2.0; derived from [rusty-rs/rusty-dex](https://github.com/rusty-rs/rusty-dex) 0.2.0
+plus the extensions `asLody/dexdec` carries. See [`LICENSE`](LICENSE).

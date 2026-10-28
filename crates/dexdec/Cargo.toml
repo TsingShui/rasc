@@ -3,21 +3,15 @@ name = "dexdec"
 version = "1.0.0"
 edition = "2021"
 license = "Apache-2.0"
-description = "Dex decompiler core library (forked from asLody/dexdec; Java emitter used by rasc's `getclass`)"
-repository = "https://github.com/asLody/dexdec"
+description = "DEX to Java decompiler used by rasc's `getclass`"
 keywords = ["android", "dex", "decompiler", "reverse-engineering"]
 categories = ["development-tools"]
 readme = "README.md"
 
-# Fork-only edits relative to upstream (asLody/dexdec):
-#   * literal package fields (upstream inherits them from its workspace root);
-#   * no `cli`/`bin`, no embedded `.dexsym` database or platform-symbol layer,
-#     no symbol builder, no mimalloc, and no file/APK entry point: rasc drives
-#     the library through `Decompiler::from_bytes`;
-#   * no Kotlin source backend: rasc only asks for Java, so the Kotlin printer,
-#     its `@kotlin.Metadata` decoder and the language switch are removed;
-#   * `[lib] test = false` - upstream's unit tests stay in-tree for reference
-#     but are not run by rasc's `cargo test --workspace`.
+# Derived from asLody/dexdec (Apache-2.0; see LICENSE). This tree is maintained
+# in-tree: it has no CLI, no archive entry point, no platform-symbol database and
+# no Kotlin backend, and `[lib] test = false` keeps its legacy unit tests out of
+# the workspace gate.
 [dependencies]
 rusty-dex = { path = "../rusty-dex", version = "1.0.0" }
 bitflags = "2"
@@ -29,8 +23,7 @@ default = []
 [lib]
 test = false
 
-# Vendored upstream code: its warnings are upstream's style, not this repository's
-# regressions, and the zero-warning build gate counts every `warning:` line cargo
-# prints for a workspace member. Allowed here so the gate keeps testing rasc.
+# The pipeline still carries inherited style that has not been adopted into the
+# workspace lint policy. Drop this allowance once that cleanup happens.
 [lints.rust]
 warnings = "allow"

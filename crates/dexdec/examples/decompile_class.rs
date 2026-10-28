@@ -2,8 +2,8 @@
 //!
 //! Usage: cargo run --release -p dexdec --example decompile_class -- <dex> <descriptor>...
 //!
-//! This is the fork's smoke tool: the same `from_bytes` + `class()` path rasc
-//! uses for `getclass --emitter dexdec`.
+//! This is the crate's smoke tool: the same `from_bytes` + `class()` path rasc
+//! uses for `getclass`.
 
 use dexdec::{DecompileOptions, Decompiler};
 

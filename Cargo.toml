@@ -27,7 +27,7 @@ rmcp = { version = "3.5", default-features = false, features = ["server", "macro
 tokio = { version = "1", features = ["rt-multi-thread", "sync", "time", "signal"] }
 tokio-util = { version = "0.7", features = ["rt"] }
 uuid = { version = "1", features = ["v4"] }
-# Java emitter for `getclass` (vendored fork of asLody/dexdec, Java path only).
+# Java decompiler for `getclass`.
 dexdec = { path = "crates/dexdec" }
 memchr = "2.7"
 memmap2 = "0.9"

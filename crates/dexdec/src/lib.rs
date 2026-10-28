@@ -22,9 +22,10 @@
 //! - `analysis` - Value, type, hierarchy, and language-backend analyses
 //! - `language` - Typed target-language ASTs and printers
 
-// This is a large maintained upstream snapshot. The workspace gate checks its
-// build and tests, while focused rasc clippy covers code changed for the MCP
-// server.
+// The decompiler pipeline is large and still carries inherited style. The
+// workspace gate checks that it builds, while rasc's own code is linted
+// separately. Remove this allowance once the pipeline adopts the workspace lint
+// policy.
 #![allow(warnings)]
 #![allow(clippy::all)]
 
