@@ -5,7 +5,7 @@
 //! This is the fork's smoke tool: the same `from_bytes` + `class()` path rasc
 //! uses for `getclass --emitter dexdec`.
 
-use dexdec::{DecompileOptions, Decompiler, SourceLanguage};
+use dexdec::{DecompileOptions, Decompiler};
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -14,7 +14,7 @@ fn main() {
         std::process::exit(2);
     }
     let bytes = std::fs::read(&args[0]).expect("read dex");
-    let options = DecompileOptions::default().with_language(SourceLanguage::Java);
+    let options = DecompileOptions::default();
     let mut decompiler = Decompiler::from_bytes(&bytes)
         .expect("open dex")
         .with_options(options);

@@ -10,11 +10,9 @@ use std::sync::Arc;
 use rayon::prelude::*;
 
 use crate::analysis::java_backend::{FunctionObjectClass, JavaSourceAbi, SourceSignatureInference};
-use crate::analysis::kotlin_backend::KotlinSourceAbi;
 use crate::analysis::{
-    ClassMethodInput, JavaDecompiler, JavaDecompilerConfig, JavaDecompilerError, KotlinDecompiler,
-    KotlinDecompilerConfig, KotlinDecompilerError, MethodRecoveryFailure, MethodRecoveryStage,
-    NestedClassInput,
+    ClassMethodInput, JavaDecompiler, JavaDecompilerConfig, JavaDecompilerError,
+    MethodRecoveryFailure, MethodRecoveryStage, NestedClassInput,
 };
 use crate::decoder::method_decoder::MethodDecoder;
 use crate::frontend::{ClassNode, DexFileReader, DexResult, MethodCode};
@@ -36,9 +34,8 @@ pub use catalog::{
     MemberKind, MemberSummary, MemberVisitor, MethodOutline,
 };
 pub use decompiler::{
-    java_source_path, kotlin_source_path, source_path, BatchSummary, ClassBatch, ClassFailure,
-    ClassSelector, DecompileOptions, Decompiler, MethodOutput, MethodRequest, SourceLanguage,
-    SourceUnit,
+    java_source_path, source_path, BatchSummary, ClassBatch, ClassFailure, ClassSelector,
+    DecompileOptions, Decompiler, MethodOutput, MethodRequest, SourceUnit,
 };
 
 pub(crate) struct ClassRenderInput {
@@ -63,8 +60,6 @@ pub struct DecompilerContext {
     type_hierarchy_cache: Option<(u64, Arc<crate::ir::analysis::ClassHierarchyIndex>)>,
     /// Immutable target-language ABI facts shared by one class-graph revision.
     java_source_abi_cache: Option<(u64, Arc<JavaSourceAbi>)>,
-    kotlin_source_abi_cache: Option<(u64, Arc<KotlinSourceAbi>)>,
-    kotlin_contract_roots: std::collections::BTreeSet<MethodReference>,
 }
 
 trait SourceBackend {
@@ -94,7 +89,6 @@ trait SourceBackend {
 }
 
 struct JavaSourceBackend;
-struct KotlinSourceBackend;
 
 impl SourceBackend for JavaSourceBackend {
     type Config = JavaDecompilerConfig;
@@ -138,48 +132,6 @@ impl SourceBackend for JavaSourceBackend {
     }
 }
 
-impl SourceBackend for KotlinSourceBackend {
-    type Config = KotlinDecompilerConfig;
-
-    fn prepare_context(context: &mut DecompilerContext) -> Result<(), DecompileError> {
-        context.kotlin_source_abi().map(|_| ())
-    }
-
-    fn generate_method(
-        context: &mut DecompilerContext,
-        config: &Self::Config,
-        observer: Arc<dyn crate::ir::AnalysisObserver>,
-        hierarchy: Arc<crate::ir::analysis::ClassHierarchyIndex>,
-        class: &ClassNode,
-        method: &crate::frontend::MethodNode,
-        cfg: &mut CFG,
-    ) -> Result<String, DecompileError> {
-        KotlinDecompiler::new(config.clone())
-            .with_shared_type_hierarchy(hierarchy)
-            .with_source_abi(context.kotlin_source_abi()?)
-            .with_analysis_observer(observer)
-            .generate_method_with_context(class, method, cfg)
-            .map_err(DecompileError::from)
-    }
-
-    fn generate_class(
-        context: &mut DecompilerContext,
-        config: &Self::Config,
-        observer: Arc<dyn crate::ir::AnalysisObserver>,
-        hierarchy: Arc<crate::ir::analysis::ClassHierarchyIndex>,
-        class: &ClassNode,
-        methods: &mut Vec<ClassMethodInput>,
-        nested: Vec<NestedClassInput>,
-    ) -> Result<String, DecompileError> {
-        KotlinDecompiler::new(config.clone())
-            .with_shared_type_hierarchy(hierarchy)
-            .with_source_abi(context.kotlin_source_abi()?)
-            .with_analysis_observer(observer)
-            .generate_class_with_nested(class, methods, nested)
-            .map_err(DecompileError::from)
-    }
-}
-
 impl DecompilerContext {
     /// Create a context from an already parsed reader.
     pub fn from_reader(reader: DexFileReader) -> Self {
@@ -190,8 +142,6 @@ impl DecompilerContext {
             retain_decoded_methods: false,
             type_hierarchy_cache: None,
             java_source_abi_cache: None,
-            kotlin_source_abi_cache: None,
-            kotlin_contract_roots: std::collections::BTreeSet::new(),
         }
     }
 
@@ -228,8 +178,6 @@ impl DecompilerContext {
         self.clear_method_cache();
         self.type_hierarchy_cache = None;
         self.java_source_abi_cache = None;
-        self.kotlin_source_abi_cache = None;
-        self.kotlin_contract_roots.clear();
         &mut self.reader
     }
 
@@ -353,8 +301,6 @@ impl DecompilerContext {
         self.clear_method_cache();
         self.type_hierarchy_cache = None;
         self.java_source_abi_cache = None;
-        self.kotlin_source_abi_cache = None;
-        self.kotlin_contract_roots.clear();
     }
 
     /// Decode a method's bytecode into IR
@@ -565,7 +511,7 @@ impl DecompilerContext {
     }
 
     /// Resolve member identities without changing the decoder's raw register
-    /// arguments or inferred types. Archive-wide Kotlin nullability consumes
+    /// arguments or inferred types. Archive-wide source-ABI analysis consumes
     /// this representation before full source-generation enrichment.
     fn resolve_member_references_with(
         reader: &DexFileReader,
@@ -669,52 +615,6 @@ impl DecompilerContext {
         self.type_hierarchy_cache = Some((revision, Arc::clone(&hierarchy)));
         crate::analysis::method_override::freeze_default_platform_class_details();
         Ok(hierarchy)
-    }
-
-    fn kotlin_source_abi(&mut self) -> Result<Arc<KotlinSourceAbi>, DecompileError> {
-        let revision = self.reader.loaded_classes_revision();
-        if let Some((cached_revision, source_abi)) = &self.kotlin_source_abi_cache {
-            if *cached_revision == revision {
-                return Ok(Arc::clone(source_abi));
-            }
-        }
-        let mut attempted = std::collections::BTreeSet::new();
-        loop {
-            let source_abi = Arc::new(KotlinSourceAbi::analyze(
-                self.reader.classes(),
-                &self.kotlin_contract_roots,
-                |class, method_index| {
-                    let dex_index = self.reader.get_dex_index(class.type_descriptor())?;
-                    self.reader
-                        .get_method(dex_index, method_index)?
-                        .to_string()
-                        .parse()
-                        .ok()
-                },
-                |class, field_index| {
-                    let dex_index = self.reader.get_dex_index(class.type_descriptor())?;
-                    self.reader
-                        .get_field(dex_index, field_index)?
-                        .to_string()
-                        .parse()
-                        .ok()
-                },
-            ));
-            let dependencies = source_abi
-                .analysis_dependencies()
-                .map(ArgType::to_descriptor)
-                .filter(|owner| attempted.insert(owner.clone()))
-                .collect::<Vec<_>>();
-            let before = self.reader.loaded_classes_revision();
-            for owner in dependencies {
-                self.reader.load_class(&owner)?;
-            }
-            if self.reader.loaded_classes_revision() == before {
-                let revision = self.reader.loaded_classes_revision();
-                self.kotlin_source_abi_cache = Some((revision, Arc::clone(&source_abi)));
-                return Ok(source_abi);
-            }
-        }
     }
 
     fn prepare_java_source_abi(&mut self) -> Result<(), DecompileError> {
@@ -826,45 +726,6 @@ impl DecompilerContext {
         Ok(cfg)
     }
 
-    /// Decompile a method to Kotlin source with custom structured codegen config.
-    ///
-    /// This is retained as a focused method-level debugging entry point. The main
-    /// Kotlin source output path is class-level `decompile_class`.
-    pub fn decompile_method_with_config(
-        &mut self,
-        class_name: &str,
-        method_name: &str,
-        descriptor: Option<&str>,
-        config: &KotlinDecompilerConfig,
-    ) -> Result<Option<String>, DecompileError> {
-        self.decompile_method_with_config_and_observer(
-            class_name,
-            method_name,
-            descriptor,
-            config,
-            Arc::new(crate::ir::NullAnalysisObserver),
-        )
-    }
-
-    /// Decompile one method with the same class and source-ABI context as the
-    /// production path while exposing structured analysis events.
-    pub fn decompile_method_with_config_and_observer(
-        &mut self,
-        class_name: &str,
-        method_name: &str,
-        descriptor: Option<&str>,
-        config: &KotlinDecompilerConfig,
-        observer: Arc<dyn crate::ir::AnalysisObserver>,
-    ) -> Result<Option<String>, DecompileError> {
-        self.decompile_method_with_backend::<KotlinSourceBackend>(
-            class_name,
-            method_name,
-            descriptor,
-            config,
-            observer,
-        )
-    }
-
     pub fn decompile_java_method_with_config(
         &mut self,
         class_name: &str,
@@ -951,7 +812,6 @@ impl DecompilerContext {
         let mut source_dependencies = SourceAbiClosure::from_cfgs(std::iter::once(&ir));
         source_dependencies.include_class(&class_node);
         source_dependencies.load(&mut self.reader, observer.as_ref())?;
-        self.set_kotlin_contract_roots(contract_roots(std::iter::once(&ir)));
         let termination = self.method_termination(vec![ir.clone()], observer.as_ref())?;
         termination.apply(&mut ir);
         self.prepare_source_backend::<B>()?;
@@ -967,79 +827,6 @@ impl DecompilerContext {
         )?;
 
         Ok(Some(output))
-    }
-
-    /// Decompile a single method to Kotlin source.
-    ///
-    /// This is a high-level method that handles all steps:
-    /// 1. Loads the class if not already loaded
-    /// 2. Decodes the method bytecode to IR
-    /// 3. Resolves symbol references
-    /// 4. Structures the control flow
-    /// 5. Generates readable Kotlin method code
-    pub fn decompile_method(
-        &mut self,
-        class_name: &str,
-        method_name: &str,
-        descriptor: Option<&str>,
-    ) -> Result<Option<String>, DecompileError> {
-        // Load class if needed
-        if self.reader.get_class(class_name).is_none() {
-            self.load_class(class_name)?;
-        }
-
-        self.decompile_method_with_config(
-            class_name,
-            method_name,
-            descriptor,
-            &KotlinDecompilerConfig::default(),
-        )
-    }
-
-    /// Decompile a class to typed Kotlin source.
-    pub fn decompile_class(&mut self, class_name: &str) -> Result<Option<String>, DecompileError> {
-        self.decompile_class_with_config(class_name, &KotlinDecompilerConfig::default())
-    }
-
-    /// Decompile a class to typed Kotlin source with backend configuration.
-    pub fn decompile_class_with_config(
-        &mut self,
-        class_name: &str,
-        config: &KotlinDecompilerConfig,
-    ) -> Result<Option<String>, DecompileError> {
-        self.decompile_class_with_inner(class_name, config, true)
-    }
-
-    /// Decompile `class_name` together with any nested inner classes,
-    /// rendering them as a single source file. When `include_inner` is `false`,
-    /// only the explicitly requested class is rendered.
-    pub fn decompile_class_with_inner(
-        &mut self,
-        class_name: &str,
-        config: &KotlinDecompilerConfig,
-        include_inner: bool,
-    ) -> Result<Option<String>, DecompileError> {
-        self.decompile_class_observed(
-            class_name,
-            config,
-            include_inner,
-            Arc::new(crate::ir::NullAnalysisObserver),
-        )
-    }
-
-    pub(super) fn decompile_class_observed(
-        &mut self,
-        class_name: &str,
-        config: &KotlinDecompilerConfig,
-        include_inner: bool,
-        observer: Arc<dyn crate::ir::AnalysisObserver>,
-    ) -> Result<Option<String>, DecompileError> {
-        self.decompile_class_with_backend::<KotlinSourceBackend>(
-            class_name,
-            config,
-            include_inner,
-            observer,
-        )
     }
 
     pub fn decompile_java_class_with_inner(
@@ -1156,7 +943,6 @@ impl DecompilerContext {
                 .filter_map(|method| method.cfg().cloned())
                 .collect::<Vec<_>>();
             collect_nested_cfgs(&inner, &mut termination_roots);
-            self.set_kotlin_contract_roots(contract_roots(termination_roots.iter()));
             let termination = self.method_termination(termination_roots, observer.as_ref())?;
             for method in &mut method_models {
                 if let Some(cfg) = method.cfg_mut() {
@@ -1184,46 +970,23 @@ impl DecompilerContext {
 
     pub(crate) fn prepare_archive_source_abi_before_termination(
         &mut self,
-        prepare_java: bool,
-        prepare_kotlin: bool,
     ) -> Result<(), DecompileError> {
         let stats = std::env::var_os("DEXDEC_BATCH_STATS").is_some();
-        if prepare_kotlin {
-            let roots = self
-                .method_irs
-                .values()
-                .flat_map(|methods| methods.values())
-                .collect::<Vec<_>>();
-            self.set_kotlin_contract_roots(contract_roots(roots.into_iter()));
-        }
-        if prepare_java {
-            let started = crate::timing::Instant::now();
-            self.prepare_java_source_abi_with_cached_resolution(true)?;
-            if stats {
-                eprintln!(
-                    "dexdec batch: java_abi={:.0}ms",
-                    started.elapsed().as_secs_f64() * 1000.0
-                );
-            }
+        let started = crate::timing::Instant::now();
+        self.prepare_java_source_abi_with_cached_resolution(true)?;
+        if stats {
+            eprintln!(
+                "dexdec batch: java_abi={:.0}ms",
+                started.elapsed().as_secs_f64() * 1000.0
+            );
         }
         Ok(())
     }
 
-    pub(crate) fn prepare_archive_source_abi_after_termination(
+    pub(crate) fn resolve_archive_symbols_after_termination(
         &mut self,
-        prepare_kotlin: bool,
     ) -> Result<(), DecompileError> {
         let stats = std::env::var_os("DEXDEC_BATCH_STATS").is_some();
-        if prepare_kotlin {
-            let started = crate::timing::Instant::now();
-            self.prepare_kotlin_source_abi_from_archive_cfgs()?;
-            if stats {
-                eprintln!(
-                    "dexdec batch: kotlin_abi={:.0}ms",
-                    started.elapsed().as_secs_f64() * 1000.0
-                );
-            }
-        }
         self.resolve_archive_method_symbols()?;
         let started = crate::timing::Instant::now();
         self.type_hierarchy()?;
@@ -1234,60 +997,6 @@ impl DecompilerContext {
             );
         }
         Ok(())
-    }
-
-    fn prepare_kotlin_source_abi_from_archive_cfgs(
-        &mut self,
-    ) -> Result<Arc<KotlinSourceAbi>, DecompileError> {
-        let revision = self.reader.loaded_classes_revision();
-        if let Some((cached_revision, source_abi)) = &self.kotlin_source_abi_cache {
-            if *cached_revision == revision {
-                return Ok(Arc::clone(source_abi));
-            }
-        }
-        let source_abi = {
-            let reader = &self.reader;
-            Arc::new(KotlinSourceAbi::analyze_with_preterminated_cfgs(
-                reader.classes(),
-                &self.kotlin_contract_roots,
-                self.method_irs
-                    .values()
-                    .flat_map(|methods| methods.values()),
-                |class, method_index| {
-                    let dex_index = reader.get_dex_index(class.type_descriptor())?;
-                    reader
-                        .get_method(dex_index, method_index)?
-                        .to_string()
-                        .parse()
-                        .ok()
-                },
-                |class, field_index| {
-                    let dex_index = reader.get_dex_index(class.type_descriptor())?;
-                    reader
-                        .get_field(dex_index, field_index)?
-                        .to_string()
-                        .parse()
-                        .ok()
-                },
-            ))
-        };
-        let dependencies = source_abi
-            .analysis_dependencies()
-            .map(ArgType::to_descriptor)
-            .collect::<Vec<_>>();
-        let before = self.reader.loaded_classes_revision();
-        for owner in dependencies {
-            self.reader.load_class(&owner)?;
-        }
-        if self.reader.loaded_classes_revision() != before {
-            // The decoded archive set no longer covers every loaded class.
-            // Fall back to the standalone path, which decodes the expanded
-            // graph and preserves the interactive/subset behavior exactly.
-            return self.kotlin_source_abi();
-        }
-        let revision = self.reader.loaded_classes_revision();
-        self.kotlin_source_abi_cache = Some((revision, Arc::clone(&source_abi)));
-        Ok(source_abi)
     }
 
     fn resolve_archive_method_symbols(&mut self) -> Result<(), DecompileError> {
@@ -1451,13 +1160,6 @@ impl DecompilerContext {
         }
     }
 
-    fn set_kotlin_contract_roots(&mut self, roots: std::collections::BTreeSet<MethodReference>) {
-        if self.kotlin_contract_roots != roots {
-            self.kotlin_contract_roots = roots;
-            self.kotlin_source_abi_cache = None;
-        }
-    }
-
     fn refresh_nested_class_nodes(reader: &DexFileReader, inputs: &mut [NestedClassInput]) {
         let mut pending = inputs.iter_mut().collect::<Vec<_>>();
         while let Some(input) = pending.pop() {
@@ -1540,11 +1242,11 @@ impl DecompilerContext {
         &mut self,
         class_name: &str,
     ) -> Result<NestedClassInput, DecompileError> {
-        let class = self.reader.get_class(class_name).cloned().ok_or_else(|| {
-            DecompileError::from(KotlinDecompilerError::MissingNestedClass(
-                class_name.to_string(),
-            ))
-        })?;
+        let class = self
+            .reader
+            .get_class(class_name)
+            .cloned()
+            .ok_or_else(|| DecompileError::MissingNestedClass(class_name.to_string()))?;
         let mut methods = Vec::new();
         for method in class
             .methods()
@@ -1584,16 +1286,12 @@ impl DecompilerContext {
             match task {
                 NestedInputTask::Load(class_name) => {
                     if !seen.insert(class_name.clone()) {
-                        return Err(DecompileError::from(
-                            KotlinDecompilerError::NestedClassCycle(class_name),
-                        ));
+                        return Err(DecompileError::NestedClassCycle(class_name));
                     }
                     self.load_inner_class(&class_name)?;
                     let class_node =
                         self.reader.get_class(&class_name).cloned().ok_or_else(|| {
-                            DecompileError::from(KotlinDecompilerError::MissingNestedClass(
-                                class_name.clone(),
-                            ))
+                            DecompileError::MissingNestedClass(class_name.clone())
                         })?;
                     let mut methods = Vec::new();
                     for method in class_node
@@ -1623,10 +1321,10 @@ impl DecompilerContext {
                     child_count,
                 } => {
                     let start = results.len().checked_sub(child_count).ok_or_else(|| {
-                        DecompileError::from(KotlinDecompilerError::MalformedNestedClassStack {
+                        DecompileError::MalformedNestedClassStack {
                             expected: child_count,
                             actual: results.len(),
-                        })
+                        }
                     })?;
                     let mut nested = results.drain(start..).collect::<Vec<_>>();
                     sort_nested_inputs(&mut nested);
@@ -1640,12 +1338,10 @@ impl DecompilerContext {
         }
 
         if results.len() != root_count {
-            return Err(DecompileError::from(
-                KotlinDecompilerError::MalformedNestedClassStack {
-                    expected: root_count,
-                    actual: results.len(),
-                },
-            ));
+            return Err(DecompileError::MalformedNestedClassStack {
+                expected: root_count,
+                actual: results.len(),
+            });
         }
         let mut nested = results;
         sort_nested_inputs(&mut nested);
@@ -1678,27 +1374,6 @@ fn exact_call_targets(cfg: &CFG) -> impl Iterator<Item = MethodReference> + '_ {
                 _ => None,
             },
         )
-}
-
-fn contract_roots<'a>(
-    cfgs: impl IntoIterator<Item = &'a CFG>,
-) -> std::collections::BTreeSet<MethodReference> {
-    let mut roots = std::collections::BTreeSet::new();
-    for cfg in cfgs {
-        roots.insert(cfg_method_reference(cfg));
-        roots.extend(
-            cfg.blocks
-                .values()
-                .flat_map(|block| &block.insns)
-                .filter_map(
-                    |instruction| match instruction.payload.reference.as_deref() {
-                        Some(MemberReference::Method(method)) => Some(method.clone()),
-                        _ => None,
-                    },
-                ),
-        );
-    }
-    roots
 }
 
 fn collect_nested_cfgs(inputs: &[NestedClassInput], output: &mut Vec<CFG>) {
@@ -2069,8 +1744,12 @@ pub enum DecompileError {
     DexError(crate::frontend::DexError),
     /// Java semantic recovery or source generation failed.
     Java(JavaDecompilerError),
-    /// Kotlin semantic recovery or source generation failed.
-    Kotlin(KotlinDecompilerError),
+    /// An inner class referenced by the class graph is absent from the input.
+    MissingNestedClass(String),
+    /// Inner-class ownership in the class graph is cyclic or duplicated.
+    NestedClassCycle(String),
+    /// The nested-class input stack does not match the class graph.
+    MalformedNestedClassStack { expected: usize, actual: usize },
     /// A requested class is not present in the input.
     ClassNotFound(String),
     /// A requested method is not present in its declaring class.
@@ -2093,7 +1772,22 @@ impl std::fmt::Display for DecompileError {
             Self::Cancelled(error) => error.fmt(f),
             Self::DexError(e) => write!(f, "DEX error: {}", e),
             Self::Java(e) => write!(f, "Java generation failed: {e}"),
-            Self::Kotlin(e) => write!(f, "Kotlin generation failed: {e}"),
+            Self::MissingNestedClass(class) => {
+                write!(
+                    f,
+                    "nested class {class} is absent from the loaded DEX graph"
+                )
+            }
+            Self::NestedClassCycle(class) => {
+                write!(
+                    f,
+                    "nested-class ownership is cyclic or duplicated at {class}"
+                )
+            }
+            Self::MalformedNestedClassStack { expected, actual } => write!(
+                f,
+                "nested-class model stack has {actual} entries, expected at least {expected}"
+            ),
             Self::ClassNotFound(class) => write!(f, "class not found: {class}"),
             Self::MethodNotFound {
                 class,
@@ -2125,10 +1819,12 @@ impl std::error::Error for DecompileError {
             Self::Cancelled(source) => Some(source),
             Self::DexError(source) => Some(source),
             Self::Java(source) => Some(source),
-            Self::Kotlin(source) => Some(source),
-            Self::ClassNotFound(_) | Self::MethodNotFound { .. } | Self::AmbiguousMethod { .. } => {
-                None
-            }
+            Self::ClassNotFound(_)
+            | Self::MethodNotFound { .. }
+            | Self::AmbiguousMethod { .. }
+            | Self::MissingNestedClass(_)
+            | Self::NestedClassCycle(_)
+            | Self::MalformedNestedClassStack { .. } => None,
         }
     }
 }
@@ -2142,12 +1838,6 @@ impl From<crate::frontend::DexError> for DecompileError {
 impl From<crate::ir::AnalysisCancelled> for DecompileError {
     fn from(error: crate::ir::AnalysisCancelled) -> Self {
         Self::Cancelled(error)
-    }
-}
-
-impl From<KotlinDecompilerError> for DecompileError {
-    fn from(e: KotlinDecompilerError) -> Self {
-        Self::Kotlin(e)
     }
 }
 

@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 use crate::frontend::{ClassNode, DexFileReader, DexMemberDeclaration, DexMemberKind, DexResult};
 
-use super::kotlin_source_path;
+use super::java_source_path;
 
 /// A lightweight archive index built without loading or decompiling classes.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -148,7 +148,7 @@ impl ClassSummary {
             format!("{package}.{binary_name}")
         };
         Self {
-            source_path: kotlin_source_path(&descriptor),
+            source_path: java_source_path(&descriptor),
             descriptor,
             qualified_name,
             package,
@@ -159,7 +159,7 @@ impl ClassSummary {
     }
 }
 
-/// Kotlin declaration category for an inspected class.
+/// Declaration category for an inspected class.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum ClassKind {
@@ -284,7 +284,7 @@ mod tests {
         );
         assert_eq!(
             summary.source_path,
-            PathBuf::from("org/example/`Outer$Inner`.kt")
+            PathBuf::from("org/example/Outer$Inner.java")
         );
     }
 }

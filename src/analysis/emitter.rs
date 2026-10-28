@@ -19,9 +19,7 @@ pub(crate) struct ReusableEmitter {
 
 impl ReusableEmitter {
     pub(crate) fn from_bytes(data: &[u8]) -> Result<Self> {
-        let options = dexdec::DecompileOptions::default()
-            .with_language(dexdec::SourceLanguage::Java)
-            .with_isolated_requests(true);
+        let options = dexdec::DecompileOptions::default().with_isolated_requests(true);
         let decompiler = dexdec::Decompiler::from_bytes(data)
             .context("parse DEX for the Java emitter")?
             .with_options(options);

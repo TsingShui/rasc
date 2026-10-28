@@ -41,12 +41,11 @@ pub mod visualizer;
 
 // Re-export main types for convenience
 pub use api::{
-    decode_method, java_source_path, kotlin_source_path, load_dex, source_path, ArchiveCatalog,
-    ArchiveMemberCatalog, BatchSummary, ClassBatch, ClassFailure, ClassKind, ClassOutline,
-    ClassSelector, ClassSummary, DecodedMethod, DecompileError, DecompileOptions, Decompiler,
-    DecompilerContext, FieldOutline, MemberKind, MemberSummary, MemberVisitor, MethodOutline,
-    MethodOutput, MethodRequest, ReferenceLocation, ReferenceResults, ReferenceTarget,
-    SourceLanguage, SourceUnit,
+    decode_method, java_source_path, load_dex, source_path, ArchiveCatalog, ArchiveMemberCatalog,
+    BatchSummary, ClassBatch, ClassFailure, ClassKind, ClassOutline, ClassSelector, ClassSummary,
+    DecodedMethod, DecompileError, DecompileOptions, Decompiler, DecompilerContext, FieldOutline,
+    MemberKind, MemberSummary, MemberVisitor, MethodOutline, MethodOutput, MethodRequest,
+    ReferenceLocation, ReferenceResults, ReferenceTarget, SourceUnit,
 };
 pub use frontend::{ClassNode, DexError, DexFileReader, DexResult, MethodCode, MethodNode};
 pub use platform_symbols::{
@@ -69,7 +68,4 @@ pub use ir::{CatchHandler, ExceptionAnalysis, TryRegion};
 pub use visualizer::{method_to_dot, method_to_text};
 
 // Analysis and code generation
-pub use analysis::{
-    JavaDecompiler, JavaDecompilerConfig, JavaDecompilerError, KotlinDecompiler,
-    KotlinDecompilerConfig, KotlinDecompilerError,
-};
+pub use analysis::{JavaDecompiler, JavaDecompilerConfig, JavaDecompilerError};

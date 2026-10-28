@@ -8,9 +8,9 @@ shipped application or command in this repository; the supported product is the 
 rasc passes one DEX entry and a class descriptor to the library:
 
 ```rust
-use dexdec::{DecompileOptions, Decompiler, SourceLanguage};
+use dexdec::{DecompileOptions, Decompiler};
 
-let options = DecompileOptions::default().with_language(SourceLanguage::Java);
+let options = DecompileOptions::default();
 let mut decompiler = Decompiler::from_bytes(dex_bytes)?.with_options(options);
 let unit = decompiler.class("Lcom/example/App;".to_owned())?;
 println!("{}", unit.source);
@@ -18,8 +18,10 @@ println!("{}", unit.source);
 ```
 
 The integration seam is the DEX entry bytes. dexdec owns its frontend, CFG/SSA, semantic IR,
-source recovery, and Java/Kotlin printers; rasc does not adapt its own scanner model into that
-pipeline.
+source recovery, and Java printer; rasc does not adapt its own scanner model into that
+pipeline. The Kotlin output backend was removed with the Java-only CLI; DEX-level Kotlin facts
+that shape Java output (Intrinsics guards, inline-finally markers, default-argument masks)
+remain.
 
 ## Local examples
 

@@ -281,7 +281,7 @@ impl AccessInfo {
         }
     }
 
-    /// Build modifier string for Kotlin source code
+    /// Build a modifier string for display.
     pub fn to_modifier_string(&self) -> String {
         let mut parts = Vec::new();
 

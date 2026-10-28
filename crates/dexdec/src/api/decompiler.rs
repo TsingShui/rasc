@@ -9,16 +9,11 @@ use rayon::prelude::*;
 
 use super::ClassRenderInput;
 use crate::analysis::java_backend::JavaSourceAbi;
-use crate::analysis::kotlin_backend::KotlinSourceAbi;
-use crate::analysis::{
-    JavaDecompiler, JavaDecompilerConfig, KotlinDecompiler, KotlinDecompilerConfig,
-};
-use crate::frontend::kotlin_metadata::KotlinMetadata;
+use crate::analysis::{JavaDecompiler, JavaDecompilerConfig};
 use crate::frontend::DexFileReader;
 use crate::ir::analysis::ClassHierarchyIndex;
 use crate::ir::{AnalysisObserver, NullAnalysisObserver};
 use crate::language::java::JavaIdentifier;
-use crate::language::kotlin::KotlinIdentifier;
 
 use super::{
     ArchiveCatalog, ArchiveMemberCatalog, ClassOutline, ReferenceLocation, ReferenceResults,
@@ -26,20 +21,11 @@ use super::{
 };
 use super::{DecompileError, DecompilerContext};
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub enum SourceLanguage {
-    Java,
-    #[default]
-    Kotlin,
-}
-
 /// Source-generation settings shared by method and class requests.
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct DecompileOptions {
-    pub language: SourceLanguage,
     pub java: JavaDecompilerConfig,
-    pub kotlin: KotlinDecompilerConfig,
     pub include_nested: bool,
     /// When true (default), each class request discards the loaded class graph
     /// so one interactive lookup cannot leak into the next. Full-archive
@@ -48,18 +34,8 @@ pub struct DecompileOptions {
 }
 
 impl DecompileOptions {
-    pub fn with_language(mut self, language: SourceLanguage) -> Self {
-        self.language = language;
-        self
-    }
-
     pub fn with_java(mut self, java: JavaDecompilerConfig) -> Self {
         self.java = java;
-        self
-    }
-
-    pub fn with_kotlin(mut self, kotlin: KotlinDecompilerConfig) -> Self {
-        self.kotlin = kotlin;
         self
     }
 
@@ -77,9 +53,7 @@ impl DecompileOptions {
 impl Default for DecompileOptions {
     fn default() -> Self {
         Self {
-            language: SourceLanguage::default(),
             java: JavaDecompilerConfig::default(),
-            kotlin: KotlinDecompilerConfig::default(),
             include_nested: true,
             isolate_requests: true,
         }
@@ -143,7 +117,6 @@ impl MethodRequest {
 #[non_exhaustive]
 pub struct SourceUnit {
     pub class: String,
-    pub language: SourceLanguage,
     pub path: PathBuf,
     pub method_count: usize,
     pub source: String,
@@ -154,7 +127,6 @@ pub struct SourceUnit {
 #[non_exhaustive]
 pub struct MethodOutput {
     pub request: MethodRequest,
-    pub language: SourceLanguage,
     pub source: Option<String>,
 }
 
@@ -281,29 +253,6 @@ impl Decompiler {
             .reader()
             .visit_member_declarations(|member| visitor.visit(member.into()))
             .map_err(Into::into)
-    }
-
-    /// The language a class was written in, as far as the class itself says.
-    ///
-    /// The Kotlin compiler stamps everything it emits with `@kotlin.Metadata`,
-    /// down to the synthetic classes it makes for lambdas. R8 often strips that
-    /// annotation but leaves the DEX `SourceFile` (`.kt`), which is the same
-    /// attribute JADX uses to recover Kotlin file names. A class with neither
-    /// signal is read back as Java.
-    ///
-    /// Only the class declaration is read; no method body is decoded.
-    pub fn source_language(
-        &mut self,
-        class: impl Into<String>,
-    ) -> Result<SourceLanguage, DecompileError> {
-        let class = class.into();
-        let Some(node) = self.context.load_class_deferred(&class)? else {
-            return Err(DecompileError::ClassNotFound(class));
-        };
-        Ok(inferred_source_language(
-            &node.annotations,
-            node.source_file.as_deref(),
-        ))
     }
 
     /// Inspect one class declaration without decoding any method body.
@@ -439,29 +388,16 @@ impl Decompiler {
             }
         };
         request.descriptor = Some(descriptor.clone());
-        let source = match self.options.language {
-            SourceLanguage::Java => self
-                .context
-                .decompile_java_method_with_config_and_observer(
-                    &request.class,
-                    &request.method,
-                    Some(&descriptor),
-                    &self.options.java,
-                    Arc::clone(&self.observer),
-                )?,
-            SourceLanguage::Kotlin => self.context.decompile_method_with_config_and_observer(
+        let source = self
+            .context
+            .decompile_java_method_with_config_and_observer(
                 &request.class,
                 &request.method,
                 Some(&descriptor),
-                &self.options.kotlin,
+                &self.options.java,
                 Arc::clone(&self.observer),
-            )?,
-        };
-        Ok(MethodOutput {
-            request,
-            language: self.options.language,
-            source,
-        })
+            )?;
+        Ok(MethodOutput { request, source })
     }
 
     pub fn classes(&mut self, selector: ClassSelector) -> Result<ClassBatch<'_>, DecompileError> {
@@ -483,7 +419,7 @@ impl Decompiler {
     /// again.
     pub fn generate_classes(
         &mut self,
-        classes: Vec<(String, SourceLanguage)>,
+        classes: Vec<String>,
     ) -> Result<Vec<Result<SourceUnit, ClassFailure>>, DecompileError> {
         if classes.is_empty() {
             return Ok(Vec::new());
@@ -491,8 +427,7 @@ impl Decompiler {
         if self.options.isolate_requests || classes.len() == 1 {
             return Ok(classes
                 .into_iter()
-                .map(|(class, language)| {
-                    self.set_options(self.options.clone().with_language(language));
+                .map(|class| {
                     let class_name = class.clone();
                     let method_count = self
                         .context
@@ -507,28 +442,18 @@ impl Decompiler {
                 .collect());
         }
 
-        let needs_java = classes
-            .iter()
-            .any(|(_, language)| *language == SourceLanguage::Java);
-        let needs_kotlin = classes
-            .iter()
-            .any(|(_, language)| *language == SourceLanguage::Kotlin);
         let include_nested = self.options.include_nested;
-        self.context.load_archive_selection(
-            classes.iter().map(|(class, _)| class.as_str()),
-            include_nested,
-        )?;
+        self.context
+            .load_archive_selection(classes.iter().map(String::as_str), include_nested)?;
         self.context.set_retain_decoded_methods(true);
-        let generated = self.generate_archive_classes(classes, needs_java, needs_kotlin);
+        let generated = self.generate_archive_classes(classes);
         self.context.set_retain_decoded_methods(false);
         generated
     }
 
     fn generate_archive_classes(
         &mut self,
-        classes: Vec<(String, SourceLanguage)>,
-        needs_java: bool,
-        needs_kotlin: bool,
+        classes: Vec<String>,
     ) -> Result<Vec<Result<SourceUnit, ClassFailure>>, DecompileError> {
         let stats = batch_stats_enabled();
         let t0 = Instant::now();
@@ -539,14 +464,13 @@ impl Decompiler {
         let prefetch_ms = t1.elapsed();
         let t2 = Instant::now();
         self.context
-            .prepare_archive_source_abi_before_termination(needs_java, needs_kotlin)?;
+            .prepare_archive_source_abi_before_termination()?;
         let abi_prefix_ms = t2.elapsed();
         let t3 = Instant::now();
         self.context.apply_archive_termination()?;
         let termination_ms = t3.elapsed();
         let t4 = Instant::now();
-        self.context
-            .prepare_archive_source_abi_after_termination(needs_kotlin)?;
+        self.context.resolve_archive_symbols_after_termination()?;
         let abi_ms = abi_prefix_ms + t4.elapsed();
 
         let include_nested = self.options.include_nested;
@@ -555,7 +479,7 @@ impl Decompiler {
         let mut ready = Vec::new();
         let mut finished: Vec<Option<Result<SourceUnit, ClassFailure>>> =
             (0..classes.len()).map(|_| None).collect();
-        for (index, (class, language)) in classes.into_iter().enumerate() {
+        for (index, class) in classes.into_iter().enumerate() {
             let method_count = self
                 .context
                 .get_class(&class)
@@ -570,7 +494,6 @@ impl Decompiler {
                     index,
                     ArchiveClassJob {
                         class,
-                        language,
                         method_count,
                         input,
                     },
@@ -594,22 +517,10 @@ impl Decompiler {
 
         let collect_ms = t4.elapsed();
         let hierarchy = self.context.type_hierarchy()?;
-        if needs_java {
-            self.context.prepare_java_source_abi()?;
-        }
-        let java_abi = if needs_java {
-            self.context.java_source_abi()
-        } else {
-            Arc::new(JavaSourceAbi::default())
-        };
-        let kotlin_abi = if needs_kotlin {
-            self.context.kotlin_source_abi()?
-        } else {
-            Arc::new(KotlinSourceAbi::default())
-        };
+        self.context.prepare_java_source_abi()?;
+        let java_abi = self.context.java_source_abi();
         self.context.abandon_archive_buffers();
         let java = self.options.java.clone();
-        let kotlin = self.options.kotlin.clone();
         let observer = Arc::clone(&self.observer);
 
         let t5 = Instant::now();
@@ -619,15 +530,7 @@ impl Decompiler {
             .map(|(index, job)| {
                 let started = Instant::now();
                 let class = job.class.clone();
-                let result = render_archive_job(
-                    job,
-                    &java,
-                    &kotlin,
-                    &hierarchy,
-                    &java_abi,
-                    &kotlin_abi,
-                    &observer,
-                );
+                let result = render_archive_job(job, &java, &hierarchy, &java_abi, &observer);
                 (index, class, started.elapsed(), result)
             })
             .collect::<Vec<_>>();
@@ -680,28 +583,19 @@ impl Decompiler {
             .ok_or_else(|| DecompileError::ClassNotFound(class.clone()))?
             .methods()
             .len();
-        let generated = match self.options.language {
-            SourceLanguage::Java => self.context.decompile_java_class_observed(
-                &class,
-                &self.options.java,
-                self.options.include_nested,
-                Arc::clone(&self.observer),
-            ),
-            SourceLanguage::Kotlin => self.context.decompile_class_observed(
-                &class,
-                &self.options.kotlin,
-                self.options.include_nested,
-                Arc::clone(&self.observer),
-            ),
-        };
-        let source = generated?.ok_or_else(|| DecompileError::ClassNotFound(class.clone()))?;
+        let source = self.context.decompile_java_class_observed(
+            &class,
+            &self.options.java,
+            self.options.include_nested,
+            Arc::clone(&self.observer),
+        )?;
+        let source = source.ok_or_else(|| DecompileError::ClassNotFound(class.clone()))?;
         if self.options.isolate_requests {
             self.clear_analysis_scope();
         }
         Ok(SourceUnit {
-            path: source_path(&class, self.options.language),
+            path: source_path(&class),
             class,
-            language: self.options.language,
             method_count,
             source,
         })
@@ -769,7 +663,7 @@ impl Iterator for ClassBatch<'_> {
 
 impl ExactSizeIterator for ClassBatch<'_> {}
 
-pub fn source_path(descriptor: &str, language: SourceLanguage) -> PathBuf {
+pub fn source_path(descriptor: &str) -> PathBuf {
     let binary_name = descriptor
         .strip_prefix('L')
         .and_then(|name| name.strip_suffix(';'))
@@ -779,22 +673,10 @@ pub fn source_path(descriptor: &str, language: SourceLanguage) -> PathBuf {
         .map_or(("", binary_name), |(package, name)| (package, name));
     let mut path = PathBuf::new();
     for segment in package.split('/').filter(|segment| !segment.is_empty()) {
-        path.push(match language {
-            SourceLanguage::Java => JavaIdentifier::from_dex(segment).to_string(),
-            SourceLanguage::Kotlin => KotlinIdentifier::from_dex(segment).to_string(),
-        });
+        path.push(JavaIdentifier::from_dex(segment).to_string());
     }
-    let (name, extension) = match language {
-        SourceLanguage::Java => (
-            JavaIdentifier::from_dex(binary_simple_name).to_string(),
-            "java",
-        ),
-        SourceLanguage::Kotlin => (
-            KotlinIdentifier::from_dex(binary_simple_name).to_string(),
-            "kt",
-        ),
-    };
-    path.push(format!("{name}.{extension}"));
+    let name = JavaIdentifier::from_dex(binary_simple_name).to_string();
+    path.push(format!("{name}.java"));
     path
 }
 
@@ -804,7 +686,6 @@ fn batch_stats_enabled() -> bool {
 
 struct ArchiveClassJob {
     class: String,
-    language: SourceLanguage,
     method_count: usize,
     input: ClassRenderInput,
 }
@@ -819,104 +700,49 @@ fn archive_java_parallel_methods_from(value: Option<std::ffi::OsString>) -> bool
     value.as_deref() == Some(std::ffi::OsStr::new("1"))
 }
 
-fn archive_kotlin_parallel_methods() -> bool {
-    archive_java_parallel_methods_from(std::env::var_os("DEXDEC_ARCHIVE_METHOD_PARALLEL"))
-}
-
 fn render_archive_job(
     mut job: ArchiveClassJob,
     java: &JavaDecompilerConfig,
-    kotlin: &KotlinDecompilerConfig,
     hierarchy: &Arc<ClassHierarchyIndex>,
     java_abi: &Arc<JavaSourceAbi>,
-    kotlin_abi: &Arc<KotlinSourceAbi>,
     observer: &Arc<dyn AnalysisObserver>,
 ) -> Result<SourceUnit, ClassFailure> {
-    let generated = match job.language {
-        SourceLanguage::Java => {
-            let mut decompiler = JavaDecompiler::new(java.clone())
-                .with_shared_type_hierarchy(Arc::clone(hierarchy))
-                .with_source_abi(Arc::clone(java_abi))
-                .with_analysis_observer(Arc::clone(observer))
-                .with_parallel_methods(archive_java_parallel_methods());
-            debug_assert!(
-                !decompiler.parallel_methods() || archive_java_parallel_methods(),
-                "archive Java jobs set parallel_methods=false unless DEXDEC_ARCHIVE_METHOD_PARALLEL=1"
-            );
-            decompiler
-                .generate_class_with_nested(
-                    &job.input.class_node,
-                    &mut job.input.methods,
-                    job.input.nested,
-                )
-                .map_err(DecompileError::from)
-        }
-        SourceLanguage::Kotlin => KotlinDecompiler::new(kotlin.clone())
-            .with_shared_type_hierarchy(Arc::clone(hierarchy))
-            .with_source_abi(Arc::clone(kotlin_abi))
-            .with_analysis_observer(Arc::clone(observer))
-            .with_parallel_methods(archive_kotlin_parallel_methods())
-            .generate_class_with_nested(
-                &job.input.class_node,
-                &mut job.input.methods,
-                job.input.nested,
-            )
-            .map_err(DecompileError::from),
-    };
-    match generated {
+    let mut decompiler = JavaDecompiler::new(java.clone())
+        .with_shared_type_hierarchy(Arc::clone(hierarchy))
+        .with_source_abi(Arc::clone(java_abi))
+        .with_analysis_observer(Arc::clone(observer))
+        .with_parallel_methods(archive_java_parallel_methods());
+    debug_assert!(
+        !decompiler.parallel_methods() || archive_java_parallel_methods(),
+        "archive Java jobs set parallel_methods=false unless DEXDEC_ARCHIVE_METHOD_PARALLEL=1"
+    );
+    match decompiler.generate_class_with_nested(
+        &job.input.class_node,
+        &mut job.input.methods,
+        job.input.nested,
+    ) {
         Ok(source) => Ok(SourceUnit {
-            path: source_path(&job.class, job.language),
+            path: source_path(&job.class),
             class: job.class,
-            language: job.language,
             method_count: job.method_count,
             source,
         }),
         Err(error) => Err(ClassFailure {
             class: job.class,
             method_count: job.method_count,
-            error,
+            error: DecompileError::from(error),
         }),
     }
 }
 
 /// Relative Java source path derived from a DEX class descriptor.
 pub fn java_source_path(descriptor: &str) -> PathBuf {
-    source_path(descriptor, SourceLanguage::Java)
-}
-
-/// Relative Kotlin source path derived from a DEX class descriptor.
-pub fn kotlin_source_path(descriptor: &str) -> PathBuf {
-    source_path(descriptor, SourceLanguage::Kotlin)
-}
-
-fn inferred_source_language(
-    annotations: &[crate::frontend::AnnotationNode],
-    source_file: Option<&str>,
-) -> SourceLanguage {
-    if annotations.iter().any(KotlinMetadata::is_metadata) || is_kotlin_source_file(source_file) {
-        SourceLanguage::Kotlin
-    } else {
-        SourceLanguage::Java
-    }
-}
-
-fn is_kotlin_source_file(source_file: Option<&str>) -> bool {
-    source_file.is_some_and(|name| {
-        name.ends_with(".kt") || name.ends_with(".kts") || name.ends_with(".ktm")
-    })
+    source_path(descriptor)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn source_path_uses_kotlin_identifiers() {
-        assert_eq!(
-            kotlin_source_path("Lexample/bad-name/Test$class;"),
-            PathBuf::from("example/`bad-name`/`Test$class`.kt")
-        );
-    }
 
     #[test]
     fn listed_selection_is_sorted_and_unique() {
@@ -937,39 +763,19 @@ mod tests {
     }
 
     #[test]
-    fn archive_kotlin_jobs_disable_method_parallelism() {
-        assert!(!archive_kotlin_parallel_methods());
-        let decompiler =
-            KotlinDecompiler::new(KotlinDecompilerConfig::default()).with_parallel_methods(false);
-        assert!(!decompiler.parallel_methods());
-        let parallel = KotlinDecompiler::new(KotlinDecompilerConfig::default());
-        assert!(parallel.parallel_methods());
-    }
-
-    #[test]
     fn generate_classes_loads_requested_classes_without_full_archive() {
         let dex = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/testcases/classes.dex");
         let mut decompiler = Decompiler::open(dex).expect("open test DEX");
-        decompiler.set_options(
-            DecompileOptions::default()
-                .with_language(SourceLanguage::Java)
-                .with_isolated_requests(false),
-        );
+        decompiler.set_options(DecompileOptions::default().with_isolated_requests(false));
         let results = decompiler
-            .generate_classes(vec![
-                ("LHelloWorld;".into(), SourceLanguage::Java),
-                ("LSimpleIf;".into(), SourceLanguage::Java),
-            ])
+            .generate_classes(vec!["LHelloWorld;".into(), "LSimpleIf;".into()])
             .expect("generate requested classes");
         assert_eq!(results.len(), 2);
         for result in results {
             result.expect("requested class should decompile without load_all_classes");
         }
         let again = decompiler
-            .generate_classes(vec![
-                ("LHelloWorld;".into(), SourceLanguage::Java),
-                ("LSimpleIf;".into(), SourceLanguage::Java),
-            ])
+            .generate_classes(vec!["LHelloWorld;".into(), "LSimpleIf;".into()])
             .expect("second archive pass after abandon");
         assert_eq!(again.len(), 2);
         for result in again {
@@ -981,7 +787,7 @@ mod tests {
     fn isolate_class_requests_discard_loaded_graph() {
         let dex = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/testcases/classes.dex");
         let mut decompiler = Decompiler::open(dex).expect("open test DEX");
-        decompiler.set_options(DecompileOptions::default().with_language(SourceLanguage::Java));
+        decompiler.set_options(DecompileOptions::default());
         decompiler
             .class("LHelloWorld;")
             .expect("first isolate class");
@@ -1000,22 +806,5 @@ mod tests {
     fn isolate_java_decompiler_enables_method_parallelism() {
         let decompiler = JavaDecompiler::new(JavaDecompilerConfig::default());
         assert!(decompiler.parallel_methods());
-    }
-
-    #[test]
-    fn source_file_kt_selects_kotlin_without_metadata() {
-        assert_eq!(
-            inferred_source_language(&[], Some("PipHintTracker.kt")),
-            SourceLanguage::Kotlin
-        );
-        assert_eq!(
-            inferred_source_language(&[], Some("Script.kts")),
-            SourceLanguage::Kotlin
-        );
-        assert_eq!(
-            inferred_source_language(&[], Some("Main.java")),
-            SourceLanguage::Java
-        );
-        assert_eq!(inferred_source_language(&[], None), SourceLanguage::Java);
     }
 }

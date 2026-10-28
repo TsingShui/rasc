@@ -19,7 +19,12 @@ re-apply.
 | 8 | the optional `profiling` feature, `hotpath` dependency and `profiling` module are removed; stage statistics remain on the existing `DEXDEC_*_STATS` paths | rasc does not expose the upstream profiling API and keeps no dormant instrumentation wrappers |
 | 9 | lazy id pools: `types`/`protos`/`fields`/`methods` store index rows (`u32`, `ProtoRow`, `FieldRow`, `MethodRow`) and expose `descriptor`/`render` on demand; `DexFile::merge` is `apk`-gated and returns `DexError::MergeUnsupported` | rendering every id-pool name at parse dominated a 10 MiB DEX; file-local indices make the former concatenate/sort merge invalid, so the optional APK merge entry point reports `MergeUnsupported` |
 | 10 | class directory stores id indices (`class_idx`, `superclass_idx: Option<TypeIdx>`, `interfaces: Vec<TypeIdx>`, `source_file_idx: Option<StringIdx>`); resolving accessors take `&DexTypes` / `&DexStrings` | descriptors decode only when requested, avoiding eager allocation for every class while preserving rendered names |
+| 11 | Kotlin source output removed: `analysis/kotlin_backend/`, `language/kotlin/`, `frontend/kotlin_metadata/`, `SourceLanguage`, `KotlinDecompiler*`, `KotlinSourceAbi`, `kotlin_source_path`, `DecompileOptions::{language,kotlin}`, the per-class batch language selector, and the Kotlin archive-ABI prep passes | rasc's only consumer asks for Java; the Kotlin printer was 27% of the crate and could never be selected, while its presence kept a language-detection API and a Kotlin-defaulted `DecompileOptions` alive. Nested-class gather errors move from `KotlinDecompilerError` to `DecompileError` (same messages, without the `Kotlin generation failed:` prefix) |
 
 Patch 9 changes behaviour only for the optional `rusty_dex::parse` / `DexFile::merge`
 entry point, which the default build never compiles. Patch 10 is representation-only:
 its accessors render the same descriptor and source-file text as the eager decoder.
+Patch 11 does not change Java output; it removes a code path rasc never selected. DEX-level
+Kotlin handling that shapes Java output stays: `Intrinsics` guards, `InlineMarker`
+finally delimiters, default-argument masks, `FunctionN` signatures and JADX-compatible local
+names all live in the shared IR and Java backend, not in the removed modules.

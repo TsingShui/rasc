@@ -8,7 +8,7 @@ the upstream `LICENSE` is kept as `LICENSE` in this directory.
 
 ```rust
 dexdec::Decompiler::from_bytes(dex_entry_bytes)
-    .with_options(DecompileOptions::default().with_language(SourceLanguage::Java))
+    .with_options(DecompileOptions::default())
     .class(descriptor)
 ```
 
@@ -37,6 +37,7 @@ member, and has its own `FORK.md`.
 | all stage timing goes through `crate::timing::Instant`, currently a `std::time::Instant` re-export | one import point keeps the instrumentation implementation explicit |
 | optional `profiling` / `hotpath` integration removed | rasc does not expose that upstream profiling interface; existing `DEXDEC_*_STATS` diagnostics remain |
 | `[lib] test = false` | upstream's unit tests stay in-tree for reference, but should not run from rasc's `cargo test --workspace` |
+| Kotlin source output removed (backend, printer, `@kotlin.Metadata` decoder, `SourceLanguage`, batch language selection) | rasc only ever requests Java; keeping the Kotlin half alive left a language-detection API, a Kotlin-defaulted `DecompileOptions`, and 27% dead code. DEX-level Kotlin facts that shape Java output stay in the shared IR and Java backend |
 | `default` features empty | the CLI features are gone |
 | crate-root warning/Clippy allowances | this large upstream snapshot is validated by build/tests; focused `rasc --no-deps` Clippy covers MCP-owned code, while the workspace-wide Rust 1.93 `-D warnings` invocation remains executable without rewriting unrelated upstream style/dead-code paths |
 

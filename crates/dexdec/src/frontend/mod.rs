@@ -28,7 +28,6 @@ mod analysis_diagnostic;
 mod class_node;
 mod dex_reader;
 mod field_node;
-pub mod kotlin_metadata;
 mod metadata;
 mod method_node;
 

@@ -13,6 +13,8 @@ readme = "README.md"
 #   * literal package fields (upstream inherits them from its workspace root);
 #   * no `cli`/`bin`, no embedded `.dexsym` database, no symbol builder, no
 #     mimalloc: rasc drives the library through `Decompiler::from_bytes`;
+#   * no Kotlin source backend: rasc only asks for Java, so the Kotlin printer,
+#     its `@kotlin.Metadata` decoder and the language switch are removed;
 #   * `[lib] test = false` - upstream's unit tests stay in-tree for reference
 #     but are not run by rasc's `cargo test --workspace`.
 [dependencies]
