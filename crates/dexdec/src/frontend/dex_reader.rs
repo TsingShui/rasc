@@ -335,56 +335,6 @@ impl DexFileReader {
             .flat_map(|dex| dex.classes.items.iter().map(move |class| (dex, class)))
     }
 
-    /// Load all classes
-    pub fn load_all_classes(&mut self) -> DexResult<()> {
-        let mut changed = false;
-        for dex_idx in 0..self.dex_files.len() {
-            let class_count = self.dex_files[dex_idx].classes.items.len();
-            for class_index in 0..class_count {
-                let class_name = {
-                    let dex = &self.dex_files[dex_idx];
-                    let class = &dex.classes.items[class_index];
-                    class
-                        .class_name(&dex.types, &dex.strings)
-                        .ok_or(DexError::InvalidTypeIndex(class.class_idx()))?
-                        .to_string()
-                };
-                self.dex_files[dex_idx].materialize_class(class_index)?;
-                let class_node = {
-                    let dex = &self.dex_files[dex_idx];
-                    self.load_class_from_def(
-                        class_index as u32,
-                        &dex.classes.items[class_index],
-                        dex,
-                    )?
-                };
-
-                if let Some(existing) = self.classes.get(&class_name) {
-                    let existing_insns: usize = existing
-                        .methods()
-                        .iter()
-                        .filter_map(|m| m.code().map(|c| c.insns.len()))
-                        .sum();
-                    let new_insns: usize = class_node
-                        .methods()
-                        .iter()
-                        .filter_map(|m| m.code().map(|c| c.insns.len()))
-                        .sum();
-                    if existing_insns >= new_insns {
-                        continue;
-                    }
-                }
-                self.classes.insert(class_name.clone(), class_node);
-                changed = true;
-            }
-        }
-        if changed {
-            self.mark_override_analysis_dirty();
-            self.link_inner_classes();
-        }
-        Ok(())
-    }
-
     /// Load a single class by name
     pub fn load_class(&mut self, class_name: &str) -> DexResult<Option<&ClassNode>> {
         if self.classes.contains_key(class_name) {

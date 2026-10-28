@@ -14,6 +14,7 @@ yet.
 | Change | Why |
 |---|---|
 | `DexArchive`, `DexReader::build_from_file`, `parse()` and the `InvalidArchive` error variant are `#[cfg(feature = "apk")]` | same reason; without the feature `from_file` rejects non-DEX input with a typed error |
+| member-declaration and code-reference scanners removed (`dex/declarations.rs`, `dex/references.rs`) | their only caller was dexdec's catalog/reference API, which the fork no longer carries |
 | unused imports guarded by the same cfg | keep the default build warning-clean |
 | narrow Clippy cleanups (`&str` lookup inputs, direct `Option` chaining, range/alignment expressions, checked string offsets) | keep the Rust 1.93 workspace-wide `-D warnings` gate green without changing parser behavior |
 | `too_many_arguments` allowed on DEX class-table builders | the parameters correspond to independent DEX tables/offsets; bundling them would obscure the file-format boundary |

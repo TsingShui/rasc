@@ -40,48 +40,6 @@ impl JavaDecompiler {
             .print_method_declaration(&declaration, 0)?)
     }
 
-    pub fn generate_method_with_context(
-        &mut self,
-        class: &ClassNode,
-        method: &MethodNode,
-        cfg: &mut CFG,
-    ) -> Result<String, JavaDecompilerError> {
-        let exception_contracts = super::exception_contract::DeclaredExceptionAnalysis::new(
-            self.source_abi.as_ref(),
-            self.type_hierarchy.as_ref(),
-        )
-        .solve(class, std::iter::once((method, &*cfg)));
-        let reference = crate::ir::MethodReference {
-            owner: class.class_type().clone(),
-            name: method.name().to_string(),
-            descriptor: crate::ir::MethodDescriptor {
-                parameters: method.param_types().to_vec(),
-                return_type: method.return_type().clone(),
-            },
-        };
-        let method = self.build_method_model_from_node(
-            class,
-            method,
-            cfg,
-            exception_contracts.get(&reference).map(Vec::as_slice),
-            None,
-            None,
-            None,
-            OuterInstanceField::analyze(class).as_ref(),
-        )?;
-        let declaration = JavaSingleMethodLowering::lower(
-            &method,
-            source_package_name(class),
-            Some(class.class_type()),
-            method_type_uses(&method),
-            &self.source_abi,
-            self.type_hierarchy.clone(),
-            self.observer.clone(),
-        )?;
-        Ok(JavaPrinter::new(self.config.indent.clone())
-            .print_method_declaration(&declaration, 0)?)
-    }
-
     /// Generate a class together with its nested inner classes, rendered as a
     /// single source file. Each inner class entry is `(ClassNode, methods)`
     /// in the same shape as the outer.
