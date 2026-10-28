@@ -290,7 +290,7 @@ build、1/4 analysis threads、完整 MCP typed result 和独立 process cold ca
 
 - 本地：`src/analysis/session/`、`src/mcp/`、`src/analysis/apk.rs`、
   `src/analysis/archive.rs`、`src/analysis/dex/`、`src/analysis/emitter.rs`、
-  `crates/dexdec/FORK.md`；
+  `crates/dexdec/README.md`；
 - Pi：`docs/codemode.md`、`docs/mcp.md`、`docs/extensions.md`；
 - 协议：[MCP tools](https://modelcontextprotocol.io/specification/2025-11-25/server/tools)、
   [cancellation](https://modelcontextprotocol.io/specification/2025-11-25/basic/utilities/cancellation)；

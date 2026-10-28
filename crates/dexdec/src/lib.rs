@@ -24,7 +24,7 @@
 
 // This is a large maintained upstream snapshot. The workspace gate checks its
 // build and tests, while focused rasc clippy covers code changed for the MCP
-// server. See FORK.md for the lint-boundary rationale.
+// server.
 #![allow(warnings)]
 #![allow(clippy::all)]
 

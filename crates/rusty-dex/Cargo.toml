@@ -8,7 +8,7 @@ homepage = "https://github.com/rusty-rs/rusty-dex"
 repository = "https://github.com/rusty-rs/rusty-dex"
 readme = "README.md"
 
-# Fork-only edit relative to upstream (see FORK.md): the zip-based APK reader is
+# Fork-only edit relative to upstream: the zip-based APK reader is
 # behind the `apk` feature so the crate builds without native compression
 # backends. rasc and dexdec both consume DEX bytes, not archives.
 [dependencies]
@@ -21,6 +21,6 @@ thiserror = "2.0.12"
 default = []
 apk = ["dep:zip"]
 
-# Vendored upstream code: see crates/dexdec/FORK.md.
+# Vendored upstream code (rusty-rs/rusty-dex 0.2.0 plus asLody/dexdec extensions).
 [lints.rust]
 warnings = "allow"

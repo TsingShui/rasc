@@ -1,6 +1,6 @@
 //! `getclass`'s Java emitter: the vendored dexdec, and the seam for future emitters.
 //!
-//! `crates/dexdec` (see its FORK.md) renders the source. When dexdec cannot
+//! `crates/dexdec` renders the source. When dexdec cannot
 //! decompile a class the command fails with that error - this module never emits
 //! Java the emitter did not produce.
 //! dexdec itself degrades an unrecoverable *method* to a throwing

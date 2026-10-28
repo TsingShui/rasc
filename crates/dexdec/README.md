@@ -33,7 +33,6 @@ cargo run --release -p dexdec --example decompile_class -- classes.dex Lcom/exam
 
 ## Fork maintenance
 
-- [`FORK.md`](FORK.md) records the snapshot and repository role.
 - The default feature set is empty and there is no archive-loading feature: rasc supplies DEX
   bytes directly, and the library has no file or APK entry point.
 
