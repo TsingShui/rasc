@@ -1,6 +1,6 @@
 [package]
 name = "dexdec"
-version = "1.0.0"
+version = "1.0.1"
 edition = "2021"
 license = "Apache-2.0"
 description = "DEX to Java decompiler used by rasc's `getclass`"
@@ -13,7 +13,7 @@ readme = "README.md"
 # no Kotlin backend, and `[lib] test = false` keeps its legacy unit tests out of
 # the workspace gate.
 [dependencies]
-rusty-dex = { path = "../rusty-dex", version = "1.0.0" }
+rusty-dex = { path = "../rusty-dex", version = "1.0.1" }
 bitflags = "2"
 rayon = "1"
 

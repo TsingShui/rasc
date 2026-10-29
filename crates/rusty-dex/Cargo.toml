@@ -1,6 +1,6 @@
 [package]
 name = "rusty-dex"
-version = "1.0.0"
+version = "1.0.1"
 edition = "2024"
 license = "Apache-2.0"
 description = "DEX parser used by the in-tree `dexdec` decompiler"
