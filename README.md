@@ -24,6 +24,20 @@ cargo install --path . # builds with cargo build --release
 rasc --help
 ```
 
+### Maintainer releases
+
+Run the `Release` workflow on `main` with a stable version, for example:
+
+```sh
+gh workflow run release.yml --ref main -f version=1.0.1
+```
+
+The workflow commits the workspace version bump directly to `main`, then builds and
+publishes the release without a release PR. Put optional release notes in
+`docs/releases/rasc-v1.0.1.md` before running it. If a run fails, retry the same version;
+the version commit may already be on `main`. Published releases are not modified, and
+`CHANGELOG.md` is not updated automatically.
+
 ## Usage
 
 ```sh

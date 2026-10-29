@@ -1,27 +1,19 @@
 name: Release
 
-# Tag-driven: pushing a version tag builds the macOS and Linux artefacts and
-# publishes them to its GitHub Release. `workflow_dispatch` can build artifacts
-# only, or rebuild and publish an existing tag when `release_tag` is provided.
-#
-# Both macOS targets build on the arm64 runner: the macOS SDK is universal, so
-# the x86_64 `cc` dependencies (libdeflater, libz-sys) cross-compile with the
-# target triple. Linux uses musl for a portable, statically linked x86_64 binary.
-# Tests run once, on the macOS host target, before anything is published.
-#
-# Release notes come from `docs/releases/<tag>.md`, which is reviewed like any
-# other file, rather than from `generate_release_notes` - the history is not part
-# of the desensitization-checked tree.
-
+# A manual release synchronizes the workspace versions on main, builds that
+# exact commit, and publishes only after all builds succeed. Release notes are
+# read from docs/releases/<tag>.md rather than generated from commit history.
 on:
-  push:
-    tags: ["v*", "rasc-v*"]
   workflow_dispatch:
     inputs:
-      release_tag:
-        description: Existing version tag to build and publish (leave empty to build artifacts only)
-        required: false
+      version:
+        description: Stable release version (X.Y.Z, without the v prefix)
+        required: true
         type: string
+
+concurrency:
+  group: release
+  cancel-in-progress: false
 
 permissions:
   contents: write
@@ -30,8 +22,50 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  prepare:
+    name: Prepare release
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.prepare.outputs.version }}
+      tag: ${{ steps.prepare.outputs.tag }}
+      commit: ${{ steps.prepare.outputs.commit }}
+    steps:
+      - name: Require main
+        if: github.ref != 'refs/heads/main'
+        run: |
+          echo "Run the release workflow on the main branch." >&2
+          exit 1
+
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Toolchain
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Test release preparation
+        env:
+          PYTHONDONTWRITEBYTECODE: '1'
+        run: python3 -m unittest discover -s tools/release -p 'test_*.py'
+
+      - name: Prepare version
+        id: prepare
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: bash tools/release/prepare.sh
+
   build:
     name: ${{ matrix.platform }} ${{ matrix.target }}
+    needs: prepare
+    permissions:
+      contents: read
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
@@ -49,7 +83,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.release_tag || github.ref }}
+          ref: ${{ needs.prepare.outputs.commit }}
 
       - name: Toolchain
         run: |
@@ -67,30 +101,25 @@ jobs:
 
       - name: Tests (host target only)
         if: matrix.target == 'aarch64-apple-darwin'
-        run: cargo test --quiet
+        run: cargo test --quiet --locked
 
       - name: Build
-        run: cargo build --release --target ${{ matrix.target }}
+        run: cargo build --release --locked --target ${{ matrix.target }}
 
       - name: Smoke test
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
         run: |
           BIN=target/${{ matrix.target }}/release/rasc
-          "$BIN" --version
+          ACTUAL_VERSION="$("$BIN" --version)"
+          echo "$ACTUAL_VERSION"
+          test "$ACTUAL_VERSION" = "rasc $VERSION"
           "$BIN" --help > /dev/null
 
       - name: Package
         env:
-          RELEASE_TAG: ${{ inputs.release_tag }}
+          VERSION: ${{ needs.prepare.outputs.version }}
         run: |
-          if [ -n "$RELEASE_TAG" ]; then
-            VERSION="${RELEASE_TAG#rasc-v}"
-            VERSION="${VERSION#v}"
-          elif [ "${GITHUB_REF_TYPE}" = "tag" ]; then
-            VERSION="${GITHUB_REF_NAME#rasc-v}"
-            VERSION="${VERSION#v}"
-          else
-            VERSION="$(grep -m1 '^version = ' Cargo.toml | cut -d'"' -f2)"
-          fi
           NAME="rasc-${VERSION}-${{ matrix.target }}"
           mkdir -p "$NAME"
           cp "target/${{ matrix.target }}/release/rasc" "$NAME/"
@@ -108,41 +137,57 @@ jobs:
 
   release:
     name: Publish
-    if: github.ref_type == 'tag' || inputs.release_tag != ''
-    needs: build
+    needs: [prepare, build]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.release_tag || github.ref }}
+          ref: ${{ needs.prepare.outputs.commit }}
+          fetch-depth: 0
 
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
           merge-multiple: true
 
-      - name: Publish release
+      - name: Tag and publish release
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
+          RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+          RELEASE_COMMIT: ${{ needs.prepare.outputs.commit }}
         run: |
-          NOTES="docs/releases/${RELEASE_TAG}.md"
-          if [ -f "$NOTES" ]; then
-            NOTES_ARGS=(--notes-file "$NOTES")
-          else
-            NOTES_ARGS=(--notes "macOS artefacts (aarch64 + x86_64) and Linux x86_64 musl artefact.")
-          fi
-          if gh release view "${RELEASE_TAG}" >/dev/null 2>&1; then
-            IS_DRAFT="$(gh release view "${RELEASE_TAG}" --json isDraft --jq .isDraft)"
-            if [ "$IS_DRAFT" != "true" ]; then
-              echo "Release ${RELEASE_TAG} is already published and immutable; assets cannot be added." >&2
+          set -euo pipefail
+          if git show-ref --verify --quiet "refs/tags/${RELEASE_TAG}"; then
+            TAG_COMMIT="$(git rev-parse "refs/tags/${RELEASE_TAG}^{commit}")"
+            if [ "$TAG_COMMIT" != "$RELEASE_COMMIT" ]; then
+              echo "Tag ${RELEASE_TAG} points to a different commit." >&2
               exit 1
             fi
-            gh release upload "${RELEASE_TAG}" artifacts/*
-            gh release edit "${RELEASE_TAG}" --draft=false
           else
-            gh release create "${RELEASE_TAG}" \
-              --title "rasc ${RELEASE_TAG}" \
-              "${NOTES_ARGS[@]}" \
-              artifacts/*
+            # If another process created the tag, this push fails rather than replacing it.
+            git push origin "HEAD:refs/tags/${RELEASE_TAG}"
           fi
+
+          if RELEASE_STATE="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${RELEASE_TAG}" --jq .draft 2>&1)"; then
+            if [ "$RELEASE_STATE" != true ]; then
+              echo "Release ${RELEASE_TAG} is already published; refusing to modify it." >&2
+              exit 1
+            fi
+          elif [[ "$RELEASE_STATE" == *"(HTTP 404)"* ]]; then
+            NOTES="docs/releases/${RELEASE_TAG}.md"
+            if [ -f "$NOTES" ]; then
+              NOTES_ARGS=(--notes-file "$NOTES")
+            else
+              NOTES_ARGS=(--notes "macOS artefacts (aarch64 + x86_64) and Linux x86_64 musl artefact.")
+            fi
+            gh release create "$RELEASE_TAG" --verify-tag --draft \
+              --title "rasc ${RELEASE_TAG}" "${NOTES_ARGS[@]}"
+          else
+            echo "Could not check release ${RELEASE_TAG}: ${RELEASE_STATE}" >&2
+            exit 1
+          fi
+
+          # Keep the release in draft until every asset has been uploaded. Clobber
+          # supports retrying a partially uploaded draft after a failed run.
+          gh release upload "$RELEASE_TAG" artifacts/* --clobber
+          gh release edit "$RELEASE_TAG" --draft=false

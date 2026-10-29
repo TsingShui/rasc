@@ -52,8 +52,8 @@ Do not commit private or unauthorized APKs, real-corpus identifiers, or mappings
 2. Add or update tests for bug fixes and features. Document any intentional CLI or output-contract change.
 3. Run formatting, relevant tests, and the applicable checks listed above. Report commands that could not be run and why.
 4. Submit a focused pull request describing the problem, the approach, compatibility impact, and validation performed. Include before/after measurements for performance claims.
-5. Use Conventional Commit messages, for example `fix: handle truncated DEX header`, `feat: add type reference search`, or `docs: clarify installation`. These messages drive automated versioning through Release Please. Use `!` or a `BREAKING CHANGE:` footer for breaking changes.
+5. Use Conventional Commit messages, for example `fix: handle truncated DEX header`, `feat: add type reference search`, or `docs: clarify installation`. Use `!` or a `BREAKING CHANGE:` footer for breaking changes.
 
 ## Releases
 
-Release Please opens a release PR and updates the package version and changelog based on Conventional Commits. Do not manually bump the version or create a release tag as part of an ordinary feature or fix; put release-relevant changes in normal commits and let the release PR update version files. Merging that PR creates the version tag and triggers the release workflow.
+Releases are initiated manually with the `Release` GitHub Actions workflow on `main`, supplying a stable `X.Y.Z` version. The workflow synchronizes the workspace versions and lockfile in a commit pushed directly to `main`, builds that exact commit, then creates the `rasc-vX.Y.Z` tag and publishes the assets. It does not create a release PR or automatically update `CHANGELOG.md`. Put reviewed release notes in `docs/releases/rasc-vX.Y.Z.md` before running it; otherwise the workflow uses a generic description. A failed run can be retried with the same version; an already published release is never modified. The version commit may remain on `main` if a subsequent build or publication fails. The workflow needs permission to push to `main`; branch protection must allow it.
