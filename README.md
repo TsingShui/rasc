@@ -7,9 +7,9 @@ rasc is a Rust cli tool built to analyze APKs and DEX files at very high speed.
 
 ## Build and install
 
-Prebuilt binaries for macOS (Apple Silicon and Intel) and Linux x86_64 (musl) are on the
-[Releases](https://github.com/TsingShui/rasc/releases) page. The Linux musl build is statically
-linked and does not require a particular glibc version. Install the latest version directly from
+Prebuilt binaries for macOS (Apple Silicon and Intel), Linux x86_64 (musl), and Windows x86_64
+are on the [Releases](https://github.com/TsingShui/rasc/releases) page. The Linux musl build is
+statically linked and does not require a particular glibc version. Install the latest version directly from
 GitHub with Cargo:
 
 ```sh

@@ -67,6 +67,9 @@ jobs:
     permissions:
       contents: read
     runs-on: ${{ matrix.runner }}
+    defaults:
+      run:
+        shell: bash
     strategy:
       fail-fast: false
       matrix:
@@ -74,12 +77,19 @@ jobs:
           - platform: macOS
             runner: macos-14
             target: aarch64-apple-darwin
+            binary: rasc
           - platform: macOS
             runner: macos-14
             target: x86_64-apple-darwin
+            binary: rasc
           - platform: Linux
             runner: ubuntu-latest
             target: x86_64-unknown-linux-musl
+            binary: rasc
+          - platform: Windows
+            runner: windows-latest
+            target: x86_64-pc-windows-msvc
+            binary: rasc.exe
     steps:
       - uses: actions/checkout@v4
         with:
@@ -110,13 +120,14 @@ jobs:
         env:
           VERSION: ${{ needs.prepare.outputs.version }}
         run: |
-          BIN=target/${{ matrix.target }}/release/rasc
+          BIN=target/${{ matrix.target }}/release/${{ matrix.binary }}
           ACTUAL_VERSION="$("$BIN" --version)"
           echo "$ACTUAL_VERSION"
           test "$ACTUAL_VERSION" = "rasc $VERSION"
           "$BIN" --help > /dev/null
 
-      - name: Package
+      - name: Package (macOS and Linux)
+        if: runner.os != 'Windows'
         env:
           VERSION: ${{ needs.prepare.outputs.version }}
         run: |
@@ -128,12 +139,30 @@ jobs:
           shasum -a 256 "$NAME.tar.gz" > "$NAME.tar.gz.sha256"
           rm -rf "$NAME"
 
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $Name = "rasc-$env:VERSION-${{ matrix.target }}"
+          New-Item -ItemType Directory -Path $Name | Out-Null
+          Copy-Item "target/${{ matrix.target }}/release/${{ matrix.binary }}" $Name
+          Copy-Item LICENSE, NOTICE, README.md $Name
+          Compress-Archive -Path $Name -DestinationPath "$Name.zip"
+          $Hash = (Get-FileHash "$Name.zip" -Algorithm SHA256).Hash.ToLowerInvariant()
+          [System.IO.File]::WriteAllText("$Name.zip.sha256", "$Hash  ${Name}.zip`n", [System.Text.UTF8Encoding]::new($false))
+          Remove-Item -Recurse -Force $Name
+
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.target }}
           path: |
             rasc-*.tar.gz
             rasc-*.tar.gz.sha256
+            rasc-*.zip
+            rasc-*.zip.sha256
 
   release:
     name: Publish
@@ -178,7 +207,7 @@ jobs:
             if [ -f "$NOTES" ]; then
               NOTES_ARGS=(--notes-file "$NOTES")
             else
-              NOTES_ARGS=(--notes "macOS artefacts (aarch64 + x86_64) and Linux x86_64 musl artefact.")
+              NOTES_ARGS=(--notes "macOS (aarch64 + x86_64), Linux x86_64 musl, and Windows x86_64 artefacts.")
             fi
             gh release create "$RELEASE_TAG" --verify-tag --draft \
               --title "rasc ${RELEASE_TAG}" "${NOTES_ARGS[@]}"
