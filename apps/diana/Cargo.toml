@@ -1,0 +1,15 @@
+[package]
+name = "diana"
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.93"
+description = "Diana APK/DEX CLI (development scaffold; not implemented)"
+license = "Apache-2.0"
+publish = false
+readme = "README.md"
+
+[dependencies]
+diana-decomp = { path = "../../crates/diana-decomp" }
+
+[lints.rust]
+unsafe_code = "forbid"

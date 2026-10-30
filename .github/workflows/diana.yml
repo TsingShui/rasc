@@ -1,0 +1,57 @@
+name: Diana
+
+# Active workspace contains only Diana; ref-fork is never built or tested.
+# Build/lint isolation only: the engine and independently certified E2E suite
+# do not exist yet. This workflow neither runs empty tests as acceptance nor
+# prepares versions, uploads artifacts, tags or publishes releases.
+on:
+  push:
+    paths:
+      - "apps/diana/**"
+      - "crates/diana-decomp/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/diana.yml"
+  pull_request:
+    paths:
+      - "apps/diana/**"
+      - "crates/diana-decomp/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/diana.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  scaffold:
+    name: Build and lint (${{ matrix.runner }})
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-latest, macos-14, windows-latest]
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Toolchain
+        run: |
+          rustup toolchain install 1.93.0 --profile minimal --component rustfmt --component clippy
+          rustup default 1.93.0
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: diana-scaffold-${{ matrix.runner }}
+
+      - name: Format
+        run: cargo fmt --all -- --check
+
+      - name: Lint
+        run: cargo clippy --workspace --locked --all-targets --all-features -- -D warnings
+
+      - name: Build
+        run: cargo build --workspace --locked --release

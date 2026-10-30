@@ -1,21 +1,21 @@
 # Diana 整体项目：CLI 优先的产品架构
 
-**最新范围**：整个项目叫 **Diana**，不再把它视为“rasc 里的新反编译器”。用户明确要求 **MCP 暂时不设计**：本轮不定义新 MCP schema、工具、协议、迁移或发布合同，也不以 MCP 完成作为 CLI 的验收条件。已有 MCP 源码暂不删除；本文只设计 CLI、APK/DEX 查询、输入安全与内部反编译流水线。本次不修改生产代码。
+**最新范围**：整个项目叫 **Diana**，不再把它视为“rasc 里的新反编译器”。用户明确要求 **MCP 暂时不设计**：本轮不定义新 MCP schema、工具、协议、迁移或发布合同，也不以 MCP 完成作为 CLI 的验收条件。已有 MCP 源码暂不删除；本文设计 CLI、APK/DEX 查询、输入安全与内部反编译流水线。用户最新要求隔离旧实现：活动 workspace 只有 `apps/diana/` 与 `crates/diana-decomp/` 骨架，rasc/dexdec/rusty-dex/vendor/tests/MCP 整体移入 `ref-fork/rasc/`，不再构建/测试/发布；实际路径与边界以 [STRUCTURE.md](STRUCTURE.md) 为准，尚无新产品功能。
 
 ## 1. 唯一产品命名
 
 | 层 | 目标名称 / 路径 | 职责 |
 |---|---|---|
-| 产品与 root package | Diana / `diana` | APK/DEX 查询、manifest、原entry提取与反编译；公开命令以CLI.md指定的11项为准 |
+| 产品与应用 package | Diana / `diana`，`apps/diana/` | APK/DEX 查询、manifest、原entry提取与反编译；公开命令以CLI.md指定的11项为准 |
 | 用户二进制 | `diana`，Windows `diana.exe` | 一个 CLI；最终不另发 rasc 二进制或长期别名 |
 | 内部反编译 crate | `diana-decomp`，`crates/diana-decomp/`，导入 `diana_decomp` | 同仓 P0–P9；不含文件/ZIP/命令入口 |
-| 轻量查询 module | root `analysis::dex` 等现有领域代码 | borrowed tables、按需扫描，不先建完整反编译对象模型 |
-| 输入与执行 module | root `analysis` 的 input/archive/request scope | 字节持有权、快照、解压、身份、请求级限额与取消 |
+| 轻量查询 module | Diana 应用根 `apps/diana/` 的未来 `analysis::dex` | borrowed tables、按需扫描，不先建完整反编译对象模型 |
+| 输入与执行 module | Diana 应用根 `apps/diana/` 的未来 input/archive/request scope | 字节持有权、快照、解压、身份、请求级限额与取消 |
 | 文档与 agent 使用说明 | `docs/diana/` | 整体设计、CLI帮助和agent用法；不保留公开skill安装命令 |
 
 反编译算法从零设计；原工具已有的有用查询/安全实现可以复用，不要求从零重写它们。**一个项目不意味着一套完整解析对象服务所有查询**：保留两条具有不同成本模型的内部路径。
 
-最终品牌不再是 rasc，但历史 release/tag、copyright、源码出处不全局替换。当前 root Cargo/binary 仍为 rasc，这是未实施状态；正式更名和发行名在产品任务中完成，不手工改版本或发布。
+最终品牌不再是 rasc，但历史 release/tag、copyright、源码出处不全局替换。当前仓库根是 Diana-only 虚拟 workspace；`diana` 位于 `apps/diana/`，仅骨架失败入口。旧 rasc 降级到 `ref-fork/rasc/` 独立参考工程，源码/测试不删除，但不参与根 Cargo/CI，不发布。本文“root 产品/src”指 Diana 应用根；固定旧提交的路径保留原锚点，当前 checkout 加 `ref-fork/rasc/` 前缀。H08 仍需真实产品能力，不手工改版本/发布。
 
 ## 2. 总体架构（本轮无 MCP 路径）
 
@@ -50,7 +50,7 @@ MCP 属于以后可以接入的 adapter，不是 pipeline phase，也不是本�
 
 | 来源 | 已有行为 | Diana 当前决策 |
 |---|---|---|
-| `src/lib.rs`、`src/cli/mod.rs` | 参数/诊断/输出与底层 analysis 分离；不启动外部反编译进程 | 保留 module 分工，root 更名，不造第二套 CLI |
+| `src/lib.rs`、`src/cli/mod.rs` | 参数/诊断/输出与底层 analysis 分离；不启动外部反编译进程 | 保留职责分工；在 apps/diana 独立实现，过渡期不修改旧 CLI，最终替代而非别名转发 |
 | `src/analysis/session/mod.rs`：`open`、`Target` | capability-relative open、普通文件限制、私有不可变快照、owner 与取消 | 复用安全读取思路到 CLI request scope；不将用户可变 mmap 作为长寿命输入；不强制复制旧协议类型 |
 | `src/analysis/archive.rs`、`apk.rs` | central-directory/root DEX、stored/deflate、按需读取、稳定合并 | 复用 ZIP/native 读取；取消为输出稳定顺序而做的排序、按序等待和重排缓冲；安全策略与性能变化单独验收 |
 | `src/analysis/session/cache.rs`：`InflateCache` | 解压字节 single-flight、reservation、LRU/pin、关闭与发布竞态 | 若 CLI 同请求复用解压字节，沿用有界 owner/reservation 纪律；不承诺跨 CLI 进程热缓存 |
@@ -60,7 +60,7 @@ MCP 属于以后可以接入的 adapter，不是 pipeline phase，也不是本�
 | `src/cli/mod.rs`、`args.rs` | stdout payload、stderr diagnostics、输出文件字节一致、BrokenPipe、member table | 保留通道；新 Mixed/JSON 输出与退出码显式定义 |
 | `src/cli/agent_skill.rs`、`skill/SKILL.md`、release workflow | 品牌影响安装目录、帮助、version、下载产物 | 独立品牌任务，逐消费者改名，不重写历史许可/旧 tag |
 
-原 `src/mcp/` 与 `docs/headless-mcp.zh-CN.md` 只作为现有能力记录；本轮不扩展它们，不提出 schema_version=2、九工具新 contract 或发布迁移任务。
+参考内 `ref-fork/rasc/src/mcp/` 与 `ref-fork/rasc/docs/headless-mcp.zh-CN.md` 只作为旧能力记录；本轮不扩展它们，不提出 schema_version=2、九工具新 contract 或发布迁移任务。
 
 ## 4. 输入 interface 与生命周期
 
@@ -95,7 +95,7 @@ root request scope 持 snapshot/mapping/inflated buffers 的 owner lease，先�
 
 ### 输出顺序策略：不提供稳定顺序保证
 
-用户明确取消稳定结果顺序要求。这是对原 rasc 可观察行为与仓库确定性指导的**有意设计变更**，H01/H03需要记录并更新未来实现的合同与测试；本次不修改现有代码或AGENTS。
+用户明确取消稳定结果顺序要求。这是对原 rasc 可观察行为与仓库确定性指导的**有意设计变更**，H01/H03需要记录并更新未来实现的合同与测试；当前未改变 rasc 排序行为，AGENTS 已区分 rasc 确定性与 Diana 语义完整性要求。
 
 - 查询、独立方法/类的计算完成顺序、诊断与trace的跨任务交错不作跨运行保证；并行结果按完成/到达顺序提交。不引入全局排序、固定tie-break或仅为还原输入顺序的队头等待/重排缓冲，也不增加stable-output模式。
 - 消费者按原始identity关联记录，不依赖行号/数组位置。成功查询返回全部匹配记录，完整、不重不漏；不同线程只比较按身份对应的内容/多重集合，不比较序列。
@@ -133,17 +133,17 @@ root request scope 持 snapshot/mapping/inflated buffers 的 owner lease，先�
 
 以上是对rasc CLI的有意接口重设计，不要求旧命令/列字节兼容；H01记录旧行为作为复用参考、按新规范验收，而不是用旧帮助限制新能力。
 
-最终只叫 Diana。过渡期为不破坏现有使用，可以保留旧 emitter helper 的活动调用；**不得将暂留旧代码解读成另一个长期 rasc 产品或默默跨引擎回退**。不提供长期 `--engine dexdec`。
+当前活动产品只叫 Diana，旧 rasc 完整归档为 ref-fork 参考工程；不以 Diana 调用旧 CLI/engine，旧 helper/MCP 调用仅留在参考内，不进入活动 workspace；**不得将暂留旧代码解读成另一个长期 rasc 产品或默默跨引擎回退**。不提供长期 `--engine dexdec`。
 
 ## 8. 产品任务与验收范围
 
-**先测试准备**：B01–B04的70case规范/source/fixture/toolchain/reference/harness先冻结并认证，B04通过才进入H01/T01；见[TEST_PREPARATION.md](TEST_PREPARATION.md)、[E2E_CASES.md](E2E_CASES.md)。所有必需来源按[REPRODUCIBILITY.md](REPRODUCIBILITY.md)公开URL/commit与checkout相对路径定位，不从作者个人SDK/参考目录取输入。实现不重设计expected、不按当前引擎能力删requiredcase。
+**先测试准备**：用户要求的纯包结构已先搭建，例外范围仅 Cargo/入口骨架/构建发布隔离，不算 H01/T01。B01–B04的70case规范/source/fixture/toolchain/reference/harness先冻结并认证，B04通过才进入H01/T01功能实现；见[TEST_PREPARATION.md](TEST_PREPARATION.md)、[E2E_CASES.md](E2E_CASES.md)。所有必需来源按[REPRODUCIBILITY.md](REPRODUCIBILITY.md)公开URL/commit与checkout相对路径定位，不从作者个人SDK/参考目录取输入。实现不重设计expected、不按当前引擎能力删requiredcase。
 
 **测试边界**：不新增CLI黑盒或帮助/参数/路由/列名等基础接口测试。CLI.md继续约束实现，但以源码/文档审阅和编译确认；H01/H07无自动测试filter。语义E2E从公开反编译库跑Java行为与raw/smali回环；复杂原始身份/041/引用内容、输入/文件安全/资源取消走公开领域module interface。现有测试不在本次删除范围，未来准备fixture也不添加简单CLI矩阵。
 
 产品任务采用 **H01–H10**，避免与已有 `U01–U08` Unsupported fixture 编号冲突，详见 [PROJECT_TASKS.md](PROJECT_TASKS.md)。
 
-- H01 名称/产品合同与 package 落点；T01–T25改为内部 `diana-decomp`。
+- H01 产品合同/CLI 实现落在 `apps/diana/`；旧 rasc 已移入 ref-fork，不进入主 workspace；T01–T25实现内部 `diana-decomp`，包骨架存在不算这些任务完成。
 - H02安全输入/request scope；H03已有轻量查询与manifest能力复用。
 - H04原始 view/041/SelectedClass 与依赖catalog；H05在T06级接通新CLI，接线做源码审阅；公开反编译interface的语义回环不等所有phase完成，不通过CLI子进程测试。
 - H06取消/字节/输出预算和同请求复用；H09补defined fields/methods与site级xref，H10补安全原entry extract，H07统一11项help/CLI JSON与agent文档。
@@ -151,6 +151,6 @@ root request scope 持 snapshot/mapping/inflated buffers 的 owner lease，先�
 
 EngineCoreRC = T01–T23/T25；**CLIProductRC** = H01–H10 + EngineCoreRC：基础11项命令/列/接线/agent说明以代码审阅和构建确认，复杂query/extract/041/身份/安全与引擎行为提供公开module测试证据。不要求CLI黑盒、旧输出序列或跨运行byte-identical。MCP不在该分母里；它的暂缓状态要在产品说明写清楚。
 
-若未设计MCP仍有live调用依赖旧dexdec，H08只能列出依赖与保留理由，不能盲删令现有代码不可编译；全面依赖退役待后续MCP范围决定。CLI新路径必须明确使用Diana Engine，无旧helper静默回退。这是阶段性内部遗留，不是第二产品。
+旧 MCP 对 dexdec 的调用留在独立 ref-fork 内，不阻止主 workspace 去除旧依赖，也不要求 Diana gate 构建/测试它。H08 核对活动依赖不触及 ref-fork，Diana CLI 只用新 Engine，无旧 helper 静默回退。参考源码保留不等于第二活动产品。
 
-本次仅更新设计和网页，不改 root Cargo/binary、共享 session 或 MCP，不删除引擎源码或发布历史。
+当前落地主工程骨架与 ref-fork 归档隔离；rasc 生产源码/session/MCP/tests 原内容保留但不再参与本分支 build/test/CI。没有引擎 fixture/功能，不删除旧引擎或发布历史，E2E 准备尚未完成。

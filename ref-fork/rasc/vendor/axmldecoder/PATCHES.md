@@ -8,7 +8,7 @@ all marked `PATCHED (rasc)` in the source:
 2. `src/stringpool.rs` - `parse_utf8_string` implemented the two-byte length forms for
    both the UTF-16 length and the byte length instead of `unimplemented!()`, which
    panicked on any string whose byte length is 128 or more. A real APK in the test
-   corpus (a repacked Douyin build) has such a manifest, and the original Python
+   corpus (a repacked application build) has such a manifest, and the original Python
    implementation decodes it, so rasc could not report that manifest at all.
 3. `src/xml.rs` - an end element without a matching start element returns a parse error
    instead of unwrapping an empty stack.

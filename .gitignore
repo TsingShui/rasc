@@ -1,4 +1,8 @@
 /target/
+# Archived workspaces never contribute build/cache output to the active tree.
+/ref-fork/**/target/
+/ref-fork/**/target-prof/
+/ref-fork/**/.cache/
 *.apk
 *.dex
 *.jar

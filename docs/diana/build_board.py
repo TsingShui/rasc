@@ -169,13 +169,16 @@ def build():
         visit(key)
     grouped = [key for group in increments for key in group['tasks']]
     assert len(grouped) == len(keys) and set(grouped) == keys
-    names = ['DESIGN.md', 'TASKS.md', 'IMPLEMENTATION_PLAN.md', 'RECOVERY_EXTENSIONS.md', 'PROJECT.md', 'PROJECT_TASKS.md', 'CLI.md', 'TEST_PREPARATION.md', 'REPRODUCIBILITY.md', 'e2e_cases.json']
+    names = ['DESIGN.md', 'TASKS.md', 'IMPLEMENTATION_PLAN.md', 'RECOVERY_EXTENSIONS.md', 'PROJECT.md', 'PROJECT_TASKS.md', 'CLI.md', 'TEST_PREPARATION.md', 'REPRODUCIBILITY.md', 'STRUCTURE.md', 'DEVELOPMENT.md', 'e2e_cases.json']
     fingerprint = hashlib.sha256(''.join(load(n) for n in names).encode()).hexdigest()[:12]
     return {'schema': 1, 'fingerprint': fingerprint, 'sources': names,
             'phases': phases, 'tasks': tasks, 'increments': increments, 'extensions': extensions,
             'hostTasks': host_tasks, 'prepTasks': prep_tasks, 'e2eDesign': case_design,
-            'commands': commands, 'product': {'name': 'Diana', 'rootPackage': 'diana',
-             'enginePackage': 'diana-decomp', 'scope': 'CLI-first', 'mcp': 'deferred'}}
+            'commands': commands, 'product': {'name': 'Diana', 'applicationPackage': 'diana',
+             'applicationPath': 'apps/diana/', 'defaultPackage': 'diana',
+             'referencePath': 'ref-fork/rasc/', 'referenceScope': 'excluded-no-build-test',
+             'enginePackage': 'diana-decomp', 'state': 'scaffold-only',
+             'scope': 'CLI-first', 'mcp': 'deferred'}}
 
 
 if __name__ == '__main__':

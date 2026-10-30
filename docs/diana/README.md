@@ -1,12 +1,14 @@
 # 新 Diana 设计与实施计划
 
-**Diana（黛安娜）是整个项目名，不再是 rasc 里的另一个反编译器。** 目标root产品/命令是 `diana`，内部反编译库是 `diana-decomp`（`crates/diana-decomp/`），开发环境变量使用 `DIANA_`。设计位于 `Diana` 分支的 `docs/diana/`。
+**Diana（黛安娜）是整个项目名，不再是 rasc 里的另一个反编译器。** 目标产品/命令是 `diana`（应用包在 `apps/diana/`），内部反编译库是 `diana-decomp`（`crates/diana-decomp/`），开发环境变量使用 `DIANA_`。设计位于 `Diana` 分支的 `docs/diana/`。
 
-**当前范围：CLI、APK/DEX查询、原始entry提取、manifest、输入安全与反编译；MCP暂时不设计。** 现有MCP代码不在本轮删除/协议重写范围，不作为CLI产品验收前置。**状态：计划待实施，不是生产程序已改名或引擎已替换。** 反编译算法从零设计，复用现有rasc的有用查询与安全能力；不迁移已删除的实验分支。
+**当前范围：CLI、APK/DEX查询、原始entry提取、manifest、输入安全与反编译；MCP暂时不设计。** 旧MCP随 rasc 归档到 `ref-fork/rasc/`，不删除/重写协议，不参加主 workspace/CI。**状态：Diana-only 包骨架已创建，功能待实现；旧实现是参考工程，不再构建/测试。** 实际目录与旧设计路径映射见 [STRUCTURE.md](STRUCTURE.md)。 反编译算法从零设计，复用现有rasc的有用查询与安全能力；不迁移已删除的实验分支。
+
+未来 GUI 与 Web UI 已按用户要求在 `apps/diana-gui/`、`apps/diana-web-ui/` 预留 README-only 目录；不实现、不引入框架/依赖、不加入 workspace 或 CI，详见 [应用入口索引](../../apps/README.md)。当前任务与 E2E 范围仍是 CLI/引擎。
 
 ## 1. 核心决定
 
-- **E2E案例先于开发**：已有70个具体D案例设计，B01–B04先审阅冻结inputs/独立expected、准备可复验工具/source/fixture/基准/harness；通过后再开始T01/H01。开发只接薄公开adapter和让固定case转绿，不按actual随意改答案或删requiredcase。
+- **E2E案例先于开发**：已有70个具体D案例设计，B01–B04先审阅冻结inputs/独立expected、准备可复验工具/source/fixture/基准/harness；通过后再开始T01/H01功能实现；用户明确要求的纯包结构已先搭建，不算任务完成。开发只接薄公开adapter和让固定case转绿，不按actual随意改答案或删requiredcase。
 - **团队协作不依赖作者机器**：参考用公开URL+commit+相对符号，工具用内容锁，fixture源/expected/recipe签入；不依赖个人home/AndroidSDK/兄弟仓cache。radguard实际独立仓commit和许可边界已更正。
 - **公开CLI按用户指定的十一项**：`get-class / entries / extract / strings / xref / manifest / classes / get-method / fields / methods / help`。参数、列与选择器以[CLI.md](CLI.md)为唯一规范；默认get只Java，显式JSON才返回清楚标记的降级报告，不提供旧命令alias、skill安装命令或分页。
 - **一个项目、两条内部路径**：root CLI/输入/轻量查询保留现有优势，内部 `diana-decomp` 承载 P0–P9；不强行让列表查询先建完整反编译对象。MCP延期，不预先冻结新工具或schema。
@@ -35,6 +37,8 @@ python3 docs/diana/build_board.py
 
 | 文档 | 回答的问题 |
 |---|---|
+| [DEVELOPMENT.md](DEVELOPMENT.md) | 开发流程唯一入口：有界批次、完成/停止条件、实际批次记录模板；按批准备前置的调整仍待确认 |
+| [STRUCTURE.md](STRUCTURE.md) | Diana-only workspace 与 ref-fork 参考隔离、默认构建/CI 范围、旧源码定位 |
 | [PROJECT.md](PROJECT.md) | Diana整项目的CLI优先架构、已有rasc能力复用、输入/041/身份/取消/预算与MCP延期边界 |
 | [REPRODUCIBILITY.md](REPRODUCIBILITY.md) | 公开参考来源、固定工具内容锁、仓库相对fixture/cache、干净checkout准备与路径验收 |
 | [TEST_PREPARATION.md](TEST_PREPARATION.md) | B01–B04在引擎实现前完成：case冻结、源/fixture/工具、独立基准、harness证伪 |
@@ -51,7 +55,7 @@ python3 docs/diana/build_board.py
 | [RECOVERY_EXTENSIONS.md](RECOVERY_EXTENSIONS.md) | 可选美化的 slot、独立开关、E01–E08候选与后续扩展验收，不成为核心依赖 |
 | [REVIEW.md](REVIEW.md) | 本次文档检查与设计风险记录；区分实际完成的文档审查和未来验收 |
 
-建议阅读顺序：本页 → REPRODUCIBILITY/TEST_PREPARATION/E2E_CASES → CLI/PROJECT/PROJECT_TASKS → DESIGN → MODULES/ALGORITHMS → IMPLEMENTATION_PLAN → 当前任务卡 → 对应 VERIFICATION；复制算法之前回查 SOURCE_MAP。使用文档内 symbol/文件定位，而不是依赖前面对话中的 LOC 或粗略 benchmark。
+建议阅读顺序：本页 → DEVELOPMENT → REPRODUCIBILITY/TEST_PREPARATION/E2E_CASES → CLI/PROJECT/PROJECT_TASKS → DESIGN → MODULES/ALGORITHMS → IMPLEMENTATION_PLAN → 当前任务卡 → 对应 VERIFICATION；复制算法之前回查 SOURCE_MAP。使用文档内 symbol/文件定位，而不是依赖前面对话中的 LOC 或粗略 benchmark。
 
 ## 3. 架构一眼图
 
@@ -92,9 +96,9 @@ P7 是分类归属，返回的 `PlannedBody` 同时携带 P6 StorageBody 与 Reg
 
 ## 4. 先测试准备，再启动实现
 
-现在先执行B01→B02→B03→B04：审阅70case规范、写自制Java/smali/Driver源和独立expected、锁公开工具/fixture、独立认证输入/参考轨迹、证明harness能拒绝错误结果。**当前仅案例设计完成，source/binaryfixture/toolhash/runner仍未实现；不是E2E已通过。** B04准备验收后才进入引擎与产品实现。
+用户要求的结构准备已完成：`apps/diana/` CLI 骨架与 `crates/diana-decomp/` 空库加入 workspace，根默认只含 Diana；旧 rasc/dexdec 全量移入 ref-fork 独立 workspace，不参与 build/test/CI，Diana 不依赖旧引擎且未发布。没有实现 Engine、CLI 命令或空 phase，也没有用零测试冒充验收。下一步仍先执行B01→B02→B03→B04：审阅70case规范、写自制Java/smali/Driver源和独立expected、锁公开工具/fixture、独立认证输入/参考轨迹、证明harness能拒绝错误结果。**当前仅案例设计完成，source/binaryfixture/toolhash/runner仍未实现；不是E2E已通过。** B04准备验收后才进入引擎与产品实现。
 
-准备通过后H01冻结root `diana`/内部`diana-decomp`命名与CLI领域合同，H02/H03复用安全输入和轻量查询；引擎第一批 **T01 → T02 → T03 → T04 → T05 → T06**：
+准备通过后H01在应用根 `apps/diana/` 实现 `diana` 产品/CLI 领域合同，内部库仍 `crates/diana-decomp/`，H02/H03复用安全输入和轻量查询；引擎第一批 **T01 → T02 → T03 → T04 → T05 → T06**：
 
 1. 最小 crate、明确输出/错误状态、预算、实际 schedule。
 2. 安全 DEX catalog/raw method 范围。
@@ -116,4 +120,4 @@ H04/T04→H05/T06尽早贯通get-method真实CLI，不等待全部phase；H09补
 
 ## 6. 本轮改动范围
 
-当前仅新增/更新 `docs/diana/` 的计划、网页和文档数据生成脚本；没有实现Rust、改Cargo/现有CLI/MCP、生成引擎fixture或发布。已在 `Diana` 分支，尚未提交。REVIEW原始审查结论针对引擎计划；后续产品范围更新单列记录，不把未来实施命令当作本轮已通过测试。
+设计资产已在 `Diana` 分支提交。用户随后要求的本轮结构工作新增 `apps/diana/` 与 `crates/diana-decomp/` 最小包、workspace 和独立构建/发布范围，具体见 STRUCTURE。用户进一步要求旧 rasc/CLI/MCP/tests/deps 归档到 `ref-fork/rasc/`，生产源码原内容保留但不再构建/测试；主 workspace/lock/CI 只含 Diana 失败入口和文档级空库；没有 Engine/70份可运行 fixture/E2E runner，没有发布。结构构建检查不是 H01/T01 或语义 E2E 通过，后续功能仍等 B01–B04。

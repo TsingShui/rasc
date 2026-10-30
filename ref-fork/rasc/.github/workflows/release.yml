@@ -1,8 +1,12 @@
-name: Release
+name: Archived rasc release
 
-# A manual release synchronizes the workspace versions on main, builds that
-# exact commit, and publishes only after all builds succeed. Release notes are
-# read from docs/releases/<tag>.md rather than generated from commit history.
+# Reference only: nested under ref-fork, not an active GitHub workflow.
+# These historical root-checkout commands are not runnable Diana release tools.
+
+# A manual rasc release synchronizes the rasc package group on main, builds
+# that exact commit, and publishes only after all builds succeed. Diana is an
+# unpublished workspace member and is not built or packaged by this workflow.
+# Release notes are read from docs/releases/<tag>.md, not generated from history.
 on:
   workflow_dispatch:
     inputs:
@@ -111,10 +115,10 @@ jobs:
 
       - name: Tests (host target only)
         if: matrix.target == 'aarch64-apple-darwin'
-        run: cargo test --quiet --locked
+        run: cargo test --quiet --locked -p rasc
 
       - name: Build
-        run: cargo build --release --locked --target ${{ matrix.target }}
+        run: cargo build --release --locked -p rasc --bin rasc --target ${{ matrix.target }}
 
       - name: Smoke test
         env:
@@ -134,7 +138,7 @@ jobs:
           NAME="rasc-${VERSION}-${{ matrix.target }}"
           mkdir -p "$NAME"
           cp "target/${{ matrix.target }}/release/rasc" "$NAME/"
-          cp LICENSE NOTICE README.md "$NAME/"
+          cp LICENSE README.md "$NAME/"
           tar -czf "$NAME.tar.gz" "$NAME"
           shasum -a 256 "$NAME.tar.gz" > "$NAME.tar.gz.sha256"
           rm -rf "$NAME"
@@ -149,7 +153,7 @@ jobs:
           $Name = "rasc-$env:VERSION-${{ matrix.target }}"
           New-Item -ItemType Directory -Path $Name | Out-Null
           Copy-Item "target/${{ matrix.target }}/release/${{ matrix.binary }}" $Name
-          Copy-Item LICENSE, NOTICE, README.md $Name
+          Copy-Item LICENSE, README.md $Name
           Compress-Archive -Path $Name -DestinationPath "$Name.zip"
           $Hash = (Get-FileHash "$Name.zip" -Algorithm SHA256).Hash.ToLowerInvariant()
           [System.IO.File]::WriteAllText("$Name.zip.sha256", "$Hash  ${Name}.zip`n", [System.Text.UTF8Encoding]::new($false))

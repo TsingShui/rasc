@@ -1,16 +1,16 @@
 # Module 规格与内部 Interface
 
-本文是内部 `diana-decomp` 的 [DESIGN.md](DESIGN.md) 实施细化；root产品/CLI整合见[PROJECT.md](PROJECT.md)。B01–B04的E2E准备先于引擎实现，测试资产/expected在root `tests/e2e/`共享，来源/工具见[REPRODUCIBILITY.md](REPRODUCIBILITY.md)，不依赖作者机器路径。MCP暂不设计。所有路径是**未来目标路径**，并非仓库已存在的 Module。所有类型草案均需在 T01/T05 对齐，未提供完整可编译程序。Module 的 interface 不仅是 Rust signature，也包含本页的不变量、失败模式和工作预算。
+本文是内部 `diana-decomp` 的 [DESIGN.md](DESIGN.md) 实施细化；root产品/CLI整合见[PROJECT.md](PROJECT.md)。B01–B04的E2E准备先于引擎实现，测试资产/expected在root `tests/e2e/`共享，来源/工具见[REPRODUCIBILITY.md](REPRODUCIBILITY.md)，不依赖作者机器路径。MCP暂不设计。`crates/diana-decomp/Cargo.toml`、`src/lib.rs` 已有纯包骨架，**下列具体 Module 仍是未来目标**，没有 Engine/阶段实现；实际结构与早期 root 路径映射见 [STRUCTURE.md](STRUCTURE.md)。所有类型草案均需在 T01/T05 对齐，未提供完整可编译程序。Module 的 interface 不仅是 Rust signature，也包含本页的不变量、失败模式和工作预算。
 
 ## 1. 目标目录与落点规则
 
-整个 Diana 产品沿用 root `src/cli/`、`src/analysis/` 等职责；具体整合/品牌/输入/查询任务见 PROJECT_TASKS 的 H01–H10。以下只列内部库，不是把整项目都放进一个 decompiler crate。现有 MCP 代码保持延期，不在本页创建或定义新的协议模块。
+整个 Diana 产品在应用根 `apps/diana/` 采用未来 `src/cli/`、`src/analysis/` 等职责；旧同名代码已移入 `ref-fork/rasc/` 作为参考，不构建/测试或引入为依赖；具体整合/品牌/输入/查询任务见 PROJECT_TASKS 的 H01–H10。以下只列内部库，不是把整项目都放进一个 decompiler crate。现有 MCP 代码保持延期，不在本页创建或定义新的协议模块。
 
 ```text
 crates/diana-decomp/
-  Cargo.toml                 # 将来 T01 创建；不依赖 dexdec/radguard/kuna
+  Cargo.toml                 # 已创建纯包骨架；不依赖旧引擎，T01 功能未实现
   src/
-    lib.rs                   # 只 re-export Engine/Options/Report/诊断/键
+    lib.rs                   # 当前只有文档；T01 后仅 re-export 实际 Engine/报告/诊断
     engine.rs                # request/class driver、分类结果，不含分析算法
     substrate/
       ids.rs                 # Dex/Method/Insn/Block/Edge/Value/Local ID

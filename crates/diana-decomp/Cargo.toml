@@ -1,0 +1,12 @@
+[package]
+name = "diana-decomp"
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.93"
+description = "Diana native DEX decompiler (development scaffold; not implemented)"
+license = "Apache-2.0"
+publish = false
+readme = "README.md"
+
+[lints.rust]
+unsafe_code = "forbid"

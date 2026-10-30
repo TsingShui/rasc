@@ -1,0 +1,114 @@
+# rasc — archived reference
+
+This tree is excluded from the active Diana workspace and CI. The usage/release
+notes below describe the historical rasc product, not active commands on this
+branch. Do not run its build/tests/release tooling automatically. See
+[reference scope](../README.md) and [Diana structure](../../docs/diana/STRUCTURE.md).
+
+
+## What rasc is for
+
+rasc is a Rust cli tool built to analyze APKs and DEX files at very high speed.
+
+## Build and install
+
+Prebuilt binaries for macOS (Apple Silicon and Intel), Linux x86_64 (musl), and Windows x86_64
+are on the [Releases](https://github.com/TsingShui/rasc/releases) page. The Linux musl build is
+statically linked and does not require a particular glibc version. Install the latest version directly from
+GitHub with Cargo:
+
+```sh
+cargo install --git https://github.com/TsingShui/rasc
+rasc --help
+```
+
+To build and install from a local checkout instead:
+
+```sh
+cargo install --path . # builds with cargo build --release
+rasc --help
+```
+
+### Maintainer releases
+
+Run the `Release` workflow on `main` with a stable version, for example:
+
+```sh
+gh workflow run release.yml --ref main -f version=1.0.1
+```
+
+The workflow commits the workspace version bump directly to `main`, then builds and
+publishes the release without a release PR. Put optional release notes in
+`docs/releases/rasc-v1.0.1.md` before running it. If a run fails, retry the same version;
+the version commit may already be on `main`. Published releases are not modified, and
+`CHANGELOG.md` is not updated automatically.
+
+## Usage
+
+```sh
+rasc getclass app.apk com.example.Main                 # one class -> Java-like source
+rasc getclass --threads 16 -o Main.java app.apk 'Lcom/example/Main;'
+rasc getclass --members app.apk com.example.Main       # source prefixed by per-member indices
+rasc findrefs app.apk string Authorization             # references across every root DEX
+rasc findrefs app.apk method onCreate --class com.example.Main
+rasc findrefs app.apk field INSTANCE --class example --fuzzy-class
+rasc classes app.apk                                   # class index
+rasc manifest app.apk                                  # binary AndroidManifest.xml -> XML
+rasc skill                                             # install the rasc skill for coding agents
+```
+
+See `rasc --help` for more usage information, or `rasc <command> --help` for command-specific options.
+
+### Headless MCP
+
+MCP is a quick, standard way to connect rasc to Pi and other MCP-compatible coding agents. Agents
+with code mode can call rasc tools and process their structured results in JavaScript.
+
+Configure rasc globally for Pi in `~/.pi/agent/mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "rasc": {
+      "command": "rasc",
+      "args": ["mcp"],
+      "exposure": "codemode",
+      "description": "High-performance native alternative to jadx for APK and DEX analysis"
+    }
+  }
+}
+```
+
+Run `pi mcp list` to verify the connection. By default, rasc can open inputs under the current
+working directory; use `--root DIR` only when an explicit access boundary is needed.
+
+Available MCP tools:
+
+- `open` - open an APK or DEX and return a `target_id`
+- `close` - close a target and release its resources
+- `status` - show server, target, and cache status
+- `classes` - list classes
+- `strings` - list strings
+- `findrefs` - find string, type, method, or field references
+- `getclass` - decompile one class
+- `manifest` - decode `AndroidManifest.xml`
+- `entries` - list APK archive entries
+
+The usual flow is `open` → analysis tools using the returned `target_id` → `close`. See
+[the headless MCP guide](docs/headless-mcp.zh-CN.md) for limits and code-mode examples.
+
+### Coding agents
+
+`rasc skill` installs a single-file [skill](skill/SKILL.md) - rasc's scope plus one line per
+command - so a coding agent knows when to reach for rasc and how to call it:
+
+```sh
+rasc skill                        # every agent that looks installed, else ~/.agents/skills
+rasc skill pi codex claude        # or pick agents explicitly
+rasc skill --dir .claude/skills   # any skills directory (a project's, for example)
+rasc skill --print                # the skill text on stdout, nothing written
+```
+
+## License
+
+Apache-2.0. The full text is in [LICENSE](../../LICENSE). Existing crates retain their license files.

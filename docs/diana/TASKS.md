@@ -1,13 +1,13 @@
 # Agent 实施任务卡
 
-本页是**将来的实现任务**，本轮只交付计划，没有创建 `crates/diana-decomp`、fixture、脚本或实现测试。目标是从零引擎，不迁移既有实验分支。所有路径除另有说明均相对于未来 `crates/diana-decomp/`；在仓库根执行命令。
+本页是**将来的功能实现任务**。用户要求先建结构后，`crates/diana-decomp/` 已有 Cargo/文档级空库，`apps/diana/` 已有失败入口；没有 Engine、phase、fixture 或 E2E runner。骨架不算 T01/H01，B04 仍是功能前置。活动 workspace 仅含 Diana；旧实现/测试已归档 ref-fork，不构建/测试。实际目录与旧 root 路径映射见 [STRUCTURE.md](STRUCTURE.md)。目标从零引擎，不迁移既有实验分支。所有路径除另有说明相对于 `crates/diana-decomp/`；在仓库根执行命令。
 
 必读：[DESIGN.md](DESIGN.md)（契约）、[MODULES.md](MODULES.md)（接口）、[ALGORITHMS.md](ALGORITHMS.md)（关键算法步骤）、[VERIFICATION.md](VERIFICATION.md)（fixture/harness规则）。依赖以 [IMPLEMENTATION_PLAN.md §4](IMPLEMENTATION_PLAN.md#4-任务依赖可用作机械检查输入) 为准。
 
 ## 0. 所有任务共同的执行合同
 
-- **范围**：T01–T25只创建当前内部 `diana-decomp` 任务会编译/测试的 Module。crate 默认 `unsafe_code=forbid`，无 blanket warnings allow，默认 lib tests 打开；不增加生产外部进程/JVM/Python依赖。root `diana` CLI替换由H任务验收，T卡不自行切默认入口。**MCP暂不设计或重写**。
-- **交付**：实现、interface/doc同步；有复杂语义/输入/资源义务的能力提供输入→结果正例与反例、fixture和来源登记。测试跨公开库/module interface，重点捕获错误语义/原始内容丢失/安全失效，不给简单enum、getter、转发、参数路由、help/列名或机械格式各写一个测试，也不靠测试私有调用次数。CLI接线人工审阅；现有测试本次不删。
+- **范围**：T01–T25只创建当前内部 `diana-decomp` 任务会编译/测试的 Module。crate 默认 `unsafe_code=forbid`，无 blanket warnings allow，默认 lib tests 打开；不增加生产外部进程/JVM/Python依赖。`apps/diana/` CLI 实现/最终产品切换由H任务验收，T卡不自行切默认入口。**MCP暂不设计或重写**。
+- **交付**：实现、interface/doc同步；有复杂语义/输入/资源义务的能力提供输入→结果正例与反例、fixture和来源登记。测试跨公开库/module interface，重点捕获错误语义/原始内容丢失/安全失效，不给简单enum、getter、转发、参数路由、help/列名或机械格式各写一个测试，也不靠测试私有调用次数。CLI接线人工审阅；旧测试保存在 ref-fork，不删除但不进入主 gate。
 - **基本gate G0**（未来 T01 后存在）：`cargo fmt --all -- --check`；`cargo clippy -p diana-decomp --all-targets -- -D warnings`；`cargo test -p diana-decomp --all-targets`；集成提交再跑根 `AGENTS.md` workspace命令。缺crate时不能运行这些命令并宣称pass。
 - **任务filter**：`cargo test -p diana-decomp --test contracts tNN_`。T01创建`tests/contracts.rs`，按任务注册子模块，测试名必须带对应filter，harness须检查运行计数非零；0tests不是验收。
 - **语义gate B(F)**：F只是原能力族索引，**实际按E2E_CASES.md第4节的任务→D固定映射运行**，不把宽F族全部作为早期任务的未来功能。B01–B04先冻结/认证输入与expected，T05只接真实库；例如T06执行`DIANA_DEV_ROUNDTRIP=1 DIANA_CASE=D009 cargo test -p diana-decomp --test contracts behavior_roundtrip -- --nocapture`。可comma-list D编号；缺工具/fixture失败，不根据当前实现动态删除成员。详见VERIFICATION.md，正常G0可运行已签入自制DEX的Rust测试，不假装运行了外部roundtrip。
@@ -23,7 +23,7 @@
 
 **依赖**：B04。**Phase**：P0/Pipeline/P9。**源码参考**：KU-01/02/04/05，RG-04。
 
-**目标文件**：未来 `crates/diana-decomp/Cargo.toml`（其余路径按本页约定相对该crate）、`src/{lib,engine}.rs`、`src/pipeline/{schedule,registry,control,diagnostics,trace}.rs`、`src/p0_knowledge/{mod,policy}.rs`、`src/substrate/{ids,origin}.rs`、`tests/contracts.rs`。package=`diana-decomp`，Rust导入=`diana_decomp`，与root产品`diana`分开。加入workspace，旧live生产依赖由H08分析退役，版本按正式流程，不手工推动release。
+**目标文件**：现有骨架 `crates/diana-decomp/Cargo.toml`（其余路径按本页约定相对该crate）、`src/{lib,engine}.rs`、`src/pipeline/{schedule,registry,control,diagnostics,trace}.rs`、`src/p0_knowledge/{mod,policy}.rs`、`src/substrate/{ids,origin}.rs`、`tests/contracts.rs`。package=`diana-decomp`，Rust导入=`diana_decomp`，与应用包 `apps/diana/` 分开；已加入 workspace，不能将骨架构建当本卡完成。旧依赖已从主 workspace/lock 去除、保留在 ref-fork；H08 核对不再引入，版本按正式流程，不手工推动release。
 
 **输入→输出 / Interface**：实现DESIGN §2和PROJECT §4的`DexImage<'a>/Engine<'a>/RunContext/Options/Request/Report/MethodOutput/ClassOutput`、分类诊断；未接线Java路径只能Unsupported/Unavailable，不能占位成功。建立`PhaseId/PassId/PassSpec`、`RunControl::charge/reserve/check_cancel`；registry是实际schedule定义的投影，不是另一份手填pass顺序。
 
@@ -572,7 +572,7 @@
 
 **依赖**：T23、T14。**Phase**：全部/验证。T24为可选美化，不是本卡前置。**参考**：KU-04/08、RG-08、DX-13。
 
-**文件**：`tests/contracts.rs`、薄public adapter、`src/pipeline/{registry,control,trace}.rs`，读取root `tests/e2e/manifest.json`/cases/expected/input证书；新crateREADME/NOTICE登记和本设计实现状态。不要各crate复制第二套可变fixture/expected。
+**文件**：`tests/contracts.rs`、薄public adapter、`src/pipeline/{registry,control,trace}.rs`，读取root `tests/e2e/manifest.json`/cases/expected/input证书；新crateREADME来源登记和本设计实现状态。不要各crate复制第二套可变fixture/expected。
 
 **输入→输出**：T01–T23的实际supportedprofile→CoreRC证据集：每能力positive/negative/limit/状态、behaviordriver与rawfallback、无panic/mutation、无序输出的身份/内容完整性、source许可证审阅。不是宣布所有DEX可Java。
 
@@ -583,7 +583,7 @@
 4. 跑B01/B04固定的D001–D054核心Java集合与其他raw/安全/identity套件，不根据当前engine-supported过滤分母；未实现仍未通过。单列JVM/ART、catalog完整性、metadata、exception/monitor证据。T24off先全core gate，on仅已实现的美化另验。
 5. 以不同worker到达次序/HashSeed重复验证记录和产物按原始identity关联、无重无漏、每份实际source合法且spans指向本份文本；不要求生成文本/局部名/声明/诊断序列byte-identical，不为测试加入canonical sort。不同合法调度触发不同预算结果如实分类，但不得因此错语义；不为本卡刻意新建并行。
 6. 记录release耗时/峰值内存方法而不是debug断言快；代表input授权后optin才运行，环境/skip明确。不做promised百分比缩减。
-7. 套用本仓workspacegates、NOTICE许可来源和self-contained约束；本卡只验收内部EngineCoreRC，root CLI替换由H05/H08验收，MCP暂不设计。
+7. 套用本仓workspacegates、各crate许可来源和self-contained约束；本卡只验收内部EngineCoreRC，root CLI替换由H05/H08验收，MCP暂不设计。
 
 **不变量 / 限额**：超限Resource不是malformed，totalrequestlimits覆盖多个method，smalllimit不可输出截断“完整Java”；fuzzcase有timeout/seed/range避免unbounded运行。
 

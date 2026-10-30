@@ -4,7 +4,9 @@
 
 **现在已有**：[e2e_cases.json](e2e_cases.json) 的70个具体案例设计及独立预期、[E2E_CASES.md](E2E_CASES.md)的oracle/比较义务、[REPRODUCIBILITY.md](REPRODUCIBILITY.md)的公开来源与工具合同。
 
-**还没有**：可运行的Java/smali源fixture、DEX/ZIP输入、工具完整checksum锁、参考Driver成绩、runner代码、新Diana引擎。不能把案例设计称为全部E2E已绿色。本页B01–B04在引擎实现T01与产品改造H01之前完成；这次仍是设计阶段，不修改生产Rust。
+**还没有**：可运行的Java/smali源fixture、DEX/ZIP输入、工具完整checksum锁、参考Driver成绩、runner代码、新Diana引擎。不能把案例设计称为全部E2E已绿色。本页B01–B04在引擎实现T01与产品功能改造H01之前完成。用户后续明确要求先建项目结构，已允许纯 Cargo/包骨架/构建发布隔离先行，见 [STRUCTURE.md](STRUCTURE.md)；这不算 T01/H01，不实现 Engine/CLI 命令，测试准备与固定期望规则不变。最新 ref-fork 隔离使主 workspace/CI 只含 Diana；旧 tests 保留但不构建/执行，也不能拿它们的通过数冒充准备或新引擎验收。
+
+批次开发流程、记录模板和停止条件见 [DEVELOPMENT.md](DEVELOPMENT.md)。按批执行 B02–B04 的建议仍待明确确认；**当前本页全量前置继续有效**，准备工具的单案例试点不算 B04 完成，不授权提前写生产引擎。
 
 ## 1. 测试接口先确认，案例不绑内部phase
 

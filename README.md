@@ -1,109 +1,72 @@
-# rasc
+# Diana
 
+Native Rust APK/DEX analysis and decompilation, designed to replace rasc.
+**Current state: package scaffolds and E2E case specifications only.** No Engine,
+analysis commands or executable E2E suite have been implemented yet.
 
-## What rasc is for
+## Active project
 
-rasc is a Rust cli tool built to analyze APKs and DEX files at very high speed. 
+```text
+apps/diana/             # Diana CLI/application package
+apps/diana-gui/         # Future GUI: documentation placeholder only
+apps/diana-web-ui/      # Future web interface: documentation placeholder only
+crates/diana-decomp/    # Independent native engine library
+docs/diana/            # Design, tasks, 70 E2E case specifications and board
+ref-fork/rasc/         # Archived rasc/dexdec/rusty-dex/vendor/tests, reference only
+```
 
-## Build and install
+The root is a virtual Cargo workspace containing **only Diana packages**. The
+rasc implementation and its crates/tests/release tooling remain in an independent
+reference workspace under `ref-fork/rasc/`; they are not production dependencies
+and are not built, tested or released by this branch’s CI or root Cargo commands.
 
-Prebuilt binaries for macOS (Apple Silicon and Intel), Linux x86_64 (musl), and Windows x86_64
-are on the [Releases](https://github.com/TsingShui/rasc/releases) page. The Linux musl build is
-statically linked and does not require a particular glibc version. Install the latest version directly from
-GitHub with Cargo:
+[Application targets](apps/README.md) share the `apps/` layout. GUI and web UI
+are reserved directories only, with no manifests, implementation, dependencies
+or CI jobs; they are not workspace members and no framework or WASM strategy
+has been selected.
+
+## Development
+
+Start with the [development workflow](docs/diana/DEVELOPMENT.md): bounded batches,
+preparation evidence, completion/stop criteria and one record per actual batch.
+The proposed per-batch preparation rule is not yet active; existing full B01–B04
+prerequisites remain in force until explicitly approved and synchronized.
+
+Run from the repository root (Rust 1.93 or newer):
 
 ```sh
-cargo install --git https://github.com/TsingShui/rasc
-rasc --help
+cargo build --locked
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
+cargo build --workspace --release --locked
 ```
 
-To build and install from a local checkout instead:
+Use `-p diana` or `-p diana-decomp` to select one package. Both share the root
+`Cargo.lock`; the archived reference retains its own lockfile. The active
+[Diana CI](.github/workflows/diana.yml) checks only scaffold format/lint/build,
+without publishing or pretending a zero-test run establishes functionality.
+`cargo test --workspace` will only select Diana; there are currently no actual
+Diana tests, and that is **not** an E2E pass.
 
-```sh
-cargo install --path . # builds with cargo build --release
-rasc --help
-```
+The current `diana` entry point reports “not implemented” to stderr and returns
+failure. It does not delegate to rasc or dexdec. Do not install or release the
+scaffold as a usable analysis tool.
 
-### Maintainer releases
+## Design and test preparation
 
-Run the `Release` workflow on `main` with a stable version, for example:
+- [Current structure and reference isolation](docs/diana/STRUCTURE.md)
+- [Design entry point](docs/diana/README.md)
+- [Offline architecture / implementation board](docs/diana/index.html)
+- [E2E preparation before engine development](docs/diana/TEST_PREPARATION.md)
+- [70 concrete case specifications](docs/diana/E2E_CASES.md)
+- [Portable sources and toolchain contract](docs/diana/REPRODUCIBILITY.md)
+- [Archived reference scope](ref-fork/README.md)
 
-```sh
-gh workflow run release.yml --ref main -f version=1.0.1
-```
-
-The workflow commits the workspace version bump directly to `main`, then builds and
-publishes the release without a release PR. Put optional release notes in
-`docs/releases/rasc-v1.0.1.md` before running it. If a run fails, retry the same version;
-the version commit may already be on `main`. Published releases are not modified, and
-`CHANGELOG.md` is not updated automatically.
-
-## Usage
-
-```sh
-rasc getclass app.apk com.example.Main                 # one class -> Java-like source
-rasc getclass --threads 16 -o Main.java app.apk 'Lcom/example/Main;'
-rasc getclass --members app.apk com.example.Main       # source prefixed by per-member indices
-rasc findrefs app.apk string Authorization             # references across every root DEX
-rasc findrefs app.apk method onCreate --class com.example.Main
-rasc findrefs app.apk field INSTANCE --class example --fuzzy-class
-rasc classes app.apk                                   # class index
-rasc manifest app.apk                                  # binary AndroidManifest.xml -> XML
-rasc skill                                             # install the rasc skill for coding agents
-```
-
-See `rasc --help` for more usage information, or `rasc <command> --help` for command-specific options.
-
-### Headless MCP
-
-MCP is a quick, standard way to connect rasc to Pi and other MCP-compatible coding agents. Agents
-with code mode can call rasc tools and process their structured results in JavaScript.
-
-Configure rasc globally for Pi in `~/.pi/agent/mcp.json`:
-
-```json
-{
-  "mcpServers": {
-    "rasc": {
-      "command": "rasc",
-      "args": ["mcp"],
-      "exposure": "codemode",
-      "description": "High-performance native alternative to jadx for APK and DEX analysis"
-    }
-  }
-}
-```
-
-Run `pi mcp list` to verify the connection. By default, rasc can open inputs under the current
-working directory; use `--root DIR` only when an explicit access boundary is needed.
-
-Available MCP tools:
-
-- `open` - open an APK or DEX and return a `target_id`
-- `close` - close a target and release its resources
-- `status` - show server, target, and cache status
-- `classes` - list classes
-- `strings` - list strings
-- `findrefs` - find string, type, method, or field references
-- `getclass` - decompile one class
-- `manifest` - decode `AndroidManifest.xml`
-- `entries` - list APK archive entries
-
-The usual flow is `open` → analysis tools using the returned `target_id` → `close`. See
-[the headless MCP guide](docs/headless-mcp.zh-CN.md) for limits and code-mode examples.
-
-### Coding agents
-
-`rasc skill` installs a single-file [skill](skill/SKILL.md) - rasc's scope plus one line per
-command - so a coding agent knows when to reach for rasc and how to call it:
-
-```sh
-rasc skill                        # every agent that looks installed, else ~/.agents/skills
-rasc skill pi codex claude        # or pick agents explicitly
-rasc skill --dir .claude/skills   # any skills directory (a project's, for example)
-rasc skill --print                # the skill text on stdout, nothing written
-```
+The requested layout work does not mark H01/T01 or B01–B04 complete. Independently
+certify fixtures, expected behavior and the comparator before production feature
+work. MCP is deferred; its old implementation is preserved only in the reference.
 
 ## License
 
-Apache-2.0. The full text is in [LICENSE](LICENSE); [NOTICE](NOTICE) 
+Apache-2.0; see [LICENSE](LICENSE). Existing reference crates retain their license
+files. There is no root NOTICE or additional license bundle.

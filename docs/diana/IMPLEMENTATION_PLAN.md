@@ -1,6 +1,8 @@
 # Diana 实施路线：按能力切片贯通，不按 Phase 闭门完成
 
-状态：实施计划；本次**不执行这些 Rust/fixture 任务**。本页T01–T25是内部`diana-decomp`引擎路线，整个Diana产品的CLI/查询/输入整合见[PROJECT.md](PROJECT.md)、[PROJECT_TASKS.md](PROJECT_TASKS.md)（H01–H10）。MCP暂不设计，也不是CLI验收前置。目标架构见 [DESIGN.md](DESIGN.md)，文件与接口见 [MODULES.md](MODULES.md)，具体执行卡见 [TASKS.md](TASKS.md)。现有实验分支不是兼容或迁移目标。
+状态：功能实施计划；纯包结构已按用户新要求先搭建，见 [STRUCTURE.md](STRUCTURE.md)，不算 H01/T01 或 E2E 准备完成。本次**不执行以下功能 Rust/fixture 任务**。本页T01–T25是内部`diana-decomp`引擎路线，整个Diana产品的CLI/查询/输入整合见[PROJECT.md](PROJECT.md)、[PROJECT_TASKS.md](PROJECT_TASKS.md)（H01–H10）。MCP暂不设计，也不是CLI验收前置。目标架构见 [DESIGN.md](DESIGN.md)，文件与接口见 [MODULES.md](MODULES.md)，具体执行卡见 [TASKS.md](TASKS.md)。现有实验分支不是兼容或迁移目标。
+
+开发流程与批次记录统一见 [DEVELOPMENT.md](DEVELOPMENT.md)。其中按批认证后进入对应实现的建议**尚未生效**；本页全量 B04 前置、T/H 依赖不因记录该建议而改变。确认后再统一同步，不能从候选批次表推导跳过依赖。
 
 ## 1. 回答“一个 phase 一个 phase 做最好吗？”
 
@@ -22,9 +24,9 @@ monitor：    在try/catch能力已验证后加入lock/release证书
 
 ## 2. 先完成测试准备，再启动生产实现
 
-**用户最新约定：E2E案例先于开发。** 已设计70个D001–D070，见[E2E_CASES.md](E2E_CASES.md)/[e2e_cases.json](e2e_cases.json)；[TEST_PREPARATION.md](TEST_PREPARATION.md)的B01→B02→B03→B04先审阅冻结行为、生成自制源/inputs、锁公开工具/依赖、独立基准与harness证伪。B04通过前不启动T01/H01引擎或产品改造。团队获取/相对路径/工具锁见[REPRODUCIBILITY.md](REPRODUCIBILITY.md)，不依赖作者机器。
+**用户最新约定：E2E案例先于开发。** 已设计70个D001–D070，见[E2E_CASES.md](E2E_CASES.md)/[e2e_cases.json](e2e_cases.json)；[TEST_PREPARATION.md](TEST_PREPARATION.md)的B01→B02→B03→B04先审阅冻结行为、生成自制源/inputs、锁公开工具/依赖、独立基准与harness证伪。用户最新授权先做纯 Cargo/包骨架/构建发布隔离；B04通过前仍不启动T01/H01引擎或产品功能改造。团队获取/相对路径/工具锁见[REPRODUCIBILITY.md](REPRODUCIBILITY.md)，不依赖作者机器。
 
-测试准备通过后，引擎线先执行 **T01 → T02 → T03 → T04 → T05 → T06**。产品线先H01冻结唯一品牌/root `diana`与内部`diana-decomp`interface，再H02/H03与引擎线交错；H04/T04→H05/T06尽早接线CLI并通过公开反编译interface跑实际语义回环，不新增CLI黑盒，不等所有phase写完。这不是 six full phases，而是最小引擎骨架与直线行为闭环：
+测试准备通过后，引擎线先执行 **T01 → T02 → T03 → T04 → T05 → T06**。产品线先H01在应用根 `apps/diana/` 实现唯一产品 `diana` 与内部 `diana-decomp` interface，旧 rasc 独立归档为 ref-fork，不参加主 workspace/CI，再H02/H03与引擎线交错；H04/T04→H05/T06尽早接线CLI并通过公开反编译interface跑实际语义回环，不新增CLI黑盒，不等所有phase写完。这不是 six full phases，而是最小引擎骨架与直线行为闭环：
 
 1. T01：只建 crate、输出状态、诊断、预算、真实 schedule 与 contract 注册；不一次建全部空目录。
 2. T02：安全 header/catalog/code-item reader，能定位一个自制类与 exact proto 方法；错误分类可测。
@@ -88,7 +90,7 @@ P2普通call读proto、P3参数输入、P5最小scalar事实在T06起已存在�
 
 ## 5. 集成纪律与 Agent 执行策略
 
-- 先完成B01–B04规范/fixture/toolchain/reference/harness准备再生产开发。每个focused实现引用固定D案例组逐步转绿，不根据actual改expected、删/skip required成员或把本应Java的案例改Smali成功；真正oracle错误须独立证据/单独审阅修正。help/参数/路由/列名/简单getter不新测，H01/H07仅审阅/构建；不冻结私有phase形状，现有测试本次不删。
+- 先完成B01–B04规范/fixture/toolchain/reference/harness准备再生产开发。每个focused实现引用固定D案例组逐步转绿，不根据actual改expected、删/skip required成员或把本应Java的案例改Smali成功；真正oracle错误须独立证据/单独审阅修正。help/参数/路由/列名/简单getter不新测，H01/H07仅审阅/构建；不冻结私有phase形状，旧测试整体保存在 ref-fork，不删除但也不运行来验收 Diana。
 - 阶段privateconstructor不让下游绕validator创建Verified；fixture可制造invalidartifact检验拒绝，helper只在tests。
 - 首轮一个writer/工作区。若用户之后允许并行：只有不修改相同schema/registry/support文件的叶任务可并行；独立worktree，先冻结共享interface再fanout。规模大不自动授权子Agent。
 - 不要求查询、独立方法/类的输出次序或生成文本跨运行一致，也不为此排序/按输入ordinal等待。验收按原identity核对完整记录、实际spans与行为driver，不能用宽松normalization把错类型/异常/副作用当相同；纯性能task也不额外要求byte-identical。

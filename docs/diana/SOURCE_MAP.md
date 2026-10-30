@@ -14,7 +14,9 @@
 
 按[REPRODUCIBILITY.md](REPRODUCIBILITY.md)在当前checkout内显式获取固定参考；参考只用于审阅/实现，不是生产或E2E测试运行的隐含依赖。离线协作者使用按相同commit验证的源码包；不能自动改用main或作者机器路径。
 
-补充产品范围：Diana是整个项目，root产品/CLI为`diana`，内部引擎为`diana-decomp`；现有rasc源码作为CLI/输入/轻量查询的复用来源，见[PROJECT.md](PROJECT.md)。MCP明确延期，本轮不设计新协议、schema或迁移。反编译算法仍从零设计，不移植已删除的实验分支。
+当前 checkout 的旧源码已整体归档到 `ref-fork/rasc/`，不参加活动构建/测试。读取上表 DX/旧 root 的固定路径时在 checkout 加此仓库相对前缀；公开 URL/commit/path 锚点不改，见 [STRUCTURE.md](STRUCTURE.md)。
+
+补充产品范围：Diana是整个项目，活动产品/CLI为`diana`，内部引擎为`diana-decomp`；现有rasc源码作为CLI/输入/轻量查询的复用来源，见[PROJECT.md](PROJECT.md)。MCP明确延期，本轮不设计新协议、schema或迁移。反编译算法仍从零设计，不移植已删除的实验分支。
 
 本轮只做源码/公开入口/文档核查，没有重新运行三引擎语料比较，也没有验证旧对话中的覆盖率数字。后续HEAD移动不自动改变本表；任何reference更新须独立审阅，不能静默用另一个版本。RG父仓gitlink不把父仓Apache声明自动传递为子仓许可，见第6节。
 
@@ -84,7 +86,7 @@
 
 实施时每次移植一个算法，新增登记：来源项目/固定提交/符号、原许可与 copyright、适配差异、不变量、测试、是否仍依赖原 helper。原则是“理解后重写或有记录地局部移植”，不是把目录搬进新 crate 再慢慢启用。
 
-- DX 与 rusty-dex 有 Apache-2.0 许可文件和本仓 NOTICE 记录；任何复制须保留许可/copyright、记录修改并更新新分发清单。
+- DX 与 rusty-dex 各自保留 Apache-2.0 许可文件；任何复制须保留许可/copyright、记录修改并更新新分发清单。
 - KU 的工作空间声明许可，含 Ghidra/angr 来源；复制具体文件前检查该文件头、根 LICENSE/NOTICE 和上游归属，不只看 Cargo 一行。
 - RG是独立git仓库/gitlink，固定版本manifest没有`license`字段，也未找到该仓自己的LICENSE。**父仓Apache-2.0不能自动覆盖gitlink子仓**。引用设计/符号不等于获准复制代码；在权利人明确许可前，阻止radguard程序/fixture移植与分发，采用自行实现+自制fixture。此前“子目录沿父许可”的假设撤回；DAD衍生归属仍需核查。
 - 本文引用符号和算法思想；本次不复制第三方程序或 corpus。若许可、fixture 授权无法确认，则阻止该项复制，保留自行实现与自制 fixture 路线；不阻止其他设计工作。

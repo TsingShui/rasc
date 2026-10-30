@@ -1,8 +1,8 @@
 # Diana 产品任务卡（CLI 优先，MCP 延期）
 
-这些是**未来实施任务，不是本轮已执行的代码变更**。H01–H10负责整个Diana产品；T01–T25负责内部`diana-decomp`。H编号与现有U01–U08 Unsupported fixture不同，不得混用。总体合同见[PROJECT.md](PROJECT.md)，公开命令/列/选择器以[CLI.md](CLI.md)为唯一规范，反编译合同见[DESIGN.md](DESIGN.md)。
+这些是**未来功能实施任务**；纯包骨架已按用户最新要求先行，不代表 H01/T01 完成。实际结构以 [STRUCTURE.md](STRUCTURE.md) 为准：下文 root 产品/src 指 Diana 应用根 `apps/diana/`，固定旧源码锚点不改，当前 checkout 对应 `ref-fork/rasc/`；主 workspace/CI 不构建测试它；产品测试在 `apps/diana/tests/`，workspace Cargo/lock、共享 `tests/e2e/` 与工具仍在仓库根。H01–H10负责整个Diana产品；T01–T25负责内部`diana-decomp`。H编号与现有U01–U08 Unsupported fixture不同，不得混用。总体合同见[PROJECT.md](PROJECT.md)，公开命令/列/选择器以[CLI.md](CLI.md)为唯一规范，反编译合同见[DESIGN.md](DESIGN.md)。
 
-MCP暂不设计：不创建新tool/schema/envelope/会话协议，不改现有MCP行为，不以其迁移完成作为CLIProductRC条件。改共享代码/包名时仍需必要编译修复、现有回归和明确保留清单；不是因为不设计就允许删坏现有调用。
+MCP暂不设计：不创建新tool/schema/envelope/会话协议。旧MCP完整归档在 ref-fork，与旧 workspace/lock/tests 独立；不改行为、不删除源码，也不编译或运行其回归来验收 Diana。主工程无旧调用/依赖。
 
 ## 1. 依赖与共享实施合同
 
@@ -23,27 +23,27 @@ host-deps H10: H02
 
 B01–B04测试设计/fixture/公开工具/独立基准/harness先于T01/H01，详见[TEST_PREPARATION.md](TEST_PREPARATION.md)；所有case与source/expected可由干净checkout复建，不用作者机器路径。T线不反向依赖H线，B准备不依赖引擎实现，因此没有跨图循环。T01采用本文既定命名/interface即可独立实现；H01不能另选同名内部crate。先H01/T01确定共享interface，再让H02/H03与T02–T06交错；H05尽早跑一个真实CLI方法。用户未授权时不启动并行子Agent。
 
-未来产品gate `PG`：root `cargo fmt --all -- --check`、`cargo clippy --workspace --all-targets --all-features -- -D warnings`、`cargo test --workspace --all-features`、`cargo build --release`。原工程遗留警告/失败先按具体来源记录，不能改测试吸收；MCP只跑原有必要回归，不补新协议合同。
+未来产品gate `PG`：root `cargo fmt --all -- --check`、`cargo clippy --workspace --all-targets --all-features -- -D warnings`、`cargo test --workspace --all-features`、`cargo build --release`。这些命令只选 Diana，不会进入 ref-fork；旧工程 lint/测试不再作为本分支 gate，也不补 MCP 回归或新协议合同。
 
-H02起为实际复杂领域任务创建`tests/product_contracts.rs`，只测试公开输入/查询/提取module interface，不启动CLI。H02–H06/H09/H10使用`cargo test -p diana --test product_contracts hNN_`且运行非零用例；H01/H07只做实现/人工核对，无测试filter，不造空测试凑数；H08汇总已有复杂测试。引擎gate用`-p diana-decomp`，root用`-p diana`；更名前的实际命令注明状态。
+H02起为实际复杂领域任务创建`tests/product_contracts.rs`，只测试公开输入/查询/提取module interface，不启动CLI。H02–H06/H09/H10使用`cargo test -p diana --test product_contracts hNN_`且运行非零用例；H01/H07只做实现/人工核对，无测试filter，不造空测试凑数；H08汇总已有复杂测试。引擎gate用`-p diana-decomp`，Diana 应用用 `-p diana`；根 Cargo 只选择 Diana 两包，没有 `-p rasc` 成员。旧工程不参与当前 gate，骨架构建不算功能/E2E通过。
 
-每卡交付focused代码、接口/doc同步、编译与审阅结果；复杂语义/安全任务接入B01–B04已冻结的自制fixture/独立expected/harness，不在实现时重新设计答案。新反例可追加，改旧oracle须独立证据与审阅；不得按引擎当前能力删case。基础CLI卡不强求新增测试。旧测试按仓库gate继续运行，不删除，也不扩成新CLI黑盒。不改版本/tag、不推发布；目标module仅按实际需要创建。
+每卡交付focused代码、接口/doc同步、编译与审阅结果；复杂语义/安全任务接入B01–B04已冻结的自制fixture/独立expected/harness，不在实现时重新设计答案。新反例可追加，改旧oracle须独立证据与审阅；不得按引擎当前能力删case。基础CLI卡不强求新增测试。旧测试保存在 ref-fork，不删除也不运行作为主 gate，更不扩成新CLI黑盒。不改版本/tag、不推发布；目标module仅按实际需要创建。
 
 ## H01 — 产品命名与领域合同冻结
 
-**依赖**：B04。**范围**：root品牌/CLI/内部crate定位，无MCP新设计。
+**依赖**：B04。**范围**：Diana应用品牌/CLI/内部crate定位，无MCP新设计。
 
-**文件**：未来root `Cargo.toml`、`src/{main,lib}.rs`、`src/cli/{args,mod}.rs`；更新README/AGENTS目标说明，历史release/许可不全局替换；本卡不创建CLI测试文件。
+**文件**：现有 `apps/diana/Cargo.toml`/`src/main.rs` 骨架与未来 `apps/diana/src/lib.rs`、`src/cli/{args,mod}.rs`（均相对 Diana 应用根）；更新README/AGENTS产品说明。旧 rasc 已整体移到 ref-fork，仅参考，不构建/测试；历史release/许可不全局替换；本卡不创建CLI测试文件。
 
-**输入→输出 / Interface**：root package/binary `diana`；内部package`diana-decomp`、path`crates/diana-decomp/`、import`diana_decomp`；原CLI领域/flags/退出码及结果完整性形成基线。输出顺序明确不再保证，独立任务结果按完成/到达顺序发布。rename不代表新算法已替换。
+**输入→输出 / Interface**：应用 package/binary `diana`（`apps/diana/`）；内部package`diana-decomp`、path`crates/diana-decomp/`、import`diana_decomp`；原CLI领域/flags/退出码及结果完整性形成基线。输出顺序明确不再保证，独立任务结果按完成/到达顺序发布。rename不代表新算法已替换。
 
 **步骤**：
 1. 登记所有live名字消费者：clapname、crateimports、测试binaryenv、skill、releaseartifact/版本断言；MCP相关只登记延期/必要编译引用，不设计servername/schema迁移。
 2. 对照现有源码与CLI.md核对命令/字段/输出通道与迁移清单，不运行CLI黑盒或建立help/格式golden。旧展示顺序与分页接口有意取消；原始身份、解码完整性和文件安全等复杂领域义务由后续module测试承担。
-3. 更名root构建入口与内部crate目标，保持版本走原发布流程；是否历史`rasc`文本属于sourceprovenance按清单判断，不全替换。
+3. 在 apps/diana/入口与内部crate骨架上实现新产品，根已是 Diana-only workspace；旧 rasc 在 ref-fork，不把其 CLI 当别名/依赖。H08 仍须产品能力证据，旧发布工具已归档，Diana 发布政策独立审阅；历史来源不全替换。
 4. 按CLI.md冻结11个命令和指定TSV/JSON列、规范at、完整method-selector、默认Java与显式JSONreport；旧getclass/findrefs/skill、class-id/memberprefix/require-java不保留alias。新增fields/methods/xrefsites/extract分别由H09/H10实现，不以旧接口限制新设计。
 
-**不变量 / 限额**：一个产品名，不造第二CLI；无JVM/Python生产runtime；原版权/来源不改。没有执行输出时不能自编基线数字。
+**不变量 / 限额**：活动 workspace 只含 Diana，旧 rasc 完整归档且不构建/测试；Diana 不转发旧 CLI/引擎；无JVM/Python生产runtime；原版权/来源不改。没有执行输出时不能自编基线数字。
 
 **测试**：不新增自动化测试。Q01是命名/基础接口的人工审阅清单，不是测试族；帮助、flags、列名、alias和分页移除与CLI.md对照，不写CLI黑盒或golden。复杂身份/解码/文件安全由后续领域任务测试。
 
@@ -185,7 +185,7 @@ H02起为实际复杂领域任务创建`tests/product_contracts.rs`，只测试�
 
 **测试**：不新增自动化测试。Q07是CLI.md/源码/agent文档的一致性审阅清单，不是测试族；help、路由、flags、列名、旧alias、默认包装不写黑盒/golden。复杂UTF16保真、身份、spans与提取安全由F03/Q04/Q06/Q09/Q10测试，不重复测基础排版。
 
-**验收**：格式/lint/构建检查 + Q07人工审阅，无h07_测试filter。现有测试仍运行，不删除。**完成**：十一命令接线与文档一致，复杂领域验证由对应任务提供，MCP不设计。
+**验收**：格式/lint/构建检查 + Q07人工审阅，无h07_测试filter。旧测试保存在 ref-fork，不删除但不进入活动 gate。**完成**：十一命令接线与文档一致，复杂领域验证由对应任务提供，MCP不设计。
 
 **不扩展**：MCPinput/outputschema、自动改用户agent配置、全局旧品牌license/historyrewrite、发布。
 
@@ -193,19 +193,19 @@ H02起为实际复杂领域任务创建`tests/product_contracts.rs`，只测试�
 
 **依赖**：H07、T25、T14。**范围**：整体验收与发行配置准备，MCP仍延期。
 
-**文件**：rootCargo/lock、releaseworkflow/README/NOTICE/AGENTS、rootquery/engineadapter、`tests/product_contracts.rs`；必要时旧deps清理，但不破坏延期MCPlive调用。
+**文件**：活动 rootCargo/lock、未来 Diana release 配置/README/AGENTS、应用 query/engineadapter、`apps/diana/tests/product_contracts.rs`；核对无 ref-fork 依赖，不维护旧MCP构建。
 
 **输入→输出 / Interface**：EngineCoreRC+H01–H07证据→CLIProductRC报告、livecallgraph/依赖退役清单、单diana发行配置。验收无序输出的完整性/身份，不要求跨运行source或报告序列一致；本卡不创建tag或上传release。
 
 **步骤**：
 1. CLI.md命令/列/路由由源码和文档审阅核对，不新增黑盒；复杂defined-vs-referenced、xrefsite完整性、extract原bytes/CRC/file安全、跨DEX/041身份与引擎行为由Q02–Q06/Q09/Q10和F测试验证。Q01/Q07仅人工清单，Q08汇总，不当执行测试族。
-2. 移除CLI路径旧dexdechelper；如果延期MCP仍live引用它，记录隔离的保留module/dependency与退出条件，不能盲删造成编译失败或偷偷为MCP新设计adapter。
-3. 未引用且许可/构建不用的旧crate可清理；仍保留第三方copyright/NOTICE和历史来源，依赖存在不等于第二发行产品。
-4. releaseworkflowbinary/versionassert/archive/checksum/Windows路径改diana；旧release不删，版本由原正式流程处理，不手工跳版本。
-5. 运行PG及要求自动化验证的复杂H卡/引擎CoreRC gate，基础接口卡H01/H07只做审阅，不造空测试；release代表输入授权optin测耗时/内存，not-run明确。MCP只跑已有必要回归，不新增协议测试。
+2. 核查活动 CLI/依赖图无旧 dexdec/MCP/helper 或 ref-fork 调用；旧代码完整保存在参考中，不需编译/跑测试，不为 MCP 新设计 adapter。
+3. ref-fork 不作为生产依赖或 gate，保留原源码/测试/许可/历史，不以当前参考目录存在当作第二发行产品或必须测试的遗留依赖。
+4. 独立审阅未来 Diana releasebinary/version/archive/checksum/Windows 配置；旧 workflow/scripts 已归档不复活，历史 release 不删除，不手工跳版本/发布。
+5. 运行仅 Diana 的 PG 与复杂 H/引擎 CoreRC gate，基础 H01/H07 只审阅，不造空测试；授权代表输入的 release 测量明确 not-run，不运行旧 MCP 回归或发布测试。
 6. 列knownUnsupported/rawcoverage与MCP延期说明：不把CLIProductRC说成全部projectinterfaces已迁移。
 
-**不变量 / 限额**：无静默跨旧enginefallback；singlebinary，不改版本/tag；既有live代码不因延期弃测；不宣称全DEX语义正确。
+**不变量 / 限额**：无静默跨旧enginefallback；singlebinary，不改版本/tag；活动代码须验证；旧参考不参与本分支 gate；不宣称全DEX语义正确。
 
 **测试**：Q08汇总复杂语义/领域测试：跨DEX/041身份、输入/提取/取消/预算，以及T25的行为和降级完整性。不建立整个CLI命令矩阵或branding/help/flags黑盒；CLI接线、旧依赖和发行配置采用源码审阅/本地构建检查。
 
