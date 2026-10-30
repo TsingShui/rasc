@@ -1,6 +1,6 @@
 # Diana
 
-Native Rust APK/DEX analysis and decompilation, designed to replace rasc.
+Native Rust APK/DEX decompiler, designed to replace rasc.
 **Current state: package scaffolds and E2E case specifications only.** No Engine,
 analysis commands or executable E2E suite have been implemented yet.
 
@@ -11,7 +11,7 @@ apps/diana/             # Diana CLI/application package
 apps/diana-gui/         # Future GUI: documentation placeholder only
 apps/diana-web-ui/      # Future web interface: documentation placeholder only
 crates/diana-decomp/    # Independent native engine library
-docs/diana/            # Core design, algorithms, tasks and 70 fixed cases
+docs/diana/            # Core design, algorithms, tasks and E2E specifications
 ref-fork/rasc/         # Archived rasc/dexdec/rusty-dex/vendor/tests, reference only
 ```
 
@@ -49,7 +49,7 @@ Diana tests, and that is **not** an E2E pass.
 
 The current `diana` entry point reports “not implemented” to stderr and returns
 failure. It does not delegate to rasc or dexdec. Do not install or release the
-scaffold as a usable analysis tool.
+scaffold as a usable decompiler.
 
 ## Local reference material
 
@@ -60,11 +60,16 @@ dependencies. See [sources and download policy](docs/diana/SOURCE_MAP.md).
 
 ## Design and test preparation
 
+The decompiler contract exposes recovered code by default. A failed method is
+shown as raw Smali or an explicit unavailable result alongside other recovered
+methods; Mixed is not a gate that suppresses the whole class. Complete Java-unit
+qualification and hard failures remain separate from readable output.
+
 - [Documentation entry](docs/diana/README.md)
 - [Product / CLI / engine design](docs/diana/DESIGN.md)
 - [Implementation algorithms](docs/diana/ALGORITHMS.md)
 - [Tasks, preparation and acceptance](docs/diana/TASKS.md)
-- [70 fixed case specifications](docs/diana/e2e_cases.json)
+- [Revisioned case specifications and independent expectations](docs/diana/e2e_cases.json)
 - [Sources and reproducibility](docs/diana/SOURCE_MAP.md)
 - [Archived reference scope](ref-fork/README.md)
 

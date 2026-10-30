@@ -1,30 +1,27 @@
-# Diana 设计：产品合同、接口与数据结构
+# Diana 产品与引擎技术规范
 
-状态：只有Rust包骨架，Engine、可运行fixture与runner尚未实现。算法已选定，见
-[ALGORITHMS.md](ALGORITHMS.md)；开发顺序、B/T/H任务及验证统一见[TASKS.md](TASKS.md)。
-[e2e_cases.json](e2e_cases.json)的70个固定案例保持独立，不从实现结果刷新。
+本文定义产品行为、Module职责、interface、数据结构和资源规则。
+算法与状态转换见[ALGORITHMS.md](ALGORITHMS.md)，任务与验证见[TASKS.md](TASKS.md)。
 
 ## 1. 产品边界与工程范围
 
-- Diana是native Rust APK/DEX分析产品。应用持文件/私有snapshot/ZIP、查询、输出；
-  diana-decomp借原DEX字节与声明facts，负责分析、Java/Smali与分类结果，不持文件权限。
-- 活动workspace只有`apps/diana`和`crates/diana-decomp`，Rust>=1.93、edition2024、
-  unsafe_code=forbid、publish=false、0.0.0骨架标记。根Cargo.lock只覆盖Diana。
-- `ref-fork/rasc/`独立workspace/lock，仅供阅读及审阅后的聚焦复用，不自动build/test/
-  lint/fmt/release，不依赖reference crates。历史固定路径在本地加ref-fork/rasc前缀。
-- `apps/diana-gui/`、`apps/diana-web-ui/`仅README占位，不加框架/manifests/deps/CI；
-  MCP延期。不提交私有APK、真实语料身份或许可证bundle，不擅自commit/push/发版。
-- 正确语义 > 明确失败 > 可实施验证 > 覆盖率 > 可读性。默认美化off；没有恢复/重试平台。
-  不把未知opcode当NOP、不造throw桩成功，不以javac成功代替行为证据。
-- 独立结果/源码/合成名字无跨运行稳定序要求，不排序/按输入等候/建重排buffer；查询返回
-  全部匹配，无分页/offset/limit。原指令、求值/参数/effect、catch、锁和初始化语义序不变。
-- 非核心代码测试须用户单独授权；不新增CLI黑盒/help/参数/列名/getter/转发测试。核心
-  复杂语义、输入/身份/提取与资源文件安全仍走公开库/module interface。
+Diana是原生APK/DEX反编译器，默认交付能恢复的真实代码；一个方法失败不阻断其他
+方法的展示。Java恢复资格、完整JavaUnit资格、一次请求是否正常完成是三个不同判断。
+Mixed/Smali是局部失败的正常出口，不把产品定位改成仅供诊断，也不能借允许降级放弃
+Java恢复质量或将required Java验收改绿。
 
-实际路径：应用`apps/diana/src/`，引擎`crates/diana-decomp/src/`，本文档及固定case在
-`docs/diana/`；未来自制资产`tests/e2e/`尚不存在；cache统一在忽略的`.cache/`。
-本轮不维护HTML看板、生成器或额外流程/复盘文档。
+- 应用Module位于`apps/diana/`，拥有输入文件、snapshot、ZIP、轻量查询与输出。
+  引擎Module位于`crates/diana-decomp/`，借用DEX bytes与声明facts，不访问文件/网络/
+  外部进程。代码为native Rust，Rust>=1.93、edition2024，两个crate均forbid unsafe。
+- 根workspace仅包含上述两个crate。参考源码`ref-fork/rasc/`不是依赖；
+  历史参考路径在本地加此前缀，公开source commit/path不变。
+- 输入、source、code-unit和UTF16坐标独立；所有偏移/count先核范围/预算再slice或分配。
+- 独立结果、源码与synthetic names无稳定展示序要求；不加排序/按输入等待的重排buffer。
+  查询返回全部匹配，无offset/limit/cursor。原指令/求值/参数/effect/catch/锁/init顺序不变。
+- 正确性不可配置关闭；无法满足Java表示约束时返回Smali或Unavailable，不造异常桩成功。
 
+应用源码在`apps/diana/src/`，引擎源码在`crates/diana-decomp/src/`。共享自制输入/
+expected位于`tests/e2e/`，生成物在`.cache/e2e/`，参考材料在`.cache/references/`。
 
 ## 2. 成功与降级必须在类型上分开
 
@@ -38,7 +35,7 @@
 - monitor 获取/释放对象、次数、顺序和异常路径；声明的 synchronized 语义。
 - 字符串 UTF-16 code units，包括孤立 surrogate；static encoded value 与初始化顺序。
 
-源码位置、局部名、临时量数量、栈帧形状不是承诺。Java/JVM 与 ART 的实现相关行为（例如具体 OOME 时机、栈轨迹行号、GC 时机）不能泛称已完全等价；算法不得因此任意跨越可能抛出、分配或同步操作，验证报告须注明运行环境局限。成功仅指恢复满足本设计的已支持语义 profile，不是数学上证明任意真实应用等价。
+源码位置、局部名、临时量数量、栈帧形状不是承诺。Java/JVM 与 ART 的实现相关行为（例如具体 OOME 时机、栈轨迹行号、GC 时机）不能泛称已完全等价；算法不得因此任意跨越可能抛出、分配或同步操作，验证报告须注明运行环境局限。Java成功要求本文定义的值、绑定、存储、控制、保护域与声明检查全部通过，不按实现当前能力动态改变合同。
 
 ### 2.2 结果模型
 
@@ -88,14 +85,17 @@ Cancelled/BudgetExceeded，不能误报Malformed。Limits不在Options/Engine重
 
 单 DEX 用长度为 1 的 images；DexId在请求内分配并以ImageOrigin映射回root的physical/logical身份，不要求不同到达顺序得到相同数字，也不为文件名/输入顺序额外排序。catalog 允许 empty；类型/调用证据不足时局部降级，不猜测。库无磁盘、进程或网络访问，root request scope 持字节 owner 至 Engine 使用结束；普通 DEX header_offset=0；T04实现原生041读取，H04只做应用借用/原身份适配，T25/H04分别提供D065两侧证据。
 
-`VerifiedJavaMethod/Unit` 字段私有，仅 P8 验证器能构造。证据记录依赖的 `EnvironmentId` 与支持 profile；**生产引擎不调用 javac**。外部环境满足声明事实时才声称合法 Java；测试必须使用真实配套 classpath。不能把 Unknown 外部方法完整声明集当 Complete。
+`VerifiedJavaMethod/Unit`字段私有，仅P8验证器在源码检查和TargetAdmission均通过后构造。
+TargetAdmission核Java8/classfile 52的signature、code/locals/stack/pool/metadata上界，规则见
+ALGORITHMS §12.4–§12.6；DeclarationOnly同样核声明边界。证据记录EnvironmentId与固定
+编译合同；**生产引擎不调用javac**。外部环境满足声明事实时才声称合法 Java；测试必须使用真实配套 classpath。不能把 Unknown 外部方法完整声明集当 Complete。
 
 `VerifiedJavaMethod`内部采用`MemberEmission::Explicit | Generated(owner_node, rule)`：
 Generated用于已证明由enum/override/inner语法生成的有code成员，不计DeclarationOnly。
 unit printer只打印owner语法，不重复发bridge/values等冲突声明；原MethodKey映射到owner spans。
 单独请求无法独立表达的Generated方法时返回原方法Smali，不造wrapper，详见ALGORITHMS §12。
 
-`JavaUnit` 要求合法 class shell、所有成员为 Java（含已验证Generated）或 DeclarationOnly、成员绑定/初始化/构造约束全通过。只要某方法 smali/unavailable 或 class shell 无法表达，结果为 Mixed；renderer 顶部必须标明非完整 Java，不能用 `.java` 后缀暗示可编译。方法级成功允许存在于 Mixed，但编译测试必须用可表示的上下文，不注入改变行为的 stub。
+`JavaUnit` 要求合法class shell、全部成员为Java（含已验证Generated）或DeclarationOnly，且绑定/初始化/构造约束通过。某方法Smali/Unavailable或shell无法表达则为Mixed；这是结果资格，不是默认拒绝展示的条件。Mixed展示保留成功方法、失败位置、原身份及Smali/不可用原因，顶部明确“非完整Java编译单元”；不造空body/异常stub补齐。文件后缀不决定资格，不自动为Mixed选择`.java`文件名；用户显式`-o`不因后缀被拒绝，标记仍须保留。方法级Java可存在于Mixed，编译验证仍须合法上下文，不改依赖造stub。
 
 ### 2.3 四类失败与取消
 
@@ -107,7 +107,7 @@ unit printer只打印owner语法，不重复发bridge/values等冲突声明；�
 | `InternalInvariant` | verifier 前后身份不一致、证书漏 edge、算法 impossible 状态 | 诊断显式 BUG、dev test 必败；请求报告可保留方法级 raw fallback，但状态仍为内部错误，不能算正常 Unsupported 或 Java 成功 |
 | `Cancelled` | caller 的取消 token | 停止请求，RequestError::Cancelled；不为取消逐个生成 smali |
 
-任何分析失败后的 Java AST/文本全部丢弃，fallback 永远只读原始字节。一个方法失败不修改其他方法配置。Unknown opcode 若无法可靠识别格式，只能 raw excerpt（例如 offset+hex），不能发明非标准 `.word` 并称 smali。
+失败方法尚未验证的Java AST/文本丢弃，其他已完成成员保留；fallback永远只读原始字节。一个方法失败不修改其他方法配置。Unknown opcode 若无法可靠识别格式，只能 raw excerpt（例如 offset+hex），不能发明非标准 `.word` 并称 smali。
 
 ## 3. Module与数据
 
@@ -144,7 +144,7 @@ unit printer只打印owner语法，不重复发bridge/values等冲突声明；�
 open/index/render中的循环同样可取消。InputError/RequestError携带统一FailureKind，
 取消/资源不能包装成Malformed。callback是协作式检查，不承诺抢占外部codec或硬超时。
 
-DexId按本次images枚举分配，映射到原ImageOrigin；原始身份是origin+原表index/proto，
+DexId按本请求images枚举分配，映射到原ImageOrigin；原始身份是origin+原表index/proto，
 不是输出数组位置。同一physical slice的041 views输入admission计一次；各logical
 catalog独立。caller提供的相同origin必须对应相同原bytes/header，冲突请求拒绝。
 
@@ -162,7 +162,9 @@ Report是owned结果：Java AST中literal UTF16、所用声明和原身份复制
 
 ```text
 RawMethodView { key, checked code/try/debug ranges }
+RawPrintable = ValidatedRawMethod | ValidatedRawDeclaration
 ValidatedRawMethod { raw_view, raw_insns, payloads, checked metadata }
+ValidatedRawDeclaration { key, checked flags/proto/annotations, code_off: Zero }
 MethodInput { key, raw, decl }
 FlowBody { raw, cfg, origins }
 SsaBody { flow, values, phis, bound_uses }
@@ -219,7 +221,7 @@ Env = sparse map<Slot, Sym>             // builder scratch，不进最终SsaBody
 
 采用ALGORITHMS §3：live-in只增；所有block live-in都建Phi；每block一次绑定、每incoming
 一次连接；retained/bad/grounded各一次单调标记。构造中的尚未填入用Option表示，不是
-语义Undefined。首版不做trivial-Phi或别名缩减，也不传播ValueId直到“看起来不变”。
+语义Undefined。不做trivial-Phi或别名缩减，也不传播ValueId直到“看起来不变”。
 
 验证器核每个Op input是本block入口Phi或已执行normal Def；Phi input等于对应前驱出口/
 throw前slot绑定。缺定义/partial wide与类型不可表达分开。普通dominator不替代异常检查。
@@ -227,14 +229,19 @@ throw前slot绑定。缺定义/partial wide与类型不可表达分开。普通d
 #### 3.3.4 类型、binding与allocation
 
 ```text
-ValueFacts { width, finite candidates, producer requirement, required_uses }
+ValueFacts { width, family_group, producer_origins, integral_bits, integral_range, required_uses }
 UseConversion { use_site, target_source_type, kind, supporting_fact }
 CallEvidence { original_ref, invoke_kind, candidate_group, completeness,
                parameter_words, access/throws/init facts, binding_obligations }
-Allocation { id, new_site, init_site, aliases, accepted_constructor_profile }
+Allocation { id, new_site, init_site, aliases, use_availability }
+FillPlan = LengthOnly | FreshArrayStores(shape_evidence, exact_elements)
 ```
 
-类型solver只改有限facts；最终use转换全有定义后交P6。纯数值literal可逐use拼写，
+类型求解依次闭合descriptor facts、family等式组与单调值事实，再一次选source type；
+ProvenNarrow只在producer-range完全落入B/S/C目标范围时允许，不能借任意primitive cast
+修改word值。fill只按ALGORITHMS §2.4的LengthOnly/FreshArrayStores规则生成Java；它登记may-throw，
+零元素也不能无语句消失，非空展开必须证明stores不会失败且中间写不可观察。
+最终use转换全有定义后交P6；纯数值literal可逐use拼写，
 非literal不能在int/float/ref之间猜cast。P4交给P5的是约束，P8才核最终Java overload/
 dispatch/throws；不得循环要求P4先知道source static types。
 
@@ -273,6 +280,7 @@ CopyPlan {
   ingress: HandlerEntry -> Vec<LocalCopy>,
   temps: Vec<LocalDecl>
 }
+LocalBinding = Parameter | OrdinaryLocal | InlineLiteral | DeferredAllocation(AllocationId)
 ShadowSnapshot { handler, phi, dst_shadow, src_local_or_literal, exact_type }
 TransferPlan { original_edge, copies, target, abrupt_kind }
 RegionPlan { owned_blocks, owned_edges, nodes, entry, follow }
@@ -289,7 +297,9 @@ monitor验证有限lock stack与所有退出后才替换synchronized。具体匹
 ### 3.6 Java结果、Generated与打印
 
 ```text
-VerifiedJavaMethod { private method_decl, body_or_generated, ResultFacts, evidence }
+VerifiedJavaMethod { private method_decl, body_or_generated, ResultFacts, evidence, target_admission }
+TargetAdmission { parameter_words, code_ceiling, locals_ceiling, stack_ceiling,
+                  handler_rows_ceiling, utf8_max, pool_slots_ceiling, compiler_owned_layout }
 JavaMemberKind = Method | Constructor | StaticInitializer
 MemberEmission = Explicit(JavaBody) | Generated(owner_node, canonical_rule)
 VerifiedJavaUnit { private class_decl, explicit_members, generated_member_evidence }
@@ -358,11 +368,12 @@ Cancelled在检查点立即向请求传播，不逐方法生成raw。
 | P8 `p8_java` | `VerifiedJavaMethod/Unit` | block/edge 精确覆盖、结构化/dispatcher、表达式合法化、class/constructor/initializer 与 throws 验证 | 不猜未解析字节、不直接按 visited 跳过 block |
 | P9 `p9_emit` | `RenderedReport`、最终 UTF-8 `OriginSpan` | AST printer、raw smali adapter、diagnostic renderer | 不做值/类型/控制流恢复 |
 
-**实际首版调度**：
+**调度顺序**：
 
 ```text
 ProgramIndex(P1) ──→ RequestFacts(P0，冻结)
-每个方法：ValidatedRawMethod(P1)
+class请求：先定owner/MemberEmission(P8，P1 raw+声明事实的直接模板证明)
+每个Explicit方法：ValidatedRawMethod(P1)
   → decode_and_bind(P2) → verify_flow
   → build_ssa(P3)       → verify_ssa
   → resolve_calls(P4)   → verify_declaration_evidence
@@ -370,20 +381,21 @@ ProgramIndex(P1) ──→ RequestFacts(P0，冻结)
   → allocate_and_copy(P6) → verify_storage
   → identify_regions(P7)
   → lower_java(P8)      → verify_method
+Generated成员：原code+模板证据 → owner语法与目标admission（无独立伪Java body）
 类装配(P8)             → verify_unit_or_mark_mixed
 render(P9)
 任意分类失败 ──→ 原始方法 + 独立 fallback 预算 ──→ smali / unavailable(P9)
 ```
 
-初版的固定点仅为P3 live-in需求与P5有限类型域；P3采用固定入口Phi、block一次绑定、incoming一次连接及有限bad/grounded传播，不反复猜ValueId/别名。它们只收集有限facts，不在循环创建新身份。P2 的 topo normalization 先收集编辑，再原子应用一次。可选纯表达式内联以后加入 P8 的有限 rewrite group，不改变 SSA/CFG。**不把 P3–P6 整段塞入互不动点**，也不强制所有 phase 必须各有相同数量 pass。
+固定点仅为P3 live-in需求与P5有限facts闭包；P3采用固定入口Phi、block一次绑定、incoming一次连接及有限bad/grounded传播，不反复猜ValueId/别名。它们只收集有限facts，不在循环创建新身份。P2 的 topo normalization 先收集编辑，再原子应用一次。纯表达式内联在P8按ALGORITHMS §15执行，不改变SSA/CFG。**不把 P3–P6 整段塞入互不动点**，也不强制所有 phase 必须各有相同数量 pass。
 
-选择理由：dexdec 的 ValueRecovery 依赖 structured Semantic IR [DX-01]；本设计不采用它，而保留显式三地址式计算，先在 CFG 上解决 SSA/type/storage，避免 BDD/gated Phi/语言语法多轮互相调度。这是新的算法设计决策，不是声称 DEX 天生只允许某种顺序。代价是输出更长、额外拷贝多，收益尚未测量。
+选择理由：dexdec 的 ValueRecovery 依赖 structured Semantic IR [DX-01]；本设计不采用它，而保留显式三地址式计算，先在 CFG 上解决 SSA/type/storage，避免 BDD/gated Phi/语言语法多轮互相调度。该调度不要求DEX具有天然的阶段顺序；显式locals/copies增加输出长度，换取值来源和transfer的局部可验证性。
 
 ## 5. 身份、来源与产物不变量
 
 ### 5.1 ID 与不可变 raw
 
-本节“固定/稳定身份”仅指**单次分析内引用一致、arena ID不重用**，不是结果排序或跨运行确定性。不同worker到达顺序可以生成不同合成ID和局部名，所有引用/证书/最终span按本次identity核对。
+本节“固定/稳定身份”仅指**单次分析内引用一致、arena ID不重用**，不是结果排序或跨运行确定性。不同worker到达顺序可以生成不同合成ID和局部名，所有引用/证书/最终span按本请求identity核对。
 
 ```rust
 struct DexId(u32);
@@ -416,13 +428,13 @@ offset 单位必须在类型/字段名上表达：DEX code_unit 与 file_byte、
 
 ### 5.3 SSA 方案
 
-采用ALGORITHMS §3的**固定入口Phi建造**，不再保留两个待选SSA策略：
+采用ALGORITHMS §3的**固定入口Phi建造**：
 
 - `Slot={start,width}`；宽值作为一个slot读取，所有source先读、normal writes后写，写入使重叠旧slot失效。
 - 先求normal/exception live-in需求，再为每个block每个live-in slot分配Phi（单predecessor也保留）。虚拟EntrySeed提供参数/this，因此入口回边也有正确首次值。
 - 每个block一次扫描，从入口Phi和本block先前Def绑定use；每条normal/exception incoming一次连接。exception使用对应site的旧环境，不使用成功result。
 - 从真实uses保留Phi闭包；Bad沿Phi users单调传播，grounded从参数/OpResult/ExceptionAt单调传播。无用Phi剔除；实际缺定义、partial wide或无根定义环明确拒绝。
-- 首版**不消除trivial Phi、不做别名缩减**。所有状态/遍历有有限度量和计费；构造Env工作表封口后drop，不把R×E矩阵一路带到P8。
+- **不消除trivial Phi、不做别名缩减**。所有状态/遍历有有限度量和计费；构造Env工作表封口后drop，不把R×E矩阵一路带到P8。
 - verifier从raw读写顺序与edge transfer重放本地最新定义，核Phi来源、word宽度与异常旧状态，不信builder bool或normal dominator。
 
 复杂异常 SSA 是阶段风险；可以先支持无 handler，然后单受保护 invoke，再扩大。阶段支持矩阵必须解释降级理由，不能声称 general SSA 已完成却忽略 exception environment。
@@ -437,14 +449,14 @@ offset 单位必须在类型/字段名上表达：DEX code_unit 与 file_byte、
 
 ```text
 Commands:
-  get-class   Fetch one class as Java
+  get-class   Decompile one class
   entries     List APK/ZIP entries (columns: name, compressed_size, uncompressed_size, compression)
   extract     Extract original entry bytes to -o
   strings     List DEX string literals (columns: at, value, entry)
   xref        Search code references across every DEX (columns: entry, context, match)
   manifest    Extract decoded AndroidManifest.xml
   classes     List classes across every DEX (columns: at)
-  get-method  Fetch one method as Java
+  get-method  Decompile one method
   fields      List fields across every DEX (columns: at)
   methods     List defined methods (columns: at)
   help        Print this message or the help of the given subcommand(s)
@@ -454,14 +466,14 @@ Commands:
 
 | Command | Summary | Columns | Usage |
 |---|---|---|---|
-| get-class | Fetch one class as Java | — | diana get-class <input> <class> |
+| get-class | Decompile one class | — | diana get-class <input> <class> |
 | entries | List APK/ZIP entries | name, compressed_size, uncompressed_size, compression | diana entries <input> |
 | extract | Extract original entry bytes to -o | — | diana extract <input> <entry-name> -o <file> |
 | strings | List DEX string literals | at, value, entry | diana strings <input> |
 | xref | Search code references across every DEX | entry, context, match | diana xref <input> <kind> <target> |
 | manifest | Extract decoded AndroidManifest.xml | — | diana manifest <input> |
 | classes | List classes across every DEX | at | diana classes <input> |
-| get-method | Fetch one method as Java | — | diana get-method <input> <method> |
+| get-method | Decompile one method | — | diana get-method <input> <method> |
 | fields | List fields across every DEX | at | diana fields <input> |
 | methods | List defined methods | at | diana methods <input> |
 | help | Print command help | — | diana help [command] |
@@ -471,7 +483,7 @@ Commands:
 ### 6.2 通用输出与选项
 
 - 默认表格为 **UTF-8 TSV**，首行是指定列名，恰按上表列顺序；不额外加序号、索引表、颜色或调试列。记录顺序不保证，按完成/到达输出。
-- `--format text|json`，默认 text；表格 JSON 为对象 `{ "items": [...] }`，字段与列名相同。Java/manifest 的 JSON 是明确 domain report，见 §6.5/§6.7；不是 MCP envelope，不设计协议工具。
+- `--format text|json`，默认 text；表格 JSON 为对象 `{ "items": [...] }`，字段与列名相同。反编译/manifest的JSON是明确domain report，见§6.5/§6.7；不是 MCP envelope，不设计协议工具。
 - `-o, --output <file>`：文本/JSON命令可指定文件，成功时文件与 stdout 的同次 payload 字节相同；`extract` 是例外，只向文件写二进制，不向 stdout 输出副本。
 - `--filter <literal>`：仅适用于 `classes` / `fields` / `methods` / `strings`；大小写不敏感的字面子串，作用于完整 `at` 表达中语义名称/描述符（不匹配 opaque e/l/c/m/f/s 索引前缀），strings 则作用于 value。不是正则，不截取记录。
 - `--class <class>`：fields/methods 的定义类选择；xref 的引用方类选择。采用 §6.3 精确 class selector，不默认模糊匹配，不代替 xref target。
@@ -481,7 +493,7 @@ Commands:
 
 TSV 的任意字符串字段按显示转义：`\\`、`\t`、`\r`、`\n`、`\0`；孤立 UTF-16 surrogate 用 `\uXXXX`，不得改成 replacement character 或让一条记录占多行。列中包含 delimiter 的值不靠有损切割。JSON serializer 同样保留必要的 Unicode escape；控制/孤立 surrogate的具体表示须 F03/Q09 验收。`at` 自身可逐字回传 CLI，包含空格或 `$` 等时需 shell 引号。
 
-流式 text 查询可以在失败前已写部分记录，必须非零退出并在stderr明确错误；这种部分输出不是完整成功。JSON报告、Java获取、manifest和extract文件按完整产物构建并原子提交，失败不留假完整文件。大表格JSON受完整结果预算；用户可改用流式text与外部shell过滤，不通过新增分页解决。
+流式 text 查询可以在失败前已写部分记录，必须非零退出并在stderr明确错误；这种部分输出不是完整成功。JSON报告、反编译展示（含Mixed）、manifest和extract文件按完整产物构建并原子提交，失败不留假完整文件；有意标记的Mixed不是被截断的JavaUnit。大表格JSON受完整结果预算；用户可改用流式text与外部shell过滤，不通过新增分页解决。
 
 ### 6.3 `at`：原始身份定位符，不是结果行号
 
@@ -497,7 +509,6 @@ string-at = e<physical-entry>:l<logical-member>:s<string-id>
 ```
 
 数字为非负十进制，`e`是物理 ZIP central-directory record index，`l`是该entry内部 logical DEX序号（普通DEX为0），`c`为class_def index，`m/f/s`为对应DEX原id表index。裸DEX视为单entry `e0:l0`。规范class descriptor如`Lcom/example/App;`；method proto必须包含参数与返回type，如`(ILjava/lang/String;)Z`。
-
 例子（示例索引，不是真实 corpus）：
 
 ```text
@@ -537,7 +548,7 @@ diana methods sample.apk --class 'com.example.App' --filter 'check'
 
 每命令只有 `at` 一列。classes枚举class_defs定义；fields枚举各class_data中实际定义的static/instance fields；methods枚举direct/virtual **defined methods**，含abstract/native/constructor/clinit声明，不把所有method_ids里的外部reference当defined method。
 
-使用原始DEXname/proto/index，包括synthetic/bridge flag涉及的原方法（flag如需查看属于JSON后续明确扩展，不擅自增列）；不为只列符号运行Diana SSA/Java后端。duplicate定义各有独立at，CLI只列其原identity，非法结构仍错误。
+使用原始DEXname/proto/index，包括synthetic/bridge flag涉及的原方法（flag保留在原始声明facts，不增加列表列）；不为只列符号运行Diana SSA/Java后端。duplicate定义各有独立at，CLI只列其原identity，非法结构仍错误。
 
 #### strings
 
@@ -547,22 +558,24 @@ diana methods sample.apk --class 'com.example.App' --filter 'check'
 
 entry列是物理entry原name；041 logical/member身份在at里，不拼造另一个真实ZIPname。裸DEX的entry使用caller提供输入的basename作为展示标签；不用于身份判断。
 
-### 6.5 get-class / get-method：默认必须是 Java
+### 6.5 get-class / get-method：默认交付反编译结果
 
 ```sh
-diana get-class sample.apk 'com.example.App' -o App.java
+diana get-class sample.apk 'com.example.App' -o App.txt
 diana get-class sample.apk 'e0:l0:c7::Lcom/example/App;'
 diana get-method sample.apk 'Lcom/example/App;->check(I)Z'
 diana get-method sample.dex 'e0:l0:c7:m23::Lcom/example/App;->check(I)Z'
 ```
 
-- 默认text：get-class只在完整`VerifiedJavaUnit`时成功输出Java；get-method输出完整方法声明/body，abstract/native输出合法DeclarationOnly。方法源码需要owner上下文，不声称它本身是一整个编译单元。
-- 默认Java不可恢复时exit1，stdout不发smali、Mixed或半个Java；stderr报告分类原因/原identity。失败不要写 `.java` 文件，也不通过抛异常stub补齐。
-- **引擎仍保留逐方法raw fallback**，只是CLI不把它当“Fetch as Java”的默认成功。`--format json`显式获取完整domain report，允许`java_unit/mixed`以及方法`java/declaration_only/smali/unavailable`，每项原identity与diagnostics/spans明确。完整Mixed报告本身可exit0；requesterror、BUG、Resource、Cancel仍错误，不因有raw片段变成功。
-- JSON保持`schema_version:1`作为**本地CLIreport格式**（不是MCPversion），含command/selection/status/source/methods/diagnostics/spans；不serialize内部AST/arena。source_range/spans相对于对应source字段UTF8bytes，字段scope明确。top-levelreport与method-onlyprojection在接口规格/源码审阅中明确，不为这种基础包装另建测试；复杂语义/raw/identity验证走公开库interface。
-- 取消此前 `getclass --members` 与 `--require-java` 提议：fields/methods是独立符号清单，get-默认就要求Java。不要同时输出索引表前缀污染source/span坐标。没有旧命令alias或自动转旧enginefallback。
+- 默认text直接展示现有Report，不以VerifiedJavaUnit作整类开关。get-class为JavaUnit时输出完整Java；为Mixed时输出标记清楚的反编译文本：真实shell/字段、恢复的Java方法、逐原方法标注的Smali或Unavailable原因。每个成员保留，不因一个方法失败丢掉其他成果。
+- get-method展示精确选中方法：Java/DeclarationOnly输出完整声明及应有body，Smali输出原始完整Smali及原因，Unavailable输出原身份/原因和已有的有界raw excerpt。不把raw excerpt叫标准Smali，不用空body/抛异常stub伪造Java。方法片段需要owner上下文，不声称单独可编译。
+- text/json只选择同一结果的表示，不选择算法、fallback或恢复门槛；无需切JSON才能看Mixed/raw，也不新增`--require-java`开关。fields/methods仍是独立符号查询，不给源码加索引表前缀。
+- 仅有局部Unsupported（包括缺catalog、invoke-custom或Java目标表示限制）时，完整展示的Mixed/Smali/Unavailable结果可exit0，含义是反编译请求及展示正常完成，不是所有方法恢复为Java。Malformed、BudgetExceeded、InternalInvariant、Cancelled、I/O等仍按§6.8失败；已有可完整渲染的Report可以保留展示并非零退出，不能用有代码掩盖错误。
+- Mixed顶部及各失败成员须有状态/原身份/原因；language段和OriginSpan可精确定位。标记是展示元数据，不是给失败方法添可执行语句。显式`-o`写同一展示payload，不靠后缀筛掉Mixed，也不自动为Mixed选择`.java`文件名；只有JavaUnit资格表示完整Java编译单元。
+- JSON保持`schema_version:1`作为本地CLIreport格式（非MCP），含command/selection/status/source/methods/diagnostics/spans。source是相应展示/成员文本，其language由status明确；不serialize AST/arena。source_range/spans使用对应source字段的UTF8bytes，不能把Mixed拼接偏移错当成员内偏移。格式/版式不做golden；复杂成员保留、raw、UTF16、原identity/spans走公开Module验收。
 
-Java编译成功不等于语义等价；完整classpath和语义fixture仍按TASKS §4验收。JSON显式选择并不允许吞掉malformed/内部错误、假smali或语义不忠实Java。
+JavaUnit和逐方法Java的验证门槛不变，必需Java案例不能用“已经展示Smali”顶替通过。
+编译成功不等于语义等价；局部失败可读不等于请求错误被吞掉，不触发重新分析/其他引擎。
 
 ### 6.6 xref
 
@@ -574,7 +587,7 @@ diana xref sample.apk field 'Lcom/example/App;->count:I'
 diana xref sample.apk method 'Lcom/example/App;->check(I)Z' --class 'com.example.Caller'
 ```
 
-kind明确为`string|type|method|field`；target是字面精确值/descriptor（string为完整UTF16字符串相等，非正则；type接受class dotted归一化或标准primitive/arraydescriptor）。首版不把名相同的所有overload混为methodreference。以后substring/fuzzy搜索必须单独命名/验收，不从当前裸value猜。
+kind明确为`string|type|method|field`；target是字面精确值/descriptor（string为完整UTF16字符串相等，非正则；type接受class dotted归一化或标准primitive/arraydescriptor）。methodreference必须包含完整proto；不提供substring/fuzzy匹配，不由裸value猜overload。
 
 默认跨输入的每个rootDEX和041logicalmember扫描代码引用，使用原始opcode/refindex；不先反编译源码再搜索。`--class`只约束引用方定义，可读短selector歧义规则同§6.3。
 
@@ -601,7 +614,7 @@ diana extract sample.apk 'classes.dex' --entry-index 4 -o original.dex
 
 默认不覆盖已存在输出；`--force`显式允许替换普通文件，拒绝输出目录/符号链接/输入文件自身或hardlink别名。先创建目标目录内private临时文件，有界解压/完整性校验后原子提交；取消/解压错误/预算不足清理临时文件，不输出半成品。no-force发布不得存在check-then-rename覆盖竞态；force也要按平台语义验收。不向stdout打印二进制或状态行，错误/`--debug`仅stderr。
 
-compression不支持、加密、坏range/size/CRC必须明确错误，不能列目录成功就假定提取可靠。CRC由H10按TASKS §6遍历实际payload明确核验，不假定codec默认提供；尚未实现。预算受原input/inflate限额，不是分页。
+compression不支持、加密、坏range/size/CRC必须明确错误，不能列目录成功就假定提取可靠。CRC按ALGORITHMS §14遍历实际payload核验，不依赖codec默认行为。公开领域原因区分AmbiguousEntry、TargetExists、UnsafeTarget、CrcMismatch、BudgetExceeded、Cancelled、UnsupportedCompression、EncryptedEntry及I/O；不能用目标已存在冒充CRC/预算/不支持格式的失败。写/复制每至多64KiB检查取消与预算；公开取消回调可以只读观察最终文件状态，不另设私有publish hook。预算受原input/inflate限额，不是分页。
 
 #### manifest
 
@@ -614,8 +627,8 @@ text为XML；json为`{ "xml": "..." }`，不附假Java状态。默认无自动�
 ### 6.8 帮助、错误和退出码
 
 - `diana help`、`diana --help`、`diana help get-method` / `diana get-method --help`成功exit0。
-- exit0：完整查询/提取/manifest、符合默认Java要求的get、显式JSON完整报告（含标记清楚的Mixed）。
-- exit1：I/O、Malformed、UnsupportedJava默认get、预算、内部BUG、取消、失效选择器等请求失败。
+- exit0：完整查询/提取/manifest，或没有硬错误且已完整交付的get反编译结果；text/json同规则，局部Unsupported导致Mixed/Smali/Unavailable本身不强制失败。
+- exit1：I/O、Malformed、预算、内部BUG、取消、失效选择器等请求失败；可完整交付的已有反编译Report不因此被清空，但仍非零退出。全局损坏无法定位、Cancelled无Report或render超限时不造假报告/截断payload。
 - exit2：未知命令/flag、非法selector/proto、缺input、extract缺`-o`、不适用选项组合。
 - exit3：唯一对象/entry/manifest查无结果。列表/xref空匹配是正常exit0。
 - exit4：唯一选择有歧义，如重复class/method/entry名，拒绝任意取第一项。
@@ -624,36 +637,37 @@ BrokenPipe按原Unixfilter行为正常结束，不打印panic。项目名称统�
 
 `mcp`延期，旧实现只在ref-fork，不恢复活动接口或设计新协议；旧agent skill安装逻辑也不自动执行迁移/删除用户目录。agent使用说明作为普通文档/发布资产，不添加第十二个公开`skill`命令。
 
-### 6.9 实施与验证落点
+### 6.9 Interface验证
 
-- H01冻结本页命令/flag/selector/error规则，update futureCLIargs/README，但当前生产源码未改。
-- H03复用快查询并迁移指定TSV/JSONcolumns；H04 canonical at与041原始identity；H05两个get命令与默认Java/显式JSON规则。
-- H09补fields/methods **definitions** 和xref **sites**；H10完成原entryextract/no-overwrite/CRC/atomicfile安全；H07统一最终help与agent说明。
-- 按用户约定不新增CLI黑盒测试。Q01/Q07是基础接口人工审阅清单，不是测试族；Q05/引擎F测试走公开反编译库语义回环，Q02–Q06/Q09/Q10仅验证复杂身份、内容、安全与资源义务。具体Agent卡见[TASKS.md](TASKS.md#6-应用任务-h01h10)。
-
-命令/flags/help/列名/默认包装/旧alias移除通过源码与本规范核对和构建确认，不为它们写CLI黑盒或golden。自动化测试只投入反编译行为、raw/smali完整性、复杂跨DEX/041身份、xrefsite/UTF16值、原entry提取CRC/竞态/alias/预算安全，跨公开库/module接口而非CLI子进程。不要求排序或跨运行同文本，不设计MCP；本次不删除现有测试。
-
+基础约定按本章核对；复杂行为通过公开库/module interface验证，不启动CLI子进程。
+查询比较原身份与内容，提取比较原payload与文件安全；反编译验证值/异常/effect，
+不以排版或synthetic names作语义合同。
 
 ## 7. 应用限额与生命周期
 
 限额分层、显式组合：
 
-| 层 | 本轮合同 |
+| 层 | 合同 |
 |---|---|
-| 文件/ZIP | 以现有安全读取默认 2GiB input、100k directory entries、64MiB directory、256MiB inflated entry 为工程基线；移到 CLI 若改变旧限制需说明并测量 |
+| 文件/ZIP | input≤2GiB、directory entries≤100k、directory≤64MiB、inflated entry≤256MiB；超额为BudgetExceeded |
 | CLI 请求/解压 | 持有字节、解压 reservation、queued query rows、声明依赖与输出 scratch 合计有界；只保留同进程/同请求必要的字节复用，不新增常驻服务 |
 | Engine | DESIGN 内 64MiB/DEX、256MiB/request 和 method work/graph/output 初值保持独立；超过引擎限额的输入仍可轻量查询，反编译明确 Resource |
 | CLI 输出 | 现有查询可流式；单反编译报告完整渲染后提交。text/JSON 分别计最终字节，JSON escape、diagnostics、spans 要算；不截断后标完整 |
 
-这些是不同预算，不将当前会话的 16MiB MCP envelope 限额硬套为新 CLI 产品合同。JSON 报告默认先采用 engine report 上限的 64MiB **最终序列化**上限作为待测工程初值，按剩余请求预算收紧；最终值在产品任务测量确定，不声称硬 RSS 上限。
+应用JSON序列化有64MiB硬上限；反编译JSON另取与`Limits.max_report_output_bytes`的较小值，轻量查询JSON不经过Engine、仍用64MiB应用上限。按最终实际JSON字节逐段检查，重复source字段、escape、diagnostics和序列化spans全部计入，不能拿未转义text长度代替。text/JSON分别核各自表示长度，不把同一结果的两种表示相加；所有实际分配/work仍消费原request累计配额，不是硬RSS上限。
 
-首版可单worker；后续只为admission/背压保留有界队列，不为展示顺序等待。native inflate不可抢占，取消为协作式。输入/扫描/发布算法见ALGORITHMS §14。
+查询使用有界admission与输出队列，不为展示顺序等待。worker数为min(8, available_parallelism)，无法取得CPU数量时为1；反编译在调用线程顺序执行。native inflate不可抢占，取消为协作式。算法见ALGORITHMS §14。
 
-## 8. 验证与计数边界
+## 8. Java表示约束
 
-Java AST封口不是任意输入等价证明。值/edge/copy/绑定/保护域各自验证，公开行为另比独立expected；V0–V7与Driver见TASKS §4。method-in-known-context不计full-unit，JVM-only与ART-not-run分开。
-
-Generated是有code成员的已验证owner生成规则，不是DeclarationOnly；单独不可表达的get-method给原Smali。完整class只有shell、全部成员/生成规则与初始化通过才为JavaUnit。EngineCoreRC与产品全部70的归属见TASKS。
+值/edge/copy/绑定/保护域分别验证，结构覆盖不替代值语义。Java AST与声明须满足
+Java8语言约束，字面量不得改变UTF16/FP bits。目标格式admission独立于分析预算：不能
+因为DEX/register/AST配额允许更大输入，就返回超过JVM参数、code或class pool界限的Java。
+TargetAdmission从实际AST和compiler-owned布局复算；未知生成模板拒绝Java，不拆方法/
+class或增加helper绕限。method-in-known-context不等于完整unit；
+class的shell、全部成员/Generated规则、构造与初始化均通过才为JavaUnit。
+Generated有原可执行方法，不计DeclarationOnly；独立不可表达的generated方法返回原Smali。
+检查关系见ALGORITHMS，公开行为证据与统计见TASKS。
 
 ## 9. 实施取舍
 
@@ -661,14 +675,16 @@ Generated是有code成员的已验证owner生成规则，不是DeclarationOnly�
 
 ## 10. 资源、策略与失效
 
-### 10.1 最小 Kuna 骨架
+### 10.1 直接调度与可选内联
 
-`pipeline/schedule.rs`直接按§4调用具体typed transitions；Rust类型限制产物先后。
-首版不建Pass trait、PassSpec registry、调度macro、TOML或restart tree；局部liveness/
-type worklist就是其owning Module内的普通循环。PhaseId只作有限诊断标签，trace可选且有界。
-T24真正存在第二个可选recovery实现时，才添加必要选项，不为未来pass提前搭基础设施。
+pipeline/schedule.rs直接调用§4的typed transitions；局部liveness/type闭包由其Module内
+的普通循环完成，不建Pass trait、registry、调度macro、TOML或restart树。PhaseId只作
+有界诊断标签。
 
-默认 `RecoveryPolicy`：`NormalStructure::StructuredThenDispatch`；`RecoveryPreset::Core`（readability默认关闭）；`inline_pure=false`；泛型只 raw；未知/复杂 Java → Smali。必需 correct lowering 无用户开关。用户确认后续美化可独立开关扩展，记录最早消费阶段；具体候选/拒绝条件见 [ALGORITHMS.md](ALGORITHMS.md#15-可选美化)。不为未来可选pass先复制BDD/完整ValueRecovery到核心。强类型 assertions/全局 restart/plugin 延后直到有实际 producer/consumer。
+RecoveryPolicy控制normal structure与inline_pure。normal structure默认
+StructuredThenDispatch；DispatchOnly只适用于dispatcher eligibility。inline_pure默认
+false，为true时执行ALGORITHMS §15的唯一纯表达式内联算法。必需lowering、类型/绑定/
+保护域/资源检查没有关闭开关。
 
 ### 10.2 明确失效范围
 
@@ -676,15 +692,15 @@ T24真正存在第二个可选recovery实现时，才添加必要选项，不为
 |---|---|---|
 | literal formatting/indent/输出名字 | 全部 verified artifact | P9 text/spans（名字若改变 Java binding 则不能仅 P9） |
 | normal structured vs dispatcher policy | P1–P6 | P7/P8/P9；只选 plan 不改 CFG |
-| 外部 declaration/hierarchy catalog | raw input/P2 原语义 | P4–P9；P3 若异常边/throws 输入被改变也重建，初版用 request 整方法重算最安全 |
+| 外部 declaration/hierarchy catalog | raw input/P2 原语义 | P4–P9；P3 若异常边/throws 输入被改变也重建，request整方法重算 |
 | CFG topology/exception chain | 仅 raw/catalog | P2 下游全部作废；不复用旧 ValueId/CopyPlan |
-| generic/nested source policy | raw/P2–P3 可复用的值身份 | P4 后的 binding/types/storage/Java；初版同样整方法重算 |
+| generic/nested source policy | raw/P2–P3 可复用的值身份 | P4 后的 binding/types/storage/Java；整方法重算 |
 
-本表是设计规则，不是初版 incremental cache 承诺。初版新请求整方法重跑，保留不可变 ProgramIndex；请求内`EnvironmentId`/profile标识可检测误用artifact；不同请求不要求同数字/跨运行canonicalfingerprint，不为无缓存的初版额外排序事实表。局部worklist只修改指定finite facts，实际变化才enqueue，先charge再执行。没有通用Repeat/Changed调度协议，也不为可观测性创建一套机械测试。
+新请求整方法重跑，不缓存可变分析产物；Engine仅保留不可变ProgramIndex。请求内`EnvironmentId`/profile标识可检测误用artifact；不同请求不要求同数字/跨运行canonicalfingerprint，不为缓存身份排序事实表。局部worklist只修改指定finite facts，实际变化才enqueue，先charge再执行。没有通用Repeat/Changed调度协议，也不为可观测性创建一套机械测试。
 
-### 10.3 资源限制（工程初值，不是格式或性能结论）
+### 10.3 资源限制
 
-| Limits 字段 | 默认初值 | 约束时机 |
+| Limits 字段 | 默认配额 | 约束时机 |
 |---|---:|---|
 | `max_image_bytes` | 64 MiB / DEX | open 前；超限 Resource，不误报 malformed |
 | `max_request_input_bytes` | 256 MiB 合计 | 累加 checked_add 后接收多个 DEX |
@@ -699,11 +715,25 @@ T24真正存在第二个可选recovery实现时，才添加必要选项，不为
 | `max_request_work_steps` | 50,000,000 | open/所有method/render共同消费 |
 | `max_work_steps` | 5,000,000 / method | decode/graph/worklist/copy 每个循环收费，不只 pass 入口 |
 | `max_copy_assignments` | 262,144 | normal+shadow+cycle temps 合计，先估算再预留 |
-| `max_nesting` | 128 | metadata/AST/handler 递归改成显式栈或深度 guard |
-| `max_output_bytes` | 8 MiB / method，64 MiB / report | 有界 String writer，含诊断和 span |
-| `fallback_code_units` / `fallback_output_bytes` | 131,072 / 8 MiB | 仅一个只读raw出口，仍受request总界限 |
+| `max_nesting` | 128 | metadata/AST/handler使用显式栈，push前检查深度 |
+| `max_method_output_bytes` | 8 MiB / normal member source | Java/DeclarationOnly的单个显式method/constructor/initializer源码段，转义后UTF8长度 |
+| `max_report_output_bytes` | 64 MiB / rendered report | 最终RenderedReport.text总UTF8长度，含shell、成员、language标记与diagnostics |
+| `fallback_code_units` / `fallback_output_bytes` | 131,072 / 8 MiB / raw member source | 独立raw方法/声明/excerpt边界；组装后仍须通过report上限 |
 | `fallback_work_steps` / `fallback_allocation_bytes` | 262,144 / 16 MiB | 每method入口从父配额预留，normal不可消费 |
 
-语法上合法但超限是 Resource；不使用饱和运算 silently truncate。所有 `count * size + offset` checked arithmetic，分配前验证 remaining input/预算，use `try_reserve` 映射资源错误。寄存器数遵循 DEX 字段上限但同时计入 method value/storage budget。所有容量增长以实际元素容量乘元素尺寸/保守容器开销checked计费；Env、Phi inputs、UTF16、spans、diagnostics不能漏计。配额累计不退款，未消费的预留与已消费额度分开；fallback不是新发一份request限额。诊断截断必须有显式 marker，不能截断 Java/smali 并标完整。
+输出配置的三个byte字段均为`u64`，分别独立设置后交给唯一RunContext，不放入Options。
+normal source只受`max_method_output_bytes`的成员上限，raw source改用独立
+`fallback_output_bytes`；两者都受`max_report_output_bytes`最终合计上限。调整某个值
+不连带重设另两个值：例如提高method上限，不增加raw或report可用长度。
+
+输出cap是每个实际表示的长度边界，不是累计分配账本：append前checked核转义后的
+新增UTF8长度；成员拼入report时在report长度中计一次，shell/分隔/诊断也计入。
+未打印的OriginSpan结构体容量记allocation，不虚构成text字节；序列化时按§7计实际
+JSON bytes。原始source已在raw writer核过成员长度，拼接不再向同一成员长度重复扣费。
+临时/失败候选产生的work与allocation仍累计不退款，不能靠重新render或换表示重置它们。
+report超限为BudgetExceeded，诊断标明`max_report_output_bytes`等实际命中的limit及界限；
+不改为Malformed、不截断成功，也不因此重跑normal/raw。资源与Java目标格式admission独立。
+
+语法上合法但超限是 Resource；不使用饱和运算 silently truncate。所有 `count * size + offset` checked arithmetic，分配前验证 remaining input/预算，use `try_reserve` 映射资源错误。寄存器数遵循 DEX 字段上限但同时计入 method value/storage budget。所有容量增长以实际元素容量乘元素尺寸/保守容器开销checked计费；Env、Phi inputs、UTF16、spans、diagnostics不能漏计。work/分配配额累计不退款，未消费预留与已消费额度分开；输出长度按上述各表示核界，fallback不是新发一份request限额。诊断截断必须有显式 marker，不能截断 Java/smali 并标完整。
 
 trace仅作可选有界定位，不设registry/调用次数测试，不引入独立console。

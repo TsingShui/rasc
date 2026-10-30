@@ -1,15 +1,16 @@
 # Diana 任务与验收
 
-**状态：仅包骨架，39个B/T/H任务尚未验收；70案例仍为designed-not-built。**
+**状态：仅包骨架，39个B/T/H任务尚未验收；案例规格draft-4共85个required案例、175个必跑调用场景，仍为designed-not-built。**
 本页统一流程、准备、任务卡与验证；接口/数据只看[DESIGN.md](DESIGN.md)，算法只看
 [ALGORITHMS.md](ALGORITHMS.md)，来源只看[SOURCE_MAP.md](SOURCE_MAP.md)。
-固定[e2e_cases.json](e2e_cases.json)不改，不另维护HTML/看板或案例expected副本。
+[e2e_cases.json](e2e_cases.json)是案例/独立expected唯一规格；允许有依据地修订错误形式、
+输入与oracle并追加反例，不为固定数量保留漏洞，不另维护HTML/看板或expected副本。
 
 ## 1. 工作规则
 
 完整B01→B02→B03→B04先于生产功能。小批开发不是准备豁免；B04工具自测仍需单独
 授权，不能改名/手工试跑后冒称同等保证。T/H依赖表示具体producer产物就绪，不是
-要求未来集成测试先完成；partial不得标整卡done，空文件/空pass不算产物。
+要求集成测试先于其消费产物完成；partial不得标整卡done，空文件/空pass不算产物。
 
 每批一个公开可观察目标：确认固定case与输入认证→真实失败→owning Module最小改动
 →正例/反例/资源与已验收回归→记录并结束。实际开工才建`docs/diana/batches/<id>.md`，
@@ -36,15 +37,18 @@
 | I4 异常 | T16–T18 | throw-before SSA、shadow、ordered catches与一层nested | D029–D035语义；逐site catch-stack不扩大try，handler自身只受outer保护 |
 | I5 锁与初始化 | T19–T20 | alias根/lock-stack、synchronized、static/constructor/final | 所有exit释放精确；static final不引入新的常量内联；final正常路径恰一次 |
 | I6 完整源码声明 | T21–T23 | bridge、named inner、enum/annotation；Explicit/Generated与Mixed分类 | Generated规则逐项匹配；full-unit直接编译，不splice修补，不把generated算无code |
-| I7 核心汇总 | T25（必需）、T24（可选） | EngineCoreRC的固定核心案例与边界证据；可选pure recovery默认off | T25不等T24；资源/取消从I0贯穿，不到最后才补；整体产品由H08汇总全部70 |
+| I7 核心汇总 | T25（必需）、T24（可选） | EngineCoreRC的required核心案例与边界证据；可选pure recovery默认off | T25不等T24；资源/取消从I0贯穿，不到最后才补；H08汇总全部required cases/invocations |
 
 第一条Java链只需当前真的会消费的Module，不先搭全部phase目录或AST大全。T06的
 answer7只是说明，实际固定案例为D009；无call/P7单块返回的是有效空事实，不是假pass。
 
-- EngineCoreRC：T01–T23/T25的D001–D064及D065 engine义务（65个case身份）全过。
-- ProductRC：复用核心证据，补D065应用映射与D066–D070，汇总完整70 required。
-- D065仍是同一case/expected的两个seam证据；缺应用侧不能称整个D065/产品通过。
-- required Java不因降级变绿；未实现/缺工具/未执行平台仍未通过。T24不阻塞两个RC。
+- EngineCoreRC：JSON中required且acceptanceGate为engine或engine-and-application的所有案例/调用；当前80个案例（D001–D065、D071–D085）。
+- ProductRC：JSON全部required案例/调用；当前85个案例，复用engine证据并补application义务。
+- D065/D085的engine-and-application要求两seam分别满足每个调用的同一expected；缺应用侧不能称整个case/产品通过，也不把两个seam计成两个case。
+- 分母/选择器从JSON字段计算，不以旧编号终点或历史70/65数量硬编码；一个调用缺失即整case未通过。
+- 默认展示局部成果不降低required Java门槛；未实现/缺工具/未执行平台仍未通过。T24不阻塞两个RC。
+- Diana是反编译器，默认get不得以整类JavaUnit挡住已恢复方法；局部失败显示在原方法处，
+  不是把所有text结果改成诊断错误或要求用户切JSON。大量常见合法输入退raw仍是质量问题，不能因“有展示”就不改算法。
 - 根Cargo gate只跑Diana，零测试/骨架构建不算语义验收；性能只测release授权输入。
 
 ## 3. 准备任务 B01–B04
@@ -61,24 +65,24 @@ E2E准备”来绕过。自制源/输入的独立语义认证仍是核心案例�
 
 ## B01 — 案例与期望规范审阅、冻结v1
 
-**依赖**：无。**Phase**：测试准备，非计算phase。**范围**：70个D001–D070的核心行为规格与E01–E08可选扩展边界。
+**依赖**：无。**Phase**：测试准备，非计算phase。**范围**：JSON全部required案例/调用及整数内联开关。
 
-**文件**：`docs/diana/e2e_cases.json`、e2e_cases.json/TASKS §4/CLI/SOURCE_MAP §10；未来`tests/e2e/cases.json`和manifest schema，全部相对checkout。
+**文件**：`docs/diana/e2e_cases.json`、TASKS §4、DESIGN §6、SOURCE_MAP §10；`tests/e2e/cases.json`和manifest schema，全部相对checkout。
 
 **输入→输出 / Interface**：行为recipe+固定inputs→独立expected+mutation-killer+oracle类型，state从`designed-not-built`成为`spec-approved`；记录review人/规范版本，不是假引擎结果。
 
 **步骤**：
 1. 对每case检查原始Java/DEX语义、inputs、返回/exception/effect序，workedexample与JVM reference driver分别支持结论；修规范错误必须在引擎实现前。
-2. 确認seam/validationScope，method-in-known-context与full-unit分开；内部op解释器不充当异常/锁oracle。
+2. 确认seam/validationScope，method-in-known-context、full-unit、full-unit-set与rendered-result分开；内部op解释器不充当异常/锁oracle。
 3. 已知合法但Java不可表达的例子明确Smali/Mixed；损坏输入明确Malformed/Unavailable，不能把全部negative统一assert any-error。
 4. 核对“必需Java能力”的case不会因缺实现切为expectedSmali；可选美化另行指定，不对core期望造成影响。
 5. 锁suite成员/inputs/expected/schema与可分发来源，记录spec SHA-256；不能含真实私有APK或路径。
 
-**不变量 / 限额**：案例依观察行为，不绑phase命名或打印形式；inputs/expected独立设计，不用被测输出生成golden。70case不等于所有合法DEX穷举，后续新增反例可追加但不可删旧case凑通过。
+**不变量 / 限额**：案例依观察行为，不绑phase命名或打印形式；inputs/expected独立设计，不用被测输出生成golden。B01批准具体revision，不冻结一个永远不变的数量；允许独立证据支持的规范纠错/输入加强，保留问题身份与有效语义，新增反例追加ID，不删旧case凑通过。
 
 **测试**：规范审阅不是CLI测试；对具有反例的oracle推导确认counterexample确实有不同返回/异常/序列。不为JSONgetter写测试。
 
-**验收**：70个case都有具体inputs/expected/oracle/mutation；范围/来源/path审阅通过，规范标记v1approved。**完成**：Engine开发者不再需要决定测试该返回什么。
+**验收**：全部required case/invocation都有具体输入、selector、expected、oracle/mutation和独立认证义务；范围/来源/path审阅通过，记录批准revision。**完成**：Engine开发者不再需要决定该调用应返回什么；draft修订本身不算B01批准。
 
 **不扩展**：CLI黑盒、私有phase测试、输出文本golden、真实语料下载、实现引擎。
 
@@ -88,10 +92,10 @@ E2E准备”来绕过。自制源/输入的独立语义认证仍是核心案例�
 
 **文件**：`tests/e2e/sources/`、`expected/`、`toolchain.lock.json`、`manifest.json`、`cases.json`；`tools/e2e.py`（开发工具选项，使用Python3.11+标准库优先），与必要tests-onlyJava/smali/Driver。所有路径相对repository，生成物只在`.cache/e2e/`。
 
-**输入→输出 / Interface**：SOURCE_MAP §10固定artifact坐标 → 完整hash/依赖锁；D001–D070recipe → 可执行自制源+literalexpected，提供`fetch-tools/prepare/verify-inputs`命令；不需要个人SDK、android.jar、参考引擎cache。
+**输入→输出 / Interface**：TASKS §4.5固定artifact坐标（来源入口见SOURCE_MAP §10） → 完整hash/依赖锁；JSON全部required recipes → 可执行自制源+literalexpected，提供`fetch-tools/prepare/verify-inputs`命令；不需要个人SDK、android.jar、参考引擎cache。
 
 **步骤**：
-1. 将70个recipe按suite分成独立源文件/driver，依赖全部自制源码签入。保留single-targetmethod的已知context，不插改变语义的stub。
+1. 将全部required recipe/invocation按suite分成独立源文件/driver，依赖全部自制源码签入。保留single-targetmethod的已知context，不插改变语义的stub；输入与预期按(case id, invocation id)绑定，不并列两张按位置配对的数组。
 2. 记录JDK各支持平台JDK资产/官方hash，R8/smali/dexlib2及所有transitiveJAR完整artifacthash；下载与运行主类按锁，不盲用`java -jar smali.jar`。
 3. 确保Java21工具 `--release 8`、R8 min-api/DEXversion检查与smali035生成路径一致；需要新版case独立profile，不能猜version。
 4. prepare只运行锁定的工具、selfmadesource，生成DEX/ZIP/invalidmutation/041recipe以及origin/identity证书。取原返回/轨迹expected来自规范和source reference，不来自Diana输出。
@@ -100,7 +104,7 @@ E2E准备”来绕过。自制源/输入的独立语义认证仍是核心案例�
 
 **不变量 / 限额**：网络/子进程只开发工具，生产crate无依赖；未锁artifact/placeholderchecksum阻止准备；toolcache缺失错误，不能用作者预装SDK代替。
 
-**测试**：重建后source-driver与70spec expected一致；固定错误输入、hash/size/超时/跨平台path错误明确prep失败，comparator证伪交给B04。不扩大成简单CLI测试。
+**测试**：重建后source-driver与各required调用的独立expected一致；固定错误输入、hash/size/超时/跨平台path错误明确prep失败，comparator证伪交给B04。非核心准备器自身测试仍需§3的单独授权，不扩大成简单CLI测试。
 
 **验收**：干净cache可以显式fetch并生成全部核心fixture，所有输入/expected/deps路径可分发，tool/fixturehash锁完整；未生成或缺oracle的case列blocked而非移除。**完成**：不需要引擎开发阶段临时设计fixture/source依赖。
 
@@ -115,7 +119,7 @@ E2E准备”来绕过。自制源/输入的独立语义认证仍是核心案例�
 **输入→输出 / Interface**：fixtureartifact → checksum、rawstructuredprojection、JVMdriver参考轨迹与规范一致性报告；manifest state=`inputs-certified`。
 
 **步骤**：
-1. 独立decoder/dexlib2检查method/ref/word/branch/payload/handler/stringunits。重点case确认原生成DEX真的含被测义务：Phi循环/正确invokekind、unusedcast、try外cleanup、monitor/桥接/annotation；不是只有source文字看着像。
+1. 独立decoder/dexlib2检查method/ref/word/branch/payload/handler/stringunits，逐项满足JSON inputRequirements。尤其确认cmpl/cmpg、unused cast、fill/FreshArray、throw前旧定义、显式encoded tag、真实bridge/outer capture和sget仍在输入。缺被测结构就准备失败，不以源码文字、assembler exit0或无关catalog缺失冒充；不冻结私有Phi/AST数量。
 2. source-origin核心case在隔离JVM执行真实referenceDriver，核对规范独立expected。FP bits、UTF16、lock、init freshprocess规则严格。
 3. 人工smali若无Java源JVMoracle：pure scalar可用测试专用独立解释器（须与source-origincase交叉校验）；exception/monitor不得用忽略effect解释器，或保留raw-integrity/declined明确状态。
 4. D065的041builder需公开格式约束与独立projection双检，不从开发者个人设备拿样本。无法证合法构造则prep blocked，不能换普通DEX假装覆盖041。
@@ -124,9 +128,9 @@ E2E准备”来绕过。自制源/输入的独立语义认证仍是核心案例�
 
 **不变量 / 限额**：referenceinput与expected冻结在引擎实现之前；任何修改需casev2reason/独立oracle/审阅，不用自动“refreshgolden”。生成字节hash不同时先解释compilerrecipe差异，不修改预期语义。
 
-**测试**：`verify-inputs`覆盖70cases全部required资产；JVM/handcraftedraw/oracle缺失分开记，不把ARTnot-run藏成pass。异常/锁的ART增强不作为本轮已完成主张。
+**测试**：`verify-inputs`覆盖全部required case/invocation资产和inputRequirements；JVM/handcrafted raw/规范镜像/oracle缺失分开记，不把ART-not-run藏成pass。ART只记录实际授权环境上的执行证据。D075–D078的内容锁、接受侧javac和拒绝侧独立projection仍须实际核验，新增规格不等于编译器费用上界已被验证。
 
-**验收**：所有requiredcase的source、input结构与独立expected可复验，hash/范围证书完整；没有unknownlocaldeps；report分母固定70。**完成**：开发过程中无需反复改案例输入来适配错误实现。
+**验收**：所有required case/invocation的source、input结构与独立expected可复验，hash/范围证书完整；没有unknown local deps；report同时给JSON派生的case与invocation分母。**完成**：开发过程中无需临时改输入来适配错误实现。
 
 **不扩展**：使用Diana/dexdec/radguard生成真值、私有cache或自动删失败case、设计CLI测试。
 
@@ -134,7 +138,7 @@ E2E准备”来绕过。自制源/输入的独立语义认证仍是核心案例�
 
 **依赖**：B03。**Phase**：测试工具/对接合同，非引擎实现。
 
-**文件**：`tests/e2e/runner/`、expected/cases/manifest，未来thin public-library adapter源码；`tools/e2e.py verify-harness`，引擎实际接入在T05。
+**文件**：`tests/e2e/runner/`、expected/cases/manifest，thin public-library adapter源码；`tools/e2e.py verify-harness`，引擎实际接入在T05。
 
 **输入→输出 / Interface**：固定case/input/期望 → 定义run-resultschema/按原identity及行为比较；没有Diana时能验证preparation与comparator，但不能报告engineE2E通过。
 
@@ -142,7 +146,7 @@ E2E准备”来绕过。自制源/输入的独立语义认证仍是核心案例�
 1. 每case输入公开Engine request/RunContext/catalog来源，结果project到method语言/原identity/source/诊断；adapter薄且不窥privatephase，不实现fake引擎来替代缺实现。
 2. Java结果编译在同自制依赖/knowncontext，Driver以returnbits/u16/events/exception/heap比较；有缺class/error/超时/无输出立即fail，不能grep掉javacerrors。
 3. rawsmaliadapter通过原classshell+原必要方法组装再独立projectioncompare，漏branch/payload/handler/UTF16/ref必须失败。
-4. Inject result mutations仅用于测试验证器：wrongreturn、missingevent、swappedcatch、float-0changed、lossysurrogate、truncatedraw、missingartifact、timeout/0cases，verify-harness须逐项拒绝；正确referenceinput可接受。
+4. Inject result mutations仅用于测试验证器：wrongreturn、missingevent、swappedcatch、float-0changed、lossysurrogate、truncatedraw、wrong-error-kind、missing-invocation、missingartifact、timeout/0cases，verify-harness须逐项拒绝；D069的TargetExists不能匹配CRC/预算错误，D070无输出不能匹配成功。正确reference可接受；实现这些工具自测仍需单独授权。
 5. 固定expected_java与expected_raw分类，不能按引擎“当前支持capabilities”动态过滤requiredmembers。实现里程碑显式选固定ID组，整core-suite始终报告全部required未通过分母。
 6. 接入失败报告保留原case输入/版本/actual/expected/artifacts到checkout cache，用相对路径，不写机器路径进golden。
 
@@ -156,7 +160,7 @@ E2E准备”来绕过。自制源/输入的独立语义认证仍是核心案例�
 
 ### 冻结与修订规则
 
-冻结的是**问题、input identity、行为期望、oracle类型、required suite成员**，不是私有phase接口或输出变量名。bugfix/refactor可以改thinadapter、tool路径实现、日志格式，不能改变一条case本应返回的值、异常类型、event顺序或完整性要求。
+B01批准后冻结该revision的**问题、input identity、有效行为期望、oracle与required成员**，不是数量、错误格式、私有phase接口或输出变量名。修订必须保留原问题ID和理由，提供独立证据/审阅；可以加强输入/观察或纠正真oracle错误，不能借格式迁移削弱语义、删required或把未实现Java改raw。bugfix/refactor可改thin adapter、tool路径与日志，不从actual刷新真值。
 
 允许测试变更但必须有理由，不许“永远不能修测试”导致错误oracle固化：
 
@@ -174,7 +178,43 @@ core Java、negative raw、invalid input、安全/领域suite分别报告。实�
 
 所有公共调用共用一个RunContext：open→decompile→render，Options不重复存Limits；
 Report只持owned结果facts。source/expected独立于Diana，F/Q只是历史能力标签，实际
-执行集合永远是JSON的70个D案例。fixture、tool/hash、runner目前都尚未建立。
+执行集合与两个分母由JSON的required、acceptanceGate和invocations计算；当前为85案例/175调用场景。fixture、tool/hash、runner目前都尚未建立。
+
+### 案例格式、修订依据与义务映射
+
+schema 2的每个invocation自带id/input/expected；case含acceptanceGate、designRefs、
+inputRequirements。不得把多个输入打包成一个any-error、漏掉调用后仍记case通过；
+scope/完整proto从独立manifest解析，不让adapter按expected挑目标。期望字段是公开
+结果/独立artifact的语义投影，不是要求生产照搬JSON字段；未知字段映射阻塞准备。
+
+draft-2保留D001–D070的问题身份并纠正下列规格；draft-3追加D085修正默认反编译展示。
+draft-4解释验收记号、将应用基础检查统一为G0，拆清normal/raw/report与最终JSON输出
+边界，D064补report合计超限、D069补压缩方式/加密拒绝；保留原调用有效预期。尚无引擎actual：
+- D040：DEX access_flags明确managed declared flag不自行加锁；保留锁行为与raw flags义务。
+- D027/D046：短literal/default encoded可能被工具换形或省略；分别固定new-array/fill
+  原始形态、显式encoded tag，并给独立规范镜像/字段绑定证据。
+- D049/D050：分别以不同outer状态、非字典序enum常量排除碰巧相同的错误结果。
+- D055/D066：两个count故障分别必跑；定义查询包含真实constructor并排除仅引用成员。
+- D068–D070：固定entry identity、force与具体错误类别；成功场景必须真的产生完整文件，
+  不以不存在文件的“没有越界写”冒充成功，不以TargetExists冒充CRC/预算错误。
+对应规范入口见SOURCE_MAP R10；JSON revisionReason保留原漏洞与修订理由，不复制expected。
+
+| 新案例 | 实际义务 | producer / 汇总 |
+|---|---|---|
+| D071–D072 | 窄producer经过Phi的合法return/call，以及int算术/混合range不误截断 | T10类型证据、T11已有调用绑定；T25整case |
+| D073–D074 | count0的null语义、非空fill的FreshArray接受/拒绝边界 | T04/T15；T25 |
+| D075–D078 | 参数words/无code声明、MUTF8、code与class pool目标投影 | T10/T21/P8；T25 |
+| D079–D080 | 多unit编译时static final仍保留sget/class-init；外部常量/Unknown拒绝 | T11/T20；T25 |
+| D081–D082 | 同静态site的动态锁错配拒绝、参数锁的合法循环接受 | T19；T25 |
+| D083 | 极端signed sparse keys与有界处理 | T14；T25 |
+| D084 | noncanonical synthetic bridge保留raw/effect，不套Generated | T21；T25 |
+| D085 | 局部invoke-custom失败时Java/Smali、UTF16、原identity/spans均保留，默认text不挡Mixed | T03/T04/P9、H05；T25/H08各自seam |
+
+D085验证公开Module的复杂结果保留与raw/UTF16/spans完整性，不启动CLI，也不为format flag、status getter或输出排版另造测试。默认展示纠正不能把原有Java正例改成Smali成功。
+
+该映射不把新增案例全部自动归“Java正例”；每次调用的支持/拒绝结果只读JSON。
+方法/声明/pool边界检查是核心语义，不是CLI参数/getter或工具自身测试。
+新规格/规范推导不替代B01批准、B03输入与编译器产物认证，也不解除B04工具自测授权阻塞。
 
 ### 4.1 验证层
 
@@ -193,11 +233,11 @@ Report只持owned结果facts。source/expected独立于Diana，F/Q只是历史�
 
 ### 4.2 状态与分母
 
-### 2.1 报告必须逐方法计数
+#### 4.2.1 报告必须逐方法计数
 
-EngineCoreRC实际验D001–D064及D065的engine义务；ProductRC复用这些证据，补D065
-应用映射与D066–D070，汇总完整70 required。不得把应用未执行记engine pass，或把65
-当作产品总分母。D065身份/expected不拆改，仅分别保存两个seam的证据。
+EngineCoreRC与ProductRC按§2和JSON acceptanceGate选取required集合；每个invocation及
+共享case的每个seam都必须有证据。不得把应用未执行记engine pass，或把engine分母当
+产品分母。D065/D085分别保存两个seam证据，每个仍只计一个case；完整展示Mixed不计JavaUnit。
 
 统计以下互斥状态，并同时输出 denominator：
 
@@ -214,7 +254,7 @@ EngineCoreRC实际验D001–D064及D065的engine义务；ProductRC复用这些�
 
 例如：`Java=12/20 executable, DeclarationOnly=3, Smali=5, Unavailable=3; JavaUnit=1/4; BehaviorVerified=10/12 in env X`，而不是“17/20 能输出就是 85% 成功”。无法真实编译的 Java 片段即便 P8 成功，也不能计为 V4 已通过。
 
-### 2.2 冻结基线纪律
+#### 4.2.2 冻结基线纪律
 
 每次baseline包含：引擎commit、options/profile/schema、输入checksum、该请求catalog标识、toolchainversions、运行命令、按原identity关联的方法状态/trace、已测试输入集。不冻结查询/跨方法结果序列，不要求跨运行局部名或生成源码相同；text样本仅作诊断，source spans对本次真实输出逐项校验。复杂查询内容通过公开module核对原identity多重集合，不提供分页或数量截取参数；旧flag移除只做源码/文档核对，不新增CLI测试。安全预算不足通过领域interface验证明确失败，不前N条成功。行为变化仍须独立审阅。
 
@@ -222,7 +262,7 @@ EngineCoreRC实际验D001–D064及D065的engine义务；ProductRC复用这些�
 
 ### 4.3 行为Driver
 
-### 4.1 Driver 输出结构
+#### 4.3.1 Driver 输出结构
 
 本项目不保证分析结果稳定顺序，但**被分析程序的执行轨迹不是展示顺序**。driver中的event seq、调用参数求值、异常/catch、cleanup、锁和初始化顺序必须逐项保留，不能按事件kind排序或当多重集合比较。独立方法/查询报告才按原identity关联且忽略展示次序。
 
@@ -247,8 +287,7 @@ EngineCoreRC实际验D001–D064及D065的engine义务；ProductRC复用这些�
 日志只存在于自制依赖中，记录call/field accessor/cleanup/lock等观察，不给恢复程序加入改变原行为的stub。额外Driver日志本身可能有effect，fixture要避免因日志改变算法可表达profile；source与恢复都使用相同依赖，但这仍只是覆盖给定fixture的证据。
 
 异常比较：类型、可见cause/自制消息（不含runtime地址）、发生时的eventprefix、catch选择与cleanup行为。不要简单比较top-level成功/失败；一个错误catch可能同样返回-1。stacktrace行号不作为成功要求，错误类型/handler不能忽略。
-
-### 4.2 双向测试与原始 DEX 的证据局限
+#### 4.3.2 双向测试与原始 DEX 的证据局限
 
 基础闭环：selfmade Java → javac/d8生成DEX → Diana → Java → javac → JVMdriver。原基准为生成DEX的自制源/JVM，依赖d8编译语义符合目标。这能检验恢复逻辑，但**不是直接在ART执行原DEX与恢复DEX的比对**。
 
@@ -262,15 +301,46 @@ EngineCoreRC实际验D001–D064及D065的engine义务；ProductRC复用这些�
 
 `behavior_roundtrip`要区分`source-origin JVM case`、`handwritten smali + scalar reference interpreter case`与`ART case`；后者没有适用执行oracle就not-run/failrequired，不补一个“更简单但不是相同CFG”的源码代替。scalar interpreter只有T05 tests-only受限pureops、没有heap/exception/monitor，也须正例对JVM交叉校验；不把它算完整DEX VM。
 
-### 4.3 超时、终止与并发
+D027/D073的规范镜像仅限JSON指定的封闭形态：D027的唯一新数组、已知足够长度、
+常量元素、无逃逸/handler，按FreshArray证明bulk fill和原位Java stores的heap/transfer；
+D073已知primitive component、count=0、无handler/其他effect，逐状态证明fill和length
+read的相同正常/异常transfer。证书列原DEX与镜像CFG/site对应、allocation/异常条件及
+推导，再编译独立Java镜像；不把镜像称为原DEX执行，不推广为异常/锁VM。
+缺这份独立推导即B03阻塞；人工复杂protected/monitor图仍遵守上面的ART证据边界。
+
+full-unit-set（D079）只是对固定role依次调用现有公开Engine class请求，再把每份完整
+JavaUnit一起编译；不新增生产batch命令，不保留原目标classfile遮掩恢复缺陷，也不改
+未选依赖造stub。多个unit/调用任一不合格即该invocation失败。
+
+#### 4.3.3 超时、终止与并发
 
 每子进程启动有deadline，超时kill并记录非通过；累计输出上限避免日志爆炸。无界循环fixture仅能证明某有限前缀，不得timeout后当expectedcomplete；循环测试使用有界计数并分别0/1/多次退出。
 
 monitor测试首要：同线程holdsLock、nullenter异常、所有退出后的lock释放、重入/嵌套sameobject。可加有deadline的双线程交接检查，但stress成功不是完整内存模型证明。锁release必须由CFG证书补充；“body还能运行”不是保持同步语义证据。
 
-### 4.4 能力族索引（执行真值仍为D001–D070）
+#### 4.3.4 文件发布的过程观察
 
-**执行规范是[e2e_cases.json](e2e_cases.json)中D001–D070，完整具体inputs/expected/oracle先由B01–B04审阅、准备、认证。** 下列F00–F25/U/M只是能力族和反例命名映射，不是让实现Agent自行补expected或按当前能力删case；映射见[e2e_cases.json](e2e_cases.json)。
+D070每个unsafe目标/force组合单独调用，不能用默认no-force的TargetExists验证force的
+alias/symlink安全。originalFilesUnchanged同时核原输入path、原handle与sentinel，
+不能只比已固定的snapshot而漏掉原path被替换。两个发布者使用不同的确定payload，
+最终文件须逐byte等于实际成功者；另一方必须是TargetExists，不能“两个都返回成功
+但最终只看见一份”。
+
+最终路径observer在发布者开始前ready：公开取消回调始终返回false，只观察最终路径，
+再辅以有deadline的并发reader；不注入私有publish hook、不匹配phase或回调次数。
+每次读取只打开一个handle并从该handle核完整内容，避免把两次rename前后的文件拼接。
+no-force允许absent或某个完整payload；force允许旧KEEP或完整新payload，空/前缀/混合
+内容均失败。结束时至少观察一次完整新文件，核所有temp清理；不存在文件不能真空通过。
+bounded写/复制循环每至多64KiB检查取消，因此把temp错误改成final再分块写的mutation
+会在公开callback中暴露半文件；callback观察本身只读、不阻塞等待生产者下一阶段。
+
+有限reader采样不证明全部OS调度：原子性同时依ALGORITHMS §14.3的hard_link/rename
+primitive与持有Dir的文件安全审阅，不能以stress通过替代。平台不支持这些primitive时，
+准备如实失败；不降级为exists+rename或取消该required调用。
+
+### 4.4 能力族索引（执行真值为JSON required集合）
+
+**执行规范是[e2e_cases.json](e2e_cases.json)中的required cases/invocations，完整输入/expected/oracle先由B01–B04审阅、准备、认证。** 下列F00–F25/U/M只是能力族和反例命名映射，不是独立执行清单，不让实现Agent自行补expected或按当前能力删case。
 
 所有F/U/M均自制。binary方法满足编译器或smaliassembler规则；专门invalid case用于拒绝，没有“畸形也能生成Java”的要求。Native/abstract不可执行的声明放独立count。
 
@@ -303,7 +373,7 @@ monitor测试首要：同线程holdsLock、nullenter异常、所有退出后的l
 | F24 PureRecovery | on/offsingle-usepurecopy；call/read/div/locknegative | samebehavior，option真实consume；effect不能移动 | T24可选；V3/V5/V7 |
 | F25 HardeningMatrix | 所有M/U、smallbudget、cancel、原始语义/取消/预算/spans、known038/039rawextension | 基线支持/状态一致、无panic/0tests、BUGgate红 | T25；V0–V7 |
 
-F07/F08手写smali部分必须在manifest指出referenceinterpreter/ART/JVM实际证明范围；F17sharedhandler若未实现ownershipprofile则作为U03式降级case，不以它不Java而否定第一档T18，亦不列为其positiveJava支持。
+F07/F08手写smali部分必须在manifest指出referenceinterpreter/ART/JVM实际证明范围；F17sharedhandler若未实现ownershipprofile则作为U03式降级case，不以它不Java而否定T18，亦不列为其positiveJava支持。
 
 ### 4.5 固定工具与内容锁
 
@@ -313,13 +383,13 @@ F07/F08手写smali部分必须在manifest指出referenceinterpreter/ART/JVM实�
 |---|---|---|
 | Rust | 根manifest最低`1.93`；runner实现时固定patch版 | 普通native构建；锁文件记录`rustc -Vv`，不手工改现有工程toolchain |
 | Python | harness准备器最低3.11（若采用Python） | 只作开发工具；不得进入生产runtime，脚本应跨平台 |
-| JDK | Eclipse Temurin **21.0.8+9**，源码目标`--release 8` | [官方release](https://github.com/adoptium/temurin21-binaries/releases/tag/jdk-21.0.8%2B9)，选择对应OS/arch的JDK资产，SHA-256用资产官方记录核；不是只下载JRE |
+| JDK | Eclipse Temurin **21.0.8+9**；恢复Java固定`--release 8 -proc:none -g:none`，原fixture的debug flags按case recipe锁定 | [官方release](https://github.com/adoptium/temurin21-binaries/releases/tag/jdk-21.0.8%2B9)，选择对应OS/arch的JDK资产，SHA-256用资产官方记录核；不是只下载JRE |
 | R8/D8 | `com.android.tools:r8:8.3.37` | [Google Maven POM](https://dl.google.com/dl/android/maven2/com/android/tools/r8/8.3.37/r8-8.3.37.pom)，主类`com.android.tools.r8.D8`；从固定JAR构造参数数组，不依赖AndroidSDK包装脚本 |
 | smali / dexlib2 | `org.smali:smali:2.5.2`、`org.smali:dexlib2:2.5.2` | [Maven Central POM](https://repo.maven.apache.org/maven2/org/smali/smali/2.5.2/smali-2.5.2.pom)，主类`org.jf.smali.Main`；POM有transitive依赖，**不是假设任意smali.jar可`java -jar`执行** |
 | 测试依赖classpath | 自制Java源码或JDK既定声明 | 全部source签入，classpath从recipe得到；核心suite不依赖Android platform jar |
-| ART增强验证 | 暂不规定设备/镜像 | 与JVM-only报告分开；没有已授权可复现环境不将ART算通过，不成为核心prep隐含本地SDK依赖 |
+| ART验证 | 使用用户明确授权且可复现的设备/镜像 | 与JVM-only报告分开；没有已授权可复现环境不将ART算通过，不成为核心prep隐含本地SDK依赖 |
 
-这些公开入口本轮作存在性核查；实际组合能否完整生成全部fixture须B02/B03验证，不能仅POM有HTTP200就标工具可用。B02产出`tests/e2e/toolchain.lock.json`：每个必需artifact的完整URL、version、SHA-256、size、依赖及mainclass；JDK每目标平台需asset/hash。**任何未填checksum/占位值、混入未锁transitive版本均阻止prep通过**。校验锁由官方checksum/可信获取的实测digest审阅；不能伪造SHA。
+工具组合须经B02/B03实际生成/认证全部fixture；POM可访问不等于工具组合可用。B02产出`tests/e2e/toolchain.lock.json`：每个必需artifact的完整URL、version、SHA-256、size、依赖及mainclass；JDK每目标平台需asset/hash。**任何未填checksum/占位值、混入未锁transitive版本均阻止prep通过**。校验锁由官方checksum/可信获取的实测digest审阅；不能伪造SHA。
 
 不要将R8/smali的JVM依赖搬到Rust生产或build.rs。可用受控Maven步骤产生classpath，但必须锁住传递依赖与artifacthash后离线运行；锁不能只写两个顶层POM。核心suite的checked-in artifact manifest与source recipe可供其他开发者复验，无需外部参考仓库。
 
@@ -344,7 +414,7 @@ inputs编译/拼接可改变符号池offset时，recipe的语义检查要逐fiel
 
 ### 4.7 执行与失败判定
 
-未来开发工具interface为`python3 tools/e2e.py fetch-tools|prepare|verify-inputs|verify-harness`；
+开发工具interface为`python3 tools/e2e.py fetch-tools|prepare|verify-inputs|verify-harness`；
 脚本目前不存在。只有fetch可联网，其他只读锁定工具和签入源，不扫描home/SDK/cache。
 子进程用参数数组/锁classpath，Windows用join_paths，不能假定裸smali.jar能java-jar。
 每case隔离临时目录/原始与恢复classfiles；clinit每输入新JVM，进程/输出均有上限。
@@ -359,6 +429,18 @@ metadata；不要求offset/debug字节相同，不用恢复端decoder生成两�
 干净checkout/新cache显式fetch→prepare→verify-inputs→verify-harness；未跑平台如实
 not-verified，没有依赖源/许可/锁的case仍blocked，不从required移除。
 
+验收记号（适用于后续所有任务卡）：
+- **G0**：下列仅Diana workspace的fmt、Clippy、release build、实际测试基础检查。
+  引擎卡与应用H卡统一用G0，再叠加各卡领域行为义务，不另设第二套隐含基础gate。
+- **B(F…/U…)**：相应已批准D案例的行为闭环；恢复Java在原合法method context或完整
+  unit内真实编译，以独立source/JVM Driver或明确获准的独立oracle比较返回/异常/
+  heap/effect/UTF16/FPbits。镜像/手写scalar/ART的证据范围遵守§4.3，不只检查javac成功。
+- **S(F…/U…)**：相应合法raw案例的Smali回环；恢复的完整Smali方法/声明在原shell中
+  经固定assembler生成DEX，用独立projection比较opcode/words/refs/targets/payload/
+  handler优先级/UTF16/metadata。Malformed或unknown-width的Unavailable/excerpt不算S成功。
+- 括号是能力族/反例标签，不是可执行case选择器；具体输入/expected只读JSON与任务卡
+  指定D ID（如T06的D009），不能改跑能力说明中的answer7，也不能用空选择器过关。
+
 G0（仅活动workspace）：
 ```sh
 cargo fmt --all -- --check
@@ -368,8 +450,8 @@ cargo test --workspace --all-features --locked
 ```
 真实测试存在后按固定D ID/卡前缀运行公开contracts；roundtrip/assembly显式opt-in。
 缺工具/fixture/classpath、非零exit、超时、0-selected、无产物/截断都失败，不能skip=pass。
-全suite成员固定，不按当前engine-supported过滤；单批可选固定ID，全70总账仍保留。
-不运行ref-fork gate。workspace现在零测试不是通过，未来命令不是本轮已运行成绩。
+已批准revision的全suite不按当前engine-supported过滤；单批可选固定ID，但总账保留JSON全部required case/invocation，包括追加编号。
+不运行ref-fork gate。workspace现在零测试不是通过，命令interface不等于实际运行成绩。
 
 ## 5. 引擎任务 T01–T25
 
@@ -402,14 +484,14 @@ cargo test --workspace --all-features --locked
 
 **文件**：`src/p1_input/{mod,cursor,header,catalog,code}.rs`、`src/p0_knowledge/declarations.rs`、`src/substrate/types.rs`、`tests/input/`。
 
-**输入→输出**：`DexImage<'a> -> ProgramIndex<'a>`，bytes由caller scope持有；普通DEX本卡header_offset=0，041由H04补齐；按descriptor+class_def_idx定位class、按`name+proto`定位MethodKey；本卡产出`RawMethodView`只保证code/triesranges安全，T03/T04通过完整P1 `validate_raw`后才构造携带`ValidatedRawMethod`的`MethodInput`，不跨seam暴露uncheckedoffset。metadata暂时仅ASCIIdescriptor/name，非ASCII走已知Unsupported，原range保留待T04。
+**输入→输出**：`DexImage<'a> -> ProgramIndex<'a>`，bytes由caller scope持有；普通DEX本卡header_offset=0，原生041解析由T04提供、应用身份适配由H04提供；按descriptor+class_def_idx定位class、按`name+proto`定位MethodKey；本卡产出`RawMethodView`只保证code/triesranges安全，T03/T04通过完整P1 `validate_raw`后才构造携带`ValidatedRawMethod`的`MethodInput`，不跨seam暴露uncheckedoffset。MUTF-8解码由T04提供，不能以ASCII替代完整name/descriptor。
 
 **步骤**：
 1. implement checked_range(offset,count,stride)及u16/u32/ULEB32/SLEB32；强制byte/code_unit类型区别。
 2. header035、little-endian、file_size、headersize、map及IDtables各自bounds/alignment；超限Resource，截断Malformed；unknowncontainer/version Unsupported。
 3. Type/Proto/Field/Method/classdata索引检查，delta累计checked_add；duplicateclass或ambiguousname按key/proto处理。
 4. code_item完整range：insns_size*2、oddpadding、trytable、handlerlistbase及target范围；在分配前用remaining/min_record与全局预算核count。
-5. 支持zero code_off的abstract/native声明；proto words与ins_size一致性等code存在时检查；未来rawfallback重新读取同validatedrange。
+5. 支持zero code_off的abstract/native声明；proto words与ins_size一致性等code存在时检查；rawfallback只读取原validated range。
 
 **不变量 / 限额**：分配前验证长度；5byteLEB高位overflow拒绝；sleb::MIN不直接abs分配；decodedmetadata总预算，不仅每table上限。可定位的localmethodmalformed不让class其他method失去raw身份。
 
@@ -425,7 +507,7 @@ cargo test --workspace --all-features --locked
 
 **文件**：`src/p1_input/formats.rs`、`src/p2_flow/decode.rs`、`src/p9_emit/{mod,smali,spans}.rs`、`src/engine.rs`、smali/input tests。
 
-**输入→输出**：`RawMethodView -> validate_raw(Vec<RawInsn>) -> ValidatedRawMethod`（offset、width、operands、originalwords）→ standard-smali MethodOutput；knownUnsupportedJava与unknownformat分开，unknownformat为Unavailable+hexexcerpt。首版format表覆盖035全部标准opcode格式，Javalowering可只支持极少op。
+**输入→输出**：`RawMethodView -> validate_raw(Vec<RawInsn>) -> ValidatedRawMethod`（offset、width、operands、originalwords）→ standard-smali MethodOutput；knownUnsupportedJava与unknownformat分开，unknownformat为Unavailable+hexexcerpt。format表覆盖ALGORITHMS §1登记的标准opcode及版本门控，Java lowering执行T06–T23规定的规则。
 
 **步骤**：
 1. 单表定义opcode/mnemonic/format/width/version；decoder/formatsvalidator/smaliprinter共用，避免长度表和打印表漂移。
@@ -479,7 +561,7 @@ cargo test --workspace --all-features --locked
 3. 读取B01–B04已冻结manifest/Dcase/expected/toolchain.lock与inputs证书，不在本卡重新填期望或使用引擎输出生成golden；不同publicinterface只改薄adapter。
 4. 接入团队可复现的root测试工具/driver，工具来自公开内容锁与checkout cache，不寻找个人SDK、平台jar或参考仓本地目录；缺工具/hash错失败，子进程只测试工具。
 5. 连接raw→smali→受控assembler→独立rawprojection比较；按已冻结D059–D061等原始内容证据核对，不为了当前能力删catch/string/payload expected。
-6. 将公开开发示例输出Report状态与spans，未来其他测试可以复用，而不是直接调privateprinter。
+6. 将公开开发示例输出Report状态与spans，其他核心测试复用，而不是直接调privateprinter。
 
 **不变量 / 限额**：测试fixture自制授权、来源固定；第三方pickle不载入；errornormalizer不删type/catch差异；zero运行数/timeoutnonzero不当pass。
 
@@ -501,10 +583,10 @@ cargo test --workspace --all-features --locked
 1. supportedop：常量、参数move、int简单add/sub/mul、return；normalterminal验证，return后rawcode仍校验。
 2. inputwordbinding、opresultValueId、simpletypeconstraints、ValueId→LocalId，explicitassignment不先GVN/inline。
 3. intliteral原bits适当signedspelling；Javaexprstmt只call/new/update，arithmetic写localassignment。
-4. JavaASTcompletion/returntype/parameter及Identifier验证，P9输出明确method/context状态+originspans；不能readonlyname猜proto。F05编译只用原自制source已知context替换选定方法，constructor/其他成员保持原源码，不生成任何语义stub；因此只计选定method的Java合法性，不把Mixed算完整DianaJavaUnit。
+4. Java AST核completion/returntype/Identifier，按ALGORITHMS §12.4–§12.6核signature和目标code/local/stack/pool上界后才Verified；256个int的静态声明必须Unsupported/raw，不能删unused参数。P9输出method/context状态与origin spans，不按name猜proto。F05编译只用原自制source已知context替换选定方法，constructor/其他成员保持原源码，不生成任何语义stub；因此只计选定method的Java合法性，不把Mixed算完整DianaJavaUnit。
 5. 真实输入经已实现的typed transitions产出结果，失败不留下Java残片；以公开interface的语义、错误状态、预算/取消观察验收。artifact/trace仅辅助定位，不新增私有Pass调用顺序、次数或逐phase计数测试。
 
-**不变量 / 限额**：无handler/noMonitor；undefinedread必须拒绝；long/doubleword契约T10才扩充，不knownprofile就Unsupported而非猜int；每effect暂不承诺可inline。
+**不变量 / 限额**：无handler/noMonitor；undefinedread必须拒绝；long/doubleword契约T10才扩充，不knownprofile就Unsupported而非猜int；effectful表达式禁止inline。
 
 **测试**：T06实际运行B01–B04固定D009（int加法/溢出），不是到开发时再生成answer/inc的新fixture；`answer()->7`等只作实现说明。未定义读/宽值/预算等按D055–D064及任务固定映射接入，范围不足仍未通过，不改expected。D009在已知合法context运行恢复方法，别把未支持的defaultconstructor计整类JavaUnit。
 
@@ -525,7 +607,7 @@ cargo test --workspace --all-features --locked
 2. 按ALGORITHMS §3反向求只增长的live-in slot集合；normal write kill与throw-before需求分开。每个block每个live-in slot均建固定Phi，包括单predecessor；虚拟EntrySeed提供参数。
 3. 每block一次扫描：先绑定全部reads、保存所需throw旧值，再使重叠slot失效/写固定Def。每条incoming一次连接，未填Option不是语义Undefined。
 4. 从实际uses保留Phi闭包，Bad与grounded分别单调传播；缺定义/partial-wide/无根定义环拒绝。验证器重放block最新定义与normal/exception来源，不拿normal dominator替代异常检查。
-5. 首版不做trivial-Phi消除或别名缩减；类型留有限constraints。封口后drop Env/live scratch，保留必要Phi inputs和use绑定给P5/P6。
+5. 不做trivial-Phi消除或别名缩减；类型留有限constraints。封口后drop Env/live scratch，保留必要Phi inputs和use绑定给P5/P6。
 
 **不变量 / 限额**：finiteworklist；looppreallocatedPhi即使本卡不emitloop也可内部测试；branchconditions只绑定一use；每eligibleedge一Phiinput。
 
@@ -581,7 +663,7 @@ cargo test --workspace --all-features --locked
 
 **不扩展**：try/monitor状态机、Object[]寄存器装箱解释器、复制effecttail、字节相同作为自然结构质量指标。
 
-## T10 — Primitive/Null/FP 完整第一档合法化
+## T10 — Primitive/Null/FP 完整合法化
 
 **依赖**：T09。**Phase**：P2/P5/P8/P9。**参考**：DX-08，RG-09。
 
@@ -590,17 +672,17 @@ cargo test --workspace --all-features --locked
 **输入→输出**：bits/wordtypes+useconstraints→TypedBody/UseConversion→合法primitive/refnullJava。支持boolean、byte/short/char/int/long、float/double、cmp/cmpl/cmpg、conversions和shift；notenoughtypeevidence明确Unsupported。
 
 **步骤**：
-1. finite候选type域，constbits不第一次use即固定；numeric/refzero用上下文约束，不全写null或0。
+1. 按ALGORITHMS §4闭合descriptor facts、family等式组，再单调传播origins/Known01/producer-range；封口后一次选择source type，literal每use独立视图。ProvenNarrow仅接受完全落入目标范围的无损转换。
 2. widewordpair、aliasoverlap/partialread检查；所有shiftmask、signed/unsigned、narrowing与Dex类型语义表逐opcode对应。
 3. booleanbitwise合法truth表达、eqzref==null；任何ambiguous非literal值不直接重解释cast。
-4. cmp FP用`x<y?-1:x>y?1:x==y?0:bias`，x/y为locals、bias=-1/+1；不需isNaN库调用，也不折掉NaN分支。FP不reassociate。任意NaN payload/bitcast需明确intrinsic证据，不在T10偷偷添加调用。
+4. cmp FP用`x<y?-1:x>y?1:x==y?0:bias`，x/y为locals、bias=-1/+1；不需isNaN库调用，也不折掉NaN分支。FP不reassociate。无法精确表达的NaN payload/bitcast为Unsupported，不为恢复新增库调用。
 5. typedliteral.escape覆盖negativeMIN、Infinity、-0、surrogate；每UseConversionno-extra-runtime-check可核查。
 
 **不变量 / 限额**：有限constraints收敛，Conflict显式拒绝；overflow和Java数值promotion不靠hostRust默认猜。
 
-**测试**：F09 `PrimitiveBits`：booleannegation/bitop、0/null/false、MIN/-1、shift-1/32/64、NaNcmpl/cmpg、negativezero、float→int边界、wideoverlap；M09错误kind/partialwide/unresolvedprimitive；B(F09)按bits/traces比较，不只formattext。F09必须拆成无library-call的核心primitive正例与尚无P4intrinsic证据的bitcast子例：后者本卡预期Unsupported/raw，不能让T10依赖未来T11；T11建立intrinsic声明后新增独立扩档验收。
+**测试**：F09 `PrimitiveBits`：booleannegation/bitop、0/null/false、MIN/-1、shift-1/32/64、NaNcmpl/cmpg、negativezero、float→int边界、wideoverlap；M09错误kind/partialwide/unresolvedprimitive；核byte参数经过int Phi后的return/call可无损窄化，混入short/int算术来源不得误证byte。B(F09)按bits/traces比较，不只formattext。F09的primitive正例不引入库调用；无精确表达规则的bitcast为Unsupported/raw。原程序已有的库调用按T11绑定，不为其新增合成调用。 固定D071的return与D072由本卡提供类型证据；D071 call在T11绑定后整case才完成。D076覆盖MUTF8目标字节边界。
 
-**验收**：G0与本卡公开核心case（统一规则见§4）；B(F09)。**完成**：supportedprimitive矩阵每族有positive/boundary；未验证bitcast/intrinsic不标支持。
+**验收**：G0与本卡公开核心case（统一规则见§4）；B(F09)。**完成**：primitive矩阵每族有positive/boundary；不把无规则的bitcast或合成intrinsic标为支持。
 
 **不扩展**：全referencegenerics、arithconstantfold/GVN、浮点代数压缩、万能numericreinterpret。
 
@@ -621,7 +703,7 @@ cargo test --workspace --all-features --locked
 
 **不变量 / 限额**：catalog候选遍历charge；Unknown不fill默认public；参数eval不重排；任何runtimecheck新增必须证据。
 
-**测试**：F10 `CallKinds`：overloadint/long/Ref/null、virtualoverride、interface、private/direct、super、sideeffectargs、unusedthrowingcall；F11 `MissingCatalog`相同输入complete时Java、empty时明确Smali；M10badresult/argwords/staticreceiver/visibility/returnonlyoverload。
+**测试**：F10 `CallKinds`：overloadint/long/Ref/null、virtualoverride、interface、private/direct、super、sideeffectargs、unusedthrowingcall；F11 `MissingCatalog`相同输入complete时Java、empty时明确Smali；M10badresult/argwords/staticreceiver/visibility/returnonlyoverload。 D071 call消费已封口range；D080分别验证Constant/Unknown的准确拒绝，不添加初始化helper。
 
 **验收**：G0与本卡公开核心case（统一规则见§4）；B(F10) + S(F11)。**完成**：所有kind有行为driver和rejectcase；missingcatalog为预期降级而非pass“忽略errors”。
 
@@ -636,8 +718,8 @@ cargo test --workspace --all-features --locked
 **输入→输出**：邻接new-instance/invoke-directinit→allocation证据和合法Javanew；`<init>`的UninitThis→singlelegalsuper/thischain→正常Refbody。
 
 **步骤**：
-1. AllocationId跟踪puremoves，不允许uninitescape/普通call/fieldread；唯一init且正常路径之后referencevalid。
-2. 初版要求args先于new准备或literal、无interveningeffect/maythrow；Javanewconstructor组合不能把effect跨过allocation/classinit时机。
+1. AllocationId仅跟踪pure move-object；禁止uninit escape/普通call/fieldread。逐use验证init正常完成后的availability，P6用DeferredAllocation，不全局把ValueId改Ref或赋null。
+2. 要求args先于new准备或literal、无interveningeffect/maythrow；Javanewconstructor组合不能把effect跨过allocation/classinit时机。
 3. constructorprologue只允许不观察uninitthis的pureargpreparation和singleexpressiblechain；super/this真实行为不删。
 4. ownership/proto访问完整；多个init、joinuninit、不合法Java参数次序→Unsupported，rawfallback保存。
 5. finalfieldassignment复杂完整处理T20，本卡simplepostsuper字段写先维持eligibility，不提前移动到initializer。
@@ -688,9 +770,9 @@ cargo test --workspace --all-features --locked
 
 **不变量 / 限额**：selector一次求值；每key语义exact，switchkeys数量和outputbyte受限；payload不算executableop。
 
-**测试**：F14 `IntegerSwitch`：negative/min/maxkey、sharedtarget、default、fallthrough、loopbreak、caseedgecopy；M12duplicatekey/outofrange/branchpayload。B(F14)覆盖每case/default与sideeffectselector。
+**测试**：F14 `IntegerSwitch`：negative/min/maxkey、sharedtarget、default、fallthrough、loopbreak、caseedgecopy；M12duplicatekey/outofrange/branchpayload。B(F14)覆盖每case/default与sideeffectselector。 固定D083的极值keys验证有界完成与真实分支，不断言AST打印形式。
 
-**验收**：G0与本卡公开核心case（统一规则见§4）；B(F14)。**完成**：普通整数switchcoverage完整，string/enum降糖模式暂未支持不fake恢复。
+**验收**：G0与本卡公开核心case（统一规则见§4）；B(F14)。**完成**：普通整数switchcoverage完整，string/enum switch按整数控制流保持，不生成未规定的switch糖化。
 
 **不扩展**：stringhashswitch/enumordinal糖化、未知bootstrap switch、branchcascade自动重启识别。
 
@@ -705,13 +787,13 @@ cargo test --workspace --all-features --locked
 **步骤**：
 1. descriptorkind与opcode窄/宽/reference兼容，null/arraytype用constraint而不是firstuse猜String。
 2. fieldstatic/instance、visibility、volatile/classinitfact来自completecatalog；unknownflags影响effect保守，不自动假定publicfinal。
-3. arrayindex/value/receiver按原eval顺序；fillarraybytebits与elementtype一致，未知type拒绝。
+3. array index/value/receiver保持原序。fill按ALGORITHMS §2.4：count=0仍发length read保留NPE；非空只在FreshArray长度足够/未逃逸证明下原序展开stores，逐元素保持bits；其他形态raw，不制造异常/helper。
 4. unusedfield/arrayread、cast依旧生成typedtemp保持throw/init/volatile；原checkcast不能因为结果不用而删。
 5. referencejoin只在no-extra-check证据下转换，Object上新增cast不能只是为了javac通过。
 
 **不变量 / 限额**：默认heapread/write/callbarrier，noDCE/hoist；allocationarraycountscharge；staticinit读字段不变成literal常量失trigger。
 
-**测试**：F15 `HeapEffects`：fieldget/set/staticinittrace、arrayload/store顺序/null/bounds、unusedcheckcastthrow、volatile原指令保留、wide/floatarraybits；M13wrongfieldopcode/arraypayloadtype/missingcatalog。B(F15)比较结果、mutationlog、exceptionclass。
+**测试**：F15 `HeapEffects`：fieldget/set/staticinittrace、arrayload/store顺序/null/bounds、unusedcheckcastthrow、volatile原指令保留、wide/floatarraybits；D027必须Java，零元素fill对null仍NPE，非空缺shape证明必须raw且不得发生部分写入后伪称原语义；M13wrongfieldopcode/arraypayloadtype/missingcatalog。B(F15)比较结果、mutationlog、exceptionclass。 D027须有真实fill/FreshArray证书；D073/74分别覆盖零count异常与非FreshArray完整raw。
 
 **验收**：G0与本卡公开核心case（统一规则见§4）；B(F15)。**完成**：supportedheapops都有throw/effectnegative，originalmemberspans定位正确。
 
@@ -747,13 +829,12 @@ cargo test --workspace --all-features --locked
 **文件**：`src/p6_variables/{exceptional,copies,definitions}.rs`、`tests/pipeline/exception_storage.rs`。
 
 **输入→输出**：exceptionSSA+TypedBody→beforethrowpureShadowSnapshot/HandlerIngress CopyPlan；handlerPhi每incomingthrowsite有对应typedsource证明。
-
 **步骤**：
 1. enumerate每handler retainedPhi的eligibleexceptionedges；创建请求内固定身份ShadowLocal，不要求跨运行同编号；不能借普通criticaledges插catch中间代码。
 2. 在throw site之前保存该edge的oldstate值，所有可能handler的snapshot均no-throw/no-allocation/localonly；catchingress绑定PhiLocal。
 3. 每(handler,Phi)始终独占shadow，nested inner handler中的throw同样给outer保存旧值；不按type合槽。保护归属采用ALGORITHMS §10一层nested规则，shared/crossing无法归属才拒绝，不使用“最近一次寄存器值”。
 4. DefinitionCertificate验证每snapshot来源在该site已定义，conversionexact不引入runtimecheck；frame-leveldefaultslot不可观察。
-5. P8 placement obligation产出明确列表，后续try构造必须消费同site位置，sourcecopy不能放到另一保护域。
+5. P8 placement obligation产出明确列表，try构造必须消费同site位置，sourcecopy不能放到另一保护域。
 
 **不变量 / 限额**：shadow只影响合成local、noheap、noextraexception；多个handlersnapshotcopy总数有上限，copycycles也按T08序列化。每throwedge有来源，不依据handler最后一次写猜值。
 
@@ -802,7 +883,7 @@ cargo test --workspace --all-features --locked
 
 **不变量 / 限额**：锁effect不是pure，noinline/hoist；证书有all-exitwalkbudget，循环不靠无界enumeration。无法证明停止该profile而非假定balance。
 
-**测试**：F19 `MonitorScope`：return/throw/nulllock、nested/reentrant、methodstatic/instance，body中`Thread.holdsLock`driver、finallythrow后lock释放；U04 mismatchedlock/exitmissing/multientry→Smali；nativeverifynegativecoverage。
+**测试**：F19 `MonitorScope`：return/throw/nulllock、nested/reentrant、methodstatic/instance，body中`Thread.holdsLock`driver、finallythrow后lock释放；U04 mismatchedlock/exitmissing/multientry→Smali；nativeverifynegativecoverage。 D081/82固定动态根重执行拒绝和参数根循环接受，不能按“有loop”一概raw。
 
 **验收**：G0与本卡公开核心case（统一规则见§4）；B(F19) + S(U04)。**完成**：有明确语义trace/holdsLock/释放检查（并发stress仅补充不当完整证明），rawflags不直接打印declared_synchronized。
 
@@ -825,7 +906,7 @@ cargo test --workspace --all-features --locked
 
 **不变量 / 限额**：sourceconstantfinal可能改变classinittrigger必须核；初始化次数/order和失败路径可见；clinitfield重写不丢origin。
 
-**测试**：F20 `Initialization`：nonconstantstaticfieldtrace、multipleconstructors、thisdelegate、blankfinal、encodednull/false/floatbits、initexception；U05 complexfinalreassignment/default不可证→Mixed/Smali；B(F20)每driver新进程防classinit已发生。
+**测试**：F20 `Initialization`：nonconstantstaticfieldtrace、multipleconstructors、thisdelegate、blankfinal、encodednull/false/floatbits、initexception；U05 complexfinalreassignment/default不可证→Mixed/Smali；B(F20)每driver新进程防classinit已发生。 D046必须看到显式encoded tags；D079分别恢复并联合编译Case/Reader，核class-init和实际getstatic。
 
 **验收**：G0与本卡公开核心case（统一规则见§4）；B(F20) + S(U05)。**完成**：合法unitinittrace一致，无法sourcefinal表达明确decl状态，不删finalcontract隐藏。
 
@@ -847,7 +928,7 @@ cargo test --workspace --all-features --locked
 
 **不变量 / 限额**：puregeneric美化可省，bindingcorrectness不可省；overloadcomplete状态与EnvironmentId稳定，sourcepublicidentity不改。
 
-**测试**：F21 `ErasedContracts`：selfmadegenericList/identity、covariantbridge、rawinterfaceimpl、nulloverload；U06 return-onlyDEXoverload、bridgeeffect不同、unknownparentcontract→Smali/Mixed；B(F21)配套完整selfmadeclasspath。
+**测试**：F21 `ErasedContracts`：selfmadegenericList/identity、covariantbridge、rawinterfaceimpl、nulloverload；U06 return-onlyDEXoverload、bridgeeffect不同、unknownparentcontract→Smali/Mixed；B(F21)配套完整selfmadeclasspath。 D048/D084分别要求canonical Generated和有effect bridge拒绝；D075含无code声明目标边界，D078核class pool拒绝不丢成员。
 
 **验收**：G0与本卡公开核心case（统一规则见§4）；B(F21) + S(U06)。**完成**：raw泛型警告可接受，但真正编译错误不可忽略；legacyfulltypesolver不整体搬入。
 
@@ -893,7 +974,7 @@ cargo test --workspace --all-features --locked
 
 **不变量 / 限额**：metadatafullsource与inspectiononly不同；annotationarray/stringUTF16limit递归有界；canonicalenum少一个constant/initializer即拒绝。
 
-**测试**：F23 `EnumAnnotation`：enumiteration/name/ordinal/valuesclone、canonicalvalueOf、runtimeannotationreflect/default/array/UTF16；U08 enumcustombody不可证/invalidannotationelement/missingretentionfacts→Mixed；B(F23)本卡只接受canonicalprofile。
+**测试**：F23 `EnumAnnotation`：enumiteration/name/ordinal/valuesclone、canonicalvalueOf、runtimeannotationreflect/default/array/UTF16；U08 enumcustombody不可证/invalidannotationelement/missingretentionfacts→Mixed；B(F23)本卡只接受canonicalprofile。 D050使用非字典序常量并核valueOf，不让field表排序碰巧满足期望。
 
 **验收**：G0与本卡公开核心case（统一规则见§4）；B(F23) + S(U08合法raw部分)。**完成**：支持profile可复算、JavaUnit分类与metadata语义合同吻合，无extendsEnum伪合法代码。
 
@@ -905,21 +986,21 @@ cargo test --workspace --all-features --locked
 
 **文件**：`src/p8_java/recovery.rs`、`src/pipeline/schedule.rs`（仅实际接线）、`src/p0_knowledge/policy.rs`。
 
-**输入→输出**：已verifiedJavaAST→可选readabilityrewrite→再次verify；defaultoff，关闭不影响CoreRC。只smallpurelocalcopies/literal和受限loop形式，不搬BDD/gatedPhi。
+**输入→输出**：verified JavaBody→ALGORITHMS §15规定的整数单use内联→再次verify；inline_pure默认false，关闭不影响CoreRC。
 
 **步骤**：
-1. 仅在P8实现一个真实可选pure函数及明确option，default off；不建PassSpec/registry。按ALGORITHMS §15的Applied/Declined/BUG合同处理，不预建E02–E08插件，必需legalization不可关闭。
-2. 只同blocksingleuse、nopossiblethrow/nocall/noheap/nomonitor/nochangingclassinitdomain的pureexpr内联；booleansyntax以已解typefact。
-3. rewrite每轮有finite measure（locals/redundantnodes下降）或explicitmaxround/worklimit，unchanged停止。
-4. applyonprivateAST，验证失败丢candidate、保持baselineAST并记RecoverDeclined；InternalInvariant仍reportBUG而不是默默吞。
+1. 仅在P8实现一个真实可选pure函数及明确option，default off；不建PassSpec/registry。按ALGORITHMS §15的Applied/Declined/BUG合同处理，不建插件框架，必需legalization不可关闭。
+2. 仅匹配同block相邻`t=expr; return t`；expr只含规定的int/long纯运算，不含FP/div/rem/heap/call/cast-ref/allocation/同步，不内联Phi/shadow/deferred allocation。
+3. 预留副本/验证及完整emit配额；复制一个JavaBody，按原AST序一次扫描并替换互不重叠的pair，不做repeat或回滚edit-log。
+4. 验证source type/binding/control/effects/Origin与配额；通过Applied，不匹配或配额不足Declined，取消停止、内部错误为BUG。
 
-**不变量 / 限额**：noeffect duplication/motion，postverifiedtypes仍valid；defaultoff和on各有sameprofile行为；label/state数量仅qualityproxy。
+**不变量 / 限额**：noeffect duplication/motion，postverifiedtypes仍valid；defaultoff和on各有sameprofile行为；不以local数量或文本形态作为正确性判据。
 
 **测试**：F24 `PureRecovery`：purecopyinline正例、call/read/div/monitornegative；B(F24)on/offdriver一致，mutationduplicatedeffect失败；budget不会禁用requiredcopylowering。
 
 **验收**：G0与本卡公开核心case（统一规则见§4）；B(F24)。**完成**：smalloption真正消费、trace可见、失败保留baseline、不影响T25核心gate。
 
-**不扩展**：本卡不做常量分支改CFG、GVN/LICM、stringbuilder/finally还原、全局restart、registry和持久HARDassertions；这些不是永久禁止美化，后续可按ALGORITHMS.md另起独立可选任务并验收。
+**不扩展**：本卡不做常量分支改CFG、GVN/LICM、stringbuilder/finally还原、全局restart、registry和持久HARDassertions；整数内联的完整支持/拒绝条件以ALGORITHMS §15为准。
 
 ## T25 — 固定核心集合加固与 EngineCoreRC
 
@@ -931,20 +1012,20 @@ cargo test --workspace --all-features --locked
 
 **步骤**：
 1. 核对B01–B04已固定manifest与实际typed transitions，required成员不按当前实现删/skip；将core-java的失败改为Smali成功不可接受。filterzero断言，known038/039/custom/polymorphic未支持列表与rawcoverage分别明确；unknownformat不能fakefallback。
-2. 生成字节和artifactmutation测试：count/offset/LEB/payload/handler/type/Phi/copy/site/loop/state/outputbudget，固定seed，取消会终止。
+2. 生成字节和artifactmutation测试：count/offset/LEB/payload/handler/type/Phi/copy/site/loop/state/outputbudget，固定seed，取消会终止。目标admission覆盖static 255/256、instance 254/255、wide参数words、source locals/code/pool边界及compiler-owned成员；不能调大Limits绕过JVM硬界限。
 3. 每个knownunsupported合法fixtureSgate；malformedUnavailable/rawexcerpt不冒充smali，BUG不算成功。fallback吞掉exception/type错误的策略必须反例失败。
-4. 跑固定D001–D064及D065的engine-seam证据（共65个案例身份），不按当前supported过滤。D065应用适配与D066–D070由H卡负责，H08汇总全部70；总账仍显示70 required，不能把未归engine的应用义务报pass或删除。单列JVM/ART、catalog完整性、metadata、exception/monitor证据。T24off先全core gate，on仅已实现的美化另验。
+4. V4按Temurin21.0.8+9 `--release 8 -proc:none -g:none`编译，独立读classfile核实际code/locals/stack/handler/pool不超过TargetAdmission投影；不只检查javac exit0。该检查验证核心admission行为，不是工具自测。跑JSON acceptanceGate=engine/engine-and-application的全部required调用，含D071–D085；不按当前supported或旧D065终点过滤。H卡补application证据，H08汇总产品全部required。单列JVM/ART/规范镜像、catalog、metadata及异常/锁证据。T24off先全core gate，on仅已实现美化另验。
 5. 以不同worker到达次序/HashSeed重复验证记录和产物按原始identity关联、无重无漏、每份实际source合法且spans指向本份文本；不要求生成文本/局部名/声明/诊断序列byte-identical，不为测试加入canonical sort。不同合法调度触发不同预算结果如实分类，但不得因此错语义；不为本卡刻意新建并行。
 6. 记录release耗时/峰值内存方法而不是debug断言快；代表input授权后optin才运行，环境/skip明确。不做promised百分比缩减。
-7. 套用本仓workspacegates、各crate许可来源和self-contained约束；本卡只验收内部EngineCoreRC，root CLI替换由H05/H08验收，MCP暂不设计。
+7. 套用本仓workspacegates、各crate许可来源和self-contained约束；本卡只验收内部EngineCoreRC，root CLI替换由H05/H08验收，不设计MCP。
 
-**不变量 / 限额**：超限Resource不是malformed，totalrequestlimits覆盖多个method，smalllimit不可输出截断“完整Java”；fuzzcase有timeout/seed/range避免unbounded运行。
+**不变量 / 限额**：分析超限Resource不是Malformed，目标格式上界失败是Unsupported而非Resource；totalrequestlimits覆盖多个method，smalllimit不可输出截断“完整Java”。fuzzcase有timeout/seed/range避免unbounded运行。
 
 **测试**：F25 `HardeningMatrix`：所有M/U/Fmanifest登记，实际产物失效、CancelvsFallback、near-boundary分配与reportspans；结果排列/合成ID变化时按原identity核对，不作跨运行全文本相等。knownunsupportedextensions仅raw且有version限制。
 
-**验收**：G0、公开核心t25_行为、固定D001–D065 engine-seam的Java/raw/input/resource/041证据及根四gate。应用domain/extract不成为engine dev依赖，统一由H08验收完整70。required成员不随实现状态变化，运行命令见TASKS §4。
+**验收**：G0、公开核心t25_行为、JSON engine gate全部required调用的Java/raw/input/resource/041/目标边界证据及根四gate。应用domain/extract不成为engine dev依赖，H08验收产品全部required。选择成员不随实现状态变化，运行命令见§4。
 
-**完成**：可追溯EngineCoreRC报告，其D001–D065核心义务全部按固定预期验收；总70分母仍在产品总账，无empty/skip或Java→Smali改答案；若反例未修，能力保持Unsupported但该requiredcase仍未通过，不能宣布CoreRC。
+**完成**：可追溯EngineCoreRC报告，JSON所列核心义务/调用全部按独立预期验收；产品总账仍显示全部required，无empty/skip或Java→Smali改答案。若反例未修，能力保持Unsupported但required仍未通过，不能宣布CoreRC。
 
 **不扩展**：生产引擎切换、版本tag/release、自动私有corpus下载、未经测量的cache/parallel、用normalizer修comparison分数。
 
@@ -954,19 +1035,19 @@ cargo test --workspace --all-features --locked
 
 **依赖**：B04。**范围**：Diana应用品牌/CLI/内部crate定位，无MCP新设计。
 
-**文件**：现有 `apps/diana/Cargo.toml`/`src/main.rs` 骨架与未来 `apps/diana/src/lib.rs`、`src/cli/{args,mod}.rs`（均相对 Diana 应用根）；更新README/AGENTS产品说明。旧 rasc 已整体移到 ref-fork，仅参考，不构建/测试；历史release/许可不全局替换；本卡不创建CLI测试文件。
+**文件**：现有 `apps/diana/Cargo.toml`/`src/main.rs` 骨架与`apps/diana/src/lib.rs`、`src/cli/{args,mod}.rs`（均相对 Diana 应用根）；更新README/AGENTS产品说明。旧 rasc 已整体移到 ref-fork，仅参考，不构建/测试；历史release/许可不全局替换；本卡不创建CLI测试文件。
 
 **输入→输出 / Interface**：应用 package/binary `diana`（`apps/diana/`）；内部package`diana-decomp`、path`crates/diana-decomp/`、import`diana_decomp`；原CLI领域/flags/退出码及结果完整性形成基线。输出顺序明确不再保证，独立任务结果按完成/到达顺序发布。rename不代表新算法已替换。
 
 **步骤**：
 1. 登记所有live名字消费者：clapname、crateimports、测试binaryenv、skill、releaseartifact/版本断言；MCP相关只登记延期/必要编译引用，不设计servername/schema迁移。
-2. 对照现有源码与DESIGN.md核对命令/字段/输出通道与迁移清单，不运行CLI黑盒或建立help/格式golden。旧展示顺序与分页接口有意取消；原始身份、解码完整性和文件安全等复杂领域义务由后续module测试承担。
+2. 对照现有源码与DESIGN.md核对命令/字段/输出通道与迁移清单，不运行CLI黑盒或建立help/格式golden。旧展示顺序与分页接口有意取消；原始身份、解码完整性和文件安全等复杂领域义务由对应module行为测试承担。
 3. 在 apps/diana/入口与内部crate骨架上实现新产品，根已是 Diana-only workspace；旧 rasc 在 ref-fork，不把其 CLI 当别名/依赖。H08 仍须产品能力证据，旧发布工具已归档，Diana 发布政策独立审阅；历史来源不全替换。
-4. 按DESIGN.md冻结11个命令和指定TSV/JSON列、规范at、完整method-selector、默认Java与显式JSONreport；旧getclass/findrefs/skill、class-id/memberprefix/require-java不保留alias。新增fields/methods/xrefsites/extract分别由H09/H10实现，不以旧接口限制新设计。
+4. 按DESIGN.md冻结11个命令和指定TSV/JSON列、规范at、完整method-selector、默认反编译展示与同结果的JSON表示；旧getclass/findrefs/skill、class-id/memberprefix/require-java不保留alias。新增fields/methods/xrefsites/extract分别由H09/H10实现，不以旧接口限制新设计。
 
 **不变量 / 限额**：活动 workspace 只含 Diana，旧 rasc 完整归档且不构建/测试；Diana 不转发旧 CLI/引擎；无JVM/Python生产runtime；原版权/来源不改。没有执行输出时不能自编基线数字。
 
-**测试**：不新增自动化测试。Q01是命名/基础接口的人工审阅清单，不是测试族；帮助、flags、列名、alias和分页移除与DESIGN.md对照，不写CLI黑盒或golden。复杂身份/解码/文件安全由后续领域任务测试。
+**测试**：不新增自动化测试。Q01是命名/基础接口的人工审阅清单，不是测试族；帮助、flags、列名、alias和分页移除与DESIGN.md对照，不写CLI黑盒或golden。复杂身份/解码/文件安全由对应领域任务测试。
 
 **验收**：格式/lint/构建检查 + Q01人工审阅记录，无h01_测试filter。**完成**：包名/十一命令合同与实现一致，未实施能力标明，不要求基础CLI测试。
 
@@ -991,7 +1072,7 @@ cargo test --workspace --all-features --locked
 
 **测试**：Q02普通文件/裸DEX/存储ZIP；反例截断竞态、symlinkescape（有限root模式）、FIFO、超input/dir、owner提前drop；测试临时目录不碰用户真实文件。
 
-**验收**：PG + `cargo test -p diana --test product_contracts h02_`。**完成**：source改动隔离、cleanup正确、预算前置与borrow边界可测；成本记录不编造收益。
+**验收**：G0 + `cargo test -p diana --test product_contracts h02_`。**完成**：source改动隔离、cleanup正确、预算前置与borrow边界可测；成本记录不编造收益。
 
 **不扩展**：长期target协议、MCPopen/schema、全平台文件数据库、为快照重写ZIPcodec。
 
@@ -1014,7 +1095,7 @@ cargo test --workspace --all-features --locked
 
 **测试**：Q03通过公开查询module interface验证多DEX/重复entry/重复manifest、UTF16匹配、并发记录完整性与资源错误。受控延迟生产者核对无按序等待且buffer有界，按原identity比较内容；不测CLIflag、表头、基础filter路由、空列表打印，亦不assert私有phase调用次数。
 
-**验收**：PG + `cargo test -p diana --test product_contracts h03_` + Diana公开领域interface的输入/解压回归。旧selfcontained/inflatepolicy仅供审阅问题，不运行ref-fork测试，不把其通过数计入验收。**完成**：按新CLI指定列返回全部匹配记录；读取/匹配/原身份完整性保持，输出序和用户分页有意取消；慢entry不阻塞无关结果，快路径无需新engine。
+**验收**：G0 + `cargo test -p diana --test product_contracts h03_` + Diana公开领域interface的输入/解压回归。旧selfcontained/inflatepolicy仅供审阅问题，不运行ref-fork测试，不把其通过数计入验收。**完成**：按新CLI指定列返回全部匹配记录；读取/匹配/原身份完整性保持，输出序和用户分页有意取消；慢entry不阻塞无关结果，快路径无需新engine。
 
 **不扩展**：合并全部DEXparsers、MCP通用分页协议、重写AXML、测量debugbuild后声称加速。
 
@@ -1037,7 +1118,7 @@ cargo test --workspace --all-features --locked
 
 **测试**：Q04通过公开输入/定义解析interface验证041多个logicalmembers、重复definition/physicalentry、跨输入过期identity和descriptor/index不一致；核对原definition/proto与未经修改的raw字节。不测CLI选择器参数语法或字符串格式化。
 
-**验收**：PG + `cargo test -p diana --test product_contracts h04_` +引擎T02–T04回归。**完成**：borrow/identity/native041及rawfallback完整，不能以scanner能列出等同engine已支持。
+**验收**：G0 + `cargo test -p diana --test product_contracts h04_` +引擎T02–T04回归。**完成**：borrow/identity/native041及rawfallback完整，不能以scanner能列出等同engine已支持。
 
 **不扩展**：生产parser全量缓存、永久跨文件ID、切默认旧engine、MCPclass-id返回新schema。
 
@@ -1047,20 +1128,20 @@ cargo test --workspace --all-features --locked
 
 **文件**：root`analysis`新engineadapter、`src/cli/{args,mod}.rs`、`tests/product_contracts.rs`、相关fixtures。
 
-**输入→输出 / Interface**：`get-class/get-method`规范selector→Engine Report→默认Java text或显式JSONdomain projection。默认不输出Mixed/Smali；显式JSON完整report才携语言状态。早期实现profile明确，最终无旧命令alias/长期双engine。
+**输入→输出 / Interface**：`get-class/get-method`规范selector→Engine Report→默认反编译text或同结果的JSON表示。默认直接交付已有Java/Mixed/Smali/Unavailable内容，局部失败不清空其他成员；无旧命令alias/双engine。
 
 **步骤**：
 1. CLI定位class/exactmethod/proto后borrowedengine执行T06fixture，callback/control由scope提供。
-2. singlemethodsource的knowncontext验证遵循TASKS §4，不把Mixedclass称JavaUnit；暂不支持方法保留raw与语言marker。
-3. 默认text的get-class须VerifiedJavaUnit，get-method须Java或DeclarationOnly且是完整声明/body；无法满足exit1且无stdout/输出文件，不提供--require-java。显式JSON允许标记清楚的完整Mixed/raw报告，requesterror/BUG仍失败。
-4. 根据DESIGN.md保存完整method owner/name/proto或method-at，textdiagnosticsstderr、同次stdout/文件payload一致；JSON不serialize私有arena，不设计MCPenvelope。
+2. singlemethodsource的knowncontext验证遵循TASKS §4，不把Mixedclass称JavaUnit；不满足Java表示约束的方法保留raw与语言marker。
+3. 按ALGORITHMS §8.1直接展示选中结果：JavaUnit为完整Java，Mixed保留shell/成功Java/失败方法raw或原因；get-method的Smali/Unavailable也直接可见。text/json不改变算法资格，不提供--require-java；硬错误保留非零状态，已有可完整渲染的Report不因此丢弃。
+4. 根据DESIGN.md保存完整method owner/name/proto或method-at，Mixed内含逐方法language/原因/原identity，额外日志走stderr；同次stdout/文件payload一致；JSON不serialize私有arena，不设计MCPenvelope。
 5. 旧实现只保留在ref-fork供阅读，不留活动旧入口/依赖或双引擎路由。Diana请求禁止静默fallback到dexdec，失败只按原rawsmali合同。
 
-**不变量 / 限额**：请求来源/方法proto精确、outputstatus真实、无stdio污染；reject路径不能凑stub通过。
+**不变量 / 限额**：请求来源/方法proto精确、output status真实，语言资格与完整展示/硬错误分开；无stdio污染，不靠stub通过。缺catalog/表示限制必须局部标注，不能上升成整类默认禁显。
 
-**测试**：Q05通过公开反编译interface运行F05→恢复Java→javac→行为Driver，验证实际返回/语义、原始身份与降级完整性。复杂overload/跨DEX在F10/Q04覆盖；不启动get-class/get-method进程，不测flags、默认stdout/JSON包装或not-found文本。
+**测试**：Q05通过公开反编译interface运行F05→恢复Java→javac→行为Driver，验证实际返回/语义、原始身份与降级完整性。复杂overload/跨DEX在F10/Q04覆盖；D085另外核默认展示保留Java与invoke-custom raw、完整UTF16/call-site及真实spans；在T04所需格式事实就绪后验收整case。不启动get-class/get-method进程，不测试flag路由、getter、JSON包装或not-found文本。
 
-**验收**：PG + `cargo test -p diana --test product_contracts h05_` +引擎B(F05)。CLI接线做源码审阅，不加黑盒测试。**完成**：新module真实语义闭环通过，CLI已调用该interface，不仅链接新crate。
+**验收**：G0 + `cargo test -p diana --test product_contracts h05_` +引擎B(F05)。CLI接线做源码审阅，不加黑盒测试。**完成**：新module真实语义闭环通过，CLI已调用该interface，不仅链接新crate。
 
 **不扩展**：新增MCPgetclass/tool、抛异常stub、未验证shape强行Java、立即删除所有旧依赖。
 
@@ -1076,14 +1157,14 @@ cargo test --workspace --all-features --locked
 1. 取消callback不引入tokio到engine；每decode/worklist/copy/region/emitcheckpoint检查，Cancelled不继续rawfallback。
 2. 用户文件/scope结束后不发过期结果；同请求cacheloader/reader的owner/reservation释放，失败无半缓存，nohardtimeout承诺。
 3. 创建RunContext时把Limits clamp到scope剩余额度；dependency/main借用按同一物理owner去重计输入，派生数据、所有methods和render累计收费。raw预留只从父配额领取，不能另发一份request预算。
-4. 输出分text与JSON精确有界writer，escape/diagnostics/spans计最终字节；JSON超限无截断prefixsuccess，file用临时输出原子发布策略（最终路径替换语义先测平台）。
+4. 输出按DESIGN §10.3的max_method_output_bytes、独立fallback_output_bytes及max_report_output_bytes分别核界；P9合计shell/成员/标记/诊断，JSON再按DESIGN §7核实际转义/重复字段/spans后的长度。不把输出长度重复扣成累积分配，也不退款真实work/分配；超限无截断成功，file按安全原子发布。D064分别固定成员与report超限。
 5. CLIstreamqueries的brokenpipe停止producer/背压；不要把SIGPIPEkill进程称catchable取消保证。
 
 **不变量 / 限额**：取消协作式；libdeflate不可抢占明确；input64MiBengine限制与256MiBinflate限制各自Resource；没有MCPsemaphore/schema新合同。
 
 **测试**：Q06通过公开请求/反编译/提取interface验证长工作取消、owner生命周期、normal/raw预算隔离、大量转义文本的输出字节预算、spans对应实际source、缓存失败reservation、consumer关闭时队列有界。不是简单JSON字段包装或私有phase调用顺序测试；每case有有限timeout。
 
-**验收**：PG + `cargo test -p diana --test product_contracts h06_` +T09/T25control回归。**完成**：exactoutputlimit和取消state有非空执行证据；不能先构造巨String才声称allocationbudget前置。
+**验收**：G0 + `cargo test -p diana --test product_contracts h06_` +T09/T25control回归。**完成**：exactoutputlimit和取消state有非空执行证据；不能先构造巨String才声称allocationbudget前置。
 
 **不扩展**：MCPclose/status/permit设计、crash隔离子进程、任意实时抢占、跨进程缓存服务。
 
@@ -1093,16 +1174,16 @@ cargo test --workspace --all-features --locked
 
 **文件**：`src/cli/{args,mod,agent_skill}.rs`、`skill/SKILL.md`、README；历史来源保留。本卡不新增CLItests、help快照或参数路由测试。
 
-**输入→输出 / Interface**：DESIGN.md的11命令、指定列、规范at、默认Java、显式JSON、extract例外正式冻结；agent使用说明作为普通文档/发行资产，不提供公开skill安装命令。MCP仍延期。
+**输入→输出 / Interface**：DESIGN.md的11命令、指定列、规范at、默认反编译text/JSON同结果、extract例外正式冻结；agent使用说明作为普通文档/发行资产，不提供公开skill安装命令。MCP仍延期。
 
 **步骤**：
 1. 帮助恰含get-class/entries/extract/strings/xref/manifest/classes/get-method/fields/methods/help及指定说明/列；TSVheader/escaping与JSONdomain fields按DESIGN.md，不加旧memberprefix。完整method selector包含name+proto，不再--method/--proto分开组合；at可回传。
-2. 默认Java失败exit1、usage2、唯一对象缺失3/歧义4，查询空集合0、显式JSON完整Mixed report0；requestBUG/Resource/Cancel失败。旧getclass/findrefs/skill/require-java/class-id/members/paginationflags明确拒绝。
+2. 默认局部Unsupported的完整Mixed/Smali展示与JSON同样可exit0，不代表JavaUnit；usage2、唯一对象缺失3/歧义4、查询空集合0。Malformed/BUG/Resource/Cancel/I/O仍失败，已有可完整渲染的结果保留并非零退出。旧getclass/findrefs/skill/require-java/class-id/members/paginationflags明确拒绝。
 3. agent文档改用Diana新命令，说明字段/at/JSON、显式外部d8一次转换及复用；不自动移动/删除用户已安装rascskill，不加第十二个skill命令。
-4. stdout/file/help/version/Windowsbinarytarget完整；JSON字段version是本地CLIreport，不据此设计未来MCP。
+4. stdout/file/help/version/Windowsbinarytarget完整；JSON字段version是本地CLIreport，不设计MCP。
 5. 所有liveCLI品牌消费者改名清单核对；legacyrelease/provenance不是remainingbug。
 
-**不变量 / 限额**：unknownflag不可静默忽略；默认source不混Smali，JSONstatus按typedreport；TSV字段控制字符/孤立surrogate转义不丢值，at与spans准确；extract二进制只写-o，不能依通用stdout复制规则污染。
+**不变量 / 限额**：unknownflag不可静默忽略；JavaUnit保持纯Java，Mixed必须明确标语言/原因并保留成员，JSON status按typed Report；TSV字段控制字符/孤立surrogate转义不丢值，at与spans准确；extract二进制只写-o，不能依通用stdout复制规则污染。
 
 **测试**：不新增自动化测试。Q07是DESIGN.md/源码/agent文档的一致性审阅清单，不是测试族；help、路由、flags、列名、旧alias、默认包装不写黑盒/golden。复杂UTF16保真、身份、spans与提取安全由F03/Q04/Q06/Q09/Q10测试，不重复测基础排版。
 
@@ -1114,7 +1195,7 @@ cargo test --workspace --all-features --locked
 
 **依赖**：H07、T25、T14。**范围**：整体验收与发行配置准备，MCP仍延期。
 
-**文件**：活动 rootCargo/lock、未来 Diana release 配置/README/AGENTS、应用 query/engineadapter、`apps/diana/tests/product_contracts.rs`；核对无 ref-fork 依赖，不维护旧MCP构建。
+**文件**：活动rootCargo/lock、README/AGENTS、应用 query/engineadapter、`apps/diana/tests/product_contracts.rs`；核对无 ref-fork 依赖，不维护旧MCP构建。
 
 **输入→输出 / Interface**：EngineCoreRC+H01–H07证据→CLIProductRC报告、livecallgraph/依赖退役清单、单diana发行配置。验收无序输出的完整性/身份，不要求跨运行source或报告序列一致；本卡不创建tag或上传release。
 
@@ -1122,15 +1203,15 @@ cargo test --workspace --all-features --locked
 1. DESIGN.md命令/列/路由由源码和文档审阅核对，不新增黑盒；复杂defined-vs-referenced、xrefsite完整性、extract原bytes/CRC/file安全、跨DEX/041身份与引擎行为由Q02–Q06/Q09/Q10和F测试验证。Q01/Q07仅人工清单，Q08汇总，不当执行测试族。
 2. 核查活动 CLI/依赖图无旧 dexdec/MCP/helper 或 ref-fork 调用；旧代码完整保存在参考中，不需编译/跑测试，不为 MCP 新设计 adapter。
 3. ref-fork 不作为生产依赖或 gate，保留原源码/测试/许可/历史，不以当前参考目录存在当作第二发行产品或必须测试的遗留依赖。
-4. 独立审阅未来 Diana releasebinary/version/archive/checksum/Windows 配置；旧 workflow/scripts 已归档不复活，历史 release 不删除，不手工跳版本/发布。
-5. 运行仅 Diana 的 PG 与复杂 H/引擎 CoreRC gate，基础 H01/H07 只审阅，不造空测试；授权代表输入的 release 测量明确 not-run，不运行旧 MCP 回归或发布测试。
+4. 核对活动workspace仅Diana、publish=false、无归档release脚本/CI接线；不得以参考工程构建成绩替代产品验收。
+5. 运行仅 Diana 的 G0 与复杂 H/引擎 CoreRC gate，基础 H01/H07 只审阅，不造空测试；授权代表输入的 release 测量明确 not-run，不运行旧 MCP 回归或发布测试。
 6. 列knownUnsupported/rawcoverage与MCP延期说明：不把CLIProductRC说成全部projectinterfaces已迁移。
 
 **不变量 / 限额**：无静默跨旧enginefallback；singlebinary，不改版本/tag；活动代码须验证；旧参考不参与本分支 gate；不宣称全DEX语义正确。
 
 **测试**：Q08汇总复杂语义/领域测试：跨DEX/041身份、输入/提取/取消/预算，以及T25的行为和降级完整性。不建立整个CLI命令矩阵或branding/help/flags黑盒；CLI接线、旧依赖和发行配置采用源码审阅/本地构建检查。
 
-**验收**：PG + Q02–Q06/Q09/Q10的实际复杂测试与T25核心gate（非零运行）；Q01/Q07人工核对、Q08汇总，无空h08_测试要求。releaseartifact本地检查，不发布。**完成**：完整D001–D070按固定expected验收，复用T25的D001–D065 engine证据，补齐D065应用映射及D066–D070领域证据；无删除/skip或core-Java改Smali。MCP延期，基础接口不另建自动化测试。
+**验收**：G0 + Q02–Q06/Q09/Q10的实际复杂测试与T25核心gate（非零运行）；Q01/Q07人工核对、Q08汇总，无空h08_测试要求。release artifact本地检查，不发布。**完成**：JSON全部required case/invocation按独立expected验收，复用T25 engine证据，补齐engine-and-application的应用侧及application案例；无删除/skip或core-Java改Smali。MCP延期，基础接口不另建自动化测试。
 
 **不扩展**：MCP迁移、直接删除src/mcp、发行/tag、自动下载私有语料、无证据cache/parallel优化。
 
@@ -1154,7 +1235,7 @@ cargo test --workspace --all-features --locked
 
 **测试**：Q09通过公开符号/引用module interface验证多DEX同名/同proto、重复classdef、外部method_id不算定义、同方法多个xrefsites、未使用stringpool项、孤立surrogate、非法delta/refindex。核对原身份/site/UTF16值，不测试columns、命令参数、JSONitems排版或简单getter。
 
-**验收**：PG + `cargo test -p diana --test product_contracts h09_` +H03/H04回归；非零Q09按原identity/site集合核对。**完成**：fields/methods/xref实际CLI接线，definitions与sites精确，不只是新增help命令。
+**验收**：G0 + `cargo test -p diana --test product_contracts h09_` +H03/H04回归；非零Q09按原identity/site集合核对。**完成**：fields/methods/xref实际CLI接线，definitions与sites精确，不只是新增help命令。
 
 **不扩展**：模糊regex/裸方法名猜重载、全量DEX对象模型、Java源码xref、MCP工具、分页、新增未经要求的默认列。
 
@@ -1168,15 +1249,15 @@ cargo test --workspace --all-features --locked
 
 **步骤**：
 1. 目录查找保留所有同名physicalrecords，名字歧义exit4；entry-index和name必须核一致，basename/路径规范化不能改变原名选错记录；bareDEX不当ZIPentry。
-2. 先检查压缩方法/加密flag、local/central ranges、declared/actualsize与原CRC。现有codec是否校CRC先查源码测试，不假定它完整；缺必需校验补齐后才标extract成功。
+2. 先核local/central结构和data范围，再拒绝EncryptedEntry和非0/8的UnsupportedCompression，之后才按未加密规则核size/CRC。加密stored含额外header，不误报明文等长损坏；无密码/解密路径。审阅codec并用Q10实际输入核对CRC，不能假定默认完整校验。
 3. 只写用户指定文件，entryname不参与路径拼接。拒绝输出目录、符号链接、输入文件本人/hardlink别名；no-force不覆盖。校验与文件打开/发布需使用安全原子primitive，避免exists检查后rename覆盖竞态。
 4. 在目标目录创建私有临时文件，有界借用/解压后写入，完整验证才publish；取消/I/O/CRC/超预算释放临时文件和reservation。`--force`只显式替换允许的普通文件，Windows/Unix语义分别验收。
 5. 字节流不经UTF8/JSON转换，no stdoutbinary或成功状态行；debug/errors仅stderr。采用独立binaryfileoutputadapter，不误用通用emit同时stdout/file。
 
 **不变量 / 限额**：输出与原entry完整解压payload逐字相等，raw041header/checksum保持；不自动创建entryname目录树；不删除用户已有文件/输入；CRC/size失败无假成功或半文件，资源预算不是分页。
 
-**测试**：Q10stored/deflated、含NUL及nonUTF8binary、041originalcontainer、duplicateentryname/indexmismatch、ZIPname`../x`仍只写选定-o、CRC/size坏、unsupportedcompression/encrypted、bomb/limit、cancel、输出存在/no-force/force/symlink/hardlink/input-alias、并发发布竞态。测试均自制临时文件，不触碰真实用户路径。
+**测试**：Q10stored/deflated、含NUL及nonUTF8binary、041originalcontainer、duplicateentryname/indexmismatch、ZIPname`../x`仍只写选定-o、CRC/size坏、unsupportedcompression/encrypted、bomb/limit、cancel、输出存在/no-force/force/symlink/hardlink/input-alias、并发发布竞态。测试均自制临时文件，不触碰真实用户路径。 固定D068–D070按每个invocation的entry/force/errorKind及§4.3.4过程观察验收。
 
-**验收**：PG + `cargo test -p diana --test product_contracts h10_` +input/archive回归；Q10通过公开提取interface核对原payload/hash、失败目标未变、无临时残留；不启动CLI测试stdout/-o路由。**完成**：原字节、CRC、竞态/alias/限额安全证据成立，不是仅解压到Vec。
+**验收**：G0 + `cargo test -p diana --test product_contracts h10_` +input/archive回归；Q10通过公开提取interface核对原payload/hash、失败目标未变、无临时残留；不启动CLI测试stdout/-o路由。**完成**：原字节、CRC、竞态/alias/限额安全证据成立，不是仅解压到Vec。
 
 **不扩展**：batch-unzip/entry路径自动写盘、压缩流/ZIPlocalheader导出、DEXnormalize、CLI外部进程、MCPextract或release。

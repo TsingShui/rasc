@@ -8,7 +8,7 @@
 
 | 标识 | 公开来源 | 固定提交 | 相对根 / 核查说明 |
 |---|---|---|---|
-| DX | [TsingShui/rasc](https://github.com/TsingShui/rasc) | `ef8a4c92c6b89e8afed9ccbc1552feae67b6982d` | DX后续路径相对`crates/dexdec/`；root/rusty-dex路径另明确标注。[固定manifest](https://github.com/TsingShui/rasc/blob/ef8a4c92c6b89e8afed9ccbc1552feae67b6982d/crates/dexdec/Cargo.toml) |
+| DX | [TsingShui/rasc](https://github.com/TsingShui/rasc) | `ef8a4c92c6b89e8afed9ccbc1552feae67b6982d` | DX路径相对`crates/dexdec/`；root/rusty-dex路径另明确标注。[固定manifest](https://github.com/TsingShui/rasc/blob/ef8a4c92c6b89e8afed9ccbc1552feae67b6982d/crates/dexdec/Cargo.toml) |
 | KU | [Noelo-Lab/kuna](https://github.com/Noelo-Lab/kuna) | `29c44b57f8c1d9b35044aa4ee3f636c193288009` | 路径相对该仓根。[固定phases文档](https://github.com/Noelo-Lab/kuna/blob/29c44b57f8c1d9b35044aa4ee3f636c193288009/docs/phases.md) |
 | RG | [MG1937/radguard](https://github.com/MG1937/radguard)，`0.1.3` | **`290de20c925c4a2c7642b1a63c9997185a06e130`** | 路径相对radguard自己的仓根。[固定manifest](https://github.com/MG1937/radguard/blob/290de20c925c4a2c7642b1a63c9997185a06e130/Cargo.toml)。此前误把父仓commit当radguard commit；父仓只含gitlink，此处更正 |
 
@@ -16,19 +16,19 @@
 
 当前 checkout 的旧源码已整体归档到 `ref-fork/rasc/`，不参加活动构建/测试。读取上表 DX/旧 root 的固定路径时在 checkout 加此仓库相对前缀；公开 URL/commit/path 锚点不改，见 [DESIGN.md](DESIGN.md#1-产品边界与工程范围)。
 
-补充产品范围：Diana是整个项目，活动产品/CLI为`diana`，内部引擎为`diana-decomp`；现有rasc源码作为CLI/输入/轻量查询的复用来源，见[DESIGN.md](DESIGN.md#1-产品边界与工程范围)。MCP明确延期，本轮不设计新协议、schema或迁移。反编译算法仍从零设计，不移植已删除的实验分支。
+补充产品范围：Diana是整个项目，活动产品/CLI为`diana`，内部引擎为`diana-decomp`；现有rasc源码作为CLI/输入/轻量查询的复用来源，见[DESIGN.md](DESIGN.md#1-产品边界与工程范围)。不设计MCP协议、schema或迁移。反编译算法独立实现，不移植实验分支。
 
-本轮只做源码/公开入口/文档核查，没有重新运行三引擎语料比较，也没有验证旧对话中的覆盖率数字。后续HEAD移动不自动改变本表；任何reference更新须独立审阅，不能静默用另一个版本。RG父仓gitlink不把父仓Apache声明自动传递为子仓许可，见第6节。
+核查范围为源码/公开入口/文档，不据此声明语料覆盖率。固定commit不跟随HEAD变化；任何reference更新须独立审阅，不能静默用另一个版本。RG父仓gitlink不把父仓Apache声明自动传递为子仓许可，见第6节。
 
 ## 2. Kuna：借机制，不借完整引擎
 
 | 证据 ID | 文件 / 符号（固定版本） | 源码观察 | 新 Diana 决策 |
 |---|---|---|---|
 | KU-01 | `docs/phases.md`：Phases、Band B、Source layout | 阶段是产物分类，P0 正交；Band B 内顺序不由目录编号决定 | 物理目录按产物所有权，实际执行顺序独立列出；不假设 P1 到 P9 只各跑一次 |
-| KU-02 | `decompiler/crates/kuna-decomp/src/infra/universalaction.rs:46–101`：`RuleRow`、`SchedNode`、`materialize` | 调度树有 Action/Pool/Group/RestartGroup，构造函数实际生成执行树 | 初版仅保留类型化 transition、显式 Sequence 与有预算的本地 Repeat；不搬动态插件、整套 ActionDatabase |
-| KU-03 | 同文件 `universal_sched:296`，`mainloop:550`、`fullloop:627` | `ActionBlockStructure` 就在 mainloop 中；types、heritage、rule pool 与后续控制图变换交织 | “Kuna 一定先做完全部数据流再结构化”不是准确执行描述。Diana 自己选一个可验证、少反馈的调度 |
+| KU-02 | `decompiler/crates/kuna-decomp/src/infra/universalaction.rs:46–101`：`RuleRow`、`SchedNode`、`materialize` | 调度树有 Action/Pool/Group/RestartGroup，构造函数实际生成执行树 | 使用typed函数直接调用和Module内有界worklist；不搬动态插件、ActionDatabase或通用Repeat调度 |
+| KU-03 | 同文件 `universal_sched:296`，`mainloop:550`、`fullloop:627` | `ActionBlockStructure` 就在 mainloop 中；types、heritage、rule pool 与后续控制图变换交织 | “Kuna 一定先做完全部数据流再结构化”不是准确执行描述。Diana按DESIGN §4的typed调用次序执行 |
 | KU-04 | `docs/spec/00-overview.md §0.7`（约 `3432–3475`） | 逐条列出 trigger、持久状态、重入范围；有未实现反馈边的明确标注 | 只为已实现的生产者/消费者建立反馈；原始字节和用户配置不被算法重写 |
-| KU-05 | `decompiler/crates/kuna-decomp/phases.toml`；`build.rs`；`build/registry.rs` | registry 与 codegen 提供 option/catalog 元数据，不等同于实际 schedule | 初版直接typed函数接线，不建registry/静态元数据生成器；PhaseId只标诊断。不引入TOML/build.rs第二份真相源 |
+| KU-05 | `decompiler/crates/kuna-decomp/phases.toml`；`build.rs`；`build/registry.rs` | registry 与 codegen 提供 option/catalog 元数据，不等同于实际 schedule | 直接typed函数接线，不建registry/静态元数据生成器；PhaseId只标诊断。不引入TOML/build.rs第二份真相源 |
 | KU-06 | `p8_structure/blockaction.rs`：`ActionBlockStructure`；`p8_structure/region_structurer.rs` | 有不同结构化策略及拒绝后的回退。部分模块头注释描述历史默认值，不能覆盖 live 配置 | 以实际默认/调用点为准。新 Diana 的例外是 Java 无 goto：普通图可回退状态机，异常/monitor 图不能无条件用它 |
 | KU-07 | `docs/spec/07-regions.md §7.1`；`p7_regions/kuna_regiongraph.rs` | 私有图上归约，真实 CFG 不被结构化分析破坏；参考实现对输出相关遍历使用稳定次序 | 只借只读CFG/私有region arena和请求内identity，不继承其稳定排序/确定性输出要求；Diana独立结果按完成顺序发布 |
 | KU-08 | `docs/observatory.md`；`docs/spec/08-structuring.md §8.4` | 可观测阶段产物、真实调度及质量代理；质量度量不自动证明语义 | 设计 `TraceEvent` 与 block/edge 覆盖证书，label/state 数只衡量可读性 |
@@ -47,11 +47,11 @@
 | DX-06 | `src/ir/analysis/effects.rs`：`InstructionEffects`、`ThrowEffect` | 读/写/调用/抛异常/同步等共享事实；未知调用保守 | 使用更少字段的 effect 表但默认保守；未使用的返回值不能成为删调用、删字段读、删异常的理由 |
 | DX-07 | `src/ir/exception.rs`；`src/ir/exception/cleanup.rs`；`src/ir/region/{exceptions,synchronization,exits}.rs` | 处理 DEX 区间、handler 归属、cleanup 等价、monitor 及跨 region leave | 不整体复制；以受限可表达 profile、明确结构证书和 smali fallback 控制复杂度 |
 | DX-08 | `src/language/java/{dex,source_types,literals,assignment}.rs` | boolean/int、null/0、泛型/擦除/重载、字面量、定值等合法化不是单纯排版 | primitive/null/调用精确绑定属于核心；泛型美化可后置，但不能忽略擦除契约与重载歧义 |
-| DX-09 | `src/analysis/java_backend/constructor_syntax.rs`：`apply_with_method_returns` | 多种 pre-super 提取/调度/生成 helper；处理 Java 与 DEX 构造约束差异 | 初版只接受可证明的相邻 new/init 和合法 constructor prologue；不做“任意前导都能静态 helper 化”的保证 |
+| DX-09 | `src/analysis/java_backend/constructor_syntax.rs`：`apply_with_method_returns` | 多种 pre-super 提取/调度/生成 helper；处理 Java 与 DEX 构造约束差异 | 接受范围为相邻new/init和合法constructor prologue；不做“任意前导都能静态 helper 化”的保证 |
 | DX-10 | `src/analysis/java_backend/declaration_lowering.rs:1381`：`failure_body` | 恢复失败可生成抛 `UnsupportedOperationException` 的方法体 | 不继承该成功表达；失败保留 raw 方法并在结果模型显式降级 |
 | DX-11 | `src/decoder/method_decoder.rs:650–675` | 未匹配 opcode 可生成 nop；word_at 的缺失值可为 0 | 新 reader/decoder 严格区分合法 NOP、未知 opcode、截断；禁止该默认路径 |
 | DX-12 | `src/api/decompiler.rs:28–55,105–138`；`src/api.rs` | request isolation 清分析 scope，但 parsed metadata 保留；请求内 hierarchy/ABI 仍被消费 | 不能称缓存“全部死代码”。内部 Diana Engine 借用 root-owned DexImage/request scope，parser/IR/source缓存延后到实测需要；root已有解压复用有独立budget |
-| DX-13 | `Cargo.toml [lib] test=false`；`src/lib.rs` lint allow；`src/analysis/java_backend/generator.rs` 等 Rayon 调用 | workspace 普通 test 不自动执行 legacy lib tests；并行 map/collect 可能维持顺序 | 不删测试换“体积”；新模块无blanket allow，必需测试进入gate；Diana不要求并行结果稳定序，首版单线程仅简化实现 |
+| DX-13 | `Cargo.toml [lib] test=false`；`src/lib.rs` lint allow；`src/analysis/java_backend/generator.rs` 等 Rayon 调用 | workspace 普通 test 不自动执行 legacy lib tests；并行 map/collect 可能维持顺序 | 不删测试换“体积”；新模块无blanket allow，必需测试进入gate；Diana不要求并行结果稳定序；引擎在调用线程执行 |
 
 `crates/rusty-dex/src/dex/instructions.rs` 的 payload 与 `bytes()` 路径需要逐种核对；不把第三方 Instruction 对象当 fallback 原始字节。新设计选安全只读 reader，可参考现有解析实现，但绝不先信任分配后再加 guard。
 
@@ -69,18 +69,16 @@
 | RG-08 | `tests/quality_gate.py:420–456`：`decompile_dad_cached`；各 `normalize_dad_*` | 冻结 DAD 输出、带 DEX-aware normalization；缓存缺失不自动生成。pickle 只宜可信内部输入 | 借“固定 comparator/明确基线”的纪律；不复制 fixture、pickle loader 或 permissive normalization；差分只是线索 |
 | RG-09 | `src/types.rs`、`src/decompiler.rs` 的 `encoded_value` | access flag/source literal 到字符串的转换需要核查 Java 合法性 | synthetic/bridge/declared-synchronized 不能直接变 Java 关键字；原 flag 保留在 metadata |
 
-## 5. 前面对话中需要撤回或收窄的结论
+## 5. 算法适用条件
 
-1. **javac 通过不是语义正确**。忽略 missing dependencies 的编译报错后得出的“通过率”也不是完整 javac 通过率；旧的 31/40、8/40、7/40 不能比较为质量排名。类/方法 denominator、依赖环境、混合输出、inner fragment 必须分别报告。
-2. **不存在已证明的 55–60k 行核心地板或 -33% 收益**。第一处 `#[cfg(test)]` 可能在文件中段，不能把其后全部算测试；LOC、函数数更不是算法深度指标。本设计不承诺代码量收益。
-3. **Phi 降低并非“永远正确”的简单赋值**。parallel copy、critical edge、旧值异常状态、循环/handler ingress、类型和词法作用域都必须保留。
-4. **默认给 locals 0/null 不自动是死写**。只可用于已证明原输入未读未定义值、且新 copy/异常路径不会观察初值的局部变量；否则 fallback，不掩盖错误。
-5. **Enum 不能直接打印成 `class E extends Enum`**。Java 禁止普通类直接继承 Enum；enum 的声明与 name/ordinal/values 契约必须单独处理或降级。
-6. **构造器 helper 不普遍可用**。可能依赖未初始化 this、实例字段、锁、访问权限、参数求值顺序；少量受限 profile 才能用，初版不实现万能 helper。
-7. **不动点不等于阶段全部互相重跑**。SourceVariableAllocation 有不可逆身份降低；不能直接塞进无条件 Repeat。Kuna registry 是元数据，不是调度解释器。
-8. **不强制生成文本跨运行相同**。用户取消稳定输出序要求，复杂/简化fallback及纯性能修改均按原identity、语义轨迹、结构覆盖与合法性验收，不额外要求byte-identical。原始输入内容与程序语义顺序仍必须准确保留。
-9. **DAD diff 不能成为唯一验收，也不应拿现成夹具当授权已知**。其 comparator 的 normalization 会隐藏形态差异，冻结参考也可能有 bug。
-10. **删除 Rayon 或取消排序不能据此保证更小/更快**。参考源码有稳定合并不等于新Diana继承该合同；现按用户要求取消结果/文本稳定序，性能影响需release测量。blanket lint allow、测试范围与缓存的实际消费者要精确核查。
+1. 固定ValueId/PhiId只固定命名，不证明状态传播收敛；集合域、transfer与有限度量按
+   ALGORITHMS §3–§4定义，不能继承参考论文对另一种域的证明。
+2. Phi赋值必须按parallel copy语义；任意逐条发赋值可能丢旧值，检查实际edge placement。
+3. 可编译、结构覆盖、有限输入行为和任意程序等价是不同证据，不能互相替代。
+4. constructor helper不能合法访问任意未初始化this/锁/字段；按相邻new/init条件拒绝
+   不可表达形态，不提供万能helper。
+5. enum用语言规则生成，不以class extends Enum或删除synthetic成员凑成可编译输出。
+6. 参考实现体积/流行度/发表场所不构成正确性证明；不预设可删LOC比例或覆盖率。
 
 ## 6. 复用登记与许可检查
 
@@ -89,7 +87,7 @@
 - DX 与 rusty-dex 各自保留 Apache-2.0 许可文件；任何复制须保留许可/copyright、记录修改并更新新分发清单。
 - KU 的工作空间声明许可，含 Ghidra/angr 来源；复制具体文件前检查该文件头、根 LICENSE/NOTICE 和上游归属，不只看 Cargo 一行。
 - RG是独立git仓库/gitlink，固定版本manifest没有`license`字段，也未找到该仓自己的LICENSE。**父仓Apache-2.0不能自动覆盖gitlink子仓**。引用设计/符号不等于获准复制代码；在权利人明确许可前，阻止radguard程序/fixture移植与分发，采用自行实现+自制fixture。此前“子目录沿父许可”的假设撤回；DAD衍生归属仍需核查。
-- 本文引用符号和算法思想；本次不复制第三方程序或 corpus。若许可、fixture 授权无法确认，则阻止该项复制，保留自行实现与自制 fixture 路线；不阻止其他设计工作。
+- 本文引用符号和算法思想；不复制未授权第三方程序或corpus。若许可、fixture 授权无法确认，则阻止该项复制，保留自行实现与自制 fixture 路线；不阻止其他设计工作。
 
 ## 7. 一键获取的补充资料与阅读落点
 
@@ -152,7 +150,7 @@ Johnny 当前只取得官方讲稿；两篇 ISSTA 论文只核官方入口/
 | 下载 ID / 论文 | 场合 / 一手入口 | 关键贡献与阅读位置 | 对 Diana 的意义 / 不适用处 |
 |---|---|---|---|
 | dream — *No More Gotos: Decompilation Using Pattern-Independent Control-Flow Structuring and Semantics-Preserving Transformations* | **NDSS 2015**；[DOI](https://doi.org/10.14722/ndss.2015.23185)，[公开论文](https://www.ndss-symposium.org/wp-content/uploads/2017/09/11_4_2.pdf) | pattern-independent structuring 与 CFG 变换；重点看条件组合与去非结构控制流 | T13/T14 的候选思想，不是“总能高效输出忠实 Java”的保证；不能重复求值有副作用条件，也不自动覆盖 Java handler/monitor/uninit |
-| johnny — *Helping Johnny to Analyze Malware: A Usability-Optimized Decompiler and Malware Analysis User Study* | **IEEE S&P 2016**；[DOI](https://doi.org/10.1109/SP.2016.18)，[官方会议/摘要](https://www.ieee-security.org/TC/SP2016/program.html)，[讲稿](https://www.ieee-security.org/TC/SP2016/slides/yakdan.pdf) | 将去编译形态与分析人员使用效果联系；当前只核摘要/讲稿，未读全文 | 不只追求少 goto/少行数；可读性应围绕实际分析任务。暂不引入用户实验平台或把研究结论直接变成产品评分阈值 |
+| johnny — *Helping Johnny to Analyze Malware: A Usability-Optimized Decompiler and Malware Analysis User Study* | **IEEE S&P 2016**；[DOI](https://doi.org/10.1109/SP.2016.18)，[官方会议/摘要](https://www.ieee-security.org/TC/SP2016/program.html)，[讲稿](https://www.ieee-security.org/TC/SP2016/slides/yakdan.pdf) | 将去编译形态与分析人员使用效果联系；当前只核摘要/讲稿，未读全文 | 不只追求少 goto/少行数；可读性应围绕实际分析任务。不引入用户实验平台或把研究结论直接变成产品评分阈值 |
 | d-helix — *D-Helix: A Generic Decompiler Testing Framework Using Symbolic Differentiation* | **USENIX Security 2024**；[会议入口](https://www.usenix.org/conference/usenixsecurity24/presentation/zou)，[论文](https://www.usenix.org/system/files/usenixsecurity24-zou.pdf) | 函数级重编译、符号模型比较、启发式定位；§4.2 的 loop bounding / memory / external-call 模型尤其重要 | 支持语义检查和定位负责决策的阶段；其超时后限制分支执行、dummy return、内存初始化/枚举等模型不能当任意程序等价证明，更不能搬进 Diana 生产语义。TUNER 是调试思路，不意味着核心正确性做成开关 |
 | fidelity-taxonomy — *A Taxonomy of C Decompiler Fidelity Issues* | **USENIX Security 2024**；[会议入口](https://www.usenix.org/conference/usenixsecurity24/presentation/dramko)，[论文](https://www.usenix.org/system/files/usenixsecurity24-dramko.pdf) | 对四个 C 反编译器的输出做 open coding / thematic analysis，归纳名称/类型以外的 fidelity 问题 | 将语义错误、声明/绑定错误、可读性缺陷分开；输出不像原源码不自动是行为 bug，长而正确也不该判失败。T24 仍是可选美化 |
 | everparse-paper — *EverParse: Verified Secure Zero-Copy Parsers for Authenticated Message Formats* | **USENIX Security 2019**；[会议入口](https://www.usenix.org/conference/usenixsecurity19/presentation/delignat-lavaud)，[论文](https://www.usenix.org/system/files/sec19-ramananandro_0.pdf) | LowParse 的安全/正确性性质与生成器外置的可信基；§2–§3 区分 parser 安全、格式正确性、非可塑性 | 加强 P1 checked-view 的证明边界：safe Rust 不自动给出长度一致、预算或格式正确。TLS/TLV 的唯一编码性质不定义 DEX，不能因此 canonicalize 原始字节，也不引入 F*/生成器依赖 |
@@ -171,9 +169,9 @@ Johnny 当前只取得官方讲稿；两篇 ISSTA 论文只核官方入口/
 | c-decompiler-correctness — *How Far We Have Come: Testing Decompilation Correctness of C Decompilers* | **ISSTA 2020**；[DOI](https://doi.org/10.1145/3395363.3397370)，[官方议程](https://conf.researchr.org/track/issta-2020/issta-2020-papers) | 反编译正确性及类型/优化问题的实证工作；当前只核出版信息与摘要 | 作为风险分类补充，不从未取得的全文推导比较器实现或覆盖结论，不复用其 C corpus 当 Diana 验收 |
 | decompiler-effectiveness — *Evaluating the Effectiveness of Decompilers* | **ISSTA 2024**；[DOI](https://doi.org/10.1145/3650212.3652144)，[官方摘要](https://2024.issta.org/details/issta-2024-papers/40/Evaluating-the-Effectiveness-of-Decompilers) | 分开考察语义一致性与可读性；只核摘要和公开 artifact README，未读全文/复现评测 | 对应“先语义、后美化”；摘要的约 55% 等数字只属于其数据/工具/方法，不能当 C/DEX 全行业准确率，也不用于 Diana 进度 |
 | ssa-abstract-interpretation — *SSA Translation is an Abstract Interpretation* | **POPL 2023**；[DOI](https://doi.org/10.1145/3571258)，[作者完整稿](https://binsec.github.io/assets/publications/papers/2023-popl-full-with-appendices.pdf) | §2、§4–§6 将 SSA 建造成抽象解释，循环命名/全局值图控制递归，讨论未完成不动点；有自身 soundness/completeness 论证 | 帮 T07 审核域、join、循环身份与收敛。其联合 GVN/SCCP/LICM 分析用于更强精度，并不证明 Diana 应改成全 band 联合求解；不把它当现有 P3 伪代码已被证明 |
-| alive2-paper — *Alive2: Bounded Translation Validation for LLVM* | **PLDI 2021**；[DOI](https://doi.org/10.1145/3453483.3454030)，[作者论文](https://web.ist.utl.pt/nuno.lopes/pubs/alive2-pldi21.pdf) | bounded translation validation、LLVM refinement/UB 模型；§3.8 明列当时的未支持项 | “检查没有反例”须附模型/边界，不等于 DEX/Java 普遍等价；2021 论文列的 exception/volatile 等限制不直接投射为当前 HEAD 状态。SMT 不是首版生产前置 |
-| csmith — *Finding and Understanding Bugs in C Compilers* | **PLDI 2011**；[DOI](https://doi.org/10.1145/1993498.1993532)，[作者稿](https://www2.cs.utah.edu/~regehr/papers/pldi11-preprint.pdf) | 生成有效且避开 C undefined/unspecified behavior 的程序，以差分发现 wrong-code | 独立输入认证比大规模生成更先；Java/DEX 的溢出、异常、移位等有自己的语义，不能沿用 C 生成器的排除规则。暂不引入随机生成平台 |
-| emi — *Compiler Validation via Equivalence Modulo Inputs* | **PLDI 2014**；[DOI](https://doi.org/10.1145/2594291.2594334)，[作者稿](https://people.inf.ethz.ch/suz/publications/emi.pdf) | 以具体测试输入的覆盖约束生成等价变体，检验编译器；“modulo inputs”是关键限定 | 支持独立行为 oracle 与未来定向变体；通过有限输入不证明全域等价。不能以优化/裁剪为由改变 frozen required 案例或删除其语义触发点 |
+| alive2-paper — *Alive2: Bounded Translation Validation for LLVM* | **PLDI 2021**；[DOI](https://doi.org/10.1145/3453483.3454030)，[作者论文](https://web.ist.utl.pt/nuno.lopes/pubs/alive2-pldi21.pdf) | bounded translation validation、LLVM refinement/UB 模型；§3.8 明列当时的未支持项 | “检查没有反例”须附模型/边界，不等于 DEX/Java 普遍等价；2021 论文列的 exception/volatile 等限制不直接投射为当前 HEAD 状态。生产不依赖SMT |
+| csmith — *Finding and Understanding Bugs in C Compilers* | **PLDI 2011**；[DOI](https://doi.org/10.1145/1993498.1993532)，[作者稿](https://www2.cs.utah.edu/~regehr/papers/pldi11-preprint.pdf) | 生成有效且避开 C undefined/unspecified behavior 的程序，以差分发现 wrong-code | 独立输入认证比大规模生成更先；Java/DEX 的溢出、异常、移位等有自己的语义，不能沿用 C 生成器的排除规则。不引入随机生成平台 |
+| emi — *Compiler Validation via Equivalence Modulo Inputs* | **PLDI 2014**；[DOI](https://doi.org/10.1145/2594291.2594334)，[作者稿](https://people.inf.ethz.ch/suz/publications/emi.pdf) | 以具体测试输入的覆盖约束生成等价变体，检验编译器；“modulo inputs”是关键限定 | 支持独立行为 oracle 与定向变体；通过有限输入不证明全域等价。不能以优化/裁剪为由改变 frozen required 案例或删除其语义触发点 |
 | java-decompiler-study — *The Strengths and Behavioral Quirks of Java Bytecode Decompilers* | **SCAM 2019（不是 FSE）**；[DOI](https://doi.org/10.1109/SCAM.2019.00019)，[作者稿](https://arxiv.org/pdf/1908.06895v1) | §III–§IV 区分 syntactic correctness、syntactic distortion、EMI；javac/ecj 的输入差异 | 与 DEX 目标更接近：编译成功、所测输入行为、原源码相似是三件事。来源编译器影响输入形态，支持 B03 逐案例核结构，不把文本相似设 gate |
 
 已有 *Understanding and Finding Java Decompiler Bugs* 是 **OOPSLA 2024 / PACMPL**
@@ -190,14 +188,14 @@ Johnny 当前只取得官方讲稿；两篇 ISSTA 论文只核官方入口/
 | ssa-cytron — *Efficiently Computing Static Single Assignment Form and the Control Dependence Graph* | **TOPLAS 1991**；[DOI](https://doi.org/10.1145/115372.115320)，[公开教学副本](https://rsim.cs.illinois.edu/arch/qual_papers/compilers/toplas91.pdf) | dominance/frontier、Phi 与重命名的经典定义；检查 P3 的 use/def 与控制依赖，不强迫改成论文的具体构造策略 |
 | abstract-interpretation — *Abstract Interpretation: A Unified Lattice Model for Static Analysis of Programs by Construction or Approximation of Fixpoints* | **POPL 1977**；[DOI](https://doi.org/10.1145/512950.512973)，[作者页与正文](https://www.di.ens.fr/~cousot/COUSOTpapers/POPL77.shtml) | 有序域、保序传递与不动点；检查 P3/P5 的单调性/有限高度，而不是“对象个数有限所以必收敛” |
 | java-memory-model — *The Java Memory Model* | **POPL 2005**；[DOI](https://doi.org/10.1145/1040305.1040336)，[作者稿](https://rsim.cs.illinois.edu/Pubs/popl05.pdf) | 同步、volatile、causality、data-race-free 与顺序一致性；论文明确省略 final fields 的详细处理，须补 [JLS 8 §17](https://docs.oracle.com/javase/specs/jls/se8/html/jls-17.html)，不能从论文推断 final/初始化任意重排合法 |
-| compcert-paper — *A Formally Verified Compiler Back-end* | **JAR 2009**；[DOI](https://doi.org/10.1007/s10817-009-9155-4)，[作者稿](https://xavierleroy.org/publi/compcert-backend.pdf) | §2 区分语义保持关系，含终止/发散/外部事件；后续以 simulation 分解转换。Cminor→PowerPC 的证明不传递给 Java/DEX；只借逐阶段义务/可信基的组织，不承诺首版 Coq 化 |
+| compcert-paper — *A Formally Verified Compiler Back-end* | **JAR 2009**；[DOI](https://doi.org/10.1007/s10817-009-9155-4)，[作者稿](https://xavierleroy.org/publi/compcert-backend.pdf) | §2 区分语义保持关系，含终止/发散/外部事件；后续以 simulation 分解转换。Cminor→PowerPC 的证明不传递给 Java/DEX；只借逐阶段义务/可信基的组织，不使用Coq |
 
 ### 8.4 新增成熟工程：固定提交、具体符号和不借什么
 
 提交与 sparse 路径由脚本固定；下列链接也固定在同一提交，不依赖 main 的行号。
 它们只供源码审阅，没有成为 Cargo/JVM/外部进程依赖，论文版本与代码 HEAD 分开。
 
-| 下载 ID | 固定源码证据 | 本次实际观察 | 对 Diana 的落点 / 禁止直接照搬 |
+| 下载 ID | 固定源码证据 | 源码证据 | 对 Diana 的落点 / 禁止直接照搬 |
 |---|---|---|---|
 | art | Android 15 `android-15.0.0_r1` 的 peeled commit；[method_verifier.cc](https://android.googlesource.com/platform/art/+/bebbc3cc49f2d9d5420197df0a336fbc3fcbea40/runtime/verifier/method_verifier.cc#2015)、[register_line.cc](https://android.googlesource.com/platform/art/+/bebbc3cc49f2d9d5420197df0a336fbc3fcbea40/runtime/verifier/register_line.cc#331) | may-throw 前复制 `saved_line_`，明确不把 check-cast 成功类型带入 catch；`PushMonitor/PopMonitor` 跟踪锁深度/别名，并有 `VERIFY_ERROR_LOCKING` 分类 | 直接支持 P2/P3 异常旧状态、T12/T16/T19。运行时 verifier 的 hard/soft/locking 失败及版本策略不能机械对应 Diana Malformed/Unsupported；不复制整个 ART，也不自动要求设备/ART 执行 |
 | r8 | 8.3.37 peeled commit；[BasicBlock.java](https://r8.googlesource.com/r8/+/3ccc501316db4344828180e7152a4adb97522bf8/src/main/java/com/android/tools/r8/ir/code/BasicBlock.java#1163)、[IRBuilder.java](https://r8.googlesource.com/r8/+/3ccc501316db4344828180e7152a4adb97522bf8/src/main/java/com/android/tools/r8/ir/conversion/IRBuilder.java) | `readCurrentDefinition(..., EdgeType)` 区分异常边；`writeCurrentDefinition` 保存 throwing result 覆盖前的定义；incomplete Phis 待 predecessor 完整再 seal | 是异常 SSA 的直接工程证据；借状态义务，不借负寄存器索引编码、不抄全部优化。源码版本相同不代表 B02 工具 jar/依赖已锁定 |
@@ -208,10 +206,8 @@ Johnny 当前只取得官方讲稿；两篇 ISSTA 论文只核官方入口/
 
 ## 9. 设计取舍与证据边界
 
-下列研究已落实为当前DESIGN/ALGORITHMS的具体方案，实施规则见DESIGN/ALGORITHMS与TASKS。
-现在不是让实施者再选SSA/控制链/验收归属；算法步骤与字段以这三份规范为准。
-70案例/独立expected、全量B01–B04和未实现状态不变。资料数量不计进度，继续读文献
-不是新前置；本文仅维护来源，不另造算法真相源。
+本节关联来源与具体实现规则。算法步骤及数据定义以DESIGN/ALGORITHMS为准，
+本文仅记录出处与证据适用范围。
 
 ### 9.1 已有设计得到支持，维持不变
 
@@ -225,36 +221,17 @@ Johnny 当前只取得官方讲稿；两篇 ISSTA 论文只核官方入口/
 
 | 来源 | 采用的工程规则 | 当前落点 |
 |---|---|---|
-| R01 Cousot / POPL 2023 / R8 | live-in有限只增；固定入口Phi、block一次绑定、incoming一次连接；retained/bad/grounded有限传播，首版不简化Phi | ALGORITHMS §3、DESIGN §3.3.3、T07；不声称继承论文证明 |
+| R01 Cousot / POPL 2023 / R8 | live-in有限只增；固定入口Phi、block一次绑定、incoming一次连接；retained/bad/grounded有限传播，不简化Phi | ALGORITHMS §3、DESIGN §3.3.3、T07；不声称继承论文证明 |
 | R02 SoK / DREAM / Ghidra | Sequence/Diamond/自然loop/受限switch明确schema，复制前计容量，失败用符合profile的dispatcher，不求全局最优 | ALGORITHMS §6；DESIGN给产品默认限额，不冒称由论文推出 |
 | R03 verified lifting / CompCert / Alive2 | raw/value/copy/edge/Java绑定各读原事实验证；finite Driver与coverage分别说明，不称全域证明 | ALGORITHMS各validator、TASKS §4 |
 | R04 JLS/JMM / ART | 原volatile/init/lock顺序不变；lock root需动态新鲜性，final不放常量字段initializer导致sget内联 | ALGORITHMS §9/§11/§12；不新建并发平台 |
 | R05 DEX / ART / EverParse / wasmparser | checked ranges/ULEB/MUTF16/metadata、041物理地址明确；raw-valid/Java-profile/资源/BUG分类分开 | ALGORITHMS §1、DESIGN §2；不复制上游panic或unsafe |
-| R06 Java研究 / fidelity taxonomy | Engine证据D001–D065核心侧，Product汇总完整70；Generated executable不计DeclarationOnly，有限行为不等编译即等价 | TASKS §2、TASKS §4 |
-| R07 R8存活期 / 具体调用链 | 一个RunContext贯穿open/render，累计派生分配，used/held分账；Env/worklist最后消费后drop、Report自持结果facts | DESIGN §2/§10、DESIGN §3.2/§7 |
+| R06 Java研究 / fidelity taxonomy | Engine按JSON acceptanceGate核全部核心required调用，Product汇总全部required；Generated executable不计DeclarationOnly，有限行为不等编译即等价 | TASKS §2、TASKS §4 |
+| R07 R8存活期 / 具体调用链 | 一个RunContext贯穿open/render，累计派生分配，used/held分账；Env/worklist最后消费后drop、Report自持结果facts | DESIGN §2/§10、DESIGN §3.2/§3.7 |
+| R08 Dalvik fill / ART verifier | 填充既有primitive array，null可通过静态类型验证，不能删零元素操作的NPE；Java采用length read及已证FreshArray stores | ALGORITHMS §2.4；[bytecode](https://source.android.com/docs/core/runtime/dalvik-bytecode)、固定ART method_verifier.cc的FILL_ARRAY_DATA分支 |
+| R09 JVMS 8格式界限 | §4.3.3参数words<=255；§4.7.3的code/max_locals/max_stack及§4.4常量池界限独立于DEX/分析预算；生成模板的保守上界为Diana自身合同，不借规范自动证明其数值 | ALGORITHMS §12.4–§12.6；[JVMS 4.3.3](https://docs.oracle.com/javase/specs/jvms/se8/html/jvms-4.html#jvms-4.3.3)、[4.7.3](https://docs.oracle.com/javase/specs/jvms/se8/html/jvms-4.html#jvms-4.7.3) |
 
-以上是设计落实，不标任何T/H/B完成；固定输入、独立oracle及运行证据仍须实际建立。
-
-### 9.3 暂不引入什么，以及最小阅读组合
-
-- 不引入 SMT/Coq/Isabelle/F* 到生产，不整体搬 ART/R8/Ghidra，不做联合 GVN/LICM、随机生成/海量语料、LLM 恢复或全局最优 structuring 平台。
-- 不导入论文恶意软件、私有/未认证 APK、bug corpus、pickle、构建镜像或闭源反编译器。论文提取 TXT 与稀疏源码保存在忽略的 `.cache/`，不保留 PDF，不新打许可证 bundle；复用具体代码仍先检查许可与文件级归属。
-- 不写任何非核心代码测试或新工具自测；不运行参考工程。核心语义测试仍按已约定流程，不能把读到某个方法当作新增基础设施授权。
-- 当前继续全量B01–B04；小批实现不是准备豁免。B04工具自测授权限制不变，不再把按批提议列作实施者自行选择项。
-
-| 到了哪个问题再读 | 一篇主要算法/语义资料 | 一个工程落点 | 本次要产出什么 |
-|---|---|---|---|
-| P3 建造、循环/异常入口 | POPL 2023 SSA（配经典域定义按需查） | R8 `BasicBlock` | 有限域、传播/封口时机、正常/异常 incoming 不变量 |
-| P6 交换/循环拷贝 | 既有 Boissinot Out-of-SSA | DX `source_variables/phi.rs` 已审局部（只参考、不依赖） | 一组真正平行拷贝与异常放置义务，不能仅看有没有 temp |
-| P7/P8 区域选择失效/膨胀 | EuroS&P 2025 SoK | Ghidra `blockaction` | 所选 profile、处理顺序、预算收费和拒绝条件 |
-| 输入验证与拒绝界限 | EverParse 2019 | wasmparser；DEX 规范作为必需语言依据另查 | 哪层保证什么、所有分配前的 count/length 与预算关系 |
-| 反编译语义证据不足 | D-Helix（先读模型限制） | 既有 JADX 的公开语义检查支撑 | 结果能声称什么、尚未覆盖什么；不是先造符号执行器 |
-| 锁/volatile/初始化 | POPL 2005 JMM（JLS §17 补规范） | ART verifier | 语义 profile 与证据边界；不把锁深度检查当全部 JMM 证明 |
-
-实施者直接按ALGORITHMS及TASKS编写，不需重新研究全部资料；有独立反例再回查来源。
-
-下一步：[目标架构](DESIGN.md)；实施者的首批入口：[实施路线](TASKS.md#2-顺序与完成定义)。
-
+案例修订的独立规范依据（R10）：[DEX access_flags/encoded_value](https://source.android.com/docs/core/runtime/dex-format)区分managed declared同步标记、显式值tag与缺省；[JLS §8.9.3](https://docs.oracle.com/javase/specs/jls/se8/html/jls-8.html#jls-8.9.3)给enum声明序；[JLS §12.4.1](https://docs.oracle.com/javase/specs/jls/se8/html/jls-12.html#jls-12.4.1)与[§13.4.9](https://docs.oracle.com/javase/specs/jls/se8/html/jls-13.html#jls-13.4.9)界定常量内联/初始化；[ZIP APPNOTE](https://pkware.cachefly.net/webdocs/casestudies/APPNOTE.TXT)给entry CRC/size/identity。D069的TargetExists假通过反例直接由DESIGN §6.7的no-force规则推出；原子发布依据ALGORITHMS §14.3的native primitive，不由有限并发采样证明。修订记录在TASKS §4及JSON revisionReason；规范出处不替代实际输入认证或独立复评。
 
 ## 10. 可复现输入与工具
 

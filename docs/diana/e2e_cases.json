@@ -1,76 +1,1916 @@
-{"schemaVersion":1,"specRevision":"draft-1","state":"designed-not-built",
-"interfacePolicy":"public-library-and-complex-domain-modules-no-cli-blackbox",
-"frozenPolicy":"Once B01 reviews draft, inputs/expected/required membership cannot change to make engine pass. New cases additive; corrections require independent evidence and review.",
-"designNotice":"All inputRecipe fields are specifications or pseudocode, not existing runnable source. B01 reviews expectations; B02 creates executable self-made inputs; B03 certifies raw structure and reference behavior; B04 verifies harness before any engine implementation.",
-"toolchainSpec":"REPRODUCIBILITY.md","caseCount":70,"cases":[
-{"id":"D001","family":"control","title":"分支合流不覆盖未选路径","suite":"core-java","seam":"decompile-method","required":true,"validationScope":"method-in-known-context","inputKind":"self-made-java-to-dex","inputRecipe":"static int choose(boolean c,int a,int b){int v;if(c)v=a;else v=b;return v;}","invocations":[[true,10,20],[false,10,20]],"expected":{"outcome":"java","observations":[{"return":10},{"return":20}]},"mustRejectMutation":"把某分支Phi拷贝提前到所有分支、漏一个incoming。","oracle":"worked-example-plus-source-jvm-driver","dependencies":"checked-in self-made source only; fixed JDK/R8; no platform SDK","notes":"Each invocation runs in an isolated process when static state is observed; no CLI subprocess. Source text/local names/order are not assertions."},
-{"id":"D002","family":"control","title":"并行拷贝交换循环","suite":"core-java","seam":"decompile-method","required":true,"validationScope":"method-in-known-context","inputKind":"self-made-java-to-dex","inputRecipe":"static int swap(int a,int b,int n){for(int i=0;i<n;i++){int t=a;a=b;b=t;}return a*100+b;}","invocations":[[10,20,0],[10,20,1],[10,20,2]],"expected":{"outcome":"java","observations":[{"return":1020},{"return":2010},{"return":1020}]},"mustRejectMutation":"把 a<-b,b<-a 顺序化成a=b;b=a。","oracle":"worked-example-plus-source-jvm-driver","dependencies":"checked-in self-made source only; fixed JDK/R8; no platform SDK","notes":"Each invocation runs in an isolated process when static state is observed; no CLI subprocess. Source text/local names/order are not assertions."},
-{"id":"D003","family":"control","title":"三个循环携带值同步旋转","suite":"core-java","seam":"decompile-method","required":true,"validationScope":"method-in-known-context","inputKind":"self-made-java-to-dex","inputRecipe":"static int rotate(int a,int b,int c,int n){while(n-->0){int t=a;a=b;b=c;c=t;}return a*100+b*10+c;}","invocations":[[1,2,3,1],[1,2,3,2],[1,2,3,3]],"expected":{"outcome":"java","observations":[{"return":231},{"return":312},{"return":123}]},"mustRejectMutation":"只保存一个覆盖后的source或漏entry/latch edge copy。","oracle":"worked-example-plus-source-jvm-driver","dependencies":"checked-in self-made source only; fixed JDK/R8; no platform SDK","notes":"Each invocation runs in an isolated process when static state is observed; no CLI subprocess. Source text/local names/order are not assertions."},
-{"id":"D004","family":"control","title":"continue之前更新和carry值","suite":"core-java","seam":"decompile-method","required":true,"validationScope":"method-in-known-context","inputKind":"self-made-java-to-dex","inputRecipe":"static int count(int n){int s=0;for(int i=0;i<n;i++){if((i&1)==0)continue;s+=i;}return s;}","invocations":[[0],[6]],"expected":{"outcome":"java","observations":[{"return":0},{"return":9}]},"mustRejectMutation":"continue绕过更新导致无限循环或重复贡献。","oracle":"worked-example-plus-source-jvm-driver","dependencies":"checked-in self-made source only; fixed JDK/R8; no platform SDK","notes":"Each invocation runs in an isolated process when static state is observed; no CLI subprocess. Source text/local names/order are not assertions."},
-{"id":"D005","family":"control","title":"嵌套循环具名退出","suite":"core-java","seam":"decompile-method","required":true,"validationScope":"method-in-known-context","inputKind":"self-made-java-to-dex","inputRecipe":"static int nested(){int s=0;outer:for(int i=0;i<3;i++)for(int j=0;j<4;j++){if(i==1&&j==2)break outer;s++;}return s;}","invocations":[[]],"expected":{"outcome":"java","observations":[{"return":6}]},"mustRejectMutation":"将break outer转成内层break或漏退出Phi。","oracle":"worked-example-plus-source-jvm-driver","dependencies":"checked-in self-made source only; fixed JDK/R8; no platform SDK","notes":"Each invocation runs in an isolated process when static state is observed; no CLI subprocess. Source text/local names/order are not assertions."},
-{"id":"D006","family":"control","title":"条件含副作用只执行实际分支","suite":"core-java","seam":"decompile-method","required":true,"validationScope":"method-in-known-context","inputKind":"self-made-java-to-dex","inputRecipe":"dep A returns false; dep B returns true; static boolean test(){return depA()&&depB();} Then separate test uses depA()||depB().","invocations":["and","or"],"expected":{"outcome":"java","observations":[{"return":false,"events":["A"]},{"return":true,"events":["A","B"]}]},"mustRejectMutation":"把短路条件展开为两个无条件调用、重复求值。","oracle":"worked-example-plus-source-jvm-driver","dependencies":"checked-in self-made source only; fixed JDK/R8; no platform SDK","notes":"Each invocation runs in an isolated process when static state is observed; no CLI subprocess. Source text/local names/order are not assertions."},
-{"id":"D007","family":"control","title":"switch共享case与fallthrough","suite":"core-java","seam":"decompile-method","required":true,"validationScope":"method-in-known-context","inputKind":"self-made-java-to-dex","inputRecipe":"static int f(int k){int r=0;switch(k){case -3:case 1:r=10;case 2:r+=2;break;default:r=7;}return r;}","invocations":[[-3],[1],[2],[9]],"expected":{"outcome":"java","observations":[{"return":12},{"return":12},{"return":2},{"return":7}]},"mustRejectMutation":"共享target丢key、fallthrough错误加break、default错误。","oracle":"worked-example-plus-source-jvm-driver","dependencies":"checked-in self-made source only; fixed JDK/R8; no platform SDK","notes":"Each invocation runs in an isolated process when static state is observed; no CLI subprocess. Source text/local names/order are not assertions."},
-{"id":"D008","family":"control","title":"循环多出口保留最后值","suite":"core-java","seam":"decompile-method","required":true,"validationScope":"method-in-known-context","inputKind":"self-made-java-to-dex","inputRecipe":"static int f(int n){int i=0,s=0;while(i<n){if(i==3)break;s+=i;i++;}return s*10+i;}","invocations":[[0],[2],[10]],"expected":{"outcome":"java","observations":[{"return":0},{"return":12},{"return":33}]},"mustRejectMutation":"退出copy取错header/latch值。","oracle":"worked-example-plus-source-jvm-driver","dependencies":"checked-in self-made source only; fixed JDK/R8; no platform SDK","notes":"Each invocation runs in an isolated process when static state is observed; no CLI subprocess. Source text/local names/order are not assertions."},
-{"id":"D009","family":"numeric","title":"整型溢出保持位宽","suite":"core-java","seam":"decompile-method","required":true,"validationScope":"method-in-known-context","inputKind":"self-made-java-to-dex","inputRecipe":"static int add(int a,int b){return a+b;}","invocations":[[2147483647,1],[-2147483648,-1]],"expected":{"outcome":"java","observations":[{"return":-2147483648},{"return":2147483647}]},"mustRejectMutation":"将int结果提升long或clamp，作为hostchecked算术执行。","oracle":"worked-example-plus-source-jvm-driver","dependencies":"checked-in self-made source only; fixed JDK/R8; no platform SDK","notes":"Each invocation runs in an isolated process when static state is observed; no CLI subprocess. Source text/local names/order are not assertions."},
-{"id":"D010","family":"numeric","title":"整型除零异常与MIN除负一","suite":"core-java","seam":"decompile-method","required":true,"validationScope":"method-in-known-context","inputKind":"self-made-java-to-dex","inputRecipe":"static int div(int a,int b){return a/b;}","invocations":[[-2147483648,-1],[7,0]],"expected":{"outcome":"java","observations":[{"return":-2147483648},{"exception":"java.lang.ArithmeticException"}]},"mustRejectMutation":"unused/折叠div删除除零异常、MIN/-1行为改动。","oracle":"worked-example-plus-source-jvm-driver","dependencies":"checked-in self-made source only; fixed JDK/R8; no platform SDK","notes":"Each invocation runs in an isolated process when static state is observed; no CLI subprocess. Source text/local names/order are not assertions."},
-{"id":"D011","family":"numeric","title":"有符号和无符号移位mask","suite":"core-java","seam":"decompile-method","required":true,"validationScope":"method-in-known-context","inputKind":"self-made-java-to-dex","inputRecipe":"static int f(int a,int n){return a>>>n;} static long g(long a,int n){return a<<n;}","invocations":[[-1,32],[-1,-1],{"method":"g","args":[1,64]}],"expected":{"outcome":"java","observations":[{"return":-1},{"return":1},{"returnLong":"1"}]},"mustRejectMutation":"不mask shiftcount、误用signedshift。","oracle":"worked-example-plus-source-jvm-driver","dependencies":"checked-in self-made source only; fixed JDK/R8; no platform SDK","notes":"Each invocation runs in an isolated process when static state is observed; no CLI subprocess. Source text/local names/order are not assertions."},
-{"id":"D012","family":"numeric","title":"窄化byte/char保留符号","suite":"core-java","seam":"decompile-method","required":true,"validationScope":"method-in-known-context","inputKind":"self-made-java-to-dex","inputRecipe":"static int f(int a){return (byte)a;} static int g(int a){return (char)a;}","invocations":[[255],{"method":"g","args":[-1]}],"expected":{"outcome":"java","observations":[{"return":-1},{"return":65535}]},"mustRejectMutation":"byte按unsigned/char按signed解释。","oracle":"worked-example-plus-source-jvm-driver","dependencies":"checked-in self-made source only; fixed JDK/R8; no platform SDK","notes":"Each invocation runs in an isolated process when static state is observed; no CLI subprocess. Source text/local names/order are not assertions."},
-{"id":"D013","family":"numeric","title":"boolean位运算不是int表达式","suite":"core-java","seam":"decompile-method","required":true,"validationScope":"method-in-known-context","inputKind":"self-made-java-to-dex","inputRecipe":"static boolean f(boolean a,boolean b){return (a^b)&!a;}","invocations":[[false,false],[false,true],[true,false],[true,true]],"expected":{"outcome":"java","observations":[{"return":false},{"return":true},{"return":false},{"return":false}]},"mustRejectMutation":"生成boolean ^ 1等不合法Java或改变逻辑。","oracle":"worked-example-plus-source-jvm-driver","dependencies":"checked-in self-made source only; fixed JDK/R8; no platform SDK","notes":"Each invocation runs in an isolated process when static state is observed; no CLI subprocess. Source text/local names/order are not assertions."},
-{"id":"D014","family":"numeric","title":"零值在ref/boolean/int上下文不混用","suite":"core-java","seam":"decompile-method","required":true,"validationScope":"method-in-known-context","inputKind":"self-made-java-to-dex","inputRecipe":"static boolean n(Object o){return o==null;} static boolean b(){return false;} static int i(){return 0;}","invocations":["n-null","n-object","b","i"],"expected":{"outcome":"java","observations":[{"return":true},{"return":false},{"return":false},{"return":0}]},"mustRejectMutation":"ref与0、boolean与null混淆；纯literal用法错误。","oracle":"worked-example-plus-source-jvm-driver","dependencies":"checked-in self-made source only; fixed JDK/R8; no platform SDK","notes":"Each invocation runs in an isolated process when static state is observed; no CLI subprocess. Source text/local names/order are not assertions."},
-{"id":"D015","family":"numeric","title":"cmpl/cmpg NaN bias","suite":"core-java","seam":"decompile-method","required":true,"validationScope":"method-in-known-context","inputKind":"self-made-java-to-dex","inputRecipe":"Java methods lt/le/gt/ge use float a,b; inputs NaN and 1.0f in both positions. Recipe confirms d8 emits each cmpl/cmpg+branch family; add explicit smali vectors if missing.","invocations":["all comparisons: NaN,1","all comparisons: 1,NaN"],"expected":{"outcome":"java","observations":[{"lt":false,"le":false,"gt":false,"ge":false},{"lt":false,"le":false,"gt":false,"ge":false}]},"mustRejectMutation":"将cmpl/cmpg结果无条件转为普通关系表达导致NaN分支错。","oracle":"worked-example-plus-source-jvm-driver","dependencies":"checked-in self-made source only; fixed JDK/R8; no platform SDK","notes":"Each invocation runs in an isolated process when static state is observed; no CLI subprocess. Source text/local names/order are not assertions."},
-{"id":"D016","family":"numeric","title":"负零与浮点除零","suite":"core-java","seam":"decompile-method","required":true,"validationScope":"method-in-known-context","inputKind":"self-made-java-to-dex","inputRecipe":"static float negzero(){return -0.0f;} static float divide(float a,float b){return a/b;}","invocations":["negzero",{"method":"divide","args":["1.0f","0.0f"]}],"expected":{"outcome":"java","observations":[{"returnFloatBits":"80000000"},{"returnFloatBits":"7f800000"}]},"mustRejectMutation":"负零转正零，FP除零转ArithmeticException。","oracle":"worked-example-plus-source-jvm-driver","dependencies":"checked-in source; JDK Driver uses Float.floatToRawIntBits only as observer, not target call","notes":"Each invocation runs in an isolated process when static state is observed; no CLI subprocess. Source text/local names/order are not assertions."},
-{"id":"D017","family":"numeric","title":"FP转int的NaN/无穷和截断","suite":"core-java","seam":"decompile-method","required":true,"validationScope":"method-in-known-context","inputKind":"self-made-java-to-dex","inputRecipe":"static int f(float a){return (int)a;}","invocations":[["NaN"],["+Infinity"],["-Infinity"],["3.9f"],["-3.9f"]],"expected":{"outcome":"java","observations":[{"return":0},{"return":2147483647},{"return":-2147483648},{"return":3},{"return":-3}]},"mustRejectMutation":"round替代truncate、NaN/overflow错误。","oracle":"worked-example-plus-source-jvm-driver","dependencies":"checked-in self-made source only; fixed JDK/R8; no platform SDK","notes":"Each invocation runs in an isolated process when static state is observed; no CLI subprocess. Source text/local names/order are not assertions."},
-{"id":"D018","family":"calls","title":"argument从左到右且receiver先求值","suite":"core-java","seam":"decompile-method","required":true,"validationScope":"method-in-known-context","inputKind":"self-made-java-to-dex","inputRecipe":"Self-made Dep.receiver logs R, Dep.arg(1/2) logs A1/A2, receiver.sum returns 3; target return Dep.receiver().sum(Dep.arg(1),Dep.arg(2)).","invocations":[[]],"expected":{"outcome":"java","observations":[{"return":3,"events":["R","A1","A2","SUM"]}]},"mustRejectMutation":"参数倒序、receiver重求值、合并表达式引入多次调用。","oracle":"worked-example-plus-source-jvm-driver","dependencies":"self-made Dep complete declaration catalog, checked-in source","notes":"Each invocation runs in an isolated process when static state is observed; no CLI subprocess. Source text/local names/order are not assertions."},
-{"id":"D019","family":"calls","title":"静态重载按descriptor选择","suite":"core-java","seam":"decompile-method","required":true,"validationScope":"method-in-known-context","inputKind":"self-made-java-to-dex","inputRecipe":"Dep.pick(Object) returns O; Dep.pick(String) returns S. target Object v=null; return Dep.pick(v);","invocations":[[]],"expected":{"outcome":"java","observations":[{"returnStringUnits":[79],"events":["pick:Object"]}]},"mustRejectMutation":"因nullliteral/新增cast选择String重载。","oracle":"worked-example-plus-source-jvm-driver","dependencies":"self-made Dep complete overload catalog","notes":"Each invocation runs in an isolated process when static state is observed; no CLI subprocess. Source text/local names/order are not assertions."},
-{"id":"D020","family":"calls","title":"虚分派保留override","suite":"core-java","seam":"decompile-class","required":true,"validationScope":"full-unit","inputKind":"self-made-java-to-dex","inputRecipe":"Base.f returns1; Child.f returns2; target Base b=new Child(); return b.f();","invocations":[[]],"expected":{"outcome":"java","observations":[{"return":2}]},"mustRejectMutation":"转成Base静态/直接call或漏override。","oracle":"worked-example-plus-source-jvm-driver","dependencies":"self-made Base/Child complete catalog; adjacent constructor profile","notes":"Each invocation runs in an isolated process when static state is observed; no CLI subprocess. Source text/local names/order are not assertions."},
-{"id":"D021","family":"calls","title":"invoke-super不变成virtual","suite":"core-java","seam":"decompile-class","required":true,"validationScope":"full-unit","inputKind":"self-made-java-to-dex","inputRecipe":"Base.f logs B returns1; Child.f logs C then returns super.f()+1; Driver calls Child.f.","invocations":[[]],"expected":{"outcome":"java","observations":[{"return":2,"events":["C","B"]}]},"mustRejectMutation":"super改this.f导致递归或目标错。","oracle":"worked-example-plus-source-jvm-driver","dependencies":"self-made Base/Child complete declarations","notes":"Each invocation runs in an isolated process when static state is observed; no CLI subprocess. Source text/local names/order are not assertions."},
-{"id":"D022","family":"calls","title":"unused调用仍抛异常和执行effect","suite":"core-java","seam":"decompile-method","required":true,"validationScope":"method-in-known-context","inputKind":"self-made-java-to-dex","inputRecipe":"static void target(){Dep.bumpAndThrow();} Dep logs B increments counter then throws self-made ExpectedError.","invocations":[[]],"expected":{"outcome":"java","observations":[{"exception":"fixtures.ExpectedError","events":["B"],"heap":{"counter":1}}]},"mustRejectMutation":"DCE unusedreturn删除call/异常。","oracle":"worked-example-plus-source-jvm-driver","dependencies":"self-made Dep/Error complete declarations","notes":"Each invocation runs in an isolated process when static state is observed; no CLI subprocess. Source text/local names/order are not assertions."},
-{"id":"D023","family":"calls","title":"interface分派保留实现","suite":"core-java","seam":"decompile-method","required":true,"validationScope":"method-in-known-context","inputKind":"self-made-java-to-dex","inputRecipe":"Interface I.f; Impl.f returns9; target int f(I x){return x.f();}","invocations":["Impl","null"],"expected":{"outcome":"java","observations":[{"return":9},{"exception":"java.lang.NullPointerException"}]},"mustRejectMutation":"interfacecall绑定错、null检查时机变。","oracle":"worked-example-plus-source-jvm-driver","dependencies":"self-made I/Impl complete catalog; dependency remains original source","notes":"Each invocation runs in an isolated process when static state is observed; no CLI subprocess. Source text/local names/order are not assertions."},
-{"id":"D024","family":"heap","title":"数组越界保留效果prefix","suite":"core-java","seam":"decompile-method","required":true,"validationScope":"method-in-known-context","inputKind":"self-made-java-to-dex","inputRecipe":"static int f(int[] a){int i=Dep.index();return a[i];} index logs IDX returns2;","invocations":["array:[7]","null"],"expected":{"outcome":"java","observations":[{"exception":"java.lang.ArrayIndexOutOfBoundsException","events":["IDX"]},{"exception":"java.lang.NullPointerException","events":["IDX"]}]},"mustRejectMutation":"提前null/boundscheck或删indexeffect。","oracle":"worked-example-plus-source-jvm-driver","dependencies":"self-made Dep complete catalog","notes":"Each invocation runs in an isolated process when static state is observed; no CLI subprocess. Source text/local names/order are not assertions."},
-{"id":"D025","family":"heap","title":"unused check-cast仍执行检查","suite":"core-java","seam":"decompile-method","required":true,"validationScope":"method-in-known-context","inputKind":"self-made-java-to-dex","inputRecipe":"static void f(Object a){String s=(String)a;} Driver observes normal/exception only.","invocations":["String","new Object","null"],"expected":{"outcome":"java","observations":[{"returnVoid":true},{"exception":"java.lang.ClassCastException"},{"returnVoid":true}]},"mustRejectMutation":"结果不用删除字节码checkcast。","oracle":"worked-example-plus-source-jvm-driver","dependencies":"checked-in self-made source only; fixed JDK/R8; no platform SDK","notes":"B02/B03 MUST confirm generated DEX retains check-cast; if javac removes it create reviewed smali input for same operation. Handwritten runtime needs appropriate oracle lane; do not silently replace test."},
-{"id":"D026","family":"heap","title":"array-store运行类型检查","suite":"core-java","seam":"decompile-method","required":true,"validationScope":"method-in-known-context","inputKind":"self-made-java-to-dex","inputRecipe":"static void f(Object[] a,Object v){a[0]=v;} Driver passes String[] and Object.","invocations":["String-array,Object","String-array,String","null-array,Object"],"expected":{"outcome":"java","observations":[{"exception":"java.lang.ArrayStoreException"},{"returnVoid":true,"heap":{"firstString":"ok"}},{"exception":"java.lang.NullPointerException"}]},"mustRejectMutation":"Object[]泛化抹去runtimecomponent检查。","oracle":"worked-example-plus-source-jvm-driver","dependencies":"checked-in self-made source only; fixed JDK/R8; no platform SDK","notes":"Each invocation runs in an isolated process when static state is observed; no CLI subprocess. Source text/local names/order are not assertions."},
-{"id":"D027","family":"heap","title":"数组literal元素位模式","suite":"core-java","seam":"decompile-method","required":true,"validationScope":"method-in-known-context","inputKind":"self-made-java-to-dex","inputRecipe":"static int[] a(){return new int[]{-1,0,2147483647};} static float[] b(){return new float[]{-0.0f,1.0f};}","invocations":["a","b"],"expected":{"outcome":"java","observations":[{"arrayInt":[-1,0,2147483647]},{"arrayFloatBits":["80000000","3f800000"]}]},"mustRejectMutation":"fill-array payload按错误宽度/类型或字节序解释。","oracle":"worked-example-plus-source-jvm-driver","dependencies":"checked-in self-made source only; fixed JDK/R8; no platform SDK","notes":"Each invocation runs in an isolated process when static state is observed; no CLI subprocess. Source text/local names/order are not assertions."},
-{"id":"D028","family":"heap","title":"字段读取和写入顺序","suite":"core-java","seam":"decompile-method","required":true,"validationScope":"method-in-known-context","inputKind":"self-made-java-to-dex","inputRecipe":"Box x starts n=4; static int f(Box x){int old=x.n;x.n=old+3;return old;}","invocations":["Box","null"],"expected":{"outcome":"java","observations":[{"return":4,"heap":{"n":7}},{"exception":"java.lang.NullPointerException"}]},"mustRejectMutation":"物理寄存器覆盖old/字段读写重排。","oracle":"worked-example-plus-source-jvm-driver","dependencies":"self-made Box complete field declarations","notes":"Each invocation runs in an isolated process when static state is observed; no CLI subprocess. Source text/local names/order are not assertions."},
-{"id":"D029","family":"exceptions","title":"赋值call失败catch观察旧值","suite":"core-java","seam":"decompile-method","required":true,"validationScope":"method-in-known-context","inputKind":"self-made-java-to-dex","inputRecipe":"static int f(){int v=7;try{v=Dep.alwaysThrows();}catch(ExpectedError e){Dep.record(v);}return v;}","invocations":[[]],"expected":{"outcome":"java","observations":[{"return":7,"events":["CALL","OLD:7"]}]},"mustRejectMutation":"异常环境错误使用正常result、snapshot在call后、默认0。","oracle":"worked-example-plus-source-jvm-driver","dependencies":"self-made Dep/Error complete declarations","notes":"Each invocation runs in an isolated process when static state is observed; no CLI subprocess. Source text/local names/order are not assertions."},
-{"id":"D030","family":"exceptions","title":"两个throw site选择对应shadow旧值","suite":"core-java","seam":"decompile-method","required":true,"validationScope":"method-in-known-context","inputKind":"self-made-java-to-dex","inputRecipe":"int v=3;try{if(c){v=7;Dep.failA();}else{v=9;Dep.failB();}}catch(ExpectedError e){Dep.record(v);}return v;","invocations":[[true],[false]],"expected":{"outcome":"java","observations":[{"return":7,"events":["A","OLD:7"]},{"return":9,"events":["B","OLD:9"]}]},"mustRejectMutation":"共用shadow错误保留上一site或覆盖值。","oracle":"worked-example-plus-source-jvm-driver","dependencies":"self-made Dep/Error complete declarations","notes":"Each invocation runs in an isolated process when static state is observed; no CLI subprocess. Source text/local names/order are not assertions."},
-{"id":"D031","family":"exceptions","title":"catch子类型优先而非类型排序","suite":"core-java","seam":"decompile-method","required":true,"validationScope":"method-in-known-context","inputKind":"self-made-java-to-dex","inputRecipe":"static int f(int k){try{Dep.raise(k);return 0;}catch(SubError e){return 1;}catch(BaseError e){return 2;}} BaseError/SubError self-made checked exceptions.","invocations":[[1],[2],[0]],"expected":{"outcome":"java","observations":[{"return":1},{"return":2},{"return":0}]},"mustRejectMutation":"按catch目标/类型排序改变优先级或catch type泛化Throwable。","oracle":"worked-example-plus-source-jvm-driver","dependencies":"complete self-made Dep/BaseError/SubError catalog","notes":"Each invocation runs in an isolated process when static state is observed; no CLI subprocess. Source text/local names/order are not assertions."},
-{"id":"D032","family":"exceptions","title":"try外cleanup异常不可被旧handler捕获","suite":"core-java","seam":"decompile-method","required":true,"validationScope":"method-in-known-context","inputKind":"self-made-java-to-dex","inputRecipe":"static int f(){int r;try{r=Dep.ok();}catch(ExpectedError e){r=-1;}Dep.cleanupThrows();return r;}","invocations":[[]],"expected":{"outcome":"java","observations":[{"exception":"fixtures.ExpectedError","events":["OK","CLEANUP"]}]},"mustRejectMutation":"扩大try到cleanup，将返回改-1或吞异常。","oracle":"worked-example-plus-source-jvm-driver","dependencies":"self-made Dep/Error complete catalog","notes":"Each invocation runs in an isolated process when static state is observed; no CLI subprocess. Source text/local names/order are not assertions."},
-{"id":"D033","family":"exceptions","title":"finally在return前执行但返回值先取","suite":"core-java","seam":"decompile-method","required":true,"validationScope":"method-in-known-context","inputKind":"self-made-java-to-dex","inputRecipe":"static int f(){int v=3;try{return v;}finally{v=8;Dep.log(v);}}","invocations":[[]],"expected":{"outcome":"java","observations":[{"return":3,"events":["FINAL:8"]}]},"mustRejectMutation":"finally后再选returnvalue，或漏cleanup。","oracle":"worked-example-plus-source-jvm-driver","dependencies":"self-made Dep complete catalog","notes":"Each invocation runs in an isolated process when static state is observed; no CLI subprocess. Source text/local names/order are not assertions."},
-{"id":"D034","family":"exceptions","title":"finally抛新异常覆盖return","suite":"core-java","seam":"decompile-method","required":true,"validationScope":"method-in-known-context","inputKind":"self-made-java-to-dex","inputRecipe":"static int f(){try{return 3;}finally{Dep.finalThrows();}}","invocations":[[]],"expected":{"outcome":"java","observations":[{"exception":"fixtures.FinalError","events":["FINAL"]}]},"mustRejectMutation":"无条件return3、抛原错误或错误catch范围。","oracle":"worked-example-plus-source-jvm-driver","dependencies":"self-made Dep/FinalError complete catalog","notes":"Each invocation runs in an isolated process when static state is observed; no CLI subprocess. Source text/local names/order are not assertions."},
-{"id":"D035","family":"exceptions","title":"catch中抛出被外层捕获","suite":"core-java","seam":"decompile-method","required":true,"validationScope":"method-in-known-context","inputKind":"self-made-java-to-dex","inputRecipe":"static int f(){try{try{Dep.failA();}catch(ErrorA e){Dep.failB();}}catch(ErrorB e){Dep.log(\"OUTER\");return 4;}return 0;}","invocations":[[]],"expected":{"outcome":"java","observations":[{"return":4,"events":["A","B","OUTER"]}]},"mustRejectMutation":"handler内throw的环境/保护域漏边。","oracle":"worked-example-plus-source-jvm-driver","dependencies":"self-made Dep/ErrorA/ErrorB complete catalog","notes":"Each invocation runs in an isolated process when static state is observed; no CLI subprocess. Source text/local names/order are not assertions."},
-{"id":"D036","family":"monitor","title":"monitor作用域内调用确实持锁","suite":"core-java","seam":"decompile-method","required":true,"validationScope":"method-in-known-context","inputKind":"self-made-java-to-dex","inputRecipe":"static boolean f(Object lock){synchronized(lock){return Thread.holdsLock(lock);}}","invocations":["object","null"],"expected":{"outcome":"java","observations":[{"return":true},{"exception":"java.lang.NullPointerException"}]},"mustRejectMutation":"把bodycall放锁外、null-lockthrow时机错。","oracle":"worked-example-plus-source-jvm-driver","dependencies":"JDK Thread.holdsLock audited observer declaration, checked-in catalog","notes":"JVM-only core evidence; no claim of full ART memory-model equivalence."},
-{"id":"D037","family":"monitor","title":"异常退出确实释放monitor","suite":"core-java","seam":"decompile-method","required":true,"validationScope":"method-in-known-context","inputKind":"self-made-java-to-dex","inputRecipe":"static void f(Object lock){synchronized(lock){Dep.raise();}} Driver catches error then Thread.holdsLock(lock).","invocations":[[]],"expected":{"outcome":"java","observations":[{"exception":"fixtures.ExpectedError","events":["RAISE"],"monitorAfter":false}]},"mustRejectMutation":"exceptionrelease缺失或release另一个对象。","oracle":"worked-example-plus-source-jvm-driver","dependencies":"self-made Dep/Error + JDK observer catalog","notes":"Each invocation runs in an isolated process when static state is observed; no CLI subprocess. Source text/local names/order are not assertions."},
-{"id":"D038","family":"monitor","title":"嵌套同锁重入与退出","suite":"core-java","seam":"decompile-method","required":true,"validationScope":"method-in-known-context","inputKind":"self-made-java-to-dex","inputRecipe":"static boolean f(Object lock){synchronized(lock){synchronized(lock){Dep.log(\"IN\");}return Thread.holdsLock(lock);}} Driver checks after.","invocations":[[]],"expected":{"outcome":"java","observations":[{"return":true,"events":["IN"],"monitorAfter":false}]},"mustRejectMutation":"内层release错误释放全部count、outerlock未持有。","oracle":"worked-example-plus-source-jvm-driver","dependencies":"self-made Dep + JDK observer catalog","notes":"Each invocation runs in an isolated process when static state is observed; no CLI subprocess. Source text/local names/order are not assertions."},
-{"id":"D039","family":"monitor","title":"锁表达式只求值一次","suite":"core-java","seam":"decompile-method","required":true,"validationScope":"method-in-known-context","inputKind":"self-made-java-to-dex","inputRecipe":"static void f(){synchronized(Dep.nextLock()){Dep.log(\"BODY\");}} Dep.nextLock logs LOCK and increments count.","invocations":[[]],"expected":{"outcome":"java","observations":[{"returnVoid":true,"events":["LOCK","BODY"],"heap":{"lockCalls":1}}]},"mustRejectMutation":"enter/exit重新求lock导致换对象或doubleeffect。","oracle":"worked-example-plus-source-jvm-driver","dependencies":"self-made Dep complete catalog","notes":"Each invocation runs in an isolated process when static state is observed; no CLI subprocess. Source text/local names/order are not assertions."},
-{"id":"D040","family":"monitor","title":"声明synchronized的实例与静态锁","suite":"core-java","seam":"decompile-class","required":true,"validationScope":"full-unit","inputKind":"self-made-java-to-dex","inputRecipe":"class Case{ synchronized boolean inst(){return Thread.holdsLock(this);} static synchronized boolean stat(){return Thread.holdsLock(Case.class);} }","invocations":["inst","stat"],"expected":{"outcome":"java","observations":[{"return":true},{"return":true}]},"mustRejectMutation":"把声明flag忽略或用错误lockobject。","oracle":"worked-example-plus-source-jvm-driver","dependencies":"JDK observer/type catalog","notes":"Each invocation runs in an isolated process when static state is observed; no CLI subprocess. Source text/local names/order are not assertions."},
-{"id":"D041","family":"construction","title":"构造器super先于body","suite":"core-java","seam":"decompile-class","required":true,"validationScope":"full-unit","inputKind":"self-made-java-to-dex","inputRecipe":"Base constructor logs BASE; Case constructor super(); logs BODY; Driver creates Case.","invocations":[[]],"expected":{"outcome":"java","observations":[{"events":["BASE","BODY"]}]},"mustRejectMutation":"删super或移动body到super之前。","oracle":"worked-example-plus-source-jvm-driver","dependencies":"self-made Base/Dep complete catalog","notes":"Each invocation runs in an isolated process when static state is observed; no CLI subprocess. Source text/local names/order are not assertions."},
-{"id":"D042","family":"construction","title":"this构造链不重复字段初始化","suite":"core-java","seam":"decompile-class","required":true,"validationScope":"full-unit","inputKind":"self-made-java-to-dex","inputRecipe":"Case(){this(4);Dep.log(\"ZERO\");} Case(int n){this.n=n;Dep.log(\"INT:4\");} Driver constructs Case().","invocations":[[]],"expected":{"outcome":"java","observations":[{"heap":{"n":4},"events":["INT:4","ZERO"]}]},"mustRejectMutation":"字段initializer下推重复、this链target错。","oracle":"worked-example-plus-source-jvm-driver","dependencies":"self-made Dep + complete Case declarations","notes":"Each invocation runs in an isolated process when static state is observed; no CLI subprocess. Source text/local names/order are not assertions."},
-{"id":"D043","family":"construction","title":"邻接new/init的参数effect只一次","suite":"core-java","seam":"decompile-method","required":true,"validationScope":"method-in-known-context","inputKind":"self-made-java-to-dex","inputRecipe":"static Box f(){int n=Dep.arg();return new Box(n);} arg logs ARG returns5; Box constructor logs CTOR:5.","invocations":[[]],"expected":{"outcome":"java","observations":[{"heap":{"boxN":5},"events":["ARG","CTOR:5"]}]},"mustRejectMutation":"inline参数重求值/变CTOR-before-ARG、allocation身份漏配。","oracle":"worked-example-plus-source-jvm-driver","dependencies":"self-made Dep/Box complete catalog","notes":"Each invocation runs in an isolated process when static state is observed; no CLI subprocess. Source text/local names/order are not assertions."},
-{"id":"D044","family":"initialization","title":"static初始化触发与单次执行","suite":"core-java","seam":"decompile-class","required":true,"validationScope":"full-unit","inputKind":"self-made-java-to-dex","inputRecipe":"Case static int n=Dep.init(); static int get(){return n;} init logs INIT returns7; one Driver invocation calls get twice.","invocations":[[]],"expected":{"outcome":"java","observations":[{"returns":[7,7],"events":["INIT"]}]},"mustRejectMutation":"把staticfieldinlineconst删触发、每调用重复clinit。","oracle":"worked-example-plus-source-jvm-driver","dependencies":"self-made Dep complete catalog","notes":"Driver entry must not load/initialize Case before beginning observation; every case uses fresh JVM."},
-{"id":"D045","family":"initialization","title":"blank final分别构造赋值一次","suite":"core-java","seam":"decompile-class","required":true,"validationScope":"full-unit","inputKind":"self-made-java-to-dex","inputRecipe":"Case final int x; Case(boolean c){if(c)x=1;else x=2;} Driver creates true/false independently.","invocations":[[true],[false]],"expected":{"outcome":"java","observations":[{"heap":{"x":1}},{"heap":{"x":2}}]},"mustRejectMutation":"final默认写再赋、branch漏值或删除finalsemantic。","oracle":"worked-example-plus-source-jvm-driver","dependencies":"checked-in self-made source only; fixed JDK/R8; no platform SDK","notes":"Each invocation runs in an isolated process when static state is observed; no CLI subprocess. Source text/local names/order are not assertions."},
-{"id":"D046","family":"initialization","title":"encoded null/false与空串区分","suite":"core-java","seam":"decompile-class","required":true,"validationScope":"full-unit","inputKind":"self-made-java-to-dex","inputRecipe":"Case static String s=null; static boolean b=false; static int i=0; Driver checks exact field values.","invocations":[[]],"expected":{"outcome":"java","observations":[{"heap":{"s":null,"b":false,"i":0}}]},"mustRejectMutation":"nullString变空串、False/None伪Java、默认encoded映射錯。","oracle":"worked-example-plus-source-jvm-driver","dependencies":"checked-in self-made source only; fixed JDK/R8; no platform SDK","notes":"Each invocation runs in an isolated process when static state is observed; no CLI subprocess. Source text/local names/order are not assertions."},
-{"id":"D047","family":"initialization","title":"静态初始化失败保持异常类型","suite":"core-java","seam":"decompile-class","required":true,"validationScope":"full-unit","inputKind":"self-made-java-to-dex","inputRecipe":"Case static int n=Dep.badInit(); badInit logs INIT then throws self-made RuntimeException; Driver accesses field once.","invocations":[[]],"expected":{"outcome":"java","observations":[{"exception":"java.lang.ExceptionInInitializerError","events":["INIT"]}]},"mustRejectMutation":"clinit当普通call、吞原initfailure或不触发。","oracle":"worked-example-plus-source-jvm-driver","dependencies":"self-made Dep/InitError complete catalog","notes":"Each invocation runs in an isolated process when static state is observed; no CLI subprocess. Source text/local names/order are not assertions."},
-{"id":"D048","family":"declarations","title":"协变bridge的调用行为","suite":"core-java","seam":"decompile-class","required":true,"validationScope":"full-unit","inputKind":"self-made-java-to-dex","inputRecipe":"Base Object get(){return \"base\";} Case String get(){return \"child\";} Driver invokes Base reference to Case.","invocations":[[]],"expected":{"outcome":"java","observations":[{"returnStringUnits":[99,104,105,108,100]}]},"mustRejectMutation":"bridge与actualmethod合并丢分派、重复错误声明。","oracle":"worked-example-plus-source-jvm-driver","dependencies":"self-made Base complete generic/erased contracts","notes":"Each invocation runs in an isolated process when static state is observed; no CLI subprocess. Source text/local names/order are not assertions."},
-{"id":"D049","family":"declarations","title":"inner capture保持outer this身份","suite":"core-java","seam":"decompile-class","required":true,"validationScope":"full-unit","inputKind":"self-made-java-to-dex","inputRecipe":"Outer has n=7; class Inner{int f(){return Outer.this.n;}} Driver creates outer and inner then f.","invocations":[[]],"expected":{"outcome":"java","observations":[{"return":7}]},"mustRejectMutation":"把capture删成独立this、名字$猜静态inner或构造参数錯。","oracle":"worked-example-plus-source-jvm-driver","dependencies":"checked-in self-made source only; fixed JDK/R8; no platform SDK","notes":"Each invocation runs in an isolated process when static state is observed; no CLI subprocess. Source text/local names/order are not assertions."},
-{"id":"D050","family":"declarations","title":"enum名字序数与values副本","suite":"core-java","seam":"decompile-class","required":true,"validationScope":"full-unit","inputKind":"self-made-java-to-dex","inputRecipe":"enum Case{A,B;} Driver observes names/ordinals; mutates first values array then asks values again.","invocations":[[]],"expected":{"outcome":"java","observations":[{"enumNames":["A","B"],"enumOrdinals":[0,1],"valuesFresh":true}]},"mustRejectMutation":"ordinaryclass extendsEnum、constant順序變/values不clone。","oracle":"worked-example-plus-source-jvm-driver","dependencies":"checked-in self-made source only; fixed JDK/R8; no platform SDK","notes":"Each invocation runs in an isolated process when static state is observed; no CLI subprocess. Source text/local names/order are not assertions."},
-{"id":"D051","family":"declarations","title":"runtime annotation值没有静默丢失","suite":"core-java","seam":"decompile-class","required":true,"validationScope":"full-unit","inputKind":"self-made-java-to-dex","inputRecipe":"self-made @Retention(RUNTIME) @interface Mark{String value();int[] nums();} @Mark(value=\"x\",nums={1,2}) class Case{}; Driver reflects.","invocations":[[]],"expected":{"outcome":"java","observations":[{"annotation":{"valueUnits":[120],"nums":[1,2]}}]},"mustRejectMutation":"systemmetadata当假注解、runtime用户注解丢掉仍JavaUnit。","oracle":"worked-example-plus-source-jvm-driver","dependencies":"self-made Mark source + JDK annotation declarations","notes":"Each invocation runs in an isolated process when static state is observed; no CLI subprocess. Source text/local names/order are not assertions."},
-{"id":"D052","family":"strings","title":"NUL/孤立surrogate/反斜线u保真","suite":"core-java","seam":"decompile-method","required":true,"validationScope":"method-in-known-context","inputKind":"self-made-java-to-dex","inputRecipe":"static String f(){return new string literal with UTF16 units [0,55296,65,56320,92,117,48,48,48,97];} Driver observes char units.","invocations":[[]],"expected":{"outcome":"java","observations":[{"returnStringUnits":[0,55296,65,56320,92,117,48,48,48,97]}]},"mustRejectMutation":"replacement丢surrogate、Unicodeprelex让literal變換行。","oracle":"worked-example-plus-source-jvm-driver","dependencies":"checked-in self-made source only; fixed JDK/R8; no platform SDK","notes":"B02 source generation must safely escape backslash-u and controls; raw DEX string_units certificate verifies the same units before engine."},
-{"id":"D053","family":"strings","title":"空串与实际换行/制表符","suite":"core-java","seam":"decompile-method","required":true,"validationScope":"method-in-known-context","inputKind":"self-made-java-to-dex","inputRecipe":"static String empty(){return \"\";} static String controls(){return text with units [65,10,9,34,92,66];}","invocations":["empty","controls"],"expected":{"outcome":"java","observations":[{"returnStringUnits":[]},{"returnStringUnits":[65,10,9,34,92,66]}]},"mustRejectMutation":"escape破坏value或输出非法literal。","oracle":"worked-example-plus-source-jvm-driver","dependencies":"checked-in self-made source only; fixed JDK/R8; no platform SDK","notes":"Each invocation runs in an isolated process when static state is observed; no CLI subprocess. Source text/local names/order are not assertions."},
-{"id":"D054","family":"strings","title":"非BMP由UTF16两个单元组成","suite":"core-java","seam":"decompile-method","required":true,"validationScope":"method-in-known-context","inputKind":"self-made-java-to-dex","inputRecipe":"static String f(){return Unicode U+1F642 represented as a surrogate pair;}","invocations":[[]],"expected":{"outcome":"java","observations":[{"returnStringUnits":[55357,56898]}]},"mustRejectMutation":"使用codepoint數當UTF16數量、截断pair。","oracle":"worked-example-plus-source-jvm-driver","dependencies":"checked-in self-made source only; fixed JDK/R8; no platform SDK","notes":"Each invocation runs in an isolated process when static state is observed; no CLI subprocess. Source text/local names/order are not assertions."},
-{"id":"D055","family":"input","title":"超大count先校验不分配","suite":"input-safety","seam":"open-or-decompile","required":true,"validationScope":"input","inputKind":"self-made-byte-mutation","inputRecipe":"Start from reviewed tiny DEX; mutate code_item insns_size or handler typed_count to require beyond actual remaining bytes; record exact patched offsets/hash.","invocations":["truncated-count"],"expected":{"outcome":"error","observations":[{"errorKind":"malformed","noJava":true,"noTrustedSmali":true}]},"mustRejectMutation":"先with_capacity/切片panic、缺字节讀0。","oracle":"format-violation-at-known-field","dependencies":"checked-in self-made source only; fixed JDK/R8; no platform SDK","notes":"Each invocation runs in an isolated process when static state is observed; no CLI subprocess. Source text/local names/order are not assertions."},
-{"id":"D056","family":"input","title":"branch到指令中间拒绝","suite":"input-safety","seam":"open-or-decompile","required":true,"validationScope":"input","inputKind":"self-made-byte-mutation","inputRecipe":"Self-made 035 method uses a multiword const then branch target patched to its second code unit.","invocations":[[]],"expected":{"outcome":"error","observations":[{"errorKind":"malformed","noJava":true,"noTrustedSmali":true}]},"mustRejectMutation":"把payload/midoperand當合法basicblock。","oracle":"format-violation-at-known-target","dependencies":"checked-in self-made source only; fixed JDK/R8; no platform SDK","notes":"Each invocation runs in an isolated process when static state is observed; no CLI subprocess. Source text/local names/order are not assertions."},
-{"id":"D057","family":"input","title":"实际read-before-def不是默认0","suite":"input-safety","seam":"open-or-decompile","required":true,"validationScope":"input","inputKind":"reviewed-invalid-smali-or-bytes","inputRecipe":"Self-made method reads an unassigned narrow register on reachable return path; no parameters provide that register.","invocations":[[]],"expected":{"outcome":"error","observations":[{"errorKind":"malformed","noJava":true,"noTrustedSmali":true}]},"mustRejectMutation":"默认为0/null让java通过。","oracle":"reachable-undefined-use-proof","dependencies":"checked-in self-made source only; fixed JDK/R8; no platform SDK","notes":"Each invocation runs in an isolated process when static state is observed; no CLI subprocess. Source text/local names/order are not assertions."},
-{"id":"D058","family":"input","title":"宽寄存器被部分覆盖后不能读取","suite":"input-safety","seam":"open-or-decompile","required":true,"validationScope":"input","inputKind":"reviewed-invalid-smali-or-bytes","inputRecipe":"Self-made const-wide v0; const/4 v1,1; return-wide v0. Register words in range but high half overwritten.","invocations":[[]],"expected":{"outcome":"error","observations":[{"errorKind":"malformed","noJava":true,"noTrustedSmali":true}]},"mustRejectMutation":"widehigh仍alias舊ValueId。","oracle":"wide-pair-invalidated-by-overlapping-write","dependencies":"checked-in self-made source only; fixed JDK/R8; no platform SDK","notes":"Each invocation runs in an isolated process when static state is observed; no CLI subprocess. Source text/local names/order are not assertions."},
-{"id":"D059","family":"raw","title":"未知opcode宽度不可猜NOP","suite":"raw-integrity","seam":"decompile-method","required":true,"validationScope":"method-in-known-context","inputKind":"self-made-byte-mutation","inputRecipe":"Mutate a supported raw method opcode at known site to unrecognized format; version and mutation recorded.","invocations":[[]],"expected":{"outcome":"unavailable","observations":[{"outcome":"unavailable","java":false,"standardSmali":false,"rawExcerpt":true}]},"mustRejectMutation":"默认nop或假.word标准smali。","oracle":"unknown-format-contract","dependencies":"checked-in self-made source only; fixed JDK/R8; no platform SDK","notes":"Each invocation runs in an isolated process when static state is observed; no CLI subprocess. Source text/local names/order are not assertions."},
-{"id":"D060","family":"raw","title":"合法return-only重载保留raw而非改public名字","suite":"raw-integrity","seam":"decompile-class","required":true,"validationScope":"full-unit","inputKind":"self-made-smali","inputRecipe":"Self-made class defines same name and parameter list with only differing return descriptor; Java source cannot faithfully declare both; raw DEX structural validity separately certified.","invocations":[[]],"expected":{"outcome":"mixed","observations":[{"outcome":"mixed","rawMethodsPreserved":2,"noFakeJavaUnit":true}]},"mustRejectMutation":"rename/drop其中一个使之JavaUnit成功。","oracle":"raw-member-identity-and-java-representability","dependencies":"checked-in self-made source only; fixed JDK/R8; no platform SDK","notes":"Each invocation runs in an isolated process when static state is observed; no CLI subprocess. Source text/local names/order are not assertions."},
-{"id":"D061","family":"raw","title":"标准smali回环完整覆盖branch/payload/handler","suite":"raw-integrity","seam":"decompile-method","required":true,"validationScope":"raw-method","inputKind":"self-made-smali","inputRecipe":"Composite self-made valid raw DEX method includes switch payload, const-string isolated surrogate, ordered typed handlers and catchall. Supply incomplete declaration catalog to request explicit Java-unsupported raw fallback.","invocations":[[]],"expected":{"outcome":"smali","observations":[{"outcome":"smali","allInstructionSites":true,"payloadBitsExact":true,"handlerPriorityExact":true,"stringUnitsExact":true,"memberRefsExact":true}]},"mustRejectMutation":"只assembler通过但删除catch/key/literal/changeproto。","oracle":"independent-dexlib2-normalized-raw-projection","dependencies":"locked smali/dexlib2 plus checked-in class shell; no source-engine oracle","notes":"Each invocation runs in an isolated process when static state is observed; no CLI subprocess. Source text/local names/order are not assertions."},
-{"id":"D062","family":"resources","title":"预算耗尽有独立raw预算","suite":"resource-safety","seam":"decompile-method","required":true,"validationScope":"request","inputKind":"self-made-java-to-dex","inputRecipe":"Known legal pure arithmetic method of reviewed size; run public engine with max_work_steps=0 then allow raw fallback budget; second invocation raw budget=0.","invocations":["normal-budget0,raw-budget-enough","normal-budget0,raw-budget0"],"expected":{"outcome":"per-invocation","observations":[{"outcome":"smali","reason":"budget_exceeded","rawExact":true},{"outcome":"unavailable","reason":"budget_exceeded"}]},"mustRejectMutation":"重试提高normallimit、raw偷用耗尽budget、截断後标完整。","oracle":"resource-contract","dependencies":"reviewed self-made raw method; no Java source VM required","notes":"Each invocation runs in an isolated process when static state is observed; no CLI subprocess. Source text/local names/order are not assertions."},
-{"id":"D063","family":"resources","title":"取消停止请求不转fallback","suite":"resource-safety","seam":"decompile-method","required":true,"validationScope":"request","inputKind":"self-made-java-to-dex","inputRecipe":"Large finite self-made graph/method; RunContext callback becomes cancelled after a bounded number of observable callback checks; no private phase call count asserted.","invocations":[[]],"expected":{"outcome":"error","observations":[{"errorKind":"cancelled","noFallbackReport":true}]},"mustRejectMutation":"取消後逐method跑smali、無界loop不检查。","oracle":"public-cancellation-contract","dependencies":"finite self-made input; check callback not private scheduler","notes":"Each invocation runs in an isolated process when static state is observed; no CLI subprocess. Source text/local names/order are not assertions."},
-{"id":"D064","family":"resources","title":"大量转义value保持实际输出预算","suite":"resource-safety","seam":"decompile-method","required":true,"validationScope":"request","inputKind":"self-made-java-to-dex","inputRecipe":"Self-made raw string/literal input chosen so output escaping exceeds tiny max_output_bytes despite small source value; no huge real allocation required.","invocations":[[]],"expected":{"outcome":"resource-failure","observations":[{"resourceFailureExplicit":true,"noTruncatedSuccess":true}]},"mustRejectMutation":"按unescapedsize计预算，halfJava/halfsmali标完整。","oracle":"bounded-output-contract","dependencies":"checked-in self-made source only; fixed JDK/R8; no platform SDK","notes":"Each invocation runs in an isolated process when static state is observed; no CLI subprocess. Source text/local names/order are not assertions."},
-{"id":"D065","family":"identity","title":"041相同数字index不同logicalmember不能串定义","suite":"identity-semantics","seam":"decompile-method","required":true,"validationScope":"method-in-known-context","inputKind":"self-made-041-container","inputRecipe":"Create two logical 041 DEX members with same class/method table indices but different Case.f return 11 vs22, original container header offsets/sections certified.","invocations":["logical0","logical1"],"expected":{"outcome":"java","observations":[{"return":11},{"return":22}]},"mustRejectMutation":"normalizedheader漏header_offset、按descriptor任取first。","oracle":"worked-return-values-plus-independent-container-projection","dependencies":"checked-in self-made source only; fixed JDK/R8; no platform SDK","notes":"Preparation must implement and independently inspect 041 builder before certifying input; no personal Android SDK sample."},
-{"id":"D066","family":"identity","title":"定义方法与外部method-id引用分开","suite":"domain-integrity","seam":"query-defined-symbols","required":true,"validationScope":"domain","inputKind":"self-made-java-to-dex","inputRecipe":"Self-made DEX declares Own.f and references External.g without defining it; public symbols query lists defined-method identities only.","invocations":[[]],"expected":{"outcome":"data","observations":[{"definedMethods":["Own.f"],"mustNotInclude":["External.g"]}]},"mustRejectMutation":"列全部method_ids當definitions。","oracle":"reviewed-input-symbol-manifest","dependencies":"checked-in self-made source only; fixed JDK/R8; no platform SDK","notes":"Each invocation runs in an isolated process when static state is observed; no CLI subprocess. Source text/local names/order are not assertions."},
-{"id":"D067","family":"identity","title":"同方法两个引用site不能合并","suite":"domain-integrity","seam":"query-reference-sites","required":true,"validationScope":"domain","inputKind":"self-made-java-to-dex","inputRecipe":"Self-made method calls Dep.f twice at distinct certified PCs; public xref query matches exact method-ref.","invocations":[[]],"expected":{"outcome":"data","observations":[{"siteCount":2,"referencingMethod":"Case.target","allCertifiedSites":true}]},"mustRejectMutation":"一referencingmethod去重漏第二site。","oracle":"independent-raw-site-manifest","dependencies":"self-made Dep reference and locked raw decoder certificate","notes":"Each invocation runs in an isolated process when static state is observed; no CLI subprocess. Source text/local names/order are not assertions."},
-{"id":"D068","family":"extract","title":"stored/deflate原payload逐字相等","suite":"extract-safety","seam":"extract-entry","required":true,"validationScope":"file","inputKind":"self-made-zip","inputRecipe":"Self-made ZIP contains deterministic payload bytes [0,255,65,0,128,10] in both method0 and method8 entries; public extract module writes chosen output.","invocations":["stored","deflated"],"expected":{"outcome":"data","observations":[{"fileBytes":[0,255,65,0,128,10]},{"fileBytes":[0,255,65,0,128,10]}]},"mustRejectMutation":"UTF8转换binary、修改DEXheader或少字節，使用错误重复entry。","oracle":"literal-payload-bytes","dependencies":"checked-in ZIP recipe and payload; no engine required","notes":"Each invocation runs in an isolated process when static state is observed; no CLI subprocess. Source text/local names/order are not assertions."},
-{"id":"D069","family":"extract","title":"CRC坏与资源失败目标不变","suite":"extract-safety","seam":"extract-entry","required":true,"validationScope":"file","inputKind":"self-made-zip","inputRecipe":"ZIP entry CRC deliberately mismatches reviewed actual payload; separate compressed entry exceeds configured inflate budget. Existing output file holds bytes [75,69,69,80].","invocations":["badCRC","overBudget"],"expected":{"outcome":"error","observations":[{"explicitError":true,"targetBytes":[75,69,69,80],"tempFilesRemaining":0},{"explicitError":true,"targetBytes":[75,69,69,80],"tempFilesRemaining":0}]},"mustRejectMutation":"先覆盖输出再CRCcheck、失败留半文件。","oracle":"literal-target-and-input-invalidity","dependencies":"self-made temporary directories and ZIP only","notes":"Each invocation runs in an isolated process when static state is observed; no CLI subprocess. Source text/local names/order are not assertions."},
-{"id":"D070","family":"extract","title":"no-clobber与输入alias/ZipSlip安全","suite":"extract-safety","seam":"extract-entry","required":true,"validationScope":"file","inputKind":"self-made-zip-and-temp-files","inputRecipe":"ZIP name ../escape; caller passes explicit safe output. Check existing-target without force, symlink output, input hardlink output, and competing no-clobber publication using public file adapter.","invocations":["unsafe-target","traversal-name-safe-target","two-publishers"],"expected":{"outcome":"per-invocation","observations":[{"explicitRejection":true,"originalFilesUnchanged":true},{"outputOnlyExplicitPath":true},{"exactlyOnePublish":true,"otherNoClobberError":true,"noPartialFile":true}]},"mustRejectMutation":"entryname拼输出路径、exists後rename覆写竞态、inputalias删除。","oracle":"file-safety-contract","dependencies":"checked-in self-made source only; fixed JDK/R8; no platform SDK","notes":"Use platform-specific symlink/hardlink capability reports; required unsupported test environment fails preparation for that platform, no CLI subprocess."}
-]}
+{
+  "schemaVersion": 2,
+  "specRevision": "draft-4",
+  "state": "designed-not-built",
+  "interfacePolicy": "public-library-and-complex-domain-modules-no-cli-blackbox",
+  "frozenPolicy": "B01 approves a reviewed revision, not an immutable case count. Preserve existing required problems and valid semantics; revise faulty recipes/oracles with independent evidence and review, append new counterexamples, never refresh from engine output or change required Java to Smali to obtain a pass.",
+  "designNotice": "Specifications, not runnable assets. Schema 2 binds each invocation id/input/expected together. B01 review, B02 executable assets/tool locks, B03 independent certification and B04 authorized harness falsification are all still required; draft-4 is not approval or execution evidence.",
+  "toolchainSpec": "TASKS.md#45-固定工具与内容锁",
+  "caseCount": 85,
+  "invocationPolicy": {
+    "required": "Every invocation is required. Match by case id + invocation id; no index-zipped expected arrays, optional branches, any-error substitution or partial case pass.",
+    "selectors": "targetRole(s) and full name+proto are resolved by the independent manifest to original physical/logical ClassKey/MethodKey, never display-name first match. The default role case must also be bound explicitly in that manifest. When method is omitted at a method/raw seam, the role itself must bind exactly one original MethodKey; a class role alone is insufficient. args=[] is implicit only for a zero-parameter call.",
+    "inputs": "method is name+full binary proto; args are formal-type-directed. {new,identity,fields}, {arrayType,values,identity}, {stringUnits}, {floatBits} describe Driver-owned setup, not production object factories. calls/repeat run in one isolated Driver instance unless isolation says fresh-jvm.",
+    "outputs": "expected fields are mandatory semantic assertions, not literal public report field spellings. Adapter projects actual public results/independent artifacts without inferring success from input/expected. java means every requested method is Java, or every requested class is JavaUnit for full-unit/full-unit-set. Raw checks use an independent decoder.",
+    "ordering": "Program event/call/array/handler order is exact; independent symbol/report results match original-key multisets without requiring publication order. No private Phi/AST/local-name/phase-count goldens.",
+    "compactValues": "stringPattern fully expands zeroPrefixUnits copies of U+0000 plus optional lastUnit; file pattern byte i=(i*multiplier+add)%256 for exactly length bytes. Length/hash-only comparison is insufficient.",
+    "certification": "Every fixture needs independently decoded structure/declarations and source-or-normative reference behavior matching the recipe, plus every inputRequirements item. Each role must resolve uniquely to original scope/key; missing opcode/template/call/selector is preparation failure, not permission to substitute a simpler graph.",
+    "gates": "engine cases and engine-and-application cases count toward EngineCoreRC; application cases join ProductRC. engine-and-application needs both seam evidences for every invocation but counts once. ProductRC includes every required case and every invocation.",
+    "assertions": "Most expected values compare exactly. mustNotInclude asserts absence from the complete original-key result; observationsOnly is a whitelist for every actual file observation (not a required sampling order/count); stringPattern expands the full exact u16 vector. Boolean integrity assertions must be computed from actual independent artifacts/state, never copied from input or expected."
+  },
+  "cases": [
+    {
+      "id": "D001",
+      "family": "control",
+      "title": "分支合流不覆盖未选路径",
+      "suite": "core-java",
+      "seam": "decompile-method",
+      "required": true,
+      "validationScope": "method-in-known-context",
+      "inputKind": "self-made-java-to-dex",
+      "inputRecipe": "static int choose(boolean c,int a,int b){int v;if(c)v=a;else v=b;return v;}",
+      "invocations": [
+        {"id":"v1","input":{"targetRole":"case","method":"choose(ZII)I","args":[true,10,20]},"expected":{"outcome":"java","return":10}},
+        {"id":"v2","input":{"targetRole":"case","method":"choose(ZII)I","args":[false,10,20]},"expected":{"outcome":"java","return":20}}
+      ],
+      "mustRejectMutation": "把某分支Phi拷贝提前到所有分支、漏一个incoming。",
+      "oracle": "worked-example-plus-source-jvm-driver",
+      "dependencies": "checked-in self-made source only; fixed JDK/R8; no platform SDK",
+      "acceptanceGate": "engine",
+      "designRefs": "ALGORITHMS §3、§5–§6",
+      "inputRequirements": []
+    },
+    {
+      "id": "D002",
+      "family": "control",
+      "title": "并行拷贝交换循环",
+      "suite": "core-java",
+      "seam": "decompile-method",
+      "required": true,
+      "validationScope": "method-in-known-context",
+      "inputKind": "self-made-java-to-dex",
+      "inputRecipe": "static int swap(int a,int b,int n){for(int i=0;i<n;i++){int t=a;a=b;b=t;}return a*100+b;}",
+      "invocations": [
+        {"id":"v1","input":{"targetRole":"case","method":"swap(III)I","args":[10,20,0]},"expected":{"outcome":"java","return":1020}},
+        {"id":"v2","input":{"targetRole":"case","method":"swap(III)I","args":[10,20,1]},"expected":{"outcome":"java","return":2010}},
+        {"id":"v3","input":{"targetRole":"case","method":"swap(III)I","args":[10,20,2]},"expected":{"outcome":"java","return":1020}}
+      ],
+      "mustRejectMutation": "把 a<-b,b<-a 顺序化成a=b;b=a。",
+      "oracle": "worked-example-plus-source-jvm-driver",
+      "dependencies": "checked-in self-made source only; fixed JDK/R8; no platform SDK",
+      "acceptanceGate": "engine",
+      "designRefs": "ALGORITHMS §3、§5–§6",
+      "inputRequirements": []
+    },
+    {
+      "id": "D003",
+      "family": "control",
+      "title": "三个循环携带值同步旋转",
+      "suite": "core-java",
+      "seam": "decompile-method",
+      "required": true,
+      "validationScope": "method-in-known-context",
+      "inputKind": "self-made-java-to-dex",
+      "inputRecipe": "static int rotate(int a,int b,int c,int n){while(n-->0){int t=a;a=b;b=c;c=t;}return a*100+b*10+c;}",
+      "invocations": [
+        {"id":"v1","input":{"targetRole":"case","method":"rotate(IIII)I","args":[1,2,3,1]},"expected":{"outcome":"java","return":231}},
+        {"id":"v2","input":{"targetRole":"case","method":"rotate(IIII)I","args":[1,2,3,2]},"expected":{"outcome":"java","return":312}},
+        {"id":"v3","input":{"targetRole":"case","method":"rotate(IIII)I","args":[1,2,3,3]},"expected":{"outcome":"java","return":123}}
+      ],
+      "mustRejectMutation": "只保存一个覆盖后的source或漏entry/latch edge copy。",
+      "oracle": "worked-example-plus-source-jvm-driver",
+      "dependencies": "checked-in self-made source only; fixed JDK/R8; no platform SDK",
+      "acceptanceGate": "engine",
+      "designRefs": "ALGORITHMS §3、§5–§6",
+      "inputRequirements": []
+    },
+    {
+      "id": "D004",
+      "family": "control",
+      "title": "continue之前更新和carry值",
+      "suite": "core-java",
+      "seam": "decompile-method",
+      "required": true,
+      "validationScope": "method-in-known-context",
+      "inputKind": "self-made-java-to-dex",
+      "inputRecipe": "static int count(int n){int s=0;for(int i=0;i<n;i++){if((i&1)==0)continue;s+=i;}return s;}",
+      "invocations": [
+        {"id":"v1","input":{"targetRole":"case","method":"count(I)I","args":[0]},"expected":{"outcome":"java","return":0}},
+        {"id":"v2","input":{"targetRole":"case","method":"count(I)I","args":[6]},"expected":{"outcome":"java","return":9}}
+      ],
+      "mustRejectMutation": "continue绕过更新导致无限循环或重复贡献。",
+      "oracle": "worked-example-plus-source-jvm-driver",
+      "dependencies": "checked-in self-made source only; fixed JDK/R8; no platform SDK",
+      "acceptanceGate": "engine",
+      "designRefs": "ALGORITHMS §3、§5–§6",
+      "inputRequirements": []
+    },
+    {
+      "id": "D005",
+      "family": "control",
+      "title": "嵌套循环具名退出",
+      "suite": "core-java",
+      "seam": "decompile-method",
+      "required": true,
+      "validationScope": "method-in-known-context",
+      "inputKind": "self-made-java-to-dex",
+      "inputRecipe": "static int nested(){int s=0;outer:for(int i=0;i<3;i++)for(int j=0;j<4;j++){if(i==1&&j==2)break outer;s++;}return s;}",
+      "invocations": [
+        {"id":"v1","input":{"targetRole":"case","method":"nested()I","args":[]},"expected":{"outcome":"java","return":6}}
+      ],
+      "mustRejectMutation": "将break outer转成内层break或漏退出Phi。",
+      "oracle": "worked-example-plus-source-jvm-driver",
+      "dependencies": "checked-in self-made source only; fixed JDK/R8; no platform SDK",
+      "acceptanceGate": "engine",
+      "designRefs": "ALGORITHMS §3、§5–§6",
+      "inputRequirements": []
+    },
+    {
+      "id": "D006",
+      "family": "control",
+      "title": "条件含副作用只执行实际分支",
+      "suite": "core-java",
+      "seam": "decompile-method",
+      "required": true,
+      "validationScope": "method-in-known-context",
+      "inputKind": "self-made-java-to-dex",
+      "inputRecipe": "static boolean and(){return Dep.a()&&Dep.b();} static boolean or(){return Dep.a()||Dep.b();} Dep.a logs A returns false; Dep.b logs B returns true.",
+      "invocations": [
+        {"id":"v1","input":{"targetRole":"case","method":"and()Z","args":[]},"expected":{"outcome":"java","return":false,"events":["A"]}},
+        {"id":"v2","input":{"targetRole":"case","method":"or()Z","args":[]},"expected":{"outcome":"java","return":true,"events":["A","B"]}}
+      ],
+      "mustRejectMutation": "把短路条件展开为两个无条件调用、重复求值。",
+      "oracle": "worked-example-plus-source-jvm-driver",
+      "dependencies": "checked-in self-made source only; fixed JDK/R8; no platform SDK",
+      "acceptanceGate": "engine",
+      "designRefs": "ALGORITHMS §3、§5–§6",
+      "inputRequirements": []
+    },
+    {
+      "id": "D007",
+      "family": "control",
+      "title": "switch共享case与fallthrough",
+      "suite": "core-java",
+      "seam": "decompile-method",
+      "required": true,
+      "validationScope": "method-in-known-context",
+      "inputKind": "self-made-java-to-dex",
+      "inputRecipe": "static int f(int k){int r=0;switch(k){case -3:case 1:r=10;case 2:r+=2;break;default:r=7;}return r;}",
+      "invocations": [
+        {"id":"v1","input":{"targetRole":"case","method":"f(I)I","args":[-3]},"expected":{"outcome":"java","return":12}},
+        {"id":"v2","input":{"targetRole":"case","method":"f(I)I","args":[1]},"expected":{"outcome":"java","return":12}},
+        {"id":"v3","input":{"targetRole":"case","method":"f(I)I","args":[2]},"expected":{"outcome":"java","return":2}},
+        {"id":"v4","input":{"targetRole":"case","method":"f(I)I","args":[9]},"expected":{"outcome":"java","return":7}}
+      ],
+      "mustRejectMutation": "共享target丢key、fallthrough错误加break、default错误。",
+      "oracle": "worked-example-plus-source-jvm-driver",
+      "dependencies": "checked-in self-made source only; fixed JDK/R8; no platform SDK",
+      "acceptanceGate": "engine",
+      "designRefs": "ALGORITHMS §3、§5–§6",
+      "inputRequirements": []
+    },
+    {
+      "id": "D008",
+      "family": "control",
+      "title": "循环多出口保留最后值",
+      "suite": "core-java",
+      "seam": "decompile-method",
+      "required": true,
+      "validationScope": "method-in-known-context",
+      "inputKind": "self-made-java-to-dex",
+      "inputRecipe": "static int f(int n){int i=0,s=0;while(i<n){if(i==3)break;s+=i;i++;}return s*10+i;}",
+      "invocations": [
+        {"id":"v1","input":{"targetRole":"case","method":"f(I)I","args":[0]},"expected":{"outcome":"java","return":0}},
+        {"id":"v2","input":{"targetRole":"case","method":"f(I)I","args":[2]},"expected":{"outcome":"java","return":12}},
+        {"id":"v3","input":{"targetRole":"case","method":"f(I)I","args":[10]},"expected":{"outcome":"java","return":33}}
+      ],
+      "mustRejectMutation": "退出copy取错header/latch值。",
+      "oracle": "worked-example-plus-source-jvm-driver",
+      "dependencies": "checked-in self-made source only; fixed JDK/R8; no platform SDK",
+      "acceptanceGate": "engine",
+      "designRefs": "ALGORITHMS §3、§5–§6",
+      "inputRequirements": []
+    },
+    {
+      "id": "D009",
+      "family": "numeric",
+      "title": "整型溢出保持位宽",
+      "suite": "core-java",
+      "seam": "decompile-method",
+      "required": true,
+      "validationScope": "method-in-known-context",
+      "inputKind": "self-made-java-to-dex",
+      "inputRecipe": "static int add(int a,int b){return a+b;}",
+      "invocations": [
+        {"id":"v1","input":{"targetRole":"case","method":"add(II)I","args":[2147483647,1]},"expected":{"outcome":"java","return":-2147483648}},
+        {"id":"v2","input":{"targetRole":"case","method":"add(II)I","args":[-2147483648,-1]},"expected":{"outcome":"java","return":2147483647}}
+      ],
+      "mustRejectMutation": "将int结果提升long或clamp，作为hostchecked算术执行。",
+      "oracle": "worked-example-plus-source-jvm-driver",
+      "dependencies": "checked-in self-made source only; fixed JDK/R8; no platform SDK",
+      "acceptanceGate": "engine",
+      "designRefs": "ALGORITHMS §4",
+      "inputRequirements": []
+    },
+    {
+      "id": "D010",
+      "family": "numeric",
+      "title": "整型除零异常与MIN除负一",
+      "suite": "core-java",
+      "seam": "decompile-method",
+      "required": true,
+      "validationScope": "method-in-known-context",
+      "inputKind": "self-made-java-to-dex",
+      "inputRecipe": "static int div(int a,int b){return a/b;}",
+      "invocations": [
+        {"id":"v1","input":{"targetRole":"case","method":"div(II)I","args":[-2147483648,-1]},"expected":{"outcome":"java","return":-2147483648}},
+        {"id":"v2","input":{"targetRole":"case","method":"div(II)I","args":[7,0]},"expected":{"outcome":"java","exception":"java.lang.ArithmeticException"}}
+      ],
+      "mustRejectMutation": "unused/折叠div删除除零异常、MIN/-1行为改动。",
+      "oracle": "worked-example-plus-source-jvm-driver",
+      "dependencies": "checked-in self-made source only; fixed JDK/R8; no platform SDK",
+      "acceptanceGate": "engine",
+      "designRefs": "ALGORITHMS §4",
+      "inputRequirements": []
+    },
+    {
+      "id": "D011",
+      "family": "numeric",
+      "title": "有符号和无符号移位mask",
+      "suite": "core-java",
+      "seam": "decompile-method",
+      "required": true,
+      "validationScope": "method-in-known-context",
+      "inputKind": "self-made-java-to-dex",
+      "inputRecipe": "static int f(int a,int n){return a>>>n;} static long g(long a,int n){return a<<n;}",
+      "invocations": [
+        {"id":"v1","input":{"targetRole":"case","method":"f(II)I","args":[-1,32]},"expected":{"outcome":"java","return":-1}},
+        {"id":"v2","input":{"targetRole":"case","method":"f(II)I","args":[-1,-1]},"expected":{"outcome":"java","return":1}},
+        {"id":"v3","input":{"targetRole":"case","method":"g(JI)J","args":["1",64]},"expected":{"outcome":"java","returnLong":"1"}}
+      ],
+      "mustRejectMutation": "不mask shiftcount、误用signedshift。",
+      "oracle": "worked-example-plus-source-jvm-driver",
+      "dependencies": "checked-in self-made source only; fixed JDK/R8; no platform SDK",
+      "acceptanceGate": "engine",
+      "designRefs": "ALGORITHMS §4",
+      "inputRequirements": []
+    },
+    {
+      "id": "D012",
+      "family": "numeric",
+      "title": "窄化byte/char保留符号",
+      "suite": "core-java",
+      "seam": "decompile-method",
+      "required": true,
+      "validationScope": "method-in-known-context",
+      "inputKind": "self-made-java-to-dex",
+      "inputRecipe": "static int f(int a){return (byte)a;} static int g(int a){return (char)a;}",
+      "invocations": [
+        {"id":"v1","input":{"targetRole":"case","method":"f(I)I","args":[255]},"expected":{"outcome":"java","return":-1}},
+        {"id":"v2","input":{"targetRole":"case","method":"g(I)I","args":[-1]},"expected":{"outcome":"java","return":65535}}
+      ],
+      "mustRejectMutation": "byte按unsigned/char按signed解释。",
+      "oracle": "worked-example-plus-source-jvm-driver",
+      "dependencies": "checked-in self-made source only; fixed JDK/R8; no platform SDK",
+      "acceptanceGate": "engine",
+      "designRefs": "ALGORITHMS §4",
+      "inputRequirements": []
+    },
+    {
+      "id": "D013",
+      "family": "numeric",
+      "title": "boolean位运算不是int表达式",
+      "suite": "core-java",
+      "seam": "decompile-method",
+      "required": true,
+      "validationScope": "method-in-known-context",
+      "inputKind": "self-made-java-to-dex",
+      "inputRecipe": "static boolean f(boolean a,boolean b){return (a^b)&!a;}",
+      "invocations": [
+        {"id":"v1","input":{"targetRole":"case","method":"f(ZZ)Z","args":[false,false]},"expected":{"outcome":"java","return":false}},
+        {"id":"v2","input":{"targetRole":"case","method":"f(ZZ)Z","args":[false,true]},"expected":{"outcome":"java","return":true}},
+        {"id":"v3","input":{"targetRole":"case","method":"f(ZZ)Z","args":[true,false]},"expected":{"outcome":"java","return":false}},
+        {"id":"v4","input":{"targetRole":"case","method":"f(ZZ)Z","args":[true,true]},"expected":{"outcome":"java","return":false}}
+      ],
+      "mustRejectMutation": "生成boolean ^ 1等不合法Java或改变逻辑。",
+      "oracle": "worked-example-plus-source-jvm-driver",
+      "dependencies": "checked-in self-made source only; fixed JDK/R8; no platform SDK",
+      "acceptanceGate": "engine",
+      "designRefs": "ALGORITHMS §4",
+      "inputRequirements": []
+    },
+    {
+      "id": "D014",
+      "family": "numeric",
+      "title": "零值在ref/boolean/int上下文不混用",
+      "suite": "core-java",
+      "seam": "decompile-method",
+      "required": true,
+      "validationScope": "method-in-known-context",
+      "inputKind": "self-made-java-to-dex",
+      "inputRecipe": "static boolean n(Object o){return o==null;} static boolean b(){return false;} static int i(){return 0;}",
+      "invocations": [
+        {"id":"v1","input":{"targetRole":"case","method":"n(Ljava/lang/Object;)Z","args":[null]},"expected":{"outcome":"java","return":true}},
+        {"id":"v2","input":{"targetRole":"case","method":"n(Ljava/lang/Object;)Z","args":[{"new":"java.lang.Object","identity":"object-1"}]},"expected":{"outcome":"java","return":false}},
+        {"id":"v3","input":{"targetRole":"case","method":"b()Z","args":[]},"expected":{"outcome":"java","return":false}},
+        {"id":"v4","input":{"targetRole":"case","method":"i()I","args":[]},"expected":{"outcome":"java","return":0}}
+      ],
+      "mustRejectMutation": "ref与0、boolean与null混淆；纯literal用法错误。",
+      "oracle": "worked-example-plus-source-jvm-driver",
+      "dependencies": "checked-in self-made source only; fixed JDK/R8; no platform SDK",
+      "acceptanceGate": "engine",
+      "designRefs": "ALGORITHMS §4",
+      "inputRequirements": []
+    },
+    {
+      "id": "D015",
+      "family": "numeric",
+      "title": "cmpl/cmpg NaN bias",
+      "suite": "core-java",
+      "seam": "decompile-method",
+      "required": true,
+      "validationScope": "method-in-known-context",
+      "inputKind": "self-made-java-to-dex",
+      "inputRecipe": "static boolean lt(float a,float b){return a<b;} le uses <=; gt uses >; ge uses >=. 固定D8生成后认证cmpl/cmpg及相应branch家族；不以未审阅smali替换缺失形态。",
+      "invocations": [
+        {"id":"v1","input":{"calls":[{"targetRole":"case","method":"lt(FF)Z","args":[{"floatBits":"7fc00000"},{"floatBits":"3f800000"}]},{"targetRole":"case","method":"le(FF)Z","args":[{"floatBits":"7fc00000"},{"floatBits":"3f800000"}]},{"targetRole":"case","method":"gt(FF)Z","args":[{"floatBits":"7fc00000"},{"floatBits":"3f800000"}]},{"targetRole":"case","method":"ge(FF)Z","args":[{"floatBits":"7fc00000"},{"floatBits":"3f800000"}]}]},"expected":{"outcome":"java","lt":false,"le":false,"gt":false,"ge":false}},
+        {"id":"v2","input":{"calls":[{"targetRole":"case","method":"lt(FF)Z","args":[{"floatBits":"3f800000"},{"floatBits":"7fc00000"}]},{"targetRole":"case","method":"le(FF)Z","args":[{"floatBits":"3f800000"},{"floatBits":"7fc00000"}]},{"targetRole":"case","method":"gt(FF)Z","args":[{"floatBits":"3f800000"},{"floatBits":"7fc00000"}]},{"targetRole":"case","method":"ge(FF)Z","args":[{"floatBits":"3f800000"},{"floatBits":"7fc00000"}]}]},"expected":{"outcome":"java","lt":false,"le":false,"gt":false,"ge":false}}
+      ],
+      "mustRejectMutation": "将cmpl/cmpg结果无条件转为普通关系表达导致NaN分支错。",
+      "oracle": "worked-example-plus-source-jvm-driver",
+      "dependencies": "checked-in self-made source only; fixed JDK/R8; no platform SDK",
+      "acceptanceGate": "engine",
+      "designRefs": "ALGORITHMS §4",
+      "inputRequirements": [
+        "独立记录实际cmpl/cmpg、branch、operand顺序与PC；四方法和两种NaN位置分别保留。若固定编译器消掉被测义务，准备阻塞并审阅recipe修订，不沿用覆盖声明。"
+      ]
+    },
+    {
+      "id": "D016",
+      "family": "numeric",
+      "title": "负零与浮点除零",
+      "suite": "core-java",
+      "seam": "decompile-method",
+      "required": true,
+      "validationScope": "method-in-known-context",
+      "inputKind": "self-made-java-to-dex",
+      "inputRecipe": "static float negzero(){return -0.0f;} static float divide(float a,float b){return a/b;}",
+      "invocations": [
+        {"id":"v1","input":{"targetRole":"case","method":"negzero()F","args":[]},"expected":{"outcome":"java","returnFloatBits":"80000000"}},
+        {"id":"v2","input":{"targetRole":"case","method":"divide(FF)F","args":[{"floatBits":"3f800000"},{"floatBits":"00000000"}]},"expected":{"outcome":"java","returnFloatBits":"7f800000"}}
+      ],
+      "mustRejectMutation": "负零转正零，FP除零转ArithmeticException。",
+      "oracle": "worked-example-plus-source-jvm-driver",
+      "dependencies": "checked-in source; JDK Driver uses Float.floatToRawIntBits only as observer, not target call",
+      "acceptanceGate": "engine",
+      "designRefs": "ALGORITHMS §4",
+      "inputRequirements": []
+    },
+    {
+      "id": "D017",
+      "family": "numeric",
+      "title": "FP转int的NaN/无穷和截断",
+      "suite": "core-java",
+      "seam": "decompile-method",
+      "required": true,
+      "validationScope": "method-in-known-context",
+      "inputKind": "self-made-java-to-dex",
+      "inputRecipe": "static int f(float a){return (int)a;}",
+      "invocations": [
+        {"id":"v1","input":{"targetRole":"case","method":"f(F)I","args":[{"floatBits":"7fc00000"}]},"expected":{"outcome":"java","return":0}},
+        {"id":"v2","input":{"targetRole":"case","method":"f(F)I","args":[{"floatBits":"7f800000"}]},"expected":{"outcome":"java","return":2147483647}},
+        {"id":"v3","input":{"targetRole":"case","method":"f(F)I","args":[{"floatBits":"ff800000"}]},"expected":{"outcome":"java","return":-2147483648}},
+        {"id":"v4","input":{"targetRole":"case","method":"f(F)I","args":[{"floatBits":"4079999a"}]},"expected":{"outcome":"java","return":3}},
+        {"id":"v5","input":{"targetRole":"case","method":"f(F)I","args":[{"floatBits":"c079999a"}]},"expected":{"outcome":"java","return":-3}}
+      ],
+      "mustRejectMutation": "round替代truncate、NaN/overflow错误。",
+      "oracle": "worked-example-plus-source-jvm-driver",
+      "dependencies": "checked-in self-made source only; fixed JDK/R8; no platform SDK",
+      "acceptanceGate": "engine",
+      "designRefs": "ALGORITHMS §4",
+      "inputRequirements": []
+    },
+    {
+      "id": "D018",
+      "family": "calls",
+      "title": "argument从左到右且receiver先求值",
+      "suite": "core-java",
+      "seam": "decompile-method",
+      "required": true,
+      "validationScope": "method-in-known-context",
+      "inputKind": "self-made-java-to-dex",
+      "inputRecipe": "Self-made Dep.receiver logs R, Dep.arg(1/2) logs A1/A2, receiver.sum returns 3; target return Dep.receiver().sum(Dep.arg(1),Dep.arg(2)).",
+      "invocations": [
+        {"id":"v1","input":{"targetRole":"case","method":"target()I","args":[]},"expected":{"outcome":"java","return":3,"events":["R","A1","A2","SUM"]}}
+      ],
+      "mustRejectMutation": "参数倒序、receiver重求值、合并表达式引入多次调用。",
+      "oracle": "worked-example-plus-source-jvm-driver",
+      "dependencies": "self-made Dep complete declaration catalog, checked-in source",
+      "acceptanceGate": "engine",
+      "designRefs": "ALGORITHMS §9",
+      "inputRequirements": []
+    },
+    {
+      "id": "D019",
+      "family": "calls",
+      "title": "静态重载按descriptor选择",
+      "suite": "core-java",
+      "seam": "decompile-method",
+      "required": true,
+      "validationScope": "method-in-known-context",
+      "inputKind": "self-made-java-to-dex",
+      "inputRecipe": "Dep.pick(Object) returns O; Dep.pick(String) returns S. target Object v=null; return Dep.pick(v);",
+      "invocations": [
+        {"id":"v1","input":{"targetRole":"case","method":"target()Ljava/lang/String;","args":[]},"expected":{"outcome":"java","returnStringUnits":[79],"events":["pick:Object"]}}
+      ],
+      "mustRejectMutation": "因nullliteral/新增cast选择String重载。",
+      "oracle": "worked-example-plus-source-jvm-driver",
+      "dependencies": "self-made Dep complete overload catalog",
+      "acceptanceGate": "engine",
+      "designRefs": "ALGORITHMS §9",
+      "inputRequirements": []
+    },
+    {
+      "id": "D020",
+      "family": "calls",
+      "title": "虚分派保留override",
+      "suite": "core-java",
+      "seam": "decompile-class",
+      "required": true,
+      "validationScope": "full-unit",
+      "inputKind": "self-made-java-to-dex",
+      "inputRecipe": "Base.f returns1; Child.f returns2; target Base b=new Child(); return b.f();",
+      "invocations": [
+        {"id":"v1","input":{"targetRole":"case","method":"target()I","args":[]},"expected":{"outcome":"java","return":2}}
+      ],
+      "mustRejectMutation": "转成Base静态/直接call或漏override。",
+      "oracle": "worked-example-plus-source-jvm-driver",
+      "dependencies": "self-made Base/Child complete catalog; adjacent constructor profile",
+      "acceptanceGate": "engine",
+      "designRefs": "ALGORITHMS §9",
+      "inputRequirements": []
+    },
+    {
+      "id": "D021",
+      "family": "calls",
+      "title": "invoke-super不变成virtual",
+      "suite": "core-java",
+      "seam": "decompile-class",
+      "required": true,
+      "validationScope": "full-unit",
+      "inputKind": "self-made-java-to-dex",
+      "inputRecipe": "Base.f logs B returns1; Child.f logs C then returns super.f()+1; Driver calls Child.f.",
+      "invocations": [
+        {"id":"v1","input":{"targetRole":"child","method":"f()I","args":[],"receiver":{"new":"fixtures.Child","identity":"child-1"}},"expected":{"outcome":"java","return":2,"events":["C","B"]}}
+      ],
+      "mustRejectMutation": "super改this.f导致递归或目标错。",
+      "oracle": "worked-example-plus-source-jvm-driver",
+      "dependencies": "self-made Base/Child complete declarations",
+      "acceptanceGate": "engine",
+      "designRefs": "ALGORITHMS §9",
+      "inputRequirements": []
+    },
+    {
+      "id": "D022",
+      "family": "calls",
+      "title": "unused调用仍抛异常和执行effect",
+      "suite": "core-java",
+      "seam": "decompile-method",
+      "required": true,
+      "validationScope": "method-in-known-context",
+      "inputKind": "self-made-java-to-dex",
+      "inputRecipe": "static void target(){Dep.bumpAndThrow();} Dep logs B increments counter then throws self-made ExpectedError.",
+      "invocations": [
+        {"id":"v1","input":{"targetRole":"case","method":"target()V","args":[]},"expected":{"outcome":"java","exception":"fixtures.ExpectedError","events":["B"],"heap":{"counter":1}}}
+      ],
+      "mustRejectMutation": "DCE unusedreturn删除call/异常。",
+      "oracle": "worked-example-plus-source-jvm-driver",
+      "dependencies": "self-made Dep/Error complete declarations",
+      "acceptanceGate": "engine",
+      "designRefs": "ALGORITHMS §9",
+      "inputRequirements": []
+    },
+    {
+      "id": "D023",
+      "family": "calls",
+      "title": "interface分派保留实现",
+      "suite": "core-java",
+      "seam": "decompile-method",
+      "required": true,
+      "validationScope": "method-in-known-context",
+      "inputKind": "self-made-java-to-dex",
+      "inputRecipe": "Interface I.f; Impl.f returns9; target int f(I x){return x.f();}",
+      "invocations": [
+        {"id":"v1","input":{"targetRole":"case","method":"f(Lfixtures/I;)I","args":[{"new":"fixtures.Impl","identity":"impl-1"}]},"expected":{"outcome":"java","return":9}},
+        {"id":"v2","input":{"targetRole":"case","method":"f(Lfixtures/I;)I","args":[null]},"expected":{"outcome":"java","exception":"java.lang.NullPointerException"}}
+      ],
+      "mustRejectMutation": "interfacecall绑定错、null检查时机变。",
+      "oracle": "worked-example-plus-source-jvm-driver",
+      "dependencies": "self-made I/Impl complete catalog; dependency remains original source",
+      "acceptanceGate": "engine",
+      "designRefs": "ALGORITHMS §9",
+      "inputRequirements": []
+    },
+    {
+      "id": "D024",
+      "family": "heap",
+      "title": "数组越界保留效果prefix",
+      "suite": "core-java",
+      "seam": "decompile-method",
+      "required": true,
+      "validationScope": "method-in-known-context",
+      "inputKind": "self-made-java-to-dex",
+      "inputRecipe": "static int f(int[] a){int i=Dep.index();return a[i];} index logs IDX returns2;",
+      "invocations": [
+        {"id":"v1","input":{"targetRole":"case","method":"f([I)I","args":[{"arrayType":"[I","values":[7]}]},"expected":{"outcome":"java","exception":"java.lang.ArrayIndexOutOfBoundsException","events":["IDX"]}},
+        {"id":"v2","input":{"targetRole":"case","method":"f([I)I","args":[null]},"expected":{"outcome":"java","exception":"java.lang.NullPointerException","events":["IDX"]}}
+      ],
+      "mustRejectMutation": "提前null/boundscheck或删indexeffect。",
+      "oracle": "worked-example-plus-source-jvm-driver",
+      "dependencies": "self-made Dep complete catalog",
+      "acceptanceGate": "engine",
+      "designRefs": "ALGORITHMS §2、§4",
+      "inputRequirements": []
+    },
+    {
+      "id": "D025",
+      "family": "heap",
+      "title": "unused check-cast仍执行检查",
+      "suite": "core-java",
+      "seam": "decompile-method",
+      "required": true,
+      "validationScope": "method-in-known-context",
+      "inputKind": "self-made-java-to-dex",
+      "inputRecipe": "static void f(Object a){String s=(String)a;} Driver observes normal/exception only.",
+      "invocations": [
+        {"id":"v1","input":{"targetRole":"case","method":"f(Ljava/lang/Object;)V","args":[{"stringUnits":[120]}]},"expected":{"outcome":"java","returnVoid":true}},
+        {"id":"v2","input":{"targetRole":"case","method":"f(Ljava/lang/Object;)V","args":[{"new":"java.lang.Object","identity":"object-1"}]},"expected":{"outcome":"java","exception":"java.lang.ClassCastException"}},
+        {"id":"v3","input":{"targetRole":"case","method":"f(Ljava/lang/Object;)V","args":[null]},"expected":{"outcome":"java","returnVoid":true}}
+      ],
+      "mustRejectMutation": "结果不用删除字节码checkcast。",
+      "oracle": "worked-example-plus-source-jvm-driver",
+      "dependencies": "checked-in self-made source only; fixed JDK/R8; no platform SDK",
+      "notes": "B02/B03 MUST confirm generated DEX retains check-cast; if javac removes it create reviewed smali input for same operation. Handwritten runtime needs appropriate oracle lane; do not silently replace test.",
+      "acceptanceGate": "engine",
+      "designRefs": "ALGORITHMS §2、§4",
+      "inputRequirements": [
+        "三个输入请求同一含reachable check-cast的原方法；独立确认cast未被javac/D8删除且其结果不影响return/effect。无cast则准备失败，不能只运行source预期。"
+      ]
+    },
+    {
+      "id": "D026",
+      "family": "heap",
+      "title": "array-store运行类型检查",
+      "suite": "core-java",
+      "seam": "decompile-method",
+      "required": true,
+      "validationScope": "method-in-known-context",
+      "inputKind": "self-made-java-to-dex",
+      "inputRecipe": "static void f(Object[] a,Object v){a[0]=v;} Driver passes String[] and Object.",
+      "invocations": [
+        {"id":"v1","input":{"targetRole":"case","method":"f([Ljava/lang/Object;Ljava/lang/Object;)V","args":[{"arrayType":"[Ljava/lang/String;","values":[{"stringUnits":[111,108,100]}],"identity":"strings-1"},{"new":"java.lang.Object","identity":"object-1"}]},"expected":{"outcome":"java","exception":"java.lang.ArrayStoreException"}},
+        {"id":"v2","input":{"targetRole":"case","method":"f([Ljava/lang/Object;Ljava/lang/Object;)V","args":[{"arrayType":"[Ljava/lang/String;","values":[{"stringUnits":[111,108,100]}],"identity":"strings-1"},{"stringUnits":[111,107]}]},"expected":{"outcome":"java","returnVoid":true,"heap":{"firstString":"ok"}}},
+        {"id":"v3","input":{"targetRole":"case","method":"f([Ljava/lang/Object;Ljava/lang/Object;)V","args":[null,{"new":"java.lang.Object","identity":"object-1"}]},"expected":{"outcome":"java","exception":"java.lang.NullPointerException"}}
+      ],
+      "mustRejectMutation": "Object[]泛化抹去runtimecomponent检查。",
+      "oracle": "worked-example-plus-source-jvm-driver",
+      "dependencies": "checked-in self-made source only; fixed JDK/R8; no platform SDK",
+      "acceptanceGate": "engine",
+      "designRefs": "ALGORITHMS §2、§4",
+      "inputRequirements": []
+    },
+    {
+      "id": "D027",
+      "family": "heap",
+      "title": "数组literal元素位模式",
+      "suite": "core-java",
+      "seam": "decompile-method",
+      "required": true,
+      "validationScope": "method-in-known-context",
+      "inputKind": "self-made-smali-with-proved-reference-java",
+      "inputRecipe": "用两个直接smali方法固定原始形态：a()[I先new-array长度3后fill-array-data宽度4/payload[-1,0,2147483647]再return-object；b()[F先new-array长度2后fill-array-data宽度4/payload bits[80000000,3f800000]再return-object。new与fill相邻，无call/逃逸/其他入口。独立参考Java分别返回new int[]{-1,0,2147483647}与new float[]{-0.0f,1.0f}。",
+      "invocations": [
+        {"id":"v1","input":{"targetRole":"case","method":"a()[I","args":[]},"expected":{"outcome":"java","arrayInt":[-1,0,2147483647]}},
+        {"id":"v2","input":{"targetRole":"case","method":"b()[F","args":[]},"expected":{"outcome":"java","arrayFloatBits":["80000000","3f800000"]}}
+      ],
+      "mustRejectMutation": "fill-array payload按错误宽度/类型或字节序解释。",
+      "oracle": "dalvik-fill-fresh-array-proof-plus-reference-java-driver",
+      "dependencies": "checked-in self-made source only; fixed JDK/R8; no platform SDK",
+      "acceptanceGate": "engine",
+      "designRefs": "ALGORITHMS §2、§4",
+      "inputRequirements": [
+        "独立记录两个component/width/count、payload原bits、唯一new-array长度及无逃逸/外部入口；原始形态由recipe固定，不赌D8是否选择payload。",
+        "B03按FreshArray前提证明单site bulk fill到参考Java初始化stores的transfer/可观察heap一致，保留allocation原序；镜像不是原DEX的JVM执行，不扩展到参数数组或有effect元素。"
+      ],
+      "revisionReason": "固定原始new-array/fill形态并给封闭FreshArray规范镜像，避免短literal被编译成filled-new-array而根本未测payload；元素独立预期不变。"
+    },
+    {
+      "id": "D028",
+      "family": "heap",
+      "title": "字段读取和写入顺序",
+      "suite": "core-java",
+      "seam": "decompile-method",
+      "required": true,
+      "validationScope": "method-in-known-context",
+      "inputKind": "self-made-java-to-dex",
+      "inputRecipe": "Box x starts n=4; static int f(Box x){int old=x.n;x.n=old+3;return old;}",
+      "invocations": [
+        {"id":"v1","input":{"targetRole":"case","method":"f(Lfixtures/Box;)I","args":[{"new":"fixtures.Box","identity":"box-1","fields":{"n":4}}]},"expected":{"outcome":"java","return":4,"heap":{"n":7}}},
+        {"id":"v2","input":{"targetRole":"case","method":"f(Lfixtures/Box;)I","args":[null]},"expected":{"outcome":"java","exception":"java.lang.NullPointerException"}}
+      ],
+      "mustRejectMutation": "物理寄存器覆盖old/字段读写重排。",
+      "oracle": "worked-example-plus-source-jvm-driver",
+      "dependencies": "self-made Box complete field declarations",
+      "acceptanceGate": "engine",
+      "designRefs": "ALGORITHMS §2、§4",
+      "inputRequirements": []
+    },
+    {
+      "id": "D029",
+      "family": "exceptions",
+      "title": "赋值call失败catch观察旧值",
+      "suite": "core-java",
+      "seam": "decompile-method",
+      "required": true,
+      "validationScope": "method-in-known-context",
+      "inputKind": "self-made-java-to-dex",
+      "inputRecipe": "static int f(){int v=7;try{v=Dep.alwaysThrows();}catch(ExpectedError e){Dep.record(v);}return v;}",
+      "invocations": [
+        {"id":"v1","input":{"targetRole":"case","method":"f()I","args":[]},"expected":{"outcome":"java","return":7,"events":["CALL","OLD:7"]}}
+      ],
+      "mustRejectMutation": "异常环境错误使用正常result、snapshot在call后、默认0。",
+      "oracle": "worked-example-plus-source-jvm-driver",
+      "dependencies": "self-made Dep/Error complete declarations",
+      "acceptanceGate": "engine",
+      "designRefs": "ALGORITHMS §3、§5、§10",
+      "inputRequirements": [
+        "独立记录原throw site、normal result commit与catch可见旧值；证明该输入实际要求保留失败前definition，而非仅凭源码变量同名。"
+      ]
+    },
+    {
+      "id": "D030",
+      "family": "exceptions",
+      "title": "两个throw site选择对应shadow旧值",
+      "suite": "core-java",
+      "seam": "decompile-method",
+      "required": true,
+      "validationScope": "method-in-known-context",
+      "inputKind": "self-made-java-to-dex",
+      "inputRecipe": "int v=3;try{if(c){v=7;Dep.failA();}else{v=9;Dep.failB();}}catch(ExpectedError e){Dep.record(v);}return v;",
+      "invocations": [
+        {"id":"v1","input":{"targetRole":"case","method":"f(Z)I","args":[true]},"expected":{"outcome":"java","return":7,"events":["A","OLD:7"]}},
+        {"id":"v2","input":{"targetRole":"case","method":"f(Z)I","args":[false]},"expected":{"outcome":"java","return":9,"events":["B","OLD:9"]}}
+      ],
+      "mustRejectMutation": "共用shadow错误保留上一site或覆盖值。",
+      "oracle": "worked-example-plus-source-jvm-driver",
+      "dependencies": "self-made Dep/Error complete declarations",
+      "acceptanceGate": "engine",
+      "designRefs": "ALGORITHMS §3、§5、§10",
+      "inputRequirements": [
+        "两个throw site必须到同一受测handler并分别携7/9的旧值；若前端复制handler/常量化而消除义务，准备失败，不冻结私有SSA或shadow数量。"
+      ]
+    },
+    {
+      "id": "D031",
+      "family": "exceptions",
+      "title": "catch子类型优先而非类型排序",
+      "suite": "core-java",
+      "seam": "decompile-method",
+      "required": true,
+      "validationScope": "method-in-known-context",
+      "inputKind": "self-made-java-to-dex",
+      "inputRecipe": "static int f(int k){try{Dep.raise(k);return 0;}catch(SubError e){return 1;}catch(BaseError e){return 2;}} BaseError/SubError self-made checked exceptions.",
+      "invocations": [
+        {"id":"v1","input":{"targetRole":"case","method":"f(I)I","args":[1]},"expected":{"outcome":"java","return":1}},
+        {"id":"v2","input":{"targetRole":"case","method":"f(I)I","args":[2]},"expected":{"outcome":"java","return":2}},
+        {"id":"v3","input":{"targetRole":"case","method":"f(I)I","args":[0]},"expected":{"outcome":"java","return":0}}
+      ],
+      "mustRejectMutation": "按catch目标/类型排序改变优先级或catch type泛化Throwable。",
+      "oracle": "worked-example-plus-source-jvm-driver",
+      "dependencies": "complete self-made Dep/BaseError/SubError catalog",
+      "acceptanceGate": "engine",
+      "designRefs": "ALGORITHMS §3、§5、§10",
+      "inputRequirements": []
+    },
+    {
+      "id": "D032",
+      "family": "exceptions",
+      "title": "try外cleanup异常不可被旧handler捕获",
+      "suite": "core-java",
+      "seam": "decompile-method",
+      "required": true,
+      "validationScope": "method-in-known-context",
+      "inputKind": "self-made-java-to-dex",
+      "inputRecipe": "static int f(){int r;try{r=Dep.ok();}catch(ExpectedError e){r=-1;}Dep.cleanupThrows();return r;}",
+      "invocations": [
+        {"id":"v1","input":{"targetRole":"case","method":"f()I","args":[]},"expected":{"outcome":"java","exception":"fixtures.ExpectedError","events":["OK","CLEANUP"]}}
+      ],
+      "mustRejectMutation": "扩大try到cleanup，将返回改-1或吞异常。",
+      "oracle": "worked-example-plus-source-jvm-driver",
+      "dependencies": "self-made Dep/Error complete catalog",
+      "acceptanceGate": "engine",
+      "designRefs": "ALGORITHMS §3、§5、§10",
+      "inputRequirements": []
+    },
+    {
+      "id": "D033",
+      "family": "exceptions",
+      "title": "finally在return前执行但返回值先取",
+      "suite": "core-java",
+      "seam": "decompile-method",
+      "required": true,
+      "validationScope": "method-in-known-context",
+      "inputKind": "self-made-java-to-dex",
+      "inputRecipe": "static int f(){int v=3;try{return v;}finally{v=8;Dep.log(v);}}",
+      "invocations": [
+        {"id":"v1","input":{"targetRole":"case","method":"f()I","args":[]},"expected":{"outcome":"java","return":3,"events":["FINAL:8"]}}
+      ],
+      "mustRejectMutation": "finally后再选returnvalue，或漏cleanup。",
+      "oracle": "worked-example-plus-source-jvm-driver",
+      "dependencies": "self-made Dep complete catalog",
+      "acceptanceGate": "engine",
+      "designRefs": "ALGORITHMS §3、§5、§10",
+      "inputRequirements": []
+    },
+    {
+      "id": "D034",
+      "family": "exceptions",
+      "title": "finally抛新异常覆盖return",
+      "suite": "core-java",
+      "seam": "decompile-method",
+      "required": true,
+      "validationScope": "method-in-known-context",
+      "inputKind": "self-made-java-to-dex",
+      "inputRecipe": "static int f(){try{return 3;}finally{Dep.finalThrows();}}",
+      "invocations": [
+        {"id":"v1","input":{"targetRole":"case","method":"f()I","args":[]},"expected":{"outcome":"java","exception":"fixtures.FinalError","events":["FINAL"]}}
+      ],
+      "mustRejectMutation": "无条件return3、抛原错误或错误catch范围。",
+      "oracle": "worked-example-plus-source-jvm-driver",
+      "dependencies": "self-made Dep/FinalError complete catalog",
+      "acceptanceGate": "engine",
+      "designRefs": "ALGORITHMS §3、§5、§10",
+      "inputRequirements": []
+    },
+    {
+      "id": "D035",
+      "family": "exceptions",
+      "title": "catch中抛出被外层捕获",
+      "suite": "core-java",
+      "seam": "decompile-method",
+      "required": true,
+      "validationScope": "method-in-known-context",
+      "inputKind": "self-made-java-to-dex",
+      "inputRecipe": "static int f(){try{try{Dep.failA();}catch(ErrorA e){Dep.failB();}}catch(ErrorB e){Dep.log(\"OUTER\");return 4;}return 0;}",
+      "invocations": [
+        {"id":"v1","input":{"targetRole":"case","method":"f()I","args":[]},"expected":{"outcome":"java","return":4,"events":["A","B","OUTER"]}}
+      ],
+      "mustRejectMutation": "handler内throw的环境/保护域漏边。",
+      "oracle": "worked-example-plus-source-jvm-driver",
+      "dependencies": "self-made Dep/ErrorA/ErrorB complete catalog",
+      "acceptanceGate": "engine",
+      "designRefs": "ALGORITHMS §3、§5、§10",
+      "inputRequirements": []
+    },
+    {
+      "id": "D036",
+      "family": "monitor",
+      "title": "monitor作用域内调用确实持锁",
+      "suite": "core-java",
+      "seam": "decompile-method",
+      "required": true,
+      "validationScope": "method-in-known-context",
+      "inputKind": "self-made-java-to-dex",
+      "inputRecipe": "static boolean f(Object lock){synchronized(lock){return Thread.holdsLock(lock);}}",
+      "invocations": [
+        {"id":"v1","input":{"targetRole":"case","method":"f(Ljava/lang/Object;)Z","args":[{"new":"java.lang.Object","identity":"lock-1"}]},"expected":{"outcome":"java","return":true}},
+        {"id":"v2","input":{"targetRole":"case","method":"f(Ljava/lang/Object;)Z","args":[null]},"expected":{"outcome":"java","exception":"java.lang.NullPointerException"}}
+      ],
+      "mustRejectMutation": "把bodycall放锁外、null-lockthrow时机错。",
+      "oracle": "worked-example-plus-source-jvm-driver",
+      "dependencies": "JDK Thread.holdsLock audited observer declaration, checked-in catalog",
+      "notes": "JVM-only core evidence; no claim of full ART memory-model equivalence.",
+      "acceptanceGate": "engine",
+      "designRefs": "ALGORITHMS §11",
+      "inputRequirements": []
+    },
+    {
+      "id": "D037",
+      "family": "monitor",
+      "title": "异常退出确实释放monitor",
+      "suite": "core-java",
+      "seam": "decompile-method",
+      "required": true,
+      "validationScope": "method-in-known-context",
+      "inputKind": "self-made-java-to-dex",
+      "inputRecipe": "static void f(Object lock){synchronized(lock){Dep.raise();}} Driver catches error then Thread.holdsLock(lock).",
+      "invocations": [
+        {"id":"v1","input":{"targetRole":"case","method":"f(Ljava/lang/Object;)V","args":[{"new":"java.lang.Object","identity":"lock-1"}],"observeMonitorAfter":"lock-1"},"expected":{"outcome":"java","exception":"fixtures.ExpectedError","events":["RAISE"],"monitorAfter":false}}
+      ],
+      "mustRejectMutation": "exceptionrelease缺失或release另一个对象。",
+      "oracle": "worked-example-plus-source-jvm-driver",
+      "dependencies": "self-made Dep/Error + JDK observer catalog",
+      "acceptanceGate": "engine",
+      "designRefs": "ALGORITHMS §11",
+      "inputRequirements": []
+    },
+    {
+      "id": "D038",
+      "family": "monitor",
+      "title": "嵌套同锁重入与退出",
+      "suite": "core-java",
+      "seam": "decompile-method",
+      "required": true,
+      "validationScope": "method-in-known-context",
+      "inputKind": "self-made-java-to-dex",
+      "inputRecipe": "static boolean f(Object lock){synchronized(lock){synchronized(lock){Dep.log(\"IN\");}return Thread.holdsLock(lock);}} Driver checks after.",
+      "invocations": [
+        {"id":"v1","input":{"targetRole":"case","method":"f(Ljava/lang/Object;)Z","args":[{"new":"java.lang.Object","identity":"lock-1"}],"observeMonitorAfter":"lock-1"},"expected":{"outcome":"java","return":true,"events":["IN"],"monitorAfter":false}}
+      ],
+      "mustRejectMutation": "内层release错误释放全部count、outerlock未持有。",
+      "oracle": "worked-example-plus-source-jvm-driver",
+      "dependencies": "self-made Dep + JDK observer catalog",
+      "acceptanceGate": "engine",
+      "designRefs": "ALGORITHMS §11",
+      "inputRequirements": []
+    },
+    {
+      "id": "D039",
+      "family": "monitor",
+      "title": "锁表达式只求值一次",
+      "suite": "core-java",
+      "seam": "decompile-method",
+      "required": true,
+      "validationScope": "method-in-known-context",
+      "inputKind": "self-made-java-to-dex",
+      "inputRecipe": "static void f(){synchronized(Dep.nextLock()){Dep.log(\"BODY\");}} Dep.nextLock logs LOCK and increments count.",
+      "invocations": [
+        {"id":"v1","input":{"targetRole":"case","method":"f()V","args":[]},"expected":{"outcome":"java","returnVoid":true,"events":["LOCK","BODY"],"heap":{"lockCalls":1}}}
+      ],
+      "mustRejectMutation": "enter/exit重新求lock导致换对象或doubleeffect。",
+      "oracle": "worked-example-plus-source-jvm-driver",
+      "dependencies": "self-made Dep complete catalog",
+      "acceptanceGate": "engine",
+      "designRefs": "ALGORITHMS §11",
+      "inputRequirements": []
+    },
+    {
+      "id": "D040",
+      "family": "monitor",
+      "title": "声明synchronized的实例与静态锁",
+      "suite": "core-java",
+      "seam": "decompile-class",
+      "required": true,
+      "validationScope": "full-unit",
+      "inputKind": "self-made-java-to-dex",
+      "inputRecipe": "class Case{ synchronized boolean inst(){return Thread.holdsLock(this);} static synchronized boolean stat(){return Thread.holdsLock(Case.class);} }",
+      "invocations": [
+        {"id":"v1","input":{"targetRole":"case","method":"inst()Z","receiver":{"new":"fixtures.Case","identity":"case-1"},"args":[],"observeMonitorAfter":"case-1"},"expected":{"outcome":"java","return":true,"monitorAfter":false}},
+        {"id":"v2","input":{"targetRole":"case","method":"stat()Z","args":[],"observeMonitorAfter":"case-class"},"expected":{"outcome":"java","return":true,"monitorAfter":false}}
+      ],
+      "mustRejectMutation": "丢失实际monitor效果、scope错误或选择错误锁对象；不把仅不以DECLARED_SYNCHRONIZED推导锁当成行为错误。",
+      "oracle": "worked-example-plus-source-jvm-driver",
+      "dependencies": "JDK observer/type catalog",
+      "acceptanceGate": "engine",
+      "designRefs": "ALGORITHMS §11",
+      "inputRequirements": [
+        "独立记录managed DECLARED_SYNCHRONIZED、实际monitor-enter/exit和release handlers；恢复锁必须依实际scope，raw flags另行保留，不由该flag凭空补锁。"
+      ],
+      "revisionReason": "依据DEX access_flags：0x20000不自行产生执行锁；修正mutation定义，保留true预期并补退出后释放观察。"
+    },
+    {
+      "id": "D041",
+      "family": "construction",
+      "title": "构造器super先于body",
+      "suite": "core-java",
+      "seam": "decompile-class",
+      "required": true,
+      "validationScope": "full-unit",
+      "inputKind": "self-made-java-to-dex",
+      "inputRecipe": "Base constructor logs BASE; Case constructor super(); logs BODY; Driver creates Case.",
+      "invocations": [
+        {"id":"v1","input":{"targetRole":"case","construct":{"method":"<init>()V","args":[]}},"expected":{"outcome":"java","events":["BASE","BODY"]}}
+      ],
+      "mustRejectMutation": "删super或移动body到super之前。",
+      "oracle": "worked-example-plus-source-jvm-driver",
+      "dependencies": "self-made Base/Dep complete catalog",
+      "acceptanceGate": "engine",
+      "designRefs": "ALGORITHMS §9、§12",
+      "inputRequirements": [
+        "constructor的唯一EntrySeed参数/this经入口绑定追溯，不在super调用前输出local声明/拷贝；原super site和normal后body顺序独立记录。"
+      ]
+    },
+    {
+      "id": "D042",
+      "family": "construction",
+      "title": "this构造链不重复字段初始化",
+      "suite": "core-java",
+      "seam": "decompile-class",
+      "required": true,
+      "validationScope": "full-unit",
+      "inputKind": "self-made-java-to-dex",
+      "inputRecipe": "Case(){this(4);Dep.log(\"ZERO\");} Case(int n){this.n=n;Dep.log(\"INT:4\");} Driver constructs Case().",
+      "invocations": [
+        {"id":"v1","input":{"targetRole":"case","construct":{"method":"<init>()V","args":[]}},"expected":{"outcome":"java","heap":{"n":4},"events":["INT:4","ZERO"]}}
+      ],
+      "mustRejectMutation": "字段initializer下推重复、this链target错。",
+      "oracle": "worked-example-plus-source-jvm-driver",
+      "dependencies": "self-made Dep + complete Case declarations",
+      "acceptanceGate": "engine",
+      "designRefs": "ALGORITHMS §9、§12",
+      "inputRequirements": []
+    },
+    {
+      "id": "D043",
+      "family": "construction",
+      "title": "邻接new/init的参数effect只一次",
+      "suite": "core-java",
+      "seam": "decompile-method",
+      "required": true,
+      "validationScope": "method-in-known-context",
+      "inputKind": "self-made-java-to-dex",
+      "inputRecipe": "static Box f(){int n=Dep.arg();return new Box(n);} arg logs ARG returns5; Box constructor logs CTOR:5.",
+      "invocations": [
+        {"id":"v1","input":{"targetRole":"case","method":"f()Lfixtures/Box;","args":[]},"expected":{"outcome":"java","heap":{"boxN":5},"events":["ARG","CTOR:5"]}}
+      ],
+      "mustRejectMutation": "inline参数重求值/变CTOR-before-ARG、allocation身份漏配。",
+      "oracle": "worked-example-plus-source-jvm-driver",
+      "dependencies": "self-made Dep/Box complete catalog",
+      "acceptanceGate": "engine",
+      "designRefs": "ALGORITHMS §9、§12",
+      "inputRequirements": []
+    },
+    {
+      "id": "D044",
+      "family": "initialization",
+      "title": "static初始化触发与单次执行",
+      "suite": "core-java",
+      "seam": "decompile-class",
+      "required": true,
+      "validationScope": "full-unit",
+      "inputKind": "self-made-java-to-dex",
+      "inputRecipe": "Case static int n=Dep.init(); static int get(){return n;} init logs INIT returns7; one Driver invocation calls get twice.",
+      "invocations": [
+        {"id":"v1","input":{"targetRole":"case","calls":[{"method":"get()I","args":[]},{"method":"get()I","args":[]}],"isolation":"fresh-jvm"},"expected":{"outcome":"java","returns":[7,7],"events":["INIT"]}}
+      ],
+      "mustRejectMutation": "把staticfieldinlineconst删触发、每调用重复clinit。",
+      "oracle": "worked-example-plus-source-jvm-driver",
+      "dependencies": "self-made Dep complete catalog",
+      "notes": "Driver entry must not load/initialize Case before beginning observation; every case uses fresh JVM.",
+      "acceptanceGate": "engine",
+      "designRefs": "ALGORITHMS §12.2",
+      "inputRequirements": []
+    },
+    {
+      "id": "D045",
+      "family": "initialization",
+      "title": "blank final分别构造赋值一次",
+      "suite": "core-java",
+      "seam": "decompile-class",
+      "required": true,
+      "validationScope": "full-unit",
+      "inputKind": "self-made-java-to-dex",
+      "inputRecipe": "Case final int x; Case(boolean c){if(c)x=1;else x=2;} Driver creates true/false independently.",
+      "invocations": [
+        {"id":"v1","input":{"targetRole":"case","construct":{"method":"<init>(Z)V","args":[true]}},"expected":{"outcome":"java","heap":{"x":1},"finalFieldPreserved":true}},
+        {"id":"v2","input":{"targetRole":"case","construct":{"method":"<init>(Z)V","args":[false]}},"expected":{"outcome":"java","heap":{"x":2},"finalFieldPreserved":true}}
+      ],
+      "mustRejectMutation": "final默认写再赋、branch漏值或删除finalsemantic。",
+      "oracle": "worked-example-plus-source-jvm-driver",
+      "dependencies": "checked-in self-made source only; fixed JDK/R8; no platform SDK",
+      "acceptanceGate": "engine",
+      "designRefs": "ALGORITHMS §12.2",
+      "inputRequirements": []
+    },
+    {
+      "id": "D046",
+      "family": "initialization",
+      "title": "显式encoded null/false/0与隐式默认不混淆",
+      "suite": "core-java",
+      "seam": "decompile-class",
+      "required": true,
+      "validationScope": "full-unit",
+      "inputKind": "self-made-dex-builder-with-reference-java",
+      "inputRecipe": "自制035 Case含canonical Object super constructor和static字段b:Z、i:I、s:Ljava/lang/String;，按static_fields的b/i/s顺序显式编码static_values array：size=3，VALUE_BOOLEAN(false)、VALUE_INT(0)、VALUE_NULL。参考Java只声明三个无initializer的非final字段；Driver读完整默认值。不得让assembler删除显式默认encoded元素。",
+      "invocations": [
+        {"id":"v1","input":{"targetRole":"case","observeStaticFields":["s:Ljava/lang/String;","b:Z","i:I"]},"expected":{"outcome":"java","heap":{"s":null,"b":false,"i":0}}}
+      ],
+      "mustRejectMutation": "nullString变空串、False/None伪Java、默认encoded映射錯。",
+      "oracle": "dex-format-encoded-value-tags-plus-reference-java-default-state",
+      "dependencies": "checked-in self-made source only; fixed JDK/R8; no platform SDK",
+      "acceptanceGate": "engine",
+      "designRefs": "ALGORITHMS §12.2",
+      "inputRequirements": [
+        "独立projection必须同时看到三个显式encoded_value的tag/value与完整static_fields绑定；没有static_values_off或数组被裁短即准备失败。原始字段/构造器/flags完整，不能由新增default constructor碰巧决定unit状态。"
+      ],
+      "revisionReason": "默认值源代码不足以保证DEX含encoded元素；改为显式构造并由独立decoder核tag/绑定，原heap预期不变。"
+    },
+    {
+      "id": "D047",
+      "family": "initialization",
+      "title": "静态初始化失败保持异常类型",
+      "suite": "core-java",
+      "seam": "decompile-class",
+      "required": true,
+      "validationScope": "full-unit",
+      "inputKind": "self-made-java-to-dex",
+      "inputRecipe": "Case static int n=Dep.badInit(); badInit logs INIT then throws self-made RuntimeException; Driver accesses field once.",
+      "invocations": [
+        {"id":"v1","input":{"targetRole":"case","readStaticField":"n:I","isolation":"fresh-jvm"},"expected":{"outcome":"java","exception":"java.lang.ExceptionInInitializerError","events":["INIT"]}}
+      ],
+      "mustRejectMutation": "clinit当普通call、吞原initfailure或不触发。",
+      "oracle": "worked-example-plus-source-jvm-driver",
+      "dependencies": "self-made Dep/InitError complete catalog",
+      "acceptanceGate": "engine",
+      "designRefs": "ALGORITHMS §12.2",
+      "inputRequirements": []
+    },
+    {
+      "id": "D048",
+      "family": "declarations",
+      "title": "协变bridge的调用行为",
+      "suite": "core-java",
+      "seam": "decompile-class",
+      "required": true,
+      "validationScope": "full-unit",
+      "inputKind": "self-made-java-to-dex",
+      "inputRecipe": "Base Object get(){return \"base\";} Case String get(){return \"child\";} Driver invokes Base reference to Case.",
+      "invocations": [
+        {"id":"v1","input":{"targetRole":"case","receiver":{"new":"fixtures.Case","identity":"case-1"},"invokeAs":"fixtures.Base","method":"get()Ljava/lang/Object;","args":[]},"expected":{"outcome":"java","returnStringUnits":[99,104,105,108,100],"generatedBridgePreserved":true}}
+      ],
+      "mustRejectMutation": "bridge与actualmethod合并丢分派、重复错误声明。",
+      "oracle": "worked-example-plus-source-jvm-driver",
+      "dependencies": "self-made Base complete generic/erased contracts",
+      "acceptanceGate": "engine",
+      "designRefs": "ALGORITHMS §12.3",
+      "inputRequirements": [
+        "独立确认一个真实ACC_BRIDGE|ACC_SYNTHETIC的()Ljava/lang/Object;方法，其canonical target为同receiver的()Ljava/lang/String;；完整parent/override目录，恢复classfile也须生成同descriptor bridge。"
+      ]
+    },
+    {
+      "id": "D049",
+      "family": "declarations",
+      "title": "inner capture保持outer this身份",
+      "suite": "core-java",
+      "seam": "decompile-class",
+      "required": true,
+      "validationScope": "full-unit",
+      "inputKind": "self-made-java-to-dex",
+      "inputRecipe": "class Outer{int n=7; class Inner{int f(){return Outer.this.n;}}} n为package-private，避免未知auto-accessor。Driver一组构造outer/inner读7；另一组构造两个outer及各自inner，令第二outer.n=9、第一outer.n=11后分别读其inner，核捕获的是各自对象而非共享默认7。",
+      "invocations": [
+        {"id":"v1","input":{"targetRole":"outer","scenario":"one-outer","initialN":7},"expected":{"outcome":"java","return":7}},
+        {"id":"two-outers","input":{"targetRole":"outer","scenario":"two-outers","outerValuesAfterConstruction":[11,9]},"expected":{"outcome":"java","returns":[11,9]}}
+      ],
+      "mustRejectMutation": "把capture删成独立this、名字$猜静态inner或构造参数錯。",
+      "oracle": "worked-example-plus-source-jvm-driver",
+      "dependencies": "checked-in self-made source only; fixed JDK/R8; no platform SDK",
+      "acceptanceGate": "engine",
+      "designRefs": "ALGORITHMS §12.3",
+      "inputRequirements": [
+        "请求outer完整unit及其真实Inner ownership closure，非单独inner片段；独立认证Enclosing/InnerClass、唯一synthetic outer字段/隐藏ctor参数和canonical pre-super赋值。"
+      ],
+      "revisionReason": "增加两个outer的差异状态，防止固定返回7或把capture绑定到错误对象仍通过。"
+    },
+    {
+      "id": "D050",
+      "family": "declarations",
+      "title": "enum名字序数与values副本",
+      "suite": "core-java",
+      "seam": "decompile-class",
+      "required": true,
+      "validationScope": "full-unit",
+      "inputKind": "self-made-java-to-dex",
+      "inputRecipe": "enum Case{Z,A;} Driver按声明序读name/ordinal；修改第一次values结果后重新values；调用valueOf(\"Z\")、valueOf(\"A\")及未知名/null。DEX static_fields按名字表排序与原clinit常量初始化序不同，不能混用。",
+      "invocations": [
+        {"id":"enum-contract","input":{"targetRole":"case","scenario":"names-ordinals-values-and-valueOf"},"expected":{"outcome":"java","enumNames":["Z","A"],"enumOrdinals":[0,1],"valuesFresh":true,"valueOfNames":["Z","A"],"valueOfUnknownException":"java.lang.IllegalArgumentException","valueOfNullException":"java.lang.NullPointerException"}}
+      ],
+      "mustRejectMutation": "按字段字典序变为A,Z、错误name/ordinal、values复用同一数组、valueOf行为丢失或输出ordinary class extends Enum。",
+      "oracle": "worked-example-plus-source-jvm-driver",
+      "dependencies": "checked-in self-made source only; fixed JDK/R8; no platform SDK",
+      "acceptanceGate": "engine",
+      "designRefs": "ALGORITHMS §12.3",
+      "inputRequirements": [
+        "独立认证clinit创建Z(name Z,ordinal0)后A(name A,ordinal1)、backing storage/values clone/valueOf/隐藏ctor的canonical模式；不从已排序field_ids推断顺序。"
+      ],
+      "revisionReason": "JLS enum顺序来自声明/初始化；用Z,A替代恰好字典序的A,B，独立推得ordinal0/1并扩valueOf观察。"
+    },
+    {
+      "id": "D051",
+      "family": "declarations",
+      "title": "runtime annotation值没有静默丢失",
+      "suite": "core-java",
+      "seam": "decompile-class",
+      "required": true,
+      "validationScope": "full-unit",
+      "inputKind": "self-made-java-to-dex",
+      "inputRecipe": "self-made @Retention(RUNTIME) @interface Mark{String value();int[] nums();} @Mark(value=\"x\",nums={1,2}) class Case{}; Driver reflects.",
+      "invocations": [
+        {"id":"v1","input":{"targetRole":"case","reflectAnnotation":"Lfixtures/Mark;"},"expected":{"outcome":"java","annotation":{"valueUnits":[120],"nums":[1,2]}}}
+      ],
+      "mustRejectMutation": "systemmetadata当假注解、runtime用户注解丢掉仍JavaUnit。",
+      "oracle": "worked-example-plus-source-jvm-driver",
+      "dependencies": "self-made Mark source + JDK annotation declarations",
+      "acceptanceGate": "engine",
+      "designRefs": "ALGORITHMS §12.3",
+      "inputRequirements": []
+    },
+    {
+      "id": "D052",
+      "family": "strings",
+      "title": "NUL/孤立surrogate/反斜线u保真",
+      "suite": "core-java",
+      "seam": "decompile-method",
+      "required": true,
+      "validationScope": "method-in-known-context",
+      "inputKind": "self-made-java-to-dex",
+      "inputRecipe": "static String f(){return new string literal with UTF16 units [0,55296,65,56320,92,117,48,48,48,97];} Driver observes char units.",
+      "invocations": [
+        {"id":"v1","input":{"targetRole":"case","method":"f()Ljava/lang/String;","args":[]},"expected":{"outcome":"java","returnStringUnits":[0,55296,65,56320,92,117,48,48,48,97]}}
+      ],
+      "mustRejectMutation": "replacement丢surrogate、Unicodeprelex让literal變換行。",
+      "oracle": "worked-example-plus-source-jvm-driver",
+      "dependencies": "checked-in self-made source only; fixed JDK/R8; no platform SDK",
+      "notes": "B02 source generation must safely escape backslash-u and controls; raw DEX string_units certificate verifies the same units before engine.",
+      "acceptanceGate": "engine",
+      "designRefs": "ALGORITHMS §1、§4.8",
+      "inputRequirements": []
+    },
+    {
+      "id": "D053",
+      "family": "strings",
+      "title": "空串与实际换行/制表符",
+      "suite": "core-java",
+      "seam": "decompile-method",
+      "required": true,
+      "validationScope": "method-in-known-context",
+      "inputKind": "self-made-java-to-dex",
+      "inputRecipe": "static String empty(){return \"\";} static String controls(){return text with units [65,10,9,34,92,66];}",
+      "invocations": [
+        {"id":"v1","input":{"targetRole":"case","method":"empty()Ljava/lang/String;","args":[]},"expected":{"outcome":"java","returnStringUnits":[]}},
+        {"id":"v2","input":{"targetRole":"case","method":"controls()Ljava/lang/String;","args":[]},"expected":{"outcome":"java","returnStringUnits":[65,10,9,34,92,66]}}
+      ],
+      "mustRejectMutation": "escape破坏value或输出非法literal。",
+      "oracle": "worked-example-plus-source-jvm-driver",
+      "dependencies": "checked-in self-made source only; fixed JDK/R8; no platform SDK",
+      "acceptanceGate": "engine",
+      "designRefs": "ALGORITHMS §1、§4.8",
+      "inputRequirements": []
+    },
+    {
+      "id": "D054",
+      "family": "strings",
+      "title": "非BMP由UTF16两个单元组成",
+      "suite": "core-java",
+      "seam": "decompile-method",
+      "required": true,
+      "validationScope": "method-in-known-context",
+      "inputKind": "self-made-java-to-dex",
+      "inputRecipe": "static String f(){return Unicode U+1F642 represented as a surrogate pair;}",
+      "invocations": [
+        {"id":"v1","input":{"targetRole":"case","method":"f()Ljava/lang/String;","args":[]},"expected":{"outcome":"java","returnStringUnits":[55357,56898]}}
+      ],
+      "mustRejectMutation": "使用codepoint數當UTF16數量、截断pair。",
+      "oracle": "worked-example-plus-source-jvm-driver",
+      "dependencies": "checked-in self-made source only; fixed JDK/R8; no platform SDK",
+      "acceptanceGate": "engine",
+      "designRefs": "ALGORITHMS §1、§4.8",
+      "inputRequirements": []
+    },
+    {
+      "id": "D055",
+      "family": "input",
+      "title": "超大count先校验不分配",
+      "suite": "input-safety",
+      "seam": "open-or-decompile",
+      "required": true,
+      "validationScope": "input",
+      "inputKind": "self-made-byte-mutation",
+      "inputRecipe": "从同一经审阅的tiny DEX建立两个独立变体：code_item insns_size写2147483647；另一变体handler typed_count写2147483647。各自最小所需bytes超出实际remaining，其他结构保持原样；记录原字段锚点、精确patch范围及artifact hash。",
+      "invocations": [
+        {"id":"insns-count","input":{"targetRole":"case","mutation":"insns_size=2147483647-beyond-remaining"},"expected":{"outcome":"error","errorKind":"malformed","noJava":true,"noTrustedSmali":true}},
+        {"id":"handler-count","input":{"targetRole":"case","mutation":"handler-typed-count=2147483647-beyond-remaining"},"expected":{"outcome":"error","errorKind":"malformed","noJava":true,"noTrustedSmali":true}}
+      ],
+      "mustRejectMutation": "先with_capacity/切片panic、缺字节讀0。",
+      "oracle": "format-violation-at-known-field",
+      "dependencies": "checked-in self-made source only; fixed JDK/R8; no platform SDK",
+      "acceptanceGate": "engine",
+      "designRefs": "ALGORITHMS §1、§3",
+      "inputRequirements": [
+        "两项独立变体分别必跑；先以checked最小字节数证明字段越界，不因同一count也超过分析预算而误归BudgetExceeded。原字段/patch位置/重建hash独立记录。"
+      ],
+      "revisionReason": "把insns_size or handler count的二选一配方改为分别必跑；保持Malformed语义。"
+    },
+    {
+      "id": "D056",
+      "family": "input",
+      "title": "branch到指令中间拒绝",
+      "suite": "input-safety",
+      "seam": "open-or-decompile",
+      "required": true,
+      "validationScope": "input",
+      "inputKind": "self-made-byte-mutation",
+      "inputRecipe": "Self-made 035 method uses a multiword const then branch target patched to its second code unit.",
+      "invocations": [
+        {"id":"v1","input":{"targetRole":"case","mutation":"branch-to-middle-of-multiword-const"},"expected":{"outcome":"error","errorKind":"malformed","noJava":true,"noTrustedSmali":true}}
+      ],
+      "mustRejectMutation": "把payload/midoperand當合法basicblock。",
+      "oracle": "format-violation-at-known-target",
+      "dependencies": "checked-in self-made source only; fixed JDK/R8; no platform SDK",
+      "acceptanceGate": "engine",
+      "designRefs": "ALGORITHMS §1、§3",
+      "inputRequirements": []
+    },
+    {
+      "id": "D057",
+      "family": "input",
+      "title": "实际read-before-def不是默认0",
+      "suite": "input-safety",
+      "seam": "open-or-decompile",
+      "required": true,
+      "validationScope": "input",
+      "inputKind": "reviewed-invalid-smali-or-bytes",
+      "inputRecipe": "Self-made method reads an unassigned narrow register on reachable return path; no parameters provide that register.",
+      "invocations": [
+        {"id":"v1","input":{"targetRole":"case","mutation":"reachable-read-before-definition"},"expected":{"outcome":"error","errorKind":"malformed","noJava":true,"noTrustedSmali":true}}
+      ],
+      "mustRejectMutation": "默认为0/null让java通过。",
+      "oracle": "reachable-undefined-use-proof",
+      "dependencies": "checked-in self-made source only; fixed JDK/R8; no platform SDK",
+      "acceptanceGate": "engine",
+      "designRefs": "ALGORITHMS §1、§3",
+      "inputRequirements": []
+    },
+    {
+      "id": "D058",
+      "family": "input",
+      "title": "宽寄存器被部分覆盖后不能读取",
+      "suite": "input-safety",
+      "seam": "open-or-decompile",
+      "required": true,
+      "validationScope": "input",
+      "inputKind": "reviewed-invalid-smali-or-bytes",
+      "inputRecipe": "Self-made const-wide v0; const/4 v1,1; return-wide v0. Register words in range but high half overwritten.",
+      "invocations": [
+        {"id":"v1","input":{"targetRole":"case","mutation":"wide-high-half-overwrite"},"expected":{"outcome":"error","errorKind":"malformed","noJava":true,"noTrustedSmali":true}}
+      ],
+      "mustRejectMutation": "widehigh仍alias舊ValueId。",
+      "oracle": "wide-pair-invalidated-by-overlapping-write",
+      "dependencies": "checked-in self-made source only; fixed JDK/R8; no platform SDK",
+      "acceptanceGate": "engine",
+      "designRefs": "ALGORITHMS §1、§3",
+      "inputRequirements": []
+    },
+    {
+      "id": "D059",
+      "family": "raw",
+      "title": "未知opcode宽度不可猜NOP",
+      "suite": "raw-integrity",
+      "seam": "decompile-method",
+      "required": true,
+      "validationScope": "method-in-known-context",
+      "inputKind": "self-made-byte-mutation",
+      "inputRecipe": "Mutate a supported raw method opcode at known site to unrecognized format; version and mutation recorded.",
+      "invocations": [
+        {"id":"v1","input":{"targetRole":"case","mutation":"unrecognized-opcode-format"},"expected":{"outcome":"unavailable","java":false,"standardSmali":false,"rawExcerpt":true}}
+      ],
+      "mustRejectMutation": "默认nop或假.word标准smali。",
+      "oracle": "unknown-format-contract",
+      "dependencies": "checked-in self-made source only; fixed JDK/R8; no platform SDK",
+      "acceptanceGate": "engine",
+      "designRefs": "ALGORITHMS §7–§8、§12",
+      "inputRequirements": []
+    },
+    {
+      "id": "D060",
+      "family": "raw",
+      "title": "合法return-only重载保留raw而非改public名字",
+      "suite": "raw-integrity",
+      "seam": "decompile-class",
+      "required": true,
+      "validationScope": "full-unit",
+      "inputKind": "self-made-smali",
+      "inputRecipe": "Self-made class defines same name and parameter list with only differing return descriptor; Java source cannot faithfully declare both; raw DEX structural validity separately certified.",
+      "invocations": [
+        {"id":"v1","input":{"targetRole":"case","scenario":"nonbridge-return-only-collision"},"expected":{"outcome":"mixed","rawMethodsPreserved":2,"noFakeJavaUnit":true}}
+      ],
+      "mustRejectMutation": "rename/drop其中一个使之JavaUnit成功。",
+      "oracle": "raw-member-identity-and-java-representability",
+      "dependencies": "checked-in self-made source only; fixed JDK/R8; no platform SDK",
+      "acceptanceGate": "engine",
+      "designRefs": "ALGORITHMS §7–§8、§12",
+      "inputRequirements": [
+        "完整class含canonical constructor，两个f仅return descriptor不同且无bridge/synthetic生成模式；其他shell/catalog事实均合法，避免因缺constructor/目录而偶然Mixed。"
+      ]
+    },
+    {
+      "id": "D061",
+      "family": "raw",
+      "title": "标准smali回环完整覆盖branch/payload/handler",
+      "suite": "raw-integrity",
+      "seam": "decompile-method",
+      "required": true,
+      "validationScope": "raw-method",
+      "inputKind": "self-made-smali",
+      "inputRecipe": "Composite self-made valid raw DEX method includes switch payload, const-string isolated surrogate, ordered typed handlers and catchall. Supply incomplete declaration catalog to request explicit Java-unsupported raw fallback.",
+      "invocations": [
+        {"id":"v1","input":{"targetRole":"case","method":"f(I)I","catalog":"complete-except-one-reachable-external-invoke"},"expected":{"outcome":"smali","allInstructionSites":true,"payloadBitsExact":true,"handlerPriorityExact":true,"stringUnitsExact":true,"memberRefsExact":true}}
+      ],
+      "mustRejectMutation": "只assembler通过但删除catch/key/literal/changeproto。",
+      "oracle": "independent-dexlib2-normalized-raw-projection",
+      "dependencies": "locked smali/dexlib2 plus checked-in class shell; no source-engine oracle",
+      "acceptanceGate": "engine",
+      "designRefs": "ALGORITHMS §7–§8、§12",
+      "inputRequirements": [
+        "必须含一个reachable外部invoke且恰缺其绑定目录，以确定Unsupported；仅提供不完整但根本未使用的catalog不足以强制raw。独立核完整payload/handlers/UTF16/refs。"
+      ]
+    },
+    {
+      "id": "D062",
+      "family": "resources",
+      "title": "预算耗尽有独立raw预算",
+      "suite": "resource-safety",
+      "seam": "decompile-method",
+      "required": true,
+      "validationScope": "request",
+      "inputKind": "self-made-java-to-dex",
+      "inputRecipe": "Known legal pure arithmetic method of reviewed size; run public engine with max_work_steps=0 then allow raw fallback budget; second invocation raw budget=0.",
+      "invocations": [
+        {"id":"v1","input":{"targetRole":"case","method":"f(I)I","limits":{"max_work_steps":0,"fallback_work_steps":262144,"max_request_work_steps":50000000}},"expected":{"outcome":"smali","reason":"budget_exceeded","rawExact":true}},
+        {"id":"v2","input":{"targetRole":"case","method":"f(I)I","limits":{"max_work_steps":0,"fallback_work_steps":0,"max_request_work_steps":50000000}},"expected":{"outcome":"unavailable","reason":"budget_exceeded"}}
+      ],
+      "mustRejectMutation": "重试提高normallimit、raw偷用耗尽budget、截断後标完整。",
+      "oracle": "resource-contract",
+      "dependencies": "reviewed self-made raw method; no Java source VM required",
+      "acceptanceGate": "engine",
+      "designRefs": "DESIGN §3.7、§10.3；ALGORITHMS §8、§13",
+      "inputRequirements": []
+    },
+    {
+      "id": "D063",
+      "family": "resources",
+      "title": "取消停止请求不转fallback",
+      "suite": "resource-safety",
+      "seam": "decompile-method",
+      "required": true,
+      "validationScope": "request",
+      "inputKind": "self-made-java-to-dex",
+      "inputRecipe": "Large finite self-made graph/method; RunContext callback becomes cancelled after a bounded number of observable callback checks; no private phase call count asserted.",
+      "invocations": [
+        {"id":"v1","input":{"targetRole":"case","method":"f(I)I","cancellation":{"arm":"after-open","cancelAfterChecks":64}},"expected":{"outcome":"error","errorKind":"cancelled","noFallbackReport":true}}
+      ],
+      "mustRejectMutation": "取消後逐method跑smali、無界loop不检查。",
+      "oracle": "public-cancellation-contract",
+      "dependencies": "finite self-made input; check callback not private scheduler",
+      "acceptanceGate": "engine",
+      "designRefs": "DESIGN §3.7、§10.3；ALGORITHMS §8、§13",
+      "inputRequirements": [
+        "独立认证方法是有限且工作量足以触发取消的合法输入，catalog完整；64是caller取消策略，不断言引擎私有phase/调用总次数。"
+      ]
+    },
+    {
+      "id": "D064",
+      "family": "resources",
+      "title": "转义后的成员预算与整份报告预算分别生效",
+      "suite": "resource-safety",
+      "seam": "decompile-and-render",
+      "required": true,
+      "validationScope": "request",
+      "inputKind": "self-made-java-to-dex",
+      "inputRecipe": "成员场景：f()String返回4个NUL，转义后源码超过16 bytes，normal与raw成员上限均16、report上限保持默认。报告场景：另一合法ReportCase含canonical ctor和8个static int method_0()..method_7()，各返回0；完整Object目录。每个成员源码远小于65536 bytes，但仅8个不同方法声明的Java最小长度合计已超过128 bytes；请求整类并render。两者其他分析/目标格式预算均充足，不需要大分配。",
+      "invocations": [
+        {"id":"v1","input":{"targetRole":"case","method":"f()Ljava/lang/String;","stringUnits":[0,0,0,0],"limits":{"max_method_output_bytes":16,"fallback_output_bytes":16}},"expected":{"outcome":"resource-failure","resourceFailureExplicit":true,"noTruncatedSuccess":true}},
+        {"id":"report-total","input":{"targetRole":"report-case","selection":"class","limits":{"max_method_output_bytes":65536,"fallback_output_bytes":65536,"max_report_output_bytes":128}},"expected":{"outcome":"resource-failure","limit":"max_report_output_bytes","resourceFailureExplicit":true,"noTruncatedSuccess":true}}
+      ],
+      "mustRejectMutation": "按未转义size核成员、把report上限误当每方法重置、漏合计shell/成员或halfJava/halfSmali标完整。",
+      "oracle": "bounded-output-contract",
+      "dependencies": "checked-in self-made source only; fixed JDK/R8; no platform SDK",
+      "acceptanceGate": "engine",
+      "designRefs": "DESIGN §3.7、§7、§10.3；ALGORITHMS §8、§13",
+      "inputRequirements": [
+        "独立确认8个方法均实际定义且名称/proto不同，输入与catalog合法；逐成员长度上限充裕，ReportCase合计必超过report上限。诊断按实际limit投影，不断言在哪个私有phase失败。"
+      ],
+      "revisionReason": "拆清原max_output_bytes的成员/report歧义；保留NUL转义的失败预期，追加只触发整份报告长度上限的独立调用。"
+    },
+    {
+      "id": "D065",
+      "family": "identity",
+      "title": "041相同数字index不同logicalmember不能串定义",
+      "suite": "identity-semantics",
+      "seam": "decompile-method",
+      "required": true,
+      "validationScope": "method-in-known-context",
+      "inputKind": "self-made-041-container",
+      "inputRecipe": "Create two logical 041 DEX members with same class/method table indices but different Case.f return 11 vs22, original container header offsets/sections certified.",
+      "invocations": [
+        {"id":"v1","input":{"targetRole":"logical0","method":"f()I","args":[],"through":["engine-original-view","application-original-view"]},"expected":{"outcome":"java","return":11}},
+        {"id":"v2","input":{"targetRole":"logical1","method":"f()I","args":[],"through":["engine-original-view","application-original-view"]},"expected":{"outcome":"java","return":22}}
+      ],
+      "mustRejectMutation": "normalizedheader漏header_offset、按descriptor任取first。",
+      "oracle": "worked-return-values-plus-independent-container-projection",
+      "dependencies": "checked-in self-made source only; fixed JDK/R8; no platform SDK",
+      "notes": "Preparation must implement and independently inspect 041 builder before certifying input; no personal Android SDK sample.",
+      "acceptanceGate": "engine-and-application",
+      "designRefs": "ALGORITHMS §1、§14.2",
+      "inputRequirements": [
+        "两logical原header_offset/共享section与相同数字class/method index独立认证；两个seam分别满足每个invocation的同一预期，不拆ID也不重复计case。"
+      ]
+    },
+    {
+      "id": "D066",
+      "family": "identity",
+      "title": "定义方法与外部method-id引用分开",
+      "suite": "domain-integrity",
+      "seam": "query-defined-symbols",
+      "required": true,
+      "validationScope": "domain",
+      "inputKind": "self-made-smali",
+      "inputRecipe": "自制035 class Lfixtures/Own;恰定义canonical <init>()V和public static f()V；ctor引用Object.<init>()V，f引用External.g()V，后两owner均无class_def。查询scope为该physical/logical输入，method-name filter=null，列所有实际定义，含constructor；不由Java编译器隐式新增成员。",
+      "invocations": [
+        {"id":"all-definitions","input":{"targetRole":"own-image","query":"defined-methods","nameFilter":null},"expected":{"outcome":"data","definedMethods":["Lfixtures/Own;-><init>()V","Lfixtures/Own;->f()V"],"mustNotInclude":["Ljava/lang/Object;-><init>()V","Lfixtures/External;->g()V"]}}
+      ],
+      "mustRejectMutation": "列全部method_ids當definitions。",
+      "oracle": "reviewed-input-symbol-manifest",
+      "dependencies": "checked-in self-made source only; fixed JDK/R8; no platform SDK",
+      "acceptanceGate": "application",
+      "designRefs": "ALGORITHMS §14.2",
+      "inputRequirements": [
+        "独立class_defs/class_data定义清单恰为两个完整proto；列表以原scope/member key关联，忽略独立结果次序，不只比显示name。"
+      ],
+      "revisionReason": "显式包含constructor与外部Object引用，改用完整descriptor的无筛选定义清单，消除自动成员/隐藏过滤歧义。"
+    },
+    {
+      "id": "D067",
+      "family": "identity",
+      "title": "同方法两个引用site不能合并",
+      "suite": "domain-integrity",
+      "seam": "query-reference-sites",
+      "required": true,
+      "validationScope": "domain",
+      "inputKind": "self-made-java-to-dex",
+      "inputRecipe": "Self-made method calls Dep.f twice at distinct certified PCs; public xref query matches exact method-ref.",
+      "invocations": [
+        {"id":"v1","input":{"targetRole":"case","query":"direct-method-xref","methodRef":"Lfixtures/Dep;->f()V"},"expected":{"outcome":"data","siteCount":2,"referencingMethod":"Case.target","allCertifiedSites":true}}
+      ],
+      "mustRejectMutation": "一referencingmethod去重漏第二site。",
+      "oracle": "independent-raw-site-manifest",
+      "dependencies": "self-made Dep reference and locked raw decoder certificate",
+      "acceptanceGate": "application",
+      "designRefs": "ALGORITHMS §14.2",
+      "inputRequirements": [
+        "同一Case.target()V内两个实际invoke operand PCs独立认证；原MethodKey+PC+operand_slot唯一，报告次序不作断言。"
+      ]
+    },
+    {
+      "id": "D068",
+      "family": "extract",
+      "title": "stored/deflate原payload逐字相等",
+      "suite": "extract-safety",
+      "seam": "extract-entry",
+      "required": true,
+      "validationScope": "file",
+      "inputKind": "self-made-zip",
+      "inputRecipe": "自制ZIP按ordinal含stored.bin(method0)、deflated.bin(method8)，payload均[0,255,65,0,128,10]；另有同名dup.bin两个record，ordinal2 payload[1]，ordinal3 payload[2]。所有CRC/size/local/central结构合法；每次输出为新路径，force=false。",
+      "invocations": [
+        {"id":"stored","input":{"entry":{"name":"stored.bin","ordinal":0},"force":false,"target":"absent"},"expected":{"outcome":"data","fileBytes":[0,255,65,0,128,10]}},
+        {"id":"deflated","input":{"entry":{"name":"deflated.bin","ordinal":1},"force":false,"target":"absent"},"expected":{"outcome":"data","fileBytes":[0,255,65,0,128,10]}},
+        {"id":"duplicate-first","input":{"entry":{"name":"dup.bin","ordinal":2},"force":false,"target":"absent"},"expected":{"outcome":"data","fileBytes":[1]}},
+        {"id":"duplicate-second","input":{"entry":{"name":"dup.bin","ordinal":3},"force":false,"target":"absent"},"expected":{"outcome":"data","fileBytes":[2]}},
+        {"id":"duplicate-unselected","input":{"entry":{"name":"dup.bin"},"force":false,"target":"absent"},"expected":{"outcome":"error","errorKind":"ambiguous_entry","targetAbsent":true,"tempFilesRemaining":0}}
+      ],
+      "mustRejectMutation": "UTF8转换binary、修改DEXheader或少字節，使用错误重复entry。",
+      "oracle": "literal-payload-bytes",
+      "dependencies": "checked-in ZIP recipe and payload; no engine required",
+      "acceptanceGate": "application",
+      "designRefs": "ALGORITHMS §14.3",
+      "inputRequirements": [
+        "独立核4个physical entry的ordinal/method/原payload/CRC；重复name不能折叠或默认任选，ambiguous调用输出必须不存在。"
+      ],
+      "revisionReason": "保留两个codec逐字节预期，并增加重复entry的显式ordinal与歧义拒绝，防止同payload掩盖错误选择。"
+    },
+    {
+      "id": "D069",
+      "family": "extract",
+      "title": "CRC、预算与不支持entry拒绝均保持目标不变",
+      "suite": "extract-safety",
+      "seam": "extract-entry",
+      "required": true,
+      "validationScope": "file",
+      "inputKind": "self-made-zip",
+      "inputRecipe": "四个独立ZIP/输出场景，均force=true替换普通文件KEEP([75,69,69,80])，目标非symlink/目录/输入alias。badCRC payload为[0,255,65,0,128,10]，local/central CRC彼此一致但为正确CRC xor 1，其他结构有效。overBudget为1024个0x41、method8、CRC/size正确、inflate限额128。unsupported.bin为method12的真实BZIP2流，version-needed=46、bit0=0，payload同badCRC但CRC正确；Diana只支持0/8。encrypted.bin是合法traditional ZipCrypto stored entry：method0、bit0=1、bit3/bit6=0、version-needed=20，12-byte加密header加6-byte密文；公开fixture密码fixture，header前11个明文字节0..10、末字节为plaintext CRC高字节。local/central CRC/size一致，compressed_size含12-byte header；独立参考工具解密可得上述6-byte payload。生产不提供密码/解密路径。",
+      "invocations": [
+        {"id":"bad-crc","input":{"entry":{"name":"bad.bin","ordinal":0},"force":true,"target":{"kind":"regular","bytes":[75,69,69,80]},"inflateBudgetBytes":4096},"expected":{"outcome":"error","errorKind":"crc_mismatch","targetBytes":[75,69,69,80],"tempFilesRemaining":0}},
+        {"id":"inflate-budget","input":{"entry":{"name":"large.bin","ordinal":0},"force":true,"target":{"kind":"regular","bytes":[75,69,69,80]},"inflateBudgetBytes":128},"expected":{"outcome":"error","errorKind":"budget_exceeded","targetBytes":[75,69,69,80],"tempFilesRemaining":0}},
+        {"id":"unsupported-compression","input":{"entry":{"name":"unsupported.bin","ordinal":0},"force":true,"target":{"kind":"regular","bytes":[75,69,69,80]},"inflateBudgetBytes":4096},"expected":{"outcome":"error","errorKind":"unsupported_compression","targetBytes":[75,69,69,80],"tempFilesRemaining":0}},
+        {"id":"encrypted-entry","input":{"entry":{"name":"encrypted.bin","ordinal":0},"force":true,"target":{"kind":"regular","bytes":[75,69,69,80]},"inflateBudgetBytes":4096},"expected":{"outcome":"error","errorKind":"encrypted_entry","targetBytes":[75,69,69,80],"tempFilesRemaining":0}}
+      ],
+      "mustRejectMutation": "删除CRC/预算/压缩方式/加密检查，以TargetExists或任意错误冒充指定拒绝；把加密stored额外header误报等长损坏，或在验证前破坏KEEP、留下temp/半文件。",
+      "oracle": "literal-target-and-input-invalidity",
+      "dependencies": "self-made temporary directories and ZIP only",
+      "acceptanceGate": "application",
+      "designRefs": "ALGORITHMS §14.3",
+      "inputRequirements": [
+        "四个目标都可安全overwrite，不能先被TargetExists挡住；各ZIP独立核头/范围/CRC/size，明确唯一拒绝原因。BZIP2流由独立参考解压器核plaintext；ZipCrypto用公开fixture密码独立解密核plaintext/CRC/12-byte header，不以裸设flag的损坏文件代替。Malformed、解码失败、错误拒绝类型或其他任意error都不能匹配指定预期。"
+      ],
+      "revisionReason": "保留force=true的CRC/预算预期，并补H10已经要求的unsupported compression与encrypted entry两种独立有效自制输入、明确错误类别和目标不变断言；不新增生产解码器。"
+    },
+    {
+      "id": "D070",
+      "family": "extract",
+      "title": "no-clobber与输入alias/ZipSlip安全",
+      "suite": "extract-safety",
+      "seam": "extract-entry",
+      "required": true,
+      "validationScope": "file",
+      "inputKind": "self-made-zip-and-temp-files",
+      "inputRecipe": "使用合法ZIP、持有的输入lease与private输出目录。各unsafe目标独立调用：已存在普通文件no-force、symlink force、输入原路径force、输入hardlink force、目录force。../escape仅是entry name，显式safe output必须成功。两个no-force发布者使用不同16MiB确定pattern payload；另测force替换KEEP。观察规则见TASKS §4.3：公开取消回调始终false并只读取最终路径，配合同步开始的reader，不使用私有phase hook或调用次数断言。",
+      "invocations": [
+        {"id":"existing-no-force","input":{"entry":{"name":"safe.bin","ordinal":0},"force":false,"target":{"kind":"regular","bytes":[75,69,69,80]}},"expected":{"outcome":"error","errorKind":"target_exists","originalFilesUnchanged":true,"tempFilesRemaining":0}},
+        {"id":"symlink-force","input":{"entry":{"name":"safe.bin","ordinal":0},"force":true,"target":{"kind":"symlink","referent":"sentinel"}},"expected":{"outcome":"error","errorKind":"unsafe_target","originalFilesUnchanged":true,"tempFilesRemaining":0}},
+        {"id":"input-path-force","input":{"entry":{"name":"safe.bin","ordinal":0},"force":true,"target":{"kind":"input-path"}},"expected":{"outcome":"error","errorKind":"unsafe_target","originalFilesUnchanged":true,"tempFilesRemaining":0}},
+        {"id":"input-hardlink-force","input":{"entry":{"name":"safe.bin","ordinal":0},"force":true,"target":{"kind":"input-hardlink"}},"expected":{"outcome":"error","errorKind":"unsafe_target","originalFilesUnchanged":true,"tempFilesRemaining":0}},
+        {"id":"directory-force","input":{"entry":{"name":"safe.bin","ordinal":0},"force":true,"target":{"kind":"directory"}},"expected":{"outcome":"error","errorKind":"unsafe_target","originalFilesUnchanged":true,"tempFilesRemaining":0}},
+        {"id":"traversal-name-safe-target","input":{"entry":{"name":"../escape","ordinal":1},"force":false,"target":{"kind":"absent","role":"explicit-safe-output"}},"expected":{"outcome":"data","fileBytes":[0,255,65,0,128,10],"outputOnlyExplicitPath":true,"escapePathAbsent":true,"tempFilesRemaining":0}},
+        {"id":"two-publishers","input":{"force":false,"target":{"kind":"absent"},"publishers":[{"entryOrdinal":2,"pattern":{"length":16777216,"multiplier":17,"add":3}},{"entryOrdinal":3,"pattern":{"length":16777216,"multiplier":29,"add":11}}],"observer":"callback-and-reader"},"expected":{"outcome":"data","exactlyOnePublish":true,"otherErrorKind":"target_exists","targetEqualsSuccessfulPublisher":true,"observationsOnly":["absent","complete-winning-payload"],"completePayloadObserved":true,"tempFilesRemaining":0}},
+        {"id":"force-atomic-replace","input":{"entryOrdinal":2,"force":true,"target":{"kind":"regular","bytes":[75,69,69,80]},"observer":"callback-and-reader"},"expected":{"outcome":"data","targetEqualsSelectedPayload":true,"observationsOnly":["old-KEEP","complete-new-payload"],"completePayloadObserved":true,"tempFilesRemaining":0}}
+      ],
+      "mustRejectMutation": "force绕过symlink/input-alias检查、entry name参与路径拼接、两个不同payload都发布成功、callback/reader观察到最终路径为空/部分/混合内容、失败删输入或遗留temp。",
+      "oracle": "file-safety-contract",
+      "dependencies": "checked-in self-made source only; fixed JDK/R8; no platform SDK",
+      "notes": "Use platform-specific symlink/hardlink capability reports; required unsupported test environment fails preparation for that platform, no CLI subprocess.",
+      "acceptanceGate": "application",
+      "designRefs": "ALGORITHMS §14.3",
+      "inputRequirements": [
+        "Windows/symlink/hardlink/atomic rename能力在准备阶段实测；缺能力是该平台准备失败，不把八个invocation合成一个any-error。观察按一次打开的handle读完整bytes，pattern的每个byte由(i*multiplier+add)%256独立确定。"
+      ],
+      "revisionReason": "拆开目标/force组合，要求ZipSlip场景真实成功及精确bytes，并把原子性布尔改为公开回调/reader的有界过程观察。"
+    },
+    {
+      "id": "D071",
+      "family": "numeric",
+      "title": "byte/short/char经入口或合流Phi后的return/call无损转换",
+      "suite": "core-java",
+      "seam": "decompile-method",
+      "required": true,
+      "validationScope": "method-in-known-context",
+      "acceptanceGate": "engine",
+      "designRefs": "ALGORITHMS §4.9、§5、§9",
+      "inputKind": "self-made-java-to-dex",
+      "inputRecipe": "Case定义b(ZBB)B、s(ZSS)S、c(ZCC)C，均用if选择两个对应类型参数后return；另call(ZBB)I选择byte后调用完整目录中的Dep.echoByte(B)I。无显式int-to-byte/short/char；选择值本已落入目标范围。",
+      "inputRequirements": [
+        "独立记录原proto、branch/return、invoke formal及不存在原有损窄化Op；选择路径真实依赖boolean参数。入口/合流具体Phi数量和local名字不作断言。",
+        "Dep.echoByte只按signed byte返回int且无额外effect；所有普通use转换必须由producer范围而非Driver实际样本值证明。"
+      ],
+      "invocations": [
+        {"id":"byte-low","input":{"targetRole":"case","method":"b(ZBB)B","args":[true,-128,127]},"expected":{"outcome":"java","return":-128}},
+        {"id":"byte-high","input":{"targetRole":"case","method":"b(ZBB)B","args":[false,-128,127]},"expected":{"outcome":"java","return":127}},
+        {"id":"short-low","input":{"targetRole":"case","method":"s(ZSS)S","args":[true,-32768,32767]},"expected":{"outcome":"java","return":-32768}},
+        {"id":"short-high","input":{"targetRole":"case","method":"s(ZSS)S","args":[false,-32768,32767]},"expected":{"outcome":"java","return":32767}},
+        {"id":"char-low","input":{"targetRole":"case","method":"c(ZCC)C","args":[true,0,65535]},"expected":{"outcome":"java","return":0}},
+        {"id":"char-high","input":{"targetRole":"case","method":"c(ZCC)C","args":[false,0,65535]},"expected":{"outcome":"java","return":65535}},
+        {"id":"call-byte","input":{"targetRole":"case","method":"call(ZBB)I","args":[true,-128,127]},"expected":{"outcome":"java","return":-128}}
+      ],
+      "mustRejectMutation": "拒绝合法byte/short/char返回或调用、缺必要static type转换导致javac失败、byte误当unsigned或char误当signed。",
+      "oracle": "JLS-primitive-ranges-plus-source-jvm-driver",
+      "dependencies": "自制源码/DEX与完整声明目录；工具内容锁见TASKS §4.5"
+    },
+    {
+      "id": "D072",
+      "family": "numeric",
+      "title": "窄producer不授权截断后续int算术或混合Phi",
+      "suite": "core-java",
+      "seam": "decompile-method",
+      "required": true,
+      "validationScope": "method-in-known-context",
+      "acceptanceGate": "engine",
+      "designRefs": "ALGORITHMS §4.9",
+      "inputKind": "self-made-java-to-dex",
+      "inputRecipe": "static int sum(byte a,byte b){return a+b;} static int mix(boolean p,byte b,char c){int v;if(p)v=b;else v=c;return v;} 不存在原始narrowing Op。",
+      "inputRequirements": [
+        "独立确认add-int结果未跟int-to-byte，以及mix可来自byte/char两种producer；源/原proto始终返回I。"
+      ],
+      "invocations": [
+        {"id":"sum-positive","input":{"targetRole":"case","method":"sum(BB)I","args":[127,127]},"expected":{"outcome":"java","return":254}},
+        {"id":"sum-negative","input":{"targetRole":"case","method":"sum(BB)I","args":[-128,-128]},"expected":{"outcome":"java","return":-256}},
+        {"id":"mixed-byte","input":{"targetRole":"case","method":"mix(ZBC)I","args":[true,-128,65535]},"expected":{"outcome":"java","return":-128}},
+        {"id":"mixed-char","input":{"targetRole":"case","method":"mix(ZBC)I","args":[false,-128,65535]},"expected":{"outcome":"java","return":65535}}
+      ],
+      "mustRejectMutation": "把byte输入的窄origin错误继承到add结果，或把byte/char hull强制转byte导致254/65535损坏。",
+      "oracle": "worked-integer-ranges-plus-source-jvm-driver",
+      "dependencies": "自制源码/DEX与完整声明目录；工具内容锁见TASKS §4.5"
+    },
+    {
+      "id": "D073",
+      "family": "heap",
+      "title": "零元素fill仍保留null异常",
+      "suite": "core-java",
+      "seam": "decompile-method",
+      "required": true,
+      "validationScope": "method-in-known-context",
+      "acceptanceGate": "engine",
+      "designRefs": "ALGORITHMS §2.4",
+      "inputKind": "self-made-smali-with-proved-reference-java",
+      "inputRecipe": "035静态f([I)V只含fill-array-data p0到count=0、element_width=4的payload，然后return-void；无handler/其他effect。独立参考Java f(int[] a){int unused=a.length;}，按Dalvik该零fill与length read的单site transfer等价：nonnull无写正常，null抛NPE。",
+      "inputRequirements": [
+        "独立确认payload count确为0、组件为int、fill原site reachable，无其他可能决定异常的操作。",
+        "B03记录这个封闭单Op到array-length的逐状态规范推导与相同单入口/正常return/异常exit对应；参考Java是语义镜像，不声称JVM执行了原DEX，不推广成异常解释器。"
+      ],
+      "invocations": [
+        {"id":"empty-array","input":{"targetRole":"case","method":"f([I)V","args":[{"arrayType":"[I","values":[]}]},"expected":{"outcome":"java","returnVoid":true,"arrayInt":[]}},
+        {"id":"null-array","input":{"targetRole":"case","method":"f([I)V","args":[null]},"expected":{"outcome":"java","exception":"java.lang.NullPointerException"}}
+      ],
+      "mustRejectMutation": "因count=0删除整个fill/NPE，或无理由改为raw。",
+      "oracle": "dalvik-fill-spec-single-op-proof-plus-reference-java-driver",
+      "dependencies": "自制源码/DEX与完整声明目录；工具内容锁见TASKS §4.5"
+    },
+    {
+      "id": "D074",
+      "family": "heap",
+      "title": "非空fill缺FreshArray证明时完整raw",
+      "suite": "raw-integrity",
+      "seam": "decompile-method",
+      "required": true,
+      "validationScope": "raw-method",
+      "acceptanceGate": "engine",
+      "designRefs": "ALGORITHMS §2.4、§8",
+      "inputKind": "self-made-smali",
+      "inputRecipe": "四个独立有效原始方法：向参数int[]填[7,8]；new int[1]后填2项；new int[n]后填2项；new int[2]先Dep.publish(array)再填2项。所有component/width/ref/target完整，目录含publish的精确声明。只验Java拒绝与raw回环，不借简化VM执行异常/部分写入。",
+      "inputRequirements": [
+        "独立projection证明各自失败的是来源/足够长度/未逃逸条件，不是metadata坏、缺catalog或未知opcode；payload两项I32与顺序完整。"
+      ],
+      "invocations": [
+        {"id":"parameter","input":{"targetRole":"parameter","method":"f([I)V"},"expected":{"outcome":"smali","reason":"unsupported","unsupportedReason":"ArrayFillShape","rawExact":true}},
+        {"id":"too-short","input":{"targetRole":"too-short","method":"f()[I"},"expected":{"outcome":"smali","reason":"unsupported","unsupportedReason":"ArrayFillShape","rawExact":true}},
+        {"id":"unknown-length","input":{"targetRole":"unknown-length","method":"f(I)[I"},"expected":{"outcome":"smali","reason":"unsupported","unsupportedReason":"ArrayFillShape","rawExact":true}},
+        {"id":"escaped","input":{"targetRole":"escaped","method":"f()[I"},"expected":{"outcome":"smali","reason":"unsupported","unsupportedReason":"ArrayFillShape","rawExact":true}}
+      ],
+      "mustRejectMutation": "对参数/长度不足或未知/已发布数组直接展开stores而伪称Java，或拒绝后丢payload。",
+      "oracle": "independent-dex-projection-plus-fresh-array-precondition-falsification",
+      "dependencies": "自制源码/DEX与完整声明目录；工具内容锁见TASKS §4.5"
+    },
+    {
+      "id": "D075",
+      "family": "java-target",
+      "title": "Java参数words含this与无code声明的255边界",
+      "suite": "target-representability",
+      "seam": "decompile-method",
+      "required": true,
+      "validationScope": "method-in-known-context",
+      "acceptanceGate": "engine",
+      "designRefs": "ALGORITHMS §12.4、§7",
+      "inputKind": "self-made-dex-builder",
+      "inputRecipe": "普通owner保留canonical Object constructor，abstract变体owner标abstract。分别构造静态255/256个I参数、实例254/255个I参数的f(... )I，body返回首个int参数，registers/ins_size均与原proto一致；另abstract实例254/255个I参数的无code声明。参数名p0..，禁止删除unused参数或改proto。接受侧有独立合法Java参考，拒绝侧只做DEX完整性及raw回环。",
+      "inputRequirements": [
+        "独立按binary proto计this+parameter words；DEX字段/范围本身有效、code_off=0只用于abstract，目录含owner/parent事实。",
+        "不把Java参数上限当DEX结构上限；abstract over-limit的Smali只有原声明，无.registers/合成body。接受侧实际javac/classfile核descriptor未少参数。"
+      ],
+      "invocations": [
+        {"id":"static-at","input":{"targetRole":"static255","parameterWords":255,"argsPattern":{"firstInt":7,"remainingInts":0}},"expected":{"outcome":"java","return":7,"protoPreserved":true}},
+        {"id":"static-over","input":{"targetRole":"static256","parameterWords":256},"expected":{"outcome":"smali","reason":"unsupported","unsupportedReason":"JavaTargetLimit","targetItem":"parameter_words","rawExact":true}},
+        {"id":"instance-at","input":{"targetRole":"instance254","parameterWords":255,"argsPattern":{"firstInt":7,"remainingInts":0}},"expected":{"outcome":"java","return":7,"protoPreserved":true}},
+        {"id":"instance-over","input":{"targetRole":"instance255","parameterWords":256},"expected":{"outcome":"smali","reason":"unsupported","unsupportedReason":"JavaTargetLimit","targetItem":"parameter_words","rawExact":true}},
+        {"id":"abstract-at","input":{"targetRole":"abstract254","parameterWords":255},"expected":{"outcome":"declaration-only","protoPreserved":true,"hasBody":false}},
+        {"id":"abstract-over","input":{"targetRole":"abstract255","parameterWords":256},"expected":{"outcome":"smali","reason":"unsupported","unsupportedReason":"JavaTargetLimit","targetItem":"parameter_words","rawDeclarationExact":true,"hasBody":false}}
+      ],
+      "mustRejectMutation": "漏this、用可配置Limits放宽255、删unused参数、把目标拒绝误报Malformed/BudgetExceeded，或为abstract造code。",
+      "oracle": "JVMS-4.3.3-word-count-plus-independent-dex-and-classfile-projection",
+      "dependencies": "自制源码/DEX与完整声明目录；工具内容锁见TASKS §4.5"
+    },
+    {
+      "id": "D076",
+      "family": "java-target",
+      "title": "MUTF8按编码字节而非u16或source escape检查",
+      "suite": "target-representability",
+      "seam": "decompile-method",
+      "required": true,
+      "validationScope": "method-in-known-context",
+      "acceptanceGate": "engine",
+      "designRefs": "ALGORITHMS §4.8、§12.4",
+      "inputKind": "self-made-dex-builder-with-reference-java",
+      "inputRecipe": "f()String的const-string分别由32767个NUL、32767个NUL后接A、32768个NUL构成，对应MUTF8长度65534/65535/65536；原DEX string_data合法。接收侧参考Java使用octal NUL escapes，不含Unicode-prelex换行。",
+      "inputRequirements": [
+        "独立逐u16按NUL=2、ASCII=1规则计MUTF8字节；所有分析/输出预算足够，不能由小输出限额掩盖目标错误。",
+        "紧凑期望完整规定字符串：zeroPrefixUnits个0后可选lastUnit；不是仅比较length或hash。"
+      ],
+      "invocations": [
+        {"id":"below","input":{"targetRole":"nul32767","method":"f()Ljava/lang/String;"},"expected":{"outcome":"java","stringPattern":{"zeroPrefixUnits":32767}}},
+        {"id":"at","input":{"targetRole":"nul32767-A","method":"f()Ljava/lang/String;"},"expected":{"outcome":"java","stringPattern":{"zeroPrefixUnits":32767,"lastUnit":65}}},
+        {"id":"over","input":{"targetRole":"nul32768","method":"f()Ljava/lang/String;"},"expected":{"outcome":"smali","reason":"unsupported","unsupportedReason":"JavaTargetLimit","targetItem":"constant_utf8_bytes","rawExact":true}}
+      ],
+      "mustRejectMutation": "按UTF16 length放过65536-byte CP项、按source escape长度误拒合法65535项，或把NUL转空/丢单元。",
+      "oracle": "JVMS-CONSTANT_Utf8-plus-exact-u16-pattern-and-javac",
+      "dependencies": "自制源码/DEX与完整声明目录；工具内容锁见TASKS §4.5"
+    },
+    {
+      "id": "D077",
+      "family": "java-target",
+      "title": "代码保守上界超过目标时不伪称资源耗尽",
+      "suite": "target-representability",
+      "seam": "decompile-method",
+      "required": true,
+      "validationScope": "raw-method",
+      "acceptanceGate": "engine",
+      "designRefs": "ALGORITHMS §12.5",
+      "inputKind": "self-made-smali",
+      "inputRecipe": "静态f()V连续执行10000个相同Dep.tick()V invoke-static后return，无loop/handler；每个call可能effect，完整目录与同一可访问声明匹配。原code约30001 code units，分析/AST/原始输出配额均充足；每个实际call至少一个32-byte语法node，目标code投影必超过65534。",
+      "inputRequirements": [
+        "独立记录10000个有序invoke site且不允许优化成一个loop/删call；此例是Diana保守投影拒绝，不声称实际javac bytecode一定超限。",
+        "分析预算固定为方法5,000,000/request50,000,000 steps，raw预留5,000,000；其余为DESIGN默认。B03核本recipe可在这些预算完成；不够须独立成本证据与spec revision，不接受BudgetExceeded冒充目标拒绝。"
+      ],
+      "invocations": [
+        {"id":"code-upper-bound","input":{"targetRole":"case","method":"f()V","catalog":"complete","limits":{"max_work_steps":5000000,"max_request_work_steps":50000000,"fallback_work_steps":5000000}},"expected":{"outcome":"smali","reason":"unsupported","unsupportedReason":"JavaTargetLimit","targetItem":"code_bytes","rawExact":true,"orderedInvokeSites":10000}}
+      ],
+      "mustRejectMutation": "把DEX code units直接当JVM费用、DCE重复call或目标上界溢出后放行、用资源error冒充目标admission。",
+      "oracle": "specified-code-cost-lower-bound-plus-independent-raw-projection",
+      "dependencies": "自制源码/DEX与完整声明目录；工具内容锁见TASKS §4.5"
+    },
+    {
+      "id": "D078",
+      "family": "java-target",
+      "title": "class pool保守投影拒绝不丢无code成员",
+      "suite": "target-representability",
+      "seam": "decompile-class",
+      "required": true,
+      "validationScope": "full-unit",
+      "acceptanceGate": "engine",
+      "designRefs": "ALGORITHMS §12.6",
+      "inputKind": "self-made-dex-builder",
+      "inputRecipe": "public interface Case恰有2200个名字互异的abstract m0000..m2199()I声明，无constructor、无code、无默认方法；flags/proto/hierarchy完整。每个声明至少计一个N，1+64+32*N已超过65535；原DEX与实际可能的JVM pool并不因此格式损坏。",
+      "inputRequirements": [
+        "独立全量声明manifest=2200、code_off均0、每个proto和原key存在；其他shell条件合法，无未知compiler-owned成员。",
+        "分析/报告预算充足；class pool拒绝不等于每个独立合法声明失效，不要求强制把所有DeclarationOnly改Smali。"
+      ],
+      "invocations": [
+        {"id":"class-pool","input":{"targetRole":"case","catalog":"complete","limits":"DESIGN-defaults"},"expected":{"outcome":"mixed","reason":"unsupported","unsupportedReason":"JavaTargetLimit","targetItem":"constant_pool_slots","declarationsPreserved":2200,"noFakeJavaUnit":true}}
+      ],
+      "mustRejectMutation": "只看DEX pool大小、漏声明/自动截断后报JavaUnit，或错误合成default constructor/body。",
+      "oracle": "specified-pool-bound-plus-independent-full-declaration-manifest",
+      "dependencies": "自制源码/DEX与完整声明目录；工具内容锁见TASKS §4.5"
+    },
+    {
+      "id": "D079",
+      "family": "initialization",
+      "title": "恢复static final不得使下游读消失及跳过class-init",
+      "suite": "core-java",
+      "seam": "decompile-related-classes",
+      "required": true,
+      "validationScope": "full-unit-set",
+      "acceptanceGate": "engine",
+      "designRefs": "ALGORITHMS §9.1、§12.2",
+      "inputKind": "self-made-java-to-dex",
+      "inputRecipe": "Case含static final int N与String S，均blank final，在static block按序赋7和\"x\"后Dep.log(\"INIT\")。Reader.readInt/readString各先Dep.log(\"READ\")再读Case字段。分别恢复Case与Reader完整JavaUnit，随后只用两份恢复源码和未改动Dep一起编译；Driver只调用Reader两次，不提前触碰Case。每种读在新JVM执行。",
+      "inputRequirements": [
+        "原DEX Reader实际含sget/sget-object，Case的clinit写及依赖目录完整；Case字段的source常量性事实为NonConstant。",
+        "两个class均通过公开Engine请求取得，不能保留原Case.class或splice原Reader；javac后Case字段无ConstantValue，Reader仍实际getstatic。"
+      ],
+      "invocations": [
+        {"id":"int-read","input":{"targetRoles":["case","reader"],"method":"readInt()I","repeat":2,"isolation":"fresh-jvm","callRole":"reader"},"expected":{"outcome":"java","returns":[7,7],"events":["READ","INIT","READ"],"fieldReadsPreserved":true,"constantValueAbsent":true}},
+        {"id":"string-read","input":{"targetRoles":["case","reader"],"method":"readString()Ljava/lang/String;","repeat":2,"isolation":"fresh-jvm","callRole":"reader"},"expected":{"outcome":"java","returnsStringUnits":[[120],[120]],"events":["READ","INIT","READ"],"fieldReadsPreserved":true,"constantValueAbsent":true}}
+      ],
+      "mustRejectMutation": "把static final改成常量字段initializer使Reader内联而遗漏INIT，或重复clinit/提前触发初始化。",
+      "oracle": "JLS-class-initialization-and-constant-variable-rules-plus-source-jvm-and-classfile",
+      "dependencies": "自制源码/DEX与完整声明目录；工具内容锁见TASKS §4.5"
+    },
+    {
+      "id": "D080",
+      "family": "initialization",
+      "title": "外部常量或未知常量性字段读不能添加helper蒙混Java",
+      "suite": "raw-integrity",
+      "seam": "decompile-method",
+      "required": true,
+      "validationScope": "raw-method",
+      "acceptanceGate": "engine",
+      "designRefs": "ALGORITHMS §9.1",
+      "inputKind": "self-made-smali",
+      "inputRecipe": "f()I仅sget External.C:I后return，外部字段public static final；两个catalog变体均完整提供owner/access/type，但JavaConstantKind分别Constant与Unknown。原DEX ref/metadata有效。",
+      "inputRequirements": [
+        "只有常量性是所测拒绝条件；known变体有独立Java classfile ConstantValue证据，unknown变体明确不给常量性证明，不伪装成NonConstant。"
+      ],
+      "invocations": [
+        {"id":"known-constant","input":{"targetRole":"case","method":"f()I","javaConstantKind":"Constant"},"expected":{"outcome":"smali","reason":"unsupported","unsupportedReason":"JavaConstantFieldRead","rawExact":true}},
+        {"id":"unknown-constantness","input":{"targetRole":"case","method":"f()I","javaConstantKind":"Unknown"},"expected":{"outcome":"smali","reason":"unsupported","unsupportedReason":"BindingEvidenceMissing","rawExact":true}}
+      ],
+      "mustRejectMutation": "源码直接读导致被javac内联、猜Unknown为NonConstant、添加反射/额外初始化helper或丢原sget。",
+      "oracle": "JLS-constant-inlining-plus-independent-raw-field-reference",
+      "dependencies": "自制源码/DEX与完整声明目录；工具内容锁见TASKS §4.5"
+    },
+    {
+      "id": "D081",
+      "family": "monitor",
+      "title": "持锁重执行同一allocation site不能认成原锁",
+      "suite": "raw-integrity",
+      "seam": "decompile-method",
+      "required": true,
+      "validationScope": "raw-method",
+      "acceptanceGate": "engine",
+      "designRefs": "ALGORITHMS §11",
+      "inputKind": "self-made-smali",
+      "inputRecipe": "f()V设flag=1；again: new Object到v0并邻接init；flag非0时monitor-enter v0、flag=0、goto again；flag为0时monitor-exit v0后return。第二个动态对象来自同一静态allocation site，却不是先前持有的对象。无handler，Object ctor目录完整，所有bytecode格式/ref/branch合法。",
+      "inputRequirements": [
+        "独立确认实际backedge重新经过同一new/init，且退出用的是新动态对象；不执行一个忽略monitor的解释器，也不宣称已通过ART verifier。",
+        "lock-stack join/identity/freshness任一证据足以拒绝该profile；不要求观察私有RootId、选择的证明顺序或某个特定检查次数。"
+      ],
+      "invocations": [
+        {"id":"reexecuted-root","input":{"targetRole":"case","method":"f()V","catalog":"complete"},"expected":{"outcome":"smali","reason":"unsupported","unsupportedReason":"MonitorScopeUnproved","rawExact":true}}
+      ],
+      "mustRejectMutation": "仅按静态AllocationId/ValueId相同而生成貌似平衡的synchronized，或把未知锁状态静默修复。",
+      "oracle": "dynamic-object-identity-counterexample-plus-independent-raw-projection",
+      "dependencies": "自制源码/DEX与完整声明目录；工具内容锁见TASKS §4.5"
+    },
+    {
+      "id": "D082",
+      "family": "monitor",
+      "title": "参数锁在有界循环中重复使用仍须正确恢复",
+      "suite": "core-java",
+      "seam": "decompile-method",
+      "required": true,
+      "validationScope": "method-in-known-context",
+      "acceptanceGate": "engine",
+      "designRefs": "ALGORITHMS §6、§11",
+      "inputKind": "self-made-java-to-dex",
+      "inputRecipe": "static int f(Object lock,int n){int s=0;for(int i=0;i<n;i++){synchronized(lock){if(Thread.holdsLock(lock))s++;}}return s;} Driver正常/异常退出后观察同一lock。每次enter/exit一层、root是不可重定义参数，不因有loop一概raw。",
+      "inputRequirements": [
+        "独立认证canonical monitor/release-handler、loop退出及同一参数根；natural loop内的scope不能被普通try识别提前拒绝。"
+      ],
+      "invocations": [
+        {"id":"zero-null","input":{"targetRole":"case","method":"f(Ljava/lang/Object;I)I","args":[null,0]},"expected":{"outcome":"java","return":0}},
+        {"id":"twice","input":{"targetRole":"case","method":"f(Ljava/lang/Object;I)I","args":[{"new":"java.lang.Object","identity":"lock-1"},2],"observeMonitorAfter":"lock-1"},"expected":{"outcome":"java","return":2,"monitorAfter":false}},
+        {"id":"null-enter","input":{"targetRole":"case","method":"f(Ljava/lang/Object;I)I","args":[null,1]},"expected":{"outcome":"java","exception":"java.lang.NullPointerException"}}
+      ],
+      "mustRejectMutation": "把锁表达式提升到0次循环之前、少释放/放body到锁外，或把任何loop都判成freshness失败。",
+      "oracle": "source-jvm-holdsLock-driver-plus-independent-monitor-projection",
+      "dependencies": "自制源码/DEX与完整声明目录；工具内容锁见TASKS §4.5"
+    },
+    {
+      "id": "D083",
+      "family": "control",
+      "title": "极端稀疏switch不按跨度展开或丢key",
+      "suite": "core-java",
+      "seam": "decompile-method",
+      "required": true,
+      "validationScope": "method-in-known-context",
+      "acceptanceGate": "engine",
+      "designRefs": "ALGORITHMS §6、§12.5",
+      "inputKind": "self-made-java-to-dex",
+      "inputRecipe": "static int f(int k){switch(k){case -2147483648:return 1;case 2147483647:return 2;default:return 3;}} 仅两个keys；无handler/monitor/uninit。资源配置须足够处理实际nodes而非跨度。",
+      "inputRequirements": [
+        "独立认证两个signed I32极值和default target；以checked宽整数计算跨度。验证行为及有界完成，不比较打印switch/if/pc的样式。"
+      ],
+      "invocations": [
+        {"id":"min","input":{"targetRole":"case","method":"f(I)I","args":[-2147483648]},"expected":{"outcome":"java","return":1}},
+        {"id":"max","input":{"targetRole":"case","method":"f(I)I","args":[2147483647]},"expected":{"outcome":"java","return":2}},
+        {"id":"default","input":{"targetRole":"case","method":"f(I)I","args":[0]},"expected":{"outcome":"java","return":3}}
+      ],
+      "mustRejectMutation": "按max-min的i32溢出构造巨大table、枚举整个跨度耗尽预算或截断极值key。",
+      "oracle": "worked-switch-outcomes-plus-source-jvm-driver",
+      "dependencies": "自制源码/DEX与完整声明目录；工具内容锁见TASKS §4.5"
+    },
+    {
+      "id": "D084",
+      "family": "declarations",
+      "title": "有额外effect的synthetic bridge不能当Generated丢弃",
+      "suite": "raw-integrity",
+      "seam": "decompile-class",
+      "required": true,
+      "validationScope": "full-unit",
+      "acceptanceGate": "engine",
+      "designRefs": "ALGORITHMS §9、§12.3",
+      "inputKind": "self-made-smali",
+      "inputRecipe": "Case extends完整自制Base，含canonical ctor、String get()返回child，以及标bridge|synthetic的Object get()：先Dep.log(\"BRIDGE\")再invoke-virtual同receiver的String get并return。source override会自动生成的bridge不含该log，故不是canonical可消费模式。",
+      "inputRequirements": [
+        "独立认证所有原成员/flags/proto/先log再target的instruction序；parent/overrides/access/throws均完整，不能因缺catalog偶然Mixed。"
+      ],
+      "invocations": [
+        {"id":"effectful-bridge","input":{"targetRole":"case","catalog":"complete"},"expected":{"outcome":"mixed","effectfulBridgeRawPreserved":true,"noFakeJavaUnit":true,"rawBridgeLogArgumentUnits":[66,82,73,68,71,69]}}
+      ],
+      "mustRejectMutation": "见synthetic就删、套用canonical bridge规则丢log、改public名或打印冲突声明伪造JavaUnit。",
+      "oracle": "canonical-bridge-precondition-counterexample-plus-independent-raw-projection",
+      "dependencies": "自制源码/DEX与完整声明目录；工具内容锁见TASKS §4.5"
+    },
+    {
+      "id": "D085",
+      "family": "result-integrity",
+      "title": "局部invoke-custom失败不阻断整类与单方法反编译展示",
+      "suite": "domain-integrity",
+      "seam": "decompile-and-render",
+      "required": true,
+      "validationScope": "rendered-result",
+      "acceptanceGate": "engine-and-application",
+      "designRefs": "DESIGN §2.2、§6.5；ALGORITHMS §8.1",
+      "inputKind": "self-made-dex-builder",
+      "inputRecipe": "自制038 Case有canonical Object constructor、static zAdd(II)I的真实加法body，以及static aDynamic()I。aDynamic先const-string（UTF16 [0,55296,42,47,92,117,48,48,48,97]），再invoke-custom零参数且call-site proto ()I，邻接move-result/return。call_site的bootstrap静态method_handle、name、method_type和全部metadata合法；bootstrap声明为自制Bootstrap.link(MethodHandles.Lookup,String,MethodType)CallSite，外部声明目录完整。已知invoke-custom只能raw，zAdd不依赖它。分别经公开Engine+render和应用公开反编译Module的默认text路径获取相同选择，不启动CLI。",
+      "inputRequirements": [
+        "独立decoder认证038、可达invoke-custom、完整call_site/method_handle/proto及三个真实method key；拒绝只因InvokeCustomUnsupported，而非目录缺失/字节格式损坏。 原class_data的direct_methods中aDynamic位于zAdd之前，独立认证这个合法输入顺序，以暴露遇失败就停止分析余下方法；不要求输出排序。",
+        "class调用必须保留所有原成员：zAdd的已验证Java与aDynamic的完整Smali同时可定位；不因class Mixed清空text，不新增stub/body，不把Mixed算JavaUnit。",
+        "以输出UTF8 source ranges逐段定位原method；独立重组/解码aDynamic的raw切片核全部opcode/ref/call-site/string units，而非比较语言getter、整段版式或私有AST。literal含*/和反斜线u，不得被Java注释包装破坏。",
+        "该case验证复杂结果保留/raw/identity/spans，不以它宣称Mixed整体通过javac或原始invoke-custom已在ART执行；zAdd的算术行为由既有D009等独立Java闭环覆盖。两seam分别满足每项预期，仅计一个case。"
+      ],
+      "invocations": [
+        {"id":"class-text","input":{"targetRole":"case","format":"text","through":["engine-render","application-default-text"]},"expected":{"outcome":"mixed","textAvailable":true,"mustIncludeJavaMethods":["zAdd(II)I"],"mustIncludeSmaliMethods":["aDynamic()I"],"allOriginalMembersPresent":true,"eachOriginalMemberOnce":true,"failedMethodHasNoJavaBody":true,"rawDynamicExact":true,"stringUnitsExact":true,"sourceSpansExact":true,"noFakeJavaUnit":true}},
+        {"id":"method-text","input":{"targetRole":"case","method":"aDynamic()I","format":"text","through":["engine-render","application-default-text"]},"expected":{"outcome":"smali","reason":"unsupported","textAvailable":true,"rawExact":true,"stringUnitsExact":true,"sourceSpansExact":true}}
+      ],
+      "mustRejectMutation": "以非JavaUnit拒绝默认text、一个失败清空其他Java成员、要求JSON才能拿raw、空stub补齐、漏成员/修改call-site或UTF16、Mixed前缀后spans失位。",
+      "oracle": "independent-dex-member-and-raw-projection-plus-rendered-source-identity-integrity",
+      "dependencies": "自制038 builder/Bootstrap声明/完整Object目录；固定smali/dexlib2开发工具；不执行外部APK或CLI"
+    }
+  ]
+}

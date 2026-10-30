@@ -1,6 +1,6 @@
 # Contributing to Diana
 
-This branch develops **Diana**, a native Rust APK/DEX analysis product. The root
+This branch develops **Diana**, a native Rust APK/DEX decompiler. The root
 Cargo workspace contains only `apps/diana` and `crates/diana-decomp`. This file
 is the repository-wide guide; package-local AGENTS.md files refine its scope.
 
@@ -12,7 +12,7 @@ is the repository-wide guide; package-local AGENTS.md files refine its scope.
   not initialize/design their frameworks, browser UI or WASM bindings until
   separately requested.
 - `crates/diana-decomp/`: independent native engine scaffold.
-- `docs/diana/`: core design/algorithms/tasks, sources and 70 fixed E2E cases.
+- `docs/diana/`: core design/algorithms/tasks, sources and revisioned E2E specifications.
 - `tools/audit/`: sensitive-input audit tooling.
 - `tools/fetch_references.py`: explicit reference downloads to ignored
   `.cache/references/`; no checksum checks, reference builds/tests or CI hooks.
@@ -30,14 +30,26 @@ Use source ideas only through explicit review and focused extraction/reimplement
 
 ## Development workflow
 
+Diana is a decompiler: default class/method retrieval must expose available
+code, not require an entirely verified Java unit before showing anything.
+Keep partial Java, raw Smali and unavailable reasons explicit; a local failure
+must not discard other members. Text/JSON are presentations of the same result,
+not capability gates. Preserve hard errors and strict Java/JavaUnit acceptance;
+a readable Mixed result is not permission to count required Java as passed.
+
 Prioritize core APK/DEX analysis, decompilation and required safety. Keep non-core
 tooling, registry/trace infrastructure and their documentation minimal; do not
 expand them into frameworks or lengthy designs. Fallback is a simple classified
 error/raw-output path, not a separate recovery subsystem or retry pipeline.
 
-Maintain only docs/diana/{README,DESIGN,ALGORITHMS,TASKS,SOURCE_MAP}.md plus the
-fixed e2e_cases.json. REPRODUCIBILITY.md is only a redirect for that frozen JSON,
-not another maintained document. Do not restore the HTML board/generator or split planning
+Technical documents specify one implementation contract: supported/rejected
+inputs, algorithms, invariants and failure behavior. Do not use first/final-version
+qualifiers, temporary support promises, speculative roadmaps or implementation-
+unrelated narration. Keep actual progress in README/TASKS, not the technical spec.
+
+Maintain only docs/diana/{README,DESIGN,ALGORITHMS,TASKS,SOURCE_MAP}.md plus
+e2e_cases.json, the single case/input/expected specification. Do not restore
+the HTML board/generator, obsolete redirect documents or split planning
 into more documents. Read `docs/diana/TASKS.md` before starting a batch; it owns
 preparation, the small-batch loop, stop/done criteria and the minimal record. Create
 `docs/diana/batches/<id>.md` only when an actual batch starts; do not duplicate
@@ -60,8 +72,13 @@ comparator falsification) before production feature work.
 Tests cross public libraries/modules for complex semantic, raw-integrity, malformed
 input and resource/file-safety behavior. Do not add CLI black-box/help/version/
 argument/column/getter/forwarding tests or empty tests to manufacture a pass.
-Frozen required cases cannot be dropped, changed to Smali success or refreshed
-from engine actual output. True oracle errors require independent evidence/review.
+B01 freezes a reviewed revision, not an arbitrary case count or faulty format.
+Correct faulty recipes/oracles with independent evidence and recorded review;
+preserve problem IDs and valid semantics, append new counterexamples, and derive
+case/invocation denominators from the specification. Never drop required cases,
+change required Java to Smali success or refresh truth from engine actual output.
+A specification revision is not B01 approval, fixture certification, production
+implementation permission or authorization for auxiliary-tool self-tests.
 Existing legacy tests remain in the reference but are not Diana acceptance.
 
 ## Development setup
