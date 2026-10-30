@@ -12,11 +12,11 @@
 | KU | [Noelo-Lab/kuna](https://github.com/Noelo-Lab/kuna) | `29c44b57f8c1d9b35044aa4ee3f636c193288009` | 路径相对该仓根。[固定phases文档](https://github.com/Noelo-Lab/kuna/blob/29c44b57f8c1d9b35044aa4ee3f636c193288009/docs/phases.md) |
 | RG | [MG1937/radguard](https://github.com/MG1937/radguard)，`0.1.3` | **`290de20c925c4a2c7642b1a63c9997185a06e130`** | 路径相对radguard自己的仓根。[固定manifest](https://github.com/MG1937/radguard/blob/290de20c925c4a2c7642b1a63c9997185a06e130/Cargo.toml)。此前误把父仓commit当radguard commit；父仓只含gitlink，此处更正 |
 
-按[REPRODUCIBILITY.md](REPRODUCIBILITY.md)在当前checkout内显式获取固定参考；参考只用于审阅/实现，不是生产或E2E测试运行的隐含依赖。离线协作者使用按相同commit验证的源码包；不能自动改用main或作者机器路径。
+按[SOURCE_MAP.md](SOURCE_MAP.md#10-可复现输入与工具)在当前checkout内显式获取固定参考；参考只用于审阅/实现，不是生产或E2E测试运行的隐含依赖。离线协作者使用按相同commit验证的源码包；不能自动改用main或作者机器路径。
 
-当前 checkout 的旧源码已整体归档到 `ref-fork/rasc/`，不参加活动构建/测试。读取上表 DX/旧 root 的固定路径时在 checkout 加此仓库相对前缀；公开 URL/commit/path 锚点不改，见 [STRUCTURE.md](STRUCTURE.md)。
+当前 checkout 的旧源码已整体归档到 `ref-fork/rasc/`，不参加活动构建/测试。读取上表 DX/旧 root 的固定路径时在 checkout 加此仓库相对前缀；公开 URL/commit/path 锚点不改，见 [DESIGN.md](DESIGN.md#1-产品边界与工程范围)。
 
-补充产品范围：Diana是整个项目，活动产品/CLI为`diana`，内部引擎为`diana-decomp`；现有rasc源码作为CLI/输入/轻量查询的复用来源，见[PROJECT.md](PROJECT.md)。MCP明确延期，本轮不设计新协议、schema或迁移。反编译算法仍从零设计，不移植已删除的实验分支。
+补充产品范围：Diana是整个项目，活动产品/CLI为`diana`，内部引擎为`diana-decomp`；现有rasc源码作为CLI/输入/轻量查询的复用来源，见[DESIGN.md](DESIGN.md#1-产品边界与工程范围)。MCP明确延期，本轮不设计新协议、schema或迁移。反编译算法仍从零设计，不移植已删除的实验分支。
 
 本轮只做源码/公开入口/文档核查，没有重新运行三引擎语料比较，也没有验证旧对话中的覆盖率数字。后续HEAD移动不自动改变本表；任何reference更新须独立审阅，不能静默用另一个版本。RG父仓gitlink不把父仓Apache声明自动传递为子仓许可，见第6节。
 
@@ -28,7 +28,7 @@
 | KU-02 | `decompiler/crates/kuna-decomp/src/infra/universalaction.rs:46–101`：`RuleRow`、`SchedNode`、`materialize` | 调度树有 Action/Pool/Group/RestartGroup，构造函数实际生成执行树 | 初版仅保留类型化 transition、显式 Sequence 与有预算的本地 Repeat；不搬动态插件、整套 ActionDatabase |
 | KU-03 | 同文件 `universal_sched:296`，`mainloop:550`、`fullloop:627` | `ActionBlockStructure` 就在 mainloop 中；types、heritage、rule pool 与后续控制图变换交织 | “Kuna 一定先做完全部数据流再结构化”不是准确执行描述。Diana 自己选一个可验证、少反馈的调度 |
 | KU-04 | `docs/spec/00-overview.md §0.7`（约 `3432–3475`） | 逐条列出 trigger、持久状态、重入范围；有未实现反馈边的明确标注 | 只为已实现的生产者/消费者建立反馈；原始字节和用户配置不被算法重写 |
-| KU-05 | `decompiler/crates/kuna-decomp/phases.toml`；`build.rs`；`build/registry.rs` | registry 与 codegen 提供 option/catalog 元数据，不等同于实际 schedule | 初版 Rust 静态表从实际 schedule 描述生成；不引入 TOML/build.rs 第二份真相源。确有外部配置需求再引入生成器 |
+| KU-05 | `decompiler/crates/kuna-decomp/phases.toml`；`build.rs`；`build/registry.rs` | registry 与 codegen 提供 option/catalog 元数据，不等同于实际 schedule | 初版直接typed函数接线，不建registry/静态元数据生成器；PhaseId只标诊断。不引入TOML/build.rs第二份真相源 |
 | KU-06 | `p8_structure/blockaction.rs`：`ActionBlockStructure`；`p8_structure/region_structurer.rs` | 有不同结构化策略及拒绝后的回退。部分模块头注释描述历史默认值，不能覆盖 live 配置 | 以实际默认/调用点为准。新 Diana 的例外是 Java 无 goto：普通图可回退状态机，异常/monitor 图不能无条件用它 |
 | KU-07 | `docs/spec/07-regions.md §7.1`；`p7_regions/kuna_regiongraph.rs` | 私有图上归约，真实 CFG 不被结构化分析破坏；参考实现对输出相关遍历使用稳定次序 | 只借只读CFG/私有region arena和请求内identity，不继承其稳定排序/确定性输出要求；Diana独立结果按完成顺序发布 |
 | KU-08 | `docs/observatory.md`；`docs/spec/08-structuring.md §8.4` | 可观测阶段产物、真实调度及质量代理；质量度量不自动证明语义 | 设计 `TraceEvent` 与 block/edge 覆盖证书，label/state 数只衡量可读性 |
@@ -91,4 +91,185 @@
 - RG是独立git仓库/gitlink，固定版本manifest没有`license`字段，也未找到该仓自己的LICENSE。**父仓Apache-2.0不能自动覆盖gitlink子仓**。引用设计/符号不等于获准复制代码；在权利人明确许可前，阻止radguard程序/fixture移植与分发，采用自行实现+自制fixture。此前“子目录沿父许可”的假设撤回；DAD衍生归属仍需核查。
 - 本文引用符号和算法思想；本次不复制第三方程序或 corpus。若许可、fixture 授权无法确认，则阻止该项复制，保留自行实现与自制 fixture 路线；不阻止其他设计工作。
 
-下一步：[目标架构](DESIGN.md)；实施者的首批入口：[实施路线](IMPLEMENTATION_PLAN.md)。
+## 7. 一键获取的补充资料与阅读落点
+
+```sh
+python3 tools/fetch_references.py
+```
+
+[下载脚本](../../tools/fetch_references.py)顶部目录表是实际 URL/源码提交/选取目录的
+唯一清单；当前 46 项，可 `--list` 查看或 `--only <id> ...` 只取本批材料。
+保存到 `.cache/references/`，本地入口 `README.generated.md`。论文/讲稿只保留同名
+UTF-8 TXT，不保留 PDF；已有 TXT 不重复下载，原始 URL 用于按需在线查阅。参考下载按用户要求
+不做 checksum，不覆盖已有修改、不构建/测试，不导入生产依赖。详见
+[SOURCE_MAP.md](SOURCE_MAP.md#10-可复现输入与工具)。
+
+| 脚本 ID | 内容 / 主要用途 | 对应任务与限制 |
+|---|---|---|
+| dx / ku / rg | 本文三个既有参考版本；原始安全、流水线纪律、数据流与文本来源 | 固定版本不变；rg 只阅读，许可未明不复制 |
+| dex-format / dalvik-bytecode / dex-constraints | AOSP 格式、指令和静态/结构约束 | P1/P2、D055–D059；优先规范，不照抄宽松解析行为 |
+| jls-expressions / jls-execution / jvms-verification | JLS/JVMS 8 的求值/调用、初始化与验证 | T10–T12/T19–T23；语言目标和实际 JVM/ART 证据分开 |
+| jd-tester / java-decompiler-bugs | 2024《Understanding and Finding Java Decompiler Bugs》与 artifact 说明 | 参考可执行小例子、失败分类、缩减方法；不下载 release 可执行物/bug corpus，不作为输出 oracle |
+| jadx | 实现与 IntegrationTest/SmaliTest 的 Java 测试支撑源码 | E2E 准备时学输入/重编译/执行观察，不照搬文本 golden、内部 seam 或 skip 策略 |
+| ssa-construction / cranelift | Braun 等 2013 SSA 论文与 Rust SSA builder/IR verifier | T07；借固定身份/Phi 与验证思想，不自动替换既定算法；仍需 DEX 异常状态证明 |
+| out-of-ssa | Boissinot 等 2009 Out-of-SSA 论文 | T08/T09，D002/D003；先正确处理平行拷贝，再考虑可选变量合并 |
+| smali | Google smali/dexlib2 的实现 | raw 投影/回环；不是 E2E 工具版本升级，assembler 成功不等于语义正确 |
+| soot / dexpler | Soot Dexpler 类型/异常图源码与 2012 论文 | 类型/异常批次参考，不搬整个 Jimple/Soot 框架 |
+| phoenix / sailr | 2013 Phoenix 与 2024 SAILR 结构恢复论文 | T13/T14；面向原生/C，不能直接套 Java 的无 goto、handler/monitor 限制 |
+| vineflower | Java 声明与恢复源码 | 构造器/nested/enum 批次按需阅读，不把参考恢复文本当真值 |
+
+每批最多选择一篇主要算法资料和一个实现参考，产出一个决策、不变量或反例；
+不把全文精读/全项目构建变成新的开工前置。新增参考先在脚本固定 URL/提交，
+记录用途与不适用范围，不自动更新旧期望或扩大实现范围。下载材料仅供开发查阅，
+不因公开可下载便推断代码/fixture 可复制或重新分发。
+
+## 8. 扩充研究：顶会、经典基础与成熟工程
+
+这轮从“有哪些项目”补到“哪些结论能支持或挑战我们的设计”。选择顺序是：
+**直接相关性 → 可核的一手证据 → 发表场合/长期影响 → 是否有公开实现**，
+不为了凑齐四大而推荐无关工作。语言语义仍以 DEX/JLS/JVMS 等规范为依据，
+顶会发表或高引用不会自动证明某个实现/fixture 正确。安全四大指 IEEE S&P、USENIX Security、CCS、NDSS；
+EuroS&P 不算 IEEE S&P。PLDI/POPL/OOPSLA 是编程语言顶会，ISSTA 属软件测试/分析，
+TOPLAS/JAR 是期刊；SCAM 2019 是直接 Java 证据，但不冒称 FSE/ICSE。
+
+Cytron SSA、Cousot 抽象解释、Csmith、JMM、CompCert 作为经典基础精选；不编造
+即时引用量，不把搜索服务不同口径的 citation 数当稳定排名。新近论文也不因
+引用尚少而排除。旧版论文的局限不自动等于所下载新工程 HEAD 的局限。
+
+**核查深度**：下面除明确注明外，已获取公开论文原件；现在只保存提取 TXT，
+不保留 PDF。已审阅摘要、算法/语义模型、
+与 Diana 相关的讨论或限制，并非全部全文逐行复现。新工程核固定提交与关键源码，
+没有构建或跑其测试。TXT 不是无损原文，OCR/公式/表格需按原 URL 在线核对。
+Johnny 当前只取得官方讲稿；两篇 ISSTA 论文只核官方入口/
+摘要，不伪称已读全文。ACM PDF 在当前网络返回访问挑战，Johnny 作者 PDF 无法连接；
+不绕过访问限制，也不以未读全文支持具体算法结论。
+
+### 8.1 安全四大与结构化综述
+
+下载 ID 与本地文件由脚本维护；下表的 DOI/会议入口用于学术定位，不要求团队另行
+寻找作者本机的材料。论文讲述的“证明”必须按其语言、模型和可信基讨论。
+
+| 下载 ID / 论文 | 场合 / 一手入口 | 关键贡献与阅读位置 | 对 Diana 的意义 / 不适用处 |
+|---|---|---|---|
+| dream — *No More Gotos: Decompilation Using Pattern-Independent Control-Flow Structuring and Semantics-Preserving Transformations* | **NDSS 2015**；[DOI](https://doi.org/10.14722/ndss.2015.23185)，[公开论文](https://www.ndss-symposium.org/wp-content/uploads/2017/09/11_4_2.pdf) | pattern-independent structuring 与 CFG 变换；重点看条件组合与去非结构控制流 | T13/T14 的候选思想，不是“总能高效输出忠实 Java”的保证；不能重复求值有副作用条件，也不自动覆盖 Java handler/monitor/uninit |
+| johnny — *Helping Johnny to Analyze Malware: A Usability-Optimized Decompiler and Malware Analysis User Study* | **IEEE S&P 2016**；[DOI](https://doi.org/10.1109/SP.2016.18)，[官方会议/摘要](https://www.ieee-security.org/TC/SP2016/program.html)，[讲稿](https://www.ieee-security.org/TC/SP2016/slides/yakdan.pdf) | 将去编译形态与分析人员使用效果联系；当前只核摘要/讲稿，未读全文 | 不只追求少 goto/少行数；可读性应围绕实际分析任务。暂不引入用户实验平台或把研究结论直接变成产品评分阈值 |
+| d-helix — *D-Helix: A Generic Decompiler Testing Framework Using Symbolic Differentiation* | **USENIX Security 2024**；[会议入口](https://www.usenix.org/conference/usenixsecurity24/presentation/zou)，[论文](https://www.usenix.org/system/files/usenixsecurity24-zou.pdf) | 函数级重编译、符号模型比较、启发式定位；§4.2 的 loop bounding / memory / external-call 模型尤其重要 | 支持语义检查和定位负责决策的阶段；其超时后限制分支执行、dummy return、内存初始化/枚举等模型不能当任意程序等价证明，更不能搬进 Diana 生产语义。TUNER 是调试思路，不意味着核心正确性做成开关 |
+| fidelity-taxonomy — *A Taxonomy of C Decompiler Fidelity Issues* | **USENIX Security 2024**；[会议入口](https://www.usenix.org/conference/usenixsecurity24/presentation/dramko)，[论文](https://www.usenix.org/system/files/usenixsecurity24-dramko.pdf) | 对四个 C 反编译器的输出做 open coding / thematic analysis，归纳名称/类型以外的 fidelity 问题 | 将语义错误、声明/绑定错误、可读性缺陷分开；输出不像原源码不自动是行为 bug，长而正确也不该判失败。T24 仍是可选美化 |
+| everparse-paper — *EverParse: Verified Secure Zero-Copy Parsers for Authenticated Message Formats* | **USENIX Security 2019**；[会议入口](https://www.usenix.org/conference/usenixsecurity19/presentation/delignat-lavaud)，[论文](https://www.usenix.org/system/files/sec19-ramananandro_0.pdf) | LowParse 的安全/正确性性质与生成器外置的可信基；§2–§3 区分 parser 安全、格式正确性、非可塑性 | 加强 P1 checked-view 的证明边界：safe Rust 不自动给出长度一致、预算或格式正确。TLS/TLV 的唯一编码性质不定义 DEX，不能因此 canonicalize 原始字节，也不引入 F*/生成器依赖 |
+| verified-lifting — *Verifiably Correct Lifting of Position-Independent x86-64 Binaries to Symbolized Assembly* | **CCS 2024**；[DOI](https://doi.org/10.1145/3658644.3690244)，[作者论文](https://www.ssrg.ece.vt.edu/papers/ccs24.pdf) | x86-64 → symbolized NASM；证书、重编译以及 Ghidra/Isabelle 支撑的符号化正确性验证 | 借“生产者提供见证、检查器消费明确义务”的组织；这不是 DEX→Java 证明，更不能把 OriginSpan/edge 覆盖证书冒称同等级语义证明 |
+| structuring-sok — *SoK: No Goto, No Cry? The Fairy Tale of Flawless Control-Flow Structuring* | **EuroS&P 2025（不是四大 IEEE S&P）**；[DOI](https://doi.org/10.1109/EuroSP63326.2025.00032)，[公开论文](https://oaklandsok.github.io/papers/behner2025.pdf) | §3–§5 系统化四个相互关联的难题：可解析子图定义、不可解析子图处理、解析顺序、实用性；比较 pattern-based / independent 方法 | 是对“无 goto 算法能一招解决”的直接约束。支持先小型自然结构、受限 dispatcher、显式预算；不得导入其链接的恶意软件样本/大语料 |
+
+已有的 **Phoenix（USENIX Security 2013）**、**SAILR（USENIX Security 2024）**仍保留。
+新增 DREAM 与 SoK 是为了对比限制而不是替换它们。SAILR 的 compiler-aware pattern
+不自动适配 D8/R8；Java 无 goto 是目标语言的合法性约束，选择自然结构还是合法
+状态机才是可读性/成本取舍，不能混为一谈。
+
+### 8.2 软件分析与编程语言研究
+
+| 下载 ID / 论文 | 场合 / 一手入口 | 关键贡献与阅读位置 | 对 Diana 的意义 / 不适用处 |
+|---|---|---|---|
+| c-decompiler-correctness — *How Far We Have Come: Testing Decompilation Correctness of C Decompilers* | **ISSTA 2020**；[DOI](https://doi.org/10.1145/3395363.3397370)，[官方议程](https://conf.researchr.org/track/issta-2020/issta-2020-papers) | 反编译正确性及类型/优化问题的实证工作；当前只核出版信息与摘要 | 作为风险分类补充，不从未取得的全文推导比较器实现或覆盖结论，不复用其 C corpus 当 Diana 验收 |
+| decompiler-effectiveness — *Evaluating the Effectiveness of Decompilers* | **ISSTA 2024**；[DOI](https://doi.org/10.1145/3650212.3652144)，[官方摘要](https://2024.issta.org/details/issta-2024-papers/40/Evaluating-the-Effectiveness-of-Decompilers) | 分开考察语义一致性与可读性；只核摘要和公开 artifact README，未读全文/复现评测 | 对应“先语义、后美化”；摘要的约 55% 等数字只属于其数据/工具/方法，不能当 C/DEX 全行业准确率，也不用于 Diana 进度 |
+| ssa-abstract-interpretation — *SSA Translation is an Abstract Interpretation* | **POPL 2023**；[DOI](https://doi.org/10.1145/3571258)，[作者完整稿](https://binsec.github.io/assets/publications/papers/2023-popl-full-with-appendices.pdf) | §2、§4–§6 将 SSA 建造成抽象解释，循环命名/全局值图控制递归，讨论未完成不动点；有自身 soundness/completeness 论证 | 帮 T07 审核域、join、循环身份与收敛。其联合 GVN/SCCP/LICM 分析用于更强精度，并不证明 Diana 应改成全 band 联合求解；不把它当现有 P3 伪代码已被证明 |
+| alive2-paper — *Alive2: Bounded Translation Validation for LLVM* | **PLDI 2021**；[DOI](https://doi.org/10.1145/3453483.3454030)，[作者论文](https://web.ist.utl.pt/nuno.lopes/pubs/alive2-pldi21.pdf) | bounded translation validation、LLVM refinement/UB 模型；§3.8 明列当时的未支持项 | “检查没有反例”须附模型/边界，不等于 DEX/Java 普遍等价；2021 论文列的 exception/volatile 等限制不直接投射为当前 HEAD 状态。SMT 不是首版生产前置 |
+| csmith — *Finding and Understanding Bugs in C Compilers* | **PLDI 2011**；[DOI](https://doi.org/10.1145/1993498.1993532)，[作者稿](https://www2.cs.utah.edu/~regehr/papers/pldi11-preprint.pdf) | 生成有效且避开 C undefined/unspecified behavior 的程序，以差分发现 wrong-code | 独立输入认证比大规模生成更先；Java/DEX 的溢出、异常、移位等有自己的语义，不能沿用 C 生成器的排除规则。暂不引入随机生成平台 |
+| emi — *Compiler Validation via Equivalence Modulo Inputs* | **PLDI 2014**；[DOI](https://doi.org/10.1145/2594291.2594334)，[作者稿](https://people.inf.ethz.ch/suz/publications/emi.pdf) | 以具体测试输入的覆盖约束生成等价变体，检验编译器；“modulo inputs”是关键限定 | 支持独立行为 oracle 与未来定向变体；通过有限输入不证明全域等价。不能以优化/裁剪为由改变 frozen required 案例或删除其语义触发点 |
+| java-decompiler-study — *The Strengths and Behavioral Quirks of Java Bytecode Decompilers* | **SCAM 2019（不是 FSE）**；[DOI](https://doi.org/10.1109/SCAM.2019.00019)，[作者稿](https://arxiv.org/pdf/1908.06895v1) | §III–§IV 区分 syntactic correctness、syntactic distortion、EMI；javac/ecj 的输入差异 | 与 DEX 目标更接近：编译成功、所测输入行为、原源码相似是三件事。来源编译器影响输入形态，支持 B03 逐案例核结构，不把文本相似设 gate |
+
+已有 *Understanding and Finding Java Decompiler Bugs* 是 **OOPSLA 2024 / PACMPL**
+（[DOI](https://doi.org/10.1145/3649860)），是比泛原生/C 研究更直接的 Java bug 分类来源。
+仍与 JADX 源码、既有 Out-of-SSA / Braun SSA 论文配合，不重复建立另一套测试方法。
+
+### 8.3 经典高影响基础
+
+这些文献的价值是定义模型和不变量，不是要求开工前通读，也不为 Diana 自动带来
+形式化证明或论文所报告的性能。
+
+| 下载 ID / 论文 | 正式来源 | 具体阅读落点与设计作用 |
+|---|---|---|
+| ssa-cytron — *Efficiently Computing Static Single Assignment Form and the Control Dependence Graph* | **TOPLAS 1991**；[DOI](https://doi.org/10.1145/115372.115320)，[公开教学副本](https://rsim.cs.illinois.edu/arch/qual_papers/compilers/toplas91.pdf) | dominance/frontier、Phi 与重命名的经典定义；检查 P3 的 use/def 与控制依赖，不强迫改成论文的具体构造策略 |
+| abstract-interpretation — *Abstract Interpretation: A Unified Lattice Model for Static Analysis of Programs by Construction or Approximation of Fixpoints* | **POPL 1977**；[DOI](https://doi.org/10.1145/512950.512973)，[作者页与正文](https://www.di.ens.fr/~cousot/COUSOTpapers/POPL77.shtml) | 有序域、保序传递与不动点；检查 P3/P5 的单调性/有限高度，而不是“对象个数有限所以必收敛” |
+| java-memory-model — *The Java Memory Model* | **POPL 2005**；[DOI](https://doi.org/10.1145/1040305.1040336)，[作者稿](https://rsim.cs.illinois.edu/Pubs/popl05.pdf) | 同步、volatile、causality、data-race-free 与顺序一致性；论文明确省略 final fields 的详细处理，须补 [JLS 8 §17](https://docs.oracle.com/javase/specs/jls/se8/html/jls-17.html)，不能从论文推断 final/初始化任意重排合法 |
+| compcert-paper — *A Formally Verified Compiler Back-end* | **JAR 2009**；[DOI](https://doi.org/10.1007/s10817-009-9155-4)，[作者稿](https://xavierleroy.org/publi/compcert-backend.pdf) | §2 区分语义保持关系，含终止/发散/外部事件；后续以 simulation 分解转换。Cminor→PowerPC 的证明不传递给 Java/DEX；只借逐阶段义务/可信基的组织，不承诺首版 Coq 化 |
+
+### 8.4 新增成熟工程：固定提交、具体符号和不借什么
+
+提交与 sparse 路径由脚本固定；下列链接也固定在同一提交，不依赖 main 的行号。
+它们只供源码审阅，没有成为 Cargo/JVM/外部进程依赖，论文版本与代码 HEAD 分开。
+
+| 下载 ID | 固定源码证据 | 本次实际观察 | 对 Diana 的落点 / 禁止直接照搬 |
+|---|---|---|---|
+| art | Android 15 `android-15.0.0_r1` 的 peeled commit；[method_verifier.cc](https://android.googlesource.com/platform/art/+/bebbc3cc49f2d9d5420197df0a336fbc3fcbea40/runtime/verifier/method_verifier.cc#2015)、[register_line.cc](https://android.googlesource.com/platform/art/+/bebbc3cc49f2d9d5420197df0a336fbc3fcbea40/runtime/verifier/register_line.cc#331) | may-throw 前复制 `saved_line_`，明确不把 check-cast 成功类型带入 catch；`PushMonitor/PopMonitor` 跟踪锁深度/别名，并有 `VERIFY_ERROR_LOCKING` 分类 | 直接支持 P2/P3 异常旧状态、T12/T16/T19。运行时 verifier 的 hard/soft/locking 失败及版本策略不能机械对应 Diana Malformed/Unsupported；不复制整个 ART，也不自动要求设备/ART 执行 |
+| r8 | 8.3.37 peeled commit；[BasicBlock.java](https://r8.googlesource.com/r8/+/3ccc501316db4344828180e7152a4adb97522bf8/src/main/java/com/android/tools/r8/ir/code/BasicBlock.java#1163)、[IRBuilder.java](https://r8.googlesource.com/r8/+/3ccc501316db4344828180e7152a4adb97522bf8/src/main/java/com/android/tools/r8/ir/conversion/IRBuilder.java) | `readCurrentDefinition(..., EdgeType)` 区分异常边；`writeCurrentDefinition` 保存 throwing result 覆盖前的定义；incomplete Phis 待 predecessor 完整再 seal | 是异常 SSA 的直接工程证据；借状态义务，不借负寄存器索引编码、不抄全部优化。源码版本相同不代表 B02 工具 jar/依赖已锁定 |
+| ghidra | [heritage.cc](https://github.com/NationalSecurityAgency/ghidra/blob/6bed26c590229dde4cca7ff5759dc49b5db19d47/Ghidra/Features/Decompiler/src/decompile/cpp/heritage.cc)、[blockaction.cc](https://github.com/NationalSecurityAgency/ghidra/blob/6bed26c590229dde4cca7ff5759dc49b5db19d47/Ghidra/Features/Decompiler/src/decompile/cpp/blockaction.cc)、[action.cc](https://github.com/NationalSecurityAgency/ghidra/blob/6bed26c590229dde4cca7ff5759dc49b5db19d47/Ghidra/Features/Decompiler/src/decompile/cpp/action.cc#L865) | SSA heritage、block structuring、action/rule 执行各有职责，`ActionPool` 遍历 ops 分配规则处理 | 用于与 Kuna 的职责/规则调度对照；不是把成熟度当算法正确证明，不引入 SLEIGH、native discovery 或一整套 restart engine |
+| alive2 | [README](https://github.com/AliveToolkit/alive2/blob/adacbd5180ccf95075e9867c4f0c259f59c9fef2/README.md)、[tv/tv.cpp](https://github.com/AliveToolkit/alive2/blob/adacbd5180ccf95075e9867c4f0c259f59c9fef2/tv/tv.cpp)、[ir/state.cpp](https://github.com/AliveToolkit/alive2/blob/adacbd5180ccf95075e9867c4f0c259f59c9fef2/ir/state.cpp) | IR、symbolic execution、refinement、SMT 分层；当前 README 明确 inter-procedural transformation 不受支持、可能有伪反例 | 学“验证域显式化”，不是直接拿 LLVM UB/refinement 模型验证 DEX；不下载 LLVM/Z3 或启用生产求解器 |
+| everparse | [README](https://github.com/project-everest/everparse/blob/43b28b1e5bcf1d8ede6c4ae021cb6e227be4e498/README.md)、[src/3d](https://github.com/project-everest/everparse/tree/43b28b1e5bcf1d8ede6c4ae021cb6e227be4e498/src/3d)、[doc](https://github.com/project-everest/everparse/tree/43b28b1e5bcf1d8ede6c4ae021cb6e227be4e498/doc) | 当前包含不同 frontend 与 C/Rust 组件，不等同 2019 论文单一工具状态；证明对象/生成器边界依组件而异 | 参考 validated views / 检查后访问的设计；手工改写成 Rust 不继承上游证明，不新增格式 DSL、代码生成平台或 F* 运行要求 |
+| wasm-tools | [BinaryReader](https://github.com/bytecodealliance/wasm-tools/blob/6860dc1222ecbc374b8bc12efcbc980bfcc9001f/crates/wasmparser/src/binary_reader.rs#L27)、[Validator](https://github.com/bytecodealliance/wasm-tools/blob/6860dc1222ecbc374b8bc12efcbc980bfcc9001f/crates/wasmparser/src/validator.rs#L115) | 借用输入并保留原 offset；Parser/Payload 与 Validator 语义状态分开。`BinaryReader::new` 默认所有已知 feature，且文档明确极端 offset/长度会 panic | 支持原字节/原位置与分层校验；**不照搬默认全 feature 或 panic 构造器**。Diana 的版本门控和 malformed 不 panic 要自行满足；WebAssembly 规则不等于 DEX |
+
+## 9. 设计取舍与证据边界
+
+下列研究已落实为当前DESIGN/ALGORITHMS的具体方案，实施规则见DESIGN/ALGORITHMS与TASKS。
+现在不是让实施者再选SSA/控制链/验收归属；算法步骤与字段以这三份规范为准。
+70案例/独立expected、全量B01–B04和未实现状态不变。资料数量不计进度，继续读文献
+不是新前置；本文仅维护来源，不另造算法真相源。
+
+### 9.1 已有设计得到支持，维持不变
+
+1. **语义优先，成功与降级分开**：D-Helix、Java 实证研究与 CompCert 都提示“文本看起来像源码/可以编译”不足以代替行为；继续 Java/Smali/Unavailable，不造异常桩成功。
+2. **三地址 CFG → 固定身份 SSA → type/storage → region/Java**仍是合理的保守工程选择；新 POPL 工作展示了联合分析的另一条路线，并没有证明独立阶段错误或必须搬 GVN/BDD。
+3. **Phi parallel copy、异常旧状态、严格保留 may-throw 操作**更有直接证据：R8/ART 都明确区分异常与正常状态；不把所有 predecessor 合一套成功状态。
+4. **受限 dispatcher 保底、复杂保护域诚实降级**不因 DREAM/SAILR 推翻；无 goto 不等于无类型/异常/锁证明义务。
+5. **核心正确性不可开关，美化默认关闭**；TUNER 可启发开发定位，不能将错误 phase 关闭后算 Java 成功。报告和文本仍不要求跨运行稳定序。
+
+### 9.2 已采纳的具体设计
+
+| 来源 | 采用的工程规则 | 当前落点 |
+|---|---|---|
+| R01 Cousot / POPL 2023 / R8 | live-in有限只增；固定入口Phi、block一次绑定、incoming一次连接；retained/bad/grounded有限传播，首版不简化Phi | ALGORITHMS §3、DESIGN §3.3.3、T07；不声称继承论文证明 |
+| R02 SoK / DREAM / Ghidra | Sequence/Diamond/自然loop/受限switch明确schema，复制前计容量，失败用符合profile的dispatcher，不求全局最优 | ALGORITHMS §6；DESIGN给产品默认限额，不冒称由论文推出 |
+| R03 verified lifting / CompCert / Alive2 | raw/value/copy/edge/Java绑定各读原事实验证；finite Driver与coverage分别说明，不称全域证明 | ALGORITHMS各validator、TASKS §4 |
+| R04 JLS/JMM / ART | 原volatile/init/lock顺序不变；lock root需动态新鲜性，final不放常量字段initializer导致sget内联 | ALGORITHMS §9/§11/§12；不新建并发平台 |
+| R05 DEX / ART / EverParse / wasmparser | checked ranges/ULEB/MUTF16/metadata、041物理地址明确；raw-valid/Java-profile/资源/BUG分类分开 | ALGORITHMS §1、DESIGN §2；不复制上游panic或unsafe |
+| R06 Java研究 / fidelity taxonomy | Engine证据D001–D065核心侧，Product汇总完整70；Generated executable不计DeclarationOnly，有限行为不等编译即等价 | TASKS §2、TASKS §4 |
+| R07 R8存活期 / 具体调用链 | 一个RunContext贯穿open/render，累计派生分配，used/held分账；Env/worklist最后消费后drop、Report自持结果facts | DESIGN §2/§10、DESIGN §3.2/§7 |
+
+以上是设计落实，不标任何T/H/B完成；固定输入、独立oracle及运行证据仍须实际建立。
+
+### 9.3 暂不引入什么，以及最小阅读组合
+
+- 不引入 SMT/Coq/Isabelle/F* 到生产，不整体搬 ART/R8/Ghidra，不做联合 GVN/LICM、随机生成/海量语料、LLM 恢复或全局最优 structuring 平台。
+- 不导入论文恶意软件、私有/未认证 APK、bug corpus、pickle、构建镜像或闭源反编译器。论文提取 TXT 与稀疏源码保存在忽略的 `.cache/`，不保留 PDF，不新打许可证 bundle；复用具体代码仍先检查许可与文件级归属。
+- 不写任何非核心代码测试或新工具自测；不运行参考工程。核心语义测试仍按已约定流程，不能把读到某个方法当作新增基础设施授权。
+- 当前继续全量B01–B04；小批实现不是准备豁免。B04工具自测授权限制不变，不再把按批提议列作实施者自行选择项。
+
+| 到了哪个问题再读 | 一篇主要算法/语义资料 | 一个工程落点 | 本次要产出什么 |
+|---|---|---|---|
+| P3 建造、循环/异常入口 | POPL 2023 SSA（配经典域定义按需查） | R8 `BasicBlock` | 有限域、传播/封口时机、正常/异常 incoming 不变量 |
+| P6 交换/循环拷贝 | 既有 Boissinot Out-of-SSA | DX `source_variables/phi.rs` 已审局部（只参考、不依赖） | 一组真正平行拷贝与异常放置义务，不能仅看有没有 temp |
+| P7/P8 区域选择失效/膨胀 | EuroS&P 2025 SoK | Ghidra `blockaction` | 所选 profile、处理顺序、预算收费和拒绝条件 |
+| 输入验证与拒绝界限 | EverParse 2019 | wasmparser；DEX 规范作为必需语言依据另查 | 哪层保证什么、所有分配前的 count/length 与预算关系 |
+| 反编译语义证据不足 | D-Helix（先读模型限制） | 既有 JADX 的公开语义检查支撑 | 结果能声称什么、尚未覆盖什么；不是先造符号执行器 |
+| 锁/volatile/初始化 | POPL 2005 JMM（JLS §17 补规范） | ART verifier | 语义 profile 与证据边界；不把锁深度检查当全部 JMM 证明 |
+
+实施者直接按ALGORITHMS及TASKS编写，不需重新研究全部资料；有独立反例再回查来源。
+
+下一步：[目标架构](DESIGN.md)；实施者的首批入口：[实施路线](TASKS.md#2-顺序与完成定义)。
+
+
+## 10. 可复现输入与工具
+
+| 类型 | 必须使用的形式 | 禁止 |
+|---|---|---|
+| 源码与fixture | 仓库相对路径、公开URL+commit | 个人绝对路径、兄弟仓库目录、未签入文件当必需输入 |
+| 固定工具 | artifact坐标/version、公开下载源、锁文件SHA-256 | 自动找作者SDK目录、latest、只写“装一个d8”、未锁依赖的fat jar |
+| E2E生成/cache | 当前checkout的`.cache/e2e/` | 把预存cache当前提；工具/fixture缺内容锁或版本检查 |
+| 参考下载/cache | 当前checkout的`.cache/references/`；明确URL/源码commit | 个人预存目录当必需输入；静默覆盖已有修改；参考资料不要求checksum |
+| 临时运行产物 | harness调用系统temporary-directory API分配，日志按case归档到`.cache/e2e/runs/` | 写死某OS的临时目录、共享固定临时名、实际路径进golden |
+
+`.cache/`是本仓明确的不提交生成目录，不是私有机器依赖；**任何必需内容都必须能重建**。输入source、expectation、manifest、recipe与hash记录签入；不得用“我机器上有”解决缺文件。运行command工作目录由脚本按自身/checkout定位，不要求当前shell恰好在某目录。
+
+参考实际URL/commit/sparse路径仅由tools/fetch_references.py顶部REFERENCES维护。
+显式运行才联网，--list不联网/写缓存；已有非空TXT复用、不重新下载PDF/覆盖修改。
+源码核HEAD/origin/干净状态，不做资料checksum；不构建/测试参考工程、不运行下载脚本。
+论文/讲稿只保同名UTF8 TXT，扫描件OCR标记，原URL保留，公式/图表有疑义回查原文。
+E2E工具/fixture仍必须完整内容锁，合同统一在TASKS §3–§4，不享资料checksum豁免。

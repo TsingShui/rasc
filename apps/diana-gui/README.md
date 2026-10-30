@@ -8,4 +8,4 @@ not a member of the Cargo workspace. Do not initialize or implement it without
 a separate user request; framework and integration choices remain open.
 
 See [application targets](../README.md) and
-[current structure](../../docs/diana/STRUCTURE.md).
+[current scope](../../docs/diana/DESIGN.md#1-产品边界与工程范围).

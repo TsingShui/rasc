@@ -9,4 +9,4 @@ web runtime and integration choices remain open. Do not initialize or implement
 this target without a separate user request.
 
 See [application targets](../README.md) and
-[current structure](../../docs/diana/STRUCTURE.md).
+[current scope](../../docs/diana/DESIGN.md#1-产品边界与工程范围).

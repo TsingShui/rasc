@@ -11,7 +11,7 @@ apps/diana/             # Diana CLI/application package
 apps/diana-gui/         # Future GUI: documentation placeholder only
 apps/diana-web-ui/      # Future web interface: documentation placeholder only
 crates/diana-decomp/    # Independent native engine library
-docs/diana/            # Design, tasks, 70 E2E case specifications and board
+docs/diana/            # Core design, algorithms, tasks and 70 fixed cases
 ref-fork/rasc/         # Archived rasc/dexdec/rusty-dex/vendor/tests, reference only
 ```
 
@@ -27,10 +27,9 @@ has been selected.
 
 ## Development
 
-Start with the [development workflow](docs/diana/DEVELOPMENT.md): bounded batches,
-preparation evidence, completion/stop criteria and one record per actual batch.
-The proposed per-batch preparation rule is not yet active; existing full B01–B04
-prerequisites remain in force until explicitly approved and synchronized.
+Start with the [core documentation](docs/diana/README.md). The unified
+[TASKS.md](docs/diana/TASKS.md) owns preparation, bounded implementation batches
+and acceptance. The full B01–B04 prerequisite remains in force.
 
 Run from the repository root (Rust 1.93 or newer):
 
@@ -52,14 +51,21 @@ The current `diana` entry point reports “not implemented” to stderr and retu
 failure. It does not delegate to rasc or dexdec. Do not install or release the
 scaffold as a usable analysis tool.
 
+## Local reference material
+
+Use `python3 tools/fetch_references.py --list` or `--only <id> ...` to fetch
+public material into ignored `.cache/references/`. Papers/slides are TXT-only;
+existing text is reused. No reference checksum, builds/tests or production
+dependencies. See [sources and download policy](docs/diana/SOURCE_MAP.md).
+
 ## Design and test preparation
 
-- [Current structure and reference isolation](docs/diana/STRUCTURE.md)
-- [Design entry point](docs/diana/README.md)
-- [Offline architecture / implementation board](docs/diana/index.html)
-- [E2E preparation before engine development](docs/diana/TEST_PREPARATION.md)
-- [70 concrete case specifications](docs/diana/E2E_CASES.md)
-- [Portable sources and toolchain contract](docs/diana/REPRODUCIBILITY.md)
+- [Documentation entry](docs/diana/README.md)
+- [Product / CLI / engine design](docs/diana/DESIGN.md)
+- [Implementation algorithms](docs/diana/ALGORITHMS.md)
+- [Tasks, preparation and acceptance](docs/diana/TASKS.md)
+- [70 fixed case specifications](docs/diana/e2e_cases.json)
+- [Sources and reproducibility](docs/diana/SOURCE_MAP.md)
 - [Archived reference scope](ref-fork/README.md)
 
 The requested layout work does not mark H01/T01 or B01–B04 complete. Independently

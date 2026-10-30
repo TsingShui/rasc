@@ -18,5 +18,5 @@ The current CLI/engine tasks and E2E preparation remain unchanged; these directo
 reservations do not mark any capability complete. The archived rasc implementation
 under `ref-fork/rasc/` stays excluded from active builds and tests.
 
-See [current structure](../docs/diana/STRUCTURE.md) and
-[test preparation](../docs/diana/TEST_PREPARATION.md).
+See [core design](../docs/diana/DESIGN.md) and
+[preparation / tasks](../docs/diana/TASKS.md).

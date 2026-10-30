@@ -19,9 +19,9 @@ code forbidden and no external runtime/process dependency.
 
 Only create modules when an implemented capability needs them. Do not pre-create
 P0–P9 directories, fake Engine results, pass registries or tests for placeholder
-getters. See [module design](../../docs/diana/MODULES.md),
-[implementation tasks](../../docs/diana/TASKS.md) and
-[E2E preparation](../../docs/diana/TEST_PREPARATION.md).
+getters. See [interfaces / data](../../docs/diana/DESIGN.md),
+[algorithms](../../docs/diana/ALGORITHMS.md) and
+[preparation / tasks](../../docs/diana/TASKS.md).
 
 The `0.0.0` version is an unpublished scaffold marker. rasc and its release
 tooling are isolated under `ref-fork/rasc/`, outside the active workspace/CI. Shared test inputs/oracles will live in root

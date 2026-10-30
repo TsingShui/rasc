@@ -2,9 +2,10 @@
 
 Repository-wide AGENTS.md applies. This is the independent internal engine
 package, currently a document-only library scaffold without a public Engine.
-Read ../../docs/diana/STRUCTURE.md, DESIGN.md, MODULES.md and TASKS.md before work.
+Read ../../docs/diana/DESIGN.md, ../../docs/diana/ALGORITHMS.md and
+../../docs/diana/TASKS.md before work.
 
-- B01–B04 in TEST_PREPARATION.md must pass before production engine work. An
+- B01–B04 in ../../docs/diana/TASKS.md must pass before production engine work. An
   empty crate that builds is not T01 or E2E acceptance.
 - Accept borrowed DEX bytes/declaration facts supplied by the application; no
   filesystem/ZIP/CLI loading, external runtime/process or MCP adapter here.

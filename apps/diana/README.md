@@ -22,8 +22,7 @@ cargo clippy --locked -p diana --all-targets -- -D warnings
 - Diana product interface tests will live under `apps/diana/tests/`; shared E2E
   sources/oracles/inputs belong to root `tests/e2e/`, not a second fixture set.
 
-See [workspace structure](../../docs/diana/STRUCTURE.md),
-[product design](../../docs/diana/PROJECT.md) and
-[E2E preparation](../../docs/diana/TEST_PREPARATION.md). The user requested package
+See [product / workspace design](../../docs/diana/DESIGN.md) and
+[preparation / tasks](../../docs/diana/TASKS.md). The user requested package
 structure first; B01–B04 still precede production behavior and engine work.
 The `0.0.0` version is an unpublished scaffold marker, not a release.
