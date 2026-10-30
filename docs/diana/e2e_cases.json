@@ -1,16 +1,17 @@
 {
   "schemaVersion": 2,
-  "specRevision": "draft-4",
+  "specRevision": "draft-5",
   "state": "designed-not-built",
   "interfacePolicy": "public-library-and-complex-domain-modules-no-cli-blackbox",
   "frozenPolicy": "B01 approves a reviewed revision, not an immutable case count. Preserve existing required problems and valid semantics; revise faulty recipes/oracles with independent evidence and review, append new counterexamples, never refresh from engine output or change required Java to Smali to obtain a pass.",
-  "designNotice": "Specifications, not runnable assets. Schema 2 binds each invocation id/input/expected together. B01 review, B02 executable assets/tool locks, B03 independent certification and B04 authorized harness falsification are all still required; draft-4 is not approval or execution evidence.",
+  "designNotice": "Specifications, not runnable assets. Schema 2 binds each invocation id/input/expected together. B01 review, B02 executable assets/tool locks, B03 independent certification and B04 authorized harness falsification are all still required; draft-5 is not approval or execution evidence. Resource quotas are opt-in; no speculative JVM-size admission.",
   "toolchainSpec": "TASKS.md#45-固定工具与内容锁",
-  "caseCount": 85,
+  "caseCount": 86,
   "invocationPolicy": {
     "required": "Every invocation is required. Match by case id + invocation id; no index-zipped expected arrays, optional branches, any-error substitution or partial case pass.",
     "selectors": "targetRole(s) and full name+proto are resolved by the independent manifest to original physical/logical ClassKey/MethodKey, never display-name first match. The default role case must also be bound explicitly in that manifest. When method is omitted at a method/raw seam, the role itself must bind exactly one original MethodKey; a class role alone is insufficient. args=[] is implicit only for a zero-parameter call.",
     "inputs": "method is name+full binary proto; args are formal-type-directed. {new,identity,fields}, {arrayType,values,identity}, {stringUnits}, {floatBits} describe Driver-owned setup, not production object factories. calls/repeat run in one isolated Driver instance unless isolation says fresh-jvm.",
+    "limits": "All resource quota fields default to None: an omitted field or null means no quota, while integer 0 is an explicit zero limit. Test inputs name only caller-selected limits; adapters must not restore numeric defaults. Real format ranges, checked arithmetic, allocation failure, cancellation and backpressure remain mandatory.",
     "outputs": "expected fields are mandatory semantic assertions, not literal public report field spellings. Adapter projects actual public results/independent artifacts without inferring success from input/expected. java means every requested method is Java, or every requested class is JavaUnit for full-unit/full-unit-set. Raw checks use an independent decoder.",
     "ordering": "Program event/call/array/handler order is exact; independent symbol/report results match original-key multisets without requiring publication order. No private Phi/AST/local-name/phase-count goldens.",
     "compactValues": "stringPattern fully expands zeroPrefixUnits copies of U+0000 plus optional lastUnit; file pattern byte i=(i*multiplier+add)%256 for exactly length bytes. Length/hash-only comparison is insufficient.",
@@ -1327,23 +1328,24 @@
     {
       "id": "D062",
       "family": "resources",
-      "title": "预算耗尽有独立raw预算",
+      "title": "显式normal预算失败与raw可用额度分离",
       "suite": "resource-safety",
       "seam": "decompile-method",
       "required": true,
       "validationScope": "request",
       "inputKind": "self-made-java-to-dex",
-      "inputRecipe": "Known legal pure arithmetic method of reviewed size; run public engine with max_work_steps=0 then allow raw fallback budget; second invocation raw budget=0.",
+      "inputRecipe": "Known legal pure arithmetic method of reviewed size. First set only normal max_work_steps=0; omitted raw/request quotas remain None, so complete raw fallback is available. Second explicitly sets raw work to zero too. Zero is not the unlimited sentinel.",
       "invocations": [
-        {"id":"v1","input":{"targetRole":"case","method":"f(I)I","limits":{"max_work_steps":0,"fallback_work_steps":262144,"max_request_work_steps":50000000}},"expected":{"outcome":"smali","reason":"budget_exceeded","rawExact":true}},
-        {"id":"v2","input":{"targetRole":"case","method":"f(I)I","limits":{"max_work_steps":0,"fallback_work_steps":0,"max_request_work_steps":50000000}},"expected":{"outcome":"unavailable","reason":"budget_exceeded"}}
+        {"id":"v1","input":{"targetRole":"case","method":"f(I)I","limits":{"max_work_steps":0}},"expected":{"outcome":"smali","reason":"budget_exceeded","rawExact":true}},
+        {"id":"v2","input":{"targetRole":"case","method":"f(I)I","limits":{"max_work_steps":0,"fallback_work_steps":0}},"expected":{"outcome":"unavailable","reason":"budget_exceeded"}}
       ],
-      "mustRejectMutation": "重试提高normallimit、raw偷用耗尽budget、截断後标完整。",
-      "oracle": "resource-contract",
+      "mustRejectMutation": "把Some(0)当None、raw偷用normal额度、重试扩大显式限额，或截断后标完整。",
+      "oracle": "explicit-resource-contract",
       "dependencies": "reviewed self-made raw method; no Java source VM required",
       "acceptanceGate": "engine",
       "designRefs": "DESIGN §3.7、§10.3；ALGORITHMS §8、§13",
-      "inputRequirements": []
+      "inputRequirements": [],
+      "revisionReason": "保留normal失败后raw成功/失败的两项原预期；不再依赖猜测的raw/request预算数值，未配置项明确为None。"
     },
     {
       "id": "D063",
@@ -1376,7 +1378,7 @@
       "required": true,
       "validationScope": "request",
       "inputKind": "self-made-java-to-dex",
-      "inputRecipe": "成员场景：f()String返回4个NUL，转义后源码超过16 bytes，normal与raw成员上限均16、report上限保持默认。报告场景：另一合法ReportCase含canonical ctor和8个static int method_0()..method_7()，各返回0；完整Object目录。每个成员源码远小于65536 bytes，但仅8个不同方法声明的Java最小长度合计已超过128 bytes；请求整类并render。两者其他分析/目标格式预算均充足，不需要大分配。",
+      "inputRecipe": "成员场景：f()String返回4个NUL，转义后源码超过16 bytes，normal与raw成员上限均显式设16，report保持None。报告场景：另一合法ReportCase含canonical ctor和8个static int method_0()..method_7()，各返回0；完整Object目录。每个成员源码远小于65536 bytes，但仅8个不同方法声明的Java最小长度合计已超过128 bytes；请求整类并render。两者其他资源配额均None，目标格式/语义正常，不需要大分配。",
       "invocations": [
         {"id":"v1","input":{"targetRole":"case","method":"f()Ljava/lang/String;","stringUnits":[0,0,0,0],"limits":{"max_method_output_bytes":16,"fallback_output_bytes":16}},"expected":{"outcome":"resource-failure","resourceFailureExplicit":true,"noTruncatedSuccess":true}},
         {"id":"report-total","input":{"targetRole":"report-case","selection":"class","limits":{"max_method_output_bytes":65536,"fallback_output_bytes":65536,"max_report_output_bytes":128}},"expected":{"outcome":"resource-failure","limit":"max_report_output_bytes","resourceFailureExplicit":true,"noTruncatedSuccess":true}}
@@ -1703,48 +1705,52 @@
     {
       "id": "D077",
       "family": "java-target",
-      "title": "代码保守上界超过目标时不伪称资源耗尽",
-      "suite": "target-representability",
+      "title": "长直线调用序列完整恢复Java并保留全部调用",
+      "suite": "core-java",
       "seam": "decompile-method",
       "required": true,
-      "validationScope": "raw-method",
+      "validationScope": "method-in-known-context",
       "acceptanceGate": "engine",
-      "designRefs": "ALGORITHMS §12.5",
-      "inputKind": "self-made-smali",
-      "inputRecipe": "静态f()V连续执行10000个相同Dep.tick()V invoke-static后return，无loop/handler；每个call可能effect，完整目录与同一可访问声明匹配。原code约30001 code units，分析/AST/原始输出配额均充足；每个实际call至少一个32-byte语法node，目标code投影必超过65534。",
+      "designRefs": "ALGORITHMS §12.4–§12.5；DESIGN §10.3",
+      "inputKind": "self-made-java-to-dex",
+      "inputRecipe": "静态f()V连续执行10000个相同Dep.tick()V后return，无loop/handler；Dep有默认初值0的static int ticks，tick()只执行ticks++。每次Driver在新JVM调用f一次后读取ticks。完整自制依赖及Object目录，恢复目标时依赖不改。所有资源配额保持None，不按节点费用预测代码大小。",
       "inputRequirements": [
-        "独立记录10000个有序invoke site且不允许优化成一个loop/删call；此例是Diana保守投影拒绝，不声称实际javac bytecode一定超限。",
-        "分析预算固定为方法5,000,000/request50,000,000 steps，raw预留5,000,000；其余为DESIGN默认。B03核本recipe可在这些预算完成；不够须独立成本证据与spec revision，不接受BudgetExceeded冒充目标拒绝。"
+        "独立认证原DEX恰有10000个有序invoke-static site及末尾return-void；不能因工具改写而用一个loop替换输入，也不能删call或加helper。",
+        "恢复Java在原合法context真实编译，独立读取classfile核10000次原callee调用及合法Code。Driver比较return-void与ticks=10000，不从源码长度或引擎状态getter推断成功。",
+        "本机同型javac探针得到code_length=30001，仅说明输入可表达；B03仍须按TASKS锁定版本重建、认证原DEX与真实参考行为。"
       ],
       "invocations": [
-        {"id":"code-upper-bound","input":{"targetRole":"case","method":"f()V","catalog":"complete","limits":{"max_work_steps":5000000,"max_request_work_steps":50000000,"fallback_work_steps":5000000}},"expected":{"outcome":"smali","reason":"unsupported","unsupportedReason":"JavaTargetLimit","targetItem":"code_bytes","rawExact":true,"orderedInvokeSites":10000}}
+        {"id":"code-upper-bound","input":{"targetRole":"case","method":"f()V","catalog":"complete","limits":{},"isolation":"fresh-jvm"},"expected":{"outcome":"java","returnVoid":true,"heap":{"ticks":10000},"orderedInvokeSites":10000}}
       ],
-      "mustRejectMutation": "把DEX code units直接当JVM费用、DCE重复call或目标上界溢出后放行、用资源error冒充目标admission。",
-      "oracle": "specified-code-cost-lower-bound-plus-independent-raw-projection",
-      "dependencies": "自制源码/DEX与完整声明目录；工具内容锁见TASKS §4.5"
+      "mustRejectMutation": "按AST节点或DEX code units猜code费用并退raw，删/合并调用，或未完整生成就报Java成功。",
+      "oracle": "worked-call-count-plus-source-jvm-driver-and-independent-classfile-projection",
+      "dependencies": "自制源码/DEX与完整声明目录；工具内容锁见TASKS §4.5",
+      "revisionReason": "按用户要求取消未测费用门槛；原10000次调用问题与invocation id保留，删除以估算自身作oracle的Smali预期，改验独立可编译Java和真实调用效果。不从Diana actual刷新真值。"
     },
     {
       "id": "D078",
       "family": "java-target",
-      "title": "class pool保守投影拒绝不丢无code成员",
-      "suite": "target-representability",
+      "title": "完整接口声明不因重复mention估算而降级",
+      "suite": "core-java",
       "seam": "decompile-class",
       "required": true,
       "validationScope": "full-unit",
       "acceptanceGate": "engine",
-      "designRefs": "ALGORITHMS §12.6",
-      "inputKind": "self-made-dex-builder",
-      "inputRecipe": "public interface Case恰有2200个名字互异的abstract m0000..m2199()I声明，无constructor、无code、无默认方法；flags/proto/hierarchy完整。每个声明至少计一个N，1+64+32*N已超过65535；原DEX与实际可能的JVM pool并不因此格式损坏。",
+      "designRefs": "ALGORITHMS §12.4、§12.6；DESIGN §10.3",
+      "inputKind": "self-made-dex-builder-with-reference-java",
+      "inputRecipe": "public interface Case恰有2200个名字互异的abstract m0000..m2199()I声明，无constructor、无code、无默认方法；flags/proto/hierarchy完整。参考Java逐项声明这些方法，恢复完整JavaUnit后直接编译；配额全None，不按声明/type/descriptor mention乘系数猜pool。",
       "inputRequirements": [
         "独立全量声明manifest=2200、code_off均0、每个proto和原key存在；其他shell条件合法，无未知compiler-owned成员。",
-        "分析/报告预算充足；class pool拒绝不等于每个独立合法声明失效，不要求强制把所有DeclarationOnly改Smali。"
+        "恢复JavaUnit真实编译，独立classfile投影与manifest核全部2200个abstract声明、无Code/合成constructor/body，并核实际pool格式有效。",
+        "本机同型javac探针的constant_pool_count=2206不是固定输出golden；B03仍须用锁定工具认证参考产物。"
       ],
       "invocations": [
-        {"id":"class-pool","input":{"targetRole":"case","catalog":"complete","limits":"DESIGN-defaults"},"expected":{"outcome":"mixed","reason":"unsupported","unsupportedReason":"JavaTargetLimit","targetItem":"constant_pool_slots","declarationsPreserved":2200,"noFakeJavaUnit":true}}
+        {"id":"class-pool","input":{"targetRole":"case","catalog":"complete","limits":{}},"expected":{"outcome":"java","declarationsPreserved":2200}}
       ],
-      "mustRejectMutation": "只看DEX pool大小、漏声明/自动截断后报JavaUnit，或错误合成default constructor/body。",
-      "oracle": "specified-pool-bound-plus-independent-full-declaration-manifest",
-      "dependencies": "自制源码/DEX与完整声明目录；工具内容锁见TASKS §4.5"
+      "mustRejectMutation": "按重复mention估算pool而返回Mixed，漏声明/截断后报JavaUnit，或错误合成constructor/body；DeclarationOnly不能抬高executable Java统计。",
+      "oracle": "independent-full-declaration-manifest-plus-javac-and-classfile-projection",
+      "dependencies": "自制源码/DEX与完整声明目录；工具内容锁见TASKS §4.5",
+      "revisionReason": "保留2200个无code声明及完整性问题；独立参考可合法编译，取消猜测pool费用导致的Mixed预期，改为必需完整JavaUnit。不删required或迎合引擎actual。"
     },
     {
       "id": "D079",
@@ -1911,6 +1917,32 @@
       "mustRejectMutation": "以非JavaUnit拒绝默认text、一个失败清空其他Java成员、要求JSON才能拿raw、空stub补齐、漏成员/修改call-site或UTF16、Mixed前缀后spans失位。",
       "oracle": "independent-dex-member-and-raw-projection-plus-rendered-source-identity-integrity",
       "dependencies": "自制038 builder/Bootstrap声明/完整Object目录；固定smali/dexlib2开发工具；不执行外部APK或CLI"
+    },
+    {
+      "id": "D086",
+      "family": "resources",
+      "title": "大code范围默认不限且显式限额不破坏完整raw",
+      "suite": "resource-safety",
+      "seam": "decompile-method",
+      "required": true,
+      "validationScope": "method-in-known-context",
+      "acceptanceGate": "engine",
+      "designRefs": "DESIGN §3.7、§10.3；ALGORITHMS §1、§7–§8、§13",
+      "inputKind": "self-made-dex-builder-with-reference-java",
+      "inputRecipe": "自制035 owner有canonical ctor与static f()V。f的code_item恰含131073个code units：首个return-void，随后131072个完整nop；registers/ins/outs/tries均0，无branch/payload/handler。只有return可达。真实输入范围覆盖全部words，完整声明目录。参考Java f直接return；使用既定tests-only pure-scalar oracle执行原入口，不引入heap/exception/monitor解释。",
+      "inputRequirements": [
+        "独立解码证明insns_size=131073、所有words实际存在、第一条为return-void、其余均完整nop且不可达；不能缩小输入、截断dead区或伪造超出实际文件的count。",
+        "默认Limits保持全None，公开Engine必须完成真实输入校验并恢复Java；Driver核return-void，真实编译目标方法，不以读取Limits默认值作为测试。",
+        "第二调用只显式设置normal max_method_code_units=131072；raw相关字段仍None，必须完整回环保留首个return和所有nop，不以旧raw默认长度限制拒绝。"
+      ],
+      "invocations": [
+        {"id":"unlimited-default","input":{"targetRole":"case","method":"f()V","limits":{}},"expected":{"outcome":"java","returnVoid":true}},
+        {"id":"explicit-code-limit","input":{"targetRole":"case","method":"f()V","limits":{"max_method_code_units":131072}},"expected":{"outcome":"smali","reason":"budget_exceeded","rawExact":true}}
+      ],
+      "mustRejectMutation": "恢复隐藏的131072默认code/raw门槛、把显式normal限制误用于raw、无效count先分配，或跳过dead区格式校验后报成功。",
+      "oracle": "independent-full-code-layout-plus-pure-scalar-reference-and-jvm-driver",
+      "dependencies": "自制035 builder/完整声明/已约定pure-scalar参考及固定assembler；不执行CLI或私有phase测试",
+      "revisionReason": "新增合法大code与显式限额对照，验收默认放开不靠getter断言，同时保留真实范围、完整raw及非截断保证。"
     }
   ]
 }

@@ -1,6 +1,6 @@
 # Diana 任务与验收
 
-**状态：仅包骨架，39个B/T/H任务尚未验收；案例规格draft-4共85个required案例、175个必跑调用场景，仍为designed-not-built。**
+**状态：仅包骨架，39个B/T/H任务尚未验收；案例规格draft-5共86个required案例、177个必跑调用场景，仍为designed-not-built。**
 本页统一流程、准备、任务卡与验证；接口/数据只看[DESIGN.md](DESIGN.md)，算法只看
 [ALGORITHMS.md](ALGORITHMS.md)，来源只看[SOURCE_MAP.md](SOURCE_MAP.md)。
 [e2e_cases.json](e2e_cases.json)是案例/独立expected唯一规格；允许有依据地修订错误形式、
@@ -42,8 +42,8 @@
 第一条Java链只需当前真的会消费的Module，不先搭全部phase目录或AST大全。T06的
 answer7只是说明，实际固定案例为D009；无call/P7单块返回的是有效空事实，不是假pass。
 
-- EngineCoreRC：JSON中required且acceptanceGate为engine或engine-and-application的所有案例/调用；当前80个案例（D001–D065、D071–D085）。
-- ProductRC：JSON全部required案例/调用；当前85个案例，复用engine证据并补application义务。
+- EngineCoreRC：JSON中required且acceptanceGate为engine或engine-and-application的所有案例/调用；当前81个案例（D001–D065、D071–D086）。
+- ProductRC：JSON全部required案例/调用；当前86个案例，复用engine证据并补application义务。
 - D065/D085的engine-and-application要求两seam分别满足每个调用的同一expected；缺应用侧不能称整个case/产品通过，也不把两个seam计成两个case。
 - 分母/选择器从JSON字段计算，不以旧编号终点或历史70/65数量硬编码；一个调用缺失即整case未通过。
 - 默认展示局部成果不降低required Java门槛；未实现/缺工具/未执行平台仍未通过。T24不阻塞两个RC。
@@ -128,7 +128,7 @@ E2E准备”来绕过。自制源/输入的独立语义认证仍是核心案例�
 
 **不变量 / 限额**：referenceinput与expected冻结在引擎实现之前；任何修改需casev2reason/独立oracle/审阅，不用自动“refreshgolden”。生成字节hash不同时先解释compilerrecipe差异，不修改预期语义。
 
-**测试**：`verify-inputs`覆盖全部required case/invocation资产和inputRequirements；JVM/handcrafted raw/规范镜像/oracle缺失分开记，不把ART-not-run藏成pass。ART只记录实际授权环境上的执行证据。D075–D078的内容锁、接受侧javac和拒绝侧独立projection仍须实际核验，新增规格不等于编译器费用上界已被验证。
+**测试**：`verify-inputs`覆盖全部required case/invocation资产和inputRequirements；JVM/handcrafted raw/规范镜像/oracle缺失分开记，不把ART-not-run藏成pass。ART只记录实际授权环境上的执行证据。D075/D076的真实格式边界、D077/D078的Java接受侧编译及D086的默认不限/显式限额对照仍须认证；本机同型javac探针不是锁定工具链或引擎执行证据。
 
 **验收**：所有required case/invocation的source、input结构与独立expected可复验，hash/范围证书完整；没有unknown local deps；report同时给JSON派生的case与invocation分母。**完成**：开发过程中无需临时改输入来适配错误实现。
 
@@ -178,7 +178,7 @@ core Java、negative raw、invalid input、安全/领域suite分别报告。实�
 
 所有公共调用共用一个RunContext：open→decompile→render，Options不重复存Limits；
 Report只持owned结果facts。source/expected独立于Diana，F/Q只是历史能力标签，实际
-执行集合与两个分母由JSON的required、acceptanceGate和invocations计算；当前为85案例/175调用场景。fixture、tool/hash、runner目前都尚未建立。
+执行集合与两个分母由JSON的required、acceptanceGate和invocations计算；当前为86案例/177调用场景。fixture、tool/hash、runner目前都尚未建立。
 
 ### 案例格式、修订依据与义务映射
 
@@ -189,7 +189,11 @@ scope/完整proto从独立manifest解析，不让adapter按expected挑目标。�
 
 draft-2保留D001–D070的问题身份并纠正下列规格；draft-3追加D085修正默认反编译展示。
 draft-4解释验收记号、将应用基础检查统一为G0，拆清normal/raw/report与最终JSON输出
-边界，D064补report合计超限、D069补压缩方式/加密拒绝；保留原调用有效预期。尚无引擎actual：
+边界，D064补report合计超限、D069补压缩方式/加密拒绝。
+draft-5按用户要求放开未经测量的数值预算：Limits/应用配额默认None，取消节点费用预测的
+Java拒绝；D077/D078改为必需Java，追加D086核默认不限与显式限制，其他有效预期保留。
+两项同型自制样例在本机javac21.0.12.1下分别有code_length=30001、pool_count=2206；
+这是独立修订依据，不是Temurin21.0.8+9锁定工具链认证、B01批准或E2E通过。尚无引擎actual：
 - D040：DEX access_flags明确managed declared flag不自行加锁；保留锁行为与raw flags义务。
 - D027/D046：短literal/default encoded可能被工具换形或省略；分别固定new-array/fill
   原始形态、显式encoded tag，并给独立规范镜像/字段绑定证据。
@@ -203,13 +207,15 @@ draft-4解释验收记号、将应用基础检查统一为G0，拆清normal/raw/
 |---|---|---|
 | D071–D072 | 窄producer经过Phi的合法return/call，以及int算术/混合range不误截断 | T10类型证据、T11已有调用绑定；T25整case |
 | D073–D074 | count0的null语义、非空fill的FreshArray接受/拒绝边界 | T04/T15；T25 |
-| D075–D078 | 参数words/无code声明、MUTF8、code与class pool目标投影 | T10/T21/P8；T25 |
+| D075–D076 | 参数words/无code声明、MUTF8的真实格式边界 | T10/T21/P8；T25 |
+| D077–D078 | 长调用序列及完整接口声明必须Java，不受估算费用拒绝 | T11/T21/P8；T25 |
 | D079–D080 | 多unit编译时static final仍保留sget/class-init；外部常量/Unknown拒绝 | T11/T20；T25 |
 | D081–D082 | 同静态site的动态锁错配拒绝、参数锁的合法循环接受 | T19；T25 |
 | D083 | 极端signed sparse keys与有界处理 | T14；T25 |
 | D084 | noncanonical synthetic bridge保留raw/effect，不套Generated | T21；T25 |
 | D085 | 局部invoke-custom失败时Java/Smali、UTF16、原identity/spans均保留，默认text不挡Mixed | T03/T04/P9、H05；T25/H08各自seam |
 
+D086由T01/T03/T04提供默认不限、显式Some(n)与完整raw的输入/资源对照，T25汇总。
 D085验证公开Module的复杂结果保留与raw/UTF16/spans完整性，不启动CLI，也不为format flag、status getter或输出排版另造测试。默认展示纠正不能把原有Java正例改成Smali成功。
 
 该映射不把新增案例全部自动归“Java正例”；每次调用的支持/拒绝结果只读JSON。
@@ -461,12 +467,12 @@ cargo test --workspace --all-features --locked
 
 **目标文件**：现有骨架 `crates/diana-decomp/Cargo.toml`（其余路径按本页约定相对该crate）、`src/{lib,engine}.rs`、`src/pipeline/{schedule,control,diagnostics}.rs`、`src/p0_knowledge/{mod,policy}.rs`、`src/substrate/{ids,origin}.rs`、`tests/contracts.rs`。package=`diana-decomp`，Rust导入=`diana_decomp`，与应用包 `apps/diana/` 分开；已加入 workspace，不能将骨架构建当本卡完成。旧依赖已从主 workspace/lock 去除、保留在 ref-fork；H08 核对不再引入，版本按正式流程，不手工推动release。
 
-**输入→输出 / Interface**：实现DESIGN §2和DESIGN §2的`DexImage<'a>/Engine<'a>/RunContext/Options/Request/Report/MethodOutput/ClassOutput`、分类诊断；未接线Java路径只能Unsupported/Unavailable，不能占位成功。Limits唯一放RunContext；open/decompile/render共用`&mut RunContext`，实现累计used/held配额与method raw预留。schedule直接调用具体typed函数，PhaseId仅为诊断标签；不实现PassSpec/registry/trait/macro。
+**输入→输出 / Interface**：实现DESIGN §2和DESIGN §2的`DexImage<'a>/Engine<'a>/RunContext/Options/Request/Report/MethodOutput/ClassOutput`、分类诊断；未接线Java路径只能Unsupported/Unavailable，不能占位成功。Limits唯一放RunContext；open/decompile/render共用`&mut RunContext`，Limits默认全None；仅显式限额使用累计used/held配额及有限raw预留。schedule直接调用具体typed函数，PhaseId仅为诊断标签；不实现PassSpec/registry/trait/macro。
 
 **步骤**：
 1. 创建最小crate与测试注册；enum和private Verified构造器只给owning validator访问。
 2. 基础enum、interface、转发与错误包装通过编译/源码审阅确认，不写“枚举值等于自身”或机械getter测试。
-3. 按DESIGN §3.7实现request/method配额；method入口预留raw work/分配，normal不可用；used不退款，未消费held才归还。open/index/render同样charge/取消，Report脱离临时IR；trace仅可选有界。
+3. 按DESIGN §3.7实现可选request/method配额；默认None不加阈值或固定raw预留，仅显式有限raw值从父配额claim；normal/raw工作子配额独立，used不退款、未消费held才归还。open/index/render同样charge/取消，Report脱离临时IR；trace仅可选有界。
 4. 不为私有Pass调用顺序写测试，也不为未实现phase创建空算法；通过真实公开请求的资源耗尽/取消行为验证调度是否停止，trace仅辅助定位。
 5. 固定diagnostic字段：code、severity、method/site、phase/pass、kind、boundeddetail，WallTime不得进入文本golden。
 
@@ -516,7 +522,7 @@ cargo test --workspace --all-features --locked
 4. Engine Unsupported路径丢弃分析partialsource，只调用rawadapter；smali text输出所有instruction，goto不能Nop删除，header/register/return类型完整。
 5. add byte spans对应memberdecl/reference与InsnOrigin；T04前只有原输入无待支持metadata、指令完整的case可标Smali。存在尚未支持metadata则Unavailable+RawExcerpt，不发“metadata不完整”的Smali成功。
 
-**不变量 / 限额**：每rawinstruction有且只有一个standard表达或明确unsupportedraw状态；非法unknownop不猜1word继续；fallback输出检查reserve，每method独立预算。
+**不变量 / 限额**：每rawinstruction有且只有一个standard表达或明确unsupportedraw状态；非法unknownop不猜1word继续；fallback只核显式限额，未配置时不能补固定reserve或code长度阈值。
 
 **测试**：F02 `RawMethods`：无debug/annotation的return、moves、wide/rangeinvoke、分支；U01 knownJavaUnsupported仍保留完整knownraw；M03截断operand、branchintoinstruction、invalidregister/index、unknownopcode。对原words/offset逐条比较；尚未支持metadata的原输入明确Unavailable。
 
@@ -583,7 +589,7 @@ cargo test --workspace --all-features --locked
 1. supportedop：常量、参数move、int简单add/sub/mul、return；normalterminal验证，return后rawcode仍校验。
 2. inputwordbinding、opresultValueId、simpletypeconstraints、ValueId→LocalId，explicitassignment不先GVN/inline。
 3. intliteral原bits适当signedspelling；Javaexprstmt只call/new/update，arithmetic写localassignment。
-4. Java AST核completion/returntype/Identifier，按ALGORITHMS §12.4–§12.6核signature和目标code/local/stack/pool上界后才Verified；256个int的静态声明必须Unsupported/raw，不能删unused参数。P9输出method/context状态与origin spans，不按name猜proto。F05编译只用原自制source已知context替换选定方法，constructor/其他成员保持原源码，不生成任何语义stub；因此只计选定method的Java合法性，不把Mixed算完整DianaJavaUnit。
+4. Java AST核completion/returntype/Identifier，按ALGORITHMS §12.4–§12.6核可直接确定的signature/MUTF8/成员事实后才Verified，不预测code/local/stack/pool并拒绝源码；256个int的静态声明必须Unsupported/raw，不能删unused参数。P9输出method/context状态与origin spans，不按name猜proto。F05编译只用原自制source已知context替换选定方法，constructor/其他成员保持原源码，不生成任何语义stub；因此只计选定method的Java合法性，不把Mixed算完整DianaJavaUnit。
 5. 真实输入经已实现的typed transitions产出结果，失败不留下Java残片；以公开interface的语义、错误状态、预算/取消观察验收。artifact/trace仅辅助定位，不新增私有Pass调用顺序、次数或逐phase计数测试。
 
 **不变量 / 限额**：无handler/noMonitor；undefinedread必须拒绝；long/doubleword契约T10才扩充，不knownprofile就Unsupported而非猜int；effectful表达式禁止inline。
@@ -928,7 +934,7 @@ cargo test --workspace --all-features --locked
 
 **不变量 / 限额**：puregeneric美化可省，bindingcorrectness不可省；overloadcomplete状态与EnvironmentId稳定，sourcepublicidentity不改。
 
-**测试**：F21 `ErasedContracts`：selfmadegenericList/identity、covariantbridge、rawinterfaceimpl、nulloverload；U06 return-onlyDEXoverload、bridgeeffect不同、unknownparentcontract→Smali/Mixed；B(F21)配套完整selfmadeclasspath。 D048/D084分别要求canonical Generated和有effect bridge拒绝；D075含无code声明目标边界，D078核class pool拒绝不丢成员。
+**测试**：F21 `ErasedContracts`：selfmadegenericList/identity、covariantbridge、rawinterfaceimpl、nulloverload；U06 return-onlyDEXoverload、bridgeeffect不同、unknownparentcontract→Smali/Mixed；B(F21)配套完整selfmadeclasspath。 D048/D084分别要求canonical Generated和有effect bridge拒绝；D075含无code声明目标边界，D078要求2200个abstract声明完整组成JavaUnit，不用pool估算拒绝。
 
 **验收**：G0与本卡公开核心case（统一规则见§4）；B(F21) + S(U06)。**完成**：raw泛型警告可接受，但真正编译错误不可忽略；legacyfulltypesolver不整体搬入。
 
@@ -991,7 +997,7 @@ cargo test --workspace --all-features --locked
 **步骤**：
 1. 仅在P8实现一个真实可选pure函数及明确option，default off；不建PassSpec/registry。按ALGORITHMS §15的Applied/Declined/BUG合同处理，不建插件框架，必需legalization不可关闭。
 2. 仅匹配同block相邻`t=expr; return t`；expr只含规定的int/long纯运算，不含FP/div/rem/heap/call/cast-ref/allocation/同步，不内联Phi/shadow/deferred allocation。
-3. 预留副本/验证及完整emit配额；复制一个JavaBody，按原AST序一次扫描并替换互不重叠的pair，不做repeat或回滚edit-log。
+3. 仅对显式有限配额核副本/验证/完整emit所需资源，默认不设估算拒绝门槛；复制一个JavaBody，按原AST序一次扫描并替换互不重叠的pair，不做repeat或回滚edit-log。
 4. 验证source type/binding/control/effects/Origin与配额；通过Applied，不匹配或配额不足Declined，取消停止、内部错误为BUG。
 
 **不变量 / 限额**：noeffect duplication/motion，postverifiedtypes仍valid；defaultoff和on各有sameprofile行为；不以local数量或文本形态作为正确性判据。
@@ -1012,14 +1018,14 @@ cargo test --workspace --all-features --locked
 
 **步骤**：
 1. 核对B01–B04已固定manifest与实际typed transitions，required成员不按当前实现删/skip；将core-java的失败改为Smali成功不可接受。filterzero断言，known038/039/custom/polymorphic未支持列表与rawcoverage分别明确；unknownformat不能fakefallback。
-2. 生成字节和artifactmutation测试：count/offset/LEB/payload/handler/type/Phi/copy/site/loop/state/outputbudget，固定seed，取消会终止。目标admission覆盖static 255/256、instance 254/255、wide参数words、source locals/code/pool边界及compiler-owned成员；不能调大Limits绕过JVM硬界限。
+2. 生成字节和artifactmutation测试：count/offset/LEB/payload/handler/type/Phi/copy/site/loop/state/outputbudget，固定seed，取消会终止。目标验证覆盖static 255/256、instance 254/255、wide参数words、MUTF8及compiler-owned布局；D077/D078必须Java，D086核默认不限/显式限额。不能用估算费用拒绝，也不能把JVM真格式边界当作可调资源预算。
 3. 每个knownunsupported合法fixtureSgate；malformedUnavailable/rawexcerpt不冒充smali，BUG不算成功。fallback吞掉exception/type错误的策略必须反例失败。
-4. V4按Temurin21.0.8+9 `--release 8 -proc:none -g:none`编译，独立读classfile核实际code/locals/stack/handler/pool不超过TargetAdmission投影；不只检查javac exit0。该检查验证核心admission行为，不是工具自测。跑JSON acceptanceGate=engine/engine-and-application的全部required调用，含D071–D085；不按当前supported或旧D065终点过滤。H卡补application证据，H08汇总产品全部required。单列JVM/ART/规范镜像、catalog、metadata及异常/锁证据。T24off先全core gate，on仅已实现美化另验。
+4. V4按Temurin21.0.8+9 `--release 8 -proc:none -g:none`编译，独立读classfile记录实际code/locals/stack/handler/pool并核真实格式界限与成员布局，不再比较猜测投影；不只检查javac exit0。该检查验证核心生成产物，不是工具自测。跑JSON acceptanceGate=engine/engine-and-application的全部required调用，含D071–D086；不按当前supported或旧D065终点过滤。H卡补application证据，H08汇总产品全部required。单列JVM/ART/规范镜像、catalog、metadata及异常/锁证据。T24off先全core gate，on仅已实现美化另验。
 5. 以不同worker到达次序/HashSeed重复验证记录和产物按原始identity关联、无重无漏、每份实际source合法且spans指向本份文本；不要求生成文本/局部名/声明/诊断序列byte-identical，不为测试加入canonical sort。不同合法调度触发不同预算结果如实分类，但不得因此错语义；不为本卡刻意新建并行。
 6. 记录release耗时/峰值内存方法而不是debug断言快；代表input授权后optin才运行，环境/skip明确。不做promised百分比缩减。
 7. 套用本仓workspacegates、各crate许可来源和self-contained约束；本卡只验收内部EngineCoreRC，root CLI替换由H05/H08验收，不设计MCP。
 
-**不变量 / 限额**：分析超限Resource不是Malformed，目标格式上界失败是Unsupported而非Resource；totalrequestlimits覆盖多个method，smalllimit不可输出截断“完整Java”。fuzzcase有timeout/seed/range避免unbounded运行。
+**不变量 / 限额**：命中显式配额或实际分配失败为Resource，不是Malformed；直接确认的目标格式超限为Unsupported，不按估算拒绝。默认所有Limits为None，显式request配额覆盖多个method，smalllimit不可截断成功。fuzzcase有timeout/seed/range避免unbounded运行。
 
 **测试**：F25 `HardeningMatrix`：所有M/U/Fmanifest登记，实际产物失效、CancelvsFallback、near-boundary分配与reportspans；结果排列/合成ID变化时按原identity核对，不作跨运行全文本相等。knownunsupportedextensions仅raw且有version限制。
 
@@ -1156,11 +1162,11 @@ cargo test --workspace --all-features --locked
 **步骤**：
 1. 取消callback不引入tokio到engine；每decode/worklist/copy/region/emitcheckpoint检查，Cancelled不继续rawfallback。
 2. 用户文件/scope结束后不发过期结果；同请求cacheloader/reader的owner/reservation释放，失败无半缓存，nohardtimeout承诺。
-3. 创建RunContext时把Limits clamp到scope剩余额度；dependency/main借用按同一物理owner去重计输入，派生数据、所有methods和render累计收费。raw预留只从父配额领取，不能另发一份request预算。
+3. 创建RunContext时仅组合已显式设置的Limits与scope剩余额度；未设置的保持None，不补固定input/inflate/JSON阈值。dependency/main按同一物理owner去重，派生数据、所有methods和render累计收费；仅显式有限raw配额参与父级预留。
 4. 输出按DESIGN §10.3的max_method_output_bytes、独立fallback_output_bytes及max_report_output_bytes分别核界；P9合计shell/成员/标记/诊断，JSON再按DESIGN §7核实际转义/重复字段/spans后的长度。不把输出长度重复扣成累积分配，也不退款真实work/分配；超限无截断成功，file按安全原子发布。D064分别固定成员与report超限。
 5. CLIstreamqueries的brokenpipe停止producer/背压；不要把SIGPIPEkill进程称catchable取消保证。
 
-**不变量 / 限额**：取消协作式；libdeflate不可抢占明确；input64MiBengine限制与256MiBinflate限制各自Resource；没有MCPsemaphore/schema新合同。
+**不变量 / 限额**：取消协作式；libdeflate不可抢占明确；默认input/inflate/JSON/engine均无数值配额，显式超限或真实分配失败才报Resource；没有MCPsemaphore/schema新合同。
 
 **测试**：Q06通过公开请求/反编译/提取interface验证长工作取消、owner生命周期、normal/raw预算隔离、大量转义文本的输出字节预算、spans对应实际source、缓存失败reservation、consumer关闭时队列有界。不是简单JSON字段包装或私有phase调用顺序测试；每case有有限timeout。
 

@@ -345,7 +345,8 @@ accepted形态已证非null且长度足够，primitive stores不会发生NPE/bou
 FillExpansion统一拥有原site，length-check与stores是其有序children，覆盖器不把它们误算
 为多次原fill执行；snapshot放在整个expansion之前。D027作为正例须由独立输入证书
 逐项证明int/float新数组形态与payload，不能由Java literal文本推断原DEX必含fill。
-运行成本O(count)，AST/常量/code投影逐项收费，payload本身借原bytes，不先复制巨大Vec。
+运行成本O(count)，AST/常量按实际增长计费，仅检查显式配额；不预测JVM code费用。
+payload本身借原bytes，不先复制巨大Vec。
 
 ## 3. 固定入口Phi建造：一次绑定，不迭代猜ValueId（T07/T16）
 
@@ -443,8 +444,8 @@ builder自报bool。D001/D002/D003/D029/D030是公开行为证据，不冻结私
 
 最简单实现每次重新扫描被影响block，worklist最坏可有O(B*|S|)次有效增长，单次扫描
 还需访问Op和相关需求集合；不能声称整个P3总是线性。扫描中的set元素/edge/input也收费。
-Phi数P不超过最终live-in总量，incoming数A按真实eligible边计，受values/phi_inputs/分配
-预算先限制。连接和后续三次图传播为O(P+A+uses)，额外存储同阶；不预分配R×E矩阵。
+Phi数P不超过最终live-in总量，incoming数A按真实eligible边计；values/phi_inputs/分配
+预算仅在显式配置时限制增长。连接和后续三次图传播为O(P+A+uses)，额外存储同阶；不预分配R×E矩阵。
 
 ### 3.5 diamond的逐项走查
 
@@ -892,8 +893,8 @@ payload label与实际instruction label分开。switch payload的target offset�
 
 ### 7.2 一次出口，不是恢复系统
 
-normal失败先停止消费其图并drop不再需要的scratch，再只读已验证raw，在预留额度内
-完整打印。Malformed不走可信raw；Cancelled直接结束；BUG即使附raw也保留BUG状态。
+normal失败先停止消费其图并drop不再需要的scratch，再只读已验证raw，在请求剩余
+资源及显式raw配额（若有）内完整打印。Malformed不走可信raw；Cancelled直接结束；BUG即使附raw也保留BUG状态。
 raw失败不重试normal、不换engine、不扩大配置。生产只打印，不spawn assembler；
 D061的回环是在开发工具中，且声明不完整造成Java拒绝不应破坏原raw成员身份。
 
@@ -906,11 +907,12 @@ D061的回环是在开发工具中，且声明不完整造成Java拒绝不应破
    检查均通过才产DeclarationOnly，否则返回完整Smali声明或Unavailable。
 3. 全部Java检查通过则Java；失败方法不打印其未验证的半段AST，但不丢弃其他已完成方法。
 4. Unsupported/BudgetExceeded只进入一次raw路径。若normal尚未完成raw校验，raw路径用
-   自己的预留配额从原RawMethodView完成校验，再打印。已确认Malformed不能靠重读撤销。
+   可用资源及显式raw配额从原RawMethodView完成校验，再打印。已确认Malformed不能靠重读撤销。
 5. raw校验/语法/预算不能满足则Unavailable。raw新发现确定损坏时保留Malformed事实；
    InternalInvariant即使附raw也保留BUG。不得重新运行normal或更换engine/限额。
 
-normal work为0而raw配额足够仍能得到完整Smali；raw配额也为0则Unavailable。
+调用者显式设置normal work为0而raw仍可用时可得到完整Smali；显式raw配额也为0则Unavailable。
+None不是0，默认不限配额不得被当作预算耗尽。
 这是失败结果到只读raw出口的一次分支，不是恢复调度器。
 
 ### 8.1 结果展示与Java资格分开
@@ -1099,7 +1101,7 @@ producer。Parameter/this本来不可重定义。仅AllocationId/ValueId相同�
 
 对每条normal/exception transfer传播有界lock stack（root+enter site），entry为空；enter成功push、enter
 失败保留旧stack；exit成功只pop同identity栈顶。join要求同stack，单次传播栈高受
-max_nesting约束；不通过无界路径枚举验证。受保护exit的异常PC先按§2规范取值。
+显式max_nesting（若有）约束；默认不设深度数值上限，仍不用宿主递归或无界路径枚举验证。受保护exit的异常PC先按§2规范取值。
 
 匹配一个synchronized region须同时成立：
 - 单入口在enter成功之后，锁expression已经求值一次；所有normal离开经同锁exit；
@@ -1185,125 +1187,82 @@ Java成员证据，不计abstract/native DeclarationOnly。unit printer仅发own
 Generated是检查后的core emission规则，不是“看见synthetic就删”。任一规则失败不能
 给任意方法造异常桩；对应required full-unit案例仍保持未通过状态。
 
-### 12.4 Java/classfile admission：与分析预算分开
+### 12.4 Java目标：直接检查与真实编译分开
 
-Java目标为Java8/classfile 52，编译合同为Temurin21.0.8+9的
-`javac --release 8 -proc:none -g:none`。生产不调用javac；P8根据下面封闭的source grammar
-计算保守上界。只有源码合法性与目标admission均通过才构造VerifiedJavaMethod/Unit。
-分析Limits即使被调大，也不能放宽这些目标格式界限。
+Java目标为Java8/classfile 52，开发编译合同为Temurin21.0.8+9的
+`javac --release 8 -proc:none -g:none`。生产不调用javac，也不预测编译器的代码大小。
+P8只对原语义、源码规则、声明事实以及能直接确定的格式项目作检查。
 
-| 检查 | 接受条件 |
+| 直接可确定的项目 | 规则 |
 |---|---|
 | 方法参数words | implicit this（非static为1）+sum(formals的J/D为2、其余含array为1) <=255 |
-| descriptor/name/String/annotation等CONSTANT_Utf8 | 每项按§4.8的MUTF8长度<=65535，不按source escape长度 |
-| max_locals/max_stack/exception table rows | 各自的保守上界<=65535 |
-| 有code的方法 | code上界<=65534；抽象/native无Code，但声明检查仍执行 |
-| 每class的field/method/attribute数量 | 含compiler-owned成员的数量各<=65535 |
-| constant_pool_count | 含index0与long/double双slot的上界<=65535 |
+| 实际descriptor/name/String/annotation等MUTF8单项 | 编码字节数<=65535，不按source escape长度 |
+| 已确定的每class field/method数量 | 包含已证compiler-owned成员，分别<=65535 |
 
 原binary proto是参数检查的truth：inner hidden outer参数、enum隐藏name/ordinal也计入；
-return type不计入。静态255个int可通过参数项，256个必拒绝；实例254个int加this为255，
-255个int加this必拒绝。不得删除unused参数、改名、拆方法、造helper来跨过界限。
+return type不计入。静态255个int与实例254个int加this可通过，静态256或实例255加this
+必须拒绝；abstract/native虽无Code也不能省略声明检查。禁止删unused参数、改名、拆
+方法/class或造helper绕过真实限制。直接确认超限时返回Unsupported/JavaTargetLimit，
+带实际项目/计数/界限，不误报Malformed或分析BudgetExceeded。
 
-失败是Unsupported/JavaTargetLimit（带项目/算得上界/目标界限），不是输入Malformed或
-分析BudgetExceeded。若上界不能建立，返回Unsupported/JavaTargetCostUnknown；不能
-拿“资源配额没用完”或“字符串看着合法”替代。独立method按方法项检查；JavaUnit再
-逐个实际class（含nested）核其pool/成员/metadata。shell失败则Mixed，独立合法方法
-仍可Java。abstract/native的失败可以打印已验证raw声明，无需伪造code_item。
+最终classfile仍须满足真实JVMS限制：有Code时`0 < code_length < 65536`；
+max_locals/max_stack、exception rows及各u2数量字段按格式核界；constant_pool_count
+包括index0及long/double双slot且<=65535。这些是实际产物限制，不是AST或ValueId配额。
+V4真实编译并独立读取classfile检查；生产没有实际classfile时，不宣称已证明其大小，
+也不以未知编译大小作Unsupported。Verified只标识已完成上述原生检查，不是编译成功证书。
+required Java的真实javac失败仍是验收失败，不能用“未预测大小”把失败算通过。
 
-### 12.5 目标投影的计数与code上界
+### 12.5 源码规模不作估算拒绝门槛
 
-投影只遍历P8将实际打印的AST，不按DEX code units或ValueId数量猜JVM大小。三地址
-operands已物化；语法只含本文明确的表达式、赋值、if/loop/integer switch、try/catch和
-synchronized，不含string concat、boxing、lambda、foreach、try-with-resources或finally。
-遇到没有计费模板的node/隐式成员即CostUnknown，不能先打印再期待compiler修正。
+不按每AST节点固定字节费、方法固定开销、DEX code units、source local数量或catch/
+monitor数量估算JVM code/locals/stack/handler/pool并拒绝Java；不设JavaTargetCostUnknown。
+不建立第二套JVM backend或估算器，也不把未知费用转换成raw理由。
 
-每个有code member从128-byte方法开销上界起计。使用checked u64，先按下表对子节点
-求和，再加本node费用；Case/Catch的实际语句也各计为node。cmp-with-bias、BoolToInt、
-ProvenNarrow、FillExpansion等打印宏必须按其实际展开的表达式/语句计数，不能把一个IR
-node当成一个Java node而漏掉children：
+三地址operands与打印宏仍按实际source语义展开，cmp-with-bias、BoolToInt、ProvenNarrow、
+FillExpansion的每项操作/类型/求值顺序均须验证。语法只含已有明确lowering规则的表达式、
+赋值、if/loop/integer switch、try/catch和synchronized；缺少语义规则的string concat、
+boxing、lambda、foreach、try-with-resources或finally不会因此变成已支持能力。
+实际容器/文本增长只检查平台容量和调用者显式配额（若有），默认不加规模阈值。
+D077的长调用序列必须完整恢复并通过真实编译，不靠删call、造loop或helper缩小方法。
 
-| node | code上界的增量（不含children） |
-|---|---:|
-| literal/local read/声明/赋值、unary/binary/cast、field/array/call/new、if/loop/label/普通transfer、Try/Catch、Synchronized | 32 bytes |
-| Java integer switch（n个keys，§6的R条件） | 96+32*n bytes |
-| return/break/continue/throw | 上述32，再加32*d；d是该site的词法synchronized深度 |
-| Array initializer/fill | 展开后的allocation/length/store/literal nodes各自计，不把整张payload只计一次 |
+### 12.6 compiler-owned成员与声明完整性
 
-理由：固定形式的load/store含wide index，field/invoke/new及宽branch都在32-byte本node
-费用内；operand表达式另计。switch包含padding与table/lookup，R<=4n+16使两种布局都
-由96+32n覆盖；稀疏源switch已改为if链。monitor正常/异常release包含在本node费用，
-穿过monitor的abrupt exit另按d支付compiler复制的release。没有finally糖化引起未记账
-的任意body复制。该投影是固定生成语法的上界合同，不是完整Java编译器或精确bytecode。
+Generated规则必须提供实际binary成员清单、签名、隐藏参数及行为证据，不能只给owner名。
+bridge、enum values/valueOf/backing storage、inner outer-capture按§12.3逐项匹配；
+不为这些成员附加猜测的code或pool费用。共享type/descriptor/name不能按重复mention
+乘固定系数变成class拒绝理由。D078的2200个abstract接口方法必须保留为完整JavaUnit，
+不造constructor/body，实际pool由独立classfile读取检查。
 
-locals上界=`binary parameter words + 全部source local/catch声明words + 2*monitor数`，
-不假设javac复用不相交locals。long/double各2；pc、cycle temp、shadow、fill length temp
-都必须入账。stack由表达式求值顺序递推：leaf取结果words，binary取
-`max(stack(left), words(left)+stack(right))`，call/new按receiver/args的prefix words逐项
-求max，conditional取互斥分支max；再保守加8个临时stack words。禁止把全部args误当
-并行求值。最终均与u2界限比较。
-
-令S为所有source statements（含Catch/Case），C为catch type alternatives数，M为monitor
-数，A为所有abrupt site的synchronized深度之和；exception rows上界取
-`4*(C+M)*(1+S+A)`。这给连续区间、normal出口、monitor cleanup造成的分段留出余量，
-不因所有catch共享一个target而只算一项。计算本身逐node计work，不分配此上界大小的表。
-
-### 12.6 compiler-owned成员与class pool
-
-Generated规则同时提供实际binary成员清单、参数、locals及code费用，不能只给owner名：
-
-| canonical规则 | code费用上界 |
-|---|---:|
-| bridge | 128+16*参数words |
-| enum values/valueOf | 每方法128 |
-| enum backing-array helper | 128+32*constant数 |
-| enum clinit的语言生成部分 | 256+128*constant数，再加用户参数表达式/显式static body的AST费用 |
-| constructor hidden outer/name/ordinal prologue | 在其显式body费用上另加64 |
-
-encoded初值导致source产生原class没有的clinit时，以实际static AST加方法开销计费，
-并将该语言初始化成员计入layout，不把它当新public helper。原有synthetic accessor若按
-原descriptor显式打印，按普通AST计费；需要compiler自动补出的未知accessor没有隐式估值。
-
-compiler-owned方法/字段/构造参数与规则不符，或source会生成未入账成员，不构造
-JavaUnit；普通class无原constructor时也不能忽略javac会自动加default constructor。
-规则不成立保留Mixed/raw，不能补一个原不存在的private异常构造器。非enum生成成员
-没有通用“估一点就算过”的分支。
-
-每class计N：其所有AST node、声明、实际type/descriptor mention、annotation元素和
-compiler-owned成员数之和（重复允许多计）；L是long/double常量数。pool slots的上界为
-`1+64+32*N+2*L`。1保留index0，64覆盖固定属性/基础class名，32覆盖一个已定义语法项
-引出的UTF8/Class/String/NameAndType/memberref等；64-bit常量再付双slot。所有生成的
-name/descriptor/属性UTF8也要单项核长度；不把bytecode debug bytes当UTF8内容。
-
-这一宽松上界可拒绝实际能编译的巨大unit，但不能接受无界pool；不引入第二套JVM
-backend或为提高通过率拆class。source grammar不扩展时投影才适用，未知隐式生成走
-CostUnknown。计数乘加overflow也不能给出admission。P8独立从实际AST/Generated布局
-重算TargetAdmission，不能信builder填true；
-V4编译和独立classfile读取核实际大小不超过投影，原行为仍由Driver另验。
+encoded初值导致source产生语言初始化成员时，将其纳入layout并核实际初始化顺序，
+不当作新public helper。compiler-owned方法/字段/隐藏参数与语义模板不符，或source会
+生成未被证明的成员，仍不能构造JavaUnit；这属于成员语义/完整性缺证，不是大小估算。
+普通class无原constructor时须处理javac自动default constructor问题，不能伪造一个原
+不存在的异常构造器。规则失败保留Mixed/raw及原key，不能静默丢成员。
+V4将实际生成成员与原manifest/规则比对，行为另由Driver核验；不信builder填true。
 
 ## 13. 控制与资源的具体接线
 
-所有open/index、方法分析及render调用使用同一个`&mut RunContext`；Limits归该context，
-Options只保存源码策略。context不存IR、不spawn、不全局共享；callback在每个循环pop、
-instruction、集合增长/复制和长字符串分块处检查。上游取消立即结束，不转raw出口。
+open/index、方法分析及render共用一个`&mut RunContext`，Limits只归该context。
+默认所有数值配额为None，既不加固定阈值，也不预留固定raw work/内存。context不存IR、
+不spawn、不全局共享；每个循环pop、instruction、集合增长/复制和长字符串分块都检查
+取消。取消立即结束，不转raw。分析收敛由各算法的有限状态/单调度量保证，不靠固定步数
+掩盖不能终止的算法。
 
-采用**累计、不退款**的request配额；method另有normal与预留raw的小额子配额。先checked
-估计分配字节并charge，再try_reserve；后者失败映射BudgetExceeded，不能当格式损坏。
-Env/Phi inputs/metadata/UTF16、HashMap容量、候选AST、spans/diagnostics/输出都计费。
-正常分析产物用完即drop，raw出口只借原始输入；drop降低实际内存但不恢复累计额度。
+只有调用者显式Some(n)的项目才核额度，累计used不退款。normal与raw工作子配额独立，
+共同计入request；method派生分配合计包含normal/raw。仅显式有限的fallback work/
+分配值从父配额claim，normal不能用held；未配置时raw只用剩余资源，不领取无限预留。
+未消费held可归还，已用额度不回退，不建立重试绕限路径。
 
-每method开始先从总request配额划出raw工作/分配保留量，normal不能使用它；预留仍在
-总硬界限内，不能每个方法另发一份无限request额度。unused raw预留在本method结束后
-可作为未消费额度归还父账，已经实际消费的work/bytes永不退款，不构造重试绕限。
-P8候选先算增量容量再创建，失败丢候选。输出长度独立按DESIGN §10.3核界：normal
-source用max_method_output_bytes，raw用fallback_output_bytes；P9最终拼接全部source、
-shell/标记/diagnostics时用max_report_output_bytes。每段转义后append前checked核新增
-长度，同时charge实际work/容量，不能String全造好才check。报告spans的结构容量归
-allocation，JSON化后才计实际序列化bytes；最终JSON上限按DESIGN §7组合，不把同一
-成员的复制误当两份成员长度。Report只留必要facts，不携整套Flow/SSA环境到输出层。
+所有分配先核平台可表示大小、输入最小记录尺寸及适用显式配额，再try_reserve；
+真实分配失败明确报Resource，不改成格式损坏。Env、metadata、UTF16、AST、spans及
+文本都遵守此规则。不可信深度的遍历及释放使用显式栈/arena，不依赖宿主递归或递归Drop；
+max_nesting只有显式设置才作数值门槛。
+产物最后消费后drop，Report只留必要owned facts，不挂整套SSA/Flow历史图。
 
-默认具体上限、report-owned数据和public interface以DESIGN为准。这里的计费
-是保守逻辑上界，不承诺allocator/RSS完全等于账本；性能只在授权release输入上测量。
+normal/raw/report输出只核各自显式设置的长度项；最终JSON也不设默认硬cap，见
+DESIGN §7/§10.3。按实际转义后的UTF8增量检查，不能先造巨String后才声称预算前置。
+同一成员拼report不重复扣成员长度，真实work/分配仍累计；未配置的上限不偷偷补默认值。
+性能记录来自授权release运行，不以账本替代RSS或实际耗时。
 
 ## 14. 应用输入、扫描与提取
 
@@ -1316,15 +1275,15 @@ cap-std的Dir/普通文件safe interface，跨平台文件身份用same-file，�
 1. 先固定允许root及Dir handle，按capability-relative规则打开显式输入；禁止设备/FIFO，
    Unix safe OpenOptionsExt加O_NONBLOCK/O_NOCTTY，避免FIFO/终端打开阻塞或改进程终端；
    Windows拒绝device/pipe namespace。得到handle后再次核regular file、len与文件身份。
-2. 小输入直接bounded copy进owned bytes，大APK复制到私有snapshot file；每读固定块
-   检查取消/累计input配额，最多读limit+1用于拒绝增长。前后核原handle身份/len/mtime，
-   观察到变化报INPUT_CHANGED并丢弃snapshot。这里只承诺复制后immutable，不声称stat
+2. 小输入复制进owned bytes，大APK复制到私有snapshot file；按入场文件长度分块读取，
+   检查取消及显式input配额（若有）。提前EOF或入场长度之外的字节，以及前后原handle
+   身份/len/mtime变化，均报INPUT_CHANGED并丢弃snapshot；不限配额也不追逐持续增长文件。这里只承诺复制后immutable，不声称stat
    检查能证明原文件任意并发写时的原子版本；分析只读取snapshot，不再读原path。
 3. 大APK只读中央目录和当前需要的entry范围；被materialize的entry各有独立owned buffer，
    stored借该buffer、deflate借解压buffer，均由lease持有。无unsafe mmap，不复制整APK
    到每个DexImage，不宣称这条safe copy路径是零拷贝。
 4. EOCD从尾部最多65535+22字节搜索，comment长度须对应文件尾；single-disk，目录
-   count/bytes先核上限。遇classic sentinel，核ZIP64 locator/EOCD记录的签名、长度、
+   count/bytes先核实际目录范围/最小记录尺寸及显式上限（若有）。遇classic sentinel，核ZIP64 locator/EOCD记录的签名、长度、
    single-disk字段与64-bit目录范围，再读目录；不将0xffffffff当真实分配量。
 5. 每个central record按原ordinal存EntryKey，检查固定46字节+name/extra/comment长度。
    UTF8 flag名称严格解码，其他按ZIP CP437；保留原name bytes，不basename/normalize。
@@ -1356,7 +1315,7 @@ cap-std的Dir/普通文件safe interface，跨平台文件身份用same-file，�
    （UnsupportedCompression，不把格式有效的不支持方式报Malformed）。两项均在解码、
    明文size/CRC校验及创建输出前判定；加密stored的compressed_size含加密header，不能
    提前套未加密的等长规则。未加密method0才要求compressed/uncompressed长度一致；
-   method8在声明长度与限额内bounded inflate，核实际长度/结束状态并遍历CRC32对照
+   method8在声明长度及显式限额（若有）内bounded inflate，核实际长度/结束状态并遍历CRC32对照
    central CRC。原payload不经UTF8/JSON、DEX normalize或header改写。
 2. output只用显式-o，不拼entry name。一次打开输出parent Dir并持有；拒绝目录/符号链接
    目标与输入同handle/hardlink身份。所有临时/最终操作相对该Dir，不重新解析可变parent路径。
@@ -1390,8 +1349,8 @@ inline_pure为false时直接返回已验证JavaBody；为true时执行一次有�
    不匹配Phi、shadow、parameter、DeferredAllocation或其他control/保护域。
 2. expr仅含int/long literal、local read、整数一元运算、显式整数转换、add/sub/mul、
    bitwise与shift；不含div/rem、FP、heap、ref cast、call、allocation或同步。
-3. 先估算body副本、替换nodes、重新验证及baseline完整emit所需配额；不能完整预留则
-   Declined。复制一个JavaBody，按原AST顺序一次扫描、替换互不重叠的pair；不运行repeat，
+3. 仅对显式配置的有限配额核body副本、替换nodes、重新验证及baseline完整emit的资源；
+   配额不足则Declined，默认不设估算拒绝门槛。复制一个JavaBody，按原AST顺序一次扫描、替换互不重叠的pair；不运行repeat，
    不在原body原地试改，不构建插件/选项registry。
 4. 将expr树原样移入return，保留source type与两个site的Origin；允许保留无use的pure
    local declaration。重新验证type/binding/control/effects与完整emit配额。

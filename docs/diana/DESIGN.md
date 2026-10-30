@@ -85,10 +85,12 @@ Cancelled/BudgetExceeded，不能误报Malformed。Limits不在Options/Engine重
 
 单 DEX 用长度为 1 的 images；DexId在请求内分配并以ImageOrigin映射回root的physical/logical身份，不要求不同到达顺序得到相同数字，也不为文件名/输入顺序额外排序。catalog 允许 empty；类型/调用证据不足时局部降级，不猜测。库无磁盘、进程或网络访问，root request scope 持字节 owner 至 Engine 使用结束；普通 DEX header_offset=0；T04实现原生041读取，H04只做应用借用/原身份适配，T25/H04分别提供D065两侧证据。
 
-`VerifiedJavaMethod/Unit`字段私有，仅P8验证器在源码检查和TargetAdmission均通过后构造。
-TargetAdmission核Java8/classfile 52的signature、code/locals/stack/pool/metadata上界，规则见
-ALGORITHMS §12.4–§12.6；DeclarationOnly同样核声明边界。证据记录EnvironmentId与固定
-编译合同；**生产引擎不调用javac**。外部环境满足声明事实时才声称合法 Java；测试必须使用真实配套 classpath。不能把 Unknown 外部方法完整声明集当 Complete。
+`VerifiedJavaMethod/Unit`字段私有，仅P8验证器在语义、源码规则及可直接确定的Java8目标
+检查通过后构造，见ALGORITHMS §12.4–§12.6；DeclarationOnly同样核声明边界。不按AST
+数量猜code、locals、stack、handler或pool大小来拒绝Java，未知编译大小也不是失败理由。
+Verified表示这些原生检查已经完成，不表示生产已编译或证明了最终classfile大小；实际
+编译与classfile格式验证属于V4验收。证据记录EnvironmentId与固定编译合同；**生产引擎
+不调用javac**。外部环境须满足声明事实，测试使用真实配套classpath；Unknown不能当Complete。
 
 `VerifiedJavaMethod`内部采用`MemberEmission::Explicit | Generated(owner_node, rule)`：
 Generated用于已证明由enum/override/inner语法生成的有code成员，不计DeclarationOnly。
@@ -103,7 +105,7 @@ unit printer只打印owner语法，不重复发bridge/values等冲突声明；�
 |---|---|---|
 | `Malformed` | 越界 ID、截断 opcode、错误分支边界、无效 LEB、使用未定义寄存器 | 全局 header/catalog 无法定位则 RequestError；局部 method Invalid → Unavailable，可附明确 raw excerpt。不是普通 Unsupported，不输出声称有效的 smali |
 | `Unsupported` | 已知合法 invoke-custom、无法合法化的 constructor、无法证明的 monitor/异常结构、缺外部声明证据 | 从完整校验的 raw method 重新生成 smali；raw 不足则 Unavailable |
-| `BudgetExceeded` | 方法 blocks/worklist/copies/输出超过限额 | 停止该方法分析；在独立小额 fallback 预算内 smali，否则 Unavailable；不得重试增加限制 |
+| `BudgetExceeded` | 命中调用者显式配置的资源上限，或实际分配/平台容量失败 | 停止该方法分析；raw若仍有可用资源则完整打印，否则Unavailable；默认无数值配额，不重试增加限制 |
 | `InternalInvariant` | verifier 前后身份不一致、证书漏 edge、算法 impossible 状态 | 诊断显式 BUG、dev test 必败；请求报告可保留方法级 raw fallback，但状态仍为内部错误，不能算正常 Unsupported 或 Java 成功 |
 | `Cancelled` | caller 的取消 token | 停止请求，RequestError::Cancelled；不为取消逐个生成 smali |
 
@@ -298,8 +300,8 @@ monitor验证有限lock stack与所有退出后才替换synchronized。具体匹
 
 ```text
 VerifiedJavaMethod { private method_decl, body_or_generated, ResultFacts, evidence, target_admission }
-TargetAdmission { parameter_words, code_ceiling, locals_ceiling, stack_ceiling,
-                  handler_rows_ceiling, utf8_max, pool_slots_ceiling, compiler_owned_layout }
+TargetAdmission { parameter_words, utf8_lengths, member_counts, compiler_owned_layout }
+// 只保存可直接核实的事实；没有code/pool等编译费用预测字段。
 JavaMemberKind = Method | Constructor | StaticInitializer
 MemberEmission = Explicit(JavaBody) | Generated(owner_node, canonical_rule)
 VerifiedJavaUnit { private class_decl, explicit_members, generated_member_evidence }
@@ -331,16 +333,19 @@ Limits仅归RunContext。公开方法顺序调用；内部RunControl借`&mut Run
 method子配额。无需RefCell/Mutex、全局context或self-referential结构。
 
 ```text
-Quota { limit, used, held }
-claim(n):        checked used+held+n<=limit; held+=n
-spend(n):        checked used+held+n<=limit; used+=n
+Quota { limit: Option<u64>, used, held }
+claim(n):        checked used+held+n；仅Some(limit)时核<=limit；held+=n
+spend(n):        checked used+held+n；仅Some(limit)时核<=limit；used+=n
 spend_held(n):   held-=n; used+=n          # 仅对应已领取的保留量
 release_unspent: held-=remaining         # 不是退款已消费的work/分配
 ```
 
-request与method同一操作分别核本层上限，不相加当成两份内存。method入口先claim raw
-work/分配保留量；normal不能消费held。MethodBudget drop归还未消费held，不回退used。
-无法预留就不启动normal；可定位方法报资源Unavailable，连报告也装不下则RequestError。
+默认所有limit为None，不设数值配额、不做raw固定预留。显式配置时，同一操作分别核
+request与适用子配额，不相加当成两份内存。normal/raw工作子配额独立，共同计入request；
+method分配上限覆盖normal/raw合计。仅显式有限的fallback work/分配值从父配额claim，
+normal不能消费held；None不领取“无限预留”，raw共享请求剩余资源，不承诺额外保留量。
+MethodBudget drop只归还未消费held，不回退used。显式预留失败不启动normal；可定位
+方法报资源Unavailable，连报告也装不下则RequestError。
 Cancelled在检查点立即向请求传播，不逐方法生成raw。
 
 分配以容量增量计费：Vec按delta_capacity*sizeof(T)，字符串按encoded字节，HashMap/
@@ -384,7 +389,7 @@ class请求：先定owner/MemberEmission(P8，P1 raw+声明事实的直接模板
 Generated成员：原code+模板证据 → owner语法与目标admission（无独立伪Java body）
 类装配(P8)             → verify_unit_or_mark_mixed
 render(P9)
-任意分类失败 ──→ 原始方法 + 独立 fallback 预算 ──→ smali / unavailable(P9)
+任意分类失败 ──→ 原始方法 + 可用资源（显式raw配额若有） ──→ smali / unavailable(P9)
 ```
 
 固定点仅为P3 live-in需求与P5有限facts闭包；P3采用固定入口Phi、block一次绑定、incoming一次连接及有限bad/grounded传播，不反复猜ValueId/别名。它们只收集有限facts，不在循环创建新身份。P2 的 topo normalization 先收集编辑，再原子应用一次。纯表达式内联在P8按ALGORITHMS §15执行，不改变SSA/CFG。**不把 P3–P6 整段塞入互不动点**，也不强制所有 phase 必须各有相同数量 pass。
@@ -645,26 +650,31 @@ BrokenPipe按原Unixfilter行为正常结束，不打印panic。项目名称统�
 
 ## 7. 应用限额与生命周期
 
-限额分层、显式组合：
+数值配额均由调用者显式配置，默认不设；应用不能以自己的固定阈值恢复引擎已取消的默认限制。
 
 | 层 | 合同 |
 |---|---|
-| 文件/ZIP | input≤2GiB、directory entries≤100k、directory≤64MiB、inflated entry≤256MiB；超额为BudgetExceeded |
-| CLI 请求/解压 | 持有字节、解压 reservation、queued query rows、声明依赖与输出 scratch 合计有界；只保留同进程/同请求必要的字节复用，不新增常驻服务 |
-| Engine | DESIGN 内 64MiB/DEX、256MiB/request 和 method work/graph/output 初值保持独立；超过引擎限额的输入仍可轻量查询，反编译明确 Resource |
-| CLI 输出 | 现有查询可流式；单反编译报告完整渲染后提交。text/JSON 分别计最终字节，JSON escape、diagnostics、spans 要算；不截断后标完整 |
+| 文件/ZIP | input、directory count/bytes、inflated bytes均默认不限；文件实际范围、目录最小记录尺寸、压缩流结束状态、实际size与CRC仍必核 |
+| CLI 请求/解压 | 显式配额覆盖持有字节、解压、依赖及scratch；取消与有界队列背压始终保留，只复用本请求必要字节 |
+| Engine | Limits默认全None；应用只传入显式配置，不注入输入/work/graph/output数值初值 |
+| CLI 输出 | 查询可流式，反编译报告完整渲染后提交；text/JSON分别核实际字节，显式超限不得截断成功 |
 
-应用JSON序列化有64MiB硬上限；反编译JSON另取与`Limits.max_report_output_bytes`的较小值，轻量查询JSON不经过Engine、仍用64MiB应用上限。按最终实际JSON字节逐段检查，重复source字段、escape、diagnostics和序列化spans全部计入，不能拿未转义text长度代替。text/JSON分别核各自表示长度，不把同一结果的两种表示相加；所有实际分配/work仍消费原request累计配额，不是硬RSS上限。
+应用JSON输出上限也为可选配置，默认None，不设64MiB等固定阈值。反编译JSON只在
+应用上限或`Limits.max_report_output_bytes`显式设置时核相应项，两项均设置才取较小值；
+轻量查询JSON只用应用显式上限。按最终JSON字节逐段核已配置的额度，重复source、escape、
+diagnostics和spans全部计入。text/JSON分别核各自长度，不把两种表示相加；实际work/
+分配仍记同一请求，累计账本不冒称RSS。
 
 查询使用有界admission与输出队列，不为展示顺序等待。worker数为min(8, available_parallelism)，无法取得CPU数量时为1；反编译在调用线程顺序执行。native inflate不可抢占，取消为协作式。算法见ALGORITHMS §14。
 
 ## 8. Java表示约束
 
 值/edge/copy/绑定/保护域分别验证，结构覆盖不替代值语义。Java AST与声明须满足
-Java8语言约束，字面量不得改变UTF16/FP bits。目标格式admission独立于分析预算：不能
-因为DEX/register/AST配额允许更大输入，就返回超过JVM参数、code或class pool界限的Java。
-TargetAdmission从实际AST和compiler-owned布局复算；未知生成模板拒绝Java，不拆方法/
-class或增加helper绕限。method-in-known-context不等于完整unit；
+Java8语言约束，字面量不得改变UTF16/FP bits。参数words、单项MUTF8和已确定的成员数量
+按真实格式界限核验；不按节点数、DEX code units或重复mention预测编译大小并拒绝源码。
+code/locals/stack/handler/pool的实际格式限制由V4真实编译与classfile读取验证，不能把未运行
+的编译当作生产证明。未知生成模板若无法证明成员语义仍拒绝，不拆方法/class或增helper
+绕过真实限制。method-in-known-context不等于完整unit；
 class的shell、全部成员/Generated规则、构造与初始化均通过才为JavaUnit。
 Generated有原可执行方法，不计DeclarationOnly；独立不可表达的generated方法返回原Smali。
 检查关系见ALGORITHMS，公开行为证据与统计见TASKS。
@@ -698,42 +708,38 @@ false，为true时执行ALGORITHMS §15的唯一纯表达式内联算法。必�
 
 新请求整方法重跑，不缓存可变分析产物；Engine仅保留不可变ProgramIndex。请求内`EnvironmentId`/profile标识可检测误用artifact；不同请求不要求同数字/跨运行canonicalfingerprint，不为缓存身份排序事实表。局部worklist只修改指定finite facts，实际变化才enqueue，先charge再执行。没有通用Repeat/Changed调度协议，也不为可观测性创建一套机械测试。
 
-### 10.3 资源限制
+### 10.3 显式可选资源限制
 
-| Limits 字段 | 默认配额 | 约束时机 |
-|---|---:|---|
-| `max_image_bytes` | 64 MiB / DEX | open 前；超限 Resource，不误报 malformed |
-| `max_request_input_bytes` | 256 MiB 合计 | 累加 checked_add 后接收多个 DEX |
-| `max_metadata_items` | 1,000,000 | 解析 ID/annotation/class_data 前；同时受剩余输入最小字节数限制 |
-| `max_string_units` | 1,000,000 / string | MUTF-8 allocation 前，另有总 decoded units 预算 |
-| `max_method_code_units` | 131,072 | method code_item length，fallback 有独立限额 |
-| `max_blocks` / `max_edges` | 16,384 / 65,536 | CFG 分割/edge 插入前 |
-| `max_values` / `max_constraints` | 262,144 / 1,000,000 | Phi/ValueId/constraint 创建前 |
-| `max_phi_inputs` / `max_ast_nodes` | 1,000,000 / 262,144 | incoming连接、AST候选创建前 |
-| `max_method_allocation_bytes` | 128 MiB 累计 | normal/raw合计；arena/Env/候选/文本容量增长前 |
-| `max_request_allocation_bytes` | 256 MiB 累计 | index、所有method结果与render派生分配合计，不含caller-owned输入 |
-| `max_request_work_steps` | 50,000,000 | open/所有method/render共同消费 |
-| `max_work_steps` | 5,000,000 / method | decode/graph/worklist/copy 每个循环收费，不只 pass 入口 |
-| `max_copy_assignments` | 262,144 | normal+shadow+cycle temps 合计，先估算再预留 |
-| `max_nesting` | 128 | metadata/AST/handler使用显式栈，push前检查深度 |
-| `max_method_output_bytes` | 8 MiB / normal member source | Java/DeclarationOnly的单个显式method/constructor/initializer源码段，转义后UTF8长度 |
-| `max_report_output_bytes` | 64 MiB / rendered report | 最终RenderedReport.text总UTF8长度，含shell、成员、language标记与diagnostics |
-| `fallback_code_units` / `fallback_output_bytes` | 131,072 / 8 MiB / raw member source | 独立raw方法/声明/excerpt边界；组装后仍须通过report上限 |
-| `fallback_work_steps` / `fallback_allocation_bytes` | 262,144 / 16 MiB | 每method入口从父配额预留，normal不可消费 |
+`Limits::default()`的所有字段均为`None`。每项类型为`Option<u64>`：
+`None`不设该项配额，`Some(n)`才按调用者指定的n核界；`Some(0)`是真正的零配额。
+不使用`u64::MAX`充当不限，不补入未配置的输入大小、节点数、work、分配、嵌套或输出阈值。
+应用默认请求也使用这一规则，不能在adapter里偷偷恢复固定上限。
 
-输出配置的三个byte字段均为`u64`，分别独立设置后交给唯一RunContext，不放入Options。
-normal source只受`max_method_output_bytes`的成员上限，raw source改用独立
-`fallback_output_bytes`；两者都受`max_report_output_bytes`最终合计上限。调整某个值
-不连带重设另两个值：例如提高method上限，不增加raw或report可用长度。
+| Limits 字段 | 显式配置后约束的对象/时机 |
+|---|---|
+| `max_image_bytes` / `max_request_input_bytes` | 单DEX / 去重物理输入合计，open前及累加时 |
+| `max_metadata_items` / `max_string_units` | metadata总条目 / 单string的UTF16单元，格式范围核实后、分配前 |
+| `max_method_code_units` | normal方法入口的code长度；raw使用独立字段 |
+| `max_blocks` / `max_edges` | CFG增长前 |
+| `max_values` / `max_constraints` / `max_phi_inputs` | value、约束或incoming增长前 |
+| `max_ast_nodes` / `max_copy_assignments` | AST及normal/shadow/cycle copy增长前 |
+| `max_method_allocation_bytes` / `max_request_allocation_bytes` | method normal/raw合计 / 整请求累计派生分配，不含caller-owned借用输入 |
+| `max_work_steps` / `max_request_work_steps` | 单method normal工作 / open、所有normal/raw与render合计；raw不消费normal子配额 |
+| `max_nesting` | 显式栈push前；不配置时仍不得对不可信深度使用宿主递归 |
+| `max_method_output_bytes` / `fallback_output_bytes` | 转义后的normal成员 / raw成员源码UTF8长度 |
+| `max_report_output_bytes` | 最终RenderedReport.text合计，含shell、成员、标记及diagnostics |
+| `fallback_code_units` | raw方法入口的code长度 |
+| `fallback_work_steps` / `fallback_allocation_bytes` | raw独立工作/分配配额；仅显式有限值参与预留，见§3.7 |
 
-输出cap是每个实际表示的长度边界，不是累计分配账本：append前checked核转义后的
-新增UTF8长度；成员拼入report时在report长度中计一次，shell/分隔/诊断也计入。
-未打印的OriginSpan结构体容量记allocation，不虚构成text字节；序列化时按§7计实际
-JSON bytes。原始source已在raw writer核过成员长度，拼接不再向同一成员长度重复扣费。
-临时/失败候选产生的work与allocation仍累计不退款，不能靠重新render或换表示重置它们。
-report超限为BudgetExceeded，诊断标明`max_report_output_bytes`等实际命中的limit及界限；
-不改为Malformed、不截断成功，也不因此重跑normal/raw。资源与Java目标格式admission独立。
+输出三个字段独立：只检查已配置的上限，不因改变一项而重设其他项。normal source、
+raw source和report是不同长度边界；同一成员拼入report不重复扣该成员的长度。
+未打印的OriginSpan容量计入实际派生分配；JSON化后才计序列化长度，见§7。
+临时/失败候选的实际work与分配累计不退款，但未配置的额度不因此变成隐式限额。
 
-语法上合法但超限是 Resource；不使用饱和运算 silently truncate。所有 `count * size + offset` checked arithmetic，分配前验证 remaining input/预算，use `try_reserve` 映射资源错误。寄存器数遵循 DEX 字段上限但同时计入 method value/storage budget。所有容量增长以实际元素容量乘元素尺寸/保守容器开销checked计费；Env、Phi inputs、UTF16、spans、diagnostics不能漏计。work/分配配额累计不退款，未消费预留与已消费额度分开；输出长度按上述各表示核界，fallback不是新发一份request限额。诊断截断必须有显式 marker，不能截断 Java/smali 并标完整。
+显式上限命中返回BudgetExceeded并标明实际字段/界限，不改为Malformed、不截断成功，
+也不重跑normal/raw。格式剩余输入、索引宽度、checked arithmetic和平台可表示容量
+始终检查；容器增长使用try_reserve，实际分配失败明确报Resource，不伪造一个配置上限。
+取消、文件完整性和有界队列背压不依赖Limits是否配置。不限配额不表示无限物理内存，
+也不宣称对所有输入有固定时间/RSS上界；性能只按实际release运行记录。
 
 trace仅作可选有界定位，不设registry/调用次数测试，不引入独立console。

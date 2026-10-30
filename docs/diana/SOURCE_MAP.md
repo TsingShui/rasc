@@ -222,14 +222,14 @@ Johnny 当前只取得官方讲稿；两篇 ISSTA 论文只核官方入口/
 | 来源 | 采用的工程规则 | 当前落点 |
 |---|---|---|
 | R01 Cousot / POPL 2023 / R8 | live-in有限只增；固定入口Phi、block一次绑定、incoming一次连接；retained/bad/grounded有限传播，不简化Phi | ALGORITHMS §3、DESIGN §3.3.3、T07；不声称继承论文证明 |
-| R02 SoK / DREAM / Ghidra | Sequence/Diamond/自然loop/受限switch明确schema，复制前计容量，失败用符合profile的dispatcher，不求全局最优 | ALGORITHMS §6；DESIGN给产品默认限额，不冒称由论文推出 |
+| R02 SoK / DREAM / Ghidra | Sequence/Diamond/自然loop/受限switch明确schema，复制前计容量，失败用符合profile的dispatcher，不求全局最优 | ALGORITHMS §6；资源配额只接受显式配置、默认不限，不从论文推出数值阈值 |
 | R03 verified lifting / CompCert / Alive2 | raw/value/copy/edge/Java绑定各读原事实验证；finite Driver与coverage分别说明，不称全域证明 | ALGORITHMS各validator、TASKS §4 |
 | R04 JLS/JMM / ART | 原volatile/init/lock顺序不变；lock root需动态新鲜性，final不放常量字段initializer导致sget内联 | ALGORITHMS §9/§11/§12；不新建并发平台 |
 | R05 DEX / ART / EverParse / wasmparser | checked ranges/ULEB/MUTF16/metadata、041物理地址明确；raw-valid/Java-profile/资源/BUG分类分开 | ALGORITHMS §1、DESIGN §2；不复制上游panic或unsafe |
 | R06 Java研究 / fidelity taxonomy | Engine按JSON acceptanceGate核全部核心required调用，Product汇总全部required；Generated executable不计DeclarationOnly，有限行为不等编译即等价 | TASKS §2、TASKS §4 |
 | R07 R8存活期 / 具体调用链 | 一个RunContext贯穿open/render，累计派生分配，used/held分账；Env/worklist最后消费后drop、Report自持结果facts | DESIGN §2/§10、DESIGN §3.2/§3.7 |
 | R08 Dalvik fill / ART verifier | 填充既有primitive array，null可通过静态类型验证，不能删零元素操作的NPE；Java采用length read及已证FreshArray stores | ALGORITHMS §2.4；[bytecode](https://source.android.com/docs/core/runtime/dalvik-bytecode)、固定ART method_verifier.cc的FILL_ARRAY_DATA分支 |
-| R09 JVMS 8格式界限 | §4.3.3参数words<=255；§4.7.3的code/max_locals/max_stack及§4.4常量池界限独立于DEX/分析预算；生成模板的保守上界为Diana自身合同，不借规范自动证明其数值 | ALGORITHMS §12.4–§12.6；[JVMS 4.3.3](https://docs.oracle.com/javase/specs/jvms/se8/html/jvms-4.html#jvms-4.3.3)、[4.7.3](https://docs.oracle.com/javase/specs/jvms/se8/html/jvms-4.html#jvms-4.7.3) |
+| R09 JVMS 8格式界限 | §4.3.3参数words<=255与单项MUTF8等直接界限由原生检查；实际code/locals/stack/handlers/pool由V4编译产物核验，不将JVMS当作AST费用系数依据，也不以未知大小拒绝源码 | ALGORITHMS §12.4–§12.6；[JVMS 4.3.3](https://docs.oracle.com/javase/specs/jvms/se8/html/jvms-4.html#jvms-4.3.3)、[4.7.3](https://docs.oracle.com/javase/specs/jvms/se8/html/jvms-4.html#jvms-4.7.3) |
 
 案例修订的独立规范依据（R10）：[DEX access_flags/encoded_value](https://source.android.com/docs/core/runtime/dex-format)区分managed declared同步标记、显式值tag与缺省；[JLS §8.9.3](https://docs.oracle.com/javase/specs/jls/se8/html/jls-8.html#jls-8.9.3)给enum声明序；[JLS §12.4.1](https://docs.oracle.com/javase/specs/jls/se8/html/jls-12.html#jls-12.4.1)与[§13.4.9](https://docs.oracle.com/javase/specs/jls/se8/html/jls-13.html#jls-13.4.9)界定常量内联/初始化；[ZIP APPNOTE](https://pkware.cachefly.net/webdocs/casestudies/APPNOTE.TXT)给entry CRC/size/identity。D069的TargetExists假通过反例直接由DESIGN §6.7的no-force规则推出；原子发布依据ALGORITHMS §14.3的native primitive，不由有限并发采样证明。修订记录在TASKS §4及JSON revisionReason；规范出处不替代实际输入认证或独立复评。
 

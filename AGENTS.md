@@ -140,8 +140,11 @@ separate core E2E fixture/toolchain integrity requirements.
 - Preserve raw identity and program instruction/argument/effect/catch/lock/
   initialization order. Independent-result order, generated source or synthetic
   names are not stable; no output sorting/reordering buffer or pagination.
-- Keep cancellation, backpressure and safety budgets. Exceeding a budget fails
-  explicitly, not as silent successful truncation.
+- Keep cancellation, backpressure, checked ranges and allocation failure handling.
+  Resource quotas are opt-in and default to no numeric caps. Do not introduce
+  unmeasured default budgets or speculative JVM-size rejection formulas. Enforce
+  explicitly configured quotas without silent successful truncation; real format
+  limits still apply.
 - Source semantics beat beauty; Java-unrepresentable methods use honest raw Smali
   or Unavailable according to the design, never fake successful source.
 - Measure performance on release builds and authorized representative inputs.
