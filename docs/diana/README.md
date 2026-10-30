@@ -1,29 +1,46 @@
-# Diana 设计与实施入口
+# Diana Design and Implementation
 
-当前只有Diana包骨架；Engine、可运行fixture与runner尚未实现。资料研究与设计不是能力验收。
+Only the Diana package scaffolds exist. The Engine, runnable fixtures and runner
+have not yet been implemented. Research and design are not evidence of capability
+acceptance.
 
-Diana是反编译器：默认展示可恢复的代码，方法失败在原位置/身份处标Smali或原因，
-不因Mixed清空整类成果。完整JavaUnit资格与正常展示分开，text/json不改变恢复能力。
-资源配额默认不限，只执行调用者显式设置的上限；不按猜测的JVM费用拒绝Java。
-范围/格式检查、真实分配失败、取消与背压仍保留，实际编译属于独立验收。
+Diana is a decompiler: it displays recovered code by default. A failed method is
+shown in its original position and identity as Smali or with a reason; a Mixed
+result does not suppress the rest of the class. Complete JavaUnit qualification
+is separate from normal display, and text/JSON do not change recovery capability.
+Resource quotas are unlimited by default; only caller-configured limits apply.
+Java is not rejected based on guessed JVM costs. Range and format checks, actual
+allocation failures, cancellation and backpressure remain in force; actual
+compilation is independently verified for acceptance.
 
-只维护以下文档，不再维护HTML看板、生成器或拆分的流程/审阅/任务副本：
+Only the following documents are maintained. There is no separate HTML board,
+generator, or duplicate workflow, review or task document:
 
-| 文档 | 唯一职责 |
+| Document | Sole responsibility |
 |---|---|
-| [DESIGN.md](DESIGN.md) | 产品/CLI合同、Engine接口、Module/数据结构、错误与预算 |
-| [ALGORITHMS.md](ALGORITHMS.md) | 解码、SSA、类型/copy、控制/异常/锁、class与应用安全的逐步算法 |
-| [TASKS.md](TASKS.md) | 开发流程、B01–B04、T01–T25、H01–H10、工具与验证/完成条件 |
-| [SOURCE_MAP.md](SOURCE_MAP.md) | 参考版本、来源/许可、资料获取与证据边界 |
+| [DESIGN.md](DESIGN.md) | Product and CLI contract, Engine interface, modules and data structures, errors and budgets |
+| [ALGORITHMS.md](ALGORITHMS.md) | Step-by-step algorithms for decoding, SSA, types and copies, control flow, exceptions, locks, classes and application safety |
+| [TASKS.md](TASKS.md) | Development workflow, B01–B04, T01–T25, H01–H10, tools, verification and completion criteria |
+| [SOURCE_MAP.md](SOURCE_MAP.md) | Reference versions, sources and licenses, material retrieval and evidence boundaries |
+| [WRITING.md](WRITING.md) | Writing rules: requirement strength, sentence roles, terminology, numbers, negation ownership |
 
-[e2e_cases.json](e2e_cases.json)单独保存案例/独立expected，schema 2将每次调用的输入与
-预期绑定；draft-5含86个required案例、177个调用场景。允许有依据的纠错与追加，不为数量
-保留错误格式/漏洞；不另维护expected或网页镜像。工具锁直接指向TASKS，不留历史跳转。
-尚未通过B01–B04，工具自测授权阻塞见TASKS，不能提前写功能。
+[e2e_cases.json](e2e_cases.json) is the sole case and independent-expectation
+specification. Schema 2 binds input and expected results per invocation; draft-5
+contains 86 required cases and 177 invocation scenarios. Evidence-based corrections
+and additions are allowed; incorrect formats or gaps are not retained merely to
+preserve a count. There is no separate copy of the expectations or web mirror.
+The tool lock points directly to TASKS without a historical redirect.
+B01–B04 have not passed. TASKS describes the authorization block on tool
+self-tests; production feature work cannot begin early.
 
-实施时读DESIGN → ALGORITHMS对应节 → TASKS当前卡；只在需要核查证据时查SOURCE_MAP。
-应用仅apps/diana，引擎仅crates/diana-decomp；ref-fork只读，不自动构建/测试。
-GUI/Web仍README占位，MCP延期。其余硬约束见根[AGENTS.md](../../AGENTS.md)。
+For implementation, read DESIGN, then the relevant section of ALGORITHMS, then
+the current TASKS card. Consult SOURCE_MAP when checking evidence. The application
+is only `apps/diana/`; the engine is only `crates/diana-decomp/`. The reference
+fork is read-only and is not automatically built or tested. GUI and Web remain
+README-only placeholders; MCP is deferred. See the root [AGENTS.md](../../AGENTS.md)
+for the remaining hard constraints.
 
-资料按需取：`python3 tools/fetch_references.py --list`或`--only <id> ...`。
-缓存为忽略的.cache/references，论文只保TXT；参考不校checksum，不影响E2E内容锁。
+Fetch references as needed with `python3 tools/fetch_references.py --list` or
+`--only <id> ...`. The cache is ignored at `.cache/references/`; papers are kept
+as TXT only. References are not checksum-verified; this does not affect the E2E
+content locks.

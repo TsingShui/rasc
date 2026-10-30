@@ -47,7 +47,7 @@ inputs, algorithms, invariants and failure behavior. Do not use first/final-vers
 qualifiers, temporary support promises, speculative roadmaps or implementation-
 unrelated narration. Keep actual progress in README/TASKS, not the technical spec.
 
-Maintain only docs/diana/{README,DESIGN,ALGORITHMS,TASKS,SOURCE_MAP}.md plus
+Maintain only docs/diana/{README,DESIGN,ALGORITHMS,TASKS,SOURCE_MAP,WRITING}.md plus
 e2e_cases.json, the single case/input/expected specification. Do not restore
 the HTML board/generator, obsolete redirect documents or split planning
 into more documents. Read `docs/diana/TASKS.md` before starting a batch; it owns
