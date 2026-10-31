@@ -87,6 +87,13 @@ impl<'i, 'a> MethodInput<'i, 'a> {
         };
         super::throws::read(self.index, annotations.method_range(), budget)
     }
+    pub(crate) fn constructor_link(
+        &self,
+        method: MethodId,
+        budget: &mut MethodBudget<'_, '_>,
+    ) -> Result<Option<super::ConstructorLink>, crate::RequestError> {
+        self.index.constructor_link(self.class_id, method, budget)
+    }
     pub(crate) fn type_name(
         &self,
         id: crate::TypeId,

@@ -28,6 +28,7 @@ pub(crate) struct AdjacentAllocation {
 pub(crate) enum ConstructorUse {
     Allocation,
     Super,
+    This,
 }
 pub(crate) fn resolve(
     input: &MethodInput<'_, '_>,
@@ -54,6 +55,11 @@ pub(crate) fn resolve(
     }
     let prototype = copy_proto(&method.declaration.prototype, budget)?;
     let caller = copy_units(input.owner(), budget)?;
+    if matches!(use_kind, ConstructorUse::This)
+        && !crate::p0_knowledge::same_units(expected_owner, &caller, budget)?
+    {
+        return Err(RequestError::BindingEvidenceMissing { reference, pc });
+    }
     if matches!(use_kind, ConstructorUse::Super) {
         let Some(caller_class) = catalog.class(&caller, budget)? else {
             return Err(RequestError::BindingEvidenceMissing { reference, pc });
@@ -79,7 +85,7 @@ pub(crate) fn resolve(
             &[60, 105, 110, 105, 116, 62],
             &prototype,
             false,
-            false,
+            matches!(use_kind, ConstructorUse::This),
             budget,
         )?
     {
@@ -100,7 +106,8 @@ pub(crate) fn resolve(
     let Some(target) = target else {
         return Err(RequestError::BindingEvidenceMissing { reference, pc });
     };
-    if target.access_flags & 9 != 1
+    if target.access_flags & 8 != 0
+        || (!matches!(use_kind, ConstructorUse::This) && target.access_flags & 1 == 0)
         || target.access_flags & (0x100 | 0x400) != 0
         || target.generic
         || !super::throws::compatible(input, catalog, target.throws.as_deref(), budget)?
@@ -156,6 +163,61 @@ pub(crate) fn resolve(
     })
 }
 
+pub(crate) fn prove_this_chain(
+    input: &MethodInput<'_, '_>,
+    catalog: &DeclarationCatalog,
+    target: MethodId,
+    origin: CodeUnitOffset,
+    budget: &mut MethodBudget<'_, '_>,
+) -> Result<(), RequestError> {
+    let mut seen = Vec::new();
+    reserve(&mut seen, 1, budget)?;
+    seen.push(input.method_id());
+    let mut current = target;
+    let owner = copy_units(input.owner(), budget)?;
+    loop {
+        budget.charge_work(1)?;
+        for &method in &seen {
+            budget.charge_work(1)?;
+            if method == current {
+                return unavailable(origin);
+            }
+        }
+        reserve(&mut seen, 1, budget)?;
+        seen.push(current);
+        let Some(link) = input.constructor_link(current, budget)? else {
+            return unavailable(origin);
+        };
+        match link.kind {
+            crate::input::ConstructorLinkKind::This => {
+                let _contract = resolve(
+                    input,
+                    catalog,
+                    link.target,
+                    &owner,
+                    ConstructorUse::This,
+                    link.pc,
+                    budget,
+                )?;
+                current = link.target;
+            }
+            crate::input::ConstructorLinkKind::Super => {
+                let parent =
+                    copy_units(input.method_reference(link.target, budget)?.owner, budget)?;
+                let _contract = resolve(
+                    input,
+                    catalog,
+                    link.target,
+                    &parent,
+                    ConstructorUse::Super,
+                    link.pc,
+                    budget,
+                )?;
+                return Ok(());
+            }
+        }
+    }
+}
 fn unavailable<T>(pc: CodeUnitOffset) -> Result<T, RequestError> {
     Err(RequestError::InitializationUnavailable { pc })
 }

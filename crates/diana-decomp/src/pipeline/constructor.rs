@@ -17,7 +17,13 @@ enum Slot {
     Int(Argument),
     String(PrefixValueId),
 }
+#[derive(Clone, Copy, PartialEq)]
+pub(crate) enum ChainKind {
+    Super,
+    This,
+}
 pub(crate) struct ConstructorPlan<'a> {
+    pub kind: ChainKind,
     _sealed: (),
     pub raw: RawMethodView<'a>,
     pub parameters: u32,
@@ -103,7 +109,7 @@ pub(crate) fn build<'a>(
         slots[at] = Slot::Int(Argument::Parameter(parameter));
     }
     let mut pc = CodeUnitOffset(0);
-    let (chain, chain_pc, receiver, arguments) = loop {
+    let (kind, chain, chain_pc, receiver, arguments) = loop {
         budget.charge_work(1)?;
         if pc.0 >= raw.code_units().0 || !checked.layout().is_reachable(pc) {
             return unavailable(pc);
@@ -173,14 +179,18 @@ pub(crate) fn build<'a>(
                     ));
                 };
                 let owner = copy_units(input.method_reference(reference, budget)?.owner, budget)?;
+                let caller = copy_units(input.owner(), budget)?;
+                let kind = if crate::p0_knowledge::same_units(&owner, &caller, budget)? {
+                    ChainKind::This
+                } else {
+                    ChainKind::Super
+                };
+                let use_kind = match kind {
+                    ChainKind::This => crate::p4_calls::allocation::ConstructorUse::This,
+                    ChainKind::Super => crate::p4_calls::allocation::ConstructorUse::Super,
+                };
                 let chain = crate::p4_calls::allocation::resolve(
-                    input,
-                    catalog,
-                    reference,
-                    &owner,
-                    crate::p4_calls::allocation::ConstructorUse::Super,
-                    pc,
-                    budget,
+                    input, catalog, reference, &owner, use_kind, pc, budget,
                 )?;
                 let mut arguments = Vec::new();
                 for register in words {
@@ -198,7 +208,12 @@ pub(crate) fn build<'a>(
                 }
                 let origin = pc;
                 pc = next;
-                break (chain, origin, receiver, arguments);
+                if kind == ChainKind::This {
+                    crate::p4_calls::allocation::prove_this_chain(
+                        input, catalog, reference, origin, budget,
+                    )?;
+                }
+                break (kind, chain, origin, receiver, arguments);
             }
             _ => return unavailable(pc),
         }
@@ -307,6 +322,7 @@ pub(crate) fn build<'a>(
             0x0e => {
                 return Ok(Some(ConstructorPlan {
                     _sealed: (),
+                    kind,
                     raw,
                     parameters,
                     chain,

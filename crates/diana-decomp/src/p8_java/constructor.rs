@@ -9,6 +9,7 @@ use crate::{
 };
 
 pub(crate) struct ConstructorBody {
+    pub kind: crate::pipeline::constructor::ChainKind,
     pub chain: crate::p4_calls::allocation::ConstructorContract,
     pub chain_pc: CodeUnitOffset,
     pub receiver: RegisterId,
@@ -263,6 +264,20 @@ pub(crate) fn verify(
         return bad();
     }
     replay(input, &plan, budget)?;
+    let caller = copy_units(input.owner(), budget)?;
+    let same_owner = crate::p0_knowledge::same_units(&caller, &plan.chain.owner, budget)?;
+    if same_owner != (plan.kind == crate::pipeline::constructor::ChainKind::This) {
+        return bad();
+    }
+    if plan.kind == crate::pipeline::constructor::ChainKind::This {
+        crate::p4_calls::allocation::prove_this_chain(
+            input,
+            catalog,
+            plan.chain.reference,
+            plan.chain_pc,
+            budget,
+        )?;
+    }
     let flags = input.access_flags();
     if flags & 0x10000 == 0
         || flags & !0x10007 != 0
@@ -333,6 +348,7 @@ pub(crate) fn verify(
     Ok(Some(VerifiedJavaMethod::constructor(
         header.finish(),
         ConstructorBody {
+            kind: plan.kind,
             chain: plan.chain,
             chain_pc: plan.chain_pc,
             receiver: plan.receiver,

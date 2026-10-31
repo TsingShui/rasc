@@ -12,7 +12,13 @@ pub(super) fn write(
             "constructor chain lost its source position",
         ));
     }
-    output.push("super(", budget)?;
+    output.push(
+        match body.kind {
+            crate::pipeline::constructor::ChainKind::Super => "super(",
+            crate::pipeline::constructor::ChainKind::This => "this(",
+        },
+        budget,
+    )?;
     for (index, &argument) in body.arguments.iter().enumerate() {
         budget.charge_work(1)?;
         if index != 0 {
