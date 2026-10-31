@@ -30,6 +30,7 @@ pub(crate) struct StaticContract {
     pub prototype: Vec<u16>,
     pub formals: Vec<CallFormal>,
     pub result: StaticResult,
+    pub declared_throws: Vec<Vec<u16>>,
 }
 fn package(descriptor: &[u16]) -> &[u16] {
     descriptor
@@ -173,7 +174,7 @@ pub(crate) fn resolve_static(
         || target.access_flags & 9 != 9
         || target.access_flags & (0x40 | 0x80) != 0
         || target.generic
-        || !matches!(&target.throws,Some(throws) if throws.is_empty())
+        || !super::throws::compatible(input, catalog, target.throws.as_deref(), budget)?
     {
         return Ok(None);
     }
@@ -347,5 +348,6 @@ pub(crate) fn resolve_static(
         prototype,
         formals,
         result,
+        declared_throws: super::throws::retain(target.throws.as_deref(), budget)?,
     }))
 }

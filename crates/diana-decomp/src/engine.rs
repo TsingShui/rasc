@@ -367,6 +367,9 @@ impl<'a> Engine<'a> {
     }
 }
 
+// This transient result is consumed directly, not stored in a collection;
+// boxing its owned AST would add another fallible allocation.
+#[allow(clippy::large_enum_variant)]
 enum NormalMember {
     Java {
         facts: MethodFacts,
@@ -470,7 +473,7 @@ fn normal_member(
     if crate::p8_java::source_group_admitted(index, key, &facts, budget)?
         && let Some(plan) = crate::pipeline::call_chain::build(&input, catalog, budget)?
         && let Some(declaration) =
-            crate::p8_java::call_chain::verify(&input, plan, catalog.environment, budget)?
+            crate::p8_java::call_chain::verify(&input, plan, catalog, catalog.environment, budget)?
     {
         let source = crate::p9_emit::java(&declaration, budget)?;
         return Ok(NormalMember::Java {

@@ -2,6 +2,8 @@
 //! validate variable items, instruction semantics or Java representability.
 
 pub(crate) mod annotations;
+mod throws;
+pub(crate) use throws::ThrowsMetadata;
 mod binding;
 pub(crate) mod catalog;
 mod code;

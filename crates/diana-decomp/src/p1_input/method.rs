@@ -77,6 +77,16 @@ pub struct MethodInput<'i, 'a> {
 }
 
 impl<'i, 'a> MethodInput<'i, 'a> {
+    pub(crate) fn throws_metadata(
+        &self,
+        budget: &mut MethodBudget<'_, '_>,
+    ) -> Result<super::ThrowsMetadata<'a>, crate::RequestError> {
+        let annotations = match &self.raw {
+            RawPrintable::Method(raw) => raw.annotations(),
+            RawPrintable::Declaration(raw) => raw.annotations(),
+        };
+        super::throws::read(self.index, annotations.method_range(), budget)
+    }
     pub(crate) fn string_literal(
         &self,
         id: crate::StringId,

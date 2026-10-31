@@ -18,6 +18,7 @@ pub(crate) struct ReceiverContract {
     pub prototype: Vec<u16>,
     pub kind: ReceiverKind,
     pub int_arity: usize,
+    pub declared_throws: Vec<Vec<u16>>,
 }
 pub(crate) fn resolve_receiver(
     input: &MethodInput<'_, '_>,
@@ -119,7 +120,7 @@ pub(crate) fn resolve_receiver(
     {
         return Ok(None);
     }
-    if !matches!(&selected.throws,Some(throws) if throws.is_empty()) {
+    if !super::throws::compatible(input, catalog, selected.throws.as_deref(), budget)? {
         return Ok(None);
     }
     if let Some(original) = input.local_method(reference, budget)? {
@@ -192,5 +193,6 @@ pub(crate) fn resolve_receiver(
         prototype,
         kind,
         int_arity,
+        declared_throws: super::throws::retain(selected.throws.as_deref(), budget)?,
     }))
 }

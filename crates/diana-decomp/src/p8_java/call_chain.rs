@@ -259,11 +259,24 @@ fn replay(chain: &Chain<'_>, budget: &mut MethodBudget<'_, '_>) -> Result<(), Re
 pub(crate) fn verify(
     input: &MethodInput<'_, '_>,
     chain: Chain<'_>,
+    catalog: &crate::DeclarationCatalog,
     environment: EnvironmentId,
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<Option<VerifiedJavaMethod>, RequestError> {
     super::declarations::check_target(input, budget)?;
     replay(&chain, budget)?;
+    for operation in &chain.operations {
+        budget.charge_work(1)?;
+        if let Operation::Call { target, .. } = operation {
+            let declared = match target {
+                Target::Static(contract) => &contract.declared_throws,
+                Target::Receiver(contract) => &contract.declared_throws,
+            };
+            if !crate::p4_calls::compatible_throws(input, catalog, Some(declared), budget)? {
+                return Ok(None);
+            }
+        }
+    }
     let RawPrintable::Method(raw) = input.raw() else {
         return bad();
     };
@@ -273,7 +286,7 @@ pub(crate) fn verify(
     ) {
         return bad();
     }
-    if raw.annotations().method_range().is_some() || raw.annotations().parameter_range().is_some() {
+    if raw.annotations().parameter_range().is_some() {
         return Ok(None);
     }
     let flags = input.access_flags();
@@ -305,6 +318,17 @@ pub(crate) fn verify(
     header.push("int ", budget)?;
     header.push(&name, budget)?;
     header.push("()", budget)?;
+    let Some(throws) = crate::p4_calls::source_throws(input, catalog, budget)? else {
+        return Ok(None);
+    };
+    for (index, descriptor) in throws.descriptors.iter().enumerate() {
+        budget.charge_work(1)?;
+        let Some(name) = super::calls::type_name(descriptor, budget)? else {
+            return Ok(None);
+        };
+        header.push(if index == 0 { " throws " } else { ", " }, budget)?;
+        header.push(&name, budget)?;
+    }
     let mut statements = Vec::new();
     let mut calls = Vec::new();
     for operation in chain.operations {
