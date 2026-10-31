@@ -23,6 +23,7 @@ pub enum InputProblem {
     InvalidClassData,
     InvalidCode,
     InvalidHandler,
+    InvalidDebug,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

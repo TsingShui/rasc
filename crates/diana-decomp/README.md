@@ -11,8 +11,9 @@ Byte/UTF16/code-unit coordinates and table IDs use distinct types. Method-body
 states are explicit, and range-checked code views are read-only.
 `raw::instruction_layout` checks instruction/payload extents and preserves typed
 operand references using one opcode specification. `ProgramIndex::check_method_layout`
-checks whole-method register/reference bounds, branch/payload/exception boundaries
-and reachable fallthrough. Its sealed `CheckedMethodLayout` keeps structural
+checks whole-method register/reference bounds, branch/payload/exception boundaries,
+035 invoke prototype word counts, wide argument adjacency, result kinds and
+reachable fallthrough. Its sealed `CheckedMethodLayout` keeps structural
 checks distinct from complete raw validation. `RawMethodView::visit_layouts`
 preserves readable prefixes under the independent fallback budget.
 `RawMethodView::visit_instructions` exposes borrowed original operand/payload
@@ -21,7 +22,11 @@ The validator shares its operand decoder. `ProgramIndex::debug_method` produces
 owned original-information JSON with resolved references, UTF16 units, handler
 order and explicit missing facts. Its reader and output use the same fallback
 ledger; known malformed input remains classified even if output later exhausts
-resources. Core tests exercise malformed input, UTF16 integrity, resource limits and cancellation.
+resources. Original debug programs retain parameter names, line/PC state, ordered
+local-variable events and encoded bytes. Their reader checks instruction
+boundaries, reference indices and local lifetimes; a failure retains the decoded
+prefix with partial coverage. Core tests exercise malformed input, UTF16
+integrity, resource limits and cancellation.
 The Engine interface awaits integration.
 
 From the repository root:

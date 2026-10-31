@@ -288,7 +288,7 @@ impl FallbackBudget<'_, '_> {
     }
 }
 
-/// The same checked parsers serve input admission and read-only fallback.
+/// The same checked parsers serve input admission, normal work and fallback.
 /// Implementations borrow the existing ledgers; this trait owns no policy/state.
 pub(crate) trait InputControl {
     fn checkpoint(&mut self) -> Result<(), ControlError>;
@@ -322,6 +322,24 @@ impl InputControl for FallbackBudget<'_, '_> {
     }
     fn charge_work(&mut self, steps: u64) -> Result<(), ControlError> {
         FallbackBudget::charge_work(self, steps)
+    }
+    fn charge_metadata(&mut self, items: u64) -> Result<(), ControlError> {
+        self.ledger.context.charge_metadata(items)
+    }
+    fn check_string_units(&mut self, units: u64) -> Result<(), ControlError> {
+        self.ledger.context.check_string_units(units)
+    }
+    fn check_image_bytes(&mut self, bytes: u64) -> Result<(), ControlError> {
+        self.ledger.context.check_image_bytes(bytes)
+    }
+}
+
+impl InputControl for MethodBudget<'_, '_> {
+    fn checkpoint(&mut self) -> Result<(), ControlError> {
+        MethodBudget::checkpoint(self)
+    }
+    fn charge_work(&mut self, steps: u64) -> Result<(), ControlError> {
+        MethodBudget::charge_work(self, steps)
     }
     fn charge_metadata(&mut self, items: u64) -> Result<(), ControlError> {
         self.ledger.context.charge_metadata(items)

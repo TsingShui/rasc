@@ -109,7 +109,7 @@ fn reserve_issues(
     Ok(())
 }
 
-struct IssueLog {
+pub(super) struct IssueLog {
     items: Vec<DebugIssue>,
     malformed: Option<DebugIssue>,
 }
@@ -129,7 +129,7 @@ impl IssueLog {
     }
 }
 
-fn missing(
+pub(super) fn missing(
     issues: &mut IssueLog,
     value: DebugIssue,
     budget: &mut FallbackBudget<'_, '_>,
@@ -147,7 +147,7 @@ fn missing(
     Ok(())
 }
 
-fn local_input(error: InputError) -> Result<InputError, DebugError> {
+pub(super) fn local_input(error: InputError) -> Result<InputError, DebugError> {
     match error.kind() {
         FailureKind::Malformed | FailureKind::Unsupported => Ok(error),
         _ => Err(error.into()),
@@ -305,7 +305,9 @@ impl ProgramIndex<'_> {
         output.push(",\"code\":", budget)?;
         match method.body {
             Ok(MethodBody::DeclarationOnly) => output.push("null", budget)?,
-            Ok(MethodBody::Code(code)) => write_code(self, &mut output, &code, issues, budget)?,
+            Ok(MethodBody::Code(code)) => {
+                write_code(self, &mut output, &code, method.method_idx, issues, budget)?
+            }
             Err(error) => {
                 let error = local_input(error)?;
                 output.unavailable(error.kind(), budget)?;
@@ -536,6 +538,7 @@ fn write_code(
     index: &ProgramIndex<'_>,
     output: &mut JsonBuffer,
     code: &RawMethodView<'_>,
+    method_id: MethodId,
     issues: &mut IssueLog,
     budget: &mut FallbackBudget<'_, '_>,
 ) -> Result<(), DebugError> {
@@ -647,17 +650,7 @@ fn write_code(
         output.push("]}", budget)?;
     }
     output.push("]", budget)?;
-    if let Some(offset) = code.debug_info_offset_byte() {
-        output.push(
-            ",\"debug_metadata\":{\"unavailable\":\"debug_program\",\"file_byte_start\":",
-            budget,
-        )?;
-        output.unsigned(
-            u64::try_from(offset.0).map_err(|_| DebugError::PlatformCapacity)?,
-            budget,
-        )?;
-        output.push("}", budget)?;
-    }
+    super::debug_program::write_program(index, output, code, method_id, issues, budget)?;
     output.push("}", budget)
 }
 

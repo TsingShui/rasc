@@ -7,7 +7,7 @@ use diana_decomp::input::{
 use diana_decomp::raw::OperandReference;
 use diana_decomp::{ClassDefId, CodeUnitOffset, FailureKind, Limits, RunContext, StringId};
 
-fn raw<'a>(index: &ProgramIndex<'a>, control: &mut RunContext<'_>) -> RawMethodView<'a> {
+pub(super) fn raw<'a>(index: &ProgramIndex<'a>, control: &mut RunContext<'_>) -> RawMethodView<'a> {
     let mut selected = None;
     index
         .class(ClassDefId(0), control)
@@ -25,7 +25,10 @@ fn raw<'a>(index: &ProgramIndex<'a>, control: &mut RunContext<'_>) -> RawMethodV
     selected.unwrap()
 }
 
-fn check<'a>(fixture: &'a Fixture, limits: Limits) -> Result<CheckedMethodLayout<'a>, MethodError> {
+pub(super) fn check<'a>(
+    fixture: &'a Fixture,
+    limits: Limits,
+) -> Result<CheckedMethodLayout<'a>, MethodError> {
     let mut control = RunContext::new(limits, &|| false);
     let index = ProgramIndex::open(&fixture.bytes, &mut control)?;
     let code = raw(&index, &mut control);
@@ -33,7 +36,7 @@ fn check<'a>(fixture: &'a Fixture, limits: Limits) -> Result<CheckedMethodLayout
     index.check_method_layout(&code, &mut budget)
 }
 
-fn code(words: &[u16], registers_size: u16, outs_size: u16) -> Fixture {
+pub(super) fn code(words: &[u16], registers_size: u16, outs_size: u16) -> Fixture {
     with_code(CodeRecipe {
         instructions: words,
         registers_size,

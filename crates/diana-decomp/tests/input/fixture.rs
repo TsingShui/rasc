@@ -43,7 +43,7 @@ pub(super) fn build(
     huge_handler: bool,
     second_delta: Option<u32>,
 ) -> Fixture {
-    build_internal(name, protected, huge_handler, second_delta, None)
+    build_internal(name, protected, huge_handler, second_delta, None, None)
 }
 
 #[derive(Clone, Copy)]
@@ -54,7 +54,11 @@ pub(super) struct CodeRecipe<'a> {
 }
 
 pub(super) fn with_code(recipe: CodeRecipe<'_>) -> Fixture {
-    build_internal("f", false, false, None, Some(recipe))
+    build_internal("f", false, false, None, Some(recipe), None)
+}
+
+pub(super) fn with_debug(recipe: CodeRecipe<'_>, program: &[u8]) -> Fixture {
+    build_internal("f", false, false, None, Some(recipe), Some(program))
 }
 
 fn build_internal(
@@ -63,13 +67,16 @@ fn build_internal(
     huge_handler: bool,
     second_delta: Option<u32>,
     override_code: Option<CodeRecipe<'_>>,
+    debug_program: Option<&[u8]>,
 ) -> Fixture {
     let mut strings: Vec<Vec<u16>> = [
         "I",
         "J",
+        "L",
         "V",
         "II",
         "IJ",
+        "IJJ",
         "Lfixtures/Case;",
         "Ljava/lang/Exception;",
         "Ljava/lang/Object;",
@@ -192,6 +199,11 @@ fn build_internal(
             bytes.extend_from_slice(&[3, 4]);
         }
     }
+    let debug_start = bytes.len();
+    if let Some(program) = debug_program {
+        put(&mut bytes, code[0] + 8, debug_start as u32);
+        bytes.extend_from_slice(program);
+    }
     let class_data = bytes.len();
     bytes.extend_from_slice(&[1, 0, 2, 1, 0, 8]);
     for (delta, offset) in [
@@ -231,7 +243,7 @@ fn build_internal(
     }
     align(&mut bytes);
     let map = bytes.len();
-    let entries = [
+    let mut entries = vec![
         (0u16, 1, 0),
         (1, strings.len(), string_ids),
         (2, types.len(), type_ids),
@@ -245,6 +257,9 @@ fn build_internal(
         (0x2002, strings.len(), string_data),
         (0x1000, 1, map),
     ];
+    if debug_program.is_some() {
+        entries.insert(9, (0x2003, 1, debug_start));
+    }
     bytes.extend_from_slice(&(entries.len() as u32).to_le_bytes());
     for (kind, count, offset) in entries {
         bytes.extend_from_slice(&kind.to_le_bytes());

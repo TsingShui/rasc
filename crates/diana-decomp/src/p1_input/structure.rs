@@ -2,6 +2,7 @@ use std::collections::TryReserveError;
 
 use thiserror::Error;
 
+use super::binding::{ResultKind, check_producer};
 use super::formats::{FlowKind, RegisterShape, RegisterWidth, ResultRole, wide_word};
 use super::operands::{RawOperands, RegisterEncoding, instruction_operands};
 use super::{Cursor, InputError, ProgramIndex, RawMethodView};
@@ -19,6 +20,9 @@ pub enum MethodProblem {
     MissingEntryInstruction,
     InvalidRegisterSpan,
     InsufficientOutgoingWords,
+    InvalidInvokeWordCount,
+    NonAdjacentWideArgument,
+    InvalidResultKind,
     InvalidBranchTarget,
     ZeroBranchDelta,
     WrongPayloadKind,
@@ -74,13 +78,13 @@ impl MethodError {
     }
 }
 
-fn bad(pc: CodeUnitOffset, problem: MethodProblem) -> MethodError {
+pub(super) fn bad(pc: CodeUnitOffset, problem: MethodProblem) -> MethodError {
     MethodError::Malformed { pc, problem }
 }
 
 /// Structural checks over all original words, including dead instructions.
-/// This is not ValidatedRawMethod: debug metadata, callee/result type binding and
-/// register definition/type analysis retain their own validation obligations.
+/// This is not ValidatedRawMethod: debug metadata, call dispatch and register
+/// definition/type analysis retain their own validation obligations.
 #[derive(Debug)]
 pub struct CheckedMethodLayout<'a> {
     original: RawMethodView<'a>,
@@ -100,8 +104,9 @@ impl<'a> CheckedMethodLayout<'a> {
 
 impl<'a> ProgramIndex<'a> {
     /// Checks registers, reference bounds, branch/payload/try/handler boundaries,
-    /// result/exception entry positions and reachable fallthrough. Only the
-    /// matching original image supplies reference bounds. Work and scratch use
+    /// invoke prototype words, result kinds, exception entry positions and
+    /// reachable fallthrough. Only the matching original image supplies
+    /// reference bounds. Work and scratch use
     /// the normal method budget; failure leaves the borrowed original intact.
     pub fn check_method_layout(
         &self,
@@ -493,7 +498,7 @@ impl<'a> Checker<'_, 'a> {
         budget: &mut MethodBudget<'_, '_>,
     ) -> Result<(), MethodError> {
         let mut pc = CodeUnitOffset(0);
-        let mut previous = None;
+        let mut previous: Option<ResultKind> = None;
         while pc.0 < self.original.code_units().0 {
             budget.charge_work(1)?;
             let layout = self.original.layout_at(pc)?;
@@ -511,13 +516,11 @@ impl<'a> Checker<'_, 'a> {
                 }
                 match spec.result {
                     ResultRole::MoveResult => {
-                        let valid = match previous {
-                            Some(RegisterShape::InvokeWords) => true,
-                            Some(RegisterShape::ArrayWords) => spec.opcode == 0x0c,
-                            _ => false,
-                        };
-                        if !valid {
+                        let Some(expected) = previous else {
                             return Err(bad(pc, MethodProblem::InvalidResultEntry));
+                        };
+                        if !expected.accepts(spec.opcode) {
+                            return Err(bad(pc, MethodProblem::InvalidResultKind));
                         }
                     }
                     ResultRole::MoveException if self.boundaries.flags(pc) & 4 == 0 => {
@@ -541,7 +544,7 @@ impl<'a> Checker<'_, 'a> {
                     }
                     _ => {}
                 }
-                previous = Some(spec.registers);
+                previous = check_producer(index, pc, spec, layout, operands, budget)?;
             } else {
                 previous = None;
             }

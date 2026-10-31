@@ -1,4 +1,5 @@
 mod debug;
+mod debug_program;
 mod error;
 mod json;
 

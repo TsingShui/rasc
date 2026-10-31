@@ -294,7 +294,11 @@ Check existing design first; include independent semantic tests for core behavio
 changes within the agreed test scope. Do not write tests for non-core code without
 explicit user authorization. Run applicable active-only gates and report blocked
 or not-run evidence.
-Use Conventional Commit messages. Do not commit, push, publish or create tags
+Use Conventional Commit messages. Agents MUST prefix every commit subject with
+`[AUTOMATED] ` before the Conventional Commit type, for example
+`[AUTOMATED] feat: decode original debug programs`. When commits are authorized,
+agents MUST commit completed, verified batches promptly.
+Do not commit, push, publish or create tags
 unless the user asks. Root NOTICE is removed as requested; retain existing crate
 license files without adding a license bundle.
 

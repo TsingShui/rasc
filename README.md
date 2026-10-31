@@ -1,8 +1,10 @@
 # Diana
 
 Native Rust APK/DEX decompiler, designed to replace rasc.
-**Current state: package scaffolds and E2E case specifications only.** No Engine,
-analysis commands or executable E2E suite have been implemented yet.
+**Current state: checked DEX 035 input, instruction structure, original debug
+snapshots and request/method resource control are implemented.** B01–B04
+preparation is accepted on macOS arm64; Engine integration and analysis commands
+remain pending. [TASKS](docs/diana/TASKS.md) owns acceptance evidence.
 
 ## Active project
 
@@ -38,14 +40,15 @@ cargo build --locked
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
 cargo build --workspace --release --locked
+cargo nextest run --workspace --all-features --locked
 ```
 
 Use `-p diana` or `-p diana-decomp` to select one package. Both share the root
 `Cargo.lock`; the archived reference retains its own lockfile. The active
 [Diana CI](.github/workflows/diana.yml) checks only scaffold format/lint/build,
 without publishing or pretending a zero-test run establishes functionality.
-`cargo test --workspace` will only select Diana; there are currently no actual
-Diana tests, and that is **not** an E2E pass.
+Core tests run through public library interfaces with cargo-nextest. Their input,
+structure, debug and resource evidence is distinct from fixed Engine E2E acceptance.
 
 The current `diana` entry point reports “not implemented” to stderr and returns
 failure. It does not delegate to rasc or dexdec. Do not install or release the
@@ -61,7 +64,7 @@ dependencies. See [sources and download policy](docs/diana/SOURCE_MAP.md).
 ## Design and test preparation
 
 The decompiler contract exposes recovered code by default. A failed method is
-shown as raw Smali or an explicit unavailable result alongside other recovered
+shown as original DEX debug information or an explicit unavailable result alongside other recovered
 methods; Mixed is not a gate that suppresses the whole class. Complete Java-unit
 qualification and hard failures remain separate from readable output.
 

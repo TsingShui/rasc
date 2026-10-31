@@ -3,7 +3,8 @@
 **Status: B01–B04 preparation is accepted on macOS arm64. T01 request resource
 control, method normal/raw reservations and cancellation are implemented;
 T02 typed reader, declaration-index and code-range tests pass. T03 instruction
-layout and whole-method structural tests pass; no T/H task or engine E2E case is accepted. The frozen draft-7 specification holds 86 required cases and 177 must-run invocation scenarios.**
+layout, whole-method structure and 035 invoke prototype/result tests pass.
+T04 original debug-program snapshot tests pass; no T/H task or engine E2E case is accepted. The frozen draft-7 specification holds 86 required cases and 177 must-run invocation scenarios.**
 This page owns the workflow, preparation, task cards and verification. Read
 [DESIGN.md](DESIGN.md) for interfaces and data, [ALGORITHMS.md](ALGORITHMS.md) for
 algorithms, and [SOURCE_MAP.md](SOURCE_MAP.md) for sources.
@@ -146,7 +147,11 @@ the structural validator. [Debug snapshots](batches/t03-debug-snapshots.md)
 retain original member/code facts and explicit coverage under the fallback
 budget. [Safe excerpts](batches/t03-safe-excerpt.md) distinguish an unknown first
 encoding from a decoded snapshot using the same registry, without assigning a
-width. T05 later connects the prepared runner to the real public library. Missing
+width. [Invoke structure](batches/t03-invoke-structure.md) validates 035 argument
+word counts, wide word adjacency and move-result kinds using the normal method
+ledger. [Original debug programs](batches/t04-debug-program.md) retain parameters,
+line/PC changes and local-variable events, with classified local failures and
+partial byte ranges. T05 later connects the prepared runner to the real public library. Missing
 Engine entrypoints currently produce `not_implemented` for the complete suite.
 
 ## B01 — Case and expected-value specification review, freeze v1
