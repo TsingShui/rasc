@@ -48,7 +48,7 @@ def run_public(root, cache, spec, manifest, case_ids=None):
         cert = certified[(case['id'],invocation['id'])]
         work = output/case['id']/invocation['id']/seam
         try:
-            if seam not in {'decompile-method','decompile-class','decompile-and-render','open-or-decompile'}:
+            if seam not in {'decompile-method','decompile-class','decompile-and-render','open-or-decompile','engine-original-view'}:
                 record['reason'] = 'the public Engine adapter does not implement this seam'
             elif len(cert['bindings']) != 1:
                 record['reason'] = 'multi-target public requests are not implemented'
@@ -92,8 +92,15 @@ def run_public(root, cache, spec, manifest, case_ids=None):
                         source_path=work/'context'/Path(selector['descriptor'][1:-1]+'.java')
                         source_path.parent.mkdir(parents=True,exist_ok=True)
                         original_path=root/'tests/e2e/sources'/case['id']/Path(selector['descriptor'][1:-1]+'.java')
-                        original_source=original_path.read_text(encoding='utf-8')
                         import re
+                        if not original_path.is_file() and case['id']=='D065':
+                            ordinal=origin['logical_ordinal']
+                            original_path=root/'tests/e2e/sources/D065/fixtures/mirror'/('logical'+str(ordinal))/'Case.java'
+                            original_source=original_path.read_text(encoding='utf-8')
+                            original_source,count=re.subn(r'^package logical'+str(ordinal)+r';','package fixtures;',original_source,count=1)
+                            if count!=1:raise ValueError('certified mirror context has a different namespace')
+                        else:
+                            original_source=original_path.read_text(encoding='utf-8')
                         pattern=r'(?m)^([ \t]*(?:public|private|protected|static|final|strictfp|synchronized|\s)+int\s+'+re.escape(selector['name'])+r'\s*\([^)]*\)\s*)\{'
                         matches=list(re.finditer(pattern,original_source))
                         if len(matches)!=1:raise ValueError('known source context does not identify one scalar method')
