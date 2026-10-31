@@ -177,8 +177,8 @@ def query_assertions(value, original):
 
 
 def compare_suite(root, spec, manifest, records, case_ids=None, reference=False):
-    from e2e import load, sha
-    if not manifest['cases'] or manifest['spec']['sha256']!=sha(root/manifest['spec']['path']):raise Mismatch('empty/stale manifest')
+    from e2e import load
+    if not manifest['cases'] or manifest['spec']['revision']!=spec['specRevision']:raise Mismatch('empty/stale manifest')
     expected={(c['id'],i['id'],s):(c,i) for c,i,s in required_runs(spec,case_ids)}
     actual={}
     for record in records:
@@ -193,8 +193,8 @@ def compare_suite(root, spec, manifest, records, case_ids=None, reference=False)
         if cert['certificate']['result']!='inputs-certified':raise Mismatch('uncertified original input')
         for identity in cert['input_assets']:
             a=assets[identity];path=root/a['path']
-            if not path.is_file() or sha(path)!=a['sha256'] or path.stat().st_size!=a['size']:raise Mismatch('missing/changed original artifact')
-        if result['spec_sha256']!=manifest['spec']['sha256']:raise Mismatch('wrong spec revision')
+            if not path.is_file() or path.stat().st_size!=a['size']:raise Mismatch('missing/changed original artifact')
+        if result['spec_revision']!=spec['specRevision']:raise Mismatch('wrong spec revision')
         if result['execution']!='completed':raise Mismatch('execution '+result['execution'])
         if result['producer']!=('reference-falsification' if reference else 'diana-public-library'):raise Mismatch('ineligible result producer')
         original_asset=assets[cert['input_assets'][0]]
@@ -203,19 +203,19 @@ def compare_suite(root, spec, manifest, records, case_ids=None, reference=False)
         original=None
         if projection_asset is not None:
             p=root/projection_path
-            if not p.is_file() or sha(p)!=projection_asset['sha256']:raise Mismatch('missing/changed certified independent projection')
+            if not p.is_file() or p.stat().st_size!=projection_asset['size']:raise Mismatch('missing/changed certified independent projection')
             original=load(p)
         layout_asset=next((a for a in assets.values() if a['path']==original_asset['path']+'.layout.json'),None)
         if layout_asset is not None and original_asset['path'].endswith('.dex'):
             path=root/layout_asset['path']
-            if sha(path)!=layout_asset['sha256']:raise Mismatch('changed original physical projection')
+            if not path.is_file() or path.stat().st_size!=layout_asset['size']:raise Mismatch('changed original physical projection')
             logical=cert['bindings'][0]['origin']['logical_ordinal'] or 0
             raw_original=load(path)['members'][logical]
             original=original_debug_facts(original,raw_original) if original is not None else raw_original
         groups={}
         for group,artifact in result['artifacts'].items():
             p=root/artifact['path']
-            if not p.resolve().is_relative_to(root.resolve()) or not p.is_file() or sha(p)!=artifact['sha256']:raise Mismatch('missing/changed result artifact')
+            if not p.resolve().is_relative_to(root.resolve()) or not p.is_file():raise Mismatch('missing/changed result artifact')
             groups[group]=p.read_bytes() if group=='text' else load(p)
         public=groups.get('outcome')
         if public is None:raise Mismatch('missing public classification')

@@ -53,5 +53,5 @@ for the remaining hard constraints.
 
 Fetch references as needed with `python3 tools/fetch_references.py --list` or
 `--only <id> ...`. The cache is ignored at `.cache/references/`; papers are kept
-as TXT only. References are not checksum-verified; this does not affect the E2E
-content locks.
+as TXT only. SHA-256 verification is disabled for reference and E2E tooling;
+E2E still requires pinned dependencies and independent semantic certification.

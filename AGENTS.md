@@ -69,8 +69,11 @@ completion still requires its fixed acceptance evidence, never empty scaffolds.
 
 ## Current state and test-first gate
 
-Production packages remain scaffolds; no Engine/CLI commands or compute phases
-exist. B01–B04 preparation is accepted for the executed profile in
+The engine implements request work/allocation accounting, method normal/raw
+reservations, cancellation, checked DEX 035 parsing and borrowed declaration/code
+range views with method-local failures. Input boundaries use typed coordinates
+and IDs; the shared instruction-layout helper checks format and range facts.
+Engine/CLI commands and decompilation compute phases remain unimplemented. B01–B04 preparation is accepted for the executed profile in
 `docs/diana/TASKS.md` §3. The prepared runner reports the absent engine as
 not-implemented, not passing. H01/T01 remain unaccepted. Keep the full B01–B04
 requirements for any new or revised preparation evidence; structure-only work
@@ -99,7 +102,7 @@ is independent and MUST NOT be updated by active work.
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
 cargo build --workspace --release --locked
-# Applicable after real Diana tests exist; currently zero tests is not acceptance
+# Run real Diana core tests; an empty selector is not acceptance
 cargo nextest run --workspace --all-features --locked
 ```
 
@@ -144,17 +147,16 @@ as same-name UTF-8 TXT only: reuse existing text, otherwise convert with Poppler
 the original public URLs for online consultation. This does not change the
 separate core E2E fixture/toolchain integrity requirements.
 
-## SHA-256 verification
+## File verification
 
-Agents MUST NOT initiate or repeat SHA-256 verification of downloads, tools,
-fixtures or caches without explicit user authorization for that verification.
-"Best practice", an existing hash field/lockfile, old planning text or a generic
-request to finish a task is not sufficient authorization. If an acceptance
-command includes SHA-256 verification, explain why it is necessary and obtain
-permission before running it; do not silently waive the gate or run it anyway.
-Reuse existing evidence for unchanged artifacts. Do not add repeated whole-JDK,
-dependency-tree or cache scans, or expand verification into scripts, self-tests
-or CI without separately authorized scope.
+Diana's download, preparation, cache and E2E tooling MUST NOT perform SHA-256
+verification or require it for acceptance. Existing digest records are
+informational provenance only, not gates. Agents MUST NOT restore those checks
+or substitute another content fingerprint without explicit user authorization.
+Keep explicit tool versions, public URLs, dependency locks, path/range/size
+checks and independent semantic evidence. Format-defined ZIP CRC and original
+DEX header fields retain their own contracts. Reuse existing evidence for
+unchanged artifacts; do not add whole-JDK, dependency-tree or cache scans.
 
 ## Engineering constraints
 
@@ -180,6 +182,63 @@ or CI without separately authorized scope.
   reference byte content except explicitly reviewed path/provenance edits.
 - MCP is deferred; old MCP is reference material, not a current interface to migrate.
 
+## Communication
+
+Assistant responses MUST state a clear decision or concrete next action.
+Assistants MUST NOT narrate scope exclusions or unsolicited statements about
+what the work does not accomplish. When a real blocker, safety constraint or
+acceptance limitation affects the decision, assistants MUST report it accurately
+and state the required next action. This communication rule does not change
+implementation scope or acceptance requirements.
+
+## Rust coding conventions
+
+Diana favors plain, explicit, type-driven Rust. Reviewability and correctness
+invariants take precedence over brevity or clever abstractions. Use the
+[Rust Style Guide](https://doc.rust-lang.org/style-guide/) for formatting and
+[Rust API Guidelines](https://rust-lang.github.io/api-guidelines/) for public
+interfaces, naming, conventional traits and documentation. Project contracts
+remain authoritative.
+
+- Contributors MUST use newtypes for confusable coordinates and identities across
+  module boundaries, such as byte offsets, code-unit offsets and method IDs.
+  Ordinary loop counters do not require wrappers. Raw, range-checked and
+  semantically validated products MUST have distinct types where later analysis
+  depends on those guarantees; only the owning validator constructs its sealed
+  validated product.
+- Contributors MUST model mutually exclusive states with enums rather than
+  independent flags that permit contradictions. Output states and failure kinds
+  remain separate as defined by DESIGN §2. Independent declaration/code results
+  and ordinary boolean predicates remain valid when their combinations have
+  explicit meanings.
+- Core interfaces MUST propagate classified errors. Contributors MUST NOT turn
+  parse failures into empty lists, zero, missing results or defaults. Application
+  boundaries MAY add human-readable context while preserving the failure kind.
+  A default representing an explicitly absent option is not error suppression.
+- Contributors MUST use checked arithmetic and checked conversions for untrusted
+  ranges and counts. A narrowing `as` conversion or production `unwrap`/`expect`
+  MUST have a locally evident invariant proving it safe, independent of an
+  assumption that input is valid. Tests MAY use `unwrap` for required outcomes.
+- Contributors SHOULD use ordinary loops and `match` for stateful algorithms,
+  control-flow analysis and multiple failure exits. Use iterator chains for
+  simple transformations, not to hide mutation or error propagation.
+- Contributors MUST start with concrete implementations and introduce traits or
+  generic abstractions only for actual multiple implementations or a concrete
+  isolation boundary. Macros SHOULD express mechanical repetition rather than
+  hide control flow. The existing direct-scheduling constraints still apply.
+- Contributors SHOULD borrow immutable input and copy only when ownership requires
+  it. Contributors MUST NOT use pervasive `clone` or `Arc<Mutex<_>>` merely to evade
+  ownership design. A small justified copy is preferable to unnecessarily complex
+  lifetimes.
+- Contributors MUST keep parsing, analysis, recovery and rendering responsibilities
+  separate. Parsers do not emit Java, analysis does not choose CLI exit codes,
+  and writers do not repair semantics. Each boundary MUST state its input
+  guarantees, output guarantees and failure behavior.
+- Contributors MUST use default rustfmt formatting and the established Clippy
+  baseline. Broader lint groups SHOULD be enabled selectively rather than all at
+  once. Lint exceptions MUST be local and justified. Core tests MUST exercise
+  meaningful invariants through public interfaces within the existing test scope.
+
 ## Code comments
 
 Contributors MUST add comments only to explain non-obvious invariants, algorithm
@@ -189,8 +248,8 @@ edits, decorate sections or describe speculative future work. Prefer clearer
 names and smaller functions over explanatory comments for avoidable complexity.
 
 Public API documentation MUST describe the contract needed by callers, including
-relevant errors and resource or cancellation behavior, without duplicating the
-design documents. Contributors MUST preserve comments that carry still-valid
+relevant errors, any panic preconditions, safety requirements, and resource or
+cancellation behavior, without duplicating the design documents. Contributors MUST preserve comments that carry still-valid
 correctness or safety reasoning and MUST update or remove comments made stale by
 a code change. Comment edits MUST NOT weaken technical requirements.
 

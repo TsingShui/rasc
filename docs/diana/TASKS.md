@@ -1,8 +1,9 @@
 # Diana tasks and acceptance
 
-**Status: B01–B04 preparation is accepted on macOS arm64. Production packages
-remain scaffolds; no T/H task or engine E2E case is accepted. The frozen draft-7
-specification holds 86 required cases and 177 must-run invocation scenarios.**
+**Status: B01–B04 preparation is accepted on macOS arm64. T01 request resource
+control, method normal/raw reservations and cancellation are implemented;
+T02 typed reader, declaration-index and code-range tests pass. T03 instruction
+layout and whole-method structural tests pass; no T/H task or engine E2E case is accepted. The frozen draft-7 specification holds 86 required cases and 177 must-run invocation scenarios.**
 This page owns the workflow, preparation, task cards and verification. Read
 [DESIGN.md](DESIGN.md) for interfaces and data, [ALGORITHMS.md](ALGORITHMS.md) for
 algorithms, and [SOURCE_MAP.md](SOURCE_MAP.md) for sources.
@@ -98,7 +99,7 @@ without P7 is a valid empty fact, not a fake pass.
 ## 3. Preparation tasks B01–B04
 
 The current rule in the root [AGENTS.md](../../AGENTS.md) forbids tests for any
-non-core code unless the user authorizes them explicitly. The hash/path/timeout
+non-core code unless the user authorizes them explicitly. The path/size/timeout
 fault tests for the preparer itself in B02 and the fault-injection self-tests for
 the comparator and runner in B04 MUST NOT derive authorization from existing plan
 text, and MUST NOT be renamed as "core E2E preparation" to bypass that rule.
@@ -109,15 +110,17 @@ The operator explicitly requested completion of B01–B04, authorizing only thei
 listed preparer and comparator/runner fault tests. This bounded authorization and
 the actual execution evidence are recorded in
 [preparation acceptance](batches/b02-b04-preparation.md). It does not authorize
-other auxiliary tests, CLI black-box tests or ART execution. The original pass
-conditions remain unchanged.
+other auxiliary tests, CLI black-box tests or ART execution. The original semantic pass
+conditions remain unchanged. The operator-approved [SHA-256 verification removal](batches/sha-verification-removal.md)
+revises only fingerprint checks: existing digest metadata in locks, recipes and
+historical evidence is informational, never an admission or acceptance gate.
 
 [B01 review](batches/b01-spec-review.md) approves the original draft-6 bytes; [debug-fallback revision](batches/debug-fallback.md) records the operator-approved draft-7 output contract.
 The preparation artifacts satisfy the following gates:
 
 | Gate | Required artifact before production implementation |
 |---|---|
-| B01 | Reviewed symbolic selectors, case-specific assertion mapping, all independent oracles/mutation obligations and the approved revision hash; no format-only approval |
+| B01 | Reviewed symbolic selectors, case-specific assertion mapping, all independent oracles/mutation obligations and the approved revision; no format-only approval |
 | B02 | Distributable self-made sources/recipes for every required invocation, actual tool/transitive/platform locks and a portable preparer |
 | B03 | Actual independent DEX/041/AXML/ZIP projections and source references, staged input certificates, and any scalar oracle needed before engine integration |
 | B04 | Comparator/runner using those certificates, plus rejection of every listed injected fault under explicit self-test authorization |
@@ -125,8 +128,18 @@ The preparation artifacts satisfy the following gates:
 B01–B04 are accepted for the executed `darwin-aarch64` profile. The checked-in
 sources, tool lock, manifest and runner reproduce from a clean source snapshot
 and cache, including a checkout path with spaces and a different working directory.
-Windows, Linux and ART are not-run, not passes. The first production batch is
-T01; T05 later connects the prepared runner to the real public library. Missing
+Windows, Linux and ART are not-run, not passes. The first production slice implements T01 request work/allocation accounting
+and cancellation; see [its batch record](batches/t01-request-control.md).
+[Method budgets](batches/t01-method-control.md) add normal/raw isolation and
+classified control errors. [Checked reader/header tests](batches/t02-reader-header.md)
+exercise public input, malformed cases and request resource/cancellation behavior.
+[Declaration-index tests](batches/t02-declaration-index.md) cover complete
+signatures, MUTF-8, local failures and checked code/handler ranges.
+[Typed boundaries](batches/t02-typed-boundaries.md) record the approved input API
+migration. [Instruction layout](batches/t03-instruction-layout.md) checks shared
+opcode/version/operand and payload envelopes. [Method structure](batches/t03-method-structure.md)
+adds register/reference and control-flow boundary checks, a budgeted raw-layout
+visitor and functional method-budget/cancellation tests. T05 later connects the prepared runner to the real public library. Missing
 Engine entrypoints currently produce `not_implemented` for the complete suite.
 
 ## B01 — Case and expected-value specification review, freeze v1
@@ -159,7 +172,7 @@ specification version; these are not fake engine results.
    because an implementation is missing. Specify optional beautification
    separately so that it does not affect core expectations.
 5. Lock the suite members, inputs, expected values, schema and distributable
-   sources, and record the specification SHA-256. The suite MUST NOT contain a
+   sources, and record the reviewed specification revision. The suite MUST NOT contain a
    real private APK or path.
 
 **Invariants / limits**: A case follows observed behavior and is not tied to
@@ -184,7 +197,7 @@ invocation should return. A draft revision alone is not B01 approval.
 **Not in scope**: CLI black-box tests, private-phase tests, output-text goldens,
 real-corpus downloads, engine implementation.
 
-## B02 — Source fixtures, tool content locks and a portable preparer
+## B02 — Source fixtures, tool version locks and a portable preparer
 
 **Dependencies**: B01. **Phase**: test tooling, not a production phase.
 
@@ -195,7 +208,7 @@ smali and Driver files. All paths are relative to the repository, and generated
 artifacts live only under `.cache/e2e/`.
 
 **Input→output / Interface**: TASKS §4.5 fixed artifact coordinates (source
-entries in SOURCE_MAP §10) → complete hash and dependency locks; every required
+entries in SOURCE_MAP §10) → complete version and dependency locks; every required
 recipe in the JSON → executable self-made sources and literal expected values,
 exposed through the `fetch-tools`, `prepare` and `verify-inputs` commands. No
 personal SDK, `android.jar` or reference-engine cache is required.
@@ -206,8 +219,8 @@ personal SDK, `android.jar` or reference-engine cache is required.
    Preserve the known context of a single-target method and do not insert a stub
    that changes semantics. Bind inputs and expected values by
    `(case id, invocation id)`, not as two positionally paired arrays.
-2. Record the JDK asset and official hash for each supported platform, and the
-   complete artifact hash of R8/smali/dexlib2 and all transitive JARs. Download
+2. Record the JDK asset, URL, version and size for each supported platform, and
+   the coordinates, URLs, versions and sizes of R8/smali/dexlib2 and all transitive JARs. Download
    and run the main class according to the lock; do not blindly use
    `java -jar smali.jar`.
 3. Confirm that the Java 21 tool with `--release 8`, the R8 min-api/DEX version
@@ -223,22 +236,22 @@ personal SDK, `android.jar` or reference-engine cache is required.
    `fetch` may use the network.
 6. A CRC-broken, duplicate-entry, undefined-reference, isolated-surrogate or
    cyclic-Phi input needs an independent raw check. A named byte patch field,
-   opcode anchor or hash is not an unchecked bare offset constant.
+   opcode anchor is not an unchecked bare offset constant.
 
 **Invariants / limits**: Network access and subprocesses belong to the
 development tool only; production crates do not depend on them. An unlocked
-artifact or a placeholder checksum blocks preparation. A missing tool cache is
+artifact or a placeholder coordinate blocks preparation. A missing tool cache is
 an error; an author's preinstalled SDK MUST NOT stand in for it.
 
 **Tests**: After a rebuild, the source driver agrees with the independent
-expected values of each required invocation. A fixed error input and a hash,
+expected values of each required invocation. A fixed error input and a
 size, timeout or cross-platform path error are explicit prep failures; B04 owns
 comparator falsification. Testing the non-core preparer itself still needs the
 separate authorization of §3 and MUST NOT expand into simple CLI tests.
 
 **Acceptance**: A clean cache can explicitly fetch and generate every core
 fixture; every input, expected and dependency path is distributable and the
-tool/fixture hash locks are complete. List a case that is not generated or lacks
+tool/dependency locks and fixture provenance are complete. List a case that is not generated or lacks
 an oracle as blocked, never removed. **Completion**: Engine development no
 longer needs a temporary fixture or source dependency designed mid-phase.
 
@@ -254,7 +267,7 @@ helper, the source-reference Driver, the required tests-only scalar oracle, and 
 `.cache/e2e/preparation-report.json` generated report (no machine absolute path
 enters a golden).
 
-**Input→output / Interface**: fixture artifacts → checksum, raw structured
+**Input→output / Interface**: fixture artifacts → original identities, raw structured
 projection, JVM driver reference trace and a specification-conformance report;
 manifest state becomes `inputs-certified`.
 
@@ -289,7 +302,7 @@ manifest state becomes `inputs-certified`.
 **Invariants / limits**: Reference inputs and expected values are frozen before
 the engine implementation. Any change needs a case v2 reason, an independent
 oracle and a review; do not use an automatic "refresh golden". When generated
-byte hashes differ, explain the compiler recipe difference first and do not
+bytes differ, explain the compiler recipe difference first and do not
 change expected semantics.
 
 **Tests**: `verify-inputs` covers every required case/invocation asset and
@@ -302,7 +315,7 @@ local same-kind javac probe is neither locked-toolchain evidence nor engine
 execution evidence.
 
 **Acceptance**: The source, input structure and independent expected values of
-every required case/invocation are reproducible, and the hash and scope
+every required case/invocation are reproducible, and the input and scope
 certificates are complete. No local dependency is unknown. The report gives both
 the JSON-derived case and invocation denominators. **Completion**: Development
 no longer needs a temporary input change to accommodate a wrong implementation.
@@ -386,7 +399,7 @@ a wrong oracle:
 |---|---|---|
 | New real counterexample | Self-made input and worked expected value | Add a new case ID; do not delete the old case |
 | Specification or oracle is genuinely wrong | Re-verification against the original source, the JVM, the DEX specification or an independent decoder; never engine output | Independent review, case revision, keep the old reason with the new expected value; no refresh hidden in an implementation PR |
-| Tool version or fixture rebuild | New artifact hash, recipe difference, input semantic projection and reference result | Independent tool-lock change; MUST NOT hide a regression or delete a critical opcode |
+| Tool version or fixture rebuild | New artifact version/path, recipe difference, input semantic projection and reference result | Independent tool-lock change; MUST NOT hide a regression or delete a critical opcode |
 | Public interface implementation change | A thin adapter update where the problem and expected values stay unchanged | Change only the adapter; do not bulk-edit cases to follow private phase structures |
 | Not-yet-implemented Java feature | No evidence permits changing expected values | The case still fails or reports not-implemented; do not switch it to a Debug success or exclude it |
 
@@ -545,7 +558,7 @@ MUST NOT count as a V4 pass even when P8 succeeds.
 #### 4.2.2 Frozen-baseline discipline
 
 Each baseline records the engine commit, the options/profile/schema, the input
-checksum, the catalog identity of that request, the toolchain versions, the run
+identity and recipe, the catalog identity of that request, the toolchain versions, the run
 command, the per-identity method status/trace and the tested input set. It does not
 freeze query or cross-method result sequences, and does not require local names or
 generated source to match across runs. Text samples serve diagnostics only, and
@@ -758,7 +771,7 @@ actual observation only from its whitelist and does not invent a sampling count.
 Compact string/file patterns expand to full exact values under the JSON policy.
 
 `inputRequirements` remains case-authored semantic predicates, not a second
-production format. The manifest binds each predicate by its index and spec hash and distinguishes
+production format. The manifest binds each predicate by its index and spec revision and distinguishes
 `input_certification` from `result_validation`. B03 certifies the original-input
 and reference predicates; B04 wires recovered-result predicates for real T/H
 execution. A predicate containing a recovered-source obligation does not require
@@ -766,7 +779,7 @@ a nonexistent engine output before B03 can pass, and remains mandatory at its
 own validation stage. `mustRejectMutation`
 is a behavior obligation, not necessarily a byte edit: result mutations belong
 to B04's already-listed falsification, while an invalid-input recipe records
-its original hash, named item/field or opcode anchor, changed bytes and independent
+its original path, named item/field or opcode anchor, changed bytes and independent
 post-edit facts. A bare unchecked offset is not a mutation certificate.
 
 B03 owns preparation of the scalar oracle that T05 integrates, with only the
@@ -801,7 +814,7 @@ abstract declarations get their own count.
 | F01 TinyDex | Self-made small header/catalog/exact proto/abstract | Exact method key and raw ranges; M01/M02 out-of-range, LEB and count failures | T02; V0 |
 | F02 RawMethods | move/return/wide/range/branch formats | Original DEX facts remain analyzable when Java is unsupported; M03 unknown width keeps explicit original bytes without guessed instructions | T03/T05; V0/V6 |
 | F03 Utf16Payload | NUL, quote, backslash-u, isolated surrogate, switch/fill, debug/encoded | u16/bits/payload target preserved; M04 truncated/overflow/metadata rejection | T04/T05; V0/V6 |
-| F04 HarnessSelfTest | Missing tool, wrong checksum, 0 selected, syntax or behavior failure | The harness itself MUST be red and contributes no Java result; separate §3 authorization remains required | B02/B04, reused in T05; V7 |
+| F04 HarnessSelfTest | Missing tool, wrong size, 0 selected, syntax or behavior failure | The harness itself MUST be red and contributes no Java result; separate §3 authorization remains required | B02/B04, reused in T05; V7 |
 | F05 ScalarReturn | answer 7, param 41+1, int wrap MAX+1 | The target method returns correctly with correct locals; early runs may use method-in-known-context with the class honestly marked Mixed; M05 undefined/bad return/instruction/cancel rejection | T06; V0/V1/V2/V4/V5 |
 | F06 DiamondPhi | `choose` with two branches, nested, same target on different edges | One evaluation of the condition; M06 missing Phi/edge/no-dominance and M07 wrong-branch copy rejection | T07/T08; V1/V2/V4/V5 |
 | F07 CopyCycleLoop | a/b swap, 3-cycle, 0/1/N latch, critical edge | Simultaneous assignment and loop Phi; M07 naive sequence/temp/observed-default rejection | T08/T09; V1/V2/V5 |
@@ -876,7 +889,7 @@ members and sharing; a header-chain or cross-container-range counterexample
 needs an independently reviewed appended case, not an unrecorded change of D065.
 AXML checks belong to H03's core manifest obligations, not an invented D-case pass.
 
-### 4.5 Pinned tools and content locks
+### 4.5 Pinned tools and dependency locks
 
 Validate the candidate tool combination before engine implementation, because it
 generates self-made fixtures and runs the baseline. The production binary depends on
@@ -886,7 +899,7 @@ no Java, Maven or Python.
 |---|---|---|
 | Rust | Root manifest minimum `1.93`; fix the patch version when the runner is implemented | Ordinary native build; the lock file records `rustc -Vv`, and the author MUST NOT hand-edit the existing project toolchain |
 | Python | Harness preparer minimum 3.11 (if Python is chosen) | Development tool only; MUST NOT enter the production runtime, and scripts are cross-platform |
-| JDK | Eclipse Temurin **21.0.8+9**; recovered Java pinned to `--release 8 -proc:none -g:none`, and the original fixture debug flags locked by the case recipe | [Official release](https://github.com/adoptium/temurin21-binaries/releases/tag/jdk-21.0.8%2B9); select the JDK asset for the OS and arch and check SHA-256 against the official asset record; do not download only the JRE |
+| JDK | Eclipse Temurin **21.0.8+9**; recovered Java pinned to `--release 8 -proc:none -g:none`, and the original fixture debug flags locked by the case recipe | [Official release](https://github.com/adoptium/temurin21-binaries/releases/tag/jdk-21.0.8%2B9); select the JDK asset for the OS and arch from the official release; do not download only the JRE |
 | R8/D8 | `com.android.tools:r8:8.3.37` | [Google Maven POM](https://dl.google.com/dl/android/maven2/com/android/tools/r8/8.3.37/r8-8.3.37.pom), main class `com.android.tools.r8.D8`; build the argument array from the pinned JAR and do not depend on an Android SDK wrapper script |
 | smali / dexlib2 | `org.smali:smali:2.5.2`, `org.smali:dexlib2:2.5.2` | [Maven Central POM](https://repo.maven.apache.org/maven2/org/smali/smali/2.5.2/smali-2.5.2.pom), main class `org.jf.smali.Main`; the POM has transitive dependencies, and **the author MUST NOT assume an arbitrary `smali.jar` runs with `java -jar`** |
 | Test dependency classpath | Self-made Java sources or declared JDK entries | All sources are checked in and the classpath comes from the recipe; the core suite depends on no Android platform jar |
@@ -894,15 +907,17 @@ no Java, Maven or Python.
 
 The tool combination MUST actually generate and certify every fixture in B02/B03;
 an accessible POM does not make the combination usable. B02 produces
-`tests/e2e/toolchain.lock.json` with the full URL, version, SHA-256, size, dependencies
-and main class of every required artifact; the JDK needs an asset and hash per target
-platform. **Any missing checksum, placeholder value or unlocked transitive version
-blocks prep from passing.** Review the verification lock against official checksums
-or digests measured from a trusted acquisition; a SHA MUST NOT be fabricated.
+`tests/e2e/toolchain.lock.json` with the full URL, version, size, dependencies
+and main class of every required artifact; the JDK needs an asset per target
+platform. Missing coordinates, placeholder values or unlocked transitive versions
+block preparation. SHA-256 fields are optional informational provenance and MUST
+NOT participate in download, cache or acceptance decisions. Path/size checks do
+not authenticate contents or detect every same-size edit; independent semantic
+comparison remains required.
 
 The author MUST NOT move the R8/smali JVM dependency into Rust production or
 `build.rs`. A controlled Maven step MAY produce the classpath, but it MUST lock the
-transitive dependencies and artifact hashes and then run offline; the lock MUST NOT
+transitive dependencies and artifact versions and then run offline; the lock MUST NOT
 list only the two top-level POMs. The checked-in artifact manifest and source recipe of
 the core suite let other developers re-verify without an external reference
 repository.
@@ -946,21 +961,21 @@ tests/e2e/
   sources/<case-id>/        # self-made Java/smali/driver/dependencies; no machine paths
   expected/<case-id>.json   # derived, read-only view of the approved JSON expectations; never truth
   inputs/                  # small self-made DEX/ZIP/AXML/bad bytes; or a reviewed generation recipe
-  manifest.json            # sources, recipe/toolchain lock, artifact hashes, fixed suite members
-  toolchain.lock.json      # complete artifacts/hashes/transitive dependencies/main classes
-  cases.json               # derived execution view (ids, pointers, hashes) of the approved JSON
+  manifest.json            # sources, recipe/toolchain lock, artifact paths/sizes, fixed suite members
+  toolchain.lock.json      # complete artifacts/versions/transitive dependencies/main classes
+  cases.json               # derived execution view (ids, pointers, revision) of the approved JSON
   runner/                  # thin adapter over the public interface; no private phase dependency
 ```
 
 The execution workspace is `.cache/e2e/`; sources and expected values elsewhere are
 never written back automatically. A checked-in binary fixture needs a scoped
 allowlist `.gitignore` entry rather than removal of the global DEX/APK ignore rule,
-plus a source, hash and small-size review. A recipe-only check-in is allowed, but prep
-MUST verify that each developer's generated result obeys the same hash and semantic
-field locks and MUST NOT assume the author's cache exists.
+plus a source, provenance and small-size review. A recipe-only check-in is allowed, but prep
+MUST verify that each developer's generated result obeys the same semantic
+field requirements and MUST NOT assume the author's cache exists.
 
 When compiling or joining inputs can change symbol-pool offsets, the semantic check of
-the recipe compares each field. A changed artifact hash needs an independent fixture
+the recipe compares each field. A changed artifact needs an independent fixture
 rebuild record; it MUST NOT be treated as "decompilation failed, regenerate a simpler
 DEX". Return and event expectations always come from the specification worked example
 or an independent baseline, never from copied Diana/dexdec/radguard printed text.
@@ -970,32 +985,32 @@ or an independent baseline, never from copied Diana/dexdec/radguard printed text
 The manifest binds the approved case specification to original input assets; it
 is not a second expected-value database. B01's `tests/e2e/cases.json` is a derived
 execution view containing case/invocation IDs and JSON pointers to targets, input,
-expected and assertion-source records in the hashed specification. It contains
-no copied expected values, fabricated asset hashes or successful certificates. Top-level fields are `schema_version:1`,
-`spec:{revision,path,sha256}`, `toolchain_lock:{path,sha256}`, `assets[]` and
-`cases[]`. It records no hand-maintained case count. IDs/paths/hashes are strings,
-counts/indices are non-negative integers, and hashes are 64 hexadecimal digits.
-All listed fields are present; irrelevant collections are empty and only the
+expected and assertion-source records in the reviewed specification. It contains
+no copied expected values or fabricated successful certificates. Top-level fields are `schema_version:1`,
+`spec:{revision,path}`, `toolchain_lock:{path}`, `assets[]` and
+`cases[]`. It records no hand-maintained case count. IDs/paths/revisions are strings and
+counts/indices are non-negative integers. Optional legacy digest fields are
+informational only. All required fields are present; irrelevant collections are empty and only the
 explicit alternatives below use null. Paths are checkout-relative POSIX paths,
 with generated artifacts under `.cache/e2e/`; implementations resolve them
 independently of the working directory.
 
 | Record / fields | Binding contract |
 |---|---|
-| Asset `id`, `path`, `sha256`, `size` | Unique local name and exact bytes; checked-in source or generated output, never a machine path or placeholder hash |
+| Asset `id`, `path`, `size` | Unique local name, checkout-relative path and file size; checked-in source or generated output, never a machine path |
 | Asset `source_paths`, `license`, `recipe` | Source-path array and license string; recipe object has tool/profile IDs, argument arrays and input/output asset IDs, or an explicit literal/byte-builder description. An original checked-in source has null recipe, not missing provenance |
 | Case `id` / `invocations[]` | Exact JSON case and invocation IDs; unknown, duplicate or missing required entries fail preparation |
-| Invocation `id`, `input_assets`, `expected_ref` | Asset IDs and JSON pointer into the hashed approved specification, not copied expected values |
+| Invocation `id`, `input_assets`, `expected_ref` | Asset IDs and JSON pointer into the reviewed approved specification, not copied expected values |
 | Invocation `bindings[]` | `{role, selector, origin}`; bind each role named by the input, including implicit `case` when used, with a full class/method/field/string selector or explicit physical entry selection |
 | Binding `origin` | `{asset_id, entry_ordinal, logical_ordinal, header_offset}`; entry ordinal is 0 for bare DEX, and logical/header fields are null only for a non-DEX entry/error. No display label or request-local DexId |
 | Binding `selector` | Tagged `kind`: class has `class_def_idx,descriptor`; method adds `method_id_idx,name,proto`; field adds `field_id_idx,name,type`; string has `string_id_idx`; entry has `name,ordinal`; query/error binds the explicit request/input without inventing a member |
-| Invocation `request`, `catalog`, `driver` | Public seam/setup and explicit limits, declaration fact assets/completeness, Driver entry/args/isolation. Catalog/driver are null only when the seam uses neither; concrete setup refers to the hashed case invocation, not inferred external SDKs or production factories |
+| Invocation `request`, `catalog`, `driver` | Public seam/setup and explicit limits, declaration fact assets/completeness, Driver entry/args/isolation. Catalog/driver are null only when the seam uses neither; concrete setup refers to the reviewed case invocation, not inferred external SDKs or production factories |
 | Invocation `checks[]` | `{requirement_index, stage, evidence_source, projection_path}` for each JSON inputRequirements obligation; stage is `input_certification` or `result_validation`, and one mixed predicate may need both. Original evidence references certified assets; recovered evidence names a public observation under §4.3.5, not a fabricated pre-engine output |
 | Invocation `assertions[]` | Expected JSON pointer, observation source and fixed comparison under §4.3.5; no cached actual boolean used as truth |
 | Invocation `certificate` | Artifact/projection/reference-evidence IDs, validationScope, actual tool/platform and certification result; missing evidence is explicit |
 
 B01 fixes the reviewed manifest shape, roles and complete symbolic selectors
-from the independent case recipes; B02 materializes actual asset hashes/table
+from the independent case recipes; B02 materializes actual asset paths/sizes/table
 indices and B03 certifies them. A draft binding or schema does not claim
 `inputs-certified`; B01 approval does not require pretending B02 has already
 built the binary assets. For a malformed fixture whose target is not locatable,
@@ -1013,7 +1028,7 @@ all specified roles/seams, with no duplicate denominator.
 The preparer MUST rebuild and certify 041 directly with original physical
 header_offset and shared-item extents under ALGORITHMS §1.1; an ordinary DEX
 rewritten or header-overlaid for a 035 decoder is not an independent 041
-projection. The lock binds hashes and semantic certificates, not private phase
+projection. The manifest binds original identities and semantic certificates, not private phase
 shapes, byte offsets guessed from output, or values refreshed from Diana.
 
 ### 4.7 Execution and failure determination
@@ -1025,9 +1040,10 @@ cache. Subprocesses use argument arrays and the locked classpath, Windows uses
 `join_paths`, and no command may assume a bare `smali.jar` runs with `java -jar`.
 Each case isolates its temporary directory and its original and recovered classfiles;
 clinit runs in a new JVM per input, and processes and output are both bounded. The
-manifest records the original identity, source and license, recipe, real SHA-256 and
+manifest records the original identity, source and license, recipe and
 tool locks, `validationScope`, request and catalog, independent expected values, checks
-and Driver inputs; a placeholder hash blocks preparation from passing.
+and Driver inputs. Results carry `spec_revision`, which MUST equal the reviewed
+specification and manifest revision; digest fields MUST NOT be checked.
 
 A method-level run replaces exactly the complete declaration and body of the target
 inside the original self-made legal context and MUST NOT change the target, a
@@ -1066,7 +1082,7 @@ G0 (active workspace only):
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
 cargo build --workspace --release --locked
-cargo test --workspace --all-features --locked
+cargo nextest run --workspace --all-features --locked
 ```
 Once real tests exist, run the public contracts by fixed D ID or card prefix; roundtrip
 and assembly are explicit opt-in. A missing tool, fixture or classpath, a nonzero exit,
@@ -1074,8 +1090,8 @@ a timeout, 0 selected cases, or a missing or truncated artifact fails; a skip MU
 count as a pass. An approved revision's full suite is not filtered by current engine
 support; a batch MAY select fixed IDs, but the ledger keeps every required case and
 invocation in the JSON, including appended IDs. Do not run the ref-fork gate. The
-workspace having zero tests now is not a pass, and a command interface is not an actual
-run result.
+workspace having zero selected tests is not a pass, and a command interface is not
+an actual run result.
 
 ## 5. Engine tasks T01–T25
 
@@ -1328,8 +1344,8 @@ DeclarationOnly and a raw method first, and never treat an empty AST as success.
    generate a golden from engine output, and a different public interface changes only
    the thin adapter.
 4. Integrate the team-reproducible root test tool and driver, taken from the public
-   content lock and the checkout cache; do not look for a personal SDK, a platform jar
-   or a local reference-repository directory. A missing tool or wrong hash fails, and
+   version/dependency lock and the checkout cache; do not look for a personal SDK, a platform jar
+   or a local reference-repository directory. A missing tool or wrong size fails, and
    subprocesses run test tooling only.
 5. Compare the actual debug snapshot and its rendered source slice against the independent original-content evidence, including D059–D061. Keep original identities, instruction/register/target/payload/handler/reference facts and UTF16 units; no output assembler is involved.
 6. Have the public development example emit Report status and spans, reused by the
@@ -1342,7 +1358,7 @@ type or catch difference; a zero run count or a nonzero timeout is not a pass.
 **Tests**: B04 already falsified harness faults; this card verifies only the
 actual Engine result integration: a real wrong return, missing event, wrong raw
 or compile error is rejected by the same comparator, and a correct source
-reference is accepted. A missing tool or hash error stays a failure, and a
+reference is accepted. A missing tool or size error stays a failure, and a
 required member MUST NOT change because the real engine does not support it.
 S(F02/F03 fixed D case groups) MUST inspect the actual public debug output and its original-fact projection.
 
@@ -2947,7 +2963,7 @@ touches no real user path. The fixed D068–D070 are accepted per each
 invocation's entry, force and error kind and the process observation of §4.3.4.
 
 **Acceptance**: G0 plus `cargo test -p diana --test product_contracts h10_` plus
-the input and archive regression; Q10 checks the original payload and hash, an
+the input and archive regression; Q10 compares the complete original payload bytes, an
 unchanged target after failure and no temporary residue through the public
 extraction interface; the test starts no CLI to check stdout or `-o` routing.
 **Completion**: Evidence exists for the original bytes, CRC, race, alias and

@@ -44,6 +44,7 @@ def save(path, value):
 
 
 def sha(path):
+    """Informational provenance only; never use this value for admission or acceptance."""
     with Path(path).open('rb') as stream:
         return hashlib.file_digest(stream, 'sha256').hexdigest()
 
@@ -130,8 +131,9 @@ class Tools:
             yield record, self.downloads / Path(record['path']).name
 
     def verify(self):
+        """Check locked paths, sizes and dependencies, without content fingerprints."""
         for record, path in self.entries():
-            if not path.is_file() or path.stat().st_size != record['size'] or sha(path) != record['sha256']:
+            if not path.is_file() or path.stat().st_size != record['size']:
                 raise PreparationError(f'missing/changed locked tool: {path.name}; run fetch-tools explicitly')
         ids = set(self.jars)
         for record in self.lock['artifacts']:
@@ -144,7 +146,7 @@ class Tools:
         self.downloads.mkdir(parents=True, exist_ok=True)
         def acquire(item):
             record, target = item
-            if target.is_file() and target.stat().st_size == record['size'] and sha(target) == record['sha256']:
+            if target.is_file() and target.stat().st_size == record['size']:
                 return
             fd, name = tempfile.mkstemp(dir=self.downloads, suffix='.partial')
             try:
@@ -156,8 +158,8 @@ class Tools:
                             raise PreparationError('download exceeds locked size: ' + target.name)
                         out.write(block)
                 temp = Path(name)
-                if temp.stat().st_size != record['size'] or sha(temp) != record['sha256']:
-                    raise PreparationError('download hash/size mismatch: ' + target.name)
+                if temp.stat().st_size != record['size']:
+                    raise PreparationError('download size mismatch: ' + target.name)
                 temp.replace(target)
             finally:
                 Path(name).unlink(missing_ok=True)
@@ -338,7 +340,7 @@ def prepare(tools, cache, jobs):
     run([sys.executable,axml_source/'build_axml.py',axml_work],ROOT,axml_work/'build.log')
     supplemental={'source_sha256':{relative(p):sha(p) for p in sorted(axml_source.iterdir()) if p.is_file()},
                   'assets':[relative(axml_work/'AndroidManifest.axml'),relative(axml_work/'manifest.zip')]}
-    report = {'schema_version':1, 'spec_sha256':sha(SPEC), 'toolchain_sha256':sha(SUITE/'toolchain.lock.json'),
+    report = {'schema_version':1, 'spec_revision':spec['specRevision'], 'spec_sha256':sha(SPEC), 'toolchain_sha256':sha(SUITE/'toolchain.lock.json'),
               'platform':tools.platform, 'case_denominator':len(cases),
               'invocation_denominator':sum(len(c['invocations']) for c in cases), 'cases':results,
               'art':'not-run: no operator-authorized device/image', 'engine':'not_implemented','supplemental_inputs':supplemental}

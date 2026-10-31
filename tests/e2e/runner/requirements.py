@@ -127,7 +127,6 @@ def check_case(cid, views, files, root, cache, tools):
         invalid = [v['record']['invalid'] for v in views if 'invalid' in v['record']]
         need({i['kind'] for i in invalid} == {'code_insns_out_of_range','typed_handler_count_out_of_range'}, 'one count variant missing')
         from .layout import Dex
-        from e2e import sha
         import hashlib,struct,zlib
         faults=[]
         for view in views:
@@ -137,7 +136,7 @@ def check_case(cid, views, files, root, cache, tools):
             count,end=reader.leb(offset,signed=True) if fault['kind'].startswith('typed_') else (reader.u32(offset),offset+4)
             faults.append({'field':fault['kind'],'anchor':offset,'value':count,'minimum_required_bytes':abs(count)*2,
                            'remaining_bytes':len(blob)-end,'changed_byte_offsets':[i for i,(a,b) in enumerate(zip((root/next(v['record']['path'] for v in views if v['name']=='original.dex')).read_bytes(),blob)) if a!=b],
-                           'original_sha256':next(v['record']['sha256'] for v in views if v['name']=='original.dex'),'mutated_sha256':record['sha256']})
+                           'original_path':next(v['record']['path'] for v in views if v['name']=='original.dex'),'mutated_path':record['path']})
             need(abs(count)*2>len(blob)-end,'count fault no longer proves a format overrun')
             repaired=bytearray(blob)
             if fault['kind'].startswith('typed_'):

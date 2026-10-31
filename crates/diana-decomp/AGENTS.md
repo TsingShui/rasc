@@ -2,7 +2,7 @@
 
 Repository-wide AGENTS.md applies, including the rule that every authored Diana
 document MUST follow ../../docs/diana/WRITING.md. This is the independent internal
-engine package, currently a document-only library scaffold without a public Engine.
+engine package, with request resource control and cancellation but no public Engine.
 Read ../../docs/diana/DESIGN.md, ../../docs/diana/ALGORITHMS.md and
 ../../docs/diana/TASKS.md before work.
 

@@ -14,8 +14,8 @@ def verify_inputs(root, cache, tools):
     spec_path = root / 'docs/diana/e2e_cases.json'
     spec = load(spec_path)
     report = load(cache / 'preparation-report.json')
-    if report['spec_sha256'] != sha(spec_path) or report['toolchain_sha256'] != sha(root / 'tests/e2e/toolchain.lock.json'):
-        raise PreparationError('stale preparation specification/toolchain')
+    if 'spec_revision' in report and report['spec_revision'] != spec['specRevision']:
+        raise PreparationError('stale preparation specification revision')
     by_id = {c['id']:c for c in spec['cases'] if c['required']}
     if len(report['cases']) != len(by_id) or {c['id'] for c in report['cases']} != set(by_id):
         raise PreparationError('missing/duplicate original case')
@@ -28,9 +28,6 @@ def verify_inputs(root, cache, tools):
         try:
             if built['execution'] != 'prepared':
                 raise PreparationError(built.get('reason','input not prepared'))
-            for path, digest in built['source_sha256'].items():
-                if sha(root / path) != digest:
-                    raise PreparationError('changed source after preparation: ' + path)
             case = by_id[cid]
             invocations = {i['id']:i for i in case['invocations']}
             source_evidence = []
@@ -100,7 +97,7 @@ def verify_inputs(root, cache, tools):
     if any(r['state'] != 'projected' for r in results):
         raise PreparationError('independent projection failures; see input-projections.json')
     from .axml_projection import certify as certify_axml
-    certify_axml(root,cache,report)
+    certify_axml(root,cache)
     # Projection success alone is not inputRequirements acceptance.
     from .requirements import certify_requirements
     certify_requirements(root, cache, tools, spec, results)

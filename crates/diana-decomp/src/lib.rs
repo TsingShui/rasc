@@ -1,8 +1,24 @@
-//! Native decompiler library for Diana — package scaffold only.
-//!
-//! No engine, parser, analysis pipeline or public decompilation interface is
-//! implemented yet. Those require the independently certified E2E preparation
-//! described in the repository's docs/diana/TASKS.md.
-//!
-//! This crate will consume borrowed DEX bytes supplied by the Diana application;
-//! it must not own CLI dispatch, filesystem/ZIP loading or external runtimes.
+//! Native DEX analysis with caller-owned input and request-scoped resource control.
+
+#[path = "p1_input/mod.rs"]
+pub mod input;
+mod pipeline;
+mod substrate;
+
+pub mod raw {
+    pub use crate::input::formats::{
+        DexVersion, Format, IndexedRef, InsnLayout, LayoutKind, LayoutProblem, OpcodeSpec,
+        OperandReference, RawDecodeError, ReferenceKind, ReferenceSlot, instruction_layout,
+    };
+}
+
+pub use substrate::ids::{
+    ByteLength, ByteOffset, ByteRange, CallSiteId, ClassDefId, CodeUnitCount, CodeUnitOffset,
+    FieldId, MethodHandleId, MethodId, ProtoId, RegisterWordCount, StringId, TypeId, Utf16Count,
+    Utf16Offset,
+};
+
+pub use pipeline::control::{
+    ControlError, FallbackBudget, Limits, MethodBudget, RequestLimit, ResourceUsage, RunContext,
+};
+pub use pipeline::diagnostics::{DiagnosticCode, FailureKind};

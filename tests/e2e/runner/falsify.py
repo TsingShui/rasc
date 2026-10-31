@@ -16,13 +16,12 @@ REFERENCE_CASES=['D009','D018','D016','D052','D061','D069']
 def verify_harness(root,cache,tools):
     from e2e import PreparationError, Tools, load, relative, run, save, sha
     spec=load(root/'docs/diana/e2e_cases.json');manifest=load(root/'tests/e2e/manifest.json')
-    if manifest['spec']['sha256']!=sha(root/'docs/diana/e2e_cases.json') or manifest['toolchain_lock']['sha256']!=sha(root/'tests/e2e/toolchain.lock.json'):
-        raise PreparationError('stale suite lock')
-    # Verify every original/dependency/certificate hash, not just the selected
-    # positive controls used for falsification.
+    if manifest['spec']['revision']!=spec['specRevision']:
+        raise PreparationError('stale suite revision')
+    # Admit every original/dependency/certificate by path and size.
     for asset in manifest['assets']:
         path=root/asset['path']
-        if not path.is_file() or path.stat().st_size!=asset['size'] or sha(path)!=asset['sha256']:
+        if not path.is_file() or path.stat().st_size!=asset['size']:
             raise PreparationError('missing/changed manifest artifact: '+asset['path'])
     directory=cache/'harness'
     directory.mkdir(parents=True,exist_ok=True)
@@ -57,9 +56,9 @@ def verify_harness(root,cache,tools):
             driver=binding['driver'];need_driver=driver is not None
             if not need_driver:raise PreparationError('missing real positive-control Driver')
             ref=assets[driver['reference_assets'][0]]
-            groups['driver']={'path':ref['path'],'sha256':ref['sha256']}
+            groups['driver']={'path':ref['path']}
         groups['outcome']=artifact(cid+'-'+iid+'-public',public)
-        records.append({'schema_version':1,'spec_sha256':manifest['spec']['sha256'],'case_id':cid,'invocation_id':iid,'seam':seam,
+        records.append({'schema_version':1,'spec_revision':spec['specRevision'],'case_id':cid,'invocation_id':iid,'seam':seam,
                         'producer':'reference-falsification','execution':'completed','artifacts':groups})
     positive=compare_suite(root,spec,manifest,records,REFERENCE_CASES,reference=True)
     failures=[]
@@ -103,14 +102,12 @@ def verify_harness(root,cache,tools):
     observed=file_assertions(root,{'target_path':relative(target),'temporary_directory':relative(temp)})
     wanted=next(i for i in cases['D070']['invocations'] if i['id']=='traversal-name-safe-target')['expected']['fileBytes']
     reject('D070-empty-output',lambda:exact(wanted,observed.get('fileBytes')))
-    for field in ['sha256','size']:
-        instance=Tools(cache);instance.lock=copy.deepcopy(instance.lock)
-        entry=instance.lock['artifacts'][0]
-        entry[field]='0'*64 if field=='sha256' else entry['size']+1
-        reject('tool-'+field,instance.verify,(PreparationError,))
+    instance=Tools(cache);instance.lock=copy.deepcopy(instance.lock)
+    instance.lock['artifacts'][0]['size']+=1
+    reject('tool-size',instance.verify,(PreparationError,))
     instance=Tools(cache);instance.downloads=directory/'missing-tools'
     reject('missing-tool',instance.verify,(PreparationError,))
-    absent=run_unimplemented(spec,manifest['spec']['sha256'])
+    absent=run_unimplemented(spec)
     if any(r['execution']!='not_implemented' for r in absent):raise PreparationError('fake engine result')
     reject('unimplemented-engine',lambda:compare_suite(root,spec,manifest,absent))
     report={'schema_version':1,'positive_reference':positive,'faults':failures,

@@ -1,18 +1,34 @@
-# diana-decomp — native engine package scaffold
+# diana-decomp — native engine library
 
 This is Diana's internal Rust decompiler library, imported as `diana_decomp`.
-**It has no Engine interface or decompilation implementation yet.** An empty
-build or a test run with zero cases is not engine or E2E acceptance.
+`RunContext` implements cumulative request work/allocation charging and latched
+cancellation. Method budgets isolate normal/raw work and reserve only explicitly
+finite fallback allowances. Resource errors expose typed failure kinds and codes.
+The public `input` module implements checked DEX 035 reads and borrowed class,
+method, MUTF-8 and code-range views. Method visits preserve original IDs and local
+declaration/code failures; complete prototype matching distinguishes overloads.
+Byte/UTF16/code-unit coordinates and table IDs use distinct types. Method-body
+states are explicit, and range-checked code views are read-only.
+`raw::instruction_layout` checks instruction/payload extents and preserves typed
+operand references using one opcode specification. `ProgramIndex::check_method_layout`
+checks whole-method register/reference bounds, branch/payload/exception boundaries
+and reachable fallthrough. Its sealed `CheckedMethodLayout` keeps structural
+checks distinct from complete raw validation. `RawMethodView::visit_layouts`
+preserves readable prefixes under the independent fallback budget. Core tests
+exercise malformed input, UTF16 integrity, resource limits and cancellation.
+The Engine interface awaits integration.
 
 From the repository root:
 
 ```sh
 cargo build --locked -p diana-decomp
 cargo clippy --locked -p diana-decomp --all-targets -- -D warnings
+cargo nextest run --locked -p diana-decomp --test contracts
 ```
 
-The crate currently has no dependencies. It must remain independent of rasc,
-dexdec, rusty-dex, Kuna and radguard implementations. Future inputs are borrowed
+Dependency choices are recorded in the root and package AGENTS.md files; the
+manifest and root lockfile own versions. The engine remains independent of rasc,
+dexdec, rusty-dex, Kuna and radguard implementations. Inputs are borrowed
 DEX bytes and declaration facts provided by `apps/diana/`; file/ZIP loading and
 CLI dispatch do not belong here. Production code stays native Rust, with unsafe
 code forbidden and no external runtime/process dependency.
@@ -24,6 +40,5 @@ getters. See [interfaces / data](../../docs/diana/DESIGN.md),
 [preparation / tasks](../../docs/diana/TASKS.md).
 
 The `0.0.0` version is an unpublished scaffold marker. rasc and its release
-tooling are isolated under `ref-fork/rasc/`, outside the active workspace/CI. Shared test inputs/oracles will live in root
-`tests/e2e/`; crate tests will only add the public-library adapter and semantic
-assertions needed by actual capabilities.
+tooling are isolated under `ref-fork/rasc/`, outside the active workspace/CI. Shared test inputs/oracles live in root
+`tests/e2e/`; crate tests cross public interfaces for actual core capabilities.

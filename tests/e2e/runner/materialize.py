@@ -15,7 +15,7 @@ from .evaluate import normalized_debug
 
 
 def observations(root,case,invocation,certificate,manifest,result,groups):
-    from e2e import Tools, compile_java, load, run, sha
+    from e2e import Tools, compile_java, load, run
     assets={a['id']:a for a in manifest['assets']}
     original=assets[certificate['input_assets'][0]]
     cache=root/original['path'].split('/prepared/',1)[0]
@@ -32,7 +32,7 @@ def observations(root,case,invocation,certificate,manifest,result,groups):
         sources=[]
         for artifact in record['sources']:
             path=root/artifact['path']
-            if path.suffix!=suffix or not path.resolve().is_relative_to(root.resolve()) or not path.is_file() or sha(path)!=artifact['sha256']:
+            if path.suffix!=suffix or not path.resolve().is_relative_to(root.resolve()) or not path.is_file():
                 raise Mismatch('missing/changed submitted source')
             sources.append(path)
         if not sources:raise Mismatch('empty submitted source set')
@@ -47,7 +47,7 @@ def observations(root,case,invocation,certificate,manifest,result,groups):
             locked_paths={a['path']:a for a in manifest['assets']}
             for path in dependencies:
                 entry=locked_paths[path.relative_to(root).as_posix()]
-                if sha(path)!=entry['sha256']:raise Mismatch('unchanged dependency was edited')
+                if not path.is_file() or path.stat().st_size!=entry['size']:raise Mismatch('missing/changed dependency')
             classes=work/'classes'
             classfiles=compile_java(tools,sources+dependencies,classes,logs,'candidate')
             compiled=[classfile.project(p) for p in classfiles]

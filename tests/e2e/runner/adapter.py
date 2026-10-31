@@ -21,8 +21,8 @@ def required_runs(spec, case_ids=None):
     return runs
 
 
-def run_unimplemented(spec, spec_hash):
-    return [{'schema_version':1,'spec_sha256':spec_hash,'case_id':c['id'],'invocation_id':i['id'],
+def run_unimplemented(spec):
+    return [{'schema_version':1,'spec_revision':spec['specRevision'],'case_id':c['id'],'invocation_id':i['id'],
              'seam':seam,'producer':'diana-public-library','execution':'not_implemented',
              'reason':'T05 public-library integration is not implemented; no engine result exists',
              'artifacts':{}} for c,i,seam in required_runs(spec)]

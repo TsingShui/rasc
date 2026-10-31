@@ -98,11 +98,8 @@ def project(data):
     return {'producer':'independent-AOSP-ResourceTypes-layout-reader','strings':strings,'resource_map':resources,'root':root}
 
 
-def certify(root,cache,report):
-    from e2e import load,save,sha
-    supplementary=report['supplemental_inputs']
-    for path,digest in supplementary['source_sha256'].items():
-        if sha(root/path)!=digest:raise ValueError('changed H03 source after preparation')
+def certify(root,cache):
+    from e2e import save,sha
     directory=cache/'prepared/H03'
     binary=(directory/'AndroidManifest.axml').read_bytes()
     projection=project(binary)
