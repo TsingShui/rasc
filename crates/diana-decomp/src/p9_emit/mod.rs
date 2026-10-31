@@ -1,4 +1,5 @@
 mod annotations;
+mod comparison;
 mod debug;
 mod debug_program;
 mod dispatcher;

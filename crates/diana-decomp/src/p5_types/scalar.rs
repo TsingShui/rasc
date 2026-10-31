@@ -242,7 +242,7 @@ pub(crate) fn solve(
         };
         match definition.expression {
             Expression::Copy(a) | Expression::Unary(_, a) => check(a)?,
-            Expression::Binary(a, _, b) => {
+            Expression::Binary(a, _, b) | Expression::Compare(a, _, b) => {
                 check(a)?;
                 check(b)?;
             }
@@ -266,6 +266,11 @@ pub(crate) fn solve(
     for definition in definitions {
         budget.charge_work(1)?;
         let valid = match definition.expression {
+            Expression::Compare(a, op, b) => {
+                definition.kind == ScalarType::Int
+                    && families.require(definitions, a, op.operand(), budget)?
+                    && families.require(definitions, b, op.operand(), budget)?
+            }
             Expression::Unary(op, source) => {
                 let (from, to) = op.signature();
                 definition.kind == to && families.require(definitions, source, from, budget)?
@@ -316,6 +321,7 @@ pub(crate) fn solve(
     for (index, definition) in definitions.iter().enumerate() {
         budget.charge_work(1)?;
         let requirements = match definition.expression {
+            Expression::Compare(a, op, b) => [Some((a, op.operand())), Some((b, op.operand()))],
             Expression::Copy(a) => [Some((a, types[index])), None],
             Expression::Unary(op, a) => [Some((a, op.signature().0)), None],
             Expression::Binary(a, op, b) => [

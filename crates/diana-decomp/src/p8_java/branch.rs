@@ -14,6 +14,7 @@ pub(crate) enum Right {
     Literal(i32),
 }
 pub(crate) enum Expression {
+    Compare(LocalId, crate::pipeline::scalar::Compare, LocalId),
     Binary(LocalId, crate::pipeline::branch::Arithmetic, Right),
     Local(LocalId),
     Constant(i32),
@@ -171,6 +172,7 @@ pub(super) fn copies(
                     Kind::Int => 0,
                     Kind::Boolean => 1,
                     Kind::Object => 2,
+                    Kind::Float => 3,
                 }),
                 1,
             )?,
@@ -189,6 +191,7 @@ pub(super) fn copies(
             (0, Width::One) => Kind::Int,
             (1, Width::One) => Kind::Boolean,
             (2, Width::One) => Kind::Object,
+            (3, Width::One) => Kind::Float,
             _ => {
                 return Err(RequestError::InternalInvariant(
                     "diamond copy temporary has a foreign type",
@@ -227,6 +230,24 @@ pub(super) fn operations(
     for op in &ssa.bound[ix(block.0)?].ops {
         budget.charge_work(1)?;
         let expression = match op.op {
+            Op::Compare(_, _, compare, _) => {
+                let Some(crate::pipeline::branch::BoundOperand::Value(right)) = op.other else {
+                    return Err(RequestError::InternalInvariant(
+                        "owned cmp lost right operand",
+                    ));
+                };
+                Expression::Compare(
+                    LocalId(
+                        op.source
+                            .ok_or(RequestError::InternalInvariant(
+                                "owned cmp lost left operand",
+                            ))?
+                            .0,
+                    ),
+                    compare,
+                    LocalId(right.0),
+                )
+            }
             Op::Binary(_, _, kind, _) => Expression::Binary(
                 LocalId(
                     op.source
@@ -383,6 +404,9 @@ fn verify_diamond(
             .0,
     );
     let condition_kind = locals[ix(condition.0)?].kind;
+    if condition_kind == Kind::Float {
+        return Ok(None);
+    }
     if matches!(condition_kind, Kind::Boolean | Kind::Object) && !matches!(opcode, 0x38 | 0x39) {
         return Ok(None);
     }

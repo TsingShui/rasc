@@ -26,6 +26,7 @@ pub(super) fn write(
                 Kind::Int => "int ",
                 Kind::Boolean => "boolean ",
                 Kind::Object => "java.lang.Object ",
+                Kind::Float => "float ",
             },
             budget,
         )?;
@@ -41,6 +42,7 @@ pub(super) fn write(
                     Kind::Int => " = 0",
                     Kind::Boolean => " = false",
                     Kind::Object => " = null",
+                    Kind::Float => " = 0.0f",
                 },
                 budget,
             )?;

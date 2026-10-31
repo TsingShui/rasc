@@ -85,9 +85,11 @@ def run_public(root, cache, spec, manifest, case_ids=None):
                     run(argv,root,work/'library.log')
                     from e2e import load
                     actual=load(public_path)
-                    groups = _artifacts(actual, cert)
-                    executable_source = groups.pop('method_source',None)
-                    if executable_source is not None:
+                    calls=invocation['input'].get('calls',[]) if case['validationScope']=='method-in-known-context' else []
+                    requested=list(dict.fromkeys(call['method'] for call in calls))
+                    groups = _artifacts(actual, cert,requested)
+                    executable_sources = groups.pop('method_sources',None)
+                    if executable_sources is not None:
                         if case['validationScope']!='method-in-known-context':raise ValueError('method fragment is not a complete JavaUnit')
                         source_path=work/'context'/Path(selector['descriptor'][1:-1]+'.java')
                         source_path.parent.mkdir(parents=True,exist_ok=True)
@@ -101,16 +103,18 @@ def run_public(root, cache, spec, manifest, case_ids=None):
                             if count!=1:raise ValueError('certified mirror context has a different namespace')
                         else:
                             original_source=original_path.read_text(encoding='utf-8')
-                        pattern=r'(?m)^([ \t]*(?:public|private|protected|static|final|strictfp|synchronized|\s)+(?:int|long|float|double|boolean|byte|short|char)\s+'+re.escape(selector['name'])+r'\s*\([^)]*\)\s*)\{'
-                        matches=list(re.finditer(pattern,original_source))
-                        if len(matches)!=1:raise ValueError('known source context does not identify one scalar method')
-                        match=matches[0];position=match.end();depth=1
-                        while position<len(original_source) and depth:
-                            if original_source[position]=='{':depth+=1
-                            elif original_source[position]=='}':depth-=1
-                            position+=1
-                        if depth:raise ValueError('unterminated known scalar context')
-                        source_path.write_text(original_source[:match.start()]+executable_source+original_source[position:],encoding='utf-8')
+                        for fragment in executable_sources:
+                            pattern=r'(?m)^([ \t]*(?:public|private|protected|static|final|strictfp|synchronized|\s)+(?:int|long|float|double|boolean|byte|short|char)\s+'+re.escape(fragment['name'])+r'\s*\([^)]*\)\s*)\{'
+                            matches=list(re.finditer(pattern,original_source))
+                            if len(matches)!=1:raise ValueError('known source context does not identify one selected method')
+                            match=matches[0];position=match.end();depth=1
+                            while position<len(original_source) and depth:
+                                if original_source[position]=='{':depth+=1
+                                elif original_source[position]=='}':depth-=1
+                                position+=1
+                            if depth:raise ValueError('unterminated known method context')
+                            original_source=original_source[:match.start()]+fragment['source']+original_source[position:]
+                        source_path.write_text(original_source,encoding='utf-8')
                         groups['java_input']={'sources':[{'path':relative(source_path)}]}
                     context = groups.pop('declaration_source',None)
                     if context is not None:
@@ -198,7 +202,7 @@ def _failure_outcome(diagnostics):
     return 'resource-failure' if any(d['kind']=='budget_exceeded' and d.get('limit') in {'max_method_output_bytes','fallback_output_bytes','max_report_output_bytes'} for d in diagnostics) else 'error'
 
 
-def _artifacts(actual, cert):
+def _artifacts(actual, cert,requested=()):
     binding=cert['bindings'][0];selector=binding['selector'];origin=binding['origin']
     if actual['schema']!='diana.inspect/1':raise ValueError('unknown public result schema')
     if actual['status']=='request_error':
@@ -238,6 +242,13 @@ def _artifacts(actual, cert):
         diagnostics=[] if reason is None else [actual['diagnostics'][reason]]
     else:
         status=actual['status'];outcome=status;diagnostics=actual['diagnostics']
+    scoped=None
+    if requested:
+        scoped=[member for method in requested for member in members if member['name']+member['proto']==method]
+        if len(scoped)!=len(requested):raise ValueError('method group differs from requested original identities')
+        chosen={member['method_id_idx'] for member in scoped}
+        diagnostics=[diagnostic for diagnostic in actual['diagnostics'] if diagnostic['method_id_idx'] in chosen or diagnostic['kind'] in {'malformed','cancelled','internal_invariant'}]
+        if all(member['status']=='java' and member['language']=='java' for member in scoped):status,outcome='java','java'
     text=actual['text'].encode('utf-8')
     spans=[];excerpts=[]
     for span in actual['spans']:
@@ -257,7 +268,8 @@ def _artifacts(actual, cert):
             'report':{'available':True},'published_success':False}
     groups={'outcome':public,'text':text}
     if outcome!='error':groups['rendered']={'spans':spans,'raw_excerpt_ranges':excerpts}
-    if outcome=='java':groups['method_source']=actual['members'][0]['source']
+    if requested:public['context_report']={'status':actual['status'],'diagnostics':actual['diagnostics'],'members':members};public['requested_methods']=requested;public['members']=scoped
+    if outcome=='java':groups['method_sources']=[{'name':member['name'],'proto':member['proto'],'source':member['source']} for member in (scoped if scoped is not None else members)]
     if outcome=='declaration-only':
         name=owner[1:-1].split('/')[-1];package=owner[1:-1].rsplit('/',1)[0].replace('/','.') if '/' in owner else ''
         if any(not part.isidentifier() for part in (package.split('.') if package else [])+[name]):raise ValueError('unsupported known Java context name')

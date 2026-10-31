@@ -142,6 +142,19 @@ fn scalar(
                 }
                 operand(value, 0, output, budget)?;
             }
+            Expression::Compare(a, op, b) => super::comparison::write(
+                op,
+                |right, output, budget| {
+                    operand(
+                        if right { b } else { a },
+                        usize::from(right),
+                        output,
+                        budget,
+                    )
+                },
+                output,
+                budget,
+            )?,
             Expression::Binary(a, op, b) => {
                 operand(a, 0, output, budget)?;
                 output.push(
@@ -240,6 +253,12 @@ pub(super) fn assignments(
         local(statement.target, output, budget)?;
         output.push(" = ", budget)?;
         match statement.expression {
+            BranchExpression::Compare(a, compare, b) => super::comparison::write(
+                compare,
+                |right, output, budget| local(if right { b } else { a }, output, budget),
+                output,
+                budget,
+            )?,
             BranchExpression::Binary(left, kind, ref right) => {
                 local(left, output, budget)?;
                 output.push(
@@ -279,6 +298,7 @@ fn diamond(
                 Kind::Int => "int ",
                 Kind::Boolean => "boolean ",
                 Kind::Object => "java.lang.Object ",
+                Kind::Float => "float ",
             },
             budget,
         )?;
@@ -292,6 +312,11 @@ fn diamond(
     assignments(&body.entry, output, budget)?;
     output.push("if (", budget)?;
     match body.condition_kind {
+        Kind::Float => {
+            return Err(RequestError::InternalInvariant(
+                "unlowered FP branch entered verified Java",
+            ));
+        }
         Kind::Boolean => {
             if body.opcode == 0x38 {
                 output.push("!", budget)?;

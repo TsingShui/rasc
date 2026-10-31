@@ -24,6 +24,7 @@ fn ty(kind: Kind) -> Result<LocalType, RequestError> {
             Kind::Int => 0,
             Kind::Boolean => 1,
             Kind::Object => 2,
+            Kind::Float => 3,
         }),
         1,
     )
@@ -35,6 +36,11 @@ fn same_expression(
     right: Option<BoundOperand>,
 ) -> bool {
     match (actual, op) {
+        (Expression::Compare(a, compare, b), Op::Compare(_, _, original, _)) => {
+            left.is_some_and(|value| value.0 == a.0)
+                && *compare == original
+                && matches!(right,Some(BoundOperand::Value(value)) if value.0==b.0)
+        }
         (Expression::Constant(actual), Op::Constant(_, original)) => *actual == original,
         (Expression::Local(actual), Op::Move(_, _)) => left.is_some_and(|id| actual.0 == id.0),
         (Expression::Binary(actual, kind, rhs), Op::Binary(_, _, original, _)) => {

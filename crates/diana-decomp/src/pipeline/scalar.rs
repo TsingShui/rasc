@@ -21,6 +21,30 @@ pub(crate) enum Binary {
     Shr,
     Ushr,
 }
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub(crate) enum Compare {
+    Long,
+    FloatL,
+    FloatG,
+    DoubleL,
+    DoubleG,
+}
+impl Compare {
+    pub(crate) fn operand(self) -> ScalarType {
+        match self {
+            Self::Long => ScalarType::Long,
+            Self::FloatL | Self::FloatG => ScalarType::Float,
+            Self::DoubleL | Self::DoubleG => ScalarType::Double,
+        }
+    }
+    pub(crate) fn bias(self) -> Option<i8> {
+        match self {
+            Self::Long => None,
+            Self::FloatL | Self::DoubleL => Some(-1),
+            _ => Some(1),
+        }
+    }
+}
 #[derive(Clone, Copy)]
 pub(crate) enum Unary {
     Neg,
@@ -56,6 +80,7 @@ enum Operand {
     Literal(i32),
 }
 enum Op {
+    Compare(RegisterId, RegisterId, Compare, RegisterId),
     ConstantWide(RegisterId, i64),
     MoveWide(RegisterId, RegisterId),
     BinaryWide(RegisterId, RegisterId, Binary, RegisterId),
@@ -74,6 +99,7 @@ struct FlowBody<'a> {
     result: ScalarType,
 }
 pub(crate) enum Expression {
+    Compare(ValueId, Compare, ValueId),
     Parameter(u32),
     Constant(i32),
     ConstantWide(i64),
@@ -312,6 +338,18 @@ fn flow<'a>(
                 0 => None,
                 1..=3 => Some(Op::Move(reg(0)?, reg(1)?)),
                 0x12..=0x15 => Some(Op::Constant(reg(0)?, literal()?)),
+                0x2d..=0x31 => Some(Op::Compare(
+                    reg(0)?,
+                    reg(1)?,
+                    match spec.opcode {
+                        0x2d => Compare::FloatL,
+                        0x2e => Compare::FloatG,
+                        0x2f => Compare::DoubleL,
+                        0x30 => Compare::DoubleG,
+                        _ => Compare::Long,
+                    },
+                    reg(2)?,
+                )),
                 0xf => Some(Op::Return(reg(0)?)),
                 0x10 => Some(Op::ReturnWide(reg(0)?)),
                 4..=6 => Some(Op::MoveWide(reg(0)?, reg(1)?)),
@@ -589,6 +627,12 @@ fn bind<'a>(
                     kind,
                     Expression::Unary(op, read(&slots, &definitions, source, wide, pc)?),
                 )
+            }
+            Op::Compare(reg, a, op, b) => {
+                let wide = op.operand().words() == 2;
+                let a = read(&slots, &definitions, a, wide, pc)?;
+                let b = read(&slots, &definitions, b, wide, pc)?;
+                (reg, ScalarType::Int, Expression::Compare(a, op, b))
             }
             Op::BinaryFp(reg, a, op, b, kind) => {
                 let a = read(&slots, &definitions, a, kind.words() == 2, pc)?;

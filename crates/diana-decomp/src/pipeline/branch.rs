@@ -14,6 +14,7 @@ pub(crate) enum DeclarationType {
     Int,
     Boolean,
     Object,
+    Float,
     Narrow(crate::p5_types::Narrow),
 }
 impl DeclarationType {
@@ -22,6 +23,7 @@ impl DeclarationType {
             Self::Int | Self::Narrow(_) => Kind::Int,
             Self::Boolean => Kind::Boolean,
             Self::Object => Kind::Object,
+            Self::Float => Kind::Float,
         }
     }
     pub(crate) fn spelling(self) -> &'static str {
@@ -36,7 +38,7 @@ impl DeclarationType {
             Self::Int => Some(IntRange::ALL),
             Self::Boolean => Some(IntRange::BOOLEAN),
             Self::Narrow(kind) => Some(kind.range()),
-            Self::Object => None,
+            Self::Object | Self::Float => None,
         }
     }
 }
@@ -45,6 +47,7 @@ pub(crate) enum Kind {
     Int,
     Boolean,
     Object,
+    Float,
 }
 impl Kind {
     pub(crate) fn spelling(self) -> &'static str {
@@ -52,6 +55,7 @@ impl Kind {
             Self::Int => "int",
             Self::Boolean => "boolean",
             Self::Object => "java.lang.Object",
+            Self::Float => "float",
         }
     }
 }
@@ -79,6 +83,12 @@ pub(crate) enum BoundOperand {
 }
 #[derive(Clone, Copy)]
 pub(crate) enum Op {
+    Compare(
+        RegisterId,
+        RegisterId,
+        crate::pipeline::scalar::Compare,
+        RegisterId,
+    ),
     Binary(RegisterId, RegisterId, Arithmetic, Operand),
     Constant(RegisterId, i32),
     Move(RegisterId, RegisterId),
@@ -118,6 +128,7 @@ pub(crate) struct Edge {
 }
 #[derive(Clone, Copy)]
 pub(crate) enum Definition {
+    Compare(ValueId, crate::pipeline::scalar::Compare, ValueId),
     Parameter(u32),
     Constant(i32),
     Move(ValueId),
@@ -241,19 +252,23 @@ fn value(sym: Sym, register: RegisterId, pc: CodeUnitOffset) -> Result<ValueId, 
 }
 fn destination(op: Op) -> Option<RegisterId> {
     match op {
-        Op::Constant(r, _) | Op::Move(r, _) | Op::Binary(r, _, _, _) => Some(r),
+        Op::Constant(r, _) | Op::Move(r, _) | Op::Binary(r, _, _, _) | Op::Compare(r, _, _, _) => {
+            Some(r)
+        }
         Op::Nop => None,
     }
 }
 fn use_register(op: Op) -> Option<RegisterId> {
     match op {
-        Op::Move(_, r) | Op::Binary(_, r, _, _) => Some(r),
+        Op::Move(_, r) | Op::Binary(_, r, _, _) | Op::Compare(_, r, _, _) => Some(r),
         _ => None,
     }
 }
 fn other_register(op: Op) -> Option<RegisterId> {
     match op {
-        Op::Binary(_, _, _, Operand::Register(register)) => Some(register),
+        Op::Binary(_, _, _, Operand::Register(register)) | Op::Compare(_, _, _, register) => {
+            Some(register)
+        }
         _ => None,
     }
 }
@@ -361,6 +376,8 @@ fn flow<'a>(
                 DeclarationType::Int
             } else if name.matches_with(&[90], budget)? {
                 DeclarationType::Boolean
+            } else if name.matches_with(&[70], budget)? {
+                DeclarationType::Float
             } else if name.matches_with(&[66], budget)? {
                 DeclarationType::Narrow(crate::p5_types::Narrow::Byte)
             } else if name.matches_with(&[83], budget)? {
@@ -507,6 +524,16 @@ fn flow<'a>(
                     push(&mut raw_switches, (targets, next), budget)?;
                     Decoded::Switch(reg(0)?, id)
                 }
+                0x2d | 0x2e => Decoded::Op(Op::Compare(
+                    reg(0)?,
+                    reg(1)?,
+                    if spec.opcode == 0x2d {
+                        crate::pipeline::scalar::Compare::FloatL
+                    } else {
+                        crate::pipeline::scalar::Compare::FloatG
+                    },
+                    reg(2)?,
+                )),
                 0x28..=0x2a => {
                     has_branch = true;
                     let to = target()?;
@@ -800,7 +827,8 @@ pub(crate) fn build<'a>(
                 None
             };
             let other = match op {
-                Op::Binary(_, _, _, Operand::Register(register)) => Some(BoundOperand::Value(
+                Op::Compare(_, _, _, register)
+                | Op::Binary(_, _, _, Operand::Register(register)) => Some(BoundOperand::Value(
                     value(lookup(&env, register, budget)?, register, pc)?,
                 )),
                 Op::Binary(_, _, _, Operand::Literal(literal)) => {
@@ -809,6 +837,26 @@ pub(crate) fn build<'a>(
                 _ => None,
             };
             let result = match op {
+                Op::Compare(_, _, compare, _) => {
+                    let id = ValueId(
+                        u32::try_from(values.len()).map_err(|_| RequestError::PlatformCapacity)?,
+                    );
+                    let Some(BoundOperand::Value(right)) = other else {
+                        return Err(RequestError::InternalInvariant("cmp lost its right value"));
+                    };
+                    push(
+                        &mut values,
+                        Definition::Compare(
+                            source.ok_or(RequestError::InternalInvariant(
+                                "cmp lost its left value",
+                            ))?,
+                            compare,
+                            right,
+                        ),
+                        budget,
+                    )?;
+                    Some(id)
+                }
                 Op::Binary(_, _, arithmetic, _) => {
                     let id = ValueId(
                         u32::try_from(values.len()).map_err(|_| RequestError::PlatformCapacity)?,
@@ -1057,7 +1105,8 @@ fn verify<'a>(
                 ));
             }
             let expected_other = match *op {
-                Op::Binary(_, _, _, Operand::Register(register)) => Some(BoundOperand::Value(
+                Op::Compare(_, _, _, register)
+                | Op::Binary(_, _, _, Operand::Register(register)) => Some(BoundOperand::Value(
                     value(lookup(&env, register, budget)?, register, *pc)?,
                 )),
                 Op::Binary(_, _, _, Operand::Literal(literal)) => {
@@ -1071,6 +1120,14 @@ fn verify<'a>(
                 ));
             }
             match *op {
+                Op::Compare(_, _, compare, _) => {
+                    if !matches!(bound.result.and_then(|id|ssa.values.get(usize::try_from(id.0).ok()?)),Some(Definition::Compare(left,kind,right)) if Some(*left)==bound.source&&*kind==compare&&Some(BoundOperand::Value(*right))==bound.other)
+                    {
+                        return Err(RequestError::InternalInvariant(
+                            "SSA cmp changed original operands or NaN bias",
+                        ));
+                    }
+                }
                 Op::Binary(_, _, arithmetic, _) => {
                     if !matches!(bound.result.and_then(|id|ssa.values.get(usize::try_from(id.0).ok()?)),Some(Definition::Binary(left,kind,right)) if Some(*left)==bound.source && *kind==arithmetic && Some(*right)==bound.other)
                     {
@@ -1183,20 +1240,22 @@ fn verify<'a>(
             Definition::Parameter(index) => match ssa.parameters[ix(*index)?].kind() {
                 Kind::Boolean => 3,
                 Kind::Int => 7,
-                Kind::Object => 0,
+                Kind::Object | Kind::Float => 0,
             },
             Definition::Constant(value) => match value {
                 0 => 1,
                 1 => 2,
                 _ => 4,
             },
-            Definition::Binary(_, _, _) => 7,
+            Definition::Binary(_, _, _) | Definition::Compare(_, _, _) => 7,
             _ => 0,
         };
         let range = match definition {
             Definition::Parameter(index) => ssa.parameters[ix(*index)?].range(),
             Definition::Constant(value) => Some(crate::p5_types::IntRange::literal(*value)),
-            Definition::Binary(_, _, _) => Some(crate::p5_types::IntRange::ALL),
+            Definition::Binary(_, _, _) | Definition::Compare(_, _, _) => {
+                Some(crate::p5_types::IntRange::ALL)
+            }
             _ => None,
         };
         push(&mut ranges, range, budget)?;
@@ -1211,7 +1270,9 @@ fn verify<'a>(
             &mut kinds,
             match definition {
                 Definition::Parameter(index) => Some(ssa.parameters[ix(*index)?].kind()),
-                Definition::Constant(_) | Definition::Binary(_, _, _) => Some(Kind::Int),
+                Definition::Constant(_)
+                | Definition::Binary(_, _, _)
+                | Definition::Compare(_, _, _) => Some(Kind::Int),
                 _ => None,
             },
             budget,
@@ -1221,6 +1282,19 @@ fn verify<'a>(
         let mut changed = false;
         for (index, definition) in ssa.values.iter().enumerate() {
             budget.charge_work(1)?;
+            if let Definition::Compare(left, _, right) = definition {
+                for source in [left, right] {
+                    budget.charge_work(1)?;
+                    let at = ix(source.0)?;
+                    if bad[at] && !bad[index] {
+                        bad[index] = true;
+                        changed = true;
+                    }
+                    if kinds[at].is_some_and(|kind| kind != Kind::Float) {
+                        type_conflict = true;
+                    }
+                }
+            }
             if let Definition::Binary(left, _, right) = definition {
                 let mut sources = [Some(*left), None];
                 if let BoundOperand::Value(right) = right {

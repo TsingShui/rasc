@@ -258,6 +258,9 @@ pub(crate) fn verify(
                 );
                 let right = bound.other.map(|id| LocalId(id.0));
                 let kind = locals[ix(left.0)?].kind;
+                if kind == Kind::Float {
+                    return Ok(None);
+                }
                 if let Some(right) = right
                     && locals[ix(right.0)?].kind != kind
                 {
