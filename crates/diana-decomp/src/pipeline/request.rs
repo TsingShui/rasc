@@ -29,6 +29,11 @@ pub enum RequestError {
         register: crate::RegisterId,
         pc: crate::CodeUnitOffset,
     },
+    #[error("partial or invalid wide register {register:?} read at {pc:?}")]
+    InvalidWideRead {
+        register: crate::RegisterId,
+        pc: crate::CodeUnitOffset,
+    },
     #[error("requested DEX identity does not exist")]
     UnknownDex,
     #[error("JavaTargetLimit: {item:?} uses {actual}, maximum {maximum}")]
@@ -49,7 +54,9 @@ impl RequestError {
             Self::Debug(error) => error.kind(),
             Self::Control(error) => error.kind(),
             Self::Allocation(_) | Self::PlatformCapacity => FailureKind::BudgetExceeded,
-            Self::UnknownDex | Self::UndefinedRegister { .. } => FailureKind::Malformed,
+            Self::UnknownDex | Self::UndefinedRegister { .. } | Self::InvalidWideRead { .. } => {
+                FailureKind::Malformed
+            }
             Self::JavaTargetLimit { .. } => FailureKind::Unsupported,
             Self::InternalInvariant(_) => FailureKind::InternalInvariant,
         }

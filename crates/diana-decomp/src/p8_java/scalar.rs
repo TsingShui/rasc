@@ -9,7 +9,7 @@ pub enum CompilationContract {
     Java8,
 }
 
-/// An owned, explicit int-method AST admitted by the P8 verifier. It contains no
+/// An owned, explicit scalar-method AST admitted by the P8 verifier. It contains no
 /// input or analysis-arena borrows. Verification does not invoke a Java compiler.
 pub struct VerifiedJavaMethod {
     pub(crate) header: String,
@@ -172,7 +172,8 @@ pub(crate) fn verify(
             header.push(text, budget)?;
         }
     }
-    header.push("int ", budget)?;
+    header.push(plan.result.spelling(), budget)?;
+    header.push(" ", budget)?;
     for unit in name {
         header.character(
             char::from_u32(u32::from(unit)).ok_or(RequestError::InternalInvariant(
@@ -182,13 +183,17 @@ pub(crate) fn verify(
         )?;
     }
     header.push("(", budget)?;
-    for parameter in 0..plan.parameters {
+    for (parameter, kind) in plan.parameters.iter().enumerate() {
         budget.charge_work(1)?;
         if parameter != 0 {
             header.push(", ", budget)?;
         }
-        header.push("int p", budget)?;
-        header.unsigned(u64::from(parameter), budget)?;
+        header.push(kind.spelling(), budget)?;
+        header.push(" p", budget)?;
+        header.unsigned(
+            u64::try_from(parameter).map_err(|_| RequestError::PlatformCapacity)?,
+            budget,
+        )?;
     }
     header.push(")", budget)?;
     budget.checkpoint()?;

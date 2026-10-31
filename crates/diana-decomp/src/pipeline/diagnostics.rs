@@ -36,6 +36,7 @@ pub enum DiagnosticCode {
     JavaTargetLimit,
     UnknownDex,
     UndefinedRegister,
+    InvalidWideRead,
     InternalInvariant,
 }
 

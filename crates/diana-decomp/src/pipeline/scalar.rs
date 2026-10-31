@@ -28,6 +28,10 @@ pub(crate) enum Unary {
     Byte,
     Char,
     Short,
+    NegLong,
+    NotLong,
+    IntToLong,
+    LongToInt,
 }
 #[derive(Clone, Copy)]
 enum Operand {
@@ -35,6 +39,10 @@ enum Operand {
     Literal(i32),
 }
 enum Op {
+    ConstantWide(RegisterId, i64),
+    MoveWide(RegisterId, RegisterId),
+    BinaryWide(RegisterId, RegisterId, Binary, RegisterId),
+    ReturnWide(RegisterId),
     Constant(RegisterId, i32),
     Move(RegisterId, RegisterId),
     Unary(RegisterId, Unary, RegisterId),
@@ -44,16 +52,19 @@ enum Op {
 struct FlowBody<'a> {
     raw: RawMethodView<'a>,
     ops: Vec<(CodeUnitOffset, Op)>,
-    parameters: u32,
+    parameters: Vec<ScalarType>,
+    result: ScalarType,
 }
 pub(crate) enum Expression {
     Parameter(u32),
     Constant(i32),
+    ConstantWide(i64),
     Copy(ValueId),
     Unary(Unary, ValueId),
     Binary(ValueId, Binary, ValueId),
 }
 pub(crate) struct Definition {
+    pub kind: ScalarType,
     pub expression: Expression,
     pub pc: Option<CodeUnitOffset>,
 }
@@ -65,9 +76,24 @@ struct SsaBody<'a> {
 struct ResolvedBody<'a> {
     ssa: SsaBody<'a>,
 }
-#[derive(Clone, Copy)]
-enum ScalarType {
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub(crate) enum ScalarType {
     Int,
+    Long,
+}
+impl ScalarType {
+    pub fn spelling(self) -> &'static str {
+        match self {
+            Self::Int => "int",
+            Self::Long => "long",
+        }
+    }
+    fn words(self) -> usize {
+        match self {
+            Self::Int => 1,
+            Self::Long => 2,
+        }
+    }
 }
 struct TypedBody<'a> {
     resolved: ResolvedBody<'a>,
@@ -83,7 +109,8 @@ pub(crate) struct PlannedBody<'a> {
     pub definitions: Vec<Definition>,
     pub locals: Vec<LocalId>,
     pub returned: ValueId,
-    pub parameters: u32,
+    pub parameters: Vec<ScalarType>,
+    pub result: ScalarType,
 }
 
 pub(crate) fn plan<'a>(
@@ -116,7 +143,54 @@ pub(crate) fn plan<'a>(
             _ => {}
         }
         reserve(&mut types, 1, budget)?;
-        types.push(ScalarType::Int);
+        let use_kind = |id: ValueId| -> Result<ScalarType, RequestError> {
+            Ok(resolved
+                .ssa
+                .definitions
+                .get(usize::try_from(id.0).map_err(|_| RequestError::PlatformCapacity)?)
+                .ok_or(RequestError::InternalInvariant(
+                    "typed scalar use disappeared",
+                ))?
+                .kind)
+        };
+        let valid =
+            match definition.expression {
+                Expression::Parameter(parameter) => {
+                    resolved.ssa.flow.parameters.get(
+                        usize::try_from(parameter).map_err(|_| RequestError::PlatformCapacity)?,
+                    ) == Some(&definition.kind)
+                }
+                Expression::Constant(_) => definition.kind == ScalarType::Int,
+                Expression::ConstantWide(_) => definition.kind == ScalarType::Long,
+                Expression::Copy(id) => use_kind(id)? == definition.kind,
+                Expression::Unary(op, id) => {
+                    let (source, target) = match op {
+                        Unary::NegLong | Unary::NotLong => (ScalarType::Long, ScalarType::Long),
+                        Unary::IntToLong => (ScalarType::Int, ScalarType::Long),
+                        Unary::LongToInt => (ScalarType::Long, ScalarType::Int),
+                        _ => (ScalarType::Int, ScalarType::Int),
+                    };
+                    use_kind(id)? == source && definition.kind == target
+                }
+                Expression::Binary(a, op, b) => {
+                    use_kind(a)? == definition.kind
+                        && use_kind(b)?
+                            == if matches!(op, Binary::Shl | Binary::Shr | Binary::Ushr) {
+                                ScalarType::Int
+                            } else {
+                                definition.kind
+                            }
+                }
+            };
+        if !valid {
+            return Ok(None);
+        }
+        types.push(definition.kind);
+    }
+    let returned =
+        usize::try_from(resolved.ssa.returned.0).map_err(|_| RequestError::PlatformCapacity)?;
+    if types[returned] != resolved.ssa.flow.result {
+        return Ok(None);
     }
     let typed = TypedBody { resolved, types };
     let mut locals = Vec::new();
@@ -136,6 +210,7 @@ pub(crate) fn plan<'a>(
         locals: storage.locals,
         returned: ssa.returned,
         parameters: ssa.flow.parameters,
+        result: ssa.flow.result,
     }))
 }
 
@@ -147,25 +222,41 @@ fn flow<'a>(
         return Ok(None);
     };
     let raw = checked.layout().original().clone();
-    if input.access_flags() & 8 == 0
-        || !raw.try_byte_range().as_range().is_empty()
-        || !input
-            .declaration()
-            .prototype
-            .return_type
-            .matches_with(&[u16::from(b'I')], budget)?
-    {
+    if input.access_flags() & 8 == 0 || !raw.try_byte_range().as_range().is_empty() {
         return Ok(None);
     }
-    let mut parameters = 0u32;
+    let result = if input
+        .declaration()
+        .prototype
+        .return_type
+        .matches_with(&[u16::from(b'I')], budget)?
+    {
+        ScalarType::Int
+    } else if input
+        .declaration()
+        .prototype
+        .return_type
+        .matches_with(&[u16::from(b'J')], budget)?
+    {
+        ScalarType::Long
+    } else {
+        return Ok(None);
+    };
+    let mut parameters = Vec::new();
     let mut supported = true;
     input.declaration().prototype.visit_parameter_types(
         budget,
         |name, budget| -> Result<(), RequestError> {
-            supported &= name.matches_with(&[u16::from(b'I')], budget)?;
-            parameters = parameters
-                .checked_add(1)
-                .ok_or(RequestError::PlatformCapacity)?;
+            let kind = if name.matches_with(&[u16::from(b'I')], budget)? {
+                ScalarType::Int
+            } else if name.matches_with(&[u16::from(b'J')], budget)? {
+                ScalarType::Long
+            } else {
+                supported = false;
+                return Ok(());
+            };
+            reserve(&mut parameters, 1, budget)?;
+            parameters.push(kind);
             Ok(())
         },
     )?;
@@ -222,6 +313,42 @@ fn flow<'a>(
                 1..=3 => Some(Op::Move(reg(0)?, reg(1)?)),
                 0x12..=0x15 => Some(Op::Constant(reg(0)?, literal()?)),
                 0xf => Some(Op::Return(reg(0)?)),
+                0x10 => Some(Op::ReturnWide(reg(0)?)),
+                4..=6 => Some(Op::MoveWide(reg(0)?, reg(1)?)),
+                0x16..=0x19 => Some(Op::ConstantWide(
+                    reg(0)?,
+                    match operands.literal() {
+                        Some(RawLiteral::Bits64(bits)) => i64::from_le_bytes(bits.to_le_bytes()),
+                        Some(RawLiteral::Signed16(value)) => i64::from(value),
+                        _ => {
+                            return Err(RequestError::InternalInvariant(
+                                "checked wide literal is absent",
+                            ));
+                        }
+                    },
+                )),
+                0x7d | 0x7e | 0x81 | 0x84 => Some(Op::Unary(
+                    reg(0)?,
+                    match spec.opcode {
+                        0x7d => Unary::NegLong,
+                        0x7e => Unary::NotLong,
+                        0x81 => Unary::IntToLong,
+                        _ => Unary::LongToInt,
+                    },
+                    reg(1)?,
+                )),
+                0x9b..=0xa5 => Some(Op::BinaryWide(
+                    reg(0)?,
+                    reg(1)?,
+                    binary(spec.opcode - 11),
+                    reg(2)?,
+                )),
+                0xbb..=0xc5 => Some(Op::BinaryWide(
+                    reg(0)?,
+                    reg(0)?,
+                    binary(spec.opcode - 11),
+                    reg(1)?,
+                )),
                 0x7b | 0x7c | 0x8d..=0x8f => Some(Op::Unary(
                     reg(0)?,
                     match spec.opcode {
@@ -268,7 +395,7 @@ fn flow<'a>(
                 "checked scalar extent overflowed",
             ))?;
     }
-    if !matches!(ops.last(), Some((_, Op::Return(_)))) {
+    if !matches!(ops.last(), Some((_, Op::Return(_) | Op::ReturnWide(_)))) {
         return Err(RequestError::InternalInvariant(
             "closed scalar flow has no terminal",
         ));
@@ -277,32 +404,83 @@ fn flow<'a>(
         raw,
         ops,
         parameters,
+        result,
     }))
 }
 
 fn define(
     definitions: &mut Vec<Definition>,
+    kind: ScalarType,
     expression: Expression,
     pc: Option<CodeUnitOffset>,
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<ValueId, RequestError> {
     let id = ValueId(u32::try_from(definitions.len()).map_err(|_| RequestError::PlatformCapacity)?);
     reserve(definitions, 1, budget)?;
-    definitions.push(Definition { expression, pc });
+    definitions.push(Definition {
+        kind,
+        expression,
+        pc,
+    });
     Ok(id)
 }
+#[derive(Clone, Copy)]
+enum Word {
+    Undefined,
+    Low(ValueId),
+    High(ValueId),
+}
 fn read(
-    slots: &[Option<ValueId>],
+    slots: &[Word],
+    definitions: &[Definition],
     register: RegisterId,
+    wide: bool,
     pc: CodeUnitOffset,
 ) -> Result<ValueId, RequestError> {
     let index = usize::try_from(register.0).map_err(|_| RequestError::PlatformCapacity)?;
-    slots
-        .get(index)
+    let slot = slots.get(index).ok_or(RequestError::InternalInvariant(
+        "checked scalar register is out of range",
+    ))?;
+    match *slot {
+        Word::Undefined => Err(RequestError::UndefinedRegister { register, pc }),
+        Word::High(_) => Err(RequestError::InvalidWideRead { register, pc }),
+        Word::Low(value) => {
+            let kind = definitions
+                [usize::try_from(value.0).map_err(|_| RequestError::PlatformCapacity)?]
+            .kind;
+            if wide {
+                if kind != ScalarType::Long
+                    || !matches!(slots.get(index.checked_add(1).ok_or(RequestError::PlatformCapacity)?),Some(Word::High(high)) if high.0==value.0)
+                {
+                    return Err(RequestError::InvalidWideRead { register, pc });
+                }
+            } else if kind != ScalarType::Int {
+                return Err(RequestError::InvalidWideRead { register, pc });
+            }
+            Ok(value)
+        }
+    }
+}
+fn write(
+    slots: &mut [Word],
+    register: RegisterId,
+    value: ValueId,
+    kind: ScalarType,
+) -> Result<(), RequestError> {
+    let index = usize::try_from(register.0).map_err(|_| RequestError::PlatformCapacity)?;
+    let end = index
+        .checked_add(kind.words())
+        .ok_or(RequestError::PlatformCapacity)?;
+    let destination = slots
+        .get_mut(index..end)
         .ok_or(RequestError::InternalInvariant(
-            "checked scalar register is out of range",
-        ))?
-        .ok_or(RequestError::UndefinedRegister { register, pc })
+            "scalar destination is outside its frame",
+        ))?;
+    destination[0] = Word::Low(value);
+    if kind == ScalarType::Long {
+        destination[1] = Word::High(value);
+    }
+    Ok(())
 }
 fn bind<'a>(
     flow: FlowBody<'a>,
@@ -313,46 +491,78 @@ fn bind<'a>(
     reserve(&mut slots, usize::from(flow.raw.registers_size()), budget)?;
     for _ in 0..flow.raw.registers_size() {
         budget.charge_work(1)?;
-        slots.push(None);
+        slots.push(Word::Undefined);
     }
-    let start = u32::from(flow.raw.registers_size())
-        .checked_sub(flow.parameters)
+    let mut parameter_register = u32::from(flow.raw.registers_size())
+        .checked_sub(u32::from(flow.raw.ins_size()))
         .ok_or(RequestError::InternalInvariant(
             "scalar parameter frame overflowed",
         ))?;
-    for parameter in 0..flow.parameters {
+    for (parameter, &kind) in flow.parameters.iter().enumerate() {
         budget.charge_work(1)?;
         let id = define(
             &mut definitions,
-            Expression::Parameter(parameter),
+            kind,
+            Expression::Parameter(
+                u32::try_from(parameter).map_err(|_| RequestError::PlatformCapacity)?,
+            ),
             None,
             budget,
         )?;
-        let index = usize::try_from(
-            start
-                .checked_add(parameter)
-                .ok_or(RequestError::PlatformCapacity)?,
-        )
-        .map_err(|_| RequestError::PlatformCapacity)?;
-        *slots.get_mut(index).ok_or(RequestError::InternalInvariant(
-            "scalar parameter is outside its frame",
-        ))? = Some(id);
+        write(&mut slots, RegisterId(parameter_register), id, kind)?;
+        parameter_register = parameter_register
+            .checked_add(u32::try_from(kind.words()).map_err(|_| RequestError::PlatformCapacity)?)
+            .ok_or(RequestError::PlatformCapacity)?;
     }
     let mut returned = None;
     for &(pc, ref op) in &flow.ops {
         budget.charge_work(1)?;
-        let (destination, expression) = match *op {
-            Op::Constant(reg, value) => (reg, Expression::Constant(value)),
-            Op::Move(reg, source) => (reg, Expression::Copy(read(&slots, source, pc)?)),
-            Op::Unary(reg, kind, source) => {
-                (reg, Expression::Unary(kind, read(&slots, source, pc)?))
+        let (destination, kind, expression) = match *op {
+            Op::Constant(reg, value) => (reg, ScalarType::Int, Expression::Constant(value)),
+            Op::ConstantWide(reg, value) => {
+                (reg, ScalarType::Long, Expression::ConstantWide(value))
             }
-            Op::Binary(reg, a, kind, b) => {
+            Op::Move(reg, source) => (
+                reg,
+                ScalarType::Int,
+                Expression::Copy(read(&slots, &definitions, source, false, pc)?),
+            ),
+            Op::MoveWide(reg, source) => (
+                reg,
+                ScalarType::Long,
+                Expression::Copy(read(&slots, &definitions, source, true, pc)?),
+            ),
+            Op::Unary(reg, op, source) => {
+                let wide = matches!(op, Unary::NegLong | Unary::NotLong | Unary::LongToInt);
+                let kind = if matches!(op, Unary::NegLong | Unary::NotLong | Unary::IntToLong) {
+                    ScalarType::Long
+                } else {
+                    ScalarType::Int
+                };
+                (
+                    reg,
+                    kind,
+                    Expression::Unary(op, read(&slots, &definitions, source, wide, pc)?),
+                )
+            }
+            Op::BinaryWide(reg, a, op, b) => {
+                let a = read(&slots, &definitions, a, true, pc)?;
+                let b = read(
+                    &slots,
+                    &definitions,
+                    b,
+                    !matches!(op, Binary::Shl | Binary::Shr | Binary::Ushr),
+                    pc,
+                )?;
+                (reg, ScalarType::Long, Expression::Binary(a, op, b))
+            }
+            Op::Binary(reg, a, op, b) => {
                 let mut value = |operand| -> Result<ValueId, RequestError> {
                     match operand {
-                        Operand::Register(reg) => read(&slots, reg, pc),
+                        Operand::Register(reg) => read(&slots, &definitions, reg, false, pc),
                         Operand::Literal(value) => define(
                             &mut definitions,
+                            ScalarType::Int,
                             Expression::Constant(value),
                             Some(pc),
                             budget,
@@ -361,18 +571,22 @@ fn bind<'a>(
                 };
                 let a = value(a)?;
                 let b = value(b)?;
-                (reg, Expression::Binary(a, kind, b))
+                (reg, ScalarType::Int, Expression::Binary(a, op, b))
             }
-            Op::Return(reg) => {
-                returned = Some(read(&slots, reg, pc)?);
+            Op::Return(reg) | Op::ReturnWide(reg) => {
+                returned = Some(read(
+                    &slots,
+                    &definitions,
+                    reg,
+                    matches!(*op, Op::ReturnWide(_)),
+                    pc,
+                )?);
                 continue;
             }
         };
-        let id = define(&mut definitions, expression, Some(pc), budget)?;
-        let index = usize::try_from(destination.0).map_err(|_| RequestError::PlatformCapacity)?;
-        *slots.get_mut(index).ok_or(RequestError::InternalInvariant(
-            "scalar destination is outside its frame",
-        ))? = Some(id);
+        // Both original operands are bound before an overlapping destination write.
+        let id = define(&mut definitions, kind, expression, Some(pc), budget)?;
+        write(&mut slots, destination, id, kind)?;
     }
     Ok(SsaBody {
         flow,

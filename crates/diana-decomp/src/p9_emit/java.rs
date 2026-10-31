@@ -34,7 +34,8 @@ fn scalar(
 ) -> Result<(), RequestError> {
     for (index, definition) in definitions.iter().enumerate() {
         budget.charge_work(1)?;
-        output.push("int v", budget)?;
+        output.push(definition.kind.spelling(), budget)?;
+        output.push(" v", budget)?;
         let target = locals.get(index).ok_or(RequestError::InternalInvariant(
             "verified definition lost its local",
         ))?;
@@ -57,11 +58,18 @@ fn scalar(
                 output.unsigned(u64::from(parameter), budget)?;
             }
             Expression::Constant(value) => output.arguments(format_args!("{value}"), budget)?,
+            Expression::ConstantWide(value) => {
+                output.arguments(format_args!("{value}L"), budget)?
+            }
             Expression::Unary(kind, id) => {
                 output.push(
                     match kind {
-                        crate::pipeline::scalar::Unary::Neg => "-",
-                        crate::pipeline::scalar::Unary::Not => "~",
+                        crate::pipeline::scalar::Unary::Neg
+                        | crate::pipeline::scalar::Unary::NegLong => "-",
+                        crate::pipeline::scalar::Unary::Not
+                        | crate::pipeline::scalar::Unary::NotLong => "~",
+                        crate::pipeline::scalar::Unary::IntToLong => "(long) ",
+                        crate::pipeline::scalar::Unary::LongToInt => "(int) ",
                         crate::pipeline::scalar::Unary::Byte => "(byte) ",
                         crate::pipeline::scalar::Unary::Char => "(char) ",
                         crate::pipeline::scalar::Unary::Short => "(short) ",

@@ -101,7 +101,7 @@ def run_public(root, cache, spec, manifest, case_ids=None):
                             if count!=1:raise ValueError('certified mirror context has a different namespace')
                         else:
                             original_source=original_path.read_text(encoding='utf-8')
-                        pattern=r'(?m)^([ \t]*(?:public|private|protected|static|final|strictfp|synchronized|\s)+int\s+'+re.escape(selector['name'])+r'\s*\([^)]*\)\s*)\{'
+                        pattern=r'(?m)^([ \t]*(?:public|private|protected|static|final|strictfp|synchronized|\s)+(?:int|long|float|double|boolean|byte|short|char)\s+'+re.escape(selector['name'])+r'\s*\([^)]*\)\s*)\{'
                         matches=list(re.finditer(pattern,original_source))
                         if len(matches)!=1:raise ValueError('known source context does not identify one scalar method')
                         match=matches[0];position=match.end();depth=1
