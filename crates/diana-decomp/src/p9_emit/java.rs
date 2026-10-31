@@ -120,6 +120,7 @@ fn scalar(
             }
         };
         match definition.expression {
+            Expression::String(ref units) => super::literals::string(units, output, budget)?,
             Expression::Parameter(parameter) => {
                 output.push("p", budget)?;
                 output.unsigned(u64::from(parameter), budget)?;

@@ -145,20 +145,39 @@ pub(super) fn check_target(
     target_limit(JavaTargetItem::MethodDescriptor, length, 65535)
 }
 
+pub(super) fn check_string_literal(
+    units: &[u16],
+    budget: &mut MethodBudget<'_, '_>,
+) -> Result<(), RequestError> {
+    let mut length = 0u64;
+    for &unit in units {
+        budget.charge_work(1)?;
+        let bytes = mutf8_unit_bytes(unit);
+        length = length
+            .checked_add(bytes)
+            .ok_or(RequestError::PlatformCapacity)?;
+    }
+    target_limit(JavaTargetItem::ConstantUtf8Bytes, length, 65535)
+}
+
 fn mutf8_length(name: DexString<'_>, budget: &mut impl InputControl) -> Result<u64, RequestError> {
     let mut units = name.reader()?;
     let mut length = 0u64;
     while let Some(unit) = units.next(budget)? {
-        let bytes = match unit {
-            1..=0x7f => 1,
-            0..=0x7ff => 2,
-            _ => 3,
-        };
+        let bytes = mutf8_unit_bytes(unit);
         length = length
             .checked_add(bytes)
             .ok_or(RequestError::PlatformCapacity)?;
     }
     Ok(length)
+}
+
+fn mutf8_unit_bytes(unit: u16) -> u64 {
+    match unit {
+        1..=0x7f => 1,
+        0..=0x7ff => 2,
+        _ => 3,
+    }
 }
 
 fn target_limit(item: JavaTargetItem, actual: u64, maximum: u64) -> Result<(), RequestError> {

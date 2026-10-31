@@ -222,6 +222,7 @@ fn diagnostic_value(diagnostic: &diana_decomp::Diagnostic) -> Value {
                 JavaTargetItem::ParameterWords => "parameter_words",
                 JavaTargetItem::MethodName => "method_name",
                 JavaTargetItem::MethodDescriptor => "method_descriptor",
+                JavaTargetItem::ConstantUtf8Bytes => "constant_utf8_bytes",
             },
             actual,
             maximum,

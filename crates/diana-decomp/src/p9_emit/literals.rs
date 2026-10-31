@@ -9,6 +9,7 @@ pub(super) fn numeric(
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<(), RequestError> {
     match (expression, kind) {
+        (Expression::Constant(0), ScalarType::String) => output.push("null", budget),
         (Expression::Constant(value @ (0 | 1)), ScalarType::Boolean) => {
             output.push(if *value == 0 { "false" } else { "true" }, budget)
         }
@@ -34,6 +35,35 @@ pub(super) fn numeric(
             "sealed literal view changed width or family",
         )),
     }
+}
+pub(super) fn string(
+    units: &[u16],
+    output: &mut TextBuffer,
+    budget: &mut MethodBudget<'_, '_>,
+) -> Result<(), RequestError> {
+    output.push("\"", budget)?;
+    for &unit in units {
+        budget.charge_work(1)?;
+        match unit {
+            0 => output.push("\\000", budget)?,
+            0x22 => output.push("\\\"", budget)?,
+            0x5c => output.push("\\\\", budget)?,
+            8 => output.push("\\b", budget)?,
+            9 => output.push("\\t", budget)?,
+            10 => output.push("\\n", budget)?,
+            12 => output.push("\\f", budget)?,
+            13 => output.push("\\r", budget)?,
+            1..=0x1f | 0x7f => output.arguments(format_args!("\\{unit:03o}"), budget)?,
+            0x20..=0x7e => output.character(
+                char::from(u8::try_from(unit).map_err(|_| {
+                    RequestError::InternalInvariant("ASCII literal unit exceeded one byte")
+                })?),
+                budget,
+            )?,
+            _ => output.arguments(format_args!("\\u{unit:04x}"), budget)?,
+        }
+    }
+    output.push("\"", budget)
 }
 fn fp(
     bits: u64,

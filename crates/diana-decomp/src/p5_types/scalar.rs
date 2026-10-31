@@ -45,6 +45,7 @@ fn mask(kind: ScalarType) -> u8 {
         Double => 8,
         Bits32 => 3,
         Bits64 => 12,
+        String => 16,
     }
 }
 fn literal(definition: &Definition) -> bool {
@@ -56,6 +57,7 @@ fn literal(definition: &Definition) -> bool {
 fn literal_valid(definition: &Definition, kind: ScalarType) -> bool {
     match (&definition.expression, kind) {
         (Expression::Constant(bits), ScalarType::Boolean) => matches!(*bits, 0 | 1),
+        (Expression::Constant(0), ScalarType::String) => true,
         (Expression::Constant(_), ScalarType::Int)
         | (Expression::ConstantWide(_), ScalarType::Long) => true,
         (Expression::Constant(bits), ScalarType::Float) => {
@@ -304,6 +306,8 @@ pub(crate) fn solve(
             ScalarType::Long
         } else if allowed == 2 {
             ScalarType::Float
+        } else if allowed == 16 {
+            ScalarType::String
         } else if allowed == 8 {
             ScalarType::Double
         } else {

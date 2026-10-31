@@ -151,6 +151,9 @@ pub(crate) fn verify(
     }
     for definition in &plan.definitions {
         budget.charge_work(1)?;
+        if let crate::pipeline::scalar::Expression::String(units) = &definition.expression {
+            super::declarations::check_string_literal(units, budget)?;
+        }
         if definition
             .pc
             .is_some_and(|pc| pc.0 >= plan.raw.code_units().0)

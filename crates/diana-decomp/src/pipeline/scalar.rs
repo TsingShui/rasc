@@ -80,6 +80,8 @@ enum Operand {
     Literal(i32),
 }
 enum Op {
+    String(RegisterId, crate::StringId),
+    MoveObject(RegisterId, RegisterId),
     Compare(RegisterId, RegisterId, Compare, RegisterId),
     ConstantWide(RegisterId, i64),
     MoveWide(RegisterId, RegisterId),
@@ -99,6 +101,7 @@ struct FlowBody<'a> {
     result: ScalarType,
 }
 pub(crate) enum Expression {
+    String(Vec<u16>),
     Compare(ValueId, Compare, ValueId),
     Parameter(u32),
     Constant(i32),
@@ -123,6 +126,7 @@ struct ResolvedBody<'a> {
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub(crate) enum ScalarType {
     Boolean,
+    String,
     Int,
     Long,
     Float,
@@ -134,6 +138,7 @@ impl ScalarType {
     pub(crate) fn spelling(self) -> Result<&'static str, RequestError> {
         Ok(match self {
             Self::Boolean => "boolean",
+            Self::String => "java.lang.String",
             Self::Int => "int",
             Self::Long => "long",
             Self::Float => "float",
@@ -147,7 +152,7 @@ impl ScalarType {
     }
     pub(crate) fn words(self) -> usize {
         match self {
-            Self::Boolean | Self::Int | Self::Float | Self::Bits32 => 1,
+            Self::Boolean | Self::String | Self::Int | Self::Float | Self::Bits32 => 1,
             _ => 2,
         }
     }
@@ -178,7 +183,7 @@ pub(crate) fn plan<'a>(
     let Some(flow) = flow(input, budget)? else {
         return Ok(None);
     };
-    let ssa = bind(flow, budget)?;
+    let ssa = bind(flow, input, budget)?;
     // The closed Op vocabulary has neither calls nor reference-valued operations.
     let resolved = ResolvedBody { ssa };
     let Some(typing) = crate::p5_types::solve(
@@ -259,6 +264,13 @@ fn flow<'a>(
         .matches_with(&[u16::from(b'Z')], budget)?
     {
         ScalarType::Boolean
+    } else if input.declaration().prototype.return_type.matches_with(
+        &[
+            76, 106, 97, 118, 97, 47, 108, 97, 110, 103, 47, 83, 116, 114, 105, 110, 103, 59,
+        ],
+        budget,
+    )? {
+        ScalarType::String
     } else {
         return Ok(None);
     };
@@ -277,6 +289,14 @@ fn flow<'a>(
                 ScalarType::Double
             } else if name.matches_with(&[u16::from(b'Z')], budget)? {
                 ScalarType::Boolean
+            } else if name.matches_with(
+                &[
+                    76, 106, 97, 118, 97, 47, 108, 97, 110, 103, 47, 83, 116, 114, 105, 110, 103,
+                    59,
+                ],
+                budget,
+            )? {
+                ScalarType::String
             } else {
                 supported = false;
                 return Ok(());
@@ -350,7 +370,21 @@ fn flow<'a>(
                     },
                     reg(2)?,
                 )),
-                0xf => Some(Op::Return(reg(0)?)),
+                0x1a | 0x1b => {
+                    let Some(reference) = layout.references()[0] else {
+                        return Err(RequestError::InternalInvariant(
+                            "const-string lost its reference",
+                        ));
+                    };
+                    let crate::raw::OperandReference::String(id) = reference.target else {
+                        return Err(RequestError::InternalInvariant(
+                            "const-string changed reference kind",
+                        ));
+                    };
+                    Some(Op::String(reg(0)?, id))
+                }
+                7..=9 => Some(Op::MoveObject(reg(0)?, reg(1)?)),
+                0xf | 0x11 => Some(Op::Return(reg(0)?)),
                 0x10 => Some(Op::ReturnWide(reg(0)?)),
                 4..=6 => Some(Op::MoveWide(reg(0)?, reg(1)?)),
                 0x16..=0x19 => Some(Op::ConstantWide(
@@ -571,6 +605,7 @@ fn write(
 }
 fn bind<'a>(
     flow: FlowBody<'a>,
+    input: &MethodInput<'_, '_>,
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<SsaBody<'a>, RequestError> {
     let mut definitions = Vec::new();
@@ -605,6 +640,16 @@ fn bind<'a>(
     for &(pc, ref op) in &flow.ops {
         budget.charge_work(1)?;
         let (destination, kind, expression) = match *op {
+            Op::String(reg, id) => {
+                let value = input.string_literal(id, budget)?;
+                let units = crate::substrate::owned::copy_units(value, budget)?;
+                (reg, ScalarType::String, Expression::String(units))
+            }
+            Op::MoveObject(reg, source) => (
+                reg,
+                ScalarType::String,
+                Expression::Copy(read(&slots, &definitions, source, false, pc)?),
+            ),
             Op::Constant(reg, value) => (reg, ScalarType::Bits32, Expression::Constant(value)),
             Op::ConstantWide(reg, value) => {
                 (reg, ScalarType::Bits64, Expression::ConstantWide(value))

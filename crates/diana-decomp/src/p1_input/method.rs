@@ -65,6 +65,7 @@ pub enum RawPrintable<'a> {
 /// The input seam for one original declaration in a selected logical program.
 /// Construction is restricted to the owning input validator.
 pub struct MethodInput<'i, 'a> {
+    index: &'i ProgramIndex<'a>,
     class_id: ClassDefId,
     method_id: MethodId,
     header_offset: ByteOffset,
@@ -76,6 +77,13 @@ pub struct MethodInput<'i, 'a> {
 }
 
 impl<'i, 'a> MethodInput<'i, 'a> {
+    pub(crate) fn string_literal(
+        &self,
+        id: crate::StringId,
+        budget: &mut MethodBudget<'_, '_>,
+    ) -> Result<DexString<'a>, InputError> {
+        self.index.string_with(id, budget)
+    }
     pub fn class_id(&self) -> ClassDefId {
         self.class_id
     }
@@ -163,6 +171,7 @@ impl<'a> ProgramIndex<'a> {
         };
         budget.checkpoint()?;
         Ok(MethodInput {
+            index: self,
             class_id,
             method_id,
             header_offset: self.header.header_offset,

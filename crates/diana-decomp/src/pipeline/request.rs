@@ -8,6 +8,7 @@ pub enum JavaTargetItem {
     ParameterWords,
     MethodName,
     MethodDescriptor,
+    ConstantUtf8Bytes,
 }
 
 #[derive(Debug, Error)]
