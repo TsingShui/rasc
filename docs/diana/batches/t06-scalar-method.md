@@ -57,3 +57,9 @@ lowering. D058's wide overwrite obligation remains pending; it is not converted
 to int or accepted as a pass. T01–T05 still need output-limit and original field
 initializer evidence. T06 task-wide acceptance remains pending those obligations;
 the D009 producer is ready for the D001 chain.
+
+Acceptance update after `b667820`: T01–T05 producers and their scoped acceptance
+are complete. D009's required non-empty compile-and-execute loop and D057
+rejection satisfy the T06 contract for the implemented int profile. The same
+D009 invocations pass in `run-erf6grqd`. Wide/FP and D058 remain explicitly
+unaccepted under their later producer obligations. Continue with T07/T08 D001.
