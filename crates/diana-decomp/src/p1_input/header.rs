@@ -2,6 +2,7 @@ use super::{
     Cursor, InputError, InputProblem, UnsupportedInput, checked_range, count_usize, file_length,
     file_offset, malformed,
 };
+use crate::pipeline::control::InputControl;
 use crate::{ByteLength, ByteOffset, ByteRange, RunContext};
 
 const HEADER_BYTES: ByteLength = ByteLength(0x70);
@@ -42,6 +43,13 @@ pub struct DexHeader {
 /// Reads a little-endian 035 envelope without copying bytes or authenticating
 /// checksum/signature. Returns typed input, resource and cancellation errors.
 pub fn read_header(bytes: &[u8], control: &mut RunContext<'_>) -> Result<DexHeader, InputError> {
+    read_header_with(bytes, control)
+}
+
+pub(crate) fn read_header_with(
+    bytes: &[u8],
+    control: &mut impl InputControl,
+) -> Result<DexHeader, InputError> {
     let mut cursor = Cursor::new(bytes);
     if cursor.read_array::<8>(control)? != *b"dex\n035\0" {
         return Err(InputError::Unsupported {
@@ -50,15 +58,15 @@ pub fn read_header(bytes: &[u8], control: &mut RunContext<'_>) -> Result<DexHead
         });
     }
     checked_range(ByteLength(bytes.len()), ByteOffset(0), 1, HEADER_BYTES)?;
-    let checksum = cursor.read_u32(control)?;
+    let checksum = cursor.read_u32_with(control)?;
     let signature = cursor.read_array(control)?;
-    if file_length(cursor.read_u32(control)?, ByteOffset(0x20))? != ByteLength(bytes.len()) {
+    if file_length(cursor.read_u32_with(control)?, ByteOffset(0x20))? != ByteLength(bytes.len()) {
         return Err(malformed(InputProblem::FileSizeMismatch, ByteOffset(0x20)));
     }
-    if file_length(cursor.read_u32(control)?, ByteOffset(0x24))? != HEADER_BYTES {
+    if file_length(cursor.read_u32_with(control)?, ByteOffset(0x24))? != HEADER_BYTES {
         return Err(malformed(InputProblem::InvalidHeaderSize, ByteOffset(0x24)));
     }
-    match cursor.read_u32(control)? {
+    match cursor.read_u32_with(control)? {
         0x1234_5678 => {}
         0x7856_3412 => {
             return Err(InputError::Unsupported {
@@ -72,8 +80,8 @@ pub fn read_header(bytes: &[u8], control: &mut RunContext<'_>) -> Result<DexHead
         offset_byte: ByteOffset(0x20),
     })?;
     control.check_image_bytes(image_bytes)?;
-    let link_size = count_usize(cursor.read_u32(control)?, ByteOffset(0x2c))?;
-    let link_offset = file_offset(cursor.read_u32(control)?, ByteOffset(0x30))?;
+    let link_size = count_usize(cursor.read_u32_with(control)?, ByteOffset(0x2c))?;
+    let link_offset = file_offset(cursor.read_u32_with(control)?, ByteOffset(0x30))?;
     let link_byte_range = section(
         ByteLength(bytes.len()),
         link_offset,
@@ -82,7 +90,7 @@ pub fn read_header(bytes: &[u8], control: &mut RunContext<'_>) -> Result<DexHead
         1,
         ByteOffset(0x2c),
     )?;
-    let map_offset = file_offset(cursor.read_u32(control)?, ByteOffset(0x34))?;
+    let map_offset = file_offset(cursor.read_u32_with(control)?, ByteOffset(0x34))?;
     let mut tables = [TableSection {
         count: 0,
         offset_byte: ByteOffset(0),
@@ -90,8 +98,8 @@ pub fn read_header(bytes: &[u8], control: &mut RunContext<'_>) -> Result<DexHead
     }; 6];
     for (index, table) in tables.iter_mut().enumerate() {
         let field = ByteOffset(0x38 + index * 8);
-        let count = cursor.read_u32(control)?;
-        let offset = file_offset(cursor.read_u32(control)?, ByteOffset(field.0 + 4))?;
+        let count = cursor.read_u32_with(control)?;
+        let offset = file_offset(cursor.read_u32_with(control)?, ByteOffset(field.0 + 4))?;
         let range = section(
             ByteLength(bytes.len()),
             offset,
@@ -109,8 +117,8 @@ pub fn read_header(bytes: &[u8], control: &mut RunContext<'_>) -> Result<DexHead
             size_byte: ByteLength(range.end.0 - range.start.0),
         };
     }
-    let data_size = count_usize(cursor.read_u32(control)?, ByteOffset(0x68))?;
-    let data_offset = file_offset(cursor.read_u32(control)?, ByteOffset(0x6c))?;
+    let data_size = count_usize(cursor.read_u32_with(control)?, ByteOffset(0x68))?;
+    let data_offset = file_offset(cursor.read_u32_with(control)?, ByteOffset(0x6c))?;
     let data_byte_range = section(
         ByteLength(bytes.len()),
         data_offset,
@@ -213,11 +221,11 @@ fn check_map(
     offset: ByteOffset,
     data: ByteRange,
     tables: &[TableSection; 6],
-    control: &mut RunContext<'_>,
+    control: &mut impl InputControl,
 ) -> Result<ByteRange, InputError> {
     let prefix = checked_range(ByteLength(data.end.0), offset, 1, ByteLength(4))?;
     let mut cursor = Cursor::at(bytes, offset)?;
-    let count = cursor.read_u32(control)?;
+    let count = cursor.read_u32_with(control)?;
     let entries = checked_range(
         ByteLength(data.end.0),
         prefix.end,
@@ -233,10 +241,10 @@ fn check_map(
     let mut previous_offset = None;
     for _ in 0..count {
         let record = cursor.position_byte();
-        let kind = cursor.read_u16(control)?;
-        let unused = cursor.read_u16(control)?;
-        let size = cursor.read_u32(control)?;
-        let item_offset = file_offset(cursor.read_u32(control)?, ByteOffset(record.0 + 8))?;
+        let kind = cursor.read_u16_with(control)?;
+        let unused = cursor.read_u16_with(control)?;
+        let size = cursor.read_u32_with(control)?;
+        let item_offset = file_offset(cursor.read_u32_with(control)?, ByteOffset(record.0 + 8))?;
         let (bit, alignment) = map_kind(kind).ok_or(InputError::Unsupported {
             reason: UnsupportedInput::MapType(kind),
             offset_byte: record,

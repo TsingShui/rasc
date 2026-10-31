@@ -14,8 +14,14 @@ operand references using one opcode specification. `ProgramIndex::check_method_l
 checks whole-method register/reference bounds, branch/payload/exception boundaries
 and reachable fallthrough. Its sealed `CheckedMethodLayout` keeps structural
 checks distinct from complete raw validation. `RawMethodView::visit_layouts`
-preserves readable prefixes under the independent fallback budget. Core tests
-exercise malformed input, UTF16 integrity, resource limits and cancellation.
+preserves readable prefixes under the independent fallback budget.
+`RawMethodView::visit_instructions` exposes borrowed original operand/payload
+facts, including literal bits and ordered invoke words, through that same budget.
+The validator shares its operand decoder. `ProgramIndex::debug_method` produces
+owned original-information JSON with resolved references, UTF16 units, handler
+order and explicit missing facts. Its reader and output use the same fallback
+ledger; known malformed input remains classified even if output later exhausts
+resources. Core tests exercise malformed input, UTF16 integrity, resource limits and cancellation.
 The Engine interface awaits integration.
 
 From the repository root:

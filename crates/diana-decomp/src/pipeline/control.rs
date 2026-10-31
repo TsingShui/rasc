@@ -15,6 +15,7 @@ pub struct Limits {
     pub max_method_allocation_bytes: Option<u64>,
     pub fallback_work_steps: Option<u64>,
     pub fallback_code_units: Option<u64>,
+    pub fallback_output_bytes: Option<u64>,
     pub fallback_allocation_bytes: Option<u64>,
 }
 
@@ -39,6 +40,7 @@ pub enum RequestLimit {
     MaxMethodAllocationBytes,
     FallbackWorkSteps,
     FallbackCodeUnits,
+    FallbackOutputBytes,
     FallbackAllocationBytes,
 }
 
@@ -55,6 +57,7 @@ impl fmt::Display for RequestLimit {
             Self::MaxMethodAllocationBytes => "max_method_allocation_bytes",
             Self::FallbackWorkSteps => "fallback_work_steps",
             Self::FallbackCodeUnits => "fallback_code_units",
+            Self::FallbackOutputBytes => "fallback_output_bytes",
             Self::FallbackAllocationBytes => "fallback_allocation_bytes",
         })
     }
@@ -186,6 +189,7 @@ impl<'c> RunContext<'c> {
         let normal_work = Quota::new(self.limits.max_work_steps);
         let raw_work = Quota::new(raw_work);
         let raw_allocation = Quota::new(raw_allocation);
+        let raw_output = Quota::new(self.limits.fallback_output_bytes);
         self.work = request_work;
         self.allocation = request_allocation;
         Ok(MethodBudget {
@@ -195,6 +199,7 @@ impl<'c> RunContext<'c> {
                 raw_work,
                 allocation,
                 raw_allocation,
+                raw_output,
             },
         })
     }
@@ -249,6 +254,15 @@ pub struct FallbackBudget<'m, 'c> {
 }
 
 impl FallbackBudget<'_, '_> {
+    pub(crate) fn charge_output(&mut self, bytes: u64) -> Result<(), ControlError> {
+        self.checkpoint()?;
+        self.ledger.raw_output = self
+            .ledger
+            .raw_output
+            .spend(bytes, RequestLimit::FallbackOutputBytes)?;
+        Ok(())
+    }
+
     pub(crate) fn check_code_units(
         &mut self,
         units: crate::CodeUnitCount,
@@ -274,6 +288,52 @@ impl FallbackBudget<'_, '_> {
     }
 }
 
+/// The same checked parsers serve input admission and read-only fallback.
+/// Implementations borrow the existing ledgers; this trait owns no policy/state.
+pub(crate) trait InputControl {
+    fn checkpoint(&mut self) -> Result<(), ControlError>;
+    fn charge_work(&mut self, steps: u64) -> Result<(), ControlError>;
+    fn charge_metadata(&mut self, items: u64) -> Result<(), ControlError>;
+    fn check_string_units(&mut self, units: u64) -> Result<(), ControlError>;
+    fn check_image_bytes(&mut self, bytes: u64) -> Result<(), ControlError>;
+}
+
+impl InputControl for RunContext<'_> {
+    fn checkpoint(&mut self) -> Result<(), ControlError> {
+        RunContext::checkpoint(self)
+    }
+    fn charge_work(&mut self, steps: u64) -> Result<(), ControlError> {
+        RunContext::charge_work(self, steps)
+    }
+    fn charge_metadata(&mut self, items: u64) -> Result<(), ControlError> {
+        RunContext::charge_metadata(self, items)
+    }
+    fn check_string_units(&mut self, units: u64) -> Result<(), ControlError> {
+        RunContext::check_string_units(self, units)
+    }
+    fn check_image_bytes(&mut self, bytes: u64) -> Result<(), ControlError> {
+        RunContext::check_image_bytes(self, bytes)
+    }
+}
+
+impl InputControl for FallbackBudget<'_, '_> {
+    fn checkpoint(&mut self) -> Result<(), ControlError> {
+        FallbackBudget::checkpoint(self)
+    }
+    fn charge_work(&mut self, steps: u64) -> Result<(), ControlError> {
+        FallbackBudget::charge_work(self, steps)
+    }
+    fn charge_metadata(&mut self, items: u64) -> Result<(), ControlError> {
+        self.ledger.context.charge_metadata(items)
+    }
+    fn check_string_units(&mut self, units: u64) -> Result<(), ControlError> {
+        self.ledger.context.check_string_units(units)
+    }
+    fn check_image_bytes(&mut self, bytes: u64) -> Result<(), ControlError> {
+        self.ledger.context.check_image_bytes(bytes)
+    }
+}
+
 #[derive(Clone, Copy)]
 enum ChargePath {
     Normal,
@@ -292,6 +352,7 @@ struct MethodLedger<'m, 'c> {
     raw_work: Quota,
     allocation: Quota,
     raw_allocation: Quota,
+    raw_output: Quota,
 }
 
 impl MethodLedger<'_, '_> {

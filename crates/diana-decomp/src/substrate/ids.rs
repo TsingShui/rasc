@@ -43,6 +43,12 @@ pub struct CodeUnitOffset(pub u32);
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct CodeUnitCount(pub u32);
 
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct CodeUnitDelta(pub i32);
+
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct RegisterId(pub u32);
+
 impl CodeUnitCount {
     pub fn checked_byte_length(self) -> Option<ByteLength> {
         usize::try_from(self.0).ok()?.checked_mul(2).map(ByteLength)
@@ -50,6 +56,10 @@ impl CodeUnitCount {
 }
 
 impl CodeUnitOffset {
+    pub fn checked_byte_offset(self) -> Option<ByteOffset> {
+        usize::try_from(self.0).ok()?.checked_mul(2).map(ByteOffset)
+    }
+
     pub fn checked_advance(self, count: CodeUnitCount) -> Option<Self> {
         self.0.checked_add(count.0).map(Self)
     }

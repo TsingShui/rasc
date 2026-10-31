@@ -139,7 +139,14 @@ signatures, MUTF-8, local failures and checked code/handler ranges.
 migration. [Instruction layout](batches/t03-instruction-layout.md) checks shared
 opcode/version/operand and payload envelopes. [Method structure](batches/t03-method-structure.md)
 adds register/reference and control-flow boundary checks, a budgeted raw-layout
-visitor and functional method-budget/cancellation tests. T05 later connects the prepared runner to the real public library. Missing
+visitor and functional method-budget/cancellation tests.
+[Original operands](batches/t03-original-operands.md) add borrowed literal,
+register-word, relative-target and payload-bit facts using the same decoder as
+the structural validator. [Debug snapshots](batches/t03-debug-snapshots.md)
+retain original member/code facts and explicit coverage under the fallback
+budget. [Safe excerpts](batches/t03-safe-excerpt.md) distinguish an unknown first
+encoding from a decoded snapshot using the same registry, without assigning a
+width. T05 later connects the prepared runner to the real public library. Missing
 Engine entrypoints currently produce `not_implemented` for the complete suite.
 
 ## B01 — Case and expected-value specification review, freeze v1

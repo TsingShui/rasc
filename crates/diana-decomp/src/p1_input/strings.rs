@@ -1,4 +1,5 @@
 use super::{Cursor, InputError, InputProblem, malformed};
+use crate::pipeline::control::InputControl;
 use crate::{ByteOffset, RunContext, Utf16Count, Utf16Offset};
 
 /// A validated, borrowed MUTF-8 string. Literal surrogate units remain intact;
@@ -19,9 +20,9 @@ impl<'a> DexString<'a> {
     pub(super) fn read(
         bytes: &'a [u8],
         mut cursor: Cursor<'a>,
-        control: &mut RunContext<'_>,
+        control: &mut impl InputControl,
     ) -> Result<Self, InputError> {
-        let utf16_len = cursor.read_uleb32(control)?;
+        let utf16_len = cursor.read_uleb32_with(control)?;
         if u64::from(utf16_len) >= cursor.remaining_byte().0 as u64 {
             return Err(malformed(InputProblem::Truncated, cursor.position_byte()));
         }
@@ -54,7 +55,7 @@ impl<'a> DexString<'a> {
         &self,
         units: &[u16],
         mut position: Utf16Offset,
-        control: &mut RunContext<'_>,
+        control: &mut impl InputControl,
     ) -> Result<Option<Utf16Offset>, InputError> {
         let mut reader = self.reader()?;
         while let Some(unit) = reader.next(control)? {
@@ -66,14 +67,14 @@ impl<'a> DexString<'a> {
         Ok(Some(position))
     }
 
-    pub(super) fn reader(&self) -> Result<Units<'a>, InputError> {
+    pub(crate) fn reader(&self) -> Result<Units<'a>, InputError> {
         Ok(Units {
             cursor: Cursor::bounded(self.bytes, self.start_byte, self.end_byte)?,
             left: self.utf16_len.0,
         })
     }
 
-    pub(super) fn validate_name(&self, control: &mut RunContext<'_>) -> Result<(), InputError> {
+    pub(super) fn validate_name(&self, control: &mut impl InputControl) -> Result<(), InputError> {
         let mut reader = self.reader()?;
         if self.bytes.get(self.start_byte.0) == Some(&b'<') {
             if self.utf16_len.0 < 3 || self.bytes.get(self.end_byte.0 - 1) != Some(&b'>') {
@@ -91,7 +92,7 @@ impl<'a> DexString<'a> {
         validate_name_units(reader, NameSyntax::Simple, control)
     }
 
-    pub(super) fn shape(&self, control: &mut RunContext<'_>) -> Result<TypeShape, InputError> {
+    pub(super) fn shape(&self, control: &mut impl InputControl) -> Result<TypeShape, InputError> {
         let mut reader = self.reader()?;
         let mut tag = reader
             .next(control)?
@@ -193,13 +194,16 @@ impl PrimitiveType {
     }
 }
 
-pub(super) struct Units<'a> {
+pub(crate) struct Units<'a> {
     cursor: Cursor<'a>,
     left: u32,
 }
 
 impl Units<'_> {
-    pub(super) fn next(&mut self, control: &mut RunContext<'_>) -> Result<Option<u16>, InputError> {
+    pub(crate) fn next(
+        &mut self,
+        control: &mut impl InputControl,
+    ) -> Result<Option<u16>, InputError> {
         if self.left == 0 {
             return Ok(None);
         }
@@ -208,7 +212,7 @@ impl Units<'_> {
     }
 }
 
-fn read_unit(cursor: &mut Cursor<'_>, control: &mut RunContext<'_>) -> Result<u16, InputError> {
+fn read_unit(cursor: &mut Cursor<'_>, control: &mut impl InputControl) -> Result<u16, InputError> {
     let start = cursor.position_byte();
     let [first] = cursor.read_array(control)?;
     match first {
@@ -243,7 +247,7 @@ enum NameSyntax {
 fn validate_name_units(
     mut reader: Units<'_>,
     syntax: NameSyntax,
-    control: &mut RunContext<'_>,
+    control: &mut impl InputControl,
 ) -> Result<(), InputError> {
     let mut component = false;
     while let Some(unit) = reader.next(control)? {

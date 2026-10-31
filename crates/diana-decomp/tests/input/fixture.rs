@@ -1,6 +1,7 @@
 pub(super) struct Fixture {
     pub(super) bytes: Vec<u8>,
     pub(super) code: [usize; 2],
+    pub(super) primary_method_idx: u32,
     pub(super) class_data: usize,
     pub(super) method_ids: usize,
     pub(super) handler_list: usize,
@@ -303,6 +304,7 @@ fn build_internal(
     Fixture {
         bytes,
         code,
+        primary_method_idx: direct[0],
         class_data,
         method_ids,
         handler_list,

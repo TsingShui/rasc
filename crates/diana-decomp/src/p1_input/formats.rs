@@ -240,19 +240,10 @@ pub fn instruction_layout(
     version: DexVersion,
 ) -> Result<InsnLayout, RawDecodeError> {
     let first = word(code_bytes, pc, 0)?;
-    if first & 0xff == 0 && first != 0 {
-        return payload(code_bytes, pc, first);
-    }
-    let opcode = first.to_le_bytes()[0];
-    let spec = opcode_spec(opcode).ok_or(RawDecodeError::UnknownEncoding { pc, word: first })?;
-    if version < spec.minimum_version {
-        return Err(RawDecodeError::UnsupportedVersion {
-            pc,
-            opcode,
-            minimum: spec.minimum_version,
-            actual: version,
-        });
-    }
+    let spec = match encoding_head(first, pc, version)? {
+        EncodingHead::Instruction(spec) => spec,
+        EncodingHead::Payload => return payload(code_bytes, pc, first),
+    };
     let width = span(code_bytes, pc, u64::from(spec.format.width().0))?;
     if matches!(
         spec.format,
@@ -401,6 +392,35 @@ fn payload(bytes: &[u8], pc: CodeUnitOffset, signature: u16) -> Result<InsnLayou
         width: span(bytes, pc, width)?,
         references: [None; 2],
     })
+}
+
+pub(crate) enum EncodingHead {
+    Instruction(OpcodeSpec),
+    Payload,
+}
+
+pub(crate) fn encoding_head(
+    first: u16,
+    pc: CodeUnitOffset,
+    version: DexVersion,
+) -> Result<EncodingHead, RawDecodeError> {
+    if first & 0xff == 0 && first != 0 {
+        return match first {
+            0x0100 | 0x0200 | 0x0300 => Ok(EncodingHead::Payload),
+            _ => Err(RawDecodeError::UnknownEncoding { pc, word: first }),
+        };
+    }
+    let opcode = first.to_le_bytes()[0];
+    let spec = opcode_spec(opcode).ok_or(RawDecodeError::UnknownEncoding { pc, word: first })?;
+    if version < spec.minimum_version {
+        return Err(RawDecodeError::UnsupportedVersion {
+            pc,
+            opcode,
+            minimum: spec.minimum_version,
+            actual: version,
+        });
+    }
+    Ok(EncodingHead::Instruction(spec))
 }
 
 pub(super) fn opcode_spec(opcode: u8) -> Option<OpcodeSpec> {

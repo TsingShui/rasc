@@ -167,7 +167,7 @@ The three seams are input, method analysis and printing; Diana MUST NOT expose a
 
 ### 3.1 Actual Modules and files
 
-A phase is an ownership/responsibility split and does not require one file per responsibility. Diana MUST implement the concrete functions in the current phase's mod.rs first and split files once they grow large or a real independent consumer appears. Diana MUST NOT create empty passes or generic Context placeholders.
+A phase is an ownership/responsibility split and does not require one file per responsibility. Diana MUST keep `mod.rs` focused on module declarations and re-exports; substantial algorithms, data types and errors belong in named implementation files. Diana MUST create those files only for an actual producer or consumer, and MUST NOT create empty passes or generic Context placeholders.
 
 | Module | First actual files / main functions | Owner |
 |---|---|---|

@@ -1,4 +1,5 @@
 use super::{InputError, InputProblem, malformed};
+use crate::pipeline::control::InputControl;
 use crate::{ByteLength, ByteOffset, ByteRange, ControlError, RunContext};
 
 /// Checks count multiplication and end addition before a caller borrows a range.
@@ -41,7 +42,7 @@ impl<'a> Cursor<'a> {
         Self::bounded(bytes, offset, ByteOffset(bytes.len()))
     }
 
-    pub(super) fn bounded(
+    pub(crate) fn bounded(
         bytes: &'a [u8],
         start: ByteOffset,
         end: ByteOffset,
@@ -57,11 +58,11 @@ impl<'a> Cursor<'a> {
         })
     }
 
-    pub(super) fn position_byte(&self) -> ByteOffset {
+    pub(crate) fn position_byte(&self) -> ByteOffset {
         self.position
     }
 
-    pub(super) fn remaining_byte(&self) -> ByteLength {
+    pub(crate) fn remaining_byte(&self) -> ByteLength {
         ByteLength(self.end.0 - self.position.0)
     }
 
@@ -69,7 +70,7 @@ impl<'a> Cursor<'a> {
         &mut self,
         count: usize,
         stride: ByteLength,
-        control: &mut RunContext<'_>,
+        control: &mut impl InputControl,
     ) -> Result<ByteRange, InputError> {
         control.charge_work(1)?;
         let range = checked_range(ByteLength(self.end.0), self.position, count, stride)?;
@@ -78,14 +79,35 @@ impl<'a> Cursor<'a> {
     }
 
     pub fn read_u16(&mut self, control: &mut RunContext<'_>) -> Result<u16, InputError> {
+        self.read_u16_with(control)
+    }
+
+    pub(crate) fn read_u16_with(
+        &mut self,
+        control: &mut impl InputControl,
+    ) -> Result<u16, InputError> {
         Ok(u16::from_le_bytes(self.read_array(control)?))
     }
 
     pub fn read_u32(&mut self, control: &mut RunContext<'_>) -> Result<u32, InputError> {
+        self.read_u32_with(control)
+    }
+
+    pub(crate) fn read_u32_with(
+        &mut self,
+        control: &mut impl InputControl,
+    ) -> Result<u32, InputError> {
         Ok(u32::from_le_bytes(self.read_array(control)?))
     }
 
     pub fn read_uleb32(&mut self, control: &mut RunContext<'_>) -> Result<u32, InputError> {
+        self.read_uleb32_with(control)
+    }
+
+    pub(crate) fn read_uleb32_with(
+        &mut self,
+        control: &mut impl InputControl,
+    ) -> Result<u32, InputError> {
         self.read_uleb32_charged(|| control.charge_work(1))
     }
 
@@ -110,6 +132,13 @@ impl<'a> Cursor<'a> {
     }
 
     pub fn read_sleb32(&mut self, control: &mut RunContext<'_>) -> Result<i32, InputError> {
+        self.read_sleb32_with(control)
+    }
+
+    pub(crate) fn read_sleb32_with(
+        &mut self,
+        control: &mut impl InputControl,
+    ) -> Result<i32, InputError> {
         self.read_sleb32_charged(|| control.charge_work(1))
     }
 
@@ -140,7 +169,7 @@ impl<'a> Cursor<'a> {
 
     pub(super) fn read_array<const N: usize>(
         &mut self,
-        control: &mut RunContext<'_>,
+        control: &mut impl InputControl,
     ) -> Result<[u8; N], InputError> {
         self.read_array_charged(|| control.charge_work(1))
     }

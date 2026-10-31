@@ -2,7 +2,8 @@ use std::collections::TryReserveError;
 
 use thiserror::Error;
 
-use super::formats::{FlowKind, RegisterShape, RegisterWidth, ResultRole, wide_word, word};
+use super::formats::{FlowKind, RegisterShape, RegisterWidth, ResultRole, wide_word};
+use super::operands::{RawOperands, RegisterEncoding, instruction_operands};
 use super::{Cursor, InputError, ProgramIndex, RawMethodView};
 use crate::raw::{
     DexVersion, Format, InsnLayout, LayoutKind, OpcodeSpec, OperandReference, RawDecodeError,
@@ -397,15 +398,15 @@ impl<'a> Checker<'_, 'a> {
         pc: CodeUnitOffset,
         spec: OpcodeSpec,
     ) -> Result<CodeUnitOffset, MethodError> {
-        let bytes = self.original.instructions();
-        let delta = match spec.format {
-            Format::F10t => i32::from(i8::from_le_bytes([word(bytes, pc, 0)?.to_le_bytes()[1]])),
-            Format::F20t | Format::F21t | Format::F22t => {
-                i32::from(i16::from_le_bytes(word(bytes, pc, 1)?.to_le_bytes()))
-            }
-            Format::F30t => self.original.signed_word(pc, 1)?,
-            _ => return Err(MethodError::InternalInvariant("branch format has no delta")),
-        };
+        let operands = instruction_operands(
+            self.original.instructions(),
+            pc,
+            self.original.layout_at(pc)?,
+        )?;
+        let delta = operands
+            .offset()
+            .ok_or(MethodError::InternalInvariant("branch format has no delta"))?
+            .0;
         if delta == 0 && spec.format != Format::F30t {
             return Err(bad(pc, MethodProblem::ZeroBranchDelta));
         }
@@ -497,7 +498,8 @@ impl<'a> Checker<'_, 'a> {
             budget.charge_work(1)?;
             let layout = self.original.layout_at(pc)?;
             if let LayoutKind::Instruction(spec) = layout.kind() {
-                check_registers(self.original, pc, spec, budget)?;
+                let operands = instruction_operands(self.original.instructions(), pc, layout)?;
+                check_registers(self.original, pc, spec, operands, budget)?;
                 for reference in layout.references().into_iter().flatten() {
                     budget.charge_work(1)?;
                     if !index.reference_in_bounds(reference.target) {
@@ -654,15 +656,11 @@ fn check_registers(
     original: &RawMethodView<'_>,
     pc: CodeUnitOffset,
     spec: OpcodeSpec,
+    operands: RawOperands,
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<(), MethodError> {
-    let bytes = original.instructions();
-    let first = word(bytes, pc, 0)?;
-    let a8 = first >> 8;
-    let a4 = a8 & 15;
-    let b4 = first >> 12;
-    let span = |start: u16, count: u16| -> Result<(), MethodError> {
-        if count != 0 && u32::from(start) + u32::from(count) > u32::from(original.registers_size())
+    let span = |start: u32, count: u8| -> Result<(), MethodError> {
+        if count != 0 && u64::from(start) + u64::from(count) > u64::from(original.registers_size())
         {
             Err(bad(pc, MethodProblem::InvalidRegisterSpan))
         } else {
@@ -671,56 +669,33 @@ fn check_registers(
     };
     match spec.registers {
         RegisterShape::InvokeWords | RegisterShape::ArrayWords => {
-            let count = match spec.format {
-                Format::F35c | Format::F45cc => b4,
-                Format::F3rc | Format::F4rcc => a8,
-                _ => {
-                    return Err(MethodError::InternalInvariant(
-                        "argument list has no word-count format",
-                    ));
+            let count = match operands.registers().encoding {
+                RegisterEncoding::List { count, .. } | RegisterEncoding::Range { count, .. } => {
+                    count
                 }
             };
-            if spec.registers == RegisterShape::InvokeWords && count > original.outs_size() {
+            if spec.registers == RegisterShape::InvokeWords
+                && u16::from(count) > original.outs_size()
+            {
                 return Err(bad(pc, MethodProblem::InsufficientOutgoingWords));
             }
-            if matches!(spec.format, Format::F3rc | Format::F4rcc) {
-                span(word(bytes, pc, 2)?, count)?;
-            } else {
-                let packed = word(bytes, pc, 2)?;
-                let registers = [
-                    packed & 15,
-                    (packed >> 4) & 15,
-                    (packed >> 8) & 15,
-                    packed >> 12,
-                    a4,
-                ];
-                for register in registers.into_iter().take(usize::from(count)) {
-                    budget.charge_work(1)?;
-                    span(register, 1)?;
+            match operands.registers().encoding {
+                RegisterEncoding::Range { first, count } => span(first.0, count)?,
+                RegisterEncoding::List { .. } => {
+                    for register in operands.registers().iter() {
+                        budget.charge_work(1)?;
+                        span(register.0, 1)?;
+                    }
                 }
             }
         }
         RegisterShape::Fixed(widths) => {
-            let registers = match spec.format {
-                Format::F10x | Format::F10t | Format::F20t | Format::F30t => [None; 3],
-                Format::F12x | Format::F22t | Format::F22s | Format::F22c => {
-                    [Some(a4), Some(b4), None]
-                }
-                Format::F22x => [Some(a8), Some(word(bytes, pc, 1)?), None],
-                Format::F32x => [Some(word(bytes, pc, 1)?), Some(word(bytes, pc, 2)?), None],
-                Format::F23x => {
-                    let bc = word(bytes, pc, 1)?;
-                    [Some(a8), Some(bc & 255), Some(bc >> 8)]
-                }
-                Format::F22b => [Some(a8), Some(word(bytes, pc, 1)? & 255), None],
-                Format::F11n => [Some(a4), None, None],
-                _ => [Some(a8), None, None],
-            };
-            for (register, width) in registers.into_iter().zip(widths) {
+            let mut registers = operands.registers().iter();
+            for width in widths {
                 budget.charge_work(1)?;
-                match (register, width) {
+                match (registers.next(), width) {
                     (Some(register), Some(width)) => span(
-                        register,
+                        register.0,
                         match width {
                             RegisterWidth::One => 1,
                             RegisterWidth::Two => 2,
@@ -733,6 +708,11 @@ fn check_registers(
                         ));
                     }
                 }
+            }
+            if registers.next().is_some() {
+                return Err(MethodError::InternalInvariant(
+                    "fixed register format has extra operands",
+                ));
             }
         }
     }

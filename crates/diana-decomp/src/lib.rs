@@ -2,7 +2,12 @@
 
 #[path = "p1_input/mod.rs"]
 pub mod input;
+mod p9_emit;
 mod pipeline;
+
+pub use p9_emit::{
+    DebugCoverage, DebugError, DebugIssue, DebugResourceError, DebugSource, DebugSourceKind,
+};
 mod substrate;
 
 pub mod raw {
@@ -10,12 +15,16 @@ pub mod raw {
         DexVersion, Format, IndexedRef, InsnLayout, LayoutKind, LayoutProblem, OpcodeSpec,
         OperandReference, RawDecodeError, ReferenceKind, ReferenceSlot, instruction_layout,
     };
+    pub use crate::input::operands::{
+        ArrayElements, RawArrayElement, RawCodeItem, RawInstruction, RawLiteral, RawOperands,
+        RawPayload, RawRegisters, RawSwitchCase, RegisterIter, SwitchCases,
+    };
 }
 
 pub use substrate::ids::{
-    ByteLength, ByteOffset, ByteRange, CallSiteId, ClassDefId, CodeUnitCount, CodeUnitOffset,
-    FieldId, MethodHandleId, MethodId, ProtoId, RegisterWordCount, StringId, TypeId, Utf16Count,
-    Utf16Offset,
+    ByteLength, ByteOffset, ByteRange, CallSiteId, ClassDefId, CodeUnitCount, CodeUnitDelta,
+    CodeUnitOffset, FieldId, MethodHandleId, MethodId, ProtoId, RegisterId, RegisterWordCount,
+    StringId, TypeId, Utf16Count, Utf16Offset,
 };
 
 pub use pipeline::control::{

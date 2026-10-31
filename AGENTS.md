@@ -230,6 +230,10 @@ remain authoritative.
   it. Contributors MUST NOT use pervasive `clone` or `Arc<Mutex<_>>` merely to evade
   ownership design. A small justified copy is preferable to unnecessarily complex
   lifetimes.
+- Contributors MUST keep `mod.rs` focused on module declarations, re-exports and
+  minimal module-local wiring. Substantial algorithms, data types and error handling
+  MUST live in named implementation files rather than accumulate in `mod.rs`.
+  Create files only for actual producers or consumers; do not split empty scaffolds.
 - Contributors MUST keep parsing, analysis, recovery and rendering responsibilities
   separate. Parsers do not emit Java, analysis does not choose CLI exit codes,
   and writers do not repair semantics. Each boundary MUST state its input
