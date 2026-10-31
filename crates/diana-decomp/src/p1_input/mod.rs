@@ -11,6 +11,7 @@ pub(crate) mod debug_program;
 mod error;
 pub(crate) mod formats;
 mod header;
+mod method;
 pub(crate) mod operands;
 mod strings;
 mod structure;
@@ -23,5 +24,8 @@ pub use cursor::{Cursor, checked_range};
 pub use error::{InputError, InputProblem, UnsupportedInput};
 use error::{count_usize, file_length, file_offset, malformed};
 pub use header::{DexHeader, TableSection, read_header};
+pub use method::{
+    CheckedAnnotations, MethodInput, RawPrintable, ValidatedRawDeclaration, ValidatedRawMethod,
+};
 pub use strings::DexString;
 pub use structure::{CheckedMethodLayout, MethodError, MethodProblem};

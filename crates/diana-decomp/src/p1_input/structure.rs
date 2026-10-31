@@ -3,6 +3,7 @@ use std::collections::TryReserveError;
 use thiserror::Error;
 
 use super::binding::{ResultKind, check_producer};
+use super::debug_program::DebugProgram;
 use super::formats::{FlowKind, RegisterShape, RegisterWidth, ResultRole, wide_word};
 use super::operands::{RawOperands, RegisterEncoding, instruction_operands};
 use super::{Cursor, InputError, ProgramIndex, RawMethodView};
@@ -19,6 +20,7 @@ use crate::{
 pub enum MethodProblem {
     MissingEntryInstruction,
     InvalidRegisterSpan,
+    InvalidTypeOperand,
     InsufficientOutgoingWords,
     InvalidInvokeWordCount,
     NonAdjacentWideArgument,
@@ -83,8 +85,9 @@ pub(super) fn bad(pc: CodeUnitOffset, problem: MethodProblem) -> MethodError {
 }
 
 /// Structural checks over all original words, including dead instructions.
-/// This is not ValidatedRawMethod: debug metadata, call dispatch and register
-/// definition/type analysis retain their own validation obligations.
+/// This also checks original debug addresses and local records. Declaration
+/// annotations, reference contents and register definition/type analysis retain
+/// their own validation obligations.
 #[derive(Debug)]
 pub struct CheckedMethodLayout<'a> {
     original: RawMethodView<'a>,
@@ -105,7 +108,7 @@ impl<'a> CheckedMethodLayout<'a> {
 impl<'a> ProgramIndex<'a> {
     /// Checks registers, reference bounds, branch/payload/try/handler boundaries,
     /// invoke prototype words, result kinds, exception entry positions and
-    /// reachable fallthrough. Only the matching original image supplies
+    /// reachable fallthrough, followed by original debug metadata. Only the matching original image supplies
     /// reference bounds. Work and scratch use
     /// the normal method budget; failure leaves the borrowed original intact.
     pub fn check_method_layout(
@@ -149,6 +152,10 @@ impl<'a> ProgramIndex<'a> {
         checker.check_exceptions(budget)?;
         checker.check_instructions(self, budget)?;
         checker.check_reachability(instruction_count, budget)?;
+        if let Some(offset) = original.debug_info_offset_byte() {
+            let mut debug = DebugProgram::open(self, original, original.method_id, offset, budget)?;
+            while debug.next(self, original, budget)?.is_some() {}
+        }
         budget.checkpoint()?;
         Ok(CheckedMethodLayout {
             original: original.clone(),
@@ -196,7 +203,7 @@ impl RawMethodView<'_> {
         Ok(())
     }
 
-    fn layout_at(&self, pc: CodeUnitOffset) -> Result<InsnLayout, MethodError> {
+    pub(super) fn layout_at(&self, pc: CodeUnitOffset) -> Result<InsnLayout, MethodError> {
         Ok(instruction_layout(self.instructions(), pc, self.version)?)
     }
 

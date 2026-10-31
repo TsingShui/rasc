@@ -356,6 +356,17 @@ impl<'a> ProgramIndex<'a> {
         Ok(self.type_descriptor(id, control)?.0)
     }
 
+    pub(super) fn class_annotations_offset(
+        &self,
+        id: ClassDefId,
+        control: &mut impl InputControl,
+    ) -> Result<ByteOffset, InputError> {
+        let mut record = self.table(TableKey::Class(id), control)?;
+        record.skip(5, ByteLength(4), control)?;
+        let at = record.position_byte();
+        file_offset(record.read_u32_with(control)?, at)
+    }
+
     pub(crate) fn class_context(
         &self,
         id: ClassDefId,
@@ -702,6 +713,9 @@ impl<'i, 'a> ClassView<'i, 'a> {
                     }
                     match member {
                         EncodedMember::Field => {
+                            if matches!(selection, MemberSelection::Method(_)) {
+                                continue;
+                            }
                             let declaration = local(self.index.validate_field(
                                 FieldId(index),
                                 self.type_idx,
@@ -744,6 +758,7 @@ impl<'i, 'a> ClassView<'i, 'a> {
                             let body = local(read_code(
                                 self.index,
                                 code_offset,
+                                MethodId(index),
                                 access_flags,
                                 words,
                                 control,

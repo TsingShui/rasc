@@ -294,6 +294,7 @@ pub(crate) trait InputControl {
     fn checkpoint(&mut self) -> Result<(), ControlError>;
     fn charge_work(&mut self, steps: u64) -> Result<(), ControlError>;
     fn charge_metadata(&mut self, items: u64) -> Result<(), ControlError>;
+    fn charge_allocation(&mut self, bytes: u64) -> Result<(), ControlError>;
     fn check_string_units(&mut self, units: u64) -> Result<(), ControlError>;
     fn check_image_bytes(&mut self, bytes: u64) -> Result<(), ControlError>;
 }
@@ -307,6 +308,9 @@ impl InputControl for RunContext<'_> {
     }
     fn charge_metadata(&mut self, items: u64) -> Result<(), ControlError> {
         RunContext::charge_metadata(self, items)
+    }
+    fn charge_allocation(&mut self, bytes: u64) -> Result<(), ControlError> {
+        RunContext::charge_allocation(self, bytes)
     }
     fn check_string_units(&mut self, units: u64) -> Result<(), ControlError> {
         RunContext::check_string_units(self, units)
@@ -322,6 +326,9 @@ impl InputControl for FallbackBudget<'_, '_> {
     }
     fn charge_work(&mut self, steps: u64) -> Result<(), ControlError> {
         FallbackBudget::charge_work(self, steps)
+    }
+    fn charge_allocation(&mut self, bytes: u64) -> Result<(), ControlError> {
+        FallbackBudget::charge_allocation(self, bytes)
     }
     fn charge_metadata(&mut self, items: u64) -> Result<(), ControlError> {
         self.ledger.context.charge_metadata(items)
@@ -340,6 +347,9 @@ impl InputControl for MethodBudget<'_, '_> {
     }
     fn charge_work(&mut self, steps: u64) -> Result<(), ControlError> {
         MethodBudget::charge_work(self, steps)
+    }
+    fn charge_allocation(&mut self, bytes: u64) -> Result<(), ControlError> {
+        MethodBudget::charge_allocation(self, bytes)
     }
     fn charge_metadata(&mut self, items: u64) -> Result<(), ControlError> {
         self.ledger.context.charge_metadata(items)

@@ -4,9 +4,7 @@ use super::{
 };
 use crate::pipeline::control::InputControl;
 use crate::raw::OperandReference;
-use crate::{
-    ByteLength, ByteOffset, ByteRange, FallbackBudget, FieldId, MethodId, StringId, TypeId,
-};
+use crate::{ByteLength, ByteOffset, ByteRange, FieldId, MethodId, StringId, TypeId};
 
 #[derive(Clone, Copy)]
 pub(crate) struct ValueOrdinal(pub u32);
@@ -66,7 +64,7 @@ fn count(
     cursor: &mut Cursor<'_>,
     minimum: u64,
     maximum: Option<u32>,
-    budget: &mut FallbackBudget<'_, '_>,
+    budget: &mut impl InputControl,
 ) -> Result<u32, InputError> {
     let count = cursor.read_uleb32_with(budget)?;
     if u64::from(count) * minimum > cursor.remaining_byte().0 as u64 {
@@ -84,7 +82,7 @@ impl<'a> EncodedValues<'a> {
         index: &ProgramIndex<'a>,
         offset: ByteOffset,
         static_fields: Option<u32>,
-        budget: &mut FallbackBudget<'_, '_>,
+        budget: &mut impl InputControl,
     ) -> Result<Self, MethodError> {
         let mut cursor = index.item(0x2005, offset, budget)?;
         let count = count(&mut cursor, 1, static_fields, budget)?;
@@ -104,7 +102,7 @@ impl<'a> EncodedValues<'a> {
     pub fn annotation(
         index: &ProgramIndex<'a>,
         offset: ByteOffset,
-        budget: &mut FallbackBudget<'_, '_>,
+        budget: &mut impl InputControl,
     ) -> Result<(u8, TypeId, Self), MethodError> {
         let mut cursor = index.item(0x2004, offset, budget)?;
         let visibility = cursor.read_array::<1>(budget)?[0];
@@ -137,11 +135,7 @@ impl<'a> EncodedValues<'a> {
         self.cursor.position_byte()
     }
 
-    fn push(
-        &mut self,
-        frame: Frame,
-        budget: &mut FallbackBudget<'_, '_>,
-    ) -> Result<(), MethodError> {
+    fn push(&mut self, frame: Frame, budget: &mut impl InputControl) -> Result<(), MethodError> {
         budget.charge_metadata(1)?;
         if self.stack.len() == self.stack.capacity() {
             let needed = self
@@ -184,7 +178,7 @@ impl<'a> EncodedValues<'a> {
         Ok(())
     }
 
-    fn bits(&mut self, width: u8, budget: &mut FallbackBudget<'_, '_>) -> Result<u64, InputError> {
+    fn bits(&mut self, width: u8, budget: &mut impl InputControl) -> Result<u64, InputError> {
         if usize::from(width) > self.cursor.remaining_byte().0 {
             return Err(malformed(
                 InputProblem::Truncated,
@@ -201,7 +195,7 @@ impl<'a> EncodedValues<'a> {
     pub fn next(
         &mut self,
         index: &ProgramIndex<'_>,
-        budget: &mut FallbackBudget<'_, '_>,
+        budget: &mut impl InputControl,
     ) -> Result<Option<ValueStep<'a>>, MethodError> {
         budget.charge_work(1)?;
         let frame = self.stack.last_mut().unwrap_or(&mut self.root);

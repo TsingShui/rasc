@@ -4,7 +4,7 @@ use super::{
     ClassView, Cursor, InputError, InputProblem, ProgramIndex, count_usize, file_offset, malformed,
 };
 use crate::pipeline::control::InputControl;
-use crate::{ByteLength, ByteOffset, ByteRange, FallbackBudget, FieldId, MethodId, TypeId};
+use crate::{ByteLength, ByteOffset, ByteRange, FieldId, MethodId, TypeId};
 
 pub(crate) struct AnnotationDirectory<'a> {
     pub class: ByteOffset,
@@ -65,7 +65,7 @@ impl<'a> ProgramIndex<'a> {
         &self,
         offsets: &mut Cursor<'_>,
         last: &mut Option<TypeId>,
-        budget: &mut FallbackBudget<'_, '_>,
+        budget: &mut impl InputControl,
     ) -> Result<(ByteOffset, u8, TypeId, EncodedValues<'a>), MethodError> {
         let at = offsets.position_byte();
         let offset = file_offset(offsets.read_u32_with(budget)?, at)?;

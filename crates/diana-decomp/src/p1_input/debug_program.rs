@@ -5,8 +5,7 @@ use super::{
 use crate::pipeline::control::InputControl;
 use crate::raw::{LayoutKind, instruction_layout};
 use crate::{
-    ByteOffset, ByteRange, CodeUnitCount, CodeUnitOffset, FallbackBudget, MethodId, RegisterId,
-    StringId, TypeId,
+    ByteOffset, ByteRange, CodeUnitCount, CodeUnitOffset, MethodId, RegisterId, StringId, TypeId,
 };
 
 #[derive(Clone, Copy)]
@@ -62,7 +61,7 @@ fn invalid(offset: ByteOffset) -> InputError {
 fn string_index(
     index: &ProgramIndex<'_>,
     cursor: &mut Cursor<'_>,
-    budget: &mut FallbackBudget<'_, '_>,
+    budget: &mut impl InputControl,
 ) -> Result<Option<StringId>, InputError> {
     let encoded = cursor.read_uleb32_with(budget)?;
     if encoded == 0 {
@@ -79,7 +78,7 @@ impl<'a> DebugProgram<'a> {
         code: &RawMethodView<'a>,
         method_id: MethodId,
         offset: ByteOffset,
-        budget: &mut FallbackBudget<'_, '_>,
+        budget: &mut impl InputControl,
     ) -> Result<Self, MethodError> {
         let mut cursor = index.item(0x2003, offset, budget)?;
         let line_start =
@@ -166,7 +165,7 @@ impl<'a> DebugProgram<'a> {
         code: &RawMethodView<'_>,
         position: bool,
         offset: ByteOffset,
-        budget: &mut FallbackBudget<'_, '_>,
+        budget: &mut impl InputControl,
     ) -> Result<(), MethodError> {
         if self.pc.0 > code.code_units().0 || (position && self.pc.0 == code.code_units().0) {
             return Err(invalid(offset).into());
@@ -196,7 +195,7 @@ impl<'a> DebugProgram<'a> {
         &mut self,
         index: &ProgramIndex<'_>,
         code: &RawMethodView<'_>,
-        budget: &mut FallbackBudget<'_, '_>,
+        budget: &mut impl InputControl,
     ) -> Result<Option<DebugEvent>, MethodError> {
         budget.checkpoint()?;
         if self.ended {

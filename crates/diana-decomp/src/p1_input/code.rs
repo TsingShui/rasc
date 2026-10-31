@@ -19,6 +19,7 @@ pub struct RawMethodView<'a> {
     pub(super) source_bytes: &'a [u8],
     pub(super) header_offset: ByteOffset,
     pub(super) version: super::formats::DexVersion,
+    pub(super) method_id: crate::MethodId,
     registers_size: u16,
     ins_size: u16,
     outs_size: u16,
@@ -67,6 +68,7 @@ impl<'a> RawMethodView<'a> {
 pub(super) fn read_code<'a>(
     index: &ProgramIndex<'a>,
     code_offset: Option<ByteOffset>,
+    method_id: crate::MethodId,
     access_flags: u32,
     expected_words: Option<RegisterWordCount>,
     control: &mut impl InputControl,
@@ -117,6 +119,7 @@ pub(super) fn read_code<'a>(
         source_bytes: index.bytes,
         header_offset: index.header.header_offset,
         version: index.header.version,
+        method_id,
         registers_size,
         ins_size,
         outs_size,
