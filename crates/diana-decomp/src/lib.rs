@@ -18,7 +18,9 @@ mod p9_emit;
 #[path = "../tests/input/fixture.rs"]
 mod test_fixture;
 pub use engine::{DexImage, Engine, MethodSelector, Options, RecoveryPolicy, Request};
-pub use p8_java::{CompilationContract, JavaMethodDecl, VerifiedJavaMethod};
+pub use p8_java::{
+    CompilationContract, JavaCallSite, JavaInvokeKind, JavaMethodDecl, VerifiedJavaMethod,
+};
 pub use p9_emit::render;
 pub use pipeline::request::{JavaTargetItem, RequestError};
 pub use substrate::report::{

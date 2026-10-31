@@ -35,7 +35,7 @@ fn package(descriptor: &[u16]) -> &[u16] {
         .rposition(|&unit| unit == 47)
         .map_or(&[], |end| &descriptor[..end])
 }
-fn plain(
+pub(super) fn plain(
     class: &ExternalClassDeclaration,
     caller: &[u16],
     budget: &mut MethodBudget<'_, '_>,
@@ -75,7 +75,7 @@ fn generated_name(prefix: &[u16]) -> bool {
         && prefix.len() > 1
         && prefix[1..].iter().all(|unit| matches!(*unit, 48..=57 | 95))
 }
-fn clear_scope(
+pub(super) fn clear_scope(
     catalog: &DeclarationCatalog,
     caller: &[u16],
     prefix: &[u16],
@@ -164,7 +164,7 @@ pub(crate) fn resolve_static(
     let Some(target) = target else {
         return Ok(None);
     };
-    if !super::overloads::unique_static_target(target_class, &name, &prototype, budget)? {
+    if !super::overloads::unique_target(target_class, &name, &prototype, true, budget)? {
         return Ok(None);
     }
     if !crate::p0_knowledge::same_units(&target.prototype, &prototype, budget)?

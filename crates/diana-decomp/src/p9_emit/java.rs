@@ -13,6 +13,16 @@ pub(crate) fn java(
     output.push(&method.header, budget)?;
     output.push(" {\n", budget)?;
     match &method.body {
+        MethodBody::Receiver(body) => {
+            if body.invoke.0 >= body.result.0 || body.result.0 >= body.returned.0 {
+                return Err(RequestError::InternalInvariant(
+                    "verified receiver origins were reordered",
+                ));
+            }
+            output.push("return p0.", budget)?;
+            output.push(&body.method, budget)?;
+            output.push("();\n", budget)?;
+        }
         MethodBody::Scalar {
             definitions,
             locals,

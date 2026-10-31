@@ -17,6 +17,7 @@ pub struct VerifiedJavaMethod {
     environment: EnvironmentId,
 }
 pub(crate) enum MethodBody {
+    Receiver(super::receiver::ReceiverMethod),
     Scalar {
         definitions: Vec<Definition>,
         locals: Vec<LocalId>,
@@ -27,6 +28,59 @@ pub(crate) enum MethodBody {
     Dispatcher(super::dispatcher::Dispatcher),
 }
 impl VerifiedJavaMethod {
+    pub(super) fn receiver(
+        header: String,
+        body: super::receiver::ReceiverMethod,
+        environment: EnvironmentId,
+    ) -> Self {
+        Self {
+            header,
+            body: MethodBody::Receiver(body),
+            environment,
+        }
+    }
+    /// Iterates already verified original call identities without allocation.
+    /// Returned slices borrow only this AST, not the engine or input bytes.
+    pub fn calls(&self) -> impl Iterator<Item = super::JavaCallSite<'_>> {
+        let cases = match &self.body {
+            MethodBody::Dispatcher(body) => Some(body.cases.as_slice()),
+            _ => None,
+        };
+        let statics = cases
+            .into_iter()
+            .flatten()
+            .flat_map(|case| case.statements.iter())
+            .filter_map(|statement| match statement {
+                super::calls::Statement::StaticCall { call, .. } => Some(super::JavaCallSite {
+                    reference: call.reference,
+                    receiver: None,
+                    owner: &call.original_owner,
+                    name: &call.original_name,
+                    prototype: &call.prototype,
+                    invoke: call.invoke,
+                    result: call.result_site,
+                    kind: super::JavaInvokeKind::Static,
+                }),
+                _ => None,
+            });
+        let receiver = match &self.body {
+            MethodBody::Receiver(body) => Some(super::JavaCallSite {
+                reference: body.contract.reference,
+                receiver: Some(body.receiver),
+                owner: &body.contract.owner,
+                name: &body.contract.name,
+                prototype: &body.contract.prototype,
+                invoke: body.invoke,
+                result: Some(body.result),
+                kind: match body.contract.kind {
+                    crate::p4_calls::ReceiverKind::Virtual => super::JavaInvokeKind::Virtual,
+                    crate::p4_calls::ReceiverKind::Interface => super::JavaInvokeKind::Interface,
+                },
+            }),
+            _ => None,
+        };
+        statics.chain(receiver)
+    }
     pub(super) fn dispatcher(
         header: String,
         body: super::dispatcher::Dispatcher,

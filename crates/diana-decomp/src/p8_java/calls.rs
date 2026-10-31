@@ -4,6 +4,24 @@ use crate::pipeline::branch::{CallId, Kind, Op, VerifiedSsa};
 use crate::substrate::owned::{TextBuffer, reserve};
 use crate::{CodeUnitOffset, MethodBudget, MethodId, RequestError};
 
+/// Original invocation kind retained by verified source binding.
+#[derive(Clone, Copy, Debug)]
+pub enum JavaInvokeKind {
+    Static,
+    Virtual,
+    Interface,
+}
+/// Borrowed original call identity in an owned verified method AST.
+pub struct JavaCallSite<'a> {
+    pub reference: MethodId,
+    pub receiver: Option<crate::RegisterId>,
+    pub owner: &'a [u16],
+    pub name: &'a [u16],
+    pub prototype: &'a [u16],
+    pub invoke: CodeUnitOffset,
+    pub result: Option<CodeUnitOffset>,
+    pub kind: JavaInvokeKind,
+}
 pub(crate) struct StaticCall {
     _sealed: (),
     pub reference: MethodId,
@@ -112,6 +130,35 @@ pub(super) fn argument(
         }
         _ => None,
     })
+}
+pub(super) fn type_name(
+    owner: &[u16],
+    budget: &mut MethodBudget<'_, '_>,
+) -> Result<Option<String>, RequestError> {
+    if owner.len() < 3 || owner.first() != Some(&76) || owner.last() != Some(&59) {
+        return Ok(None);
+    }
+    let mut output = TextBuffer::new();
+    for (index, segment) in owner[1..owner.len() - 1]
+        .split(|&unit| unit == 47)
+        .enumerate()
+    {
+        budget.charge_work(1)?;
+        let Some(segment) = text(segment, budget)? else {
+            return Ok(None);
+        };
+        if index != 0 {
+            output.push(".", budget)?;
+        }
+        output.push(&segment, budget)?;
+    }
+    Ok(Some(output.finish()))
+}
+pub(super) fn identifier_text(
+    units: &[u16],
+    budget: &mut MethodBudget<'_, '_>,
+) -> Result<Option<String>, RequestError> {
+    text(units, budget)
 }
 fn plan(
     ssa: &VerifiedSsa<'_>,
