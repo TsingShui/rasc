@@ -198,6 +198,39 @@ fn replay(
                     }
                     slots[ix(reg(0)?)?] = value;
                 }
+                1..=3 => {
+                    let Root::Argument(value) = slots[ix(reg(1)?)?] else {
+                        return bad();
+                    };
+                    slots[ix(reg(0)?)?] = Root::Argument(value);
+                }
+                0x12..=0x15 => {
+                    let value = match operands.literal() {
+                        Some(RawLiteral::Bits32(value)) => i32::from_le_bytes(value.to_le_bytes()),
+                        Some(RawLiteral::Signed8(value)) => i32::from(value),
+                        Some(RawLiteral::Signed16(value)) => i32::from(value),
+                        _ => return bad(),
+                    };
+                    slots[ix(reg(0)?)?] = Root::Argument(Argument::Literal(value));
+                }
+                0x59 => {
+                    let Some(PrefixOp::IntField {
+                        contract,
+                        value,
+                        pc: origin,
+                    }) = plan.body.get(body)
+                    else {
+                        return bad();
+                    };
+                    if *origin != pc
+                        || !matches!(slots[ix(reg(1)?)?], Root::InitializedThis)
+                        || !matches!(slots[ix(reg(0)?)?],Root::Argument(actual) if actual==*value)
+                        || !matches!(layout.references()[0],Some(reference) if matches!(reference.target,OperandReference::Field(id) if id==contract.reference))
+                    {
+                        return bad();
+                    }
+                    body = body.checked_add(1).ok_or(RequestError::PlatformCapacity)?;
+                }
                 0x1a | 0x1b => {
                     let Some(PrefixOp::String {
                         value,
@@ -339,7 +372,8 @@ pub(crate) fn verify(
         budget.charge_work(1)?;
         let pc = match statement {
             super::receiver::PrefixStatement::String { pc, .. }
-            | super::receiver::PrefixStatement::Effect { pc, .. } => *pc,
+            | super::receiver::PrefixStatement::Effect { pc, .. }
+            | super::receiver::PrefixStatement::IntField { pc, .. } => *pc,
         };
         if pc.0 <= plan.chain_pc.0 || pc.0 >= plan.returned.0 {
             return bad();

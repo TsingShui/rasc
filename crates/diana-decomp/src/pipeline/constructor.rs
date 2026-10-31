@@ -4,11 +4,7 @@ use crate::raw::{LayoutKind, OperandReference, RawLiteral, instruction_layout};
 use crate::substrate::owned::{copy_units, reserve};
 use crate::{CodeUnitOffset, DeclarationCatalog, MethodBudget, RegisterId, RequestError};
 
-#[derive(Clone, Copy, PartialEq)]
-pub(crate) enum Argument {
-    Parameter(u32),
-    Literal(i32),
-}
+pub(crate) use super::effects::IntValue as Argument;
 #[derive(Clone, Copy)]
 enum Slot {
     Undefined,
@@ -256,6 +252,51 @@ pub(crate) fn build<'a>(
                     return unavailable(pc);
                 }
                 slots[ix(reg(0)?)?] = value;
+            }
+            1..=3 => {
+                let Slot::Int(value) = slots[ix(reg(1)?)?] else {
+                    return unavailable(pc);
+                };
+                slots[ix(reg(0)?)?] = Slot::Int(value);
+            }
+            0x12..=0x15 => {
+                let value = match operands.literal() {
+                    Some(RawLiteral::Bits32(value)) => i32::from_le_bytes(value.to_le_bytes()),
+                    Some(RawLiteral::Signed8(value)) => i32::from(value),
+                    Some(RawLiteral::Signed16(value)) => i32::from(value),
+                    _ => {
+                        return Err(RequestError::InternalInvariant(
+                            "post-chain literal lost bits",
+                        ));
+                    }
+                };
+                slots[ix(reg(0)?)?] = Slot::Int(Argument::Literal(value));
+            }
+            0x59 => {
+                let Slot::Int(value) = slots[ix(reg(0)?)?] else {
+                    return unavailable(pc);
+                };
+                if !matches!(slots[ix(reg(1)?)?], Slot::InitializedThis) {
+                    return unavailable(pc);
+                }
+                let Some(reference) = layout.references()[0] else {
+                    return Err(RequestError::InternalInvariant(
+                        "field write lost reference",
+                    ));
+                };
+                let OperandReference::Field(reference) = reference.target else {
+                    return Err(RequestError::InternalInvariant(
+                        "field write changed reference kind",
+                    ));
+                };
+                let contract =
+                    crate::p4_calls::bind_own_int_write(input, catalog, reference, pc, budget)?;
+                reserve(&mut body, 1, budget)?;
+                body.push(PrefixOp::IntField {
+                    contract,
+                    value,
+                    pc,
+                });
             }
             0x1a | 0x1b => {
                 let Some(reference) = layout.references()[0] else {

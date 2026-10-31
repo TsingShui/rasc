@@ -24,6 +24,7 @@ pub enum MethodProblem {
     InsufficientOutgoingWords,
     InvalidInvokeWordCount,
     InvalidInvokeKind,
+    InvalidFieldKind,
     NonAdjacentWideArgument,
     InvalidResultKind,
     InvalidBranchTarget,

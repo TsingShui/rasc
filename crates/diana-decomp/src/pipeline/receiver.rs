@@ -8,20 +8,7 @@ pub(crate) enum ReceiverEntry {
     Parameter,
     This,
 }
-#[derive(Clone, Copy)]
-pub(crate) struct PrefixValueId(pub u32);
-pub(crate) enum PrefixOp {
-    String {
-        value: PrefixValueId,
-        reference: crate::StringId,
-        pc: CodeUnitOffset,
-    },
-    Effect {
-        contract: crate::p4_calls::StaticContract,
-        argument: PrefixValueId,
-        pc: CodeUnitOffset,
-    },
-}
+pub(crate) use super::effects::{PrefixOp, PrefixValueId};
 #[derive(Clone, Copy)]
 pub(crate) enum ResultUse {
     Direct,

@@ -378,6 +378,54 @@ impl<'a> ProgramIndex<'a> {
     ) -> Result<bool, InputError> {
         Ok(self.local_method(method_id, control)?.is_some())
     }
+    pub(crate) fn local_field_flags(
+        &self,
+        field_id: FieldId,
+        control: &mut impl InputControl,
+    ) -> Result<Option<u32>, InputError> {
+        let mut record = self.table(TableKey::Field(field_id), control)?;
+        let owner = TypeId(u32::from(record.read_u16_with(control)?));
+        let mut owner_found = false;
+        let mut found = None;
+        for index in 0..self.header.class_defs.count {
+            control.charge_work(1)?;
+            let mut definition = self.table(TableKey::Class(ClassDefId(index)), control)?;
+            if TypeId(definition.read_u32_with(control)?) != owner {
+                continue;
+            }
+            if owner_found {
+                return Err(malformed(
+                    InputProblem::InvalidClassData,
+                    self.header.class_defs.offset_byte,
+                ));
+            }
+            owner_found = true;
+            self.class_with(ClassDefId(index), control)?
+                .visit_members_with(
+                    control,
+                    MemberSelection::Fields,
+                    |entry, _| -> Result<(), InputError> {
+                        let MemberEntry::Field(field) = entry else {
+                            return Err(InputError::InternalInvariant(
+                                "local field lookup acquired another member",
+                            ));
+                        };
+                        if field.field_idx == field_id {
+                            field.declaration?;
+                            if found.is_some() {
+                                return Err(malformed(
+                                    InputProblem::InvalidClassData,
+                                    self.header.class_defs.offset_byte,
+                                ));
+                            }
+                            found = Some(field.access_flags);
+                        }
+                        Ok(())
+                    },
+                )?;
+        }
+        Ok(found)
+    }
     pub(crate) fn local_method(
         &self,
         method_id: MethodId,

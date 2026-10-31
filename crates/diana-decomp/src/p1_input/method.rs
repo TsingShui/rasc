@@ -62,6 +62,11 @@ pub enum RawPrintable<'a> {
     Declaration(ValidatedRawDeclaration),
 }
 
+pub(crate) struct OwnFieldMetadata {
+    _sealed: (),
+    pub access_flags: u32,
+    pub same_named_fields: usize,
+}
 /// The input seam for one original declaration in a selected logical program.
 /// Construction is restricted to the owning input validator.
 pub struct MethodInput<'i, 'a> {
@@ -86,6 +91,48 @@ impl<'i, 'a> MethodInput<'i, 'a> {
             RawPrintable::Declaration(raw) => raw.annotations(),
         };
         super::throws::read(self.index, annotations.method_range(), budget)
+    }
+    pub(crate) fn own_field_metadata(
+        &self,
+        reference: crate::FieldId,
+        budget: &mut MethodBudget<'_, '_>,
+    ) -> Result<Option<OwnFieldMetadata>, crate::RequestError> {
+        let field = self.index.field_reference(reference, budget)?;
+        let owner = crate::substrate::owned::copy_units(self.owner, budget)?;
+        if !field.owner.matches_with(&owner, budget)? {
+            return Ok(None);
+        }
+        let name = crate::substrate::owned::copy_units(field.declaration.name, budget)?;
+        let mut flags = None;
+        let mut same_named_fields = 0usize;
+        self.index
+            .class_with(self.class_id, budget)?
+            .visit_members_with(
+                budget,
+                MemberSelection::Fields,
+                |entry, budget| -> Result<(), crate::RequestError> {
+                    let MemberEntry::Field(field) = entry else {
+                        return Err(crate::RequestError::InternalInvariant(
+                            "field projection acquired another member",
+                        ));
+                    };
+                    let declaration = field.declaration?;
+                    if declaration.name.matches_with(&name, budget)? {
+                        same_named_fields = same_named_fields
+                            .checked_add(1)
+                            .ok_or(crate::RequestError::PlatformCapacity)?;
+                    }
+                    if field.field_idx == reference {
+                        flags = Some(field.access_flags);
+                    }
+                    Ok(())
+                },
+            )?;
+        Ok(flags.map(|access_flags| OwnFieldMetadata {
+            _sealed: (),
+            access_flags,
+            same_named_fields,
+        }))
     }
     pub(crate) fn constructor_link(
         &self,
@@ -308,6 +355,15 @@ impl<'a> ProgramIndex<'a> {
                         }
                         OperandReference::Field(id) => {
                             self.field_reference(id, budget)?;
+                            if matches!(spec.opcode, 0x52..=0x6d)
+                                && let Some(flags) = self.local_field_flags(id, budget)?
+                                && (flags & 8 != 0) != matches!(spec.opcode, 0x60..=0x6d)
+                            {
+                                return Err(MethodError::Malformed {
+                                    pc,
+                                    problem: super::MethodProblem::InvalidFieldKind,
+                                });
+                            }
                         }
                         OperandReference::Method(id) => {
                             self.method_reference(id, budget)?;

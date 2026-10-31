@@ -11,6 +11,12 @@ pub(crate) enum ReceiverExpression {
     Super,
 }
 pub(crate) enum PrefixStatement {
+    IntField {
+        contract: crate::p4_calls::InstanceIntWrite,
+        value: crate::pipeline::effects::IntValue,
+        name: String,
+        pc: CodeUnitOffset,
+    },
     String {
         value: crate::pipeline::receiver::PrefixValueId,
         units: Vec<u16>,
@@ -46,6 +52,39 @@ pub(super) fn owned_prefix(
     for op in operations {
         budget.charge_work(1)?;
         let (pc, statement) = match op {
+            crate::pipeline::receiver::PrefixOp::IntField {
+                contract,
+                value,
+                pc,
+            } => {
+                let original = input.field_reference(contract.reference, budget)?;
+                if !original.owner.matches_with(&contract.owner, budget)?
+                    || !original
+                        .declaration
+                        .name
+                        .matches_with(&contract.name, budget)?
+                    || !original
+                        .declaration
+                        .field_type
+                        .matches_with(&[73], budget)?
+                {
+                    return Err(RequestError::InternalInvariant(
+                        "owned field write changed original binding",
+                    ));
+                }
+                let Some(name) = super::calls::identifier_text(&contract.name, budget)? else {
+                    return Ok(None);
+                };
+                (
+                    pc,
+                    PrefixStatement::IntField {
+                        contract,
+                        value,
+                        name,
+                        pc,
+                    },
+                )
+            }
             crate::pipeline::receiver::PrefixOp::String {
                 value,
                 reference,
@@ -199,7 +238,9 @@ pub(crate) fn verify(
     for statement in &prefix {
         budget.charge_work(1)?;
         let pc = match statement {
-            PrefixStatement::String { pc, .. } | PrefixStatement::Effect { pc, .. } => *pc,
+            PrefixStatement::String { pc, .. }
+            | PrefixStatement::Effect { pc, .. }
+            | PrefixStatement::IntField { pc, .. } => *pc,
         };
         if pc.0 >= plan.invoke.0 {
             return Err(RequestError::InternalInvariant(
