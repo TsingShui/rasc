@@ -5,6 +5,7 @@ use crate::{DeclarationCatalog, MethodBudget, MethodId, RequestError};
 
 #[derive(Clone, Copy)]
 pub(crate) enum ReceiverKind {
+    Super,
     Direct,
     Virtual,
     Interface,
@@ -23,10 +24,11 @@ pub(crate) fn resolve_receiver(
     reference: MethodId,
     kind: ReceiverKind,
     parameter: &[u16],
+    requires_java_namespace: bool,
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<Option<ReceiverContract>, RequestError> {
     let method = input.method_reference(reference, budget)?;
-    if !method.owner.matches_with(parameter, budget)?
+    if (!matches!(kind, ReceiverKind::Super) && !method.owner.matches_with(parameter, budget)?)
         || !method
             .declaration
             .prototype
@@ -73,6 +75,24 @@ pub(crate) fn resolve_receiver(
     let Some(selected) = selected else {
         return Ok(None);
     };
+    if matches!(kind, ReceiverKind::Super) {
+        let Some(caller_class) = catalog.class(&caller, budget)? else {
+            return Ok(None);
+        };
+        if class.access_flags & 0x10 != 0
+            || selected.access_flags & (0x400 | 0x10) != 0
+            || caller_class.access_flags & 0x200 != 0
+            || !crate::p0_knowledge::same_units(parameter, &caller, budget)?
+        {
+            return Ok(None);
+        }
+        let Some(parent) = caller_class.parent.as_deref() else {
+            return Ok(None);
+        };
+        if !crate::p0_knowledge::same_units(parent, &owner, budget)? {
+            return Ok(None);
+        }
+    }
     if matches!(kind, ReceiverKind::Direct)
         && (!crate::p0_knowledge::same_units(&owner, &caller, budget)?
             || selected.access_flags & 2 == 0
@@ -84,7 +104,7 @@ pub(crate) fn resolve_receiver(
         return Ok(None);
     }
     if let Some(original) = input.local_method(reference, budget)? {
-        let mask = 1 | 2 | 4 | 8 | 0x40 | 0x80 | 0x100 | 0x400;
+        let mask = 1 | 2 | 4 | 8 | 0x10 | 0x40 | 0x80 | 0x100 | 0x400;
         let class_mask = 1 | 0x10 | 0x200 | 0x400 | 0x1000 | 0x2000 | 0x4000;
         if original.owner_access_flags & class_mask != class.access_flags & class_mask
             || original.access_flags & mask != selected.access_flags & mask
@@ -136,6 +156,12 @@ pub(crate) fn resolve_receiver(
         .map_or(owner.len() - 1, |index| index + 1);
     if input.qualifier_shadowed(&owner[1..end], budget)?
         || !clear_scope(catalog, &caller, &owner[1..end], budget)?
+    {
+        return Ok(None);
+    }
+    if requires_java_namespace
+        && (input.qualifier_shadowed(&[106, 97, 118, 97], budget)?
+            || !clear_scope(catalog, &caller, &[106, 97, 118, 97], budget)?)
     {
         return Ok(None);
     }

@@ -19,9 +19,57 @@ pub(crate) fn java(
                     "verified receiver origins were reordered",
                 ));
             }
-            output.push("return p0.", budget)?;
+            let mut previous = None;
+            for statement in &body.prefix {
+                budget.charge_work(1)?;
+                let pc = match statement {
+                    crate::p8_java::receiver::PrefixStatement::String { value, units, pc } => {
+                        output.push("java.lang.String ", budget)?;
+                        local(LocalId(value.0), &mut output, budget)?;
+                        output.push(" = ", budget)?;
+                        super::literals::string(units, &mut output, budget)?;
+                        output.push(";\n", budget)?;
+                        *pc
+                    }
+                    crate::p8_java::receiver::PrefixStatement::Effect {
+                        argument,
+                        qualifier,
+                        method,
+                        pc,
+                        ..
+                    } => {
+                        output.push(qualifier, budget)?;
+                        output.push(".", budget)?;
+                        output.push(method, budget)?;
+                        output.push("(", budget)?;
+                        local(LocalId(argument.0), &mut output, budget)?;
+                        output.push(");\n", budget)?;
+                        *pc
+                    }
+                };
+                if pc.0 >= body.invoke.0 || previous.is_some_and(|prior| pc.0 <= prior) {
+                    return Err(RequestError::InternalInvariant(
+                        "owned prefix origins reordered",
+                    ));
+                }
+                previous = Some(pc.0);
+            }
+            output.push(
+                match body.expression {
+                    crate::p8_java::receiver::ReceiverExpression::Parameter => "return p0.",
+                    crate::p8_java::receiver::ReceiverExpression::This => "return this.",
+                    crate::p8_java::receiver::ReceiverExpression::Super => "return super.",
+                },
+                budget,
+            )?;
             output.push(&body.method, budget)?;
-            output.push("();\n", budget)?;
+            output.push("()", budget)?;
+            if let crate::pipeline::receiver::ResultUse::Add { literal, .. } = body.use_result {
+                output.push(" + (", budget)?;
+                output.arguments(format_args!("{literal}"), budget)?;
+                output.push(")", budget)?;
+            }
+            output.push(";\n", budget)?;
         }
         MethodBody::Scalar {
             definitions,

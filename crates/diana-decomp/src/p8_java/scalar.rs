@@ -73,6 +73,7 @@ impl VerifiedJavaMethod {
                 invoke: body.invoke,
                 result: Some(body.result),
                 kind: match body.contract.kind {
+                    crate::p4_calls::ReceiverKind::Super => super::JavaInvokeKind::Super,
                     crate::p4_calls::ReceiverKind::Direct => super::JavaInvokeKind::Direct,
                     crate::p4_calls::ReceiverKind::Virtual => super::JavaInvokeKind::Virtual,
                     crate::p4_calls::ReceiverKind::Interface => super::JavaInvokeKind::Interface,
@@ -80,7 +81,29 @@ impl VerifiedJavaMethod {
             }),
             _ => None,
         };
-        statics.chain(receiver)
+        let prefix = match &self.body {
+            MethodBody::Receiver(body) => Some(body.prefix.as_slice()),
+            _ => None,
+        };
+        let effects = prefix
+            .into_iter()
+            .flatten()
+            .filter_map(|statement| match statement {
+                super::receiver::PrefixStatement::Effect { contract, pc, .. } => {
+                    Some(super::JavaCallSite {
+                        reference: contract.reference,
+                        receiver: None,
+                        owner: &contract.owner,
+                        name: &contract.name,
+                        prototype: &contract.prototype,
+                        invoke: *pc,
+                        result: None,
+                        kind: super::JavaInvokeKind::Static,
+                    })
+                }
+                _ => None,
+            });
+        statics.chain(effects).chain(receiver)
     }
     pub(super) fn dispatcher(
         header: String,

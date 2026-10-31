@@ -4,6 +4,7 @@ mod declarations;
 pub(crate) mod dispatcher;
 mod dispatcher_verify;
 pub(crate) mod receiver;
+mod receiver_verify;
 mod scalar;
 pub use calls::{JavaCallSite, JavaInvokeKind};
 pub(crate) use scalar::MethodBody;
