@@ -7,6 +7,7 @@ mod json;
 mod report;
 pub(crate) use java::java;
 pub use report::render;
+mod initializers;
 mod values;
 
 pub use debug::{DebugCoverage, DebugIssue, DebugSource, DebugSourceKind};

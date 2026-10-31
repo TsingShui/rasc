@@ -50,6 +50,19 @@ fn t04_encoded_values_preserve_scalar_bits_and_original_references() {
         assert_eq!(values["complete"], true);
         assert_eq!(values["entries"][0][field], expected);
         assert_eq!(values["entries"][0]["bytes"], json!(bytes));
+        let initial = &value["classes"][0]["fields"][0]["initial"];
+        assert_eq!(initial["tag"], bytes[0] & 0x1f);
+        let semantic = if field == "bits" {
+            let bits = expected.as_u64().unwrap();
+            json!(if bytes[0] & 0x1f == 0x10 {
+                format!("{bits:08x}")
+            } else {
+                format!("{bits:016x}")
+            })
+        } else {
+            expected
+        };
+        assert_eq!(initial["value"], semantic);
     }
     let literal = with_values(&[0]).literal_idx;
     for (tag, id, kind) in [
@@ -65,6 +78,10 @@ fn t04_encoded_values_preserve_scalar_bits_and_original_references() {
         assert_eq!(reference["kind"], kind);
         if tag == 0x17 {
             assert_eq!(reference["units"], json!([0xd800, 0, 0xdc00]));
+            assert_eq!(
+                value["classes"][0]["fields"][0]["initial"]["value"],
+                json!([0xd800, 0, 0xdc00])
+            );
         }
     }
 }
@@ -80,8 +97,12 @@ fn t04_encoded_values_keep_nested_annotation_order_and_default_omissions() {
     assert_eq!(array["entries"][0]["entries"][0]["name_idx"], 0);
     assert_eq!(array["entries"][0]["entries"][0]["value"], Value::Null);
     assert_eq!(array["entries"][1]["value"], true);
+    let initial = &value["classes"][0]["fields"][0]["initial"];
+    assert_eq!(initial["tag"], 0x1c);
+    assert_eq!(initial["value"][0]["value"]["type"], "Lfixtures/Case;");
+    assert_eq!(initial["value"][1]["value"], true);
     assert_eq!(
-        value["classes"][0]["fields"][0]["initial"]["encoded_static_values_ordinal"],
+        value["classes"][0]["fields"][0]["encoded_static_values_ordinal"],
         0
     );
     let (value, failure) = snapshot(&with_values(&[0]));

@@ -264,6 +264,8 @@ impl ProgramIndex<'_> {
         if let Err(error) = context.values_offset {
             missing(issues, DebugIssue::Input(error), budget)?;
         }
+        let mut initializers =
+            super::initializers::Initializers::open(self, context.values_offset, issues, budget)?;
         output.push(",\"fields\":[", budget)?;
         let mut first_field = true;
         let mut static_fields = 0u32;
@@ -279,7 +281,15 @@ impl ProgramIndex<'_> {
                         output.push(",", budget)?;
                     }
                     first_field = false;
-                    write_field(&mut output, field, context.values_offset, issues, budget)?;
+                    write_field(
+                        self,
+                        &mut output,
+                        field,
+                        &mut initializers,
+                        context.values_offset,
+                        issues,
+                        budget,
+                    )?;
                 }
                 Ok(())
             });
@@ -470,9 +480,11 @@ fn write_excerpt(
     })
 }
 
-fn write_field(
+fn write_field<'a>(
+    index: &ProgramIndex<'a>,
     output: &mut JsonBuffer,
     field: FieldEntry<'_>,
+    initializers: &mut super::initializers::Initializers<'a>,
     values_offset: Result<Option<ByteOffset>, InputError>,
     issues: &mut IssueLog,
     budget: &mut FallbackBudget<'_, '_>,
@@ -495,15 +507,16 @@ fn write_field(
             output.unavailable(error.kind(), budget)?;
         }
     }
+    if let (FieldStorage::Static { ordinal }, Ok(Some(_))) = (&field.storage, values_offset) {
+        output.push(",\"encoded_static_values_ordinal\":", budget)?;
+        output.unsigned(u64::from(*ordinal), budget)?;
+    }
     output.push(",\"initial\":", budget)?;
-    match (field.storage, values_offset) {
-        (FieldStorage::Static { ordinal }, Ok(Some(_))) => {
-            output.push("{\"encoded_static_values_ordinal\":", budget)?;
-            output.unsigned(u64::from(ordinal), budget)?;
-            output.push("}", budget)?;
+    match field.storage {
+        FieldStorage::Static { ordinal } => {
+            initializers.write(index, output, ordinal, issues, budget)?
         }
-        (FieldStorage::Static { .. }, Err(error)) => output.unavailable(error.kind(), budget)?,
-        _ => output.push("null", budget)?,
+        FieldStorage::Instance => output.push("null", budget)?,
     }
     output.push("}", budget)
 }
