@@ -305,13 +305,35 @@ pub(super) fn verify(
                         let at = ix(actual.value().0)?;
                         use super::branch::Return;
                         !match actual {
-                            Return::Direct(_) => ssa.kinds[at] == Some(ssa.result),
+                            Return::Direct(_) => {
+                                matches!(
+                                    ssa.result,
+                                    crate::pipeline::branch::DeclarationType::Int
+                                        | crate::pipeline::branch::DeclarationType::Boolean
+                                ) && ssa.kinds[at] == Some(ssa.result.kind())
+                            }
+                            Return::Narrow { kind, .. } => {
+                                let range = ssa.ranges[at];
+                                let range = if ssa.integral_bits[at] != 0
+                                    && ssa.integral_bits[at] & 4 == 0
+                                {
+                                    range.and_then(crate::p5_types::IntRange::known01)
+                                } else {
+                                    range
+                                };
+                                matches!(ssa.result,crate::pipeline::branch::DeclarationType::Narrow(declared) if declared==*kind)
+                                    && ssa.kinds[at] == Some(Kind::Int)
+                                    && range.is_some_and(|range| range.within(kind.range()))
+                            }
                             Return::BooleanWord(_) => {
-                                ssa.result == Kind::Int && ssa.kinds[at] == Some(Kind::Boolean)
+                                matches!(ssa.result, crate::pipeline::branch::DeclarationType::Int)
+                                    && ssa.kinds[at] == Some(Kind::Boolean)
                             }
                             Return::Boolean01(_) => {
-                                ssa.result == Kind::Boolean
-                                    && ssa.kinds[at] == Some(Kind::Int)
+                                matches!(
+                                    ssa.result,
+                                    crate::pipeline::branch::DeclarationType::Boolean
+                                ) && ssa.kinds[at] == Some(Kind::Int)
                                     && ssa.integral_bits[at] != 0
                                     && ssa.integral_bits[at] & 4 == 0
                             }

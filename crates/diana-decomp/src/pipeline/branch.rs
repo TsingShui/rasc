@@ -9,6 +9,37 @@ pub(crate) struct BlockId(pub u32);
 pub(crate) struct EdgeId(pub u32);
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct ValueId(pub u32);
+#[derive(Clone, Copy)]
+pub(crate) enum DeclarationType {
+    Int,
+    Boolean,
+    Object,
+    Narrow(crate::p5_types::Narrow),
+}
+impl DeclarationType {
+    pub(crate) fn kind(self) -> Kind {
+        match self {
+            Self::Int | Self::Narrow(_) => Kind::Int,
+            Self::Boolean => Kind::Boolean,
+            Self::Object => Kind::Object,
+        }
+    }
+    pub(crate) fn spelling(self) -> &'static str {
+        match self {
+            Self::Narrow(kind) => kind.spelling(),
+            _ => self.kind().spelling(),
+        }
+    }
+    fn range(self) -> Option<crate::p5_types::IntRange> {
+        use crate::p5_types::IntRange;
+        match self {
+            Self::Int => Some(IntRange::ALL),
+            Self::Boolean => Some(IntRange::BOOLEAN),
+            Self::Narrow(kind) => Some(kind.range()),
+            Self::Object => None,
+        }
+    }
+}
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub(crate) enum Kind {
     Int,
@@ -114,10 +145,11 @@ pub(crate) struct BoundBlock {
 pub(crate) struct VerifiedSsa<'a> {
     _sealed: (),
     pub switches: Vec<Switch>,
-    pub result: Kind,
+    pub result: DeclarationType,
     pub integral_bits: Vec<u8>,
+    pub ranges: Vec<Option<crate::p5_types::IntRange>>,
     pub raw: RawMethodView<'a>,
-    pub parameters: Vec<Kind>,
+    pub parameters: Vec<DeclarationType>,
     pub blocks: Vec<Block>,
     pub edges: Vec<Edge>,
     pub values: Vec<Definition>,
@@ -140,10 +172,10 @@ enum Decoded {
     ),
 }
 struct Flow<'a> {
-    result: Kind,
+    result: DeclarationType,
     switches: Vec<Switch>,
     raw: RawMethodView<'a>,
-    parameters: Vec<Kind>,
+    parameters: Vec<DeclarationType>,
     blocks: Vec<Block>,
     edges: Vec<Edge>,
 }
@@ -288,14 +320,35 @@ fn flow<'a>(
         .return_type
         .matches_with(&[73], budget)?
     {
-        Kind::Int
+        DeclarationType::Int
     } else if input
         .declaration()
         .prototype
         .return_type
         .matches_with(&[90], budget)?
     {
-        Kind::Boolean
+        DeclarationType::Boolean
+    } else if input
+        .declaration()
+        .prototype
+        .return_type
+        .matches_with(&[66], budget)?
+    {
+        DeclarationType::Narrow(crate::p5_types::Narrow::Byte)
+    } else if input
+        .declaration()
+        .prototype
+        .return_type
+        .matches_with(&[83], budget)?
+    {
+        DeclarationType::Narrow(crate::p5_types::Narrow::Short)
+    } else if input
+        .declaration()
+        .prototype
+        .return_type
+        .matches_with(&[67], budget)?
+    {
+        DeclarationType::Narrow(crate::p5_types::Narrow::Char)
     } else {
         return Ok(None);
     };
@@ -305,16 +358,22 @@ fn flow<'a>(
         budget,
         |name, budget| -> Result<(), RequestError> {
             let kind = if name.matches_with(&[73], budget)? {
-                Kind::Int
+                DeclarationType::Int
             } else if name.matches_with(&[90], budget)? {
-                Kind::Boolean
+                DeclarationType::Boolean
+            } else if name.matches_with(&[66], budget)? {
+                DeclarationType::Narrow(crate::p5_types::Narrow::Byte)
+            } else if name.matches_with(&[83], budget)? {
+                DeclarationType::Narrow(crate::p5_types::Narrow::Short)
+            } else if name.matches_with(&[67], budget)? {
+                DeclarationType::Narrow(crate::p5_types::Narrow::Char)
             } else if name.matches_with(
                 &[
                     76, 106, 97, 118, 97, 47, 108, 97, 110, 103, 47, 79, 98, 106, 101, 99, 116, 59,
                 ],
                 budget,
             )? {
-                Kind::Object
+                DeclarationType::Object
             } else {
                 supported = false;
                 return Ok(());
@@ -477,7 +536,12 @@ fn flow<'a>(
         }
         pc = next;
     }
-    if !has_branch {
+    if !has_branch
+        && !matches!(result, DeclarationType::Narrow(_))
+        && !parameters
+            .iter()
+            .any(|kind| matches!(kind, DeclarationType::Narrow(_)))
+    {
         return Ok(None);
     }
     // Block order follows original instruction order; no output sorting is used.
@@ -890,6 +954,7 @@ pub(crate) fn build<'a>(
         switches: flow.switches,
         result: flow.result,
         integral_bits: Vec::new(),
+        ranges: Vec::new(),
         raw: flow.raw,
         parameters: flow.parameters,
         blocks: flow.blocks,
@@ -902,6 +967,22 @@ pub(crate) fn build<'a>(
     verify(ssa, &seeds, budget)
 }
 
+fn merge_range(
+    target: &mut Option<crate::p5_types::IntRange>,
+    source: Option<crate::p5_types::IntRange>,
+) -> bool {
+    let merged = match (*target, source) {
+        (None, value) => value,
+        (value, None) => value,
+        (Some(a), Some(b)) => Some(a.hull(b)),
+    };
+    if merged == *target {
+        false
+    } else {
+        *target = merged;
+        true
+    }
+}
 fn verify<'a>(
     mut ssa: VerifiedSsa<'a>,
     seeds: &[(RegisterId, Sym)],
@@ -1094,11 +1175,12 @@ fn verify<'a>(
     let mut bad = Vec::new();
     let mut grounded = Vec::new();
     let mut integral_bits = Vec::new();
+    let mut ranges = Vec::new();
     let mut kinds = Vec::new();
     let mut type_conflict = false;
     for definition in &ssa.values {
         let bits = match definition {
-            Definition::Parameter(index) => match ssa.parameters[ix(*index)?] {
+            Definition::Parameter(index) => match ssa.parameters[ix(*index)?].kind() {
                 Kind::Boolean => 3,
                 Kind::Int => 7,
                 Kind::Object => 0,
@@ -1111,6 +1193,13 @@ fn verify<'a>(
             Definition::Binary(_, _, _) => 7,
             _ => 0,
         };
+        let range = match definition {
+            Definition::Parameter(index) => ssa.parameters[ix(*index)?].range(),
+            Definition::Constant(value) => Some(crate::p5_types::IntRange::literal(*value)),
+            Definition::Binary(_, _, _) => Some(crate::p5_types::IntRange::ALL),
+            _ => None,
+        };
+        push(&mut ranges, range, budget)?;
         push(&mut integral_bits, bits, budget)?;
         push(&mut bad, false, budget)?;
         push(
@@ -1121,7 +1210,7 @@ fn verify<'a>(
         push(
             &mut kinds,
             match definition {
-                Definition::Parameter(index) => Some(ssa.parameters[ix(*index)?]),
+                Definition::Parameter(index) => Some(ssa.parameters[ix(*index)?].kind()),
                 Definition::Constant(_) | Definition::Binary(_, _, _) => Some(Kind::Int),
                 _ => None,
             },
@@ -1155,6 +1244,8 @@ fn verify<'a>(
                     bad[index] = true;
                     changed = true;
                 }
+                let source_range = ranges[source];
+                changed |= merge_range(&mut ranges[index], source_range);
                 let merged = integral_bits[index] | integral_bits[source];
                 if merged != integral_bits[index] {
                     integral_bits[index] = merged;
@@ -1183,6 +1274,8 @@ fn verify<'a>(
                             bad[index] = true;
                             changed = true;
                         }
+                        let source_range = ranges[source];
+                        changed |= merge_range(&mut ranges[index], source_range);
                         let merged = integral_bits[index] | integral_bits[source];
                         if merged != integral_bits[index] {
                             integral_bits[index] = merged;
@@ -1270,5 +1363,6 @@ fn verify<'a>(
     }
     ssa.kinds = kinds;
     ssa.integral_bits = integral_bits;
+    ssa.ranges = ranges;
     Ok(Some(ssa))
 }

@@ -324,14 +324,8 @@ pub(crate) fn verify(
         if index != 0 {
             header.push(", ", budget)?;
         }
-        header.push(
-            match kind {
-                Kind::Int => "int p",
-                Kind::Boolean => "boolean p",
-                Kind::Object => "java.lang.Object p",
-            },
-            budget,
-        )?;
+        header.push(kind.spelling(), budget)?;
+        header.push(" p", budget)?;
         header.unsigned(
             u64::try_from(index).map_err(|_| RequestError::PlatformCapacity)?,
             budget,

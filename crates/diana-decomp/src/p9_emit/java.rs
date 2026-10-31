@@ -208,6 +208,12 @@ pub(super) fn returned(
             local(value, output, budget)?;
             output.push(" != 0)", budget)?;
         }
+        Return::Narrow { value, kind } => {
+            output.push("(", budget)?;
+            output.push(kind.spelling(), budget)?;
+            output.push(") ", budget)?;
+            local(value, output, budget)?;
+        }
         Return::BooleanWord(value) => {
             output.push("(", budget)?;
             local(value, output, budget)?;

@@ -27,11 +27,18 @@ pub(crate) enum Return {
     Direct(LocalId),
     Boolean01(LocalId),
     BooleanWord(LocalId),
+    Narrow {
+        value: LocalId,
+        kind: crate::p5_types::Narrow,
+    },
 }
 impl Return {
     pub(crate) fn value(self) -> LocalId {
         match self {
-            Self::Direct(value) | Self::Boolean01(value) | Self::BooleanWord(value) => value,
+            Self::Direct(value)
+            | Self::Boolean01(value)
+            | Self::BooleanWord(value)
+            | Self::Narrow { value, .. } => value,
         }
     }
 }
@@ -40,7 +47,23 @@ pub(super) fn returned(
     value: LocalId,
 ) -> Result<Option<Return>, RequestError> {
     let index = ix(value.0)?;
-    Ok(match (ssa.kinds[index], ssa.result) {
+    use crate::pipeline::branch::DeclarationType;
+    if let DeclarationType::Narrow(kind) = ssa.result {
+        let mut range = ssa.ranges[index];
+        if ssa.integral_bits[index] != 0 && ssa.integral_bits[index] & 4 == 0 {
+            range = range.and_then(crate::p5_types::IntRange::known01);
+        }
+        return Ok(
+            if ssa.kinds[index] == Some(Kind::Int)
+                && range.is_some_and(|range| range.within(kind.range()))
+            {
+                Some(Return::Narrow { value, kind })
+            } else {
+                None
+            },
+        );
+    }
+    Ok(match (ssa.kinds[index], ssa.result.kind()) {
         (Some(Kind::Int), Kind::Int) | (Some(Kind::Boolean), Kind::Boolean) => {
             Some(Return::Direct(value))
         }
@@ -450,14 +473,8 @@ fn verify_diamond(
         if index != 0 {
             header.push(", ", budget)?;
         }
-        header.push(
-            match kind {
-                Kind::Int => "int p",
-                Kind::Boolean => "boolean p",
-                Kind::Object => "java.lang.Object p",
-            },
-            budget,
-        )?;
+        header.push(kind.spelling(), budget)?;
+        header.push(" p", budget)?;
         header.unsigned(
             u64::try_from(index).map_err(|_| RequestError::PlatformCapacity)?,
             budget,
