@@ -40,3 +40,12 @@ TASKS.md changed.
 T08 remains pending actual loop-storage and critical-edge rollup with T09. The
 copy producer is ready; D002/D003 still need arithmetic/two-operand branch flow
 and dispatcher emission before their Java behavior can be accepted.
+
+Acceptance update after `c4748d5`: the complete D002/D003 iteration sets now pass
+actual compiler/JVM comparison in `run-_2vfo8zp`. The independently executed
+hand-made two-entry cycle also exercises critical incoming edges and proves that
+DA-only locals are not read. The T09 structure/definition checker reconstructs
+parallel assignments from SSA and independently validates the actual stored edge
+sequences. Combined with the exact-type 2/3-cycle and wide-bit core checks, this
+closes the T08 copy/storage obligations without claiming Java support for every
+wide or effectful method.
