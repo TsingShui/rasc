@@ -641,6 +641,7 @@ fn flow<'a>(
                                     matches!(result_layout.kind(),LayoutKind::Instruction(spec) if spec.opcode==0x0c)
                                 }
                                 crate::p4_calls::StaticResult::Void => false,
+                                crate::p4_calls::StaticResult::Nominal => return Ok(None),
                             };
                             if !valid {
                                 return Err(RequestError::InternalInvariant(
@@ -1360,7 +1361,8 @@ fn verify<'a>(
                         .map_err(crate::input::MethodError::Decode)?;
                         let expected = match site.contract.result {
                             crate::p4_calls::StaticResult::Int => Some(0x0a),
-                            crate::p4_calls::StaticResult::Reference(_) => Some(0x0c),
+                            crate::p4_calls::StaticResult::Reference(_)
+                            | crate::p4_calls::StaticResult::Nominal => Some(0x0c),
                             crate::p4_calls::StaticResult::Void => None,
                         };
                         if !matches!(result.kind(),LayoutKind::Instruction(spec) if Some(spec.opcode)==expected)
@@ -1574,6 +1576,11 @@ fn verify<'a>(
                         crate::p4_calls::StaticResult::Reference(
                             crate::p5_types::BuiltinReference::String,
                         ) => Kind::String,
+                        crate::p4_calls::StaticResult::Nominal => {
+                            return Err(RequestError::InternalInvariant(
+                                "nominal call result entered primitive SSA",
+                            ));
+                        }
                         crate::p4_calls::StaticResult::Void => {
                             return Err(RequestError::InternalInvariant(
                                 "void call acquired a value definition",

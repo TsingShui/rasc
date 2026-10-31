@@ -13,6 +13,7 @@ pub(crate) fn java(
     output.push(&method.header, budget)?;
     output.push(" {\n", budget)?;
     match &method.body {
+        MethodBody::CallChain(body) => super::call_chain::write(body, &mut output, budget)?,
         MethodBody::Receiver(body) => {
             if body.invoke.0 >= body.result.0 || body.result.0 >= body.returned.0 {
                 return Err(RequestError::InternalInvariant(

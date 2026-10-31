@@ -81,6 +81,16 @@ fn parameters(
     at = at.checked_add(1).ok_or(RequestError::PlatformCapacity)?;
     if proto.get(at) == Some(&86) {
         at = at.checked_add(1).ok_or(RequestError::PlatformCapacity)?;
+    } else if proto.get(at) == Some(&76) {
+        at = at.checked_add(1).ok_or(RequestError::PlatformCapacity)?;
+        while proto.get(at).is_some_and(|&unit| unit != 59) {
+            budget.charge_work(1)?;
+            at = at.checked_add(1).ok_or(RequestError::PlatformCapacity)?;
+        }
+        if proto.get(at) != Some(&59) {
+            return Ok(None);
+        }
+        at = at.checked_add(1).ok_or(RequestError::PlatformCapacity)?;
     } else if formal(proto, &mut at, budget)?.is_none() {
         return Ok(None);
     }

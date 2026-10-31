@@ -1,4 +1,5 @@
 pub(crate) mod branch;
+pub(crate) mod call_chain;
 pub(crate) mod control;
 pub(crate) mod diagnostics;
 pub(crate) mod receiver;

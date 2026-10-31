@@ -17,6 +17,7 @@ pub(crate) struct ReceiverContract {
     pub name: Vec<u16>,
     pub prototype: Vec<u16>,
     pub kind: ReceiverKind,
+    pub int_arity: usize,
 }
 pub(crate) fn resolve_receiver(
     input: &MethodInput<'_, '_>,
@@ -32,8 +33,26 @@ pub(crate) fn resolve_receiver(
         || !method
             .declaration
             .prototype
-            .matches_with(&[40, 41, 73], budget)?
+            .return_type
+            .matches_with(&[73], budget)?
     {
+        return Ok(None);
+    }
+    let mut int_arity = 0usize;
+    let mut supported = true;
+    method.declaration.prototype.visit_parameter_types(
+        budget,
+        |name, budget| -> Result<(), RequestError> {
+            if !name.matches_with(&[73], budget)? {
+                supported = false;
+            }
+            int_arity = int_arity
+                .checked_add(1)
+                .ok_or(RequestError::PlatformCapacity)?;
+            Ok(())
+        },
+    )?;
+    if !supported {
         return Ok(None);
     }
     let owner = copy_units(method.owner, budget)?;
@@ -172,5 +191,6 @@ pub(crate) fn resolve_receiver(
         name,
         prototype,
         kind,
+        int_arity,
     }))
 }

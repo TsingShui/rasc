@@ -14,6 +14,8 @@ pub(crate) enum CallFormal {
 }
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub(crate) enum StaticResult {
+    /// The exact non-builtin class result is retained in the sealed prototype.
+    Nominal,
     Reference(crate::p5_types::BuiltinReference),
     Int,
     Void,
@@ -267,7 +269,30 @@ pub(crate) fn resolve_static(
     {
         StaticResult::Void
     } else {
-        return Ok(None);
+        let descriptor = copy_units(reference.declaration.prototype.return_type, budget)?;
+        if descriptor.len() < 3 || descriptor.first() != Some(&76) || descriptor.last() != Some(&59)
+        {
+            return Ok(None);
+        }
+        let Some(class) = catalog.class(&descriptor, budget)? else {
+            return Ok(None);
+        };
+        if !plain(class, &caller, budget)?
+            || class.access_flags & 1 == 0
+            || class.access_flags & 0x2200 != 0
+        {
+            return Ok(None);
+        }
+        let end = descriptor[1..descriptor.len() - 1]
+            .iter()
+            .position(|&unit| unit == 47)
+            .map_or(descriptor.len() - 1, |index| index + 1);
+        if input.qualifier_shadowed(&descriptor[1..end], budget)?
+            || !clear_scope(catalog, &caller, &descriptor[1..end], budget)?
+        {
+            return Ok(None);
+        }
+        StaticResult::Nominal
     };
     let mut formals = Vec::new();
     let mut supported = true;

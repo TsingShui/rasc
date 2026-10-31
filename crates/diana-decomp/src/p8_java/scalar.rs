@@ -17,6 +17,7 @@ pub struct VerifiedJavaMethod {
     environment: EnvironmentId,
 }
 pub(crate) enum MethodBody {
+    CallChain(super::call_chain::Body),
     Receiver(super::receiver::ReceiverMethod),
     Scalar {
         definitions: Vec<Definition>,
@@ -28,6 +29,17 @@ pub(crate) enum MethodBody {
     Dispatcher(super::dispatcher::Dispatcher),
 }
 impl VerifiedJavaMethod {
+    pub(super) fn call_chain(
+        header: String,
+        body: super::call_chain::Body,
+        environment: EnvironmentId,
+    ) -> Self {
+        Self {
+            header,
+            body: MethodBody::CallChain(body),
+            environment,
+        }
+    }
     pub(super) fn receiver(
         header: String,
         body: super::receiver::ReceiverMethod,
@@ -103,7 +115,40 @@ impl VerifiedJavaMethod {
                 }
                 _ => None,
             });
-        statics.chain(effects).chain(receiver)
+        let chain = match &self.body {
+            MethodBody::CallChain(body) => Some(body.calls.as_slice()),
+            _ => None,
+        };
+        let chained = chain.into_iter().flatten().map(|call| {
+            let super::call_chain::Call {
+                pc,
+                target,
+                receiver,
+                result,
+                ..
+            } = call;
+            super::JavaCallSite {
+                reference: target.reference(),
+                receiver: receiver.map(|(_, register)| register),
+                owner: target.owner(),
+                name: target.name(),
+                prototype: target.prototype(),
+                invoke: *pc,
+                result: result.as_ref().map(|local| local.pc),
+                kind: match target {
+                    crate::pipeline::call_chain::Target::Static(_) => super::JavaInvokeKind::Static,
+                    crate::pipeline::call_chain::Target::Receiver(c) => match c.kind {
+                        crate::p4_calls::ReceiverKind::Virtual => super::JavaInvokeKind::Virtual,
+                        crate::p4_calls::ReceiverKind::Interface => {
+                            super::JavaInvokeKind::Interface
+                        }
+                        crate::p4_calls::ReceiverKind::Direct => super::JavaInvokeKind::Direct,
+                        crate::p4_calls::ReceiverKind::Super => super::JavaInvokeKind::Super,
+                    },
+                },
+            }
+        });
+        statics.chain(effects).chain(receiver).chain(chained)
     }
     pub(super) fn dispatcher(
         header: String,

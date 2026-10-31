@@ -349,6 +349,9 @@ pub(crate) fn plan<'a>(
                             else {
                                 return Err(RequestError::BindingEvidenceMissing { reference, pc });
                             };
+                            if contract.int_arity != 0 {
+                                return Ok(None);
+                            }
                             return Ok(Some(ReceiverPlan {
                                 _sealed: (),
                                 prefix,
