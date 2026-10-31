@@ -95,6 +95,7 @@ def run_public(root, cache, spec, manifest, case_ids=None):
                         source_path.parent.mkdir(parents=True,exist_ok=True)
                         original_path=root/'tests/e2e/sources'/case['id']/Path(selector['descriptor'][1:-1]+'.java')
                         import re
+                        support_sources=[]
                         if not original_path.is_file() and case['id']=='D065':
                             ordinal=origin['logical_ordinal']
                             original_path=root/'tests/e2e/sources/D065/fixtures/mirror'/('logical'+str(ordinal))/'Case.java'
@@ -102,7 +103,22 @@ def run_public(root, cache, spec, manifest, case_ids=None):
                             original_source,count=re.subn(r'^package logical'+str(ordinal)+r';','package fixtures;',original_source,count=1)
                             if count!=1:raise ValueError('certified mirror context has a different namespace')
                         else:
-                            if not original_path.is_file():original_path=cache/'prepared'/case['id']/'reference'/binding['role']/Path(selector['descriptor'][1:-1]+'.java')
+                            if not original_path.is_file():
+                                generated=cache/'prepared'/case['id']/Path(selector['descriptor'][1:-1]+'.java')
+                                generated_asset=next((asset for asset in assets.values() if asset['path']==relative(generated)),None)
+                                if generated_asset is not None:
+                                    original_path=generated
+                                    if not generated.is_file() or generated.stat().st_size!=generated_asset['size']:raise ValueError('missing/changed generated original context')
+                                    for command in generated_asset['recipe']['argument_arrays']:
+                                        if not command or Path(command[0]).name!='javac':continue
+                                        for argument in command[1:]:
+                                            if not argument.endswith('.java') or root/argument==original_path:continue
+                                            path=relative(root/argument)
+                                            dependency=next((asset for asset in assets.values() if asset['path']==path),None)
+                                            if dependency is None:raise ValueError('generated context dependency is absent from the manifest')
+                                            if not (root/path).is_file() or (root/path).stat().st_size!=dependency['size']:raise ValueError('missing/changed generated context dependency')
+                                            if path not in support_sources:support_sources.append(path)
+                                else:original_path=cache/'prepared'/case['id']/'reference'/binding['role']/Path(selector['descriptor'][1:-1]+'.java')
                             original_source=original_path.read_text(encoding='utf-8')
                         for fragment in executable_sources:
                             pattern=r'(?m)^([ \t]*(?:public|private|protected|static|final|strictfp|synchronized|\s)+(?:void|int|long|float|double|boolean|byte|short|char|(?:java\.lang\.)?String)\s+'+re.escape(fragment['name'])+r'\s*\([^)]*\)\s*)\{'
@@ -116,7 +132,7 @@ def run_public(root, cache, spec, manifest, case_ids=None):
                             if depth:raise ValueError('unterminated known method context')
                             original_source=original_source[:match.start()]+fragment['source']+original_source[position:]
                         source_path.write_text(original_source,encoding='utf-8')
-                        groups['java_input']={'sources':[{'path':relative(source_path)}]}
+                        groups['java_input']={'sources':[{'path':relative(source_path)},*({'path':path} for path in support_sources)]}
                     context = groups.pop('declaration_source',None)
                     if context is not None:
                         if case['validationScope']!='method-in-known-context':raise ValueError('declaration fragment has no accepted compilation context')
