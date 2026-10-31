@@ -447,7 +447,7 @@ fn normal_member(
         });
     }
     if crate::p8_java::source_group_admitted(index, key, &facts, budget)?
-        && let Some(ssa) = crate::pipeline::branch::build(&input, budget)?
+        && let Some(ssa) = crate::pipeline::branch::build(&input, catalog, budget)?
     {
         if let Some(declaration) =
             crate::p8_java::branch::verify(&input, ssa, catalog.environment, budget)?

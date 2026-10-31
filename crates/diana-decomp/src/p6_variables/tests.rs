@@ -113,7 +113,16 @@ fn t09_two_entry_dispatcher_preserves_edges_and_never_reads_da_defaults() {
                 .iter()
                 .find(|case| case.key.0 == pc)
                 .expect("reachable synthetic default");
-            assign(&case.statements, &mut values);
+            for statement in &case.statements {
+                match statement {
+                    crate::p8_java::calls::Statement::Assignment(statement) => {
+                        assign(std::slice::from_ref(statement), &mut values)
+                    }
+                    crate::p8_java::calls::Statement::StaticCall { .. } => {
+                        panic!("call outside the pure loop interpretation")
+                    }
+                }
+            }
             let edge = match &case.transfer {
                 Transfer::Switch {
                     value,

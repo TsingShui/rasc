@@ -84,6 +84,60 @@ impl<'i, 'a> MethodInput<'i, 'a> {
     ) -> Result<DexString<'a>, InputError> {
         self.index.string_with(id, budget)
     }
+    pub(crate) fn local_method(
+        &self,
+        id: MethodId,
+        budget: &mut MethodBudget<'_, '_>,
+    ) -> Result<Option<super::catalog::LocalMethod<'a>>, InputError> {
+        self.index.local_method(id, budget)
+    }
+    pub(crate) fn method_reference(
+        &self,
+        id: MethodId,
+        budget: &mut MethodBudget<'_, '_>,
+    ) -> Result<super::catalog::MethodReference<'_, 'a>, InputError> {
+        self.index.method_reference(id, budget)
+    }
+    pub(crate) fn plain_owner_scope(
+        &self,
+        parent: Option<&[u16]>,
+        budget: &mut MethodBudget<'_, '_>,
+    ) -> Result<bool, crate::RequestError> {
+        let context = self.index.class_context(self.class_id, budget)?;
+        if context.annotations_offset.0 != 0 || !context.interfaces?.is_empty() {
+            return Ok(false);
+        }
+        Ok(match (context.superclass?, parent) {
+            (None, None) => true,
+            (Some(original), Some(parent)) => original.matches_with(parent, budget)?,
+            _ => false,
+        })
+    }
+    pub(crate) fn qualifier_shadowed(
+        &self,
+        prefix: &[u16],
+        budget: &mut MethodBudget<'_, '_>,
+    ) -> Result<bool, crate::RequestError> {
+        let mut shadowed = false;
+        self.index
+            .class_with(self.class_id, budget)?
+            .visit_members_with(
+                budget,
+                MemberSelection::Fields,
+                |entry, budget| -> Result<(), crate::RequestError> {
+                    let MemberEntry::Field(field) = entry else {
+                        return Err(crate::RequestError::InternalInvariant(
+                            "field-only scope check acquired another member",
+                        ));
+                    };
+                    if field.declaration?.name.matches_with(prefix, budget)? {
+                        shadowed = true;
+                    }
+                    Ok(())
+                },
+            )?;
+        Ok(shadowed)
+    }
     pub fn class_id(&self) -> ClassDefId {
         self.class_id
     }

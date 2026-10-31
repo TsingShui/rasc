@@ -56,7 +56,32 @@ pub(super) fn write(
         output.push("case ", budget)?;
         output.unsigned(u64::from(case.key.0), budget)?;
         output.push(": {\n", budget)?;
-        assignments(&case.statements, output, budget)?;
+        for statement in &case.statements {
+            budget.charge_work(1)?;
+            match statement {
+                crate::p8_java::calls::Statement::Assignment(statement) => {
+                    assignments(std::slice::from_ref(statement), output, budget)?
+                }
+                crate::p8_java::calls::Statement::StaticCall { target, call } => {
+                    if let Some(target) = target {
+                        local(*target, output, budget)?;
+                        output.push(" = ", budget)?;
+                    }
+                    output.push(&call.qualifier, budget)?;
+                    output.push(".", budget)?;
+                    output.push(&call.method, budget)?;
+                    output.push("(", budget)?;
+                    for (index, &argument) in call.arguments.iter().enumerate() {
+                        budget.charge_work(1)?;
+                        if index != 0 {
+                            output.push(", ", budget)?;
+                        }
+                        super::java::value_use(argument, output, budget)?;
+                    }
+                    output.push(");\n", budget)?;
+                }
+            }
+        }
         match &case.transfer {
             Transfer::Switch {
                 value,

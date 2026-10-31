@@ -24,7 +24,7 @@ pub(crate) struct Assignment {
     pub expression: Expression,
 }
 #[derive(Clone, Copy, Eq, PartialEq)]
-pub(crate) enum Return {
+pub(crate) enum ValueUse {
     Direct(LocalId),
     Boolean01(LocalId),
     BooleanWord(LocalId),
@@ -33,7 +33,7 @@ pub(crate) enum Return {
         kind: crate::p5_types::Narrow,
     },
 }
-impl Return {
+impl ValueUse {
     pub(crate) fn value(self) -> LocalId {
         match self {
             Self::Direct(value)
@@ -46,7 +46,7 @@ impl Return {
 pub(super) fn returned(
     ssa: &VerifiedSsa<'_>,
     value: LocalId,
-) -> Result<Option<Return>, RequestError> {
+) -> Result<Option<ValueUse>, RequestError> {
     let index = ix(value.0)?;
     use crate::pipeline::branch::DeclarationType;
     if let DeclarationType::Narrow(kind) = ssa.result {
@@ -58,7 +58,7 @@ pub(super) fn returned(
             if ssa.kinds[index] == Some(Kind::Int)
                 && range.is_some_and(|range| range.within(kind.range()))
             {
-                Some(Return::Narrow { value, kind })
+                Some(ValueUse::Narrow { value, kind })
             } else {
                 None
             },
@@ -66,13 +66,13 @@ pub(super) fn returned(
     }
     Ok(match (ssa.kinds[index], ssa.result.kind()) {
         (Some(Kind::Int), Kind::Int) | (Some(Kind::Boolean), Kind::Boolean) => {
-            Some(Return::Direct(value))
+            Some(ValueUse::Direct(value))
         }
-        (Some(Kind::Boolean), Kind::Int) => Some(Return::BooleanWord(value)),
+        (Some(Kind::Boolean), Kind::Int) => Some(ValueUse::BooleanWord(value)),
         (Some(Kind::Int), Kind::Boolean)
             if ssa.integral_bits[index] != 0 && ssa.integral_bits[index] & 4 == 0 =>
         {
-            Some(Return::Boolean01(value))
+            Some(ValueUse::Boolean01(value))
         }
         _ => None,
     })
@@ -85,7 +85,7 @@ pub(crate) struct Diamond {
     pub condition: LocalId,
     pub condition_kind: Kind,
     pub opcode: u8,
-    pub returned: Return,
+    pub returned: ValueUse,
 }
 fn ix(id: u32) -> Result<usize, RequestError> {
     usize::try_from(id).map_err(|_| RequestError::PlatformCapacity)
@@ -221,6 +221,71 @@ pub(super) fn copies(
     }
     Ok(())
 }
+pub(super) fn operation(
+    op: &crate::pipeline::branch::BoundOp,
+) -> Result<Option<Assignment>, RequestError> {
+    let expression = match op.op {
+        Op::Compare(_, _, compare, _) => {
+            let Some(crate::pipeline::branch::BoundOperand::Value(right)) = op.other else {
+                return Err(RequestError::InternalInvariant(
+                    "owned cmp lost right operand",
+                ));
+            };
+            Expression::Compare(
+                LocalId(
+                    op.source
+                        .ok_or(RequestError::InternalInvariant(
+                            "owned cmp lost left operand",
+                        ))?
+                        .0,
+                ),
+                compare,
+                LocalId(right.0),
+            )
+        }
+        Op::Binary(_, _, kind, _) => Expression::Binary(
+            LocalId(
+                op.source
+                    .ok_or(RequestError::InternalInvariant(
+                        "verified arithmetic left local absent",
+                    ))?
+                    .0,
+            ),
+            kind,
+            match op.other.ok_or(RequestError::InternalInvariant(
+                "verified arithmetic right local absent",
+            ))? {
+                crate::pipeline::branch::BoundOperand::Value(id) => Right::Local(LocalId(id.0)),
+                crate::pipeline::branch::BoundOperand::Literal(value) => Right::Literal(value),
+            },
+        ),
+        Op::Nop => return Ok(None),
+        Op::Call(_, _) => {
+            return Err(RequestError::InternalInvariant(
+                "call entered pure assignment lowering",
+            ));
+        }
+        Op::Constant(_, value) => Expression::Constant(value),
+        Op::Move(_, _) => Expression::Local(LocalId(
+            op.source
+                .ok_or(RequestError::InternalInvariant(
+                    "verified move lost its source",
+                ))?
+                .0,
+        )),
+    };
+
+    Ok(Some(Assignment {
+        target: LocalId(
+            op.result
+                .ok_or(RequestError::InternalInvariant(
+                    "verified operation lost its local",
+                ))?
+                .0,
+        ),
+        expression,
+    }))
+}
 pub(super) fn operations(
     ssa: &VerifiedSsa<'_>,
     block: BlockId,
@@ -229,65 +294,9 @@ pub(super) fn operations(
 ) -> Result<(), RequestError> {
     for op in &ssa.bound[ix(block.0)?].ops {
         budget.charge_work(1)?;
-        let expression = match op.op {
-            Op::Compare(_, _, compare, _) => {
-                let Some(crate::pipeline::branch::BoundOperand::Value(right)) = op.other else {
-                    return Err(RequestError::InternalInvariant(
-                        "owned cmp lost right operand",
-                    ));
-                };
-                Expression::Compare(
-                    LocalId(
-                        op.source
-                            .ok_or(RequestError::InternalInvariant(
-                                "owned cmp lost left operand",
-                            ))?
-                            .0,
-                    ),
-                    compare,
-                    LocalId(right.0),
-                )
-            }
-            Op::Binary(_, _, kind, _) => Expression::Binary(
-                LocalId(
-                    op.source
-                        .ok_or(RequestError::InternalInvariant(
-                            "verified arithmetic left local absent",
-                        ))?
-                        .0,
-                ),
-                kind,
-                match op.other.ok_or(RequestError::InternalInvariant(
-                    "verified arithmetic right local absent",
-                ))? {
-                    crate::pipeline::branch::BoundOperand::Value(id) => Right::Local(LocalId(id.0)),
-                    crate::pipeline::branch::BoundOperand::Literal(value) => Right::Literal(value),
-                },
-            ),
-            Op::Nop => continue,
-            Op::Constant(_, value) => Expression::Constant(value),
-            Op::Move(_, _) => Expression::Local(LocalId(
-                op.source
-                    .ok_or(RequestError::InternalInvariant(
-                        "verified move lost its source",
-                    ))?
-                    .0,
-            )),
-        };
-        append(
-            output,
-            Assignment {
-                target: LocalId(
-                    op.result
-                        .ok_or(RequestError::InternalInvariant(
-                            "verified operation lost its local",
-                        ))?
-                        .0,
-                ),
-                expression,
-            },
-            budget,
-        )?;
+        if let Some(statement) = operation(op)? {
+            append(output, statement, budget)?;
+        }
     }
     Ok(())
 }
@@ -310,7 +319,7 @@ fn verify_diamond(
     environment: EnvironmentId,
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<Option<VerifiedJavaMethod>, RequestError> {
-    if ssa.blocks.len() != 4 {
+    if !ssa.calls.is_empty() || ssa.blocks.len() != 4 {
         return Ok(None);
     }
     let Terminal::Test {

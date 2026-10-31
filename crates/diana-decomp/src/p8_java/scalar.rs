@@ -81,6 +81,7 @@ pub(crate) fn source_group_admitted(
                 if let MemberEntry::MethodHeader {
                     method_idx,
                     declaration,
+                    ..
                 } = entry
                 {
                     let declaration = declaration?;

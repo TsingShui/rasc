@@ -59,6 +59,98 @@ fn same_expression(
         _ => false,
     }
 }
+fn static_call(
+    ssa: &VerifiedSsa<'_>,
+    id: crate::pipeline::branch::CallId,
+    actual: &super::calls::StaticCall,
+    budget: &mut MethodBudget<'_, '_>,
+) -> Result<bool, RequestError> {
+    let site = ssa
+        .calls
+        .get(ix(id.0)?)
+        .ok_or(RequestError::InternalInvariant(
+            "call certificate has foreign site",
+        ))?;
+    let bound = ssa.bound_calls[ix(id.0)?]
+        .as_ref()
+        .ok_or(RequestError::InternalInvariant(
+            "call certificate lost argument bindings",
+        ))?;
+    let contract = &site.contract;
+    if actual.reference != contract.reference
+        || actual.original_owner != contract.owner
+        || actual.original_name != contract.name
+        || actual.prototype != contract.prototype
+        || actual.invoke != site.pc
+        || actual.result_site != site.result_pc
+        || actual.arguments.len() != bound.arguments.len()
+        || actual.arguments.len() != contract.formals.len()
+    {
+        return Ok(false);
+    }
+    let owner = &contract.owner;
+    if owner.len() < 3 {
+        return Ok(false);
+    }
+    let mut source = actual.qualifier.encode_utf16();
+    for &unit in &owner[1..owner.len() - 1] {
+        budget.charge_work(1)?;
+        if source.next() != Some(if unit == 47 { 46 } else { unit }) {
+            return Ok(false);
+        }
+    }
+    if source.next().is_some() {
+        return Ok(false);
+    }
+    let mut source = actual.method.encode_utf16();
+    for &unit in &contract.name {
+        budget.charge_work(1)?;
+        if source.next() != Some(unit) {
+            return Ok(false);
+        }
+    }
+    if source.next().is_some() {
+        return Ok(false);
+    }
+    use super::branch::ValueUse;
+    use crate::p4_calls::IntegralFormal;
+    for ((&view, &value), &formal) in actual
+        .arguments
+        .iter()
+        .zip(&bound.arguments)
+        .zip(&contract.formals)
+    {
+        budget.charge_work(1)?;
+        let at = ix(value.0)?;
+        if view.value().0 != value.0 {
+            return Ok(false);
+        }
+        let valid = match (view, formal, ssa.kinds[at]) {
+            (ValueUse::Direct(_), IntegralFormal::Int, Some(Kind::Int))
+            | (ValueUse::Direct(_), IntegralFormal::Boolean, Some(Kind::Boolean))
+            | (ValueUse::BooleanWord(_), IntegralFormal::Int, Some(Kind::Boolean)) => true,
+            (ValueUse::Boolean01(_), IntegralFormal::Boolean, Some(Kind::Int)) => {
+                ssa.integral_bits[at] != 0 && ssa.integral_bits[at] & 4 == 0
+            }
+            (ValueUse::Narrow { kind, .. }, IntegralFormal::Narrow(formal), Some(Kind::Int))
+                if kind == formal =>
+            {
+                let range = ssa.ranges[at];
+                let range = if ssa.integral_bits[at] != 0 && ssa.integral_bits[at] & 4 == 0 {
+                    range.and_then(crate::p5_types::IntRange::known01)
+                } else {
+                    range
+                };
+                range.is_some_and(|range| range.within(kind.range()))
+            }
+            _ => false,
+        };
+        if !valid {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
 fn copies(
     ssa: &VerifiedSsa<'_>,
     body: &Dispatcher,
@@ -236,9 +328,21 @@ pub(super) fn verify(
                 .ok_or(RequestError::InternalInvariant(
                     "dispatcher omitted an original operation",
                 ))?;
-            if bound.result.map(|id| id.0) != Some(actual.target.0)
-                || !same_expression(&actual.expression, bound.op, bound.source, bound.other)
-            {
+            let matches = match actual {
+                super::calls::Statement::Assignment(actual) => {
+                    bound.result.map(|id| id.0) == Some(actual.target.0)
+                        && same_expression(&actual.expression, bound.op, bound.source, bound.other)
+                }
+                super::calls::Statement::StaticCall { target, call } => {
+                    if let Op::Call(id, _) = bound.op {
+                        target.map(|value| value.0) == bound.result.map(|value| value.0)
+                            && static_call(ssa, id, call, budget)?
+                    } else {
+                        false
+                    }
+                }
+            };
+            if !matches {
                 return Err(RequestError::InternalInvariant(
                     "dispatcher changed operation order or value correspondence",
                 ));
@@ -309,16 +413,16 @@ pub(super) fn verify(
                     || ssa.bound[index].terminal.map(|id| id.0) != Some(actual.value().0)
                     || {
                         let at = ix(actual.value().0)?;
-                        use super::branch::Return;
+                        use super::branch::ValueUse;
                         !match actual {
-                            Return::Direct(_) => {
+                            ValueUse::Direct(_) => {
                                 matches!(
                                     ssa.result,
                                     crate::pipeline::branch::DeclarationType::Int
                                         | crate::pipeline::branch::DeclarationType::Boolean
                                 ) && ssa.kinds[at] == Some(ssa.result.kind())
                             }
-                            Return::Narrow { kind, .. } => {
+                            ValueUse::Narrow { kind, .. } => {
                                 let range = ssa.ranges[at];
                                 let range = if ssa.integral_bits[at] != 0
                                     && ssa.integral_bits[at] & 4 == 0
@@ -331,11 +435,11 @@ pub(super) fn verify(
                                     && ssa.kinds[at] == Some(Kind::Int)
                                     && range.is_some_and(|range| range.within(kind.range()))
                             }
-                            Return::BooleanWord(_) => {
+                            ValueUse::BooleanWord(_) => {
                                 matches!(ssa.result, crate::pipeline::branch::DeclarationType::Int)
                                     && ssa.kinds[at] == Some(Kind::Boolean)
                             }
-                            Return::Boolean01(_) => {
+                            ValueUse::Boolean01(_) => {
                                 matches!(
                                     ssa.result,
                                     crate::pipeline::branch::DeclarationType::Boolean

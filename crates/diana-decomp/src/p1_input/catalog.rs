@@ -361,9 +361,16 @@ impl<'a> ProgramIndex<'a> {
         method_id: MethodId,
         control: &mut impl InputControl,
     ) -> Result<bool, InputError> {
+        Ok(self.local_method(method_id, control)?.is_some())
+    }
+    pub(crate) fn local_method(
+        &self,
+        method_id: MethodId,
+        control: &mut impl InputControl,
+    ) -> Result<Option<LocalMethod<'a>>, InputError> {
         let mut method = self.table(TableKey::Method(method_id), control)?;
         let owner = TypeId(u32::from(method.read_u16_with(control)?));
-        let mut found = false;
+        let mut found = None;
         let mut owner_found = false;
         for index in 0..self.header.class_defs.count {
             let mut definition = self.table(TableKey::Class(ClassDefId(index)), control)?;
@@ -381,15 +388,24 @@ impl<'a> ProgramIndex<'a> {
                 .visit_members_with(
                     control,
                     MemberSelection::Header(method_id),
-                    |entry, _| -> Result<(), InputError> {
+                    |entry, control| -> Result<(), InputError> {
                         if let MemberEntry::MethodHeader {
                             method_idx,
+                            access_flags,
                             declaration,
                         } = entry
                         {
                             declaration?;
                             if method_idx == method_id {
-                                found = true;
+                                let class = self.class_with(ClassDefId(index), control)?;
+                                let context = self.class_context(ClassDefId(index), control)?;
+                                found = Some(LocalMethod {
+                                    access_flags,
+                                    owner_access_flags: class.access_flags,
+                                    parent: context.superclass?,
+                                    plain_scope: context.annotations_offset.0 == 0
+                                        && context.interfaces?.is_empty(),
+                                });
                             }
                         }
                         Ok(())
@@ -578,6 +594,12 @@ pub(crate) struct ClassContext<'a> {
     pub annotations_offset: ByteOffset,
 }
 
+pub(crate) struct LocalMethod<'a> {
+    pub access_flags: u32,
+    pub owner_access_flags: u32,
+    pub parent: Option<DexString<'a>>,
+    pub plain_scope: bool,
+}
 pub(crate) struct MethodReference<'i, 'a> {
     pub owner: DexString<'a>,
     pub declaration: MethodDeclaration<'i, 'a>,
@@ -694,6 +716,7 @@ pub(crate) enum MemberEntry<'i, 'a> {
     Method(MethodEntry<'i, 'a>),
     MethodHeader {
         method_idx: MethodId,
+        access_flags: u32,
         declaration: Result<MethodDeclaration<'i, 'a>, InputError>,
     },
 }
@@ -863,6 +886,7 @@ impl<'i, 'a> ClassView<'i, 'a> {
                                 visit(
                                     MemberEntry::MethodHeader {
                                         method_idx: MethodId(index),
+                                        access_flags,
                                         declaration,
                                     },
                                     control,

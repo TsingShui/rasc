@@ -1,0 +1,290 @@
+use crate::input::MethodInput;
+use crate::substrate::owned::{copy_proto, copy_units, reserve};
+use crate::{
+    DeclarationCatalog, DeclarationCoverage, ExternalClassDeclaration, MethodBudget, MethodId,
+    RequestError,
+};
+
+#[derive(Clone, Copy)]
+pub(crate) enum IntegralFormal {
+    Int,
+    Boolean,
+    Narrow(crate::p5_types::Narrow),
+}
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub(crate) enum StaticResult {
+    Int,
+    Void,
+}
+/// An exact non-generic static declaration contract. Source expression binding
+/// still requires typed argument views and a checked source qualifier.
+pub(crate) struct StaticContract {
+    _sealed: (),
+    pub reference: MethodId,
+    pub owner: Vec<u16>,
+    pub name: Vec<u16>,
+    pub prototype: Vec<u16>,
+    pub formals: Vec<IntegralFormal>,
+    pub result: StaticResult,
+}
+fn package(descriptor: &[u16]) -> &[u16] {
+    descriptor
+        .iter()
+        .rposition(|&unit| unit == 47)
+        .map_or(&[], |end| &descriptor[..end])
+}
+fn plain(
+    class: &ExternalClassDeclaration,
+    caller: &[u16],
+    budget: &mut MethodBudget<'_, '_>,
+) -> Result<bool, RequestError> {
+    budget.charge_work(
+        u64::try_from(
+            class
+                .descriptor
+                .len()
+                .checked_add(caller.len())
+                .ok_or(RequestError::PlatformCapacity)?,
+        )
+        .map_err(|_| RequestError::PlatformCapacity)?,
+    )?;
+    Ok(!class.generic
+        && !class.enclosing_scope
+        && class.interfaces.is_empty()
+        && match class.coverage {
+            DeclarationCoverage::AllDeclarations => true,
+            DeclarationCoverage::ExportedApi => package(&class.descriptor) != package(caller),
+        })
+}
+fn push<T>(
+    values: &mut Vec<T>,
+    value: T,
+    budget: &mut MethodBudget<'_, '_>,
+) -> Result<(), RequestError> {
+    reserve(values, 1, budget)?;
+    values.push(value);
+    Ok(())
+}
+fn generated_name(prefix: &[u16]) -> bool {
+    if prefix == [112, 99] {
+        return true;
+    }
+    matches!(prefix.first(), Some(112 | 118 | 99))
+        && prefix.len() > 1
+        && prefix[1..].iter().all(|unit| matches!(*unit, 48..=57 | 95))
+}
+fn clear_scope(
+    catalog: &DeclarationCatalog,
+    caller: &[u16],
+    prefix: &[u16],
+    budget: &mut MethodBudget<'_, '_>,
+) -> Result<bool, RequestError> {
+    budget.charge_work(u64::try_from(prefix.len()).map_err(|_| RequestError::PlatformCapacity)?)?;
+    if generated_name(prefix) {
+        return Ok(false);
+    }
+    let mut at = caller;
+    let mut seen: Vec<&[u16]> = Vec::new();
+    loop {
+        budget.charge_work(1)?;
+        for old in &seen {
+            budget.charge_work(1)?;
+            if crate::p0_knowledge::same_units(old, at, budget)? {
+                return Ok(false);
+            }
+        }
+        push(&mut seen, at, budget)?;
+        let Some(class) = catalog.class(at, budget)? else {
+            return Ok(false);
+        };
+        if !plain(class, caller, budget)? {
+            return Ok(false);
+        }
+        for name in &class.field_names {
+            budget.charge_work(1)?;
+            if crate::p0_knowledge::same_units(name, prefix, budget)? {
+                return Ok(false);
+            }
+        }
+        match &class.parent {
+            Some(parent) => at = parent,
+            None => {
+                return Ok(class.descriptor
+                    == [
+                        76, 106, 97, 118, 97, 47, 108, 97, 110, 103, 47, 79, 98, 106, 101, 99, 116,
+                        59,
+                    ]);
+            }
+        }
+    }
+}
+pub(crate) fn resolve_static(
+    input: &MethodInput<'_, '_>,
+    catalog: &DeclarationCatalog,
+    id: MethodId,
+    budget: &mut MethodBudget<'_, '_>,
+) -> Result<Option<StaticContract>, RequestError> {
+    let reference = input.method_reference(id, budget)?;
+    let owner = copy_units(reference.owner, budget)?;
+    let name = copy_units(reference.declaration.name, budget)?;
+    let prototype = copy_proto(&reference.declaration.prototype, budget)?;
+    if owner.first() != Some(&76) || owner.last() != Some(&59) {
+        return Ok(None);
+    }
+    let Some(target_class) = catalog.class(&owner, budget)? else {
+        return Ok(None);
+    };
+    let caller = copy_units(input.owner(), budget)?;
+    let Some(caller_class) = catalog.class(&caller, budget)? else {
+        return Ok(None);
+    };
+    if !input.plain_owner_scope(caller_class.parent.as_deref(), budget)? {
+        return Ok(None);
+    }
+    if !plain(target_class, &caller, budget)?
+        || target_class.access_flags & 1 == 0
+        || target_class.access_flags & 0x200 != 0
+    {
+        return Ok(None);
+    }
+    let mut target = None;
+    for method in &target_class.methods {
+        budget.charge_work(1)?;
+        if crate::p0_knowledge::same_units(&method.name, &name, budget)? {
+            if target.is_some() {
+                return Ok(None);
+            }
+            target = Some(method);
+        }
+    }
+    let Some(target) = target else {
+        return Ok(None);
+    };
+    if !crate::p0_knowledge::same_units(&target.prototype, &prototype, budget)?
+        || target.access_flags & 9 != 9
+        || target.access_flags & (0x40 | 0x80) != 0
+        || target.generic
+        || !matches!(&target.throws,Some(throws) if throws.is_empty())
+    {
+        return Ok(None);
+    }
+    if let Some(original) = input.local_method(id, budget)? {
+        let method_mask = 1 | 2 | 4 | 8 | 0x40 | 0x80 | 0x100 | 0x400;
+        let class_mask = 1 | 0x10 | 0x200 | 0x400 | 0x1000 | 0x2000 | 0x4000;
+        if original.access_flags & method_mask != target.access_flags & method_mask
+            || original.owner_access_flags & class_mask != target_class.access_flags & class_mask
+            || !original.plain_scope
+        {
+            return Ok(None);
+        }
+        let parent_matches = match (original.parent, target_class.parent.as_deref()) {
+            (None, None) => true,
+            (Some(original), Some(expected)) => original.matches_with(expected, budget)?,
+            _ => false,
+        };
+        if !parent_matches {
+            return Ok(None);
+        }
+    }
+    let mut current = &owner[..];
+    let mut seen: Vec<&[u16]> = Vec::new();
+    loop {
+        budget.charge_work(1)?;
+        for old in &seen {
+            budget.charge_work(1)?;
+            if crate::p0_knowledge::same_units(old, current, budget)? {
+                return Ok(None);
+            }
+        }
+        push(&mut seen, current, budget)?;
+        let Some(class) = catalog.class(current, budget)? else {
+            return Ok(None);
+        };
+        if !plain(class, &caller, budget)? {
+            return Ok(None);
+        }
+        if !crate::p0_knowledge::same_units(current, &owner, budget)? {
+            for method in &class.methods {
+                budget.charge_work(1)?;
+                if crate::p0_knowledge::same_units(&method.name, &name, budget)? {
+                    return Ok(None);
+                }
+            }
+        }
+        match &class.parent {
+            Some(parent) => current = parent,
+            None => {
+                if class.descriptor
+                    != [
+                        76, 106, 97, 118, 97, 47, 108, 97, 110, 103, 47, 79, 98, 106, 101, 99, 116,
+                        59,
+                    ]
+                {
+                    return Ok(None);
+                }
+                break;
+            }
+        }
+    }
+    let prefix_end = owner[1..owner.len() - 1]
+        .iter()
+        .position(|&unit| unit == 47)
+        .map_or(owner.len() - 1, |index| index + 1);
+    if input.qualifier_shadowed(&owner[1..prefix_end], budget)?
+        || !clear_scope(catalog, &caller, &owner[1..prefix_end], budget)?
+    {
+        return Ok(None);
+    }
+    let result = if reference
+        .declaration
+        .prototype
+        .return_type
+        .matches_with(&[73], budget)?
+    {
+        StaticResult::Int
+    } else if reference
+        .declaration
+        .prototype
+        .return_type
+        .matches_with(&[86], budget)?
+    {
+        StaticResult::Void
+    } else {
+        return Ok(None);
+    };
+    let mut formals = Vec::new();
+    let mut supported = true;
+    reference.declaration.prototype.visit_parameter_types(
+        budget,
+        |name, budget| -> Result<(), RequestError> {
+            use crate::p5_types::Narrow;
+            let formal = if name.matches_with(&[73], budget)? {
+                IntegralFormal::Int
+            } else if name.matches_with(&[90], budget)? {
+                IntegralFormal::Boolean
+            } else if name.matches_with(&[66], budget)? {
+                IntegralFormal::Narrow(Narrow::Byte)
+            } else if name.matches_with(&[83], budget)? {
+                IntegralFormal::Narrow(Narrow::Short)
+            } else if name.matches_with(&[67], budget)? {
+                IntegralFormal::Narrow(Narrow::Char)
+            } else {
+                supported = false;
+                return Ok(());
+            };
+            push(&mut formals, formal, budget)
+        },
+    )?;
+    if !supported {
+        return Ok(None);
+    }
+    Ok(Some(StaticContract {
+        _sealed: (),
+        reference: id,
+        owner,
+        name,
+        prototype,
+        formals,
+        result,
+    }))
+}

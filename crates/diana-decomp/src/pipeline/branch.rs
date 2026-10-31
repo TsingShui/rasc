@@ -82,7 +82,19 @@ pub(crate) enum BoundOperand {
     Literal(i32),
 }
 #[derive(Clone, Copy)]
+pub(crate) struct CallId(pub u32);
+pub(crate) struct CallSite {
+    pub contract: crate::p4_calls::StaticContract,
+    pub registers: Vec<RegisterId>,
+    pub pc: CodeUnitOffset,
+    pub result_pc: Option<CodeUnitOffset>,
+}
+pub(crate) struct BoundCall {
+    pub arguments: Vec<ValueId>,
+}
+#[derive(Clone, Copy)]
 pub(crate) enum Op {
+    Call(CallId, Option<RegisterId>),
     Compare(
         RegisterId,
         RegisterId,
@@ -128,6 +140,7 @@ pub(crate) struct Edge {
 }
 #[derive(Clone, Copy)]
 pub(crate) enum Definition {
+    CallResult(CallId),
     Compare(ValueId, crate::pipeline::scalar::Compare, ValueId),
     Parameter(u32),
     Constant(i32),
@@ -156,6 +169,8 @@ pub(crate) struct BoundBlock {
 pub(crate) struct VerifiedSsa<'a> {
     _sealed: (),
     pub switches: Vec<Switch>,
+    pub calls: Vec<CallSite>,
+    pub bound_calls: Vec<Option<BoundCall>>,
     pub result: DeclarationType,
     pub integral_bits: Vec<u8>,
     pub ranges: Vec<Option<crate::p5_types::IntRange>>,
@@ -183,6 +198,7 @@ enum Decoded {
     ),
 }
 struct Flow<'a> {
+    calls: Vec<CallSite>,
     result: DeclarationType,
     switches: Vec<Switch>,
     raw: RawMethodView<'a>,
@@ -252,6 +268,7 @@ fn value(sym: Sym, register: RegisterId, pc: CodeUnitOffset) -> Result<ValueId, 
 }
 fn destination(op: Op) -> Option<RegisterId> {
     match op {
+        Op::Call(_, destination) => destination,
         Op::Constant(r, _) | Op::Move(r, _) | Op::Binary(r, _, _, _) | Op::Compare(r, _, _, _) => {
             Some(r)
         }
@@ -320,6 +337,7 @@ fn block_at(
 
 fn flow<'a>(
     input: &MethodInput<'_, 'a>,
+    catalog: &crate::DeclarationCatalog,
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<Option<Flow<'a>>, RequestError> {
     let RawPrintable::Method(checked) = input.raw() else {
@@ -402,6 +420,7 @@ fn flow<'a>(
         return Ok(None);
     }
     let mut instructions = Vec::new();
+    let mut calls = Vec::new();
     let mut raw_switches: Vec<(Vec<(i32, CodeUnitOffset)>, CodeUnitOffset)> = Vec::new();
     let mut leaders = Vec::new();
     push(&mut leaders, CodeUnitOffset(0), budget)?;
@@ -411,7 +430,7 @@ fn flow<'a>(
         budget.charge_work(1)?;
         let layout = instruction_layout(raw.instructions(), pc, raw.version())
             .map_err(crate::input::MethodError::Decode)?;
-        let next = pc
+        let mut next = pc
             .checked_advance(layout.width())
             .ok_or(RequestError::PlatformCapacity)?;
         if checked.layout().is_reachable(pc) {
@@ -534,6 +553,75 @@ fn flow<'a>(
                     },
                     reg(2)?,
                 )),
+                0x71 | 0x77 => {
+                    let Some(reference) = layout.references()[0] else {
+                        return Err(RequestError::InternalInvariant(
+                            "checked invoke has no reference",
+                        ));
+                    };
+                    let crate::raw::OperandReference::Method(reference) = reference.target else {
+                        return Err(RequestError::InternalInvariant(
+                            "checked invoke has wrong reference kind",
+                        ));
+                    };
+                    let Some(contract) =
+                        crate::p4_calls::resolve_static(input, catalog, reference, budget)?
+                    else {
+                        return Err(RequestError::BindingEvidenceMissing { reference, pc });
+                    };
+                    let mut registers = Vec::new();
+                    for register in operands.registers().iter() {
+                        budget.charge_work(1)?;
+                        push(&mut registers, register, budget)?;
+                    }
+                    if registers.len() != contract.formals.len() {
+                        return Err(RequestError::InternalInvariant(
+                            "checked invoke differs from contract words",
+                        ));
+                    }
+                    let mut destination = None;
+                    let mut result_pc = None;
+                    if next.0 < raw.code_units().0 {
+                        let result_layout =
+                            instruction_layout(raw.instructions(), next, raw.version())
+                                .map_err(crate::input::MethodError::Decode)?;
+                        if matches!(result_layout.kind(),LayoutKind::Instruction(spec) if spec.opcode==0x0a)
+                        {
+                            if contract.result != crate::p4_calls::StaticResult::Int {
+                                return Err(RequestError::InternalInvariant(
+                                    "void call acquired move-result",
+                                ));
+                            }
+                            let result = crate::input::operands::instruction_operands(
+                                raw.instructions(),
+                                next,
+                                result_layout,
+                            )
+                            .map_err(crate::input::MethodError::Decode)?;
+                            destination = Some(result.registers().iter().next().ok_or(
+                                RequestError::InternalInvariant("move-result lost destination"),
+                            )?);
+                            result_pc = Some(next);
+                            next = next
+                                .checked_advance(result_layout.width())
+                                .ok_or(RequestError::PlatformCapacity)?;
+                        }
+                    }
+                    let call = CallId(
+                        u32::try_from(calls.len()).map_err(|_| RequestError::PlatformCapacity)?,
+                    );
+                    push(
+                        &mut calls,
+                        CallSite {
+                            contract,
+                            registers,
+                            pc,
+                            result_pc,
+                        },
+                        budget,
+                    )?;
+                    Decoded::Op(Op::Call(call, destination))
+                }
                 0x28..=0x2a => {
                     has_branch = true;
                     let to = target()?;
@@ -564,6 +652,7 @@ fn flow<'a>(
         pc = next;
     }
     if !has_branch
+        && calls.is_empty()
         && !matches!(result, DeclarationType::Narrow(_))
         && !parameters
             .iter()
@@ -692,6 +781,7 @@ fn flow<'a>(
         }
     }
     Ok(Some(Flow {
+        calls,
         result,
         switches,
         raw,
@@ -703,9 +793,10 @@ fn flow<'a>(
 
 pub(crate) fn build<'a>(
     input: &MethodInput<'_, 'a>,
+    catalog: &crate::DeclarationCatalog,
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<Option<VerifiedSsa<'a>>, RequestError> {
-    let Some(flow) = flow(input, budget)? else {
+    let Some(flow) = flow(input, catalog, budget)? else {
         return Ok(None);
     };
     let mut live = Vec::new();
@@ -743,6 +834,12 @@ pub(crate) fn build<'a>(
                         } else {
                             position += 1;
                         }
+                    }
+                }
+                if let Op::Call(call, _) = op {
+                    for &register in &flow.calls[ix(call.0)?].registers {
+                        budget.charge_work(1)?;
+                        add_register(&mut needed, register, budget)?;
                     }
                 }
                 if let Some(register) = use_register(op) {
@@ -807,6 +904,10 @@ pub(crate) fn build<'a>(
         }
     }
     let mut bound = Vec::new();
+    let mut bound_calls = Vec::new();
+    for _ in &flow.calls {
+        push(&mut bound_calls, None, budget)?;
+    }
     let mut outgoing = Vec::new();
     for (index, block) in flow.blocks.iter().enumerate() {
         budget.charge_work(1)?;
@@ -837,6 +938,32 @@ pub(crate) fn build<'a>(
                 _ => None,
             };
             let result = match op {
+                Op::Call(call, destination) => {
+                    let site = &flow.calls[ix(call.0)?];
+                    let mut arguments = Vec::new();
+                    for &register in &site.registers {
+                        budget.charge_work(1)?;
+                        push(
+                            &mut arguments,
+                            value(lookup(&env, register, budget)?, register, pc)?,
+                            budget,
+                        )?;
+                    }
+                    if bound_calls[ix(call.0)?].is_some() {
+                        return Err(RequestError::InternalInvariant("call was bound twice"));
+                    }
+                    bound_calls[ix(call.0)?] = Some(BoundCall { arguments });
+                    if destination.is_some() {
+                        let result = ValueId(
+                            u32::try_from(values.len())
+                                .map_err(|_| RequestError::PlatformCapacity)?,
+                        );
+                        push(&mut values, Definition::CallResult(call), budget)?;
+                        Some(result)
+                    } else {
+                        None
+                    }
+                }
                 Op::Compare(_, _, compare, _) => {
                     let id = ValueId(
                         u32::try_from(values.len()).map_err(|_| RequestError::PlatformCapacity)?,
@@ -1000,6 +1127,8 @@ pub(crate) fn build<'a>(
     let ssa = VerifiedSsa {
         _sealed: (),
         switches: flow.switches,
+        calls: flow.calls,
+        bound_calls,
         result: flow.result,
         integral_bits: Vec::new(),
         ranges: Vec::new(),
@@ -1120,6 +1249,97 @@ fn verify<'a>(
                 ));
             }
             match *op {
+                Op::Call(call, destination) => {
+                    let site = ssa
+                        .calls
+                        .get(ix(call.0)?)
+                        .ok_or(RequestError::InternalInvariant("call has foreign identity"))?;
+                    let original =
+                        instruction_layout(ssa.raw.instructions(), *pc, ssa.raw.version())
+                            .map_err(crate::input::MethodError::Decode)?;
+                    if !matches!(original.kind(),LayoutKind::Instruction(spec) if matches!(spec.opcode,0x71|0x77))
+                        || !matches!(original.references()[0],Some(reference) if reference.target==crate::raw::OperandReference::Method(site.contract.reference))
+                    {
+                        return Err(RequestError::InternalInvariant(
+                            "call changed its original invoke or method reference",
+                        ));
+                    }
+                    let original_operands = crate::input::operands::instruction_operands(
+                        ssa.raw.instructions(),
+                        *pc,
+                        original,
+                    )
+                    .map_err(crate::input::MethodError::Decode)?;
+                    let mut original_registers = original_operands.registers().iter();
+                    for &register in &site.registers {
+                        budget.charge_work(1)?;
+                        if original_registers.next() != Some(register) {
+                            return Err(RequestError::InternalInvariant(
+                                "call changed original argument word order",
+                            ));
+                        }
+                    }
+                    if original_registers.next().is_some() {
+                        return Err(RequestError::InternalInvariant(
+                            "call dropped original argument words",
+                        ));
+                    }
+                    if let Some(result_pc) = site.result_pc {
+                        if pc.checked_advance(original.width()) != Some(result_pc) {
+                            return Err(RequestError::InternalInvariant(
+                                "call result is not adjacent",
+                            ));
+                        }
+                        let result = instruction_layout(
+                            ssa.raw.instructions(),
+                            result_pc,
+                            ssa.raw.version(),
+                        )
+                        .map_err(crate::input::MethodError::Decode)?;
+                        let operands = crate::input::operands::instruction_operands(
+                            ssa.raw.instructions(),
+                            result_pc,
+                            result,
+                        )
+                        .map_err(crate::input::MethodError::Decode)?;
+                        if !matches!(result.kind(),LayoutKind::Instruction(spec) if spec.opcode==0x0a)
+                            || operands.registers().iter().next() != destination
+                        {
+                            return Err(RequestError::InternalInvariant(
+                                "call changed move-result kind or target",
+                            ));
+                        }
+                    }
+                    let arguments = ssa
+                        .bound_calls
+                        .get(ix(call.0)?)
+                        .and_then(Option::as_ref)
+                        .ok_or(RequestError::InternalInvariant("call lost bound arguments"))?;
+                    if site.pc != *pc
+                        || site.registers.len() != arguments.arguments.len()
+                        || destination.is_some() != bound.result.is_some()
+                        || destination.is_some() != site.result_pc.is_some()
+                    {
+                        return Err(RequestError::InternalInvariant(
+                            "call atom changed its original/result sites",
+                        ));
+                    }
+                    for (&register, &argument) in site.registers.iter().zip(&arguments.arguments) {
+                        budget.charge_work(1)?;
+                        if value(lookup(&env, register, budget)?, register, *pc)? != argument {
+                            return Err(RequestError::InternalInvariant(
+                                "call changed argument words or order",
+                            ));
+                        }
+                    }
+                    if let Some(result) = bound.result
+                        && !matches!(ssa.values.get(ix(result.0)?),Some(Definition::CallResult(original)) if original.0==call.0)
+                    {
+                        return Err(RequestError::InternalInvariant(
+                            "call acquired a foreign result definition",
+                        ));
+                    }
+                }
                 Op::Compare(_, _, compare, _) => {
                     if !matches!(bound.result.and_then(|id|ssa.values.get(usize::try_from(id.0).ok()?)),Some(Definition::Compare(left,kind,right)) if Some(*left)==bound.source&&*kind==compare&&Some(BoundOperand::Value(*right))==bound.other)
                     {
@@ -1247,15 +1467,17 @@ fn verify<'a>(
                 1 => 2,
                 _ => 4,
             },
-            Definition::Binary(_, _, _) | Definition::Compare(_, _, _) => 7,
+            Definition::Binary(_, _, _)
+            | Definition::Compare(_, _, _)
+            | Definition::CallResult(_) => 7,
             _ => 0,
         };
         let range = match definition {
             Definition::Parameter(index) => ssa.parameters[ix(*index)?].range(),
             Definition::Constant(value) => Some(crate::p5_types::IntRange::literal(*value)),
-            Definition::Binary(_, _, _) | Definition::Compare(_, _, _) => {
-                Some(crate::p5_types::IntRange::ALL)
-            }
+            Definition::Binary(_, _, _)
+            | Definition::Compare(_, _, _)
+            | Definition::CallResult(_) => Some(crate::p5_types::IntRange::ALL),
             _ => None,
         };
         push(&mut ranges, range, budget)?;
@@ -1272,7 +1494,8 @@ fn verify<'a>(
                 Definition::Parameter(index) => Some(ssa.parameters[ix(*index)?].kind()),
                 Definition::Constant(_)
                 | Definition::Binary(_, _, _)
-                | Definition::Compare(_, _, _) => Some(Kind::Int),
+                | Definition::Compare(_, _, _)
+                | Definition::CallResult(_) => Some(Kind::Int),
                 _ => None,
             },
             budget,
@@ -1434,6 +1657,23 @@ fn verify<'a>(
     }
     if type_conflict {
         return Ok(None);
+    }
+    for (index, site) in ssa.calls.iter().enumerate() {
+        let Some(call) = &ssa.bound_calls[index] else {
+            return Err(RequestError::InternalInvariant(
+                "reachable call has no argument binding",
+            ));
+        };
+        for (&register, &argument) in site.registers.iter().zip(&call.arguments) {
+            budget.charge_work(1)?;
+            let argument = ix(argument.0)?;
+            if bad[argument] || !grounded[argument] {
+                return Err(RequestError::UndefinedRegister {
+                    register,
+                    pc: site.pc,
+                });
+            }
+        }
     }
     ssa.kinds = kinds;
     ssa.integral_bits = integral_bits;

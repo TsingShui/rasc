@@ -131,7 +131,7 @@ def run_public(root, cache, spec, manifest, case_ids=None):
                         else:save(path,value)
                         record['artifacts'][group]={'path':relative(path)}
                     record['execution']='completed'
-                    record['catalog']={'asset_id':cert['catalog']['asset_id'],'applied':'partial external signatures'}
+                    record['catalog']={'asset_id':cert['catalog']['asset_id'],'applied':'signatures and explicitly covered class directories'}
         except (PreparationError,OSError,ValueError,KeyError,TypeError,IndexError) as error:
             record['execution']='failed';record['reason']=str(error)
         records.append(record)
@@ -157,7 +157,7 @@ def run_public(root, cache, spec, manifest, case_ids=None):
     all_runs=required_runs(spec)
     report={'execution':'passed' if len(passed)==len(selected_cases) else 'failed',
             'spec_revision':spec['specRevision'],'engine_revision':{'commit':revision,'working_tree_dirty':dirty},
-            'profile':'native-public-library; certified partial external signatures; caller limits/cancellation; recovery disabled',
+            'profile':'native-public-library; certified declarations with per-class coverage; caller limits/cancellation; recovery disabled',
             'full_required_set':case_ids is None,'selected_cases':len(selected_cases),
             'selected_invocations':len({(c['id'],i['id']) for c,i,_ in runs}),'selected_seams':len(runs),
             'passed_cases':len(passed),'passed_seams':sum(r['execution']=='passed' for r in results),
@@ -179,8 +179,10 @@ def _catalog(root, assets, identity):
             raise PreparationError('missing/changed declaration evidence')
         return load(path)
     catalog=checked(assets[identity])
-    declarations=[value['declaration'] for value in checked(assets[catalog['jdk_declarations']]).values()]
-    declarations.extend(catalog['source_classfiles'].values())
+    api_declarations=[value['declaration'] for value in checked(assets[catalog['jdk_declarations']]).values()]
+    declarations=list(api_declarations)
+    source_declarations=list(catalog['source_classfiles'].values())
+    declarations.extend(source_declarations)
     for path in catalog['explicit_facts']:
         for entry in checked(by_path[path])['entries']:
             if entry.get('declared') is True:declarations.append(entry)
@@ -191,7 +193,16 @@ def _catalog(root, assets, identity):
     for declaration in declarations:
         for method in declaration['methods']:
             methods.append({'owner':units(declaration['descriptor']),'name':units(method['name']),'prototype':units(method['proto'])})
-    return {'environment_id':0,'methods':methods}
+    classes=[]
+    for declaration,coverage in [(declaration,'exported_api') for declaration in api_declarations]+[(declaration,'all_declarations') for declaration in source_declarations]:
+        attributes=declaration['attributes']
+        classes.append({'descriptor':units(declaration['descriptor']),'access_flags':declaration['flags'],'parent':None if declaration['parent'] is None else units(declaration['parent']),
+                        'interfaces':[units(name) for name in declaration['interfaces']],
+                        'methods':[{'name':units(method['name']),'prototype':units(method['proto']),'access_flags':method['flags'],'throws':None if method.get('throws') is None else [units(name) for name in method['throws']],'generic':'Signature' in method['attributes']} for method in declaration['methods']],
+                        'field_names':[units(field['name']) for field in declaration['fields']],
+                        'coverage':coverage,
+                        'generic':'Signature' in attributes,'enclosing_scope':any(attribute in attributes for attribute in ('InnerClasses','EnclosingMethod','NestHost','NestMembers'))})
+    return {'environment_id':0,'methods':methods,'classes':classes}
 
 
 def _units(value):

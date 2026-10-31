@@ -1,4 +1,5 @@
 pub(crate) mod branch;
+pub(crate) mod calls;
 mod declarations;
 pub(crate) mod dispatcher;
 mod dispatcher_verify;

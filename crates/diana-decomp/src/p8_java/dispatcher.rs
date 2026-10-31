@@ -1,4 +1,4 @@
-use super::branch::{Assignment, Local, LocalId, copies, operations};
+use super::branch::{Assignment, Local, LocalId, copies};
 use crate::input::{MethodInput, RawPrintable};
 use crate::pipeline::branch::{BlockId, Definition, EdgeId, Kind, Terminal, VerifiedSsa};
 use crate::substrate::owned::{TextBuffer, copy_units, reserve};
@@ -15,7 +15,7 @@ pub(crate) enum Transfer {
         cases: Vec<(i32, Edge)>,
         default: Edge,
     },
-    Return(super::branch::Return),
+    Return(super::branch::ValueUse),
     Jump(Edge),
     Branch {
         left: LocalId,
@@ -28,7 +28,7 @@ pub(crate) enum Transfer {
 }
 pub(crate) struct Case {
     pub key: BlockId,
-    pub statements: Vec<Assignment>,
+    pub statements: Vec<super::calls::Statement>,
     pub transfer: Transfer,
 }
 pub(crate) struct Dispatcher {
@@ -156,8 +156,9 @@ pub(crate) fn verify(
                 )?;
             }
         }
-        let mut statements = Vec::new();
-        operations(ssa, key, &mut statements, budget)?;
+        let Some(statements) = super::calls::operations(ssa, key, budget)? else {
+            return Ok(None);
+        };
         let bound = &ssa.bound[index];
         let transfer = match block.terminal {
             Terminal::Switch { table, .. } => {

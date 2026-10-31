@@ -209,32 +209,40 @@ fn scalar(
     output.push(";\n", budget)
 }
 pub(super) fn returned(
-    value: crate::p8_java::branch::Return,
+    value: crate::p8_java::branch::ValueUse,
     output: &mut TextBuffer,
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<(), RequestError> {
-    use crate::p8_java::branch::Return;
     output.push("return ", budget)?;
+    value_use(value, output, budget)?;
+    output.push(";\n", budget)
+}
+pub(super) fn value_use(
+    value: crate::p8_java::branch::ValueUse,
+    output: &mut TextBuffer,
+    budget: &mut MethodBudget<'_, '_>,
+) -> Result<(), RequestError> {
+    use crate::p8_java::branch::ValueUse;
     match value {
-        Return::Direct(value) => local(value, output, budget)?,
-        Return::Boolean01(value) => {
+        ValueUse::Direct(value) => local(value, output, budget)?,
+        ValueUse::Boolean01(value) => {
             output.push("(", budget)?;
             local(value, output, budget)?;
             output.push(" != 0)", budget)?;
         }
-        Return::Narrow { value, kind } => {
+        ValueUse::Narrow { value, kind } => {
             output.push("(", budget)?;
             output.push(kind.spelling(), budget)?;
             output.push(") ", budget)?;
             local(value, output, budget)?;
         }
-        Return::BooleanWord(value) => {
+        ValueUse::BooleanWord(value) => {
             output.push("(", budget)?;
             local(value, output, budget)?;
             output.push(" ? 1 : 0)", budget)?;
         }
     }
-    output.push(";\n", budget)
+    Ok(())
 }
 pub(super) fn local(
     id: LocalId,

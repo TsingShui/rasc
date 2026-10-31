@@ -35,6 +35,11 @@ pub enum RequestError {
         register: crate::RegisterId,
         pc: crate::CodeUnitOffset,
     },
+    #[error("binding evidence missing for method {reference:?} at {pc:?}")]
+    BindingEvidenceMissing {
+        reference: crate::MethodId,
+        pc: crate::CodeUnitOffset,
+    },
     #[error("requested DEX identity does not exist")]
     UnknownDex,
     #[error("JavaTargetLimit: {item:?} uses {actual}, maximum {maximum}")]
@@ -58,7 +63,9 @@ impl RequestError {
             Self::UnknownDex | Self::UndefinedRegister { .. } | Self::InvalidWideRead { .. } => {
                 FailureKind::Malformed
             }
-            Self::JavaTargetLimit { .. } => FailureKind::Unsupported,
+            Self::JavaTargetLimit { .. } | Self::BindingEvidenceMissing { .. } => {
+                FailureKind::Unsupported
+            }
             Self::InternalInvariant(_) => FailureKind::InternalInvariant,
         }
     }

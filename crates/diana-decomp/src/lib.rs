@@ -2,9 +2,13 @@
 
 mod engine;
 mod p0_knowledge;
-pub use p0_knowledge::{DeclarationCatalog, ExternalMethodSignature};
+pub use p0_knowledge::{
+    DeclarationCatalog, DeclarationCoverage, ExternalClassDeclaration, ExternalMethodDeclaration,
+    ExternalMethodSignature,
+};
 #[path = "p1_input/mod.rs"]
 pub mod input;
+mod p4_calls;
 mod p5_types;
 mod p6_variables;
 mod p8_java;

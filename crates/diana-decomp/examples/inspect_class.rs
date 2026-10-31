@@ -30,7 +30,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
     if !matches!(arguments.len(), 3 | 5) {
-        return Err("usage: inspect_class <dex> <header-offset> <class-def-index> [<method-name> <full-proto>] [--catalog <signature-json>] [--control <control-json>] [--output <json-path>]".into());
+        return Err("usage: inspect_class <dex> <header-offset> <class-def-index> [<method-name> <full-proto>] [--catalog <declaration-json>] [--control <control-json>] [--output <json-path>]".into());
     }
     let bytes = std::fs::read(&arguments[0])?;
     let header_offset = ByteOffset(arguments[1].parse()?);
@@ -47,10 +47,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     struct CatalogInput {
         environment_id: u64,
         methods: Vec<ExternalMethodSignature>,
+        #[serde(default)]
+        classes: Vec<diana_decomp::ExternalClassDeclaration>,
     }
     let catalog = if let Some(path) = catalog_path {
         let facts: CatalogInput = serde_json::from_reader(std::fs::File::open(path)?)?;
-        DeclarationCatalog::partial_signatures(EnvironmentId(facts.environment_id), facts.methods)
+        DeclarationCatalog::with_declarations(
+            EnvironmentId(facts.environment_id),
+            facts.methods,
+            facts.classes,
+        )
     } else {
         DeclarationCatalog::empty(EnvironmentId(0))
     };
