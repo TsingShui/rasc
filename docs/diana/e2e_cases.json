@@ -5,7 +5,7 @@
   "interfacePolicy": "public-library-and-complex-domain-modules-no-cli-blackbox",
   "frozenPolicy": "B01 approves a reviewed revision, not an immutable case count. Preserve existing required problems and valid semantics; revise faulty recipes/oracles with independent evidence and review, append new counterexamples, never refresh from engine output or change required Java to Smali to obtain a pass.",
   "designNotice": "Specifications, not runnable assets. Schema 2 binds each invocation id/input/expected together. B01 review, B02 executable assets/tool locks, B03 independent certification and B04 authorized harness falsification are all still required; draft-5 is not approval or execution evidence. Resource quotas are opt-in; no speculative JVM-size admission.",
-  "toolchainSpec": "TASKS.md#45-固定工具与内容锁",
+  "toolchainSpec": "TASKS.md#45-pinned-tools-and-content-locks",
   "caseCount": 86,
   "invocationPolicy": {
     "required": "Every invocation is required. Match by case id + invocation id; no index-zipped expected arrays, optional branches, any-error substitution or partial case pass.",
@@ -23,7 +23,7 @@
     {
       "id": "D001",
       "family": "control",
-      "title": "分支合流不覆盖未选路径",
+      "title": "Branch merge does not overwrite the untaken path",
       "suite": "core-java",
       "seam": "decompile-method",
       "required": true,
@@ -34,7 +34,7 @@
         {"id":"v1","input":{"targetRole":"case","method":"choose(ZII)I","args":[true,10,20]},"expected":{"outcome":"java","return":10}},
         {"id":"v2","input":{"targetRole":"case","method":"choose(ZII)I","args":[false,10,20]},"expected":{"outcome":"java","return":20}}
       ],
-      "mustRejectMutation": "把某分支Phi拷贝提前到所有分支、漏一个incoming。",
+      "mustRejectMutation": "The decompiler MUST NOT hoist the Phi copy of one branch ahead of all branches, and MUST NOT omit an incoming edge.",
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "checked-in self-made source only; fixed JDK/R8; no platform SDK",
       "acceptanceGate": "engine",
@@ -44,7 +44,7 @@
     {
       "id": "D002",
       "family": "control",
-      "title": "并行拷贝交换循环",
+      "title": "Parallel-copy swap loop",
       "suite": "core-java",
       "seam": "decompile-method",
       "required": true,
@@ -56,7 +56,7 @@
         {"id":"v2","input":{"targetRole":"case","method":"swap(III)I","args":[10,20,1]},"expected":{"outcome":"java","return":2010}},
         {"id":"v3","input":{"targetRole":"case","method":"swap(III)I","args":[10,20,2]},"expected":{"outcome":"java","return":1020}}
       ],
-      "mustRejectMutation": "把 a<-b,b<-a 顺序化成a=b;b=a。",
+      "mustRejectMutation": "The decompiler MUST NOT serialize the parallel copies a<-b,b<-a into a=b;b=a.",
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "checked-in self-made source only; fixed JDK/R8; no platform SDK",
       "acceptanceGate": "engine",
@@ -66,7 +66,7 @@
     {
       "id": "D003",
       "family": "control",
-      "title": "三个循环携带值同步旋转",
+      "title": "Synchronous rotation of three loop-carried values",
       "suite": "core-java",
       "seam": "decompile-method",
       "required": true,
@@ -78,7 +78,7 @@
         {"id":"v2","input":{"targetRole":"case","method":"rotate(IIII)I","args":[1,2,3,2]},"expected":{"outcome":"java","return":312}},
         {"id":"v3","input":{"targetRole":"case","method":"rotate(IIII)I","args":[1,2,3,3]},"expected":{"outcome":"java","return":123}}
       ],
-      "mustRejectMutation": "只保存一个覆盖后的source或漏entry/latch edge copy。",
+      "mustRejectMutation": "The decompiler MUST NOT keep only one overwritten source, and MUST NOT omit an entry or latch edge copy.",
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "checked-in self-made source only; fixed JDK/R8; no platform SDK",
       "acceptanceGate": "engine",
@@ -88,7 +88,7 @@
     {
       "id": "D004",
       "family": "control",
-      "title": "continue之前更新和carry值",
+      "title": "Update before continue and the carried value",
       "suite": "core-java",
       "seam": "decompile-method",
       "required": true,
@@ -99,7 +99,7 @@
         {"id":"v1","input":{"targetRole":"case","method":"count(I)I","args":[0]},"expected":{"outcome":"java","return":0}},
         {"id":"v2","input":{"targetRole":"case","method":"count(I)I","args":[6]},"expected":{"outcome":"java","return":9}}
       ],
-      "mustRejectMutation": "continue绕过更新导致无限循环或重复贡献。",
+      "mustRejectMutation": "The decompiler MUST NOT let continue bypass the update, which yields an infinite loop or a duplicated contribution.",
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "checked-in self-made source only; fixed JDK/R8; no platform SDK",
       "acceptanceGate": "engine",
@@ -109,7 +109,7 @@
     {
       "id": "D005",
       "family": "control",
-      "title": "嵌套循环具名退出",
+      "title": "Named exit from a nested loop",
       "suite": "core-java",
       "seam": "decompile-method",
       "required": true,
@@ -119,7 +119,7 @@
       "invocations": [
         {"id":"v1","input":{"targetRole":"case","method":"nested()I","args":[]},"expected":{"outcome":"java","return":6}}
       ],
-      "mustRejectMutation": "将break outer转成内层break或漏退出Phi。",
+      "mustRejectMutation": "The decompiler MUST NOT turn break outer into an inner break, and MUST NOT omit the exit Phi.",
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "checked-in self-made source only; fixed JDK/R8; no platform SDK",
       "acceptanceGate": "engine",
@@ -129,7 +129,7 @@
     {
       "id": "D006",
       "family": "control",
-      "title": "条件含副作用只执行实际分支",
+      "title": "A condition with side effects executes only the actual branch",
       "suite": "core-java",
       "seam": "decompile-method",
       "required": true,
@@ -140,7 +140,7 @@
         {"id":"v1","input":{"targetRole":"case","method":"and()Z","args":[]},"expected":{"outcome":"java","return":false,"events":["A"]}},
         {"id":"v2","input":{"targetRole":"case","method":"or()Z","args":[]},"expected":{"outcome":"java","return":true,"events":["A","B"]}}
       ],
-      "mustRejectMutation": "把短路条件展开为两个无条件调用、重复求值。",
+      "mustRejectMutation": "The decompiler MUST NOT expand a short-circuit condition into two unconditional calls, and MUST NOT evaluate an operand more than once.",
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "checked-in self-made source only; fixed JDK/R8; no platform SDK",
       "acceptanceGate": "engine",
@@ -150,7 +150,7 @@
     {
       "id": "D007",
       "family": "control",
-      "title": "switch共享case与fallthrough",
+      "title": "switch with shared cases and fallthrough",
       "suite": "core-java",
       "seam": "decompile-method",
       "required": true,
@@ -163,7 +163,7 @@
         {"id":"v3","input":{"targetRole":"case","method":"f(I)I","args":[2]},"expected":{"outcome":"java","return":2}},
         {"id":"v4","input":{"targetRole":"case","method":"f(I)I","args":[9]},"expected":{"outcome":"java","return":7}}
       ],
-      "mustRejectMutation": "共享target丢key、fallthrough错误加break、default错误。",
+      "mustRejectMutation": "The decompiler MUST NOT drop a key from a shared target, add a break to a fallthrough case, or misplace the default.",
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "checked-in self-made source only; fixed JDK/R8; no platform SDK",
       "acceptanceGate": "engine",
@@ -173,7 +173,7 @@
     {
       "id": "D008",
       "family": "control",
-      "title": "循环多出口保留最后值",
+      "title": "A loop with multiple exits preserves the final value",
       "suite": "core-java",
       "seam": "decompile-method",
       "required": true,
@@ -185,7 +185,7 @@
         {"id":"v2","input":{"targetRole":"case","method":"f(I)I","args":[2]},"expected":{"outcome":"java","return":12}},
         {"id":"v3","input":{"targetRole":"case","method":"f(I)I","args":[10]},"expected":{"outcome":"java","return":33}}
       ],
-      "mustRejectMutation": "退出copy取错header/latch值。",
+      "mustRejectMutation": "The decompiler MUST NOT take the wrong header or latch value for an exit copy.",
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "checked-in self-made source only; fixed JDK/R8; no platform SDK",
       "acceptanceGate": "engine",
@@ -195,7 +195,7 @@
     {
       "id": "D009",
       "family": "numeric",
-      "title": "整型溢出保持位宽",
+      "title": "Integer overflow keeps the bit width",
       "suite": "core-java",
       "seam": "decompile-method",
       "required": true,
@@ -206,7 +206,7 @@
         {"id":"v1","input":{"targetRole":"case","method":"add(II)I","args":[2147483647,1]},"expected":{"outcome":"java","return":-2147483648}},
         {"id":"v2","input":{"targetRole":"case","method":"add(II)I","args":[-2147483648,-1]},"expected":{"outcome":"java","return":2147483647}}
       ],
-      "mustRejectMutation": "将int结果提升long或clamp，作为hostchecked算术执行。",
+      "mustRejectMutation": "The decompiler MUST NOT widen an int result to long, clamp it, or evaluate it as host-checked arithmetic.",
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "checked-in self-made source only; fixed JDK/R8; no platform SDK",
       "acceptanceGate": "engine",
@@ -216,7 +216,7 @@
     {
       "id": "D010",
       "family": "numeric",
-      "title": "整型除零异常与MIN除负一",
+      "title": "Integer divide-by-zero exception and MIN divided by negative one",
       "suite": "core-java",
       "seam": "decompile-method",
       "required": true,
@@ -227,7 +227,7 @@
         {"id":"v1","input":{"targetRole":"case","method":"div(II)I","args":[-2147483648,-1]},"expected":{"outcome":"java","return":-2147483648}},
         {"id":"v2","input":{"targetRole":"case","method":"div(II)I","args":[7,0]},"expected":{"outcome":"java","exception":"java.lang.ArithmeticException"}}
       ],
-      "mustRejectMutation": "unused/折叠div删除除零异常、MIN/-1行为改动。",
+      "mustRejectMutation": "The decompiler MUST NOT delete the divide-by-zero exception of an unused or folded div, and MUST NOT change the MIN/-1 behavior.",
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "checked-in self-made source only; fixed JDK/R8; no platform SDK",
       "acceptanceGate": "engine",
@@ -237,7 +237,7 @@
     {
       "id": "D011",
       "family": "numeric",
-      "title": "有符号和无符号移位mask",
+      "title": "Signed and unsigned shift masks",
       "suite": "core-java",
       "seam": "decompile-method",
       "required": true,
@@ -249,7 +249,7 @@
         {"id":"v2","input":{"targetRole":"case","method":"f(II)I","args":[-1,-1]},"expected":{"outcome":"java","return":1}},
         {"id":"v3","input":{"targetRole":"case","method":"g(JI)J","args":["1",64]},"expected":{"outcome":"java","returnLong":"1"}}
       ],
-      "mustRejectMutation": "不mask shiftcount、误用signedshift。",
+      "mustRejectMutation": "The decompiler MUST NOT leave the shift count unmasked, and MUST NOT use a signed shift where an unsigned shift applies.",
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "checked-in self-made source only; fixed JDK/R8; no platform SDK",
       "acceptanceGate": "engine",
@@ -259,7 +259,7 @@
     {
       "id": "D012",
       "family": "numeric",
-      "title": "窄化byte/char保留符号",
+      "title": "Narrowing to byte/char preserves the sign",
       "suite": "core-java",
       "seam": "decompile-method",
       "required": true,
@@ -270,7 +270,7 @@
         {"id":"v1","input":{"targetRole":"case","method":"f(I)I","args":[255]},"expected":{"outcome":"java","return":-1}},
         {"id":"v2","input":{"targetRole":"case","method":"g(I)I","args":[-1]},"expected":{"outcome":"java","return":65535}}
       ],
-      "mustRejectMutation": "byte按unsigned/char按signed解释。",
+      "mustRejectMutation": "The decompiler MUST NOT interpret byte as unsigned or char as signed.",
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "checked-in self-made source only; fixed JDK/R8; no platform SDK",
       "acceptanceGate": "engine",
@@ -280,7 +280,7 @@
     {
       "id": "D013",
       "family": "numeric",
-      "title": "boolean位运算不是int表达式",
+      "title": "A boolean bit operation is not an int expression",
       "suite": "core-java",
       "seam": "decompile-method",
       "required": true,
@@ -293,7 +293,7 @@
         {"id":"v3","input":{"targetRole":"case","method":"f(ZZ)Z","args":[true,false]},"expected":{"outcome":"java","return":false}},
         {"id":"v4","input":{"targetRole":"case","method":"f(ZZ)Z","args":[true,true]},"expected":{"outcome":"java","return":false}}
       ],
-      "mustRejectMutation": "生成boolean ^ 1等不合法Java或改变逻辑。",
+      "mustRejectMutation": "The decompiler MUST NOT emit invalid Java such as boolean ^ 1, and MUST NOT change the logic.",
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "checked-in self-made source only; fixed JDK/R8; no platform SDK",
       "acceptanceGate": "engine",
@@ -303,7 +303,7 @@
     {
       "id": "D014",
       "family": "numeric",
-      "title": "零值在ref/boolean/int上下文不混用",
+      "title": "Zero values are not interchanged across ref/boolean/int contexts",
       "suite": "core-java",
       "seam": "decompile-method",
       "required": true,
@@ -316,7 +316,7 @@
         {"id":"v3","input":{"targetRole":"case","method":"b()Z","args":[]},"expected":{"outcome":"java","return":false}},
         {"id":"v4","input":{"targetRole":"case","method":"i()I","args":[]},"expected":{"outcome":"java","return":0}}
       ],
-      "mustRejectMutation": "ref与0、boolean与null混淆；纯literal用法错误。",
+      "mustRejectMutation": "The decompiler MUST NOT confuse a reference with 0 or a boolean with null, and MUST NOT use a bare literal in the wrong context.",
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "checked-in self-made source only; fixed JDK/R8; no platform SDK",
       "acceptanceGate": "engine",
@@ -332,24 +332,24 @@
       "required": true,
       "validationScope": "method-in-known-context",
       "inputKind": "self-made-java-to-dex",
-      "inputRecipe": "static boolean lt(float a,float b){return a<b;} le uses <=; gt uses >; ge uses >=. 固定D8生成后认证cmpl/cmpg及相应branch家族；不以未审阅smali替换缺失形态。",
+      "inputRecipe": "static boolean lt(float a,float b){return a<b;} le uses <=; gt uses >; ge uses >=. Preparation MUST certify the cmpl/cmpg instruction and the corresponding branch family after generation with the pinned D8; it MUST NOT substitute unreviewed Smali for a missing form.",
       "invocations": [
         {"id":"v1","input":{"calls":[{"targetRole":"case","method":"lt(FF)Z","args":[{"floatBits":"7fc00000"},{"floatBits":"3f800000"}]},{"targetRole":"case","method":"le(FF)Z","args":[{"floatBits":"7fc00000"},{"floatBits":"3f800000"}]},{"targetRole":"case","method":"gt(FF)Z","args":[{"floatBits":"7fc00000"},{"floatBits":"3f800000"}]},{"targetRole":"case","method":"ge(FF)Z","args":[{"floatBits":"7fc00000"},{"floatBits":"3f800000"}]}]},"expected":{"outcome":"java","lt":false,"le":false,"gt":false,"ge":false}},
         {"id":"v2","input":{"calls":[{"targetRole":"case","method":"lt(FF)Z","args":[{"floatBits":"3f800000"},{"floatBits":"7fc00000"}]},{"targetRole":"case","method":"le(FF)Z","args":[{"floatBits":"3f800000"},{"floatBits":"7fc00000"}]},{"targetRole":"case","method":"gt(FF)Z","args":[{"floatBits":"3f800000"},{"floatBits":"7fc00000"}]},{"targetRole":"case","method":"ge(FF)Z","args":[{"floatBits":"3f800000"},{"floatBits":"7fc00000"}]}]},"expected":{"outcome":"java","lt":false,"le":false,"gt":false,"ge":false}}
       ],
-      "mustRejectMutation": "将cmpl/cmpg结果无条件转为普通关系表达导致NaN分支错。",
+      "mustRejectMutation": "The decompiler MUST NOT convert a cmpl/cmpg result unconditionally into an ordinary relational expression, which misdirects the NaN branch.",
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "checked-in self-made source only; fixed JDK/R8; no platform SDK",
       "acceptanceGate": "engine",
       "designRefs": "ALGORITHMS §4",
       "inputRequirements": [
-        "独立记录实际cmpl/cmpg、branch、operand顺序与PC；四方法和两种NaN位置分别保留。若固定编译器消掉被测义务，准备阻塞并审阅recipe修订，不沿用覆盖声明。"
+        "Record independently the actual cmpl/cmpg instruction, branch, operand order and PC; keep the four methods and both NaN positions separately. If the pinned compiler eliminates the tested obligation, preparation blocks and the recipe revision MUST be reviewed; the existing coverage claim MUST NOT be retained."
       ]
     },
     {
       "id": "D016",
       "family": "numeric",
-      "title": "负零与浮点除零",
+      "title": "Negative zero and floating-point division by zero",
       "suite": "core-java",
       "seam": "decompile-method",
       "required": true,
@@ -360,7 +360,7 @@
         {"id":"v1","input":{"targetRole":"case","method":"negzero()F","args":[]},"expected":{"outcome":"java","returnFloatBits":"80000000"}},
         {"id":"v2","input":{"targetRole":"case","method":"divide(FF)F","args":[{"floatBits":"3f800000"},{"floatBits":"00000000"}]},"expected":{"outcome":"java","returnFloatBits":"7f800000"}}
       ],
-      "mustRejectMutation": "负零转正零，FP除零转ArithmeticException。",
+      "mustRejectMutation": "The decompiler MUST NOT turn negative zero into positive zero, and MUST NOT turn an FP division by zero into an ArithmeticException.",
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "checked-in source; JDK Driver uses Float.floatToRawIntBits only as observer, not target call",
       "acceptanceGate": "engine",
@@ -370,7 +370,7 @@
     {
       "id": "D017",
       "family": "numeric",
-      "title": "FP转int的NaN/无穷和截断",
+      "title": "NaN, infinity and truncation in FP-to-int conversion",
       "suite": "core-java",
       "seam": "decompile-method",
       "required": true,
@@ -384,7 +384,7 @@
         {"id":"v4","input":{"targetRole":"case","method":"f(F)I","args":[{"floatBits":"4079999a"}]},"expected":{"outcome":"java","return":3}},
         {"id":"v5","input":{"targetRole":"case","method":"f(F)I","args":[{"floatBits":"c079999a"}]},"expected":{"outcome":"java","return":-3}}
       ],
-      "mustRejectMutation": "round替代truncate、NaN/overflow错误。",
+      "mustRejectMutation": "The decompiler MUST NOT substitute rounding for truncation, and MUST NOT mishandle NaN or overflow.",
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "checked-in self-made source only; fixed JDK/R8; no platform SDK",
       "acceptanceGate": "engine",
@@ -394,7 +394,7 @@
     {
       "id": "D018",
       "family": "calls",
-      "title": "argument从左到右且receiver先求值",
+      "title": "Arguments evaluate left to right and the receiver first",
       "suite": "core-java",
       "seam": "decompile-method",
       "required": true,
@@ -404,7 +404,7 @@
       "invocations": [
         {"id":"v1","input":{"targetRole":"case","method":"target()I","args":[]},"expected":{"outcome":"java","return":3,"events":["R","A1","A2","SUM"]}}
       ],
-      "mustRejectMutation": "参数倒序、receiver重求值、合并表达式引入多次调用。",
+      "mustRejectMutation": "The decompiler MUST NOT reverse the argument order, re-evaluate the receiver, or merge expressions so that a call happens more than once.",
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "self-made Dep complete declaration catalog, checked-in source",
       "acceptanceGate": "engine",
@@ -414,7 +414,7 @@
     {
       "id": "D019",
       "family": "calls",
-      "title": "静态重载按descriptor选择",
+      "title": "Static overload selection follows the descriptor",
       "suite": "core-java",
       "seam": "decompile-method",
       "required": true,
@@ -424,7 +424,7 @@
       "invocations": [
         {"id":"v1","input":{"targetRole":"case","method":"target()Ljava/lang/String;","args":[]},"expected":{"outcome":"java","returnStringUnits":[79],"events":["pick:Object"]}}
       ],
-      "mustRejectMutation": "因nullliteral/新增cast选择String重载。",
+      "mustRejectMutation": "The decompiler MUST NOT select the String overload because of a null literal or an added cast.",
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "self-made Dep complete overload catalog",
       "acceptanceGate": "engine",
@@ -434,7 +434,7 @@
     {
       "id": "D020",
       "family": "calls",
-      "title": "虚分派保留override",
+      "title": "Virtual dispatch preserves the override",
       "suite": "core-java",
       "seam": "decompile-class",
       "required": true,
@@ -444,7 +444,7 @@
       "invocations": [
         {"id":"v1","input":{"targetRole":"case","method":"target()I","args":[]},"expected":{"outcome":"java","return":2}}
       ],
-      "mustRejectMutation": "转成Base静态/直接call或漏override。",
+      "mustRejectMutation": "The decompiler MUST NOT turn the call into a static or direct call on Base, and MUST NOT omit the override.",
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "self-made Base/Child complete catalog; adjacent constructor profile",
       "acceptanceGate": "engine",
@@ -454,7 +454,7 @@
     {
       "id": "D021",
       "family": "calls",
-      "title": "invoke-super不变成virtual",
+      "title": "invoke-super does not become virtual",
       "suite": "core-java",
       "seam": "decompile-class",
       "required": true,
@@ -464,7 +464,7 @@
       "invocations": [
         {"id":"v1","input":{"targetRole":"child","method":"f()I","args":[],"receiver":{"new":"fixtures.Child","identity":"child-1"}},"expected":{"outcome":"java","return":2,"events":["C","B"]}}
       ],
-      "mustRejectMutation": "super改this.f导致递归或目标错。",
+      "mustRejectMutation": "The decompiler MUST NOT rewrite super into this.f, which causes recursion or the wrong target.",
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "self-made Base/Child complete declarations",
       "acceptanceGate": "engine",
@@ -474,7 +474,7 @@
     {
       "id": "D022",
       "family": "calls",
-      "title": "unused调用仍抛异常和执行effect",
+      "title": "An unused call still throws and executes its effects",
       "suite": "core-java",
       "seam": "decompile-method",
       "required": true,
@@ -484,7 +484,7 @@
       "invocations": [
         {"id":"v1","input":{"targetRole":"case","method":"target()V","args":[]},"expected":{"outcome":"java","exception":"fixtures.ExpectedError","events":["B"],"heap":{"counter":1}}}
       ],
-      "mustRejectMutation": "DCE unusedreturn删除call/异常。",
+      "mustRejectMutation": "The decompiler MUST NOT delete the call or its exception through DCE of an unused return value.",
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "self-made Dep/Error complete declarations",
       "acceptanceGate": "engine",
@@ -494,7 +494,7 @@
     {
       "id": "D023",
       "family": "calls",
-      "title": "interface分派保留实现",
+      "title": "Interface dispatch preserves the implementation",
       "suite": "core-java",
       "seam": "decompile-method",
       "required": true,
@@ -505,7 +505,7 @@
         {"id":"v1","input":{"targetRole":"case","method":"f(Lfixtures/I;)I","args":[{"new":"fixtures.Impl","identity":"impl-1"}]},"expected":{"outcome":"java","return":9}},
         {"id":"v2","input":{"targetRole":"case","method":"f(Lfixtures/I;)I","args":[null]},"expected":{"outcome":"java","exception":"java.lang.NullPointerException"}}
       ],
-      "mustRejectMutation": "interfacecall绑定错、null检查时机变。",
+      "mustRejectMutation": "The decompiler MUST NOT bind the interface call to the wrong target, and MUST NOT change the timing of the null check.",
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "self-made I/Impl complete catalog; dependency remains original source",
       "acceptanceGate": "engine",
@@ -515,7 +515,7 @@
     {
       "id": "D024",
       "family": "heap",
-      "title": "数组越界保留效果prefix",
+      "title": "An out-of-bounds array access keeps the effect prefix",
       "suite": "core-java",
       "seam": "decompile-method",
       "required": true,
@@ -526,7 +526,7 @@
         {"id":"v1","input":{"targetRole":"case","method":"f([I)I","args":[{"arrayType":"[I","values":[7]}]},"expected":{"outcome":"java","exception":"java.lang.ArrayIndexOutOfBoundsException","events":["IDX"]}},
         {"id":"v2","input":{"targetRole":"case","method":"f([I)I","args":[null]},"expected":{"outcome":"java","exception":"java.lang.NullPointerException","events":["IDX"]}}
       ],
-      "mustRejectMutation": "提前null/boundscheck或删indexeffect。",
+      "mustRejectMutation": "The decompiler MUST NOT hoist the null or bounds check, and MUST NOT delete the index effect.",
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "self-made Dep complete catalog",
       "acceptanceGate": "engine",
@@ -536,7 +536,7 @@
     {
       "id": "D025",
       "family": "heap",
-      "title": "unused check-cast仍执行检查",
+      "title": "An unused check-cast still performs the check",
       "suite": "core-java",
       "seam": "decompile-method",
       "required": true,
@@ -548,20 +548,20 @@
         {"id":"v2","input":{"targetRole":"case","method":"f(Ljava/lang/Object;)V","args":[{"new":"java.lang.Object","identity":"object-1"}]},"expected":{"outcome":"java","exception":"java.lang.ClassCastException"}},
         {"id":"v3","input":{"targetRole":"case","method":"f(Ljava/lang/Object;)V","args":[null]},"expected":{"outcome":"java","returnVoid":true}}
       ],
-      "mustRejectMutation": "结果不用删除字节码checkcast。",
+      "mustRejectMutation": "The decompiler MUST NOT delete the bytecode checkcast because its result is unused.",
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "checked-in self-made source only; fixed JDK/R8; no platform SDK",
       "notes": "B02/B03 MUST confirm generated DEX retains check-cast; if javac removes it create reviewed smali input for same operation. Handwritten runtime needs appropriate oracle lane; do not silently replace test.",
       "acceptanceGate": "engine",
       "designRefs": "ALGORITHMS §2、§4",
       "inputRequirements": [
-        "三个输入请求同一含reachable check-cast的原方法；独立确认cast未被javac/D8删除且其结果不影响return/effect。无cast则准备失败，不能只运行source预期。"
+        "The three inputs request the same original method containing a reachable check-cast; confirm independently that neither javac nor D8 removed the cast and that its result does not affect the return or any effect. If no cast exists, preparation fails; running the source expectation alone is insufficient."
       ]
     },
     {
       "id": "D026",
       "family": "heap",
-      "title": "array-store运行类型检查",
+      "title": "array-store performs the runtime type check",
       "suite": "core-java",
       "seam": "decompile-method",
       "required": true,
@@ -573,7 +573,7 @@
         {"id":"v2","input":{"targetRole":"case","method":"f([Ljava/lang/Object;Ljava/lang/Object;)V","args":[{"arrayType":"[Ljava/lang/String;","values":[{"stringUnits":[111,108,100]}],"identity":"strings-1"},{"stringUnits":[111,107]}]},"expected":{"outcome":"java","returnVoid":true,"heap":{"firstString":"ok"}}},
         {"id":"v3","input":{"targetRole":"case","method":"f([Ljava/lang/Object;Ljava/lang/Object;)V","args":[null,{"new":"java.lang.Object","identity":"object-1"}]},"expected":{"outcome":"java","exception":"java.lang.NullPointerException"}}
       ],
-      "mustRejectMutation": "Object[]泛化抹去runtimecomponent检查。",
+      "mustRejectMutation": "The decompiler MUST NOT generalize to Object[] and thereby erase the runtime component check.",
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "checked-in self-made source only; fixed JDK/R8; no platform SDK",
       "acceptanceGate": "engine",
@@ -583,32 +583,32 @@
     {
       "id": "D027",
       "family": "heap",
-      "title": "数组literal元素位模式",
+      "title": "Array literal element bit patterns",
       "suite": "core-java",
       "seam": "decompile-method",
       "required": true,
       "validationScope": "method-in-known-context",
       "inputKind": "self-made-smali-with-proved-reference-java",
-      "inputRecipe": "用两个直接smali方法固定原始形态：a()[I先new-array长度3后fill-array-data宽度4/payload[-1,0,2147483647]再return-object；b()[F先new-array长度2后fill-array-data宽度4/payload bits[80000000,3f800000]再return-object。new与fill相邻，无call/逃逸/其他入口。独立参考Java分别返回new int[]{-1,0,2147483647}与new float[]{-0.0f,1.0f}。",
+      "inputRecipe": "Two direct Smali methods fix the original form: a()[I first runs new-array with length 3, then fill-array-data with width 4 and payload [-1,0,2147483647], then return-object; b()[F first runs new-array with length 2, then fill-array-data with width 4 and payload bits [80000000,3f800000], then return-object. new and fill are adjacent, with no call, no escape and no other entry point. The independent reference Java returns new int[]{-1,0,2147483647} and new float[]{-0.0f,1.0f} respectively.",
       "invocations": [
         {"id":"v1","input":{"targetRole":"case","method":"a()[I","args":[]},"expected":{"outcome":"java","arrayInt":[-1,0,2147483647]}},
         {"id":"v2","input":{"targetRole":"case","method":"b()[F","args":[]},"expected":{"outcome":"java","arrayFloatBits":["80000000","3f800000"]}}
       ],
-      "mustRejectMutation": "fill-array payload按错误宽度/类型或字节序解释。",
+      "mustRejectMutation": "The decompiler MUST NOT interpret the fill-array payload with the wrong width, the wrong type or the wrong byte order.",
       "oracle": "dalvik-fill-fresh-array-proof-plus-reference-java-driver",
       "dependencies": "checked-in self-made source only; fixed JDK/R8; no platform SDK",
       "acceptanceGate": "engine",
       "designRefs": "ALGORITHMS §2、§4",
       "inputRequirements": [
-        "独立记录两个component/width/count、payload原bits、唯一new-array长度及无逃逸/外部入口；原始形态由recipe固定，不赌D8是否选择payload。",
-        "B03按FreshArray前提证明单site bulk fill到参考Java初始化stores的transfer/可观察heap一致，保留allocation原序；镜像不是原DEX的JVM执行，不扩展到参数数组或有effect元素。"
+        "Record independently the two component/width/count triples, the original payload bits, the single new-array length and the absence of escape or external entry points; the recipe fixes the original form rather than depending on whether D8 selects the payload form.",
+        "Under the FreshArray precondition, B03 MUST prove that the single-site bulk fill matches the transfer and observable heap of the reference Java initialization stores, preserving the original allocation order. The mirror is not a JVM execution of the original DEX, and it does not extend to parameter arrays or to elements with effects."
       ],
-      "revisionReason": "固定原始new-array/fill形态并给封闭FreshArray规范镜像，避免短literal被编译成filled-new-array而根本未测payload；元素独立预期不变。"
+      "revisionReason": "The revision fixes the original new-array/fill form and supplies a closed FreshArray normative mirror, because a short literal would otherwise be compiled into filled-new-array and the payload would never be tested; the independent element expectations are unchanged."
     },
     {
       "id": "D028",
       "family": "heap",
-      "title": "字段读取和写入顺序",
+      "title": "Field read and write order",
       "suite": "core-java",
       "seam": "decompile-method",
       "required": true,
@@ -619,7 +619,7 @@
         {"id":"v1","input":{"targetRole":"case","method":"f(Lfixtures/Box;)I","args":[{"new":"fixtures.Box","identity":"box-1","fields":{"n":4}}]},"expected":{"outcome":"java","return":4,"heap":{"n":7}}},
         {"id":"v2","input":{"targetRole":"case","method":"f(Lfixtures/Box;)I","args":[null]},"expected":{"outcome":"java","exception":"java.lang.NullPointerException"}}
       ],
-      "mustRejectMutation": "物理寄存器覆盖old/字段读写重排。",
+      "mustRejectMutation": "The decompiler MUST NOT let a physical register overwrite the old value, and MUST NOT reorder field reads and writes.",
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "self-made Box complete field declarations",
       "acceptanceGate": "engine",
@@ -629,7 +629,7 @@
     {
       "id": "D029",
       "family": "exceptions",
-      "title": "赋值call失败catch观察旧值",
+      "title": "A failing call in an assignment: the catch observes the old value",
       "suite": "core-java",
       "seam": "decompile-method",
       "required": true,
@@ -639,19 +639,19 @@
       "invocations": [
         {"id":"v1","input":{"targetRole":"case","method":"f()I","args":[]},"expected":{"outcome":"java","return":7,"events":["CALL","OLD:7"]}}
       ],
-      "mustRejectMutation": "异常环境错误使用正常result、snapshot在call后、默认0。",
+      "mustRejectMutation": "The decompiler MUST NOT use the normal result in the exception environment, take the snapshot after the call, or fall back to a default 0.",
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "self-made Dep/Error complete declarations",
       "acceptanceGate": "engine",
       "designRefs": "ALGORITHMS §3、§5、§10",
       "inputRequirements": [
-        "独立记录原throw site、normal result commit与catch可见旧值；证明该输入实际要求保留失败前definition，而非仅凭源码变量同名。"
+        "Record independently the original throw site, the normal result commit and the old value visible to the catch; prove that this input actually requires preserving the pre-failure definition, not merely that the source variable has the same name."
       ]
     },
     {
       "id": "D030",
       "family": "exceptions",
-      "title": "两个throw site选择对应shadow旧值",
+      "title": "Two throw sites select their respective shadowed old value",
       "suite": "core-java",
       "seam": "decompile-method",
       "required": true,
@@ -662,19 +662,19 @@
         {"id":"v1","input":{"targetRole":"case","method":"f(Z)I","args":[true]},"expected":{"outcome":"java","return":7,"events":["A","OLD:7"]}},
         {"id":"v2","input":{"targetRole":"case","method":"f(Z)I","args":[false]},"expected":{"outcome":"java","return":9,"events":["B","OLD:9"]}}
       ],
-      "mustRejectMutation": "共用shadow错误保留上一site或覆盖值。",
+      "mustRejectMutation": "The decompiler MUST NOT share one shadow and thereby keep the value of the previous site or the overwritten value.",
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "self-made Dep/Error complete declarations",
       "acceptanceGate": "engine",
       "designRefs": "ALGORITHMS §3、§5、§10",
       "inputRequirements": [
-        "两个throw site必须到同一受测handler并分别携7/9的旧值；若前端复制handler/常量化而消除义务，准备失败，不冻结私有SSA或shadow数量。"
+        "The two throw sites MUST reach the same tested handler and carry the old values 7 and 9 respectively; if the front end duplicates or constant-folds the handler and so eliminates the obligation, preparation fails. Preparation MUST NOT freeze a private SSA form or a shadow count."
       ]
     },
     {
       "id": "D031",
       "family": "exceptions",
-      "title": "catch子类型优先而非类型排序",
+      "title": "Catch subtypes take precedence over type ordering",
       "suite": "core-java",
       "seam": "decompile-method",
       "required": true,
@@ -686,7 +686,7 @@
         {"id":"v2","input":{"targetRole":"case","method":"f(I)I","args":[2]},"expected":{"outcome":"java","return":2}},
         {"id":"v3","input":{"targetRole":"case","method":"f(I)I","args":[0]},"expected":{"outcome":"java","return":0}}
       ],
-      "mustRejectMutation": "按catch目标/类型排序改变优先级或catch type泛化Throwable。",
+      "mustRejectMutation": "The decompiler MUST NOT change the handler precedence through the ordering of catch targets or catch types, and MUST NOT generalize the catch type to Throwable.",
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "complete self-made Dep/BaseError/SubError catalog",
       "acceptanceGate": "engine",
@@ -696,7 +696,7 @@
     {
       "id": "D032",
       "family": "exceptions",
-      "title": "try外cleanup异常不可被旧handler捕获",
+      "title": "A cleanup exception outside the try is not caught by the old handler",
       "suite": "core-java",
       "seam": "decompile-method",
       "required": true,
@@ -706,7 +706,7 @@
       "invocations": [
         {"id":"v1","input":{"targetRole":"case","method":"f()I","args":[]},"expected":{"outcome":"java","exception":"fixtures.ExpectedError","events":["OK","CLEANUP"]}}
       ],
-      "mustRejectMutation": "扩大try到cleanup，将返回改-1或吞异常。",
+      "mustRejectMutation": "The decompiler MUST NOT widen the try to cover the cleanup, change the return to -1, or swallow the exception.",
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "self-made Dep/Error complete catalog",
       "acceptanceGate": "engine",
@@ -716,7 +716,7 @@
     {
       "id": "D033",
       "family": "exceptions",
-      "title": "finally在return前执行但返回值先取",
+      "title": "finally runs before the return, but the return value is read first",
       "suite": "core-java",
       "seam": "decompile-method",
       "required": true,
@@ -726,7 +726,7 @@
       "invocations": [
         {"id":"v1","input":{"targetRole":"case","method":"f()I","args":[]},"expected":{"outcome":"java","return":3,"events":["FINAL:8"]}}
       ],
-      "mustRejectMutation": "finally后再选returnvalue，或漏cleanup。",
+      "mustRejectMutation": "The decompiler MUST NOT select the return value after finally, and MUST NOT omit the cleanup.",
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "self-made Dep complete catalog",
       "acceptanceGate": "engine",
@@ -736,7 +736,7 @@
     {
       "id": "D034",
       "family": "exceptions",
-      "title": "finally抛新异常覆盖return",
+      "title": "A new exception thrown by finally overrides the return",
       "suite": "core-java",
       "seam": "decompile-method",
       "required": true,
@@ -746,7 +746,7 @@
       "invocations": [
         {"id":"v1","input":{"targetRole":"case","method":"f()I","args":[]},"expected":{"outcome":"java","exception":"fixtures.FinalError","events":["FINAL"]}}
       ],
-      "mustRejectMutation": "无条件return3、抛原错误或错误catch范围。",
+      "mustRejectMutation": "The decompiler MUST NOT return 3 unconditionally, throw the original error, or use the wrong catch range.",
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "self-made Dep/FinalError complete catalog",
       "acceptanceGate": "engine",
@@ -756,7 +756,7 @@
     {
       "id": "D035",
       "family": "exceptions",
-      "title": "catch中抛出被外层捕获",
+      "title": "A throw inside catch is caught by the outer handler",
       "suite": "core-java",
       "seam": "decompile-method",
       "required": true,
@@ -766,7 +766,7 @@
       "invocations": [
         {"id":"v1","input":{"targetRole":"case","method":"f()I","args":[]},"expected":{"outcome":"java","return":4,"events":["A","B","OUTER"]}}
       ],
-      "mustRejectMutation": "handler内throw的环境/保护域漏边。",
+      "mustRejectMutation": "For a throw inside a handler, the decompiler MUST NOT omit the environment or protected-range edge.",
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "self-made Dep/ErrorA/ErrorB complete catalog",
       "acceptanceGate": "engine",
@@ -776,7 +776,7 @@
     {
       "id": "D036",
       "family": "monitor",
-      "title": "monitor作用域内调用确实持锁",
+      "title": "A call inside the monitor scope really holds the lock",
       "suite": "core-java",
       "seam": "decompile-method",
       "required": true,
@@ -787,7 +787,7 @@
         {"id":"v1","input":{"targetRole":"case","method":"f(Ljava/lang/Object;)Z","args":[{"new":"java.lang.Object","identity":"lock-1"}]},"expected":{"outcome":"java","return":true}},
         {"id":"v2","input":{"targetRole":"case","method":"f(Ljava/lang/Object;)Z","args":[null]},"expected":{"outcome":"java","exception":"java.lang.NullPointerException"}}
       ],
-      "mustRejectMutation": "把bodycall放锁外、null-lockthrow时机错。",
+      "mustRejectMutation": "The decompiler MUST NOT place the body call outside the lock, and MUST NOT misplace the timing of the null-lock throw.",
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "JDK Thread.holdsLock audited observer declaration, checked-in catalog",
       "notes": "JVM-only core evidence; no claim of full ART memory-model equivalence.",
@@ -798,7 +798,7 @@
     {
       "id": "D037",
       "family": "monitor",
-      "title": "异常退出确实释放monitor",
+      "title": "An abnormal exit really releases the monitor",
       "suite": "core-java",
       "seam": "decompile-method",
       "required": true,
@@ -808,7 +808,7 @@
       "invocations": [
         {"id":"v1","input":{"targetRole":"case","method":"f(Ljava/lang/Object;)V","args":[{"new":"java.lang.Object","identity":"lock-1"}],"observeMonitorAfter":"lock-1"},"expected":{"outcome":"java","exception":"fixtures.ExpectedError","events":["RAISE"],"monitorAfter":false}}
       ],
-      "mustRejectMutation": "exceptionrelease缺失或release另一个对象。",
+      "mustRejectMutation": "The decompiler MUST NOT omit the exception release, and MUST NOT release a different object.",
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "self-made Dep/Error + JDK observer catalog",
       "acceptanceGate": "engine",
@@ -818,7 +818,7 @@
     {
       "id": "D038",
       "family": "monitor",
-      "title": "嵌套同锁重入与退出",
+      "title": "Nested reentry on the same lock and exit",
       "suite": "core-java",
       "seam": "decompile-method",
       "required": true,
@@ -828,7 +828,7 @@
       "invocations": [
         {"id":"v1","input":{"targetRole":"case","method":"f(Ljava/lang/Object;)Z","args":[{"new":"java.lang.Object","identity":"lock-1"}],"observeMonitorAfter":"lock-1"},"expected":{"outcome":"java","return":true,"events":["IN"],"monitorAfter":false}}
       ],
-      "mustRejectMutation": "内层release错误释放全部count、outerlock未持有。",
+      "mustRejectMutation": "The decompiler MUST NOT let an inner release drop the entire count, and MUST NOT treat the outer lock as unheld.",
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "self-made Dep + JDK observer catalog",
       "acceptanceGate": "engine",
@@ -838,7 +838,7 @@
     {
       "id": "D039",
       "family": "monitor",
-      "title": "锁表达式只求值一次",
+      "title": "The lock expression evaluates exactly once",
       "suite": "core-java",
       "seam": "decompile-method",
       "required": true,
@@ -848,7 +848,7 @@
       "invocations": [
         {"id":"v1","input":{"targetRole":"case","method":"f()V","args":[]},"expected":{"outcome":"java","returnVoid":true,"events":["LOCK","BODY"],"heap":{"lockCalls":1}}}
       ],
-      "mustRejectMutation": "enter/exit重新求lock导致换对象或doubleeffect。",
+      "mustRejectMutation": "The decompiler MUST NOT re-evaluate the lock at enter/exit, which changes the object or doubles the effect.",
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "self-made Dep complete catalog",
       "acceptanceGate": "engine",
@@ -858,7 +858,7 @@
     {
       "id": "D040",
       "family": "monitor",
-      "title": "声明synchronized的实例与静态锁",
+      "title": "Instance and static locks under declared synchronized",
       "suite": "core-java",
       "seam": "decompile-class",
       "required": true,
@@ -869,20 +869,20 @@
         {"id":"v1","input":{"targetRole":"case","method":"inst()Z","receiver":{"new":"fixtures.Case","identity":"case-1"},"args":[],"observeMonitorAfter":"case-1"},"expected":{"outcome":"java","return":true,"monitorAfter":false}},
         {"id":"v2","input":{"targetRole":"case","method":"stat()Z","args":[],"observeMonitorAfter":"case-class"},"expected":{"outcome":"java","return":true,"monitorAfter":false}}
       ],
-      "mustRejectMutation": "丢失实际monitor效果、scope错误或选择错误锁对象；不把仅不以DECLARED_SYNCHRONIZED推导锁当成行为错误。",
+      "mustRejectMutation": "The decompiler MUST NOT lose the actual monitor effect, get the scope wrong, or select the wrong lock object. Refraining from deriving a lock from DECLARED_SYNCHRONIZED alone is not a behavior error.",
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "JDK observer/type catalog",
       "acceptanceGate": "engine",
       "designRefs": "ALGORITHMS §11",
       "inputRequirements": [
-        "独立记录managed DECLARED_SYNCHRONIZED、实际monitor-enter/exit和release handlers；恢复锁必须依实际scope，raw flags另行保留，不由该flag凭空补锁。"
+        "Record independently the managed DECLARED_SYNCHRONIZED flag, the actual monitor-enter/exit instructions and the release handlers; the recovered lock MUST follow the actual scope, the raw flags are preserved separately, and no lock is added from that flag alone."
       ],
-      "revisionReason": "依据DEX access_flags：0x20000不自行产生执行锁；修正mutation定义，保留true预期并补退出后释放观察。"
+      "revisionReason": "Per the DEX access_flags, 0x20000 does not by itself produce an executing lock. The revision corrects the mutation definition, keeps the true expectations and adds the observation that the lock is released after exit."
     },
     {
       "id": "D041",
       "family": "construction",
-      "title": "构造器super先于body",
+      "title": "The constructor super call precedes the body",
       "suite": "core-java",
       "seam": "decompile-class",
       "required": true,
@@ -892,19 +892,19 @@
       "invocations": [
         {"id":"v1","input":{"targetRole":"case","construct":{"method":"<init>()V","args":[]}},"expected":{"outcome":"java","events":["BASE","BODY"]}}
       ],
-      "mustRejectMutation": "删super或移动body到super之前。",
+      "mustRejectMutation": "The decompiler MUST NOT delete super, and MUST NOT move the body ahead of super.",
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "self-made Base/Dep complete catalog",
       "acceptanceGate": "engine",
       "designRefs": "ALGORITHMS §9、§12",
       "inputRequirements": [
-        "constructor的唯一EntrySeed参数/this经入口绑定追溯，不在super调用前输出local声明/拷贝；原super site和normal后body顺序独立记录。"
+        "The unique EntrySeed parameter/this of the constructor is traced through its entry binding; the decompiler MUST NOT emit a local declaration or copy before the super call. The original super site and the body order after the normal path are recorded independently."
       ]
     },
     {
       "id": "D042",
       "family": "construction",
-      "title": "this构造链不重复字段初始化",
+      "title": "A this construction chain does not repeat field initialization",
       "suite": "core-java",
       "seam": "decompile-class",
       "required": true,
@@ -914,7 +914,7 @@
       "invocations": [
         {"id":"v1","input":{"targetRole":"case","construct":{"method":"<init>()V","args":[]}},"expected":{"outcome":"java","heap":{"n":4},"events":["INT:4","ZERO"]}}
       ],
-      "mustRejectMutation": "字段initializer下推重复、this链target错。",
+      "mustRejectMutation": "The decompiler MUST NOT push the field initializer down so that it repeats, and MUST NOT resolve the this-chain target incorrectly.",
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "self-made Dep + complete Case declarations",
       "acceptanceGate": "engine",
@@ -924,7 +924,7 @@
     {
       "id": "D043",
       "family": "construction",
-      "title": "邻接new/init的参数effect只一次",
+      "title": "Adjacent new/init argument effects occur exactly once",
       "suite": "core-java",
       "seam": "decompile-method",
       "required": true,
@@ -934,7 +934,7 @@
       "invocations": [
         {"id":"v1","input":{"targetRole":"case","method":"f()Lfixtures/Box;","args":[]},"expected":{"outcome":"java","heap":{"boxN":5},"events":["ARG","CTOR:5"]}}
       ],
-      "mustRejectMutation": "inline参数重求值/变CTOR-before-ARG、allocation身份漏配。",
+      "mustRejectMutation": "The decompiler MUST NOT re-evaluate an inlined argument, turn an argument into a CTOR-before-ARG order, or fail to match the allocation identity.",
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "self-made Dep/Box complete catalog",
       "acceptanceGate": "engine",
@@ -944,7 +944,7 @@
     {
       "id": "D044",
       "family": "initialization",
-      "title": "static初始化触发与单次执行",
+      "title": "Static initialization triggers and runs exactly once",
       "suite": "core-java",
       "seam": "decompile-class",
       "required": true,
@@ -954,7 +954,7 @@
       "invocations": [
         {"id":"v1","input":{"targetRole":"case","calls":[{"method":"get()I","args":[]},{"method":"get()I","args":[]}],"isolation":"fresh-jvm"},"expected":{"outcome":"java","returns":[7,7],"events":["INIT"]}}
       ],
-      "mustRejectMutation": "把staticfieldinlineconst删触发、每调用重复clinit。",
+      "mustRejectMutation": "The decompiler MUST NOT delete the trigger by inlining a static field as a constant, and MUST NOT repeat clinit on every call.",
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "self-made Dep complete catalog",
       "notes": "Driver entry must not load/initialize Case before beginning observation; every case uses fresh JVM.",
@@ -965,7 +965,7 @@
     {
       "id": "D045",
       "family": "initialization",
-      "title": "blank final分别构造赋值一次",
+      "title": "A blank final is assigned once in each constructor",
       "suite": "core-java",
       "seam": "decompile-class",
       "required": true,
@@ -976,7 +976,7 @@
         {"id":"v1","input":{"targetRole":"case","construct":{"method":"<init>(Z)V","args":[true]}},"expected":{"outcome":"java","heap":{"x":1},"finalFieldPreserved":true}},
         {"id":"v2","input":{"targetRole":"case","construct":{"method":"<init>(Z)V","args":[false]}},"expected":{"outcome":"java","heap":{"x":2},"finalFieldPreserved":true}}
       ],
-      "mustRejectMutation": "final默认写再赋、branch漏值或删除finalsemantic。",
+      "mustRejectMutation": "The decompiler MUST NOT write a default value for the final and then assign it, omit the assignment in a branch, or delete the final semantic.",
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "checked-in self-made source only; fixed JDK/R8; no platform SDK",
       "acceptanceGate": "engine",
@@ -986,30 +986,30 @@
     {
       "id": "D046",
       "family": "initialization",
-      "title": "显式encoded null/false/0与隐式默认不混淆",
+      "title": "Explicit encoded null/false/0 is not confused with the implicit default",
       "suite": "core-java",
       "seam": "decompile-class",
       "required": true,
       "validationScope": "full-unit",
       "inputKind": "self-made-dex-builder-with-reference-java",
-      "inputRecipe": "自制035 Case含canonical Object super constructor和static字段b:Z、i:I、s:Ljava/lang/String;，按static_fields的b/i/s顺序显式编码static_values array：size=3，VALUE_BOOLEAN(false)、VALUE_INT(0)、VALUE_NULL。参考Java只声明三个无initializer的非final字段；Driver读完整默认值。不得让assembler删除显式默认encoded元素。",
+      "inputRecipe": "A self-made 035 Case contains the canonical Object super constructor and the static fields b:Z, i:I, s:Ljava/lang/String;. In static_fields order b/i/s, it encodes a static_values array explicitly: size=3, VALUE_BOOLEAN(false), VALUE_INT(0), VALUE_NULL. The reference Java declares only these three non-final fields without an initializer; the Driver reads the complete default values. The assembler MUST NOT delete the explicitly encoded default elements.",
       "invocations": [
         {"id":"v1","input":{"targetRole":"case","observeStaticFields":["s:Ljava/lang/String;","b:Z","i:I"]},"expected":{"outcome":"java","heap":{"s":null,"b":false,"i":0}}}
       ],
-      "mustRejectMutation": "nullString变空串、False/None伪Java、默认encoded映射錯。",
+      "mustRejectMutation": "The decompiler MUST NOT turn the null String into an empty string, emit pseudo-Java False/None, or map the encoded defaults incorrectly.",
       "oracle": "dex-format-encoded-value-tags-plus-reference-java-default-state",
       "dependencies": "checked-in self-made source only; fixed JDK/R8; no platform SDK",
       "acceptanceGate": "engine",
       "designRefs": "ALGORITHMS §12.2",
       "inputRequirements": [
-        "独立projection必须同时看到三个显式encoded_value的tag/value与完整static_fields绑定；没有static_values_off或数组被裁短即准备失败。原始字段/构造器/flags完整，不能由新增default constructor碰巧决定unit状态。"
+        "The independent projection MUST see both the tag/value of all three explicit encoded_value entries and the complete static_fields binding; a missing static_values_off or a truncated array is a preparation failure. The original fields, constructor and flags stay complete, so an added default constructor cannot accidentally determine the unit state."
       ],
-      "revisionReason": "默认值源代码不足以保证DEX含encoded元素；改为显式构造并由独立decoder核tag/绑定，原heap预期不变。"
+      "revisionReason": "Source-level default values do not guarantee that the DEX contains the encoded elements. The revision constructs them explicitly and has an independent decoder check the tags and bindings; the original heap expectations are unchanged."
     },
     {
       "id": "D047",
       "family": "initialization",
-      "title": "静态初始化失败保持异常类型",
+      "title": "Static initialization failure keeps the exception type",
       "suite": "core-java",
       "seam": "decompile-class",
       "required": true,
@@ -1019,7 +1019,7 @@
       "invocations": [
         {"id":"v1","input":{"targetRole":"case","readStaticField":"n:I","isolation":"fresh-jvm"},"expected":{"outcome":"java","exception":"java.lang.ExceptionInInitializerError","events":["INIT"]}}
       ],
-      "mustRejectMutation": "clinit当普通call、吞原initfailure或不触发。",
+      "mustRejectMutation": "The decompiler MUST NOT treat clinit as an ordinary call, swallow the original init failure, or skip the trigger.",
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "self-made Dep/InitError complete catalog",
       "acceptanceGate": "engine",
@@ -1029,7 +1029,7 @@
     {
       "id": "D048",
       "family": "declarations",
-      "title": "协变bridge的调用行为",
+      "title": "Call behavior of a covariant bridge",
       "suite": "core-java",
       "seam": "decompile-class",
       "required": true,
@@ -1039,66 +1039,66 @@
       "invocations": [
         {"id":"v1","input":{"targetRole":"case","receiver":{"new":"fixtures.Case","identity":"case-1"},"invokeAs":"fixtures.Base","method":"get()Ljava/lang/Object;","args":[]},"expected":{"outcome":"java","returnStringUnits":[99,104,105,108,100],"generatedBridgePreserved":true}}
       ],
-      "mustRejectMutation": "bridge与actualmethod合并丢分派、重复错误声明。",
+      "mustRejectMutation": "The decompiler MUST NOT merge the bridge with the actual method and lose the dispatch, and MUST NOT declare the duplicate incorrectly.",
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "self-made Base complete generic/erased contracts",
       "acceptanceGate": "engine",
       "designRefs": "ALGORITHMS §12.3",
       "inputRequirements": [
-        "独立确认一个真实ACC_BRIDGE|ACC_SYNTHETIC的()Ljava/lang/Object;方法，其canonical target为同receiver的()Ljava/lang/String;；完整parent/override目录，恢复classfile也须生成同descriptor bridge。"
+        "Confirm independently one real ACC_BRIDGE|ACC_SYNTHETIC ()Ljava/lang/Object; method whose canonical target is the ()Ljava/lang/String; method on the same receiver; the parent/override catalog is complete, and the restored classfile MUST also generate a bridge with the same descriptor."
       ]
     },
     {
       "id": "D049",
       "family": "declarations",
-      "title": "inner capture保持outer this身份",
+      "title": "Inner capture keeps the outer this identity",
       "suite": "core-java",
       "seam": "decompile-class",
       "required": true,
       "validationScope": "full-unit",
       "inputKind": "self-made-java-to-dex",
-      "inputRecipe": "class Outer{int n=7; class Inner{int f(){return Outer.this.n;}}} n为package-private，避免未知auto-accessor。Driver一组构造outer/inner读7；另一组构造两个outer及各自inner，令第二outer.n=9、第一outer.n=11后分别读其inner，核捕获的是各自对象而非共享默认7。",
+      "inputRecipe": "class Outer{int n=7; class Inner{int f(){return Outer.this.n;}}} The field n is package-private, which avoids an unknown auto-accessor. One Driver group constructs an outer and an inner and reads 7; another group constructs two outers with their own inners, sets the second outer.n to 9 and the first outer.n to 11, and then reads each inner, verifying that each capture holds its own object instead of a shared default 7.",
       "invocations": [
         {"id":"v1","input":{"targetRole":"outer","scenario":"one-outer","initialN":7},"expected":{"outcome":"java","return":7}},
         {"id":"two-outers","input":{"targetRole":"outer","scenario":"two-outers","outerValuesAfterConstruction":[11,9]},"expected":{"outcome":"java","returns":[11,9]}}
       ],
-      "mustRejectMutation": "把capture删成独立this、名字$猜静态inner或构造参数錯。",
+      "mustRejectMutation": "The decompiler MUST NOT delete the capture into a standalone this, guess a static inner from the $ in the name, or build the constructor parameters incorrectly.",
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "checked-in self-made source only; fixed JDK/R8; no platform SDK",
       "acceptanceGate": "engine",
       "designRefs": "ALGORITHMS §12.3",
       "inputRequirements": [
-        "请求outer完整unit及其真实Inner ownership closure，非单独inner片段；独立认证Enclosing/InnerClass、唯一synthetic outer字段/隐藏ctor参数和canonical pre-super赋值。"
+        "Request the complete outer unit together with its real Inner ownership closure, not an isolated inner fragment; certify independently the Enclosing/InnerClass attributes, the unique synthetic outer field/hidden ctor parameter and the canonical pre-super assignment."
       ],
-      "revisionReason": "增加两个outer的差异状态，防止固定返回7或把capture绑定到错误对象仍通过。"
+      "revisionReason": "The revision adds differing state on two outers, so that a fixed return of 7 or a capture bound to the wrong object cannot pass."
     },
     {
       "id": "D050",
       "family": "declarations",
-      "title": "enum名字序数与values副本",
+      "title": "enum names, ordinals and the values copy",
       "suite": "core-java",
       "seam": "decompile-class",
       "required": true,
       "validationScope": "full-unit",
       "inputKind": "self-made-java-to-dex",
-      "inputRecipe": "enum Case{Z,A;} Driver按声明序读name/ordinal；修改第一次values结果后重新values；调用valueOf(\"Z\")、valueOf(\"A\")及未知名/null。DEX static_fields按名字表排序与原clinit常量初始化序不同，不能混用。",
+      "inputRecipe": "enum Case{Z,A;} The Driver reads name/ordinal in declaration order, mutates the result of the first values call and then calls values again, and calls valueOf(\"Z\"), valueOf(\"A\"), an unknown name and null. DEX static_fields are ordered by the name table, which differs from the original clinit constant initialization order; the two orders MUST NOT be conflated.",
       "invocations": [
         {"id":"enum-contract","input":{"targetRole":"case","scenario":"names-ordinals-values-and-valueOf"},"expected":{"outcome":"java","enumNames":["Z","A"],"enumOrdinals":[0,1],"valuesFresh":true,"valueOfNames":["Z","A"],"valueOfUnknownException":"java.lang.IllegalArgumentException","valueOfNullException":"java.lang.NullPointerException"}}
       ],
-      "mustRejectMutation": "按字段字典序变为A,Z、错误name/ordinal、values复用同一数组、valueOf行为丢失或输出ordinary class extends Enum。",
+      "mustRejectMutation": "The decompiler MUST NOT reorder the constants into A,Z by field lexicographic order, emit the wrong name/ordinal, reuse one array for values, lose the valueOf behavior, or output an ordinary class extends Enum.",
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "checked-in self-made source only; fixed JDK/R8; no platform SDK",
       "acceptanceGate": "engine",
       "designRefs": "ALGORITHMS §12.3",
       "inputRequirements": [
-        "独立认证clinit创建Z(name Z,ordinal0)后A(name A,ordinal1)、backing storage/values clone/valueOf/隐藏ctor的canonical模式；不从已排序field_ids推断顺序。"
+        "Certify independently the canonical clinit pattern that creates Z(name Z,ordinal0) before A(name A,ordinal1), together with the backing storage, the values clone, valueOf and the hidden ctor; the declaration order MUST NOT be inferred from sorted field_ids."
       ],
-      "revisionReason": "JLS enum顺序来自声明/初始化；用Z,A替代恰好字典序的A,B，独立推得ordinal0/1并扩valueOf观察。"
+      "revisionReason": "JLS enum order comes from the declaration and initialization. The revision replaces A,B, which happened to be in lexicographic order, with Z,A, derives ordinal0/1 independently and widens the valueOf observations."
     },
     {
       "id": "D051",
       "family": "declarations",
-      "title": "runtime annotation值没有静默丢失",
+      "title": "Runtime annotation values are not silently dropped",
       "suite": "core-java",
       "seam": "decompile-class",
       "required": true,
@@ -1108,7 +1108,7 @@
       "invocations": [
         {"id":"v1","input":{"targetRole":"case","reflectAnnotation":"Lfixtures/Mark;"},"expected":{"outcome":"java","annotation":{"valueUnits":[120],"nums":[1,2]}}}
       ],
-      "mustRejectMutation": "systemmetadata当假注解、runtime用户注解丢掉仍JavaUnit。",
+      "mustRejectMutation": "The decompiler MUST NOT present system metadata as a fake annotation, and MUST NOT drop a runtime user annotation while still reporting JavaUnit.",
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "self-made Mark source + JDK annotation declarations",
       "acceptanceGate": "engine",
@@ -1118,7 +1118,7 @@
     {
       "id": "D052",
       "family": "strings",
-      "title": "NUL/孤立surrogate/反斜线u保真",
+      "title": "Fidelity for NUL, an unpaired surrogate and backslash-u",
       "suite": "core-java",
       "seam": "decompile-method",
       "required": true,
@@ -1128,7 +1128,7 @@
       "invocations": [
         {"id":"v1","input":{"targetRole":"case","method":"f()Ljava/lang/String;","args":[]},"expected":{"outcome":"java","returnStringUnits":[0,55296,65,56320,92,117,48,48,48,97]}}
       ],
-      "mustRejectMutation": "replacement丢surrogate、Unicodeprelex让literal變換行。",
+      "mustRejectMutation": "The decompiler MUST NOT replace and lose the surrogate, and MUST NOT let Unicode preprocessing turn the literal into a line break.",
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "checked-in self-made source only; fixed JDK/R8; no platform SDK",
       "notes": "B02 source generation must safely escape backslash-u and controls; raw DEX string_units certificate verifies the same units before engine.",
@@ -1139,7 +1139,7 @@
     {
       "id": "D053",
       "family": "strings",
-      "title": "空串与实际换行/制表符",
+      "title": "The empty string versus an actual newline/tab",
       "suite": "core-java",
       "seam": "decompile-method",
       "required": true,
@@ -1150,7 +1150,7 @@
         {"id":"v1","input":{"targetRole":"case","method":"empty()Ljava/lang/String;","args":[]},"expected":{"outcome":"java","returnStringUnits":[]}},
         {"id":"v2","input":{"targetRole":"case","method":"controls()Ljava/lang/String;","args":[]},"expected":{"outcome":"java","returnStringUnits":[65,10,9,34,92,66]}}
       ],
-      "mustRejectMutation": "escape破坏value或输出非法literal。",
+      "mustRejectMutation": "The decompiler MUST NOT let escaping corrupt the value, and MUST NOT emit an illegal literal.",
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "checked-in self-made source only; fixed JDK/R8; no platform SDK",
       "acceptanceGate": "engine",
@@ -1160,7 +1160,7 @@
     {
       "id": "D054",
       "family": "strings",
-      "title": "非BMP由UTF16两个单元组成",
+      "title": "A non-BMP character consists of two UTF-16 units",
       "suite": "core-java",
       "seam": "decompile-method",
       "required": true,
@@ -1170,7 +1170,7 @@
       "invocations": [
         {"id":"v1","input":{"targetRole":"case","method":"f()Ljava/lang/String;","args":[]},"expected":{"outcome":"java","returnStringUnits":[55357,56898]}}
       ],
-      "mustRejectMutation": "使用codepoint數當UTF16數量、截断pair。",
+      "mustRejectMutation": "The decompiler MUST NOT use the code-point count as the UTF-16 count, and MUST NOT split the pair.",
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "checked-in self-made source only; fixed JDK/R8; no platform SDK",
       "acceptanceGate": "engine",
@@ -1180,31 +1180,31 @@
     {
       "id": "D055",
       "family": "input",
-      "title": "超大count先校验不分配",
+      "title": "An oversized count is validated before any allocation",
       "suite": "input-safety",
       "seam": "open-or-decompile",
       "required": true,
       "validationScope": "input",
       "inputKind": "self-made-byte-mutation",
-      "inputRecipe": "从同一经审阅的tiny DEX建立两个独立变体：code_item insns_size写2147483647；另一变体handler typed_count写2147483647。各自最小所需bytes超出实际remaining，其他结构保持原样；记录原字段锚点、精确patch范围及artifact hash。",
+      "inputRecipe": "Two independent variants are built from the same reviewed tiny DEX: one writes code_item insns_size as 2147483647, and the other writes handler typed_count as 2147483647. The minimum bytes each variant requires exceed the actual remaining bytes, and every other structure stays unchanged; the original field anchors, the exact patch ranges and the artifact hash are recorded.",
       "invocations": [
         {"id":"insns-count","input":{"targetRole":"case","mutation":"insns_size=2147483647-beyond-remaining"},"expected":{"outcome":"error","errorKind":"malformed","noJava":true,"noTrustedSmali":true}},
         {"id":"handler-count","input":{"targetRole":"case","mutation":"handler-typed-count=2147483647-beyond-remaining"},"expected":{"outcome":"error","errorKind":"malformed","noJava":true,"noTrustedSmali":true}}
       ],
-      "mustRejectMutation": "先with_capacity/切片panic、缺字节讀0。",
+      "mustRejectMutation": "The decompiler MUST NOT call with_capacity or panic on a slice first, and MUST NOT read 0 for a missing byte.",
       "oracle": "format-violation-at-known-field",
       "dependencies": "checked-in self-made source only; fixed JDK/R8; no platform SDK",
       "acceptanceGate": "engine",
       "designRefs": "ALGORITHMS §1、§3",
       "inputRequirements": [
-        "两项独立变体分别必跑；先以checked最小字节数证明字段越界，不因同一count也超过分析预算而误归BudgetExceeded。原字段/patch位置/重建hash独立记录。"
+        "Both independent variants MUST each run. First prove the field overrun from the checked minimum byte count, and do not misclassify it as BudgetExceeded merely because the same count also exceeds an analysis budget. The original field, the patch locations and the rebuilt hash are recorded independently."
       ],
-      "revisionReason": "把insns_size or handler count的二选一配方改为分别必跑；保持Malformed语义。"
+      "revisionReason": "The revision makes the either-or recipe for insns_size or handler count mandatory for each variant separately and keeps the Malformed semantics."
     },
     {
       "id": "D056",
       "family": "input",
-      "title": "branch到指令中间拒绝",
+      "title": "A branch into the middle of an instruction is rejected",
       "suite": "input-safety",
       "seam": "open-or-decompile",
       "required": true,
@@ -1214,7 +1214,7 @@
       "invocations": [
         {"id":"v1","input":{"targetRole":"case","mutation":"branch-to-middle-of-multiword-const"},"expected":{"outcome":"error","errorKind":"malformed","noJava":true,"noTrustedSmali":true}}
       ],
-      "mustRejectMutation": "把payload/midoperand當合法basicblock。",
+      "mustRejectMutation": "The decompiler MUST NOT accept a payload or a mid-operand offset as a legal basic block.",
       "oracle": "format-violation-at-known-target",
       "dependencies": "checked-in self-made source only; fixed JDK/R8; no platform SDK",
       "acceptanceGate": "engine",
@@ -1224,7 +1224,7 @@
     {
       "id": "D057",
       "family": "input",
-      "title": "实际read-before-def不是默认0",
+      "title": "An actual read-before-def is not a default 0",
       "suite": "input-safety",
       "seam": "open-or-decompile",
       "required": true,
@@ -1234,7 +1234,7 @@
       "invocations": [
         {"id":"v1","input":{"targetRole":"case","mutation":"reachable-read-before-definition"},"expected":{"outcome":"error","errorKind":"malformed","noJava":true,"noTrustedSmali":true}}
       ],
-      "mustRejectMutation": "默认为0/null让java通过。",
+      "mustRejectMutation": "The decompiler MUST NOT default the value to 0/null to make java succeed.",
       "oracle": "reachable-undefined-use-proof",
       "dependencies": "checked-in self-made source only; fixed JDK/R8; no platform SDK",
       "acceptanceGate": "engine",
@@ -1244,7 +1244,7 @@
     {
       "id": "D058",
       "family": "input",
-      "title": "宽寄存器被部分覆盖后不能读取",
+      "title": "A wide register cannot be read after partial overwrite",
       "suite": "input-safety",
       "seam": "open-or-decompile",
       "required": true,
@@ -1254,7 +1254,7 @@
       "invocations": [
         {"id":"v1","input":{"targetRole":"case","mutation":"wide-high-half-overwrite"},"expected":{"outcome":"error","errorKind":"malformed","noJava":true,"noTrustedSmali":true}}
       ],
-      "mustRejectMutation": "widehigh仍alias舊ValueId。",
+      "mustRejectMutation": "The decompiler MUST NOT let the wide high half still alias the old ValueId.",
       "oracle": "wide-pair-invalidated-by-overlapping-write",
       "dependencies": "checked-in self-made source only; fixed JDK/R8; no platform SDK",
       "acceptanceGate": "engine",
@@ -1264,7 +1264,7 @@
     {
       "id": "D059",
       "family": "raw",
-      "title": "未知opcode宽度不可猜NOP",
+      "title": "The width of an unknown opcode must not be guessed as NOP",
       "suite": "raw-integrity",
       "seam": "decompile-method",
       "required": true,
@@ -1274,7 +1274,7 @@
       "invocations": [
         {"id":"v1","input":{"targetRole":"case","mutation":"unrecognized-opcode-format"},"expected":{"outcome":"unavailable","java":false,"standardSmali":false,"rawExcerpt":true}}
       ],
-      "mustRejectMutation": "默认nop或假.word标准smali。",
+      "mustRejectMutation": "The decompiler MUST NOT default to nop, and MUST NOT fabricate a .word in standard Smali.",
       "oracle": "unknown-format-contract",
       "dependencies": "checked-in self-made source only; fixed JDK/R8; no platform SDK",
       "acceptanceGate": "engine",
@@ -1284,7 +1284,7 @@
     {
       "id": "D060",
       "family": "raw",
-      "title": "合法return-only重载保留raw而非改public名字",
+      "title": "A legal return-only overload stays raw instead of acquiring a changed public name",
       "suite": "raw-integrity",
       "seam": "decompile-class",
       "required": true,
@@ -1294,19 +1294,19 @@
       "invocations": [
         {"id":"v1","input":{"targetRole":"case","scenario":"nonbridge-return-only-collision"},"expected":{"outcome":"mixed","rawMethodsPreserved":2,"noFakeJavaUnit":true}}
       ],
-      "mustRejectMutation": "rename/drop其中一个使之JavaUnit成功。",
+      "mustRejectMutation": "The decompiler MUST NOT rename or drop one of the two overloads to make JavaUnit succeed.",
       "oracle": "raw-member-identity-and-java-representability",
       "dependencies": "checked-in self-made source only; fixed JDK/R8; no platform SDK",
       "acceptanceGate": "engine",
       "designRefs": "ALGORITHMS §7–§8、§12",
       "inputRequirements": [
-        "完整class含canonical constructor，两个f仅return descriptor不同且无bridge/synthetic生成模式；其他shell/catalog事实均合法，避免因缺constructor/目录而偶然Mixed。"
+        "The complete class contains the canonical constructor, the two f methods differ only in their return descriptor and there is no bridge or synthetic generation pattern; all other shell and catalog facts are legal, so the class does not become Mixed merely through a missing constructor or catalog entry."
       ]
     },
     {
       "id": "D061",
       "family": "raw",
-      "title": "标准smali回环完整覆盖branch/payload/handler",
+      "title": "A standard Smali round trip covers branch/payload/handler completely",
       "suite": "raw-integrity",
       "seam": "decompile-method",
       "required": true,
@@ -1316,19 +1316,19 @@
       "invocations": [
         {"id":"v1","input":{"targetRole":"case","method":"f(I)I","catalog":"complete-except-one-reachable-external-invoke"},"expected":{"outcome":"smali","allInstructionSites":true,"payloadBitsExact":true,"handlerPriorityExact":true,"stringUnitsExact":true,"memberRefsExact":true}}
       ],
-      "mustRejectMutation": "只assembler通过但删除catch/key/literal/changeproto。",
+      "mustRejectMutation": "The round trip MUST NOT pass the assembler while dropping a catch, a key, a literal or a changed proto.",
       "oracle": "independent-dexlib2-normalized-raw-projection",
       "dependencies": "locked smali/dexlib2 plus checked-in class shell; no source-engine oracle",
       "acceptanceGate": "engine",
       "designRefs": "ALGORITHMS §7–§8、§12",
       "inputRequirements": [
-        "必须含一个reachable外部invoke且恰缺其绑定目录，以确定Unsupported；仅提供不完整但根本未使用的catalog不足以强制raw。独立核完整payload/handlers/UTF16/refs。"
+        "The input MUST contain one reachable external invoke whose binding catalog is exactly missing, so that the outcome is determined as Unsupported; an incomplete catalog that is never used does not force raw output. Check the complete payload/handlers/UTF16/refs independently."
       ]
     },
     {
       "id": "D062",
       "family": "resources",
-      "title": "显式normal预算失败与raw可用额度分离",
+      "title": "An explicit normal budget failure stays separate from the raw allowance",
       "suite": "resource-safety",
       "seam": "decompile-method",
       "required": true,
@@ -1339,18 +1339,18 @@
         {"id":"v1","input":{"targetRole":"case","method":"f(I)I","limits":{"max_work_steps":0}},"expected":{"outcome":"smali","reason":"budget_exceeded","rawExact":true}},
         {"id":"v2","input":{"targetRole":"case","method":"f(I)I","limits":{"max_work_steps":0,"fallback_work_steps":0}},"expected":{"outcome":"unavailable","reason":"budget_exceeded"}}
       ],
-      "mustRejectMutation": "把Some(0)当None、raw偷用normal额度、重试扩大显式限额，或截断后标完整。",
+      "mustRejectMutation": "The decompiler MUST NOT treat Some(0) as None, draw the raw path from the normal allowance, widen the explicit limit by retrying, or label a truncated result complete.",
       "oracle": "explicit-resource-contract",
       "dependencies": "reviewed self-made raw method; no Java source VM required",
       "acceptanceGate": "engine",
       "designRefs": "DESIGN §3.7、§10.3；ALGORITHMS §8、§13",
       "inputRequirements": [],
-      "revisionReason": "保留normal失败后raw成功/失败的两项原预期；不再依赖猜测的raw/request预算数值，未配置项明确为None。"
+      "revisionReason": "The revision keeps both original expectations, the raw success and the raw failure after the normal failure, and no longer depends on a guessed raw/request budget value; an unconfigured field is explicitly None."
     },
     {
       "id": "D063",
       "family": "resources",
-      "title": "取消停止请求不转fallback",
+      "title": "A cancellation request does not turn into fallback",
       "suite": "resource-safety",
       "seam": "decompile-method",
       "required": true,
@@ -1360,43 +1360,43 @@
       "invocations": [
         {"id":"v1","input":{"targetRole":"case","method":"f(I)I","cancellation":{"arm":"after-open","cancelAfterChecks":64}},"expected":{"outcome":"error","errorKind":"cancelled","noFallbackReport":true}}
       ],
-      "mustRejectMutation": "取消後逐method跑smali、無界loop不检查。",
+      "mustRejectMutation": "After cancellation the decompiler MUST NOT run smali method by method, and MUST NOT keep looping without checking the cancellation.",
       "oracle": "public-cancellation-contract",
       "dependencies": "finite self-made input; check callback not private scheduler",
       "acceptanceGate": "engine",
       "designRefs": "DESIGN §3.7、§10.3；ALGORITHMS §8、§13",
       "inputRequirements": [
-        "独立认证方法是有限且工作量足以触发取消的合法输入，catalog完整；64是caller取消策略，不断言引擎私有phase/调用总次数。"
+        "Certify independently that the method is a legal input, finite and with enough work to trigger cancellation, and that the catalog is complete; 64 is the caller cancellation policy, and the requirement asserts nothing about engine-private phases or the total call count."
       ]
     },
     {
       "id": "D064",
       "family": "resources",
-      "title": "转义后的成员预算与整份报告预算分别生效",
+      "title": "The escaped member budget and the whole-report budget apply separately",
       "suite": "resource-safety",
       "seam": "decompile-and-render",
       "required": true,
       "validationScope": "request",
       "inputKind": "self-made-java-to-dex",
-      "inputRecipe": "成员场景：f()String返回4个NUL，转义后源码超过16 bytes，normal与raw成员上限均显式设16，report保持None。报告场景：另一合法ReportCase含canonical ctor和8个static int method_0()..method_7()，各返回0；完整Object目录。每个成员源码远小于65536 bytes，但仅8个不同方法声明的Java最小长度合计已超过128 bytes；请求整类并render。两者其他资源配额均None，目标格式/语义正常，不需要大分配。",
+      "inputRecipe": "Member scenario: f()String returns 4 NUL units, so the escaped source exceeds 16 bytes; the normal and raw member limits are both set explicitly to 16, and report stays None. Report scenario: another legal ReportCase contains the canonical ctor and 8 static int methods method_0()..method_7(), each returning 0, with a complete Object catalog. Each member source is far smaller than 65536 bytes, but the minimum Java length of the 8 distinct method declarations alone already exceeds 128 bytes; the whole class is requested and rendered. All other resource quotas in both scenarios are None, the target format and semantics are normal, and no large allocation is required.",
       "invocations": [
         {"id":"v1","input":{"targetRole":"case","method":"f()Ljava/lang/String;","stringUnits":[0,0,0,0],"limits":{"max_method_output_bytes":16,"fallback_output_bytes":16}},"expected":{"outcome":"resource-failure","resourceFailureExplicit":true,"noTruncatedSuccess":true}},
         {"id":"report-total","input":{"targetRole":"report-case","selection":"class","limits":{"max_method_output_bytes":65536,"fallback_output_bytes":65536,"max_report_output_bytes":128}},"expected":{"outcome":"resource-failure","limit":"max_report_output_bytes","resourceFailureExplicit":true,"noTruncatedSuccess":true}}
       ],
-      "mustRejectMutation": "按未转义size核成员、把report上限误当每方法重置、漏合计shell/成员或halfJava/halfSmali标完整。",
+      "mustRejectMutation": "The decompiler MUST NOT measure a member by its unescaped size, reset the report limit per method, omit the shell or member total from the sum, or label a half-Java/half-Smali result complete.",
       "oracle": "bounded-output-contract",
       "dependencies": "checked-in self-made source only; fixed JDK/R8; no platform SDK",
       "acceptanceGate": "engine",
       "designRefs": "DESIGN §3.7、§7、§10.3；ALGORITHMS §8、§13",
       "inputRequirements": [
-        "独立确认8个方法均实际定义且名称/proto不同，输入与catalog合法；逐成员长度上限充裕，ReportCase合计必超过report上限。诊断按实际limit投影，不断言在哪个私有phase失败。"
+        "Confirm independently that all 8 methods are actually defined with distinct names and protos, and that the input and catalog are legal; the per-member length limit is ample while the ReportCase total MUST exceed the report limit. The diagnosis follows the actual limit projection and asserts nothing about which private phase fails."
       ],
-      "revisionReason": "拆清原max_output_bytes的成员/report歧义；保留NUL转义的失败预期，追加只触发整份报告长度上限的独立调用。"
+      "revisionReason": "The revision separates the member/report ambiguity of the former max_output_bytes; it keeps the failure expectation for the NUL escaping and adds an independent invocation that triggers only the whole-report length limit."
     },
     {
       "id": "D065",
       "family": "identity",
-      "title": "041相同数字index不同logicalmember不能串定义",
+      "title": "041: equal numeric indices on different logical members do not chain definitions",
       "suite": "identity-semantics",
       "seam": "decompile-method",
       "required": true,
@@ -1407,43 +1407,43 @@
         {"id":"v1","input":{"targetRole":"logical0","method":"f()I","args":[],"through":["engine-original-view","application-original-view"]},"expected":{"outcome":"java","return":11}},
         {"id":"v2","input":{"targetRole":"logical1","method":"f()I","args":[],"through":["engine-original-view","application-original-view"]},"expected":{"outcome":"java","return":22}}
       ],
-      "mustRejectMutation": "normalizedheader漏header_offset、按descriptor任取first。",
+      "mustRejectMutation": "The decompiler MUST NOT omit header_offset from the normalized header, and MUST NOT pick an arbitrary first entry by descriptor.",
       "oracle": "worked-return-values-plus-independent-container-projection",
       "dependencies": "checked-in self-made source only; fixed JDK/R8; no platform SDK",
       "notes": "Preparation must implement and independently inspect 041 builder before certifying input; no personal Android SDK sample.",
       "acceptanceGate": "engine-and-application",
       "designRefs": "ALGORITHMS §1、§14.2",
       "inputRequirements": [
-        "两logical原header_offset/共享section与相同数字class/method index独立认证；两个seam分别满足每个invocation的同一预期，不拆ID也不重复计case。"
+        "Certify independently the original header_offset and shared section of both logical inputs together with their equal numeric class/method indices; each of the two seams satisfies the same expectation for every invocation, without splitting the ID or counting the case twice."
       ]
     },
     {
       "id": "D066",
       "family": "identity",
-      "title": "定义方法与外部method-id引用分开",
+      "title": "Defined methods stay separate from external method-id references",
       "suite": "domain-integrity",
       "seam": "query-defined-symbols",
       "required": true,
       "validationScope": "domain",
       "inputKind": "self-made-smali",
-      "inputRecipe": "自制035 class Lfixtures/Own;恰定义canonical <init>()V和public static f()V；ctor引用Object.<init>()V，f引用External.g()V，后两owner均无class_def。查询scope为该physical/logical输入，method-name filter=null，列所有实际定义，含constructor；不由Java编译器隐式新增成员。",
+      "inputRecipe": "A self-made 035 class Lfixtures/Own; defines exactly the canonical <init>()V and public static f()V; the ctor references Object.<init>()V and f references External.g()V, and the latter two owners have no class_def. The query scope is this physical/logical input, the method-name filter is null, and the query lists every actual definition including the constructor; the Java compiler MUST NOT add an implicit member.",
       "invocations": [
         {"id":"all-definitions","input":{"targetRole":"own-image","query":"defined-methods","nameFilter":null},"expected":{"outcome":"data","definedMethods":["Lfixtures/Own;-><init>()V","Lfixtures/Own;->f()V"],"mustNotInclude":["Ljava/lang/Object;-><init>()V","Lfixtures/External;->g()V"]}}
       ],
-      "mustRejectMutation": "列全部method_ids當definitions。",
+      "mustRejectMutation": "The symbol query MUST NOT list every method_ids entry as a definition.",
       "oracle": "reviewed-input-symbol-manifest",
       "dependencies": "checked-in self-made source only; fixed JDK/R8; no platform SDK",
       "acceptanceGate": "application",
       "designRefs": "ALGORITHMS §14.2",
       "inputRequirements": [
-        "独立class_defs/class_data定义清单恰为两个完整proto；列表以原scope/member key关联，忽略独立结果次序，不只比显示name。"
+        "The independent class_defs/class_data definition list is exactly the two complete protos; the result relates entries to the original scope and member key, the independent result order is ignored, and the comparison is not limited to display names."
       ],
-      "revisionReason": "显式包含constructor与外部Object引用，改用完整descriptor的无筛选定义清单，消除自动成员/隐藏过滤歧义。"
+      "revisionReason": "The revision includes the constructor and the external Object reference explicitly and switches to an unfiltered definition list with complete descriptors, which removes the ambiguity about automatic members and hidden filtering."
     },
     {
       "id": "D067",
       "family": "identity",
-      "title": "同方法两个引用site不能合并",
+      "title": "Two reference sites in one method cannot be merged",
       "suite": "domain-integrity",
       "seam": "query-reference-sites",
       "required": true,
@@ -1453,25 +1453,25 @@
       "invocations": [
         {"id":"v1","input":{"targetRole":"case","query":"direct-method-xref","methodRef":"Lfixtures/Dep;->f()V"},"expected":{"outcome":"data","siteCount":2,"referencingMethod":"Case.target","allCertifiedSites":true}}
       ],
-      "mustRejectMutation": "一referencingmethod去重漏第二site。",
+      "mustRejectMutation": "The reference-site query MUST NOT deduplicate inside one referencing method and thereby omit the second site.",
       "oracle": "independent-raw-site-manifest",
       "dependencies": "self-made Dep reference and locked raw decoder certificate",
       "acceptanceGate": "application",
       "designRefs": "ALGORITHMS §14.2",
       "inputRequirements": [
-        "同一Case.target()V内两个实际invoke operand PCs独立认证；原MethodKey+PC+operand_slot唯一，报告次序不作断言。"
+        "Certify independently the two actual invoke operand PCs inside the same Case.target()V; the original MethodKey+PC+operand_slot is unique, and the report order is not asserted."
       ]
     },
     {
       "id": "D068",
       "family": "extract",
-      "title": "stored/deflate原payload逐字相等",
+      "title": "Stored and deflated original payloads match byte for byte",
       "suite": "extract-safety",
       "seam": "extract-entry",
       "required": true,
       "validationScope": "file",
       "inputKind": "self-made-zip",
-      "inputRecipe": "自制ZIP按ordinal含stored.bin(method0)、deflated.bin(method8)，payload均[0,255,65,0,128,10]；另有同名dup.bin两个record，ordinal2 payload[1]，ordinal3 payload[2]。所有CRC/size/local/central结构合法；每次输出为新路径，force=false。",
+      "inputRecipe": "The self-made ZIP contains stored.bin(method0) and deflated.bin(method8) by ordinal, both with payload [0,255,65,0,128,10]; it also contains two records named dup.bin, with ordinal2 payload[1] and ordinal3 payload[2]. All CRC/size/local/central structures are legal; each output goes to a new path with force=false.",
       "invocations": [
         {"id":"stored","input":{"entry":{"name":"stored.bin","ordinal":0},"force":false,"target":"absent"},"expected":{"outcome":"data","fileBytes":[0,255,65,0,128,10]}},
         {"id":"deflated","input":{"entry":{"name":"deflated.bin","ordinal":1},"force":false,"target":"absent"},"expected":{"outcome":"data","fileBytes":[0,255,65,0,128,10]}},
@@ -1479,52 +1479,52 @@
         {"id":"duplicate-second","input":{"entry":{"name":"dup.bin","ordinal":3},"force":false,"target":"absent"},"expected":{"outcome":"data","fileBytes":[2]}},
         {"id":"duplicate-unselected","input":{"entry":{"name":"dup.bin"},"force":false,"target":"absent"},"expected":{"outcome":"error","errorKind":"ambiguous_entry","targetAbsent":true,"tempFilesRemaining":0}}
       ],
-      "mustRejectMutation": "UTF8转换binary、修改DEXheader或少字節，使用错误重复entry。",
+      "mustRejectMutation": "The extract command MUST NOT convert binary content through UTF-8, modify the DEX header, drop bytes, or use the wrong duplicate entry.",
       "oracle": "literal-payload-bytes",
       "dependencies": "checked-in ZIP recipe and payload; no engine required",
       "acceptanceGate": "application",
       "designRefs": "ALGORITHMS §14.3",
       "inputRequirements": [
-        "独立核4个physical entry的ordinal/method/原payload/CRC；重复name不能折叠或默认任选，ambiguous调用输出必须不存在。"
+        "Check independently the ordinal/method/original payload/CRC of the 4 physical entries; a duplicate name MUST NOT be collapsed or silently chosen by default, and the output of the ambiguous call MUST NOT exist."
       ],
-      "revisionReason": "保留两个codec逐字节预期，并增加重复entry的显式ordinal与歧义拒绝，防止同payload掩盖错误选择。"
+      "revisionReason": "The revision keeps the byte-for-byte expectation of both codecs and adds the explicit ordinal of the duplicate entries plus the rejection of the ambiguity, so that identical payloads cannot hide a wrong selection."
     },
     {
       "id": "D069",
       "family": "extract",
-      "title": "CRC、预算与不支持entry拒绝均保持目标不变",
+      "title": "CRC, budget and unsupported-entry rejections all leave the target unchanged",
       "suite": "extract-safety",
       "seam": "extract-entry",
       "required": true,
       "validationScope": "file",
       "inputKind": "self-made-zip",
-      "inputRecipe": "四个独立ZIP/输出场景，均force=true替换普通文件KEEP([75,69,69,80])，目标非symlink/目录/输入alias。badCRC payload为[0,255,65,0,128,10]，local/central CRC彼此一致但为正确CRC xor 1，其他结构有效。overBudget为1024个0x41、method8、CRC/size正确、inflate限额128。unsupported.bin为method12的真实BZIP2流，version-needed=46、bit0=0，payload同badCRC但CRC正确；Diana只支持0/8。encrypted.bin是合法traditional ZipCrypto stored entry：method0、bit0=1、bit3/bit6=0、version-needed=20，12-byte加密header加6-byte密文；公开fixture密码fixture，header前11个明文字节0..10、末字节为plaintext CRC高字节。local/central CRC/size一致，compressed_size含12-byte header；独立参考工具解密可得上述6-byte payload。生产不提供密码/解密路径。",
+      "inputRecipe": "Four independent ZIP/output scenarios each use force=true to replace the regular file KEEP([75,69,69,80]); no target is a symlink, a directory or an input alias. The badCRC payload is [0,255,65,0,128,10], the local and central CRC agree with each other but equal the correct CRC xor 1, and the other structures are valid. overBudget holds 1024 bytes of 0x41 with method8, a correct CRC/size and an inflate limit of 128. unsupported.bin is a real BZIP2 stream with method12, version-needed=46 and bit0=0, with the badCRC payload but a correct CRC; Diana supports only methods 0 and 8. encrypted.bin is a legal traditional ZipCrypto stored entry: method0, bit0=1, bit3/bit6=0, version-needed=20, a 12-byte encryption header plus 6 bytes of ciphertext; the public fixture password is fixture, the first 11 plaintext header bytes are 0..10 and the last byte is the high byte of the plaintext CRC. The local and central CRC/size agree, and compressed_size includes the 12-byte header; an independent reference tool decrypts the stated 6-byte payload. Production provides no password or decryption path.",
       "invocations": [
         {"id":"bad-crc","input":{"entry":{"name":"bad.bin","ordinal":0},"force":true,"target":{"kind":"regular","bytes":[75,69,69,80]},"inflateBudgetBytes":4096},"expected":{"outcome":"error","errorKind":"crc_mismatch","targetBytes":[75,69,69,80],"tempFilesRemaining":0}},
         {"id":"inflate-budget","input":{"entry":{"name":"large.bin","ordinal":0},"force":true,"target":{"kind":"regular","bytes":[75,69,69,80]},"inflateBudgetBytes":128},"expected":{"outcome":"error","errorKind":"budget_exceeded","targetBytes":[75,69,69,80],"tempFilesRemaining":0}},
         {"id":"unsupported-compression","input":{"entry":{"name":"unsupported.bin","ordinal":0},"force":true,"target":{"kind":"regular","bytes":[75,69,69,80]},"inflateBudgetBytes":4096},"expected":{"outcome":"error","errorKind":"unsupported_compression","targetBytes":[75,69,69,80],"tempFilesRemaining":0}},
         {"id":"encrypted-entry","input":{"entry":{"name":"encrypted.bin","ordinal":0},"force":true,"target":{"kind":"regular","bytes":[75,69,69,80]},"inflateBudgetBytes":4096},"expected":{"outcome":"error","errorKind":"encrypted_entry","targetBytes":[75,69,69,80],"tempFilesRemaining":0}}
       ],
-      "mustRejectMutation": "删除CRC/预算/压缩方式/加密检查，以TargetExists或任意错误冒充指定拒绝；把加密stored额外header误报等长损坏，或在验证前破坏KEEP、留下temp/半文件。",
+      "mustRejectMutation": "The extract command MUST NOT delete the CRC, budget, compression-method or encryption check, and MUST NOT substitute TargetExists or any other error for the specified rejection. It MUST NOT misreport the extra header of the encrypted stored entry as an equal-length corruption, MUST NOT damage KEEP before the validation, and MUST NOT leave a temp or partial file behind.",
       "oracle": "literal-target-and-input-invalidity",
       "dependencies": "self-made temporary directories and ZIP only",
       "acceptanceGate": "application",
       "designRefs": "ALGORITHMS §14.3",
       "inputRequirements": [
-        "四个目标都可安全overwrite，不能先被TargetExists挡住；各ZIP独立核头/范围/CRC/size，明确唯一拒绝原因。BZIP2流由独立参考解压器核plaintext；ZipCrypto用公开fixture密码独立解密核plaintext/CRC/12-byte header，不以裸设flag的损坏文件代替。Malformed、解码失败、错误拒绝类型或其他任意error都不能匹配指定预期。"
+        "All four targets are safely overwritable and MUST NOT be blocked by TargetExists first; check the header, range, CRC and size of each ZIP independently and identify exactly one rejection reason. An independent reference decompressor MUST verify the plaintext of the BZIP2 stream; the public fixture password MUST decrypt the ZipCrypto entry independently and verify its plaintext, CRC and 12-byte header, and a corrupt file that merely sets the flag MUST NOT substitute for it. Malformed, a decode failure, the wrong rejection type or any other error MUST NOT match the specified expectation."
       ],
-      "revisionReason": "保留force=true的CRC/预算预期，并补H10已经要求的unsupported compression与encrypted entry两种独立有效自制输入、明确错误类别和目标不变断言；不新增生产解码器。"
+      "revisionReason": "The revision keeps the force=true CRC/budget expectations and adds the two independent valid self-made inputs for unsupported compression and for the encrypted entry that H10 already requires, together with the explicit error kind and the unchanged-target assertion; it adds no production decoder."
     },
     {
       "id": "D070",
       "family": "extract",
-      "title": "no-clobber与输入alias/ZipSlip安全",
+      "title": "no-clobber and input alias/ZipSlip safety",
       "suite": "extract-safety",
       "seam": "extract-entry",
       "required": true,
       "validationScope": "file",
       "inputKind": "self-made-zip-and-temp-files",
-      "inputRecipe": "使用合法ZIP、持有的输入lease与private输出目录。各unsafe目标独立调用：已存在普通文件no-force、symlink force、输入原路径force、输入hardlink force、目录force。../escape仅是entry name，显式safe output必须成功。两个no-force发布者使用不同16MiB确定pattern payload；另测force替换KEEP。观察规则见TASKS §4.3：公开取消回调始终false并只读取最终路径，配合同步开始的reader，不使用私有phase hook或调用次数断言。",
+      "inputRecipe": "Use a legal ZIP, a held input lease and a private output directory. Each unsafe target is invoked independently: an existing regular file with no-force, a symlink with force, the original input path with force, an input hardlink with force, and a directory with force. ../escape appears only as an entry name, and an explicit safe output MUST succeed. Two no-force publishers use different deterministic 16MiB pattern payloads; force replacement of KEEP is tested as well. The observation rules are in TASKS §4.3: the public cancellation callback always returns false and reads only the final path, together with a reader that starts synchronously; no private phase hook or call-count assertion is used.",
       "invocations": [
         {"id":"existing-no-force","input":{"entry":{"name":"safe.bin","ordinal":0},"force":false,"target":{"kind":"regular","bytes":[75,69,69,80]}},"expected":{"outcome":"error","errorKind":"target_exists","originalFilesUnchanged":true,"tempFilesRemaining":0}},
         {"id":"symlink-force","input":{"entry":{"name":"safe.bin","ordinal":0},"force":true,"target":{"kind":"symlink","referent":"sentinel"}},"expected":{"outcome":"error","errorKind":"unsafe_target","originalFilesUnchanged":true,"tempFilesRemaining":0}},
@@ -1535,21 +1535,21 @@
         {"id":"two-publishers","input":{"force":false,"target":{"kind":"absent"},"publishers":[{"entryOrdinal":2,"pattern":{"length":16777216,"multiplier":17,"add":3}},{"entryOrdinal":3,"pattern":{"length":16777216,"multiplier":29,"add":11}}],"observer":"callback-and-reader"},"expected":{"outcome":"data","exactlyOnePublish":true,"otherErrorKind":"target_exists","targetEqualsSuccessfulPublisher":true,"observationsOnly":["absent","complete-winning-payload"],"completePayloadObserved":true,"tempFilesRemaining":0}},
         {"id":"force-atomic-replace","input":{"entryOrdinal":2,"force":true,"target":{"kind":"regular","bytes":[75,69,69,80]},"observer":"callback-and-reader"},"expected":{"outcome":"data","targetEqualsSelectedPayload":true,"observationsOnly":["old-KEEP","complete-new-payload"],"completePayloadObserved":true,"tempFilesRemaining":0}}
       ],
-      "mustRejectMutation": "force绕过symlink/input-alias检查、entry name参与路径拼接、两个不同payload都发布成功、callback/reader观察到最终路径为空/部分/混合内容、失败删输入或遗留temp。",
+      "mustRejectMutation": "The extract command MUST NOT let force bypass the symlink or input-alias check, MUST NOT let an entry name participate in path concatenation, MUST NOT publish two different payloads successfully, MUST NOT let the callback or reader observe the final path as empty, partial or mixed content, and MUST NOT delete the input or leave a temp file behind on failure.",
       "oracle": "file-safety-contract",
       "dependencies": "checked-in self-made source only; fixed JDK/R8; no platform SDK",
       "notes": "Use platform-specific symlink/hardlink capability reports; required unsupported test environment fails preparation for that platform, no CLI subprocess.",
       "acceptanceGate": "application",
       "designRefs": "ALGORITHMS §14.3",
       "inputRequirements": [
-        "Windows/symlink/hardlink/atomic rename能力在准备阶段实测；缺能力是该平台准备失败，不把八个invocation合成一个any-error。观察按一次打开的handle读完整bytes，pattern的每个byte由(i*multiplier+add)%256独立确定。"
+        "The Windows/symlink/hardlink/atomic-rename capabilities are measured during preparation; a platform lacking a capability fails preparation, and the eight invocations are not merged into one any-error. An observation reads the complete bytes through a single opened handle, and each pattern byte is determined independently as (i*multiplier+add)%256."
       ],
-      "revisionReason": "拆开目标/force组合，要求ZipSlip场景真实成功及精确bytes，并把原子性布尔改为公开回调/reader的有界过程观察。"
+      "revisionReason": "The revision separates the target/force combinations, requires the ZipSlip scenario to really succeed with exact bytes, and replaces the atomicity boolean with a bounded process observation through the public callback and reader."
     },
     {
       "id": "D071",
       "family": "numeric",
-      "title": "byte/short/char经入口或合流Phi后的return/call无损转换",
+      "title": "Lossless return/call conversion of byte/short/char through an entry or merged Phi",
       "suite": "core-java",
       "seam": "decompile-method",
       "required": true,
@@ -1557,10 +1557,10 @@
       "acceptanceGate": "engine",
       "designRefs": "ALGORITHMS §4.9、§5、§9",
       "inputKind": "self-made-java-to-dex",
-      "inputRecipe": "Case定义b(ZBB)B、s(ZSS)S、c(ZCC)C，均用if选择两个对应类型参数后return；另call(ZBB)I选择byte后调用完整目录中的Dep.echoByte(B)I。无显式int-to-byte/short/char；选择值本已落入目标范围。",
+      "inputRecipe": "The Case defines b(ZBB)B, s(ZSS)S and c(ZCC)C, each selecting one of two parameters of the corresponding type with if and then returning it; it also defines call(ZBB)I, which selects a byte and then calls Dep.echoByte(B)I from the complete catalog. No explicit int-to-byte/short/char conversion exists; the selected value already falls inside the target range.",
       "inputRequirements": [
-        "独立记录原proto、branch/return、invoke formal及不存在原有损窄化Op；选择路径真实依赖boolean参数。入口/合流具体Phi数量和local名字不作断言。",
-        "Dep.echoByte只按signed byte返回int且无额外effect；所有普通use转换必须由producer范围而非Driver实际样本值证明。"
+        "Record independently the original proto, the branch/return, the invoke formal and the absence of an originally lossy narrowing Op; the selected path really depends on the boolean parameter. The number of Phis at an entry or merge and the local names are not asserted.",
+        "Dep.echoByte returns int from the signed byte only and has no additional effect; every ordinary use conversion MUST be proven from the producer range, not from the actual sample values the Driver uses."
       ],
       "invocations": [
         {"id":"byte-low","input":{"targetRole":"case","method":"b(ZBB)B","args":[true,-128,127]},"expected":{"outcome":"java","return":-128}},
@@ -1571,14 +1571,14 @@
         {"id":"char-high","input":{"targetRole":"case","method":"c(ZCC)C","args":[false,0,65535]},"expected":{"outcome":"java","return":65535}},
         {"id":"call-byte","input":{"targetRole":"case","method":"call(ZBB)I","args":[true,-128,127]},"expected":{"outcome":"java","return":-128}}
       ],
-      "mustRejectMutation": "拒绝合法byte/short/char返回或调用、缺必要static type转换导致javac失败、byte误当unsigned或char误当signed。",
+      "mustRejectMutation": "The decompiler MUST NOT reject a legal byte/short/char return or call, and MUST NOT omit a required static type conversion so that javac fails; it MUST NOT treat byte as unsigned or char as signed.",
       "oracle": "JLS-primitive-ranges-plus-source-jvm-driver",
-      "dependencies": "自制源码/DEX与完整声明目录；工具内容锁见TASKS §4.5"
+      "dependencies": "self-made source/DEX with a complete declaration catalog; tool content locks in TASKS §4.5"
     },
     {
       "id": "D072",
       "family": "numeric",
-      "title": "窄producer不授权截断后续int算术或混合Phi",
+      "title": "A narrow producer does not authorize truncating later int arithmetic or a mixed Phi",
       "suite": "core-java",
       "seam": "decompile-method",
       "required": true,
@@ -1586,9 +1586,9 @@
       "acceptanceGate": "engine",
       "designRefs": "ALGORITHMS §4.9",
       "inputKind": "self-made-java-to-dex",
-      "inputRecipe": "static int sum(byte a,byte b){return a+b;} static int mix(boolean p,byte b,char c){int v;if(p)v=b;else v=c;return v;} 不存在原始narrowing Op。",
+      "inputRecipe": "static int sum(byte a,byte b){return a+b;} static int mix(boolean p,byte b,char c){int v;if(p)v=b;else v=c;return v;} No original narrowing Op exists.",
       "inputRequirements": [
-        "独立确认add-int结果未跟int-to-byte，以及mix可来自byte/char两种producer；源/原proto始终返回I。"
+        "Confirm independently that the add-int result is not followed by int-to-byte, and that mix can come from either the byte or the char producer; the source and original proto always return I."
       ],
       "invocations": [
         {"id":"sum-positive","input":{"targetRole":"case","method":"sum(BB)I","args":[127,127]},"expected":{"outcome":"java","return":254}},
@@ -1596,14 +1596,14 @@
         {"id":"mixed-byte","input":{"targetRole":"case","method":"mix(ZBC)I","args":[true,-128,65535]},"expected":{"outcome":"java","return":-128}},
         {"id":"mixed-char","input":{"targetRole":"case","method":"mix(ZBC)I","args":[false,-128,65535]},"expected":{"outcome":"java","return":65535}}
       ],
-      "mustRejectMutation": "把byte输入的窄origin错误继承到add结果，或把byte/char hull强制转byte导致254/65535损坏。",
+      "mustRejectMutation": "The decompiler MUST NOT carry the narrow origin of the byte input into the add result, and MUST NOT force the byte/char hull to byte, which corrupts 254 or 65535.",
       "oracle": "worked-integer-ranges-plus-source-jvm-driver",
-      "dependencies": "自制源码/DEX与完整声明目录；工具内容锁见TASKS §4.5"
+      "dependencies": "self-made source/DEX with a complete declaration catalog; tool content locks in TASKS §4.5"
     },
     {
       "id": "D073",
       "family": "heap",
-      "title": "零元素fill仍保留null异常",
+      "title": "A zero-element fill still preserves the null exception",
       "suite": "core-java",
       "seam": "decompile-method",
       "required": true,
@@ -1611,23 +1611,23 @@
       "acceptanceGate": "engine",
       "designRefs": "ALGORITHMS §2.4",
       "inputKind": "self-made-smali-with-proved-reference-java",
-      "inputRecipe": "035静态f([I)V只含fill-array-data p0到count=0、element_width=4的payload，然后return-void；无handler/其他effect。独立参考Java f(int[] a){int unused=a.length;}，按Dalvik该零fill与length read的单site transfer等价：nonnull无写正常，null抛NPE。",
+      "inputRecipe": "A 035 static f([I)V contains only a fill-array-data on p0 with count=0 and element_width=4 payload, then return-void; there is no handler and no other effect. The independent reference Java is f(int[] a){int unused=a.length;}, which Dalvik treats as equivalent to the single-site transfer of this zero fill and the length read: a nonnull array without writes completes normally, and null throws NPE.",
       "inputRequirements": [
-        "独立确认payload count确为0、组件为int、fill原site reachable，无其他可能决定异常的操作。",
-        "B03记录这个封闭单Op到array-length的逐状态规范推导与相同单入口/正常return/异常exit对应；参考Java是语义镜像，不声称JVM执行了原DEX，不推广成异常解释器。"
+        "Confirm independently that the payload count really is 0, the component is int and the original fill site is reachable, with no other operation that could determine the exception.",
+        "B03 MUST record the state-by-state normative derivation from this closed single Op to array-length, together with the correspondence of the same single entry, normal return and exception exit; the reference Java is a semantic mirror, it does not claim that a JVM executed the original DEX, and it MUST NOT be generalized into an exception interpreter."
       ],
       "invocations": [
         {"id":"empty-array","input":{"targetRole":"case","method":"f([I)V","args":[{"arrayType":"[I","values":[]}]},"expected":{"outcome":"java","returnVoid":true,"arrayInt":[]}},
         {"id":"null-array","input":{"targetRole":"case","method":"f([I)V","args":[null]},"expected":{"outcome":"java","exception":"java.lang.NullPointerException"}}
       ],
-      "mustRejectMutation": "因count=0删除整个fill/NPE，或无理由改为raw。",
+      "mustRejectMutation": "The decompiler MUST NOT delete the whole fill and the NPE because count=0, and MUST NOT switch to raw without justification.",
       "oracle": "dalvik-fill-spec-single-op-proof-plus-reference-java-driver",
-      "dependencies": "自制源码/DEX与完整声明目录；工具内容锁见TASKS §4.5"
+      "dependencies": "self-made source/DEX with a complete declaration catalog; tool content locks in TASKS §4.5"
     },
     {
       "id": "D074",
       "family": "heap",
-      "title": "非空fill缺FreshArray证明时完整raw",
+      "title": "A non-empty fill without a FreshArray proof stays complete raw",
       "suite": "raw-integrity",
       "seam": "decompile-method",
       "required": true,
@@ -1635,9 +1635,9 @@
       "acceptanceGate": "engine",
       "designRefs": "ALGORITHMS §2.4、§8",
       "inputKind": "self-made-smali",
-      "inputRecipe": "四个独立有效原始方法：向参数int[]填[7,8]；new int[1]后填2项；new int[n]后填2项；new int[2]先Dep.publish(array)再填2项。所有component/width/ref/target完整，目录含publish的精确声明。只验Java拒绝与raw回环，不借简化VM执行异常/部分写入。",
+      "inputRecipe": "Four independent valid original methods: fill the parameter int[] with [7,8]; create new int[1] and fill 2 elements; create new int[n] and fill 2 elements; create new int[2], call Dep.publish(array) and then fill 2 elements. All component/width/ref/target facts are complete, and the catalog contains the exact declaration of publish. Only the Java rejection and the raw round trip are verified, without a simplified VM executing exceptions or partial writes.",
       "inputRequirements": [
-        "独立projection证明各自失败的是来源/足够长度/未逃逸条件，不是metadata坏、缺catalog或未知opcode；payload两项I32与顺序完整。"
+        "The independent projection MUST prove that each failure comes from the source, the sufficient-length or the no-escape condition, and not from damaged metadata, a missing catalog or an unknown opcode; the two I32 payload elements and their order are complete."
       ],
       "invocations": [
         {"id":"parameter","input":{"targetRole":"parameter","method":"f([I)V"},"expected":{"outcome":"smali","reason":"unsupported","unsupportedReason":"ArrayFillShape","rawExact":true}},
@@ -1645,14 +1645,14 @@
         {"id":"unknown-length","input":{"targetRole":"unknown-length","method":"f(I)[I"},"expected":{"outcome":"smali","reason":"unsupported","unsupportedReason":"ArrayFillShape","rawExact":true}},
         {"id":"escaped","input":{"targetRole":"escaped","method":"f()[I"},"expected":{"outcome":"smali","reason":"unsupported","unsupportedReason":"ArrayFillShape","rawExact":true}}
       ],
-      "mustRejectMutation": "对参数/长度不足或未知/已发布数组直接展开stores而伪称Java，或拒绝后丢payload。",
+      "mustRejectMutation": "The decompiler MUST NOT expand the stores directly for a parameter array, an array of insufficient or unknown length, or an already published array and then claim Java, and MUST NOT drop the payload on rejection.",
       "oracle": "independent-dex-projection-plus-fresh-array-precondition-falsification",
-      "dependencies": "自制源码/DEX与完整声明目录；工具内容锁见TASKS §4.5"
+      "dependencies": "self-made source/DEX with a complete declaration catalog; tool content locks in TASKS §4.5"
     },
     {
       "id": "D075",
       "family": "java-target",
-      "title": "Java参数words含this与无code声明的255边界",
+      "title": "The 255 boundary for Java parameter words including this and for declarations without code",
       "suite": "target-representability",
       "seam": "decompile-method",
       "required": true,
@@ -1660,10 +1660,10 @@
       "acceptanceGate": "engine",
       "designRefs": "ALGORITHMS §12.4、§7",
       "inputKind": "self-made-dex-builder",
-      "inputRecipe": "普通owner保留canonical Object constructor，abstract变体owner标abstract。分别构造静态255/256个I参数、实例254/255个I参数的f(... )I，body返回首个int参数，registers/ins_size均与原proto一致；另abstract实例254/255个I参数的无code声明。参数名p0..，禁止删除unused参数或改proto。接受侧有独立合法Java参考，拒绝侧只做DEX完整性及raw回环。",
+      "inputRecipe": "The ordinary owner keeps the canonical Object constructor, and the abstract variant owner is marked abstract. Construct f(...)I with 255/256 static I parameters and with 254/255 instance I parameters, whose body returns the first int parameter, and whose registers/ins_size match the original proto; also construct code-less declarations with 254/255 instance I parameters. Parameter names are p0.., and deleting an unused parameter or changing the proto is forbidden. The accepted side has an independent legal Java reference, and the rejected side only checks DEX integrity and the raw round trip.",
       "inputRequirements": [
-        "独立按binary proto计this+parameter words；DEX字段/范围本身有效、code_off=0只用于abstract，目录含owner/parent事实。",
-        "不把Java参数上限当DEX结构上限；abstract over-limit的Smali只有原声明，无.registers/合成body。接受侧实际javac/classfile核descriptor未少参数。"
+        "Count this plus the parameter words from the binary proto independently; the DEX field and range are themselves valid, code_off=0 applies only to the abstract declarations, and the catalog contains the owner/parent facts.",
+        "A Java parameter limit MUST NOT be treated as a DEX structural limit; the over-limit abstract Smali contains only the original declaration, with no .registers and no synthetic body. On the accepted side, javac/classfile MUST confirm that the descriptor lost no parameter."
       ],
       "invocations": [
         {"id":"static-at","input":{"targetRole":"static255","parameterWords":255,"argsPattern":{"firstInt":7,"remainingInts":0}},"expected":{"outcome":"java","return":7,"protoPreserved":true}},
@@ -1673,14 +1673,14 @@
         {"id":"abstract-at","input":{"targetRole":"abstract254","parameterWords":255},"expected":{"outcome":"declaration-only","protoPreserved":true,"hasBody":false}},
         {"id":"abstract-over","input":{"targetRole":"abstract255","parameterWords":256},"expected":{"outcome":"smali","reason":"unsupported","unsupportedReason":"JavaTargetLimit","targetItem":"parameter_words","rawDeclarationExact":true,"hasBody":false}}
       ],
-      "mustRejectMutation": "漏this、用可配置Limits放宽255、删unused参数、把目标拒绝误报Malformed/BudgetExceeded，或为abstract造code。",
+      "mustRejectMutation": "The decompiler MUST NOT omit this, widen 255 through configurable Limits, delete an unused parameter, misreport the intended rejection as Malformed/BudgetExceeded, or fabricate code for the abstract declarations.",
       "oracle": "JVMS-4.3.3-word-count-plus-independent-dex-and-classfile-projection",
-      "dependencies": "自制源码/DEX与完整声明目录；工具内容锁见TASKS §4.5"
+      "dependencies": "self-made source/DEX with a complete declaration catalog; tool content locks in TASKS §4.5"
     },
     {
       "id": "D076",
       "family": "java-target",
-      "title": "MUTF8按编码字节而非u16或source escape检查",
+      "title": "MUTF8 is checked by encoded bytes, not by u16 or source escape length",
       "suite": "target-representability",
       "seam": "decompile-method",
       "required": true,
@@ -1688,24 +1688,24 @@
       "acceptanceGate": "engine",
       "designRefs": "ALGORITHMS §4.8、§12.4",
       "inputKind": "self-made-dex-builder-with-reference-java",
-      "inputRecipe": "f()String的const-string分别由32767个NUL、32767个NUL后接A、32768个NUL构成，对应MUTF8长度65534/65535/65536；原DEX string_data合法。接收侧参考Java使用octal NUL escapes，不含Unicode-prelex换行。",
+      "inputRecipe": "The const-string of f()String is built from 32767 NUL units, 32767 NUL units followed by A, and 32768 NUL units, corresponding to MUTF8 lengths 65534/65535/65536; the original DEX string_data is legal. The receiving side's reference Java uses octal NUL escapes and contains no Unicode preprocessing newline.",
       "inputRequirements": [
-        "独立逐u16按NUL=2、ASCII=1规则计MUTF8字节；所有分析/输出预算足够，不能由小输出限额掩盖目标错误。",
-        "紧凑期望完整规定字符串：zeroPrefixUnits个0后可选lastUnit；不是仅比较length或hash。"
+        "Count the MUTF8 bytes per u16 independently with NUL=2 and ASCII=1; every analysis and output budget is sufficient, so a small output limit MUST NOT mask the target error.",
+        "The compact expectation specifies the complete string: zeroPrefixUnits copies of 0 plus an optional lastUnit; comparing only length or hash is insufficient."
       ],
       "invocations": [
         {"id":"below","input":{"targetRole":"nul32767","method":"f()Ljava/lang/String;"},"expected":{"outcome":"java","stringPattern":{"zeroPrefixUnits":32767}}},
         {"id":"at","input":{"targetRole":"nul32767-A","method":"f()Ljava/lang/String;"},"expected":{"outcome":"java","stringPattern":{"zeroPrefixUnits":32767,"lastUnit":65}}},
         {"id":"over","input":{"targetRole":"nul32768","method":"f()Ljava/lang/String;"},"expected":{"outcome":"smali","reason":"unsupported","unsupportedReason":"JavaTargetLimit","targetItem":"constant_utf8_bytes","rawExact":true}}
       ],
-      "mustRejectMutation": "按UTF16 length放过65536-byte CP项、按source escape长度误拒合法65535项，或把NUL转空/丢单元。",
+      "mustRejectMutation": "The decompiler MUST NOT accept the 65536-byte constant-pool item by UTF-16 length, wrongly reject the legal 65535 item by source escape length, or turn NUL into empty and drop units.",
       "oracle": "JVMS-CONSTANT_Utf8-plus-exact-u16-pattern-and-javac",
-      "dependencies": "自制源码/DEX与完整声明目录；工具内容锁见TASKS §4.5"
+      "dependencies": "self-made source/DEX with a complete declaration catalog; tool content locks in TASKS §4.5"
     },
     {
       "id": "D077",
       "family": "java-target",
-      "title": "长直线调用序列完整恢复Java并保留全部调用",
+      "title": "A long straight-line call sequence recovers complete Java and keeps every call",
       "suite": "core-java",
       "seam": "decompile-method",
       "required": true,
@@ -1713,24 +1713,24 @@
       "acceptanceGate": "engine",
       "designRefs": "ALGORITHMS §12.4–§12.5；DESIGN §10.3",
       "inputKind": "self-made-java-to-dex",
-      "inputRecipe": "静态f()V连续执行10000个相同Dep.tick()V后return，无loop/handler；Dep有默认初值0的static int ticks，tick()只执行ticks++。每次Driver在新JVM调用f一次后读取ticks。完整自制依赖及Object目录，恢复目标时依赖不改。所有资源配额保持None，不按节点费用预测代码大小。",
+      "inputRecipe": "A static f()V executes 10000 identical Dep.tick()V calls in sequence and then returns, with no loop and no handler; Dep has a static int ticks with the default initial value 0, and tick() only performs ticks++. The Driver calls f once in a new JVM and then reads ticks. The complete self-made dependencies and Object catalog are provided, and the dependencies stay unchanged when the target is recovered. All resource quotas stay None; the code size is not predicted from a per-node cost.",
       "inputRequirements": [
-        "独立认证原DEX恰有10000个有序invoke-static site及末尾return-void；不能因工具改写而用一个loop替换输入，也不能删call或加helper。",
-        "恢复Java在原合法context真实编译，独立读取classfile核10000次原callee调用及合法Code。Driver比较return-void与ticks=10000，不从源码长度或引擎状态getter推断成功。",
-        "本机同型javac探针得到code_length=30001，仅说明输入可表达；B03仍须按TASKS锁定版本重建、认证原DEX与真实参考行为。"
+        "Certify independently that the original DEX has exactly 10000 ordered invoke-static sites and a trailing return-void; the input MUST NOT be replaced by a single loop because of a tool rewrite, and calls MUST NOT be deleted or wrapped in a helper.",
+        "The recovered Java really compiles in the original legal context, and the independent classfile read verifies the 10000 calls to the original callee plus legal Code. The Driver compares return-void and ticks=10000; it does not infer success from the source length or from an engine state getter.",
+        "A same-shaped local javac probe yields code_length=30001, which only shows that the input is expressible; B03 MUST still rebuild with the TASKS-pinned versions and certify the original DEX and the real reference behavior."
       ],
       "invocations": [
         {"id":"code-upper-bound","input":{"targetRole":"case","method":"f()V","catalog":"complete","limits":{},"isolation":"fresh-jvm"},"expected":{"outcome":"java","returnVoid":true,"heap":{"ticks":10000},"orderedInvokeSites":10000}}
       ],
-      "mustRejectMutation": "按AST节点或DEX code units猜code费用并退raw，删/合并调用，或未完整生成就报Java成功。",
+      "mustRejectMutation": "The decompiler MUST NOT guess a code cost from AST nodes or DEX code units and fall back to raw, MUST NOT delete or merge calls, and MUST NOT report Java success before the output is complete.",
       "oracle": "worked-call-count-plus-source-jvm-driver-and-independent-classfile-projection",
-      "dependencies": "自制源码/DEX与完整声明目录；工具内容锁见TASKS §4.5",
-      "revisionReason": "按用户要求取消未测费用门槛；原10000次调用问题与invocation id保留，删除以估算自身作oracle的Smali预期，改验独立可编译Java和真实调用效果。不从Diana actual刷新真值。"
+      "dependencies": "self-made source/DEX with a complete declaration catalog; tool content locks in TASKS §4.5",
+      "revisionReason": "At the user's request the unmeasured cost threshold is removed; the original 10000-call problem and the invocation ids are preserved, the Smali expectation that used the estimate itself as the oracle is deleted, and the check now uses independently compilable Java and the real call effect. The truth is not refreshed from the Diana actual output."
     },
     {
       "id": "D078",
       "family": "java-target",
-      "title": "完整接口声明不因重复mention估算而降级",
+      "title": "Complete interface declarations are not downgraded by a repeated-mention estimate",
       "suite": "core-java",
       "seam": "decompile-class",
       "required": true,
@@ -1738,24 +1738,24 @@
       "acceptanceGate": "engine",
       "designRefs": "ALGORITHMS §12.4、§12.6；DESIGN §10.3",
       "inputKind": "self-made-dex-builder-with-reference-java",
-      "inputRecipe": "public interface Case恰有2200个名字互异的abstract m0000..m2199()I声明，无constructor、无code、无默认方法；flags/proto/hierarchy完整。参考Java逐项声明这些方法，恢复完整JavaUnit后直接编译；配额全None，不按声明/type/descriptor mention乘系数猜pool。",
+      "inputRecipe": "A public interface Case has exactly 2200 distinct abstract declarations m0000..m2199()I, with no constructor, no code and no default method; flags/proto/hierarchy are complete. The reference Java declares these methods one by one, and the complete recovered JavaUnit is compiled directly; all quotas are None, and the pool is not guessed by multiplying a coefficient per declaration/type/descriptor mention.",
       "inputRequirements": [
-        "独立全量声明manifest=2200、code_off均0、每个proto和原key存在；其他shell条件合法，无未知compiler-owned成员。",
-        "恢复JavaUnit真实编译，独立classfile投影与manifest核全部2200个abstract声明、无Code/合成constructor/body，并核实际pool格式有效。",
-        "本机同型javac探针的constant_pool_count=2206不是固定输出golden；B03仍须用锁定工具认证参考产物。"
+        "The independent full declaration manifest is 2200 entries with code_off all 0, and every proto and original key exists; the other shell conditions are legal and there is no unknown compiler-owned member.",
+        "The recovered JavaUnit really compiles, and the independent classfile projection and manifest verify all 2200 abstract declarations, the absence of Code, a synthetic constructor and a body, and the validity of the actual pool format.",
+        "The constant_pool_count=2206 of the same-shaped local javac probe is not a fixed output golden; B03 MUST still certify the reference artifact with the pinned tools."
       ],
       "invocations": [
         {"id":"class-pool","input":{"targetRole":"case","catalog":"complete","limits":{}},"expected":{"outcome":"java","declarationsPreserved":2200}}
       ],
-      "mustRejectMutation": "按重复mention估算pool而返回Mixed，漏声明/截断后报JavaUnit，或错误合成constructor/body；DeclarationOnly不能抬高executable Java统计。",
+      "mustRejectMutation": "The decompiler MUST NOT estimate the pool from repeated mentions and return Mixed, MUST NOT report JavaUnit after a dropped or truncated declaration, and MUST NOT synthesize a constructor or body incorrectly; DeclarationOnly MUST NOT inflate the executable Java statistics.",
       "oracle": "independent-full-declaration-manifest-plus-javac-and-classfile-projection",
-      "dependencies": "自制源码/DEX与完整声明目录；工具内容锁见TASKS §4.5",
-      "revisionReason": "保留2200个无code声明及完整性问题；独立参考可合法编译，取消猜测pool费用导致的Mixed预期，改为必需完整JavaUnit。不删required或迎合引擎actual。"
+      "dependencies": "self-made source/DEX with a complete declaration catalog; tool content locks in TASKS §4.5",
+      "revisionReason": "The revision keeps the 2200 code-less declarations and the completeness requirement; the independent reference compiles legally, so the Mixed expectation caused by a guessed pool cost is removed and complete JavaUnit is required instead. No required case is deleted and the engine actual output is not accommodated."
     },
     {
       "id": "D079",
       "family": "initialization",
-      "title": "恢复static final不得使下游读消失及跳过class-init",
+      "title": "Recovering a static final removes no downstream read and skips no class-init",
       "suite": "core-java",
       "seam": "decompile-related-classes",
       "required": true,
@@ -1763,23 +1763,23 @@
       "acceptanceGate": "engine",
       "designRefs": "ALGORITHMS §9.1、§12.2",
       "inputKind": "self-made-java-to-dex",
-      "inputRecipe": "Case含static final int N与String S，均blank final，在static block按序赋7和\"x\"后Dep.log(\"INIT\")。Reader.readInt/readString各先Dep.log(\"READ\")再读Case字段。分别恢复Case与Reader完整JavaUnit，随后只用两份恢复源码和未改动Dep一起编译；Driver只调用Reader两次，不提前触碰Case。每种读在新JVM执行。",
+      "inputRecipe": "The Case contains a static final int N and a String S, both blank final, which a static block assigns 7 and \"x\" in that order and then logs \"INIT\" through Dep.log. Reader.readInt/readString each log \"READ\" through Dep.log first and then read the Case field. Case and Reader are each recovered as a complete JavaUnit, and only these two recovered sources are compiled together with the unchanged Dep; the Driver calls Reader twice and does not touch Case beforehand. Each read runs in a new JVM.",
       "inputRequirements": [
-        "原DEX Reader实际含sget/sget-object，Case的clinit写及依赖目录完整；Case字段的source常量性事实为NonConstant。",
-        "两个class均通过公开Engine请求取得，不能保留原Case.class或splice原Reader；javac后Case字段无ConstantValue，Reader仍实际getstatic。"
+        "The original DEX Reader really contains sget/sget-object, the clinit writes of Case and the dependency catalog are complete, and the source constant-ness fact of the Case fields is NonConstant.",
+        "Both classes are obtained through public Engine requests; the original Case.class MUST NOT be kept and the original Reader MUST NOT be spliced in. After javac the Case fields have no ConstantValue and Reader still really issues getstatic."
       ],
       "invocations": [
         {"id":"int-read","input":{"targetRoles":["case","reader"],"method":"readInt()I","repeat":2,"isolation":"fresh-jvm","callRole":"reader"},"expected":{"outcome":"java","returns":[7,7],"events":["READ","INIT","READ"],"fieldReadsPreserved":true,"constantValueAbsent":true}},
         {"id":"string-read","input":{"targetRoles":["case","reader"],"method":"readString()Ljava/lang/String;","repeat":2,"isolation":"fresh-jvm","callRole":"reader"},"expected":{"outcome":"java","returnsStringUnits":[[120],[120]],"events":["READ","INIT","READ"],"fieldReadsPreserved":true,"constantValueAbsent":true}}
       ],
-      "mustRejectMutation": "把static final改成常量字段initializer使Reader内联而遗漏INIT，或重复clinit/提前触发初始化。",
+      "mustRejectMutation": "The decompiler MUST NOT turn the static final into a constant field initializer, which lets Reader inline it and omit INIT; it MUST NOT repeat clinit or trigger initialization early.",
       "oracle": "JLS-class-initialization-and-constant-variable-rules-plus-source-jvm-and-classfile",
-      "dependencies": "自制源码/DEX与完整声明目录；工具内容锁见TASKS §4.5"
+      "dependencies": "self-made source/DEX with a complete declaration catalog; tool content locks in TASKS §4.5"
     },
     {
       "id": "D080",
       "family": "initialization",
-      "title": "外部常量或未知常量性字段读不能添加helper蒙混Java",
+      "title": "An external constant or unknown-constantness field read adds no helper to fake Java",
       "suite": "raw-integrity",
       "seam": "decompile-method",
       "required": true,
@@ -1787,22 +1787,22 @@
       "acceptanceGate": "engine",
       "designRefs": "ALGORITHMS §9.1",
       "inputKind": "self-made-smali",
-      "inputRecipe": "f()I仅sget External.C:I后return，外部字段public static final；两个catalog变体均完整提供owner/access/type，但JavaConstantKind分别Constant与Unknown。原DEX ref/metadata有效。",
+      "inputRecipe": "f()I only runs sget External.C:I and then returns; the external field is public static final. Both catalog variants provide the complete owner/access/type, but their JavaConstantKind is Constant and Unknown respectively. The original DEX ref/metadata is valid.",
       "inputRequirements": [
-        "只有常量性是所测拒绝条件；known变体有独立Java classfile ConstantValue证据，unknown变体明确不给常量性证明，不伪装成NonConstant。"
+        "Constant-ness alone is the rejection condition under test; the known variant has independent Java classfile ConstantValue evidence, and the unknown variant deliberately provides no constant-ness proof and MUST NOT be disguised as NonConstant."
       ],
       "invocations": [
         {"id":"known-constant","input":{"targetRole":"case","method":"f()I","javaConstantKind":"Constant"},"expected":{"outcome":"smali","reason":"unsupported","unsupportedReason":"JavaConstantFieldRead","rawExact":true}},
         {"id":"unknown-constantness","input":{"targetRole":"case","method":"f()I","javaConstantKind":"Unknown"},"expected":{"outcome":"smali","reason":"unsupported","unsupportedReason":"BindingEvidenceMissing","rawExact":true}}
       ],
-      "mustRejectMutation": "源码直接读导致被javac内联、猜Unknown为NonConstant、添加反射/额外初始化helper或丢原sget。",
+      "mustRejectMutation": "The decompiler MUST NOT let a direct source read be inlined by javac, MUST NOT guess Unknown as NonConstant, MUST NOT add reflection or an extra initialization helper, and MUST NOT drop the original sget.",
       "oracle": "JLS-constant-inlining-plus-independent-raw-field-reference",
-      "dependencies": "自制源码/DEX与完整声明目录；工具内容锁见TASKS §4.5"
+      "dependencies": "self-made source/DEX with a complete declaration catalog; tool content locks in TASKS §4.5"
     },
     {
       "id": "D081",
       "family": "monitor",
-      "title": "持锁重执行同一allocation site不能认成原锁",
+      "title": "Re-executing the same allocation site while holding a lock is not the original lock",
       "suite": "raw-integrity",
       "seam": "decompile-method",
       "required": true,
@@ -1810,22 +1810,22 @@
       "acceptanceGate": "engine",
       "designRefs": "ALGORITHMS §11",
       "inputKind": "self-made-smali",
-      "inputRecipe": "f()V设flag=1；again: new Object到v0并邻接init；flag非0时monitor-enter v0、flag=0、goto again；flag为0时monitor-exit v0后return。第二个动态对象来自同一静态allocation site，却不是先前持有的对象。无handler，Object ctor目录完整，所有bytecode格式/ref/branch合法。",
+      "inputRecipe": "f()V sets flag=1; again: new Object into v0 with an adjacent init; when flag is nonzero it runs monitor-enter v0, sets flag=0 and goto again; when flag is 0 it runs monitor-exit v0 and then returns. The second dynamic object comes from the same static allocation site, but it is not the object held earlier. There is no handler, the Object ctor catalog is complete, and every bytecode format/ref/branch is legal.",
       "inputRequirements": [
-        "独立确认实际backedge重新经过同一new/init，且退出用的是新动态对象；不执行一个忽略monitor的解释器，也不宣称已通过ART verifier。",
-        "lock-stack join/identity/freshness任一证据足以拒绝该profile；不要求观察私有RootId、选择的证明顺序或某个特定检查次数。"
+        "Confirm independently that the actual backedge re-executes the same new/init and that the exit uses the new dynamic object; do not run an interpreter that ignores monitors, and do not claim that the ART verifier has accepted it.",
+        "Any one evidence of lock-stack join, identity or freshness suffices to reject this profile; observing a private RootId, a particular proof order or a specific number of checks is not required."
       ],
       "invocations": [
         {"id":"reexecuted-root","input":{"targetRole":"case","method":"f()V","catalog":"complete"},"expected":{"outcome":"smali","reason":"unsupported","unsupportedReason":"MonitorScopeUnproved","rawExact":true}}
       ],
-      "mustRejectMutation": "仅按静态AllocationId/ValueId相同而生成貌似平衡的synchronized，或把未知锁状态静默修复。",
+      "mustRejectMutation": "The decompiler MUST NOT emit an apparently balanced synchronized solely because the static AllocationId/ValueId match, and MUST NOT silently repair an unknown lock state.",
       "oracle": "dynamic-object-identity-counterexample-plus-independent-raw-projection",
-      "dependencies": "自制源码/DEX与完整声明目录；工具内容锁见TASKS §4.5"
+      "dependencies": "self-made source/DEX with a complete declaration catalog; tool content locks in TASKS §4.5"
     },
     {
       "id": "D082",
       "family": "monitor",
-      "title": "参数锁在有界循环中重复使用仍须正确恢复",
+      "title": "A parameter lock reused in a bounded loop is still recovered correctly",
       "suite": "core-java",
       "seam": "decompile-method",
       "required": true,
@@ -1833,23 +1833,23 @@
       "acceptanceGate": "engine",
       "designRefs": "ALGORITHMS §6、§11",
       "inputKind": "self-made-java-to-dex",
-      "inputRecipe": "static int f(Object lock,int n){int s=0;for(int i=0;i<n;i++){synchronized(lock){if(Thread.holdsLock(lock))s++;}}return s;} Driver正常/异常退出后观察同一lock。每次enter/exit一层、root是不可重定义参数，不因有loop一概raw。",
+      "inputRecipe": "static int f(Object lock,int n){int s=0;for(int i=0;i<n;i++){synchronized(lock){if(Thread.holdsLock(lock))s++;}}return s;} The Driver observes the same lock after normal and abnormal exits. Each enter/exit covers one level, and the root is a non-redefinable parameter, so the presence of a loop alone MUST NOT force raw output.",
       "inputRequirements": [
-        "独立认证canonical monitor/release-handler、loop退出及同一参数根；natural loop内的scope不能被普通try识别提前拒绝。"
+        "Certify independently the canonical monitor/release-handler, the loop exit and the single parameter root; a scope inside a natural loop MUST NOT be rejected early by ordinary try recognition."
       ],
       "invocations": [
         {"id":"zero-null","input":{"targetRole":"case","method":"f(Ljava/lang/Object;I)I","args":[null,0]},"expected":{"outcome":"java","return":0}},
         {"id":"twice","input":{"targetRole":"case","method":"f(Ljava/lang/Object;I)I","args":[{"new":"java.lang.Object","identity":"lock-1"},2],"observeMonitorAfter":"lock-1"},"expected":{"outcome":"java","return":2,"monitorAfter":false}},
         {"id":"null-enter","input":{"targetRole":"case","method":"f(Ljava/lang/Object;I)I","args":[null,1]},"expected":{"outcome":"java","exception":"java.lang.NullPointerException"}}
       ],
-      "mustRejectMutation": "把锁表达式提升到0次循环之前、少释放/放body到锁外，或把任何loop都判成freshness失败。",
+      "mustRejectMutation": "The decompiler MUST NOT hoist the lock expression ahead of the loop that may run zero times, MUST NOT release too few times or place the body outside the lock, and MUST NOT classify every loop as a freshness failure.",
       "oracle": "source-jvm-holdsLock-driver-plus-independent-monitor-projection",
-      "dependencies": "自制源码/DEX与完整声明目录；工具内容锁见TASKS §4.5"
+      "dependencies": "self-made source/DEX with a complete declaration catalog; tool content locks in TASKS §4.5"
     },
     {
       "id": "D083",
       "family": "control",
-      "title": "极端稀疏switch不按跨度展开或丢key",
+      "title": "An extremely sparse switch is not expanded over its span and loses no key",
       "suite": "core-java",
       "seam": "decompile-method",
       "required": true,
@@ -1857,23 +1857,23 @@
       "acceptanceGate": "engine",
       "designRefs": "ALGORITHMS §6、§12.5",
       "inputKind": "self-made-java-to-dex",
-      "inputRecipe": "static int f(int k){switch(k){case -2147483648:return 1;case 2147483647:return 2;default:return 3;}} 仅两个keys；无handler/monitor/uninit。资源配置须足够处理实际nodes而非跨度。",
+      "inputRecipe": "static int f(int k){switch(k){case -2147483648:return 1;case 2147483647:return 2;default:return 3;}} Only two keys exist; there is no handler, monitor or uninitialized value. The resource configuration MUST be sufficient for the actual nodes rather than for the span.",
       "inputRequirements": [
-        "独立认证两个signed I32极值和default target；以checked宽整数计算跨度。验证行为及有界完成，不比较打印switch/if/pc的样式。"
+        "Certify independently the two signed I32 extremes and the default target, and compute the span with checked wide integers. Verify the behavior and the bounded completion; the printed style of switch/if/pc is not compared."
       ],
       "invocations": [
         {"id":"min","input":{"targetRole":"case","method":"f(I)I","args":[-2147483648]},"expected":{"outcome":"java","return":1}},
         {"id":"max","input":{"targetRole":"case","method":"f(I)I","args":[2147483647]},"expected":{"outcome":"java","return":2}},
         {"id":"default","input":{"targetRole":"case","method":"f(I)I","args":[0]},"expected":{"outcome":"java","return":3}}
       ],
-      "mustRejectMutation": "按max-min的i32溢出构造巨大table、枚举整个跨度耗尽预算或截断极值key。",
+      "mustRejectMutation": "The decompiler MUST NOT build a huge table through an i32 overflow of max-min, MUST NOT enumerate the whole span and exhaust the budget, and MUST NOT truncate an extreme key.",
       "oracle": "worked-switch-outcomes-plus-source-jvm-driver",
-      "dependencies": "自制源码/DEX与完整声明目录；工具内容锁见TASKS §4.5"
+      "dependencies": "self-made source/DEX with a complete declaration catalog; tool content locks in TASKS §4.5"
     },
     {
       "id": "D084",
       "family": "declarations",
-      "title": "有额外effect的synthetic bridge不能当Generated丢弃",
+      "title": "A synthetic bridge with extra effects is not dropped as Generated",
       "suite": "raw-integrity",
       "seam": "decompile-class",
       "required": true,
@@ -1881,21 +1881,21 @@
       "acceptanceGate": "engine",
       "designRefs": "ALGORITHMS §9、§12.3",
       "inputKind": "self-made-smali",
-      "inputRecipe": "Case extends完整自制Base，含canonical ctor、String get()返回child，以及标bridge|synthetic的Object get()：先Dep.log(\"BRIDGE\")再invoke-virtual同receiver的String get并return。source override会自动生成的bridge不含该log，故不是canonical可消费模式。",
+      "inputRecipe": "The Case extends a complete self-made Base and contains the canonical ctor, a String get() that returns the child, and an Object get() marked bridge|synthetic that first runs Dep.log(\"BRIDGE\") and then invoke-virtual String get on the same receiver and returns. The bridge that a source override would generate automatically does not contain that log, so this member is not a canonical consumable pattern.",
       "inputRequirements": [
-        "独立认证所有原成员/flags/proto/先log再target的instruction序；parent/overrides/access/throws均完整，不能因缺catalog偶然Mixed。"
+        "Certify independently every original member, its flags and proto, and the instruction order that logs before the target; the parent/overrides/access/throws facts are complete, so the class does not become Mixed merely through a missing catalog."
       ],
       "invocations": [
         {"id":"effectful-bridge","input":{"targetRole":"case","catalog":"complete"},"expected":{"outcome":"mixed","effectfulBridgeRawPreserved":true,"noFakeJavaUnit":true,"rawBridgeLogArgumentUnits":[66,82,73,68,71,69]}}
       ],
-      "mustRejectMutation": "见synthetic就删、套用canonical bridge规则丢log、改public名或打印冲突声明伪造JavaUnit。",
+      "mustRejectMutation": "The decompiler MUST NOT delete a member merely because it is synthetic, MUST NOT apply the canonical bridge rule and lose the log, MUST NOT change the public name, and MUST NOT fabricate JavaUnit by printing a conflicting declaration.",
       "oracle": "canonical-bridge-precondition-counterexample-plus-independent-raw-projection",
-      "dependencies": "自制源码/DEX与完整声明目录；工具内容锁见TASKS §4.5"
+      "dependencies": "self-made source/DEX with a complete declaration catalog; tool content locks in TASKS §4.5"
     },
     {
       "id": "D085",
       "family": "result-integrity",
-      "title": "局部invoke-custom失败不阻断整类与单方法反编译展示",
+      "title": "A local invoke-custom failure does not block whole-class and single-method decompilation display",
       "suite": "domain-integrity",
       "seam": "decompile-and-render",
       "required": true,
@@ -1903,25 +1903,25 @@
       "acceptanceGate": "engine-and-application",
       "designRefs": "DESIGN §2.2、§6.5；ALGORITHMS §8.1",
       "inputKind": "self-made-dex-builder",
-      "inputRecipe": "自制038 Case有canonical Object constructor、static zAdd(II)I的真实加法body，以及static aDynamic()I。aDynamic先const-string（UTF16 [0,55296,42,47,92,117,48,48,48,97]），再invoke-custom零参数且call-site proto ()I，邻接move-result/return。call_site的bootstrap静态method_handle、name、method_type和全部metadata合法；bootstrap声明为自制Bootstrap.link(MethodHandles.Lookup,String,MethodType)CallSite，外部声明目录完整。已知invoke-custom只能raw，zAdd不依赖它。分别经公开Engine+render和应用公开反编译Module的默认text路径获取相同选择，不启动CLI。",
+      "inputRecipe": "The self-made 038 Case has the canonical Object constructor, a static zAdd(II)I with a real addition body, and a static aDynamic()I. aDynamic first runs const-string (UTF16 [0,55296,42,47,92,117,48,48,48,97]), then runs invoke-custom with zero arguments and the call-site proto ()I, with an adjacent move-result/return. The bootstrap static method_handle, name, method_type and all metadata of the call_site are legal; the bootstrap is declared as the self-made Bootstrap.link(MethodHandles.Lookup,String,MethodType)CallSite, and the external declaration catalog is complete. invoke-custom is known to yield raw only, and zAdd does not depend on it. The same selection is obtained through the public Engine+render and through the default text path of the application's public decompilation Module, without starting the CLI.",
       "inputRequirements": [
-        "独立decoder认证038、可达invoke-custom、完整call_site/method_handle/proto及三个真实method key；拒绝只因InvokeCustomUnsupported，而非目录缺失/字节格式损坏。 原class_data的direct_methods中aDynamic位于zAdd之前，独立认证这个合法输入顺序，以暴露遇失败就停止分析余下方法；不要求输出排序。",
-        "class调用必须保留所有原成员：zAdd的已验证Java与aDynamic的完整Smali同时可定位；不因class Mixed清空text，不新增stub/body，不把Mixed算JavaUnit。",
-        "以输出UTF8 source ranges逐段定位原method；独立重组/解码aDynamic的raw切片核全部opcode/ref/call-site/string units，而非比较语言getter、整段版式或私有AST。literal含*/和反斜线u，不得被Java注释包装破坏。",
-        "该case验证复杂结果保留/raw/identity/spans，不以它宣称Mixed整体通过javac或原始invoke-custom已在ART执行；zAdd的算术行为由既有D009等独立Java闭环覆盖。两seam分别满足每项预期，仅计一个case。"
+        "An independent decoder MUST certify 038, the reachable invoke-custom, the complete call_site/method_handle/proto and the three real method keys; the rejection comes only from InvokeCustomUnsupported and not from a missing catalog or damaged byte format. In the original class_data direct_methods, aDynamic precedes zAdd; certify this legal input order independently, so that stopping analysis of the remaining methods on a failure becomes visible. Output ordering is not required.",
+        "A class invocation MUST keep every original member: the verified Java of zAdd and the complete Smali of aDynamic are both locatable; a Mixed class MUST NOT clear the text, MUST NOT add a stub or body, and MUST NOT count Mixed as JavaUnit.",
+        "Use the UTF8 source ranges of the output to locate each original method; independently reassemble and decode the raw slice of aDynamic and check every opcode/ref/call-site/string unit, rather than comparing language getters, whole-section layout or a private AST. The literal contains */ and backslash-u, so a Java comment wrapper MUST NOT corrupt it.",
+        "This case verifies complex-result preservation, raw, identity and spans; it MUST NOT be used to claim that Mixed as a whole passes javac or that the original invoke-custom ran on ART. The arithmetic behavior of zAdd is covered by the independent Java loop of existing cases such as D009. Each seam satisfies every expectation and the case counts once."
       ],
       "invocations": [
         {"id":"class-text","input":{"targetRole":"case","format":"text","through":["engine-render","application-default-text"]},"expected":{"outcome":"mixed","textAvailable":true,"mustIncludeJavaMethods":["zAdd(II)I"],"mustIncludeSmaliMethods":["aDynamic()I"],"allOriginalMembersPresent":true,"eachOriginalMemberOnce":true,"failedMethodHasNoJavaBody":true,"rawDynamicExact":true,"stringUnitsExact":true,"sourceSpansExact":true,"noFakeJavaUnit":true}},
         {"id":"method-text","input":{"targetRole":"case","method":"aDynamic()I","format":"text","through":["engine-render","application-default-text"]},"expected":{"outcome":"smali","reason":"unsupported","textAvailable":true,"rawExact":true,"stringUnitsExact":true,"sourceSpansExact":true}}
       ],
-      "mustRejectMutation": "以非JavaUnit拒绝默认text、一个失败清空其他Java成员、要求JSON才能拿raw、空stub补齐、漏成员/修改call-site或UTF16、Mixed前缀后spans失位。",
+      "mustRejectMutation": "The decompiler MUST NOT reject the default text output with a non-JavaUnit status, MUST NOT let one failure clear the other Java members, MUST NOT require JSON before it yields raw, MUST NOT fill in an empty stub, MUST NOT omit a member or modify the call-site or UTF16, and MUST NOT misplace spans after the Mixed prefix.",
       "oracle": "independent-dex-member-and-raw-projection-plus-rendered-source-identity-integrity",
-      "dependencies": "自制038 builder/Bootstrap声明/完整Object目录；固定smali/dexlib2开发工具；不执行外部APK或CLI"
+      "dependencies": "self-made 038 builder/Bootstrap declarations/complete Object catalog; pinned smali/dexlib2 development tools; no external APK or CLI is executed"
     },
     {
       "id": "D086",
       "family": "resources",
-      "title": "大code范围默认不限且显式限额不破坏完整raw",
+      "title": "A large code range is unlimited by default and an explicit limit does not break complete raw",
       "suite": "resource-safety",
       "seam": "decompile-method",
       "required": true,
@@ -1929,20 +1929,20 @@
       "acceptanceGate": "engine",
       "designRefs": "DESIGN §3.7、§10.3；ALGORITHMS §1、§7–§8、§13",
       "inputKind": "self-made-dex-builder-with-reference-java",
-      "inputRecipe": "自制035 owner有canonical ctor与static f()V。f的code_item恰含131073个code units：首个return-void，随后131072个完整nop；registers/ins/outs/tries均0，无branch/payload/handler。只有return可达。真实输入范围覆盖全部words，完整声明目录。参考Java f直接return；使用既定tests-only pure-scalar oracle执行原入口，不引入heap/exception/monitor解释。",
+      "inputRecipe": "A self-made 035 owner has the canonical ctor and a static f()V. The code_item of f contains exactly 131073 code units: the first is return-void and the remaining 131072 are complete nop instructions; registers/ins/outs/tries are all 0, with no branch, payload or handler. Only the return is reachable. The real input range covers all words, and the declaration catalog is complete. The reference Java f returns directly; the established tests-only pure-scalar oracle executes the original entry, without heap, exception or monitor interpretation.",
       "inputRequirements": [
-        "独立解码证明insns_size=131073、所有words实际存在、第一条为return-void、其余均完整nop且不可达；不能缩小输入、截断dead区或伪造超出实际文件的count。",
-        "默认Limits保持全None，公开Engine必须完成真实输入校验并恢复Java；Driver核return-void，真实编译目标方法，不以读取Limits默认值作为测试。",
-        "第二调用只显式设置normal max_method_code_units=131072；raw相关字段仍None，必须完整回环保留首个return和所有nop，不以旧raw默认长度限制拒绝。"
+        "Independent decoding MUST prove that insns_size=131073, that all words really exist, that the first instruction is return-void and that all remaining instructions are complete nop and unreachable; the input MUST NOT be shrunk, the dead range MUST NOT be truncated, and a count beyond the actual file MUST NOT be fabricated.",
+        "The default Limits stay all None, and the public Engine MUST complete the real input validation and recover Java; the Driver checks return-void and really compiles the target method, rather than testing by reading the Limits default values.",
+        "The second invocation explicitly sets only normal max_method_code_units=131072; the raw-related fields remain None, so the complete round trip MUST keep the first return and every nop and MUST NOT reject through the former raw default length limit."
       ],
       "invocations": [
         {"id":"unlimited-default","input":{"targetRole":"case","method":"f()V","limits":{}},"expected":{"outcome":"java","returnVoid":true}},
         {"id":"explicit-code-limit","input":{"targetRole":"case","method":"f()V","limits":{"max_method_code_units":131072}},"expected":{"outcome":"smali","reason":"budget_exceeded","rawExact":true}}
       ],
-      "mustRejectMutation": "恢复隐藏的131072默认code/raw门槛、把显式normal限制误用于raw、无效count先分配，或跳过dead区格式校验后报成功。",
+      "mustRejectMutation": "The decompiler MUST NOT restore a hidden default 131072 code/raw threshold, MUST NOT apply the explicit normal limit to raw, MUST NOT allocate before validating an invalid count, and MUST NOT skip format validation of the dead range and then report success.",
       "oracle": "independent-full-code-layout-plus-pure-scalar-reference-and-jvm-driver",
-      "dependencies": "自制035 builder/完整声明/已约定pure-scalar参考及固定assembler；不执行CLI或私有phase测试",
-      "revisionReason": "新增合法大code与显式限额对照，验收默认放开不靠getter断言，同时保留真实范围、完整raw及非截断保证。"
+      "dependencies": "self-made 035 builder/complete declarations/the agreed pure-scalar reference and a pinned assembler; no CLI or private phase test is executed",
+      "revisionReason": "The revision adds a legal large code range and an explicit-limit counterpart, so that the default being open is accepted without a getter assertion, while the real range, the complete raw output and the non-truncation guarantee are preserved."
     }
   ]
 }

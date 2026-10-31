@@ -1,278 +1,550 @@
-# Diana 任务与验收
+# Diana tasks and acceptance
 
-**状态：仅包骨架，39个B/T/H任务尚未验收；案例规格draft-5共86个required案例、177个必跑调用场景，仍为designed-not-built。**
-本页统一流程、准备、任务卡与验证；接口/数据只看[DESIGN.md](DESIGN.md)，算法只看
-[ALGORITHMS.md](ALGORITHMS.md)，来源只看[SOURCE_MAP.md](SOURCE_MAP.md)。
-[e2e_cases.json](e2e_cases.json)是案例/独立expected唯一规格；允许有依据地修订错误形式、
-输入与oracle并追加反例，不为固定数量保留漏洞，不另维护HTML/看板或expected副本。
+**Status: package scaffolds only; 39 B/T/H tasks are not yet accepted. The case
+specification draft-5 holds 86 required cases and 177 must-run invocation
+scenarios and remains designed-not-built.**
+This page owns the workflow, preparation, task cards and verification. Read
+[DESIGN.md](DESIGN.md) for interfaces and data, [ALGORITHMS.md](ALGORITHMS.md) for
+algorithms, and [SOURCE_MAP.md](SOURCE_MAP.md) for sources.
+[e2e_cases.json](e2e_cases.json) is the single specification of cases and
+independent expected values. An author MAY revise a faulty form, input or oracle
+with supporting evidence and MAY append a counterexample. The project MUST NOT
+keep a defect to preserve a fixed count, and MUST NOT maintain a second HTML board
+or a copy of the expected values.
 
-## 1. 工作规则
+## 1. Working rules
 
-完整B01→B02→B03→B04先于生产功能。小批开发不是准备豁免；B04工具自测仍需单独
-授权，不能改名/手工试跑后冒称同等保证。T/H依赖表示具体producer产物就绪，不是
-要求集成测试先于其消费产物完成；partial不得标整卡done，空文件/空pass不算产物。
+The full B01→B02→B03→B04 sequence precedes production feature work. Small-batch
+development is not a preparation exemption. B04 tool self-tests still require
+separate authorization; renaming them or running them once by hand does not claim
+the same guarantee. A T/H dependency means that the named producer artifact is
+ready; it does not require an integration test to complete before the artifact that
+consumes it. A partial result MUST NOT mark a whole card done, and an empty file or
+an empty pass is not an artifact.
 
-每批一个公开可观察目标：确认固定case与输入认证→真实失败→owning Module最小改动
-→正例/反例/资源与已验收回归→记录并结束。实际开工才建`docs/diana/batches/<id>.md`，
-只记目标/不做、固定D ID与版本、producer/算法节号、修改函数、预算/取消点、真实
-命令/执行数/平台/产物相对路径及剩余义务，不复制expected或新建进度数据库。
-无用户授权不启子Agent，不一批混多种能力，不预铺全部phase/trait/registry/AST。
+Each batch has one publicly observable goal: confirm the fixed cases and input
+certification → expose a real failure → make the smallest change in the owning
+module → cover positive, negative, resource and already-accepted regression →
+record and finish. Create `docs/diana/batches/<id>.md` only when work actually
+starts, and record only the goal and non-goals, the fixed D IDs and versions, the
+producer and algorithm section numbers, the changed functions, the budget and
+cancellation points, the real commands, execution counts, platform and artifact
+relative paths, and the remaining obligations. That record MUST NOT copy expected
+values or start a new progress database. Do not start a subagent without user
+authorization, do not mix several capabilities in one batch, and do not pre-lay
+every phase, trait, registry or AST node.
 
-发现设计反例、必须改public interface/固定expected/有效依赖、无法认证oracle/工具，
-或必须写未授权辅助测试时停止受影响部分。blocked/负结果不是通过；真正oracle错误
-需独立证据、单独review/revision，不能从actual刷新。核心测试跨公开库/module，
-不新增CLI黑盒、机械getter、私有IR/排版/调用次数golden。可选美化默认off。
+Stop the affected part when a design counterexample appears, when a public
+interface, a fixed expected value or an effective dependency needs a change, when the
+oracle or the tooling cannot be certified, or when an unauthorized auxiliary test
+would be required. A blocked or negative result is not a pass. A genuine oracle
+error needs independent evidence and a separate review and revision; the engine
+MUST NOT refresh it from actual output. Core tests cross public libraries and
+modules. Do not add CLI black-box tests, mechanical getter tests, or goldens for
+private IR, formatting or invocation counts. Optional beautification defaults off.
 
-## 2. 顺序与完成定义
+## 2. Order and completion definition
 
-首条链D009（配D055/D059拒绝）→D001固定Phi/edge copy→D002/D003 dispatcher循环；
-调用/类型就绪后D029/D030 shadow/try，再扩其他固定case。各卡named输入不能跳过。
+The first chain is D009 (with D055/D059 rejection) → D001 fixed Phi/edge copy →
+D002/D003 dispatcher loops. After calls and types are ready, D029/D030 shadow/try
+follow, and the remaining fixed cases then expand. A card MUST NOT skip a named
+input.
 
-| 增量 | 任务 | 交付行为 | 硬验收 / 不进入下一增量的条件 |
+| Increment | Tasks | Delivered behavior | Hard acceptance / condition that blocks the next increment |
 |---|---|---|---|
-| I0 安全输入 | T01–T05 | 原scope/精确proto；035及T04原生041；格式/metadata/raw通路；同一control接线 | 范围先核再分配，未知width不猜；完整raw状态不遗漏metadata；工具/fixture未准备不算通过 |
-| I1 scalar与循环 | T06–T10 | 参数/算术/return、D001合流、D002/3循环copy与dispatcher、primitive/null/FP | 固定SSA、parallel copy、DA初值不可观察；cmp NaN bias和word宽度正确 |
-| I2 调用与对象 | T11–T12、T15 | descriptor绑定、receiver/args顺序、邻接new/init、field/array/cast效果 | 完整catalog/checked throws、no-extra-check、allocation/init与volatile/class-init不移动 |
-| I3 普通自然结构 | T13–T14 | 有界Sequence/Diamond/Loop/Switch；不匹配仍用合法dispatcher | 同case行为一致，不比文本；候选前收费，不复制effect或重排copy |
-| I4 异常 | T16–T18 | throw-before SSA、shadow、ordered catches与一层nested | D029–D035语义；逐site catch-stack不扩大try，handler自身只受outer保护 |
-| I5 锁与初始化 | T19–T20 | alias根/lock-stack、synchronized、static/constructor/final | 所有exit释放精确；static final不引入新的常量内联；final正常路径恰一次 |
-| I6 完整源码声明 | T21–T23 | bridge、named inner、enum/annotation；Explicit/Generated与Mixed分类 | Generated规则逐项匹配；full-unit直接编译，不splice修补，不把generated算无code |
-| I7 核心汇总 | T25（必需）、T24（可选） | EngineCoreRC的required核心案例与边界证据；可选pure recovery默认off | T25不等T24；资源/取消从I0贯穿，不到最后才补；H08汇总全部required cases/invocations |
+| I0 Safe input | T01–T05 | Original scope/exact proto; 035 and T04 native 041; format/metadata/raw path; the same control wiring | Check ranges before allocating, never guess an unknown width; a complete raw status never omits metadata; unprepared tools or fixtures are not a pass |
+| I1 Scalar and loops | T06–T10 | Parameters/arithmetic/return, D001 merge, D002/3 loop copy and dispatcher, primitive/null/FP | Fixed SSA, parallel copy, DA initial values unobservable; cmp NaN bias and word width correct |
+| I2 Calls and objects | T11–T12, T15 | Descriptor binding, receiver/args order, adjacent new/init, field/array/cast effects | Complete catalog and checked throws, no-extra-check, allocation/init and volatile/class-init not moved |
+| I3 Ordinary natural structure | T13–T14 | Bounded Sequence/Diamond/Loop/Switch; an unmatched graph still uses the legal dispatcher | Same-case behavior equal, never compare text; charge before candidates, no duplicated effect, no reordered copy |
+| I4 Exceptions | T16–T18 | Throw-before SSA, shadow, ordered catches and one nested layer | D029–D035 semantics; the per-site catch-stack does not widen the try, and the handler itself only gets the outer protection |
+| I5 Locks and initialization | T19–T20 | Alias root/lock-stack, synchronized, static/constructor/final | Every exit releases exactly; static final introduces no new constant inlining; the final normal path assigns exactly once |
+| I6 Complete source declarations | T21–T23 | Bridge, named inner, enum/annotation; Explicit/Generated and Mixed classification | Generated rules match item by item; the full unit compiles directly, without splice patching, and generated members are not counted as code-free |
+| I7 Core rollup | T25 (required), T24 (optional) | Required core cases and boundary evidence for EngineCoreRC; optional pure recovery defaults off | T25 does not wait for T24; resources and cancellation run from I0 throughout, not added at the end; H08 rolls up all required cases/invocations |
 
-第一条Java链只需当前真的会消费的Module，不先搭全部phase目录或AST大全。T06的
-answer7只是说明，实际固定案例为D009；无call/P7单块返回的是有效空事实，不是假pass。
+The first Java chain needs only the modules that actually consume it now; do not
+build every phase directory or a full AST first. The `answer7` in T06 is only an
+explanation; the actual fixed case is D009. A single-block result without a call or
+without P7 is a valid empty fact, not a fake pass.
 
-- EngineCoreRC：JSON中required且acceptanceGate为engine或engine-and-application的所有案例/调用；当前81个案例（D001–D065、D071–D086）。
-- ProductRC：JSON全部required案例/调用；当前86个案例，复用engine证据并补application义务。
-- D065/D085的engine-and-application要求两seam分别满足每个调用的同一expected；缺应用侧不能称整个case/产品通过，也不把两个seam计成两个case。
-- 分母/选择器从JSON字段计算，不以旧编号终点或历史70/65数量硬编码；一个调用缺失即整case未通过。
-- 默认展示局部成果不降低required Java门槛；未实现/缺工具/未执行平台仍未通过。T24不阻塞两个RC。
-- Diana是反编译器，默认get不得以整类JavaUnit挡住已恢复方法；局部失败显示在原方法处，
-  不是把所有text结果改成诊断错误或要求用户切JSON。大量常见合法输入退raw仍是质量问题，不能因“有展示”就不改算法。
-- 根Cargo gate只跑Diana，零测试/骨架构建不算语义验收；性能只测release授权输入。
+- EngineCoreRC: every case/invocation in the JSON that is required with
+  `acceptanceGate` `engine` or `engine-and-application`; currently 81 cases
+  (D001–D065, D071–D086).
+- ProductRC: every required case/invocation in the JSON; currently 86 cases,
+  reusing engine evidence and adding the application obligations.
+- D065/D085 `engine-and-application` requires both seams to satisfy the same
+  expected value of each invocation. A missing application side means neither the
+  whole case nor the product passes, and the two seams are not counted as two
+  cases.
+- Compute the denominator and the selector from the JSON fields. Do not hard-code
+  an old ID endpoint or a historical 70/65 count. One missing invocation fails the
+  whole case.
+- Showing partial results by default does not lower the required Java bar.
+  Unimplemented features, missing tools and unexecuted platforms still fail. T24
+  blocks neither RC.
+- Diana is a decompiler: default retrieval MUST NOT let a whole-class JavaUnit gate
+  an already-recovered method. Show the local failure at the original method
+  instead of turning every text result into a diagnostic error or requiring the
+  user to switch to JSON. A large set of common legal inputs still falling back to
+  raw is a quality problem, and the existence of a display option is not a reason
+  to leave the algorithm unchanged.
+- The root Cargo gate runs Diana only. Zero tests or a scaffold build is not
+  semantic acceptance. Measure performance only on release builds with authorized
+  inputs.
 
-## 3. 准备任务 B01–B04
+## 3. Preparation tasks B01–B04
 
+The current rule in the root [AGENTS.md](../../AGENTS.md) forbids tests for any
+non-core code unless the user authorizes them explicitly. The hash/path/timeout
+fault tests for the preparer itself in B02 and the fault-injection self-tests for
+the comparator and runner in B04 MUST NOT derive authorization from existing plan
+text, and MUST NOT be renamed as "core E2E preparation" to bypass that rule.
+Independent semantic certification of self-made sources and inputs remains
+preparation for core cases; keep the two categories distinct.
 
-根 [AGENTS.md](../../AGENTS.md) 的最新规则禁止为任何非核心代码写测试，除非用户
-明确授权。本页 B02 中针对准备器本身的hash/path/timeout故障测试，以及 B04 对
-comparator/runner 的故障注入自测，不能凭既有计划文字取得授权；不得换名为“核心
-E2E准备”来绕过。自制源/输入的独立语义认证仍是核心案例的准备工作，两者要分清。
+**B04 keeps its original pass conditions and full prerequisites, but its tool
+self-test implementation is currently blocked by authorization.** B04 work
+requires explicit user authorization of a bounded scope, or a separately approved
+change to the preparation gate. An author MUST NOT omit that work and then claim
+B04 passed, and MUST NOT treat one manual trial run as the original
+fault-falsification guarantee. This section's authorization boundary governs.
 
-**B04原通过条件和全量前置仍保留，但其工具自测实现当前受授权阻塞。** 需用户
-明确授权限定的B04工作，或另行批准准备门槛调整；不能擅自省略后宣称B04通过，
-也不能以一次人工试跑等同原故障证伪保证；以本节授权边界为准。
+## B01 — Case and expected-value specification review, freeze v1
 
-## B01 — 案例与期望规范审阅、冻结v1
+**Dependencies**: none. **Phase**: test preparation, not a compute phase.
+**Scope**: all required cases/invocations in the JSON and the integer-inlining
+option.
 
-**依赖**：无。**Phase**：测试准备，非计算phase。**范围**：JSON全部required案例/调用及整数内联开关。
+**Files**: `docs/diana/e2e_cases.json`, TASKS §4, DESIGN §6, SOURCE_MAP §10;
+`tests/e2e/cases.json` and the manifest schema, all relative to the checkout.
 
-**文件**：`docs/diana/e2e_cases.json`、TASKS §4、DESIGN §6、SOURCE_MAP §10；`tests/e2e/cases.json`和manifest schema，全部相对checkout。
+**Input→output / Interface**: behavior recipes and fixed inputs → independent
+expected values, mutation killers and oracle type, with state moving from
+`designed-not-built` to `spec-approved`. Record the reviewer and the
+specification version; these are not fake engine results.
 
-**输入→输出 / Interface**：行为recipe+固定inputs→独立expected+mutation-killer+oracle类型，state从`designed-not-built`成为`spec-approved`；记录review人/规范版本，不是假引擎结果。
+**Steps**:
+1. For each case, check the original Java/DEX semantics, the inputs and the
+   return/exception/effect order; the worked example and the JVM reference driver
+   each support the conclusion. Fix a specification error before the engine
+   implements the behavior.
+2. Confirm seam and validationScope, and keep method-in-known-context, full-unit,
+   full-unit-set and rendered-result separate. An internal op interpreter MUST NOT
+   serve as an exception or lock oracle.
+3. Mark a known-legal example that Java cannot express as Smali/Mixed. Mark a
+   damaged input as Malformed/Unavailable; do not assert a uniform any-error for
+   every negative case.
+4. Verify that a case requiring Java capability does not switch to expectedSmali
+   because an implementation is missing. Specify optional beautification
+   separately so that it does not affect core expectations.
+5. Lock the suite members, inputs, expected values, schema and distributable
+   sources, and record the specification SHA-256. The suite MUST NOT contain a
+   real private APK or path.
 
-**步骤**：
-1. 对每case检查原始Java/DEX语义、inputs、返回/exception/effect序，workedexample与JVM reference driver分别支持结论；修规范错误必须在引擎实现前。
-2. 确认seam/validationScope，method-in-known-context、full-unit、full-unit-set与rendered-result分开；内部op解释器不充当异常/锁oracle。
-3. 已知合法但Java不可表达的例子明确Smali/Mixed；损坏输入明确Malformed/Unavailable，不能把全部negative统一assert any-error。
-4. 核对“必需Java能力”的case不会因缺实现切为expectedSmali；可选美化另行指定，不对core期望造成影响。
-5. 锁suite成员/inputs/expected/schema与可分发来源，记录spec SHA-256；不能含真实私有APK或路径。
+**Invariants / limits**: A case follows observed behavior and is not tied to
+phase names or print form. Inputs and expected values are designed
+independently; do not generate a golden from the output under test. B01 approves
+a specific revision and does not freeze a count that never changes.
+Specification corrections and input strengthening supported by independent
+evidence are allowed; preserve the problem identity and valid semantics, append
+a counterexample under a new ID, and never delete an old case to manufacture a
+pass.
 
-**不变量 / 限额**：案例依观察行为，不绑phase命名或打印形式；inputs/expected独立设计，不用被测输出生成golden。B01批准具体revision，不冻结一个永远不变的数量；允许独立证据支持的规范纠错/输入加强，保留问题身份与有效语义，新增反例追加ID，不删旧case凑通过。
+**Tests**: Specification review is not a CLI test. For an oracle derivation with
+a counterexample, confirm that the counterexample really has a different return,
+exception or sequence. Do not write tests for JSON getters.
 
-**测试**：规范审阅不是CLI测试；对具有反例的oracle推导确认counterexample确实有不同返回/异常/序列。不为JSONgetter写测试。
+**Acceptance**: Every required case/invocation has concrete inputs, a selector,
+expected values, an oracle/mutation and an independent certification obligation;
+the scope, source and path review passes and the approved revision is recorded.
+**Completion**: An engine developer no longer needs to decide what that
+invocation should return. A draft revision alone is not B01 approval.
 
-**验收**：全部required case/invocation都有具体输入、selector、expected、oracle/mutation和独立认证义务；范围/来源/path审阅通过，记录批准revision。**完成**：Engine开发者不再需要决定该调用应返回什么；draft修订本身不算B01批准。
+**Not in scope**: CLI black-box tests, private-phase tests, output-text goldens,
+real-corpus downloads, engine implementation.
 
-**不扩展**：CLI黑盒、私有phase测试、输出文本golden、真实语料下载、实现引擎。
+## B02 — Source fixtures, tool content locks and a portable preparer
 
-## B02 — 源fixture、工具内容锁与可移植准备器
+**Dependencies**: B01. **Phase**: test tooling, not a production phase.
 
-**依赖**：B01。**Phase**：测试工具，非生产phase。
+**Files**: `tests/e2e/sources/`, `expected/`, `toolchain.lock.json`,
+`manifest.json`, `cases.json`; `tools/e2e.py` (a development tool option that
+prefers the Python 3.11+ standard library), plus the necessary tests-only Java,
+smali and Driver files. All paths are relative to the repository, and generated
+artifacts live only under `.cache/e2e/`.
 
-**文件**：`tests/e2e/sources/`、`expected/`、`toolchain.lock.json`、`manifest.json`、`cases.json`；`tools/e2e.py`（开发工具选项，使用Python3.11+标准库优先），与必要tests-onlyJava/smali/Driver。所有路径相对repository，生成物只在`.cache/e2e/`。
+**Input→output / Interface**: TASKS §4.5 fixed artifact coordinates (source
+entries in SOURCE_MAP §10) → complete hash and dependency locks; every required
+recipe in the JSON → executable self-made sources and literal expected values,
+exposed through the `fetch-tools`, `prepare` and `verify-inputs` commands. No
+personal SDK, `android.jar` or reference-engine cache is required.
 
-**输入→输出 / Interface**：TASKS §4.5固定artifact坐标（来源入口见SOURCE_MAP §10） → 完整hash/依赖锁；JSON全部required recipes → 可执行自制源+literalexpected，提供`fetch-tools/prepare/verify-inputs`命令；不需要个人SDK、android.jar、参考引擎cache。
+**Steps**:
+1. Split every required recipe/invocation by suite into an independent source
+   file or driver, and check in all dependencies of the self-made sources.
+   Preserve the known context of a single-target method and do not insert a stub
+   that changes semantics. Bind inputs and expected values by
+   `(case id, invocation id)`, not as two positionally paired arrays.
+2. Record the JDK asset and official hash for each supported platform, and the
+   complete artifact hash of R8/smali/dexlib2 and all transitive JARs. Download
+   and run the main class according to the lock; do not blindly use
+   `java -jar smali.jar`.
+3. Confirm that the Java 21 tool with `--release 8`, the R8 min-api/DEX version
+   checks and the smali 035 generation path agree. A case that needs a newer
+   version gets its own profile; do not guess a version.
+4. `prepare` runs only the locked tools and self-made sources, and generates the
+   DEX/ZIP/invalid-mutation/041 recipes plus the origin/identity certificate.
+   Take the original return and trace expected values from the specification and
+   the source reference, never from Diana output.
+5. The preparer supports a different working directory, Windows separators,
+   classpath and exe suffixes, and paths containing spaces. Use the system temp
+   API and do not hard-code the home directory or an OS temporary path. Only
+   `fetch` may use the network.
+6. A CRC-broken, duplicate-entry, undefined-reference, isolated-surrogate or
+   cyclic-Phi input needs an independent raw check. A named byte patch field,
+   opcode anchor or hash is not an unchecked bare offset constant.
 
-**步骤**：
-1. 将全部required recipe/invocation按suite分成独立源文件/driver，依赖全部自制源码签入。保留single-targetmethod的已知context，不插改变语义的stub；输入与预期按(case id, invocation id)绑定，不并列两张按位置配对的数组。
-2. 记录JDK各支持平台JDK资产/官方hash，R8/smali/dexlib2及所有transitiveJAR完整artifacthash；下载与运行主类按锁，不盲用`java -jar smali.jar`。
-3. 确保Java21工具 `--release 8`、R8 min-api/DEXversion检查与smali035生成路径一致；需要新版case独立profile，不能猜version。
-4. prepare只运行锁定的工具、selfmadesource，生成DEX/ZIP/invalidmutation/041recipe以及origin/identity证书。取原返回/轨迹expected来自规范和source reference，不来自Diana输出。
-5. 准备器支持不同cwd、Windowsseparator/classpath/exe suffix、路径含空格；系统temp API，不写死home或OS临时路径。只有fetch可联网。
-6. CRC坏/entry重复/无定义引用/孤立surrogate/循环Phi等input需独立raw检查；指定bytepatchfield/opcode锚点/hash不是未检查的裸offset常量。
+**Invariants / limits**: Network access and subprocesses belong to the
+development tool only; production crates do not depend on them. An unlocked
+artifact or a placeholder checksum blocks preparation. A missing tool cache is
+an error; an author's preinstalled SDK MUST NOT stand in for it.
 
-**不变量 / 限额**：网络/子进程只开发工具，生产crate无依赖；未锁artifact/placeholderchecksum阻止准备；toolcache缺失错误，不能用作者预装SDK代替。
+**Tests**: After a rebuild, the source driver agrees with the independent
+expected values of each required invocation. A fixed error input and a hash,
+size, timeout or cross-platform path error are explicit prep failures; B04 owns
+comparator falsification. Testing the non-core preparer itself still needs the
+separate authorization of §3 and MUST NOT expand into simple CLI tests.
 
-**测试**：重建后source-driver与各required调用的独立expected一致；固定错误输入、hash/size/超时/跨平台path错误明确prep失败，comparator证伪交给B04。非核心准备器自身测试仍需§3的单独授权，不扩大成简单CLI测试。
+**Acceptance**: A clean cache can explicitly fetch and generate every core
+fixture; every input, expected and dependency path is distributable and the
+tool/fixture hash locks are complete. List a case that is not generated or lacks
+an oracle as blocked, never removed. **Completion**: Engine development no
+longer needs a temporary fixture or source dependency designed mid-phase.
 
-**验收**：干净cache可以显式fetch并生成全部核心fixture，所有输入/expected/deps路径可分发，tool/fixturehash锁完整；未生成或缺oracle的case列blocked而非移除。**完成**：不需要引擎开发阶段临时设计fixture/source依赖。
+**Not in scope**: Production Rust/API implementation, automatic external
+platform catalogs, real-corpus downloads, private test paths.
 
-**不扩展**：生产Rust/API实现、自动外部平台catalog、下载真实corpus、私有testpaths。
+## B03 — Independent input and baseline verification, freeze artifacts v1
 
-## B03 — 独立输入/基准验证与冻结artifact v1
+**Dependencies**: B02. **Phase**: input and baseline certification.
 
-**依赖**：B02。**Phase**：输入/基准认证。
+**Files**: `tests/e2e/manifest.json`, the independent dexlib2 projection and
+helper, the source-reference Driver, and the
+`.cache/e2e/preparation-report.json` generated report (no machine absolute path
+enters a golden).
 
-**文件**：`tests/e2e/manifest.json`、独立dexlib2projection/helper、source reference Driver，`.cache/e2e/preparation-report.json`生成report（不带机器绝对路径进入golden）。
+**Input→output / Interface**: fixture artifacts → checksum, raw structured
+projection, JVM driver reference trace and a specification-conformance report;
+manifest state becomes `inputs-certified`.
 
-**输入→输出 / Interface**：fixtureartifact → checksum、rawstructuredprojection、JVMdriver参考轨迹与规范一致性报告；manifest state=`inputs-certified`。
+**Steps**:
+1. An independent decoder or dexlib2 checks the method/ref/word/branch/payload/
+   handler/string units against every JSON `inputRequirements` item. In particular,
+   confirm that cmpl/cmpg, an unused cast, fill/FreshArray, the old definition
+   before a throw, an explicit encoded tag, a real bridge/outer capture and sget
+   are still in the input. If the structure under test is missing, preparation
+   fails; source text, assembler exit 0 or an unrelated catalog gap MUST NOT stand
+   in for it. Do not freeze private Phi/AST counts.
+2. For a source-origin core case, run the real reference Driver on an isolated
+   JVM and check the specification's independent expected values. FP bits, UTF-16,
+   locks and the fresh-process rule for init are strict.
+3. When handwritten smali has no Java source and therefore no JVM oracle, a pure
+   scalar case MAY use a tests-only independent interpreter that is cross-checked
+   against source-origin cases. Exception and monitor cases MUST NOT use an
+   interpreter that ignores effects; they either keep raw-integrity evidence or
+   keep an explicit declined status.
+4. The 041 builder for D065 needs both the published format constraint and an
+   independent projection check; do not take a sample from a developer's personal
+   device. If a legal construction cannot be proven, preparation is blocked; do
+   not substitute an ordinary DEX and claim 041 coverage.
+5. Fix the invalid-mutation facts: format out-of-range, unknown width and undefined
+   wide each prove themselves, and assembler exit 0 MUST NOT be inferred as proof
+   of all legality.
+6. Rebuild the reference artifacts from a fresh checkout and a fresh cache, and
+   record the supported platforms and tool versions. An unexecuted platform MUST
+   NOT be claimed as passing.
 
-**步骤**：
-1. 独立decoder/dexlib2检查method/ref/word/branch/payload/handler/stringunits，逐项满足JSON inputRequirements。尤其确认cmpl/cmpg、unused cast、fill/FreshArray、throw前旧定义、显式encoded tag、真实bridge/outer capture和sget仍在输入。缺被测结构就准备失败，不以源码文字、assembler exit0或无关catalog缺失冒充；不冻结私有Phi/AST数量。
-2. source-origin核心case在隔离JVM执行真实referenceDriver，核对规范独立expected。FP bits、UTF16、lock、init freshprocess规则严格。
-3. 人工smali若无Java源JVMoracle：pure scalar可用测试专用独立解释器（须与source-origincase交叉校验）；exception/monitor不得用忽略effect解释器，或保留raw-integrity/declined明确状态。
-4. D065的041builder需公开格式约束与独立projection双检，不从开发者个人设备拿样本。无法证合法构造则prep blocked，不能换普通DEX假装覆盖041。
-5. 固定invalidmutations事实：格式越界/unknownwidth/undefinedwide/CRC分别证明，不通过assemblerexit0推断所有合法性。
-6. freshcheckout/freshcache复建reference成果，记录可支持的平台和工具版本；平台没跑不能宣称已通过。
+**Invariants / limits**: Reference inputs and expected values are frozen before
+the engine implementation. Any change needs a case v2 reason, an independent
+oracle and a review; do not use an automatic "refresh golden". When generated
+byte hashes differ, explain the compiler recipe difference first and do not
+change expected semantics.
 
-**不变量 / 限额**：referenceinput与expected冻结在引擎实现之前；任何修改需casev2reason/独立oracle/审阅，不用自动“refreshgolden”。生成字节hash不同时先解释compilerrecipe差异，不修改预期语义。
+**Tests**: `verify-inputs` covers every required case/invocation asset and
+`inputRequirements`. Record JVM, handcrafted raw, specification mirror and
+missing oracle separately; do not hide ART-not-run as a pass. ART records only
+execution evidence on an actually authorized environment. D075/D076 real format
+boundaries, D077/D078 Java-side compilation acceptance and the D086
+default-unlimited versus explicit-limit contrast still need certification; a
+local same-kind javac probe is neither locked-toolchain evidence nor engine
+execution evidence.
 
-**测试**：`verify-inputs`覆盖全部required case/invocation资产和inputRequirements；JVM/handcrafted raw/规范镜像/oracle缺失分开记，不把ART-not-run藏成pass。ART只记录实际授权环境上的执行证据。D075/D076的真实格式边界、D077/D078的Java接受侧编译及D086的默认不限/显式限额对照仍须认证；本机同型javac探针不是锁定工具链或引擎执行证据。
+**Acceptance**: The source, input structure and independent expected values of
+every required case/invocation are reproducible, and the hash and scope
+certificates are complete. No local dependency is unknown. The report gives both
+the JSON-derived case and invocation denominators. **Completion**: Development
+no longer needs a temporary input change to accommodate a wrong implementation.
 
-**验收**：所有required case/invocation的source、input结构与独立expected可复验，hash/范围证书完整；没有unknown local deps；report同时给JSON派生的case与invocation分母。**完成**：开发过程中无需临时改输入来适配错误实现。
+**Not in scope**: Generating truth with Diana/dexdec/radguard, private caches,
+automatically deleting a failing case, CLI test design.
 
-**不扩展**：使用Diana/dexdec/radguard生成真值、私有cache或自动删失败case、设计CLI测试。
+## B04 — E2E comparator, runner adapter and fault falsification
 
-## B04 — E2E comparator、runner adapter与故障证伪
+**Dependencies**: B03. **Phase**: test tooling and integration contract, not
+engine implementation.
 
-**依赖**：B03。**Phase**：测试工具/对接合同，非引擎实现。
+**Files**: `tests/e2e/runner/`, expected/cases/manifest, the thin public-library
+adapter source; `tools/e2e.py verify-harness`; actual engine integration happens
+in T05.
 
-**文件**：`tests/e2e/runner/`、expected/cases/manifest，thin public-library adapter源码；`tools/e2e.py verify-harness`，引擎实际接入在T05。
+**Input→output / Interface**: fixed cases, inputs and expectations → a defined
+run-result schema, compared by original identity and behavior. Without Diana the
+harness can verify preparation and the comparator, but MUST NOT report engine
+E2E as passing.
 
-**输入→输出 / Interface**：固定case/input/期望 → 定义run-resultschema/按原identity及行为比较；没有Diana时能验证preparation与comparator，但不能报告engineE2E通过。
+**Steps**:
+1. Each case input publishes the Engine request, RunContext and catalog source;
+   project the result to the method language, original identity, source and
+   diagnostics. The adapter stays thin, MUST NOT inspect private phases, and MUST
+   NOT implement a fake engine to replace a missing implementation.
+2. Compile the Java result against the same self-made dependencies and known
+   context, and compare return bits, u16 values, events, exception and heap through
+   the Driver. Fail immediately on a missing class, error, timeout or empty output;
+   do not grep javac errors away.
+3. The raw smali adapter assembles the original class shell with the original
+   required methods and then compares through an independent projection. A lost
+   branch, payload, handler, UTF-16 value or reference MUST fail.
+4. Injected result mutations verify the verifier only: wrong return, missing event,
+   swapped catch, changed float 0, lossy surrogate, truncated raw, wrong error
+   kind, missing invocation, missing artifact, timeout and 0 cases. `verify-harness`
+   MUST reject each item; D069 `TargetExists` MUST NOT match a CRC or budget error,
+   and D070 empty output MUST NOT match success. A correct reference is acceptable.
+   Implementing these tool self-tests still needs separate authorization.
+5. Fix the `expected_java` and `expected_raw` classification; do not dynamically
+   filter required members by the engine's current capabilities. An implementation
+   milestone selects a fixed ID group explicitly, while the whole core suite
+   always reports the full required denominator as not passing.
+6. The integration failure report keeps the original case input, version, actual,
+   expected and artifacts in the checkout cache under relative paths; do not write
+   machine paths into a golden.
 
-**步骤**：
-1. 每case输入公开Engine request/RunContext/catalog来源，结果project到method语言/原identity/source/诊断；adapter薄且不窥privatephase，不实现fake引擎来替代缺实现。
-2. Java结果编译在同自制依赖/knowncontext，Driver以returnbits/u16/events/exception/heap比较；有缺class/error/超时/无输出立即fail，不能grep掉javacerrors。
-3. rawsmaliadapter通过原classshell+原必要方法组装再独立projectioncompare，漏branch/payload/handler/UTF16/ref必须失败。
-4. Inject result mutations仅用于测试验证器：wrongreturn、missingevent、swappedcatch、float-0changed、lossysurrogate、truncatedraw、wrong-error-kind、missing-invocation、missingartifact、timeout/0cases，verify-harness须逐项拒绝；D069的TargetExists不能匹配CRC/预算错误，D070无输出不能匹配成功。正确reference可接受；实现这些工具自测仍需单独授权。
-5. 固定expected_java与expected_raw分类，不能按引擎“当前支持capabilities”动态过滤requiredmembers。实现里程碑显式选固定ID组，整core-suite始终报告全部required未通过分母。
-6. 接入失败报告保留原case输入/版本/actual/expected/artifacts到checkout cache，用相对路径，不写机器路径进golden。
+**Invariants / limits**: Program event sequences are strict; independent report
+order is unconstrained. Source and local names have no golden. The comparator
+MUST NOT change expected values automatically. CLI black-box tests are not
+required; a tool invocation is not the CLI under test.
 
-**不变量 / 限额**：程序事件序列严格，独立report顺序无要求；source/localname没有golden；comparator无法自动改expected。不要求CLI黑盒，toolinvocation不等于被测CLI。
+**Tests**: The composite wrong results above prove that the harness rejects
+wrong output; a trivial `assert caseid == caseid` is not enough. Resource and
+run timeouts are bounded, and a reference Java compile failure MUST NOT be
+absorbed as engine "unsupported".
 
-**测试**：上述复合错误结果证明harness能反对错误，非平凡“assertcaseid==caseid”；资源和运行超时有界，referenceJava编译失败不能当引擎“不支持”吸收。
+**Acceptance**: `verify-harness` rejects every negative and accepts the expected
+correct reference; the suite lock and paths are reproducible and an
+unimplemented engine reports not-implemented. **Completion**: T01/H01 start only
+after B01–B04 preparation acceptance passes explicitly, and T05 connects only to
+the real library.
 
-**验收**：verify-harness所有negative被拒绝，预期正确reference被接受；suite锁与路径可复制，未实现engine报告not-implemented。**完成**：B01–B04准备验收明确通过后才开始T01/H01，T05只接到真实库。
+**Not in scope**: Production stubs, basic JSON/CLI argument tests, automatic
+test-golden updates, removing cases to keep version support.
 
-**不扩展**：生产stub、基础JSON/CLI参数测试、自动testgolden更新、为了版本支持移除case。
+### Freeze and revision rules
 
-### 冻结与修订规则
+After B01 approval, the revision freezes the **problems, input identity, valid
+behavior expectations, oracles and required members**; it does not freeze counts,
+faulty formats, private phase interfaces or output variable names. A revision MUST
+preserve the original problem ID and reason and MUST supply independent evidence
+and review. It MAY strengthen inputs or observations and MAY correct a genuine
+oracle error. It MUST NOT weaken semantics through a format migration, delete
+required members or turn unimplemented Java into raw. A bugfix or refactor MAY
+change the thin adapter, tool paths and logs, but MUST NOT refresh truth from
+actual output.
 
-B01批准后冻结该revision的**问题、input identity、有效行为期望、oracle与required成员**，不是数量、错误格式、私有phase接口或输出变量名。修订必须保留原问题ID和理由，提供独立证据/审阅；可以加强输入/观察或纠正真oracle错误，不能借格式迁移削弱语义、删required或把未实现Java改raw。bugfix/refactor可改thin adapter、tool路径与日志，不从actual刷新真值。
+Test changes are allowed with a reason; "tests can never be fixed" MUST NOT harden
+a wrong oracle:
 
-允许测试变更但必须有理由，不许“永远不能修测试”导致错误oracle固化：
-
-| 变更 | 必须提供的独立证据 | 处理 |
+| Change | Required independent evidence | Handling |
 |---|---|---|
-| 新真实反例 | 自制输入+workedexpected | 新增case ID，不删除旧case |
-| 规范/oracle确有错误 | 原源/JVM/DEX规范或独立decoder复验，非引擎输出 | 独立review、case revision、保留旧理由/新expected；不在实现PR偷refresh |
-| 工具版本/fixture重建 | 新artifacthash/recipe差异、input语义projection与reference结果 | 独立工具锁变更；不得隐藏回归/删关键opcode |
-| publicinterface实现变更 | 问题与expected不变的thinadapter更新 | 只改adapter；不批量改cases跟随phase私有结构 |
-| 尚未实现Java功能 | 没有允许改expected的证据 | case仍fail/not-implemented，不能换为Smali成功或exclude |
+| New real counterexample | Self-made input and worked expected value | Add a new case ID; do not delete the old case |
+| Specification or oracle is genuinely wrong | Re-verification against the original source, the JVM, the DEX specification or an independent decoder; never engine output | Independent review, case revision, keep the old reason with the new expected value; no refresh hidden in an implementation PR |
+| Tool version or fixture rebuild | New artifact hash, recipe difference, input semantic projection and reference result | Independent tool-lock change; MUST NOT hide a regression or delete a critical opcode |
+| Public interface implementation change | A thin adapter update where the problem and expected values stay unchanged | Change only the adapter; do not bulk-edit cases to follow private phase structures |
+| Not-yet-implemented Java feature | No evidence permits changing expected values | The case still fails or reports not-implemented; do not switch it to a Smali success or exclude it |
 
-core Java、negative raw、invalid input、安全/领域suite分别报告。实现期间每张任务卡引用固定case组逐步转绿；全core-suite红很正常，但不能把红计为skip通过。**准备完成≠Diana通过；当前案例已设计≠inputs-certified**。
+Core Java, negative raw, invalid input and the safety/domain suites are reported
+separately. During implementation, each task card turns a fixed case group green
+step by step. A fully red core suite is normal, but red MUST NOT be counted as a
+skip pass. **Preparation complete is not Diana passing; designed cases are not
+inputs-certified.**
 
-## 4. 验证规则
+## 4. Verification rules
 
-所有公共调用共用一个RunContext：open→decompile→render，Options不重复存Limits；
-Report只持owned结果facts。source/expected独立于Diana，F/Q只是历史能力标签，实际
-执行集合与两个分母由JSON的required、acceptanceGate和invocations计算；当前为86案例/177调用场景。fixture、tool/hash、runner目前都尚未建立。
+All public calls share one RunContext: open → decompile → render. Options MUST NOT
+store Limits a second time, and Report holds only owned result facts. Sources and
+expected values are independent of Diana; F/Q labels are historical capability
+tags. Compute the actual execution set and both denominators from the JSON
+`required`, `acceptanceGate` and `invocations` fields; the current specification
+holds 86 cases and 177 invocation scenarios. Fixtures, tool hashes and the runner
+are all not yet established.
 
-### 案例格式、修订依据与义务映射
+### Case format, revision basis and obligation mapping
 
-schema 2的每个invocation自带id/input/expected；case含acceptanceGate、designRefs、
-inputRequirements。不得把多个输入打包成一个any-error、漏掉调用后仍记case通过；
-scope/完整proto从独立manifest解析，不让adapter按expected挑目标。期望字段是公开
-结果/独立artifact的语义投影，不是要求生产照搬JSON字段；未知字段映射阻塞准备。
+In schema 2 each invocation carries its own id, input and expected value, and a case
+carries `acceptanceGate`, `designRefs` and `inputRequirements`. The specification
+MUST NOT pack several inputs into one any-error and MUST NOT count a case as passing
+when an invocation is missing. Resolve scope and the complete proto from the
+independent manifest; the adapter MUST NOT pick targets from expected values.
+Expected fields are the semantic projection of public results and independent
+artifacts, not a requirement that production copy the JSON fields. An unknown field
+mapping blocks preparation.
 
-draft-2保留D001–D070的问题身份并纠正下列规格；draft-3追加D085修正默认反编译展示。
-draft-4解释验收记号、将应用基础检查统一为G0，拆清normal/raw/report与最终JSON输出
-边界，D064补report合计超限、D069补压缩方式/加密拒绝。
-draft-5按用户要求放开未经测量的数值预算：Limits/应用配额默认None，取消节点费用预测的
-Java拒绝；D077/D078改为必需Java，追加D086核默认不限与显式限制，其他有效预期保留。
-两项同型自制样例在本机javac21.0.12.1下分别有code_length=30001、pool_count=2206；
-这是独立修订依据，不是Temurin21.0.8+9锁定工具链认证、B01批准或E2E通过。尚无引擎actual：
-- D040：DEX access_flags明确managed declared flag不自行加锁；保留锁行为与raw flags义务。
-- D027/D046：短literal/default encoded可能被工具换形或省略；分别固定new-array/fill
-  原始形态、显式encoded tag，并给独立规范镜像/字段绑定证据。
-- D049/D050：分别以不同outer状态、非字典序enum常量排除碰巧相同的错误结果。
-- D055/D066：两个count故障分别必跑；定义查询包含真实constructor并排除仅引用成员。
-- D068–D070：固定entry identity、force与具体错误类别；成功场景必须真的产生完整文件，
-  不以不存在文件的“没有越界写”冒充成功，不以TargetExists冒充CRC/预算错误。
-对应规范入口见SOURCE_MAP R10；JSON revisionReason保留原漏洞与修订理由，不复制expected。
+draft-2 preserves the problem identity of D001–D070 and corrects the following
+specifications. draft-3 appends D085 to correct default decompilation display.
+draft-4 explains the acceptance notation, unifies the application baseline checks
+as G0, separates the normal/raw/report boundary from the final JSON output, adds the
+report total-overrun case to D064 and adds compression-method and encryption
+rejection to D069. draft-5 releases unmeasured numeric budgets as the user
+requested: Limits and application quotas default to None, and the Java rejection
+predicted from node cost is removed. D077/D078 become required Java, D086 is appended
+to check the default-unlimited and explicit-limit contrast, and other valid
+expectations are preserved. Two same-kind self-made samples on this machine under
+javac 21.0.12.1 give `code_length=30001` and `pool_count=2206`; this is independent
+revision evidence, not Temurin 21.0.8+9 locked-toolchain certification, B01 approval
+or E2E passing. No engine actual output exists:
+- D040: DEX `access_flags` states the managed declared flag and does not add a lock
+  on its own; the lock behavior and raw-flags obligation stay.
+- D027/D046: a tool may change the shape of or omit a short literal or default
+  encoded value. Fix the original new-array/fill shape and the explicit encoded tag
+  respectively, and supply independent specification-mirror or field-binding
+  evidence.
+- D049/D050: exclude a coincidentally equal wrong result through a different outer
+  state and a non-lexicographic enum constant respectively.
+- D055/D066: both count faults MUST run separately; the definition query includes a
+  real constructor and excludes referenced-only members.
+- D068–D070: fix entry identity, force and the concrete error category. A success
+  scenario MUST really produce a complete file; an absent file MUST NOT be presented
+  as "no out-of-bounds write" success, and `TargetExists` MUST NOT stand in for a CRC
+  or budget error.
+The specification entries are listed in SOURCE_MAP R10. The JSON `revisionReason`
+preserves the original defect and the revision reason and does not copy expected
+values.
 
-| 新案例 | 实际义务 | producer / 汇总 |
+| New case | Actual obligation | Producer / rollup |
 |---|---|---|
-| D071–D072 | 窄producer经过Phi的合法return/call，以及int算术/混合range不误截断 | T10类型证据、T11已有调用绑定；T25整case |
-| D073–D074 | count0的null语义、非空fill的FreshArray接受/拒绝边界 | T04/T15；T25 |
-| D075–D076 | 参数words/无code声明、MUTF8的真实格式边界 | T10/T21/P8；T25 |
-| D077–D078 | 长调用序列及完整接口声明必须Java，不受估算费用拒绝 | T11/T21/P8；T25 |
-| D079–D080 | 多unit编译时static final仍保留sget/class-init；外部常量/Unknown拒绝 | T11/T20；T25 |
-| D081–D082 | 同静态site的动态锁错配拒绝、参数锁的合法循环接受 | T19；T25 |
-| D083 | 极端signed sparse keys与有界处理 | T14；T25 |
-| D084 | noncanonical synthetic bridge保留raw/effect，不套Generated | T21；T25 |
-| D085 | 局部invoke-custom失败时Java/Smali、UTF16、原identity/spans均保留，默认text不挡Mixed | T03/T04/P9、H05；T25/H08各自seam |
+| D071–D072 | Legal return/call through a Phi from a narrow producer, and int arithmetic/mixed ranges not truncated wrongly | T10 type evidence, T11 existing call binding; T25 whole case |
+| D073–D074 | null semantics of count 0, and the FreshArray accept/reject boundary of a non-empty fill | T04/T15; T25 |
+| D075–D076 | Real format boundaries of parameter words and code-free declarations, and of MUTF-8 | T10/T21/P8; T25 |
+| D077–D078 | A long call sequence and a complete interface declaration MUST be Java, without rejection by estimated cost | T11/T21/P8; T25 |
+| D079–D080 | static final still keeps sget/class-init in a multi-unit compile; external constant and Unknown rejection | T11/T20; T25 |
+| D081–D082 | Dynamic lock mismatch at one static site is rejected, and a legal loop over a parameter lock is accepted | T19; T25 |
+| D083 | Extreme signed sparse keys with bounded handling | T14; T25 |
+| D084 | A non-canonical synthetic bridge keeps raw/effect and is not labeled Generated | T21; T25 |
+| D085 | When a local invoke-custom fails, Java/Smali, UTF-16, original identity and spans are all preserved, and default text does not hide Mixed | T03/T04/P9, H05; T25/H08 own their seams |
 
-D086由T01/T03/T04提供默认不限、显式Some(n)与完整raw的输入/资源对照，T25汇总。
-D085验证公开Module的复杂结果保留与raw/UTF16/spans完整性，不启动CLI，也不为format flag、status getter或输出排版另造测试。默认展示纠正不能把原有Java正例改成Smali成功。
+T01/T03/T04 supply the D086 input and resource contrast between default-unlimited,
+explicit `Some(n)` and complete raw; T25 rolls it up. D085 verifies complex result
+preservation and raw/UTF-16/span integrity through a public module without starting
+the CLI, and adds no test for a format flag, a status getter or output formatting. A
+default-display correction MUST NOT turn an existing positive Java case into a Smali
+success.
 
-该映射不把新增案例全部自动归“Java正例”；每次调用的支持/拒绝结果只读JSON。
-方法/声明/pool边界检查是核心语义，不是CLI参数/getter或工具自身测试。
-新规格/规范推导不替代B01批准、B03输入与编译器产物认证，也不解除B04工具自测授权阻塞。
+This mapping MUST NOT automatically classify new cases as Java positive. The
+support or rejection result of each invocation comes only from the JSON. Method,
+declaration and pool boundary checks are core semantics, not CLI arguments, getters
+or tool self-tests. A new specification or specification derivation does not replace
+B01 approval, B03 input and compiler-artifact certification, and does not lift the
+B04 tool-self-test authorization block.
 
-### 4.1 验证层
+### 4.1 Validation layers
 
-| 层 / ID | 核查什么 | 证据 | 不能证明 |
+| Layer / ID | What it checks | Evidence | What it cannot prove |
 |---|---|---|---|
-| V0 InputSafety | offset/count/LEB/alignment/ID/word/payload/UTF-16/handler/depth | 小型自制 binary、定向畸形 mutation、预算/取消、无 panic/无无界分配测试 | 任意输入安全、所有 DEX verifier 规则已完备 |
-| V1 FlowSSA | raw instruction 消费、normal/exception edge、参数 words、定义/支配/Phi/旧状态 | public seam profile case + 独立 artifact verifier mutation；edge/env 预期记录 | 仅凭图无环或 SSA 名称不能证明所有语义 |
-| V2 Storage | parallel copy、critical edge、loop latch、throw 前 snapshot、默认值不可观察 | CopyPlan 重执行测试、定义可用性、exact type/no-extra-check、negative cycle/order cases | one-local-per-value 并不自动给出合法 Phi 消除 |
-| V3 Structure | op/edge coverage、transfer target、try/handler order、monitor release | Structure/Protection/Monitor certificates 独立验证；对应行为 fixture | label/goto/state 更少不证明更正确；visited 集不够 |
-| V4 JavaLegality | 方法/class context、成员绑定、primitive/ref/null、checked throws、constructor/final/nested/enum/annotation | P8 validator + **完整 classpath 下真实 javac exit=0** | Java 可编译不证明等价；忽略缺依赖的错误不是通过 |
-| V5 Behavior | 返回、heap/call 日志、异常及 cleanup、循环、锁、初始化、字符串/FP bits | 自制基准源码与恢复 Java 的隔离运行差分；必要时授权 ART 环境 | JVM≠ART 的实现相关行为、没有覆盖的路径、所有输入 |
-| V6 RawFallback | 标准 smali 完整性与原始指令/metadata 语义 | 自制合法 fixture → smali → 受控 assembler → DEX 语义字段比较 | raw excerpt 不是 smali，offset byte-identical 不是必要条件 |
-| V7 System | 状态分母、预算/trace/catalog一致、实际source spans、无序输出完整性、许可、性能 | 无empty-run报告、按原identity核对记录/证据、多种到达次序、文档/schema检查 | 不要求跨运行文本/记录排列一致；release成功或多线程不证明质量 |
+| V0 InputSafety | offset/count/LEB/alignment/ID/word/payload/UTF-16/handler/depth | Small self-made binaries, targeted malformed mutations, budget/cancellation, no-panic/no-unbounded-allocation tests | Safety for arbitrary input, completeness of all DEX verifier rules |
+| V1 FlowSSA | raw instruction consumption, normal/exception edge, parameter words, definition/dominance/Phi/old state | Public seam profile cases plus independent artifact-verifier mutations; recorded edge/env expectations | Neither an acyclic graph nor SSA names prove all semantics |
+| V2 Storage | parallel copy, critical edge, loop latch, pre-throw snapshot, unobservable default values | CopyPlan re-execution tests, definition availability, exact type/no-extra-check, negative cycle/order cases | one-local-per-value does not automatically give legal Phi elimination |
+| V3 Structure | op/edge coverage, transfer target, try/handler order, monitor release | Independent verification of Structure/Protection/Monitor certificates; matching behavior fixtures | Fewer labels/gotos/states does not prove correctness; a visited set is not enough |
+| V4 JavaLegality | method/class context, member binding, primitive/ref/null, checked throws, constructor/final/nested/enum/annotation | P8 validator plus **a real javac exit=0 on the complete classpath** | Compilable Java does not prove equivalence; ignoring a missing-dependency error is not a pass |
+| V5 Behavior | return, heap/call log, exception and cleanup, loops, locks, initialization, string/FP bits | Isolated-run differential between self-made baseline source and recovered Java; authorized ART environment when required | Implementation-dependent behavior where JVM≠ART, uncovered paths, all inputs |
+| V6 RawFallback | standard smali completeness and original instruction/metadata semantics | Self-made legal fixture → smali → controlled assembler → DEX semantic field comparison | A raw excerpt is not smali; byte-identical offsets are not a necessary condition |
+| V7 System | status denominators, budget/trace/catalog consistency, actual source spans, unordered-output completeness, license, performance | A report with no empty run, identity-linked records and evidence, several arrival orders, document/schema checks | Cross-run text or record arrangement is not required to match; a release success or multithreading does not prove quality |
 
-每个能力至少一正例、一个能破坏其核心不变量的反例、一个 limit/cancel 例；反例必须验证正确分类，而不只是“返回任何 error”。Default initializer 将未定义读取变为 0/null 的情况必须被 V1/V2 拒绝。
+Each capability has at least one positive case, one counterexample that can break its
+core invariant and one limit/cancel case; the counterexample MUST verify the correct
+classification, not merely "returns some error". V1/V2 MUST reject a default
+initializer that turns an undefined read into 0/null.
 
-### 4.2 状态与分母
+### 4.2 States and denominators
 
-#### 4.2.1 报告必须逐方法计数
+#### 4.2.1 The report counts per method
 
-EngineCoreRC与ProductRC按§2和JSON acceptanceGate选取required集合；每个invocation及
-共享case的每个seam都必须有证据。不得把应用未执行记engine pass，或把engine分母当
-产品分母。D065/D085分别保存两个seam证据，每个仍只计一个case；完整展示Mixed不计JavaUnit。
+EngineCoreRC and ProductRC select the required set from §2 and the JSON
+`acceptanceGate`; every invocation and every seam of a shared case needs evidence.
+An unexecuted application check MUST NOT count as an engine pass, and the engine
+denominator MUST NOT become the product denominator. D065/D085 keep evidence for both
+seams separately and each still counts as one case; a completely displayed Mixed
+result does not count as a JavaUnit.
 
-统计以下互斥状态，并同时输出 denominator：
+The report counts the following mutually exclusive states and outputs the
+denominator at the same time:
 
-- `Java` executable methods（有 code，经过 P8 验证）及其 behavior-tested 子集。
-- `DeclarationOnly`（abstract/native，无 body）——不能抬高 executable Java 恢复率。
-- 已验证的`Generated` bridge/enum/inner成员归Java executable，并记录owner生成规则；
-  不重复打印冲突声明、不计DeclarationOnly。full-unit必须由该owner语法生成预期行为；
-  单独不能表达的get-method仍给原Smali，不为它造wrapper。
-- `Smali`（已校验 raw + 全部指令/规定 metadata）；与 `Unavailable` 分开。
-- `Unavailable`（损坏/未知宽度/无法可靠 fallback/资源失败），诊断原因为 Malformed、Unsupported、BudgetExceeded、InternalInvariant。
-- `JavaUnit` 与 `Mixed` class 数；单 inner 片段、缺 shell metadata、任意 fallback 不算完整 JavaUnit。
-- RequestError 与 Cancelled 单列；BUG 必須为红色 gate 信号，即使能输出 raw。
-- missing catalog、known unsupported instruction、exception profile、monitor profile、constructor profile 各原因数。
+- `Java` executable methods (with code, P8-verified) and their behavior-tested
+  subset.
+- `DeclarationOnly` (abstract/native, no body) — MUST NOT raise the executable Java
+  recovery rate.
+- A verified `Generated` bridge/enum/inner member counts as Java executable and
+  records the owner generation rule; the report MUST NOT print a conflicting
+  declaration twice or count it as DeclarationOnly. A full unit MUST generate the
+  expected behavior from that owner syntax; a get-method that cannot be expressed on
+  its own still yields the original Smali and gets no invented wrapper.
+- `Smali` (verified raw plus all instructions and required metadata); kept separate
+  from `Unavailable`.
+- `Unavailable` (damaged/unknown width/no reliable fallback/resource failure), with
+  the diagnostic reason Malformed, Unsupported, BudgetExceeded or InternalInvariant.
+- `JavaUnit` and `Mixed` class counts; a single inner fragment, missing shell
+  metadata or an arbitrary fallback is not a complete JavaUnit.
+- RequestError and Cancelled are listed separately; a BUG MUST be a red gate signal
+  even when raw output is produced.
+- Per-reason counts for missing catalog, known unsupported instruction, exception
+  profile, monitor profile and constructor profile.
 
-例如：`Java=12/20 executable, DeclarationOnly=3, Smali=5, Unavailable=3; JavaUnit=1/4; BehaviorVerified=10/12 in env X`，而不是“17/20 能输出就是 85% 成功”。无法真实编译的 Java 片段即便 P8 成功，也不能计为 V4 已通过。
+For example, report `Java=12/20 executable, DeclarationOnly=3, Smali=5,
+Unavailable=3; JavaUnit=1/4; BehaviorVerified=10/12 in env X` rather than
+"17/20 can be emitted, so 85% succeeded". A Java fragment that cannot really compile
+MUST NOT count as a V4 pass even when P8 succeeds.
 
-#### 4.2.2 冻结基线纪律
+#### 4.2.2 Frozen-baseline discipline
 
-每次baseline包含：引擎commit、options/profile/schema、输入checksum、该请求catalog标识、toolchainversions、运行命令、按原identity关联的方法状态/trace、已测试输入集。不冻结查询/跨方法结果序列，不要求跨运行局部名或生成源码相同；text样本仅作诊断，source spans对本次真实输出逐项校验。复杂查询内容通过公开module核对原identity多重集合，不提供分页或数量截取参数；旧flag移除只做源码/文档核对，不新增CLI测试。安全预算不足通过领域interface验证明确失败，不前N条成功。行为变化仍须独立审阅。
+Each baseline records the engine commit, the options/profile/schema, the input
+checksum, the catalog identity of that request, the toolchain versions, the run
+command, the per-identity method status/trace and the tested input set. It does not
+freeze query or cross-method result sequences, and does not require local names or
+generated source to match across runs. Text samples serve diagnostics only, and
+source spans are checked item by item against this run's real output. A complex
+query result is checked through a public module against the original-identity
+multiset; the CLI offers no pagination or count-truncation argument. Removing an old
+flag needs only a source and document check, not a new CLI test. An insufficient
+safety budget fails explicitly through a domain interface; it MUST NOT succeed for
+the first N entries. A behavior change still needs independent review.
 
-参考 dexdec、radguard、DAD 输出只作 triage：相同可能同错，不同可能都是等价形态。不能冻结宽松 normalizer 后宣称真值；comparison 规则变更与引擎变更必须分别记录。本设计不复制 RG pickle/DEX fixtures，不运行未授权缓存，不让 fixture 名揭示真实 corpus 身份。
+Output from dexdec, radguard and DAD serves triage only: equal output may be equally
+wrong, and different output may both be equivalent forms. A lenient normalizer MUST
+NOT be frozen and then declared truth, and a comparison-rule change and an engine
+change MUST be recorded separately. This design copies no RG pickle or DEX fixture,
+runs no unauthorized cache, and lets no fixture name reveal a real corpus identity.
 
-### 4.3 行为Driver
+### 4.3 Behavior Driver
 
-#### 4.3.1 Driver 输出结构
+#### 4.3.1 Driver output structure
 
-本项目不保证分析结果稳定顺序，但**被分析程序的执行轨迹不是展示顺序**。driver中的event seq、调用参数求值、异常/catch、cleanup、锁和初始化顺序必须逐项保留，不能按事件kind排序或当多重集合比较。独立方法/查询报告才按原identity关联且忽略展示次序。
+This project does not guarantee a stable order for analysis results, but **the
+execution trace of the analyzed program is not a display order**. The Driver MUST
+preserve the event seq, argument evaluation order, exception/catch, cleanup, lock and
+initialization order of the program item by item; it MUST NOT sort by event kind or
+compare them as a multiset. Only independent method and query reports are linked by
+original identity with display order ignored.
 
-比较规范字段的JSON结构与语义event序列，不比较打印Java文本或JSON对象键排列。每 case 独立执行原始自制源码与恢复源码的相同public入口，依赖Driver/Logger与catalog版本一致。
+The harness compares the JSON structure of the specified fields and the semantic
+event sequence, not printed Java text or JSON key arrangement. Each case runs the
+same public entry of the original self-made source and of the recovered source
+separately, with the same Driver/Logger and catalog versions.
 
 ```json
 {
@@ -288,982 +560,2185 @@ EngineCoreRC与ProductRC按§2和JSON acceptanceGate选取required集合；每�
 }
 ```
 
-类型编码：int/long十进制或固定bits；float/double用rawbits、NaN策略显式（canonicalNaN是否足够取决case）；strings用u16codeunits数组；null与空String不同；对象仅自制identitytoken/可见字段，不用地址或默认toString。
+Type encoding: int/long as decimal or fixed bits; float/double as raw bits with an
+explicit NaN policy (whether canonical NaN suffices depends on the case); strings as
+a `u16` code-unit array; null differs from an empty String; objects use only
+self-made identity tokens and visible fields, never an address or the default
+`toString`.
 
-日志只存在于自制依赖中，记录call/field accessor/cleanup/lock等观察，不给恢复程序加入改变原行为的stub。额外Driver日志本身可能有effect，fixture要避免因日志改变算法可表达profile；source与恢复都使用相同依赖，但这仍只是覆盖给定fixture的证据。
+Logs exist only in self-made dependencies and record observations such as calls,
+field accessors, cleanup and locks. The harness MUST NOT add a stub to the recovered
+program that changes original behavior. Additional Driver logging can itself have an
+effect, so a fixture MUST avoid a logging change that alters the profile the
+algorithm can express; source and recovered code use the same dependencies, but that
+is still evidence for the given fixture only.
 
-异常比较：类型、可见cause/自制消息（不含runtime地址）、发生时的eventprefix、catch选择与cleanup行为。不要简单比较top-level成功/失败；一个错误catch可能同样返回-1。stacktrace行号不作为成功要求，错误类型/handler不能忽略。
-#### 4.3.2 双向测试与原始 DEX 的证据局限
+Exception comparison covers type, visible cause or self-made message (no runtime
+address), the event prefix at the occurrence, catch selection and cleanup behavior.
+The harness MUST NOT simply compare top-level success or failure, because a wrong
+catch may also return -1. Stack-trace line numbers are not a success requirement;
+the error type and handler MUST NOT be ignored.
 
-基础闭环：selfmade Java → javac/d8生成DEX → Diana → Java → javac → JVMdriver。原基准为生成DEX的自制源/JVM，依赖d8编译语义符合目标。这能检验恢复逻辑，但**不是直接在ART执行原DEX与恢复DEX的比对**。
+#### 4.3.2 Round-trip testing and the evidence limits of original DEX
 
-加强层：在用户明确提供授权 Android 测试环境后，原始DEX与恢复Java经d8的DEX分别执行同Driver，比较事件。生产依然不依赖外部runtime。没有该环境时V5标`JVM-only, ART-not-run`，例如volatile/monitor/FP/constructorallocation的实现相关部分列风险，不宣称全部ART等价。
+The basic loop is self-made Java → javac/d8-generated DEX → Diana → Java → javac →
+JVM Driver. The baseline is the self-made source and the JVM that generated the DEX,
+which relies on d8 compiling semantics that match the target. This tests the
+recovery logic, but **it is not a direct comparison of the original DEX and the
+recovered DEX executed on ART**.
 
-对于人工smali构造的不可归约CFG或Java无法直接产生的rawcase：
+The stronger layer runs the original DEX and the DEX compiled from recovered Java by
+d8 through the same Driver and compares events, once the user explicitly provides an
+authorized Android test environment. Production still depends on no external
+runtime. Without that environment, V5 reports `JVM-only, ART-not-run` and lists the
+implementation-dependent parts such as volatile, monitor, FP and constructor
+allocation as risks instead of claiming full ART equivalence.
 
-- normal op-graph/copy测试可以使用**tests-only reference interpreter**（只支持自制pure scalar ops），并对实际Java执行比较；interpreter没有生产路径，不成为DEX运行时。
-- exceptional/monitor不使用“简化 interpreter 忽略异常/锁”当oracle。人工protectedgraph若无授权ART环境，仅做V0/V1/V2/V3/V6证据，并保持Javaprofile实验性/未完成相应V5合同。
-- 不能用dexdec/radguard给出的文本作为自制case真值。基准是case设计中具体返回/轨迹与独立语义推导，参考引擎只是补充debug。
+For an irreducible CFG built by hand-written smali or a raw case that Java cannot
+directly produce:
 
-`behavior_roundtrip`要区分`source-origin JVM case`、`handwritten smali + scalar reference interpreter case`与`ART case`；后者没有适用执行oracle就not-run/failrequired，不补一个“更简单但不是相同CFG”的源码代替。scalar interpreter只有T05 tests-only受限pureops、没有heap/exception/monitor，也须正例对JVM交叉校验；不把它算完整DEX VM。
+- A normal op-graph or copy test MAY use a **tests-only reference interpreter** that
+  supports only self-made pure scalar ops and is compared against real Java execution.
+  The interpreter has no production path and does not become a DEX runtime.
+- Exception and monitor cases MUST NOT use a simplified interpreter that ignores
+  exceptions or locks as an oracle. Without an authorized ART environment, a
+  hand-made protected graph yields only V0/V1/V2/V3/V6 evidence, and its Java profile
+  stays experimental with the corresponding V5 contract incomplete.
+- Text emitted by dexdec or radguard MUST NOT serve as truth for a self-made case. The
+  baseline is the specific return and trace in the case design and the independent
+  semantic derivation; a reference engine only adds debugging information.
 
-D027/D073的规范镜像仅限JSON指定的封闭形态：D027的唯一新数组、已知足够长度、
-常量元素、无逃逸/handler，按FreshArray证明bulk fill和原位Java stores的heap/transfer；
-D073已知primitive component、count=0、无handler/其他effect，逐状态证明fill和length
-read的相同正常/异常transfer。证书列原DEX与镜像CFG/site对应、allocation/异常条件及
-推导，再编译独立Java镜像；不把镜像称为原DEX执行，不推广为异常/锁VM。
-缺这份独立推导即B03阻塞；人工复杂protected/monitor图仍遵守上面的ART证据边界。
+`behavior_roundtrip` MUST distinguish a `source-origin JVM case`, a `handwritten
+smali + scalar reference interpreter case` and an `ART case`. The last is not-run or
+fails as required when no applicable execution oracle exists; do not substitute
+source for "a simpler but different CFG". The scalar interpreter exists only as the
+T05 tests-only restricted pure-ops component with no heap, exception or monitor
+support, and its positives still need cross-checking against the JVM; it MUST NOT
+count as a complete DEX VM.
 
-full-unit-set（D079）只是对固定role依次调用现有公开Engine class请求，再把每份完整
-JavaUnit一起编译；不新增生产batch命令，不保留原目标classfile遮掩恢复缺陷，也不改
-未选依赖造stub。多个unit/调用任一不合格即该invocation失败。
+The specification mirrors of D027/D073 are limited to the closed shape the JSON
+specifies. D027 covers the single new array, a known sufficient length, constant
+elements and no escape or handler, and proves the bulk fill and the in-place Java
+stores by FreshArray heap and transfer. D073 covers a known primitive component,
+count 0 and no handler or other effect, and proves the same normal and exception
+transfer of the fill and the length read per state. The certificate lists the
+original DEX and mirror CFG/site correspondence, the allocation and exception
+conditions, and the derivation, and then compiles an independent Java mirror. It
+MUST NOT call the mirror execution of the original DEX, and MUST NOT generalize it to
+an exception or lock VM. A missing independent derivation blocks B03; a hand-made
+complex protected or monitor graph still obeys the ART evidence boundary above.
 
-#### 4.3.3 超时、终止与并发
+A full-unit-set (D079) only invokes the existing public Engine class request for the
+fixed roles in turn and then compiles every complete JavaUnit together. It adds no
+production batch command, keeps no original target classfile that hides a recovery
+defect, and changes no unselected dependency to build a stub. If any unit or
+invocation is unacceptable, that invocation fails.
 
-每子进程启动有deadline，超时kill并记录非通过；累计输出上限避免日志爆炸。无界循环fixture仅能证明某有限前缀，不得timeout后当expectedcomplete；循环测试使用有界计数并分别0/1/多次退出。
+#### 4.3.3 Timeouts, termination and concurrency
 
-monitor测试首要：同线程holdsLock、nullenter异常、所有退出后的lock释放、重入/嵌套sameobject。可加有deadline的双线程交接检查，但stress成功不是完整内存模型证明。锁release必须由CFG证书补充；“body还能运行”不是保持同步语义证据。
+Every subprocess start has a deadline; a timeout kills the process and records a
+non-pass, and a cumulative output cap prevents log explosion. An unbounded-loop
+fixture proves only some finite prefix; after a timeout the harness MUST NOT call
+the expected run complete. Loop tests use bounded counters and exercise 0, 1 and
+several exits separately.
 
-#### 4.3.4 文件发布的过程观察
+Monitor tests first cover `Thread.holdsLock` on the same thread, a null-enter
+exception, lock release after every exit, and reentrancy and nesting on the same
+object. A two-thread handoff check with a deadline MAY be added, but a successful
+stress run is not a proof of the complete memory model. A CFG certificate MUST
+supplement every lock release; "the body still runs" is not evidence of preserved
+synchronization semantics.
 
-D070每个unsafe目标/force组合单独调用，不能用默认no-force的TargetExists验证force的
-alias/symlink安全。originalFilesUnchanged同时核原输入path、原handle与sentinel，
-不能只比已固定的snapshot而漏掉原path被替换。两个发布者使用不同的确定payload，
-最终文件须逐byte等于实际成功者；另一方必须是TargetExists，不能“两个都返回成功
-但最终只看见一份”。
+#### 4.3.4 Process observation of file publication
 
-最终路径observer在发布者开始前ready：公开取消回调始终返回false，只观察最终路径，
-再辅以有deadline的并发reader；不注入私有publish hook、不匹配phase或回调次数。
-每次读取只打开一个handle并从该handle核完整内容，避免把两次rename前后的文件拼接。
-no-force允许absent或某个完整payload；force允许旧KEEP或完整新payload，空/前缀/混合
-内容均失败。结束时至少观察一次完整新文件，核所有temp清理；不存在文件不能真空通过。
-bounded写/复制循环每至多64KiB检查取消，因此把temp错误改成final再分块写的mutation
-会在公开callback中暴露半文件；callback观察本身只读、不阻塞等待生产者下一阶段。
+D070 invokes each unsafe target and force combination separately; a default no-force
+`TargetExists` MUST NOT verify the alias and symlink safety of force.
+`originalFilesUnchanged` checks the original input path, the original handle and a
+sentinel at the same time; it MUST NOT compare only a frozen snapshot and miss a
+replaced original path. The two publishers use different deterministic payloads, and
+the final file MUST equal the actually successful payload byte for byte; the other
+publisher MUST observe `TargetExists`. Two publishers MUST NOT both report success
+while only one payload is visible.
 
-有限reader采样不证明全部OS调度：原子性同时依ALGORITHMS §14.3的hard_link/rename
-primitive与持有Dir的文件安全审阅，不能以stress通过替代。平台不支持这些primitive时，
-准备如实失败；不降级为exists+rename或取消该required调用。
+The final-path observer is ready before the publisher starts: the public cancellation
+callback always returns false and only observes the final path, supplemented by a
+concurrent reader with a deadline. The test MUST NOT inject a private publish hook or
+match phases or callback counts. Each read opens one handle and checks the complete
+content through that handle, so content from before and after two renames is never
+concatenated. no-force permits an absent file or one complete payload; force permits
+the old KEEP result or a complete new payload, and empty, prefix or mixed content
+fails. At the end the test observes the complete new file at least once and checks
+that all temp files are cleaned; an absent file MUST NOT pass vacuously. The bounded
+write and copy loops check cancellation at most every 64 KiB, so a mutation that
+writes a temp file as the final file in chunks exposes a half file through the public
+callback; the callback observation itself is read-only and never blocks waiting for
+the producer's next stage.
 
-### 4.4 能力族索引（执行真值为JSON required集合）
+Finite reader sampling does not prove all OS scheduling: atomicity also depends on the
+hard_link/rename primitive of ALGORITHMS §14.3 and on the file-safety review that
+holds the Dir, and a passing stress run MUST NOT replace it. When the platform does
+not support these primitives, preparation fails honestly; the test MUST NOT degrade
+to exists+rename or drop that required invocation.
 
-**执行规范是[e2e_cases.json](e2e_cases.json)中的required cases/invocations，完整输入/expected/oracle先由B01–B04审阅、准备、认证。** 下列F00–F25/U/M只是能力族和反例命名映射，不是独立执行清单，不让实现Agent自行补expected或按当前能力删case。
+### 4.4 Capability family index (the execution truth is the JSON required set)
 
-所有F/U/M均自制。binary方法满足编译器或smaliassembler规则；专门invalid case用于拒绝，没有“畸形也能生成Java”的要求。Native/abstract不可执行的声明放独立count。
+**The execution specification is the required cases and invocations in
+[e2e_cases.json](e2e_cases.json); B01–B04 review, prepare and certify the complete
+inputs, expected values and oracles first.** The following F00–F25 and U/M items are
+only a capability-family and counterexample naming map, not an independent execution
+list; they do not authorize an implementation agent to add expected values or delete
+a case based on current capability.
 
-| Fixture | 核心输入/路径 | 期望成功/反例 | 归属任务 / 验证 |
+Every F/U/M fixture is self-made. A binary method satisfies the compiler or the
+smali assembler rules; a dedicated invalid case exists for rejection, and no
+requirement says a malformed input can also produce Java. Non-executable native or
+abstract declarations get their own count.
+
+| Fixture | Core input/path | Expected success/counterexample | Owning task / verification |
 |---|---|---|---|
-| F00 ResourceControl | 公开请求的预算隔离/失败释放/取消停止 | 真实边界与超额、fallback不绕预算；基础enum/包装/私有调用序不测试 | T01/T05；V7 |
-| F01 TinyDex | 自制smallheader/catalog/exactproto/abstract | exactMethodKey、rawranges；M01/M02越界/LEB/countfail | T02；V0 |
-| F02 RawMethods | move/return/wide/range/branch格式 | standard完整rawsmali，U01Java不支持但raw保留，M03unknownwidth不能假smali | T03/T05；V0/V6 |
-| F03 Utf16Payload | NUL/quote/backslash-u/isolatedsurrogate、switch/fill、debug/encoded | u16/bits/payloadtarget保留，M04截断/overflow/metadata拒绝 | T04/T05；V0/V6 |
-| F04 HarnessSelfTest | 工具缺失、wrongchecksum、0selected、syntax/behaviorfailure | harness自身必须红，不计Java成果 | T05；V7 |
-| F05 ScalarReturn | answer7、param41+1、intwrapMAX+1 | 目标方法正确返回/locals；早期可 method-in-known-context，class 如实 Mixed；M05undefined/badreturn/ins/cancel拒绝 | T06；V0/V1/V2/V4/V5 |
-| F06 DiamondPhi | choose两branch、nested、同target不同edge | 同condition一次eval，M06missingPhi/edge/noDominance，M07wrongbranchcopy拒绝 | T07/T08；V1/V2/V4/V5 |
-| F07 CopyCycleLoop | a/b交换、3cycle、0/1/Nlatch、criticaledge | 同时赋值、循环Phi；M07naiveseq/temp/默认值观察拒绝 | T08/T09；V1/V2/V5 |
-| F08 DispatchGraph | 普通two-entrycycle、多exit/throwterminal | dispatcher返回/日志一致，M08lost/dup/default/eligibility失败 | T09；V3/V4/V5（有smalioracle限制） |
-| F09 PrimitiveBits | boolean/int/ref0、wide、shift、FPNaN/-0/cmpbias/conversion | 无library-call核心bits/异常一致；无P4证据的bitcast子例本卡Unsupported，M09partialwide/unresolvedtype拒绝 | T10；V1/V4/V5 |
-| F10 CallKinds | static/private/super/virtual/interface、overload/null、effectargs | samecallee/argorder/callresult；M10badresult/kind/proto/visibility | T11；V1/V4/V5 |
-| F11 MissingCatalog | F10合法raw但empty/partial外部facts | Smali+BindingEvidenceMissing；completecatalog时Java，不能填public假事实 | T11；V6/V7 |
-| F12 AdjacentConstruction | argsready、new/init/purealias、super/thischain | 构造轨迹相同；U02complexpre-super/maythrow/lock拒绝 | T12；V1/V4/V5/V6 |
-| F13 NaturalControl | ordinaryif/while/nestedloop/break/continue | natural/dispatch两adapter行为一致，M11dupRegion/lostEdge | T13；V3/V4/V5 |
-| F14 IntegerSwitch | packed/sparse、negative/extreme/shared/fall/default | selector一次、copyedgeexact；M12payload/key/bounds | T14；V0/V3/V5 |
-| F15 HeapEffects | staticinit/field/array/null/bounds/volatile/unusedcast | effect/异常prefix完整；M13fieldkind/payload/missingcatalog | T15；V0/V1/V4/V5 |
-| F16 ThrowState | old=7；result-producingcall抛；catch读old | catch7不是正常newresult；M14normalstate/order/moveexception坏 | T16–T18；V1/V2/V3/V5 |
-| F17 HandlerPhi | 2sitesoldvalues、loopprotected、sharedtarget | snapshots在throw前，M15postcall/Undefined/cast/alias不允许 | T17/T18；V2/V3/V5 |
-| F18 ProtectedControl | subtype顺序、catchall/rethrow、cleanupreturn/throw、cleanup自身抛、一层nested | samehandler/domain/trace，U03复杂reentry/ownership降级；M16expandedtry等失败 | T18；V3/V4/V5/V6 |
-| F19 MonitorScope | holdsLock/return/throw/null、nested/reentrant/static/instance | allreleases、sameidentity；U04mismatch/missing/multientry降级 | T19；V3/V5/V6 |
-| F20 Initialization | encodednull/false/bits、nonconstantstatic、thisdelegate、blankfinal、initexception | newprocess初始化顺序，U05unrepresentablefinal→Mixed | T20；V4/V5/V7 |
-| F21 ErasedContracts | selfmadegeneric/rawinterface/bridge/covariant/nullOverload | raw警告可接受、memberbinding不改；U06return-only/unknown/bridgeeffect拒绝 | T21；V4/V5/V6 |
-| F22 NamedNested | static/instanceoutercapture、privateaccess、name冲突/Unicode | unit合法、spans映射；U07cycle/missing/ambiguousownership | T22；V0/V4/V5/V7 |
-| F23 EnumAnnotation | canonicalenumname/ordinal/valuesclone/valueOf、runtimeannotation | 无extendsEnum、reflectmetadata一致；U08custombody/annotation不可表达Mixed | T23；V4/V5/V6 |
-| F24 PureRecovery | on/offsingle-usepurecopy；call/read/div/locknegative | samebehavior，option真实consume；effect不能移动 | T24可选；V3/V5/V7 |
-| F25 HardeningMatrix | 所有M/U、smallbudget、cancel、原始语义/取消/预算/spans、known038/039rawextension | 基线支持/状态一致、无panic/0tests、BUGgate红 | T25；V0–V7 |
+| F00 ResourceControl | Budget isolation, failure release and cancellation stop of a public request | Real boundaries and overrun, fallback does not bypass the budget; basic enums, wrappers and private call order are not tested | T01/T05; V7 |
+| F01 TinyDex | Self-made small header/catalog/exact proto/abstract | Exact method key and raw ranges; M01/M02 out-of-range, LEB and count failures | T02; V0 |
+| F02 RawMethods | move/return/wide/range/branch formats | Complete standard raw smali; U01 keeps raw although Java does not support it; M03 unknown width MUST NOT fake smali | T03/T05; V0/V6 |
+| F03 Utf16Payload | NUL, quote, backslash-u, isolated surrogate, switch/fill, debug/encoded | u16/bits/payload target preserved; M04 truncated/overflow/metadata rejection | T04/T05; V0/V6 |
+| F04 HarnessSelfTest | Missing tool, wrong checksum, 0 selected, syntax or behavior failure | The harness itself MUST be red and contributes no Java result | T05; V7 |
+| F05 ScalarReturn | answer 7, param 41+1, int wrap MAX+1 | The target method returns correctly with correct locals; early runs may use method-in-known-context with the class honestly marked Mixed; M05 undefined/bad return/instruction/cancel rejection | T06; V0/V1/V2/V4/V5 |
+| F06 DiamondPhi | `choose` with two branches, nested, same target on different edges | One evaluation of the condition; M06 missing Phi/edge/no-dominance and M07 wrong-branch copy rejection | T07/T08; V1/V2/V4/V5 |
+| F07 CopyCycleLoop | a/b swap, 3-cycle, 0/1/N latch, critical edge | Simultaneous assignment and loop Phi; M07 naive sequence/temp/observed-default rejection | T08/T09; V1/V2/V5 |
+| F08 DispatchGraph | Ordinary two-entry cycle, multiple exits, throw terminal | Dispatcher returns and logs agree; M08 lost/duplicate/default/eligibility failures | T09; V3/V4/V5 (with the smali oracle limitation) |
+| F09 PrimitiveBits | boolean/int/ref 0, wide, shift, FP NaN/-0/cmp bias/conversion | Core bits and exceptions agree without library calls; a bitcast subcase without P4 evidence stays Unsupported in this card; M09 partial-wide/unresolved-type rejection | T10; V1/V4/V5 |
+| F10 CallKinds | static/private/super/virtual/interface, overload/null, effect args | Same callee, argument order and call result; M10 bad result/kind/proto/visibility | T11; V1/V4/V5 |
+| F11 MissingCatalog | F10 legal raw with empty/partial external facts | Smali plus BindingEvidenceMissing; Java with a complete catalog; public facts MUST NOT be invented | T11; V6/V7 |
+| F12 AdjacentConstruction | Args ready, new/init/pure alias, super/this chain | Construction trace identical; U02 complex pre-super/may-throw/lock rejection | T12; V1/V4/V5/V6 |
+| F13 NaturalControl | Ordinary if/while, nested loop, break/continue | Both the natural and dispatch adapter agree; M11 duplicate region/lost edge | T13; V3/V4/V5 |
+| F14 IntegerSwitch | packed/sparse, negative/extreme/shared/fall/default | Selector evaluated once, copy edge exact; M12 payload/key/bounds | T14; V0/V3/V5 |
+| F15 HeapEffects | static init/field/array/null/bounds/volatile/unused cast | Effect and exception prefix complete; M13 field kind/payload/missing catalog | T15; V0/V1/V4/V5 |
+| F16 ThrowState | old=7; a result-producing call throws; catch reads old | Catch 7 is not the normal new result; M14 normal state/order/move-exception faults | T16–T18; V1/V2/V3/V5 |
+| F17 HandlerPhi | Two sites with different old values, loop protected, shared target | Snapshots precede the throw; M15 post-call/Undefined/cast/alias not allowed | T17/T18; V2/V3/V5 |
+| F18 ProtectedControl | Subtype order, catch-all/rethrow, cleanup return/throw, cleanup throwing itself, one nested level | Same handler/domain/trace; U03 complex reentry/ownership degrades; M16 expanded try and similar failures | T18; V3/V4/V5/V6 |
+| F19 MonitorScope | holdsLock/return/throw/null, nested/reentrant, static/instance | All releases and same identity; U04 mismatch/missing/multi-entry degrade | T19; V3/V5/V6 |
+| F20 Initialization | encoded null/false/bits, non-constant static, this delegate, blank final, init exception | Initialization order in a new process; U05 unrepresentable final → Mixed | T20; V4/V5/V7 |
+| F21 ErasedContracts | Self-made generic/raw interface/bridge/covariant/null overload | Raw warnings acceptable, member binding unchanged; U06 return-only/unknown/bridge effect rejection | T21; V4/V5/V6 |
+| F22 NamedNested | static/instance outer capture, private access, name conflict/Unicode | Legal unit and span mapping; U07 cycle/missing/ambiguous ownership | T22; V0/V4/V5/V7 |
+| F23 EnumAnnotation | Canonical enum name/ordinal/values clone/valueOf, runtime annotation | No `extends Enum`, reflect metadata agrees; U08 custom body/annotation unrepresentable → Mixed | T23; V4/V5/V6 |
+| F24 PureRecovery | On/off single-use pure copy; call/read/div/lock negative | Same behavior, the option really consumed; effects MUST NOT move | T24 optional; V3/V5/V7 |
+| F25 HardeningMatrix | All M/U, small budget, cancel, original semantics/cancellation/budget/spans, known 038/039 raw extension | Baseline support and status agree, no panic and no 0 tests, BUG gate red | T25; V0–V7 |
 
-F07/F08手写smali部分必须在manifest指出referenceinterpreter/ART/JVM实际证明范围；F17sharedhandler若未实现ownershipprofile则作为U03式降级case，不以它不Java而否定T18，亦不列为其positiveJava支持。
+For the hand-written smali part of F07/F08 the manifest MUST state the range that the
+reference interpreter, ART or the JVM actually proves. If the F17 shared handler
+lacks an ownership profile, it becomes a U03-style degraded case; its Java
+unavailability does not negate T18 and it is not listed as positive Java support for
+T18.
 
-### 4.5 固定工具与内容锁
+### 4.5 Pinned tools and content locks
 
-候选组合先于引擎实现验证，用于自制fixture生成/基准执行。生产二进制不依赖Java/Maven/Python。
+Validate the candidate tool combination before engine implementation, because it
+generates self-made fixtures and runs the baseline. The production binary depends on
+no Java, Maven or Python.
 
-| 工具 | 固定版本与公开来源 | 使用与验证 |
+| Tool | Pinned version and public source | Use and verification |
 |---|---|---|
-| Rust | 根manifest最低`1.93`；runner实现时固定patch版 | 普通native构建；锁文件记录`rustc -Vv`，不手工改现有工程toolchain |
-| Python | harness准备器最低3.11（若采用Python） | 只作开发工具；不得进入生产runtime，脚本应跨平台 |
-| JDK | Eclipse Temurin **21.0.8+9**；恢复Java固定`--release 8 -proc:none -g:none`，原fixture的debug flags按case recipe锁定 | [官方release](https://github.com/adoptium/temurin21-binaries/releases/tag/jdk-21.0.8%2B9)，选择对应OS/arch的JDK资产，SHA-256用资产官方记录核；不是只下载JRE |
-| R8/D8 | `com.android.tools:r8:8.3.37` | [Google Maven POM](https://dl.google.com/dl/android/maven2/com/android/tools/r8/8.3.37/r8-8.3.37.pom)，主类`com.android.tools.r8.D8`；从固定JAR构造参数数组，不依赖AndroidSDK包装脚本 |
-| smali / dexlib2 | `org.smali:smali:2.5.2`、`org.smali:dexlib2:2.5.2` | [Maven Central POM](https://repo.maven.apache.org/maven2/org/smali/smali/2.5.2/smali-2.5.2.pom)，主类`org.jf.smali.Main`；POM有transitive依赖，**不是假设任意smali.jar可`java -jar`执行** |
-| 测试依赖classpath | 自制Java源码或JDK既定声明 | 全部source签入，classpath从recipe得到；核心suite不依赖Android platform jar |
-| ART验证 | 使用用户明确授权且可复现的设备/镜像 | 与JVM-only报告分开；没有已授权可复现环境不将ART算通过，不成为核心prep隐含本地SDK依赖 |
+| Rust | Root manifest minimum `1.93`; fix the patch version when the runner is implemented | Ordinary native build; the lock file records `rustc -Vv`, and the author MUST NOT hand-edit the existing project toolchain |
+| Python | Harness preparer minimum 3.11 (if Python is chosen) | Development tool only; MUST NOT enter the production runtime, and scripts are cross-platform |
+| JDK | Eclipse Temurin **21.0.8+9**; recovered Java pinned to `--release 8 -proc:none -g:none`, and the original fixture debug flags locked by the case recipe | [Official release](https://github.com/adoptium/temurin21-binaries/releases/tag/jdk-21.0.8%2B9); select the JDK asset for the OS and arch and check SHA-256 against the official asset record; do not download only the JRE |
+| R8/D8 | `com.android.tools:r8:8.3.37` | [Google Maven POM](https://dl.google.com/dl/android/maven2/com/android/tools/r8/8.3.37/r8-8.3.37.pom), main class `com.android.tools.r8.D8`; build the argument array from the pinned JAR and do not depend on an Android SDK wrapper script |
+| smali / dexlib2 | `org.smali:smali:2.5.2`, `org.smali:dexlib2:2.5.2` | [Maven Central POM](https://repo.maven.apache.org/maven2/org/smali/smali/2.5.2/smali-2.5.2.pom), main class `org.jf.smali.Main`; the POM has transitive dependencies, and **the author MUST NOT assume an arbitrary `smali.jar` runs with `java -jar`** |
+| Test dependency classpath | Self-made Java sources or declared JDK entries | All sources are checked in and the classpath comes from the recipe; the core suite depends on no Android platform jar |
+| ART verification | A device or image that the user explicitly authorized and that is reproducible | Reported separately from JVM-only runs; without an authorized reproducible environment ART is not a pass and MUST NOT become an implicit local SDK dependency of core prep |
 
-工具组合须经B02/B03实际生成/认证全部fixture；POM可访问不等于工具组合可用。B02产出`tests/e2e/toolchain.lock.json`：每个必需artifact的完整URL、version、SHA-256、size、依赖及mainclass；JDK每目标平台需asset/hash。**任何未填checksum/占位值、混入未锁transitive版本均阻止prep通过**。校验锁由官方checksum/可信获取的实测digest审阅；不能伪造SHA。
+The tool combination MUST actually generate and certify every fixture in B02/B03;
+an accessible POM does not make the combination usable. B02 produces
+`tests/e2e/toolchain.lock.json` with the full URL, version, SHA-256, size, dependencies
+and main class of every required artifact; the JDK needs an asset and hash per target
+platform. **Any missing checksum, placeholder value or unlocked transitive version
+blocks prep from passing.** Review the verification lock against official checksums
+or digests measured from a trusted acquisition; a SHA MUST NOT be fabricated.
 
-不要将R8/smali的JVM依赖搬到Rust生产或build.rs。可用受控Maven步骤产生classpath，但必须锁住传递依赖与artifacthash后离线运行；锁不能只写两个顶层POM。核心suite的checked-in artifact manifest与source recipe可供其他开发者复验，无需外部参考仓库。
+The author MUST NOT move the R8/smali JVM dependency into Rust production or
+`build.rs`. A controlled Maven step MAY produce the classpath, but it MUST lock the
+transitive dependencies and artifact hashes and then run offline; the lock MUST NOT
+list only the two top-level POMs. The checked-in artifact manifest and source recipe of
+the core suite let other developers re-verify without an external reference
+repository.
 
-### 4.6 资产目录与生成纪律
+### 4.6 Asset layout and generation discipline
 
-固定行为规格只保存在`docs/diana/e2e_cases.json`，本节维护准备/资产合同。实际B02产出：
+The fixed behavior specification lives only in `docs/diana/e2e_cases.json`; this
+section maintains the preparation and asset contract. Actual B02 output:
 
 ```text
 tests/e2e/
-  sources/<case-id>/        # 自制Java/smali/driver/依赖；无机器路径
-  expected/<case-id>.json   # 独立返回/轨迹/状态，不由引擎输出生成
-  inputs/                  # 小型自制DEX/ZIP/AXML/badbytes；或审阅过的生成recipe
-  manifest.json            # 来源、recipe/toolchain lock、artifacthash、suite固定成员
-  toolchain.lock.json      # 完整artifact/hash/传递依赖/主类
-  cases.json               # 从审阅过设计清单生成，签入执行版本
-  runner/                  # 公开interface的薄adapter；无私有phase依赖
+  sources/<case-id>/        # self-made Java/smali/driver/dependencies; no machine paths
+  expected/<case-id>.json   # independent return/trace/status, not generated from engine output
+  inputs/                  # small self-made DEX/ZIP/AXML/bad bytes; or a reviewed generation recipe
+  manifest.json            # sources, recipe/toolchain lock, artifact hashes, fixed suite members
+  toolchain.lock.json      # complete artifacts/hashes/transitive dependencies/main classes
+  cases.json               # generated from the reviewed design list, checked in as the executed version
+  runner/                  # thin adapter over the public interface; no private phase dependency
 ```
 
-执行workspace在`.cache/e2e/`，其他目录的source/expected不可自动write-back。若签入binary fixture，需局部白名单.gitignore而非取消全局DEX/APK忽略；来源/hash/小size审阅。可以只签recipe，但prep须验证每个开发者生成结果受同hash/语义字段锁约束，不假定作者cache存在。
+The execution workspace is `.cache/e2e/`; sources and expected values elsewhere are
+never written back automatically. A checked-in binary fixture needs a scoped
+allowlist `.gitignore` entry rather than removal of the global DEX/APK ignore rule,
+plus a source, hash and small-size review. A recipe-only check-in is allowed, but prep
+MUST verify that each developer's generated result obeys the same hash and semantic
+field locks and MUST NOT assume the author's cache exists.
 
-inputs编译/拼接可改变符号池offset时，recipe的语义检查要逐field比较；artifacthash变更需要独立fixture rebuild记录，不能当“反编译失败，重新生成一个更简单DEX”。返回/事件期望永远源于规范 worked example或独立基准，不copy Diana/dexdec/radguard打印文本。
+When compiling or joining inputs can change symbol-pool offsets, the semantic check of
+the recipe compares each field. A changed artifact hash needs an independent fixture
+rebuild record; it MUST NOT be treated as "decompilation failed, regenerate a simpler
+DEX". Return and event expectations always come from the specification worked example
+or an independent baseline, never from copied Diana/dexdec/radguard printed text.
 
-### 4.7 执行与失败判定
+### 4.7 Execution and failure determination
 
-开发工具interface为`python3 tools/e2e.py fetch-tools|prepare|verify-inputs|verify-harness`；
-脚本目前不存在。只有fetch可联网，其他只读锁定工具和签入源，不扫描home/SDK/cache。
-子进程用参数数组/锁classpath，Windows用join_paths，不能假定裸smali.jar能java-jar。
-每case隔离临时目录/原始与恢复classfiles；clinit每输入新JVM，进程/输出均有上限。
-manifest记录原身份、source/license、recipe、真实SHA-256/tool锁、validationScope、
-request/catalog、独立expected、checks与Driver inputs；占位hash阻止准备通过。
+The development tool interface is
+`python3 tools/e2e.py fetch-tools|prepare|verify-inputs|verify-harness`; the script
+does not exist yet. Only `fetch` may use the network; the other commands read only the
+locked tools and checked-in sources and MUST NOT scan the home directory, an SDK or a
+cache. Subprocesses use argument arrays and the locked classpath, Windows uses
+`join_paths`, and no command may assume a bare `smali.jar` runs with `java -jar`.
+Each case isolates its temporary directory and its original and recovered classfiles;
+clinit runs in a new JVM per input, and processes and output are both bounded. The
+manifest records the original identity, source and license, recipe, real SHA-256 and
+tool locks, `validationScope`, request and catalog, independent expected values, checks
+and Driver inputs; a placeholder hash blocks preparation from passing.
 
-方法级只在原自制合法context精确替换目标完整声明/body，不改目标/依赖或造stub；
-只计目标方法，不计JavaUnit。full-unit直接编译完整输出，不能splice修补。D8输入为
-显式classfile列表/self-made JAR，不把目录当classfile；--lib显式记录，不能忽略warning。
-raw通过原shell组装并独立projection比对opcode/word/ref/target/payload/handler/UTF16/
-metadata；不要求offset/debug字节相同，不用恢复端decoder生成两端truth。
-干净checkout/新cache显式fetch→prepare→verify-inputs→verify-harness；未跑平台如实
-not-verified，没有依赖源/许可/锁的case仍blocked，不从required移除。
+A method-level run replaces exactly the complete declaration and body of the target
+inside the original self-made legal context and MUST NOT change the target, a
+dependency or a stub; it counts only the target method, not a JavaUnit. A full-unit run
+compiles the complete output directly and MUST NOT splice-patch it. D8 input is an
+explicit classfile list or a self-made JAR, and a directory MUST NOT be treated as a
+classfile; `--lib` entries are recorded explicitly and warnings MUST NOT be ignored.
+A raw run assembles the original shell and compares through an independent projection
+of opcode, word, ref, target, payload, handler, UTF-16 and metadata; offsets and debug
+bytes need not match, and the recovered-side decoder MUST NOT generate truth for both
+sides. A clean checkout and a new cache run explicitly
+fetch → prepare → verify-inputs → verify-harness; an unexecuted platform is honestly
+not-verified, a case without a dependency source, license or lock stays blocked and is
+not removed from the required set.
 
-验收记号（适用于后续所有任务卡）：
-- **G0**：下列仅Diana workspace的fmt、Clippy、release build、实际测试基础检查。
-  引擎卡与应用H卡统一用G0，再叠加各卡领域行为义务，不另设第二套隐含基础gate。
-- **B(F…/U…)**：相应已批准D案例的行为闭环；恢复Java在原合法method context或完整
-  unit内真实编译，以独立source/JVM Driver或明确获准的独立oracle比较返回/异常/
-  heap/effect/UTF16/FPbits。镜像/手写scalar/ART的证据范围遵守§4.3，不只检查javac成功。
-- **S(F…/U…)**：相应合法raw案例的Smali回环；恢复的完整Smali方法/声明在原shell中
-  经固定assembler生成DEX，用独立projection比较opcode/words/refs/targets/payload/
-  handler优先级/UTF16/metadata。Malformed或unknown-width的Unavailable/excerpt不算S成功。
-- 括号是能力族/反例标签，不是可执行case选择器；具体输入/expected只读JSON与任务卡
-  指定D ID（如T06的D009），不能改跑能力说明中的answer7，也不能用空选择器过关。
+Acceptance notation (it applies to every later task card):
+- **G0**: the fmt, Clippy, release build and real-test baseline checks below, limited
+  to the Diana workspace. Engine cards and application H cards use G0 uniformly and
+  then add the domain behavior obligations of each card; no second implicit baseline
+  gate exists.
+- **B(F…/U…)**: the behavior loop of the corresponding approved D case. The recovered
+  Java really compiles in the original legal method context or inside the complete
+  unit, and an independent source or JVM Driver, or an explicitly authorized
+  independent oracle, compares return, exception, heap, effect, UTF-16 and FP bits.
+  The evidence scope of a mirror, hand-written scalar or ART case obeys §4.3 and does
+  not check javac success alone.
+- **S(F…/U…)**: the Smali loop of the corresponding legal raw case. The recovered
+  complete Smali method or declaration assembles through the pinned assembler inside
+  the original shell, and an independent projection compares opcode, words, refs,
+  targets, payload, handler priority, UTF-16 and metadata. An Unavailable or excerpt
+  result for a Malformed or unknown-width input is not an S pass.
+- The parenthesized labels are capability-family and counterexample tags, not
+  executable case selectors. Concrete inputs and expected values come only from the
+  JSON and the D ID named by the task card (for example D009 in T06); an author MUST
+  NOT run the `answer 7` example from the capability text, and MUST NOT pass with an
+  empty selector.
 
-G0（仅活动workspace）：
+G0 (active workspace only):
 ```sh
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
 cargo build --workspace --release --locked
 cargo test --workspace --all-features --locked
 ```
-真实测试存在后按固定D ID/卡前缀运行公开contracts；roundtrip/assembly显式opt-in。
-缺工具/fixture/classpath、非零exit、超时、0-selected、无产物/截断都失败，不能skip=pass。
-已批准revision的全suite不按当前engine-supported过滤；单批可选固定ID，但总账保留JSON全部required case/invocation，包括追加编号。
-不运行ref-fork gate。workspace现在零测试不是通过，命令interface不等于实际运行成绩。
-
-## 5. 引擎任务 T01–T25
-
-## T01 — 引擎合同与直接 typed 调度
-
-**依赖**：B04。**Phase**：P0/Pipeline/P9。**源码参考**：KU-01/02/04/05，RG-04。
-
-**目标文件**：现有骨架 `crates/diana-decomp/Cargo.toml`（其余路径按本页约定相对该crate）、`src/{lib,engine}.rs`、`src/pipeline/{schedule,control,diagnostics}.rs`、`src/p0_knowledge/{mod,policy}.rs`、`src/substrate/{ids,origin}.rs`、`tests/contracts.rs`。package=`diana-decomp`，Rust导入=`diana_decomp`，与应用包 `apps/diana/` 分开；已加入 workspace，不能将骨架构建当本卡完成。旧依赖已从主 workspace/lock 去除、保留在 ref-fork；H08 核对不再引入，版本按正式流程，不手工推动release。
-
-**输入→输出 / Interface**：实现DESIGN §2和DESIGN §2的`DexImage<'a>/Engine<'a>/RunContext/Options/Request/Report/MethodOutput/ClassOutput`、分类诊断；未接线Java路径只能Unsupported/Unavailable，不能占位成功。Limits唯一放RunContext；open/decompile/render共用`&mut RunContext`，Limits默认全None；仅显式限额使用累计used/held配额及有限raw预留。schedule直接调用具体typed函数，PhaseId仅为诊断标签；不实现PassSpec/registry/trait/macro。
-
-**步骤**：
-1. 创建最小crate与测试注册；enum和private Verified构造器只给owning validator访问。
-2. 基础enum、interface、转发与错误包装通过编译/源码审阅确认，不写“枚举值等于自身”或机械getter测试。
-3. 按DESIGN §3.7实现可选request/method配额；默认None不加阈值或固定raw预留，仅显式有限raw值从父配额claim；normal/raw工作子配额独立，used不退款、未消费held才归还。open/index/render同样charge/取消，Report脱离临时IR；trace仅可选有界。
-4. 不为私有Pass调用顺序写测试，也不为未实现phase创建空算法；通过真实公开请求的资源耗尽/取消行为验证调度是否停止，trace仅辅助定位。
-5. 固定diagnostic字段：code、severity、method/site、phase/pass、kind、boundeddetail，WallTime不得进入文本golden。
-
-**不变量 / 限额**：所有状态可穷举；必需typed transition不可被recovery policy禁用；无registry/PassId重复测试；work/allocation charge不得溢出或退款重试绕限。Cancelled停止请求，不触发fallback。
-
-**测试**：F00聚焦复杂资源控制：公开请求恰在预算边界与超额、资源错误后的fallback预算隔离、长工作取消后停止、重复申请/失败不会绕限制或泄漏。基本状态enum/包装/私有Pass调用顺序不测试；真实Malformed/Unsupported在后续输入/语义fixture验证。T01未有可运行真实请求时这部分作为后续接入要求，不造无效测试凑数。
-
-**验收**：G0和源码/interface审阅；有真实资源/取消请求时运行非零`t01_`领域测试，接口尚未接线时明确待T05接入，不写空green。**完成条件**：crate编译、资源控制实现有明确验证落点；不要求基础enum/路由/转发测试，不能把未接线功能当成功。
-
-**不扩展**：Pass trait/registry/schema生成器、TOML/build.rs、ActionDatabase、restart、并行cache、独立console。
-
-## T02 — 安全 DEX catalog 与方法原始范围
-
-**依赖**：T01。**Phase**：P1/P0。**参考**：RG-06、DX-11/12。
-
-**文件**：`src/p1_input/{mod,cursor,header,catalog,code}.rs`、`src/p0_knowledge/declarations.rs`、`src/substrate/types.rs`、`tests/input/`。
-
-**输入→输出**：`DexImage<'a> -> ProgramIndex<'a>`，bytes由caller scope持有；普通DEX本卡header_offset=0，原生041解析由T04提供、应用身份适配由H04提供；按descriptor+class_def_idx定位class、按`name+proto`定位MethodKey；本卡产出`RawMethodView`只保证code/triesranges安全，T03/T04通过完整P1 `validate_raw`后才构造携带`ValidatedRawMethod`的`MethodInput`，不跨seam暴露uncheckedoffset。MUTF-8解码由T04提供，不能以ASCII替代完整name/descriptor。
-
-**步骤**：
-1. implement checked_range(offset,count,stride)及u16/u32/ULEB32/SLEB32；强制byte/code_unit类型区别。
-2. header035、little-endian、file_size、headersize、map及IDtables各自bounds/alignment；超限Resource，截断Malformed；unknowncontainer/version Unsupported。
-3. Type/Proto/Field/Method/classdata索引检查，delta累计checked_add；duplicateclass或ambiguousname按key/proto处理。
-4. code_item完整range：insns_size*2、oddpadding、trytable、handlerlistbase及target范围；在分配前用remaining/min_record与全局预算核count。
-5. 支持zero code_off的abstract/native声明；proto words与ins_size一致性等code存在时检查；rawfallback只读取原validated range。
-
-**不变量 / 限额**：分配前验证长度；5byteLEB高位overflow拒绝；sleb::MIN不直接abs分配；decodedmetadata总预算，不仅每table上限。可定位的localmethodmalformed不让class其他method失去raw身份。
-
-**测试**：F01 `TinyDex`：空class、abstractmethod、exactproto overload；M01 header截断/offset*stride overflow/map越界；M02 methodcodedeltaoverflow、triespadding/handler_off错；Resource小limit。Rust自行造微型DEX，记录builder来源，不能引用未知真实sample。
-
-**验收**：G0 + `cargo test -p diana-decomp --test contracts t02_`。**完成**：正确MethodKey/rawrange，所有M01/M02在分配前明确拒绝，无panic。
-
-**不扩展**：APK/JAR载入、全平台符号解析、源码支持判定、先调用第三方parser再guard。
-
-## T03 — 指令格式表与独立 raw smali 通路
-
-**依赖**：T02。**Phase**：P1/P2(rawdecode)/P9。**参考**：DX-11，RG-02/05。
-
-**文件**：`src/p1_input/formats.rs`、`src/p2_flow/decode.rs`、`src/p9_emit/{mod,smali,spans}.rs`、`src/engine.rs`、smali/input tests。
-
-**输入→输出**：`RawMethodView -> validate_raw(Vec<RawInsn>) -> ValidatedRawMethod`（offset、width、operands、originalwords）→ standard-smali MethodOutput；knownUnsupportedJava与unknownformat分开，unknownformat为Unavailable+hexexcerpt。format表覆盖ALGORITHMS §1登记的标准opcode及版本门控，Java lowering执行T06–T23规定的规则。
-
-**步骤**：
-1. 单表定义opcode/mnemonic/format/width/version；decoder/formatsvalidator/smaliprinter共用，避免长度表和打印表漂移。
-2. 第一遍标instructionstart/payloadstart，检查operandregister/index与widewords；第二遍检查branches相对PC/指令边界；填充payload由T04完善，目前合法格式记录，Java拒绝且不称完整metadata-smali。
-3. emitted labels用code_unit稳定命名；invoke/range registerword count保留，不按sourceparameters错误拆words。
-4. Engine Unsupported路径丢弃分析partialsource，只调用rawadapter；smali text输出所有instruction，goto不能Nop删除，header/register/return类型完整。
-5. add byte spans对应memberdecl/reference与InsnOrigin；T04前只有原输入无待支持metadata、指令完整的case可标Smali。存在尚未支持metadata则Unavailable+RawExcerpt，不发“metadata不完整”的Smali成功。
-
-**不变量 / 限额**：每rawinstruction有且只有一个standard表达或明确unsupportedraw状态；非法unknownop不猜1word继续；fallback只核显式限额，未配置时不能补固定reserve或code长度阈值。
-
-**测试**：F02 `RawMethods`：无debug/annotation的return、moves、wide/rangeinvoke、分支；U01 knownJavaUnsupported仍保留完整knownraw；M03截断operand、branchintoinstruction、invalidregister/index、unknownopcode。对原words/offset逐条比较；尚未支持metadata的原输入明确Unavailable。
-
-**验收**：G0 + `cargo test -p diana-decomp --test contracts t03_`；T05后补S(F02)。**完成**：rawfixtures所有known指令无遗漏，M03无panic，不能fake-smaliunknownword。
-
-**不扩展**：字节码解释器、把unsupported重试成Java、生成抛异常stub、生产spawnassembler。
-
-## T04 — 无损 UTF-16、payload 与 raw metadata 完整性
-
-**依赖**：T03。**Phase**：P1/P9。**参考**：RG-06/07/09，DX-08/11。
-
-**文件**：`src/p1_input/{strings,payload,values,debug}.rs`、`src/p9_emit/{smali,literals}.rs`、`src/substrate/types.rs`、input/literal fixtures。
-
-**输入→输出**：MUTF-8→`DexString(Vec<u16>)`；validswitch/arraypayload/encodedvalue/debugraw→完整Method/Declaration raw记录。另实现原生041的0x78 header/物理offset规则，直接接受原container+header_offset；D065的engine读取由本卡拥有，应用适配留H04。diagnosticlossystring不得成为literaltruth。
-
-**步骤**：
-1. decode MUTF-8 NUL、surrogate、invalidencoding、声明utf16_len；remainingbytes与stringunits先核，绝不replacement改变literal。
-2. switchpayload对齐/target基于switch-PC、检查原格式要求的keys递增/唯一与数量（不为稳定输出重排原输入）；fill-array宽度countchecked且保留bytesbits；payload不是executableblock。
-3. debugprogram逐opcode有限解码，地址增量/line/signoverflow检查；若无法可靠decode该metadata标Malformed/Unsupported，不能打印完整smali承诺。
-4. annotation/encodedarray有界栈，非法valuewidth/tag与index拒绝；systemmetadata保留原身份，不写Java关键字。
-5. Java/smali literal按ALGORITHMS §4处理NUL/newline/backslash-u/surrogate。041按§1.1遍历logical header链，file_size仅作步长，所有section偏移仍是物理坐标，可指后续共享数据但不指前面的数据；不overlay/rechecksum。
-
-**不变量 / 限额**：保留每u16、float/doublebits；allpayloadbytecoverage，nestedcountdepthcharge；no`Vec::with_capacity(input_count)`先于校验。
-
-**测试**：F03 `Utf16Payload`：unpairedhigh/low、NUL、`\\u000a`文字、NaNbitpattern、sparse/packedswitch、fillarray；M04负relativepayload、overlap、oversizedarray/annotation、baddebugtarget/unterminatedMUTF8。futureS(F03)校验smali→DEXliteral/payload等价。
-
-**验收**：G0 + `cargo test -p diana-decomp --test contracts t04_`；T05后S(F02,F03)。**完成**：rawroundtripcomparison可逐field说明精确保留或明确unsupported，无静默lossy值。
-
-**不扩展**：源级annotation/generic美化、stringbuilder拼接、全部新版DEXmetadata。
-
-## T05 — 接入已冻结 E2E 与最小 typed product/AST
-
-**依赖**：T04。**Phase**：Pipeline/Substrate/P9、测试体系。**参考**：KU-08、RG-08、DX-13。
-
-**文件**：`src/substrate/{cfg,java}.rs`、`tests/contracts.rs`、薄`tests/support/e2e_adapter.rs`、`examples/inspect_class.rs`；读取B01–B04先准备的root `tests/e2e/` cases/manifest/expected/锁定harness，不复制第二份oracle或工具源。
-
-**输入→输出**：按DESIGN §3.2建立Flow/Ssa/Typed/Storage/PlannedBody骨干与privateconstructors；fixturemanifest可驱动nativeinputtests、smaliassemblycheck、javac/d8roundtrip。最早验证DeclarationOnly和rawmethod，不把空AST视成功。
-
-**步骤**：
-1. 按DESIGN §3固定采用ownershipwrappers；raw视图借用caller-owned bytes，permethodownedarena，ID永不recycle；当前schema按DESIGN §3采用，不自行换成第二套Context体系；仅创建当前实际消费的产物，不预先铺完整AST。
-2. MinimalJavaAst支持合法声明与literal/return预留，Validated/Verified不能pub直接new；P9只接受verified输入。
-3. 读取B01–B04已冻结manifest/Dcase/expected/toolchain.lock与inputs证书，不在本卡重新填期望或使用引擎输出生成golden；不同publicinterface只改薄adapter。
-4. 接入团队可复现的root测试工具/driver，工具来自公开内容锁与checkout cache，不寻找个人SDK、平台jar或参考仓本地目录；缺工具/hash错失败，子进程只测试工具。
-5. 连接raw→smali→受控assembler→独立rawprojection比较；按已冻结D059–D061等原始内容证据核对，不为了当前能力删catch/string/payload expected。
-6. 将公开开发示例输出Report状态与spans，其他核心测试复用，而不是直接调privateprinter。
-
-**不变量 / 限额**：测试fixture自制授权、来源固定；第三方pickle不载入；errornormalizer不删type/catch差异；zero运行数/timeoutnonzero不当pass。
-
-**测试**：B04已完成harness故障证伪；本卡仅验证实际Engine结果接入：真实错误return/漏event/错raw/编译错误被相同comparator拒绝，正确源参考可接受。缺tool/hash错误保持失败，不能因真实引擎未支持而改required成员。S(F02/F03对应固定D案例组)必须真实assembler执行。
-
-**验收**：G0 +公开adapter的非零实际语义/raw测试，引用B04冻结的suite。**完成**：同一固定case/expected/harness接到真实public库，不重新设计oracle；未实现cases仍报告未通过，不假装完整语义已验证。
-
-**不扩展**：大语料campaign、CI自动download私有APK、复制RGcache、生产CLI接线。
-
-## T06 — 第一条 Java 端到端：常量、参数与显式 scalar locals
-
-**依赖**：T05。**Phase**：P2–P9最小profile。**参考**：DX-01/02/08，RG-02。
-
-**文件**：`src/p2_flow/{mod,build,results,effects,verify}.rs`、`src/p3_ssa/{mod,inputs,build,verify}.rs`、`src/p4_calls/mod.rs`、`src/p5_types/{mod,constraints,lattice,solve}.rs`、`src/p6_variables/{mod,locals,definitions}.rs`、`src/p7_regions/mod.rs`、`src/p8_java/{mod,expressions,declarations,verify}.rs`、`src/p9_emit/java.rs`。
-
-**输入→输出**：F05 `ScalarReturn`的选定静态方法经真实schedule输出VerifiedJavaMethod；含未支持constructor等成员的class如实标Mixed，unsupported其他method依然rawsmali。本卡不要求完整普通class为JavaUnit。无call的P4返回emptyvalidbinding，无complexregion的P7返回singleblockplan，不声称它们已全实现。
-
-**步骤**：
-1. supportedop：常量、参数move、int简单add/sub/mul、return；normalterminal验证，return后rawcode仍校验。
-2. inputwordbinding、opresultValueId、simpletypeconstraints、ValueId→LocalId，explicitassignment不先GVN/inline。
-3. intliteral原bits适当signedspelling；Javaexprstmt只call/new/update，arithmetic写localassignment。
-4. Java AST核completion/returntype/Identifier，按ALGORITHMS §12.4–§12.6核可直接确定的signature/MUTF8/成员事实后才Verified，不预测code/local/stack/pool并拒绝源码；256个int的静态声明必须Unsupported/raw，不能删unused参数。P9输出method/context状态与origin spans，不按name猜proto。F05编译只用原自制source已知context替换选定方法，constructor/其他成员保持原源码，不生成任何语义stub；因此只计选定method的Java合法性，不把Mixed算完整DianaJavaUnit。
-5. 真实输入经已实现的typed transitions产出结果，失败不留下Java残片；以公开interface的语义、错误状态、预算/取消观察验收。artifact/trace仅辅助定位，不新增私有Pass调用顺序、次数或逐phase计数测试。
-
-**不变量 / 限额**：无handler/noMonitor；undefinedread必须拒绝；long/doubleword契约T10才扩充，不knownprofile就Unsupported而非猜int；effectful表达式禁止inline。
-
-**测试**：T06实际运行B01–B04固定D009（int加法/溢出），不是到开发时再生成answer/inc的新fixture；`answer()->7`等只作实现说明。未定义读/宽值/预算等按D055–D064及任务固定映射接入，范围不足仍未通过，不改expected。D009在已知合法context运行恢复方法，别把未支持的defaultconstructor计整类JavaUnit。
-
-**验收**：G0与本卡公开核心case（统一规则见§4）；B(F05)。**完成**：至少一个非空方法真实编译和执行闭环，负例不是默认值“成功”。
-
-**不扩展**：复杂branch、handler、变量merge、表达式美化、通用typedhelper生成。
-
-## T07 — 分支与固定身份 join Phi 的 SSA
-
-**依赖**：T06。**Phase**：P2/P3/P5/P6。**参考**：DX-03/04、RG-03。
-
-**文件**：`src/p2_flow/build.rs`、`src/p3_ssa/{liveness,build,verify}.rs`、`src/p5_types/constraints.rs`、`tests/pipeline/ssa.rs`。
-
-**输入→输出**：normalbranchFlowBody→SsaBody，joininputs以EdgeId标识，ValueId稳定；尚无Javacopylowering完整支持的方法可Smali，但internalSSA须完整验证。
-
-**步骤**：
-1. buildblockleaders由entry/target/afterterminal；normalbranches精确true/false，goto为terminator不是effectNOP。
-2. 按ALGORITHMS §3反向求只增长的live-in slot集合；normal write kill与throw-before需求分开。每个block每个live-in slot均建固定Phi，包括单predecessor；虚拟EntrySeed提供参数。
-3. 每block一次扫描：先绑定全部reads、保存所需throw旧值，再使重叠slot失效/写固定Def。每条incoming一次连接，未填Option不是语义Undefined。
-4. 从实际uses保留Phi闭包，Bad与grounded分别单调传播；缺定义/partial-wide/无根定义环拒绝。验证器重放block最新定义与normal/exception来源，不拿normal dominator替代异常检查。
-5. 不做trivial-Phi消除或别名缩减；类型留有限constraints。封口后drop Env/live scratch，保留必要Phi inputs和use绑定给P5/P6。
-
-**不变量 / 限额**：finiteworklist；looppreallocatedPhi即使本卡不emitloop也可内部测试；branchconditions只绑定一use；每eligibleedge一Phiinput。
-
-**测试**：F06 `DiamondPhi`：choose两个const/param、nesteddiamond、sameblock两edge；M06遗漏Phiinput、wrongedgeValueId、不支配use、undefinedbranchjoin。inputSSA正例+mutation反例。
-
-**验收**：G0 + `cargo test -p diana-decomp --test contracts t07_`。**完成**：join证书真实生成/独立校验，稳定ID与预算测试；T08须接上F06Java行为。
-
-**不扩展**：exceptionSSA、fullheritage、dominancefrontier优化、coalescing。不要只凭变量表叫SSA而省略join。
-
-## T08 — 独立 Local 分配、边 parallel copy 与循环值
-
-**依赖**：T07。**Phase**：P3/P5/P6/P8最小transfer。**参考**：DX-04/05。
-
-**文件**：`src/p6_variables/{locals,copies,definitions}.rs`、`src/p3_ssa/build.rs`、`src/p8_java/structured.rs`的最小diamondadapter、storagetests。
-
-**输入→输出**：TypedBody→StorageBody+normalCopyPlan；每nonliteraldefinition与Phi独立LocalId。F06simplediamond可输出Java；loop先内部plan验证，T09提供通用执行。
-
-**步骤**：
-1. 参数/this为pinnedbinding，ValueId不同默认不sharelocals；不把registernumber直接当LocalId。
-2. Phi.inputs按EdgeId产生parallelassignments；criticaledge保留edgecopyplacement，不先落sourceblock尾。
-3. 严格采用ALGORITHMS §5的parallel sequentialize：dst不在剩余sources才输出，否则保存任一cycle source到exact-type temp并改写所有该source；entry copy在首次进入前，branch/latch copy在选中edge后。
-4. DefinitionCertificate独立求originaluse/edgecopyavailability；仅已证明不可观察的普通locals允许defaultinitialization满足JavaDA。
-5. loopentry/latch多个Phi预分配/传播，normalcopyplan可以internalinterpreter在test验证；最小diamondP8实现singlecondition求值与transfer。
-
-**不变量 / 限额**：deaddefault不是借口读Undefined；copy周期tempcharge、source-dsttypeproof；先选edge后copy，copy全是pure无throw。Uninit不得null初始化伪装Ref。
-
-**测试**：F06choose正/负条件两driver；F07 `CopyCycleLoop`：`a<-b,b<-a`期望交换、2/3cycle、criticaledge、loopentry/latch；M07naive顺序赋值、copy放wrongbranch、default观察、typecastcopy。T09后补B(F07)。
-
-**验收**：G0与本卡公开核心case（统一规则见§4）；B(F06)。**完成**：simplebranch真Java；parallelcopy所有cycle/criticaledge反例validator失败；loopcopy义务清楚不自称全loopJava完成。
-
-**不扩展**：interferencecoloring、局部name角色推断、异常shadow、跨regionleavecopyheuristic。
-
-## T09 — 普通 CFG dispatcher 与端到端循环
-
-**依赖**：T08。**Phase**：P7/P8/P9。**参考**：KU-06/07；方案是新DEXadapter，不复制Cgoto。
-
-**文件**：`src/p7_regions/{normal,verify}.rs`、`src/p8_java/{dispatcher,verify}.rs`、`src/p9_emit/java.rs`。
-
-**输入→输出**：无handlers/Monitor/Uninit的StorageBody→DispatchPlan→VerifiedJava；onecaseperreachableblock，localpc取本次BlockId对应值，不要求跨运行case展示序列相同。
-
-**步骤**：
-1. eligibility显式检查，异常图任何handler不进dispatcher；constructoruninit同样拒绝。
-2. case内按ops原顺序，Branch两arm各emit对应copy、pcnext、continue；return/throw退出；defaultpc不可达证书。
-3. loops完全通过edgepc，不先认while/for；nestedcaseJava括号作用域合法，alllocals在外层可见。
-4. StructureCertificate重新枚举ops/edges确认覆盖；合成pc/assignnoheap和noallocation，但defaultassert不可达不依赖userinputguess。
-5. support普通irreduciblemultipleentryloop，扩展budget只影响Resource不影响输出语义；nohandlercase不应因自然structuring失败而错fallback。
-
-**不变量 / 限额**：conditionevalonce、edgecopy先于pcassign、case目标/键与block identity对应；互不fallthrough的dispatcher case展示顺序不要求稳定。输出估算limit先reserve，不能fullstring造好再丢。
-
-**测试**：B(F07)交换循环，多次迭代/0次/continue/break；F08 `DispatchGraph`：simplecycle、twoentrycycle、multipleexit、throwterminal；M08漏edge、duplicateeffect、defaultreachable、handlerineligible。人工two-entry CFG用T05测试专用scalar interpreter作独立oracle并与实际恢复Java执行比较；本卡不引入JVM不能直接生成的原始人工CFG源码假替身，exception/monitor不使用此简化oracle。
-
-**验收**：G0与本卡公开核心case（统一规则见§4）；B(F07,F08)。**完成**：复杂ordinarygraph有合法Java而非goto伪码；eligibilitynegative严禁接受。
-
-**不扩展**：try/monitor状态机、Object[]寄存器装箱解释器、复制effecttail、字节相同作为自然结构质量指标。
-
-## T10 — Primitive/Null/FP 完整合法化
-
-**依赖**：T09。**Phase**：P2/P5/P8/P9。**参考**：DX-08，RG-09。
-
-**文件**：`src/p5_types/{lattice,constraints,solve,conversions}.rs`、`src/p2_flow/decode.rs`、`src/p8_java/expressions.rs`、`src/p9_emit/literals.rs`。
-
-**输入→输出**：bits/wordtypes+useconstraints→TypedBody/UseConversion→合法primitive/refnullJava。支持boolean、byte/short/char/int/long、float/double、cmp/cmpl/cmpg、conversions和shift；notenoughtypeevidence明确Unsupported。
-
-**步骤**：
-1. 按ALGORITHMS §4闭合descriptor facts、family等式组，再单调传播origins/Known01/producer-range；封口后一次选择source type，literal每use独立视图。ProvenNarrow仅接受完全落入目标范围的无损转换。
-2. widewordpair、aliasoverlap/partialread检查；所有shiftmask、signed/unsigned、narrowing与Dex类型语义表逐opcode对应。
-3. booleanbitwise合法truth表达、eqzref==null；任何ambiguous非literal值不直接重解释cast。
-4. cmp FP用`x<y?-1:x>y?1:x==y?0:bias`，x/y为locals、bias=-1/+1；不需isNaN库调用，也不折掉NaN分支。FP不reassociate。无法精确表达的NaN payload/bitcast为Unsupported，不为恢复新增库调用。
-5. typedliteral.escape覆盖negativeMIN、Infinity、-0、surrogate；每UseConversionno-extra-runtime-check可核查。
-
-**不变量 / 限额**：有限constraints收敛，Conflict显式拒绝；overflow和Java数值promotion不靠hostRust默认猜。
-
-**测试**：F09 `PrimitiveBits`：booleannegation/bitop、0/null/false、MIN/-1、shift-1/32/64、NaNcmpl/cmpg、negativezero、float→int边界、wideoverlap；M09错误kind/partialwide/unresolvedprimitive；核byte参数经过int Phi后的return/call可无损窄化，混入short/int算术来源不得误证byte。B(F09)按bits/traces比较，不只formattext。F09的primitive正例不引入库调用；无精确表达规则的bitcast为Unsupported/raw。原程序已有的库调用按T11绑定，不为其新增合成调用。 固定D071的return与D072由本卡提供类型证据；D071 call在T11绑定后整case才完成。D076覆盖MUTF8目标字节边界。
-
-**验收**：G0与本卡公开核心case（统一规则见§4）；B(F09)。**完成**：primitive矩阵每族有positive/boundary；不把无规则的bitcast或合成intrinsic标为支持。
-
-**不扩展**：全referencegenerics、arithconstantfold/GVN、浮点代数压缩、万能numericreinterpret。
-
-## T11 — 精确调用契约、外部声明与结果绑定
-
-**依赖**：T10。**Phase**：P0/P2/P4/P5/P8。**参考**：DX-02/06/08，KU-01。
-
-**文件**：`src/p0_knowledge/declarations.rs`、`src/p2_flow/results.rs`、`src/p4_calls/{mod,members,contracts}.rs`、`src/p5_types/constraints.rs`、`src/p8_java/expressions.rs`。
-
-**输入→输出**：rawinvoke+完整/未知catalog→CallEvidence精确kind/owner/proto、receiver+argswordbound、typedresult；缺bindingfacts→Smali，不“调用看起来像就输出”。
-
-**步骤**：
-1. invoke格式/range、receiver先、descriptorwords；move-result必须紧随合法producer、正确kind且不是branchtarget；未消费callresult仍保留call。
-2. selfmadecompletecatalog提供static/direct/virtual/interface/super、visibility、overloadgroup、throws；Unknown与Partial分开。P4产出descriptor约束与BindingObligation，不要求P5尚未求出的source type。
-3. P5完成类型和UseConversion后，P8 discharge精确Javabinding：receiver/staticowner、argstatictypes、重载唯一/dispatch等价；cast必须no-extra-check或原checkcast。
-4. callmaythrow保守、unusedresult不DCE；checkedthrows与callerdecl/override一致，不sneakythrow、catchwrap或扩张契约。
-5. 报告保存originalMethodRef与EnvironmentId；same-name-different-proto请求精确选择。
-
-**不变量 / 限额**：catalog候选遍历charge；Unknown不fill默认public；参数eval不重排；任何runtimecheck新增必须证据。
-
-**测试**：F10 `CallKinds`：overloadint/long/Ref/null、virtualoverride、interface、private/direct、super、sideeffectargs、unusedthrowingcall；F11 `MissingCatalog`相同输入complete时Java、empty时明确Smali；M10badresult/argwords/staticreceiver/visibility/returnonlyoverload。 D071 call消费已封口range；D080分别验证Constant/Unknown的准确拒绝，不添加初始化helper。
-
-**验收**：G0与本卡公开核心case（统一规则见§4）；B(F10) + S(F11)。**完成**：所有kind有行为driver和rejectcase；missingcatalog为预期降级而非pass“忽略errors”。
-
-**不扩展**：nativecallingconventions、反射推断、动态invoke-custom/bootstrapJava语义、全平台catalog。
-
-## T12 — 对象初始化身份与受限构造器
-
-**依赖**：T11。**Phase**：P3/P4/P5/P8。**参考**：DX-09，DX-02 RecoverConstructors。
-
-**文件**：`src/p4_calls/allocation.rs`、`src/p3_ssa/{inputs,verify}.rs`、`src/p5_types/lattice.rs`、`src/p8_java/declarations.rs`。
-
-**输入→输出**：邻接new-instance/invoke-directinit→allocation证据和合法Javanew；`<init>`的UninitThis→singlelegalsuper/thischain→正常Refbody。
-
-**步骤**：
-1. AllocationId仅跟踪pure move-object；禁止uninit escape/普通call/fieldread。逐use验证init正常完成后的availability，P6用DeferredAllocation，不全局把ValueId改Ref或赋null。
-2. 要求args先于new准备或literal、无interveningeffect/maythrow；Javanewconstructor组合不能把effect跨过allocation/classinit时机。
-3. constructorprologue只允许不观察uninitthis的pureargpreparation和singleexpressiblechain；super/this真实行为不删。
-4. ownership/proto访问完整；多个init、joinuninit、不合法Java参数次序→Unsupported，rawfallback保存。
-5. finalfieldassignment复杂完整处理T20，本卡simplepostsuper字段写先维持eligibility，不提前移动到initializer。
-
-**不变量 / 限额**：uninit不能defaultnull成为普通Ref；new与init被一个sourceeventconsumed但origin二者保留；无“万能静态helper”。
-
-**测试**：F12 `AdjacentConstruction`：puremovealias、argsreadybeforeallocation、supertrace→bodytrace、thischain；U02 `ConstructorPrologue`：pre-superthisfield、controlflow/monitor/maythrowargs、initdup，应Smali不是Java。
-
-**验收**：G0与本卡公开核心case（统一规则见§4）；B(F12) + S(U02)。**完成**：constructortrace顺序一致，所有uninitnegative明确处理，未支持特例不删super掩盖。
-
-**不扩展**：arbitraryconstructorcarrier/helper、anonymouscapture、enumimplicitconstructor、objectallocation大量重写。
-
-## T13 — Reducible if/while 自然结构 adapter
-**依赖**：T10。**Phase**：P7/P8。**参考**：KU-06/07，DX-07区域职责。
-
-**文件**：`src/p7_regions/{normal,verify}.rs`、`src/p8_java/{structured,verify}.rs`。
-
-**输入→输出**：normalStorageBody→私有SESE/SCCregionplan→naturalJava；schema不能覆盖则普通dispatcher（T09），不修改原CFG。
-
-**步骤**：
-1. 使用算法所需RPO/normaldominance/postdom构造Sequence/Diamond/NaturalLoop，每collapse减少regionnode数；不添加稳定排序/tie-break保证同源码形式。
-2. loopheader/latch/exit保留EdgeId；continue/break的copies在transfer前，不能按blockvisited删除尾部。
-3. singleentry循环和multipleexit受限profile、`while(true)+if break`合法即可，不做for/foreach糖化。
-4. RegionCoverage验证leafBlock集不重叠，Transfer映射精确；origin与effectcoverage不是文本次数。
-5. 同fixture用StructuredThenDispatch与DispatchOnly两adapter比行为证据；纯readability不同不要求textidentical。
-
-**不变量 / 限额**：原topology/SSA/CopyPlan不变；privatearena有限；不可归约走已有合法dispatcher，handler/monitor图仍禁止普通fallback。
-
-**测试**：F13 `NaturalControl`：diamond、while0次/多次、nestedloops、conditionalbreak/continue、copyonexit；M11丢边/错误scope/dupregion；B(F13)两mode结果/trace一致。
-
-**验收**：G0与本卡公开核心case（统一规则见§4）；B(F13)。**完成**：simpleloop明确naturalAST，hardgraphdispatcher；certificateinvalid不能降成宽松成功。
-
-**不扩展**：NoMoreGotos/taildup/SAILRfullalgorithm、异常region、减少变量数、goto品质当正确性oracle。
-
-## T14 — 整数 switch / payload / fallthrough 结构
-
-**依赖**：T13。**Phase**：P2/P7/P8。**参考**：RG-02、DX-07、KU-06。
-
-**文件**：`src/p2_flow/build.rs`、`src/p7_regions/normal.rs`、`src/p8_java/structured.rs`、`src/p9_emit/java.rs`。
-
-**输入→输出**：已校验packed/sparsepayload→key/EdgeIdmapping→JavaSwitch或dispatcher，target共享/fallthrough保留。
-
-**步骤**：
-1. key有序唯一、relativeoffset正确；defaultedge不伪造成最后case。
-2. sharedtarget合case但保留原keys与originedges；falls/return/breaktargets显式，不合并不同copyplan。
-3. differingPhiinputedges进入同target：case内先执行对应copy再转目标；不因block相同丢edge差异。
-4. non-SESE/loopinsidecase优先dispatcher，普通graph结构失败不emitundefinedgoto。
-
-**不变量 / 限额**：selector一次求值；每key语义exact，switchkeys数量和outputbyte受限；payload不算executableop。
-
-**测试**：F14 `IntegerSwitch`：negative/min/maxkey、sharedtarget、default、fallthrough、loopbreak、caseedgecopy；M12duplicatekey/outofrange/branchpayload。B(F14)覆盖每case/default与sideeffectselector。 固定D083的极值keys验证有界完成与真实分支，不断言AST打印形式。
-
-**验收**：G0与本卡公开核心case（统一规则见§4）；B(F14)。**完成**：普通整数switchcoverage完整，string/enum switch按整数控制流保持，不生成未规定的switch糖化。
-
-**不扩展**：stringhashswitch/enumordinal糖化、未知bootstrap switch、branchcascade自动重启识别。
-
-## T15 — 字段、数组、显式 check-cast 与可见效果
-
-**依赖**：T12。**Phase**：P2/P4/P5/P8。**参考**：DX-06/08，RG-06。
-
-**文件**：`src/p2_flow/{decode,effects}.rs`、`src/p4_calls/members.rs`、`src/p5_types/{constraints,conversions}.rs`、`src/p8_java/expressions.rs`。
-
-**输入→输出**：iget/iput/sget/sput、arrayload/store/new/fill/length、instanceof/checkcast→准确typedops+合法Java，rawmemberidentity不被source名字覆盖。
-
-**步骤**：
-1. descriptorkind与opcode窄/宽/reference兼容，null/arraytype用constraint而不是firstuse猜String。
-2. fieldstatic/instance、visibility、volatile/classinitfact来自completecatalog；unknownflags影响effect保守，不自动假定publicfinal。
-3. array index/value/receiver保持原序。fill按ALGORITHMS §2.4：count=0仍发length read保留NPE；非空只在FreshArray长度足够/未逃逸证明下原序展开stores，逐元素保持bits；其他形态raw，不制造异常/helper。
-4. unusedfield/arrayread、cast依旧生成typedtemp保持throw/init/volatile；原checkcast不能因为结果不用而删。
-5. referencejoin只在no-extra-check证据下转换，Object上新增cast不能只是为了javac通过。
-
-**不变量 / 限额**：默认heapread/write/callbarrier，noDCE/hoist；allocationarraycountscharge；staticinit读字段不变成literal常量失trigger。
-
-**测试**：F15 `HeapEffects`：fieldget/set/staticinittrace、arrayload/store顺序/null/bounds、unusedcheckcastthrow、volatile原指令保留、wide/floatarraybits；D027必须Java，零元素fill对null仍NPE，非空缺shape证明必须raw且不得发生部分写入后伪称原语义；M13wrongfieldopcode/arraypayloadtype/missingcatalog。B(F15)比较结果、mutationlog、exceptionclass。 D027须有真实fill/FreshArray证书；D073/74分别覆盖零count异常与非FreshArray完整raw。
-
-**验收**：G0与本卡公开核心case（统一规则见§4）；B(F15)。**完成**：supportedheapops都有throw/effectnegative，originalmemberspans定位正确。
-
-**不扩展**：heapaliasoptimizer、静态final常量传播、泛型字段typeprojection、去除unusedthrowing表达。
-
-## T16 — 每抛出 site 的有序异常图与 SSA 环境
-
-**依赖**：T15、T07。**Phase**：P1/P2/P3。**参考**：DX-03/07。
-
-**文件**：`src/p2_flow/{protection,build,verify}.rs`、`src/p3_ssa/{liveness,build,verify}.rs`、`src/p1_input/code.rs`。
-
-**输入→输出**：checkedtry/handlerraw+maythrowops→orderedExceptionEdges；SsaBody含throw前exceptionenvironment与handler ExceptionValue。该卡先internal验证，JavaprotectedprofileT18后完成。
-
-**步骤**：
-1. split每受保护maythrowop到terminalsite，try边界也split；orderpreservehandlerlist、catch-all位置；normalgraph和exceptiongraph独立。
-2. instruction成功result仅normaledgecommit；throwingdefinition覆盖旧reg的exceptionedge保持旧value，其他opcode-specifictransfer显式列。
-3. handler入口move-exception新ValueId，typedchain与commonhandler可能多exceptionedges；incomingPhi按原EdgeId。
-4. exceptionSSAvalidator不使用normaldomtree替代异常availability；read-before-def仍Malformed，unknowntype不标正确。
-5. normaljumpintohandler、overlap异常区/非法range在raw及flow层明确错误/Unsupported，不排序修复。
-
-**不变量 / 限额**：throwedge每site对应实际opcodeeffect；maythrow分类保守；拆图扩张limitscharge，不把过复杂当无handler。
-
-**测试**：F16 `ThrowState`：`v=old;v=call();catch{use(v)}`、multipletypedcatch/catch-all、sharedhandler、throwinhandler；M14使用normalnewresult、catchrank重排、moveexception非法target、trymidinstruction。tests查environment，不仅source文本。
-
-**验收**：G0 + `cargo test -p diana-decomp --test contracts t16_`。**完成**：异常site/oldstate链证书齐全，尚无Javaprotected能力则不作为该Java功能通过；T18必须补B。
-
-**不扩展**：finally归并、catch-all一律转换finally、generalmonitor、跨trydispatcher。
-
-## T17 — Handler Phi shadow snapshots 与异常 ingress 拷贝
-
-**依赖**：T16、T08。**Phase**：P6。**参考**：DX-05。
-
-**文件**：`src/p6_variables/{exceptional,copies,definitions}.rs`、`tests/pipeline/exception_storage.rs`。
-
-**输入→输出**：exceptionSSA+TypedBody→beforethrowpureShadowSnapshot/HandlerIngress CopyPlan；handlerPhi每incomingthrowsite有对应typedsource证明。
-**步骤**：
-1. enumerate每handler retainedPhi的eligibleexceptionedges；创建请求内固定身份ShadowLocal，不要求跨运行同编号；不能借普通criticaledges插catch中间代码。
-2. 在throw site之前保存该edge的oldstate值，所有可能handler的snapshot均no-throw/no-allocation/localonly；catchingress绑定PhiLocal。
-3. 每(handler,Phi)始终独占shadow，nested inner handler中的throw同样给outer保存旧值；不按type合槽。保护归属采用ALGORITHMS §10一层nested规则，shared/crossing无法归属才拒绝，不使用“最近一次寄存器值”。
-4. DefinitionCertificate验证每snapshot来源在该site已定义，conversionexact不引入runtimecheck；frame-leveldefaultslot不可观察。
-5. P8 placement obligation产出明确列表，try构造必须消费同site位置，sourcecopy不能放到另一保护域。
-
-**不变量 / 限额**：shadow只影响合成local、noheap、noextraexception；多个handlersnapshotcopy总数有上限，copycycles也按T08序列化。每throwedge有来源，不依据handler最后一次写猜值。
-
-**测试**：F16旧值internalstorage、F17 `HandlerPhi`两个sites不同oldvalue、looptryshadow、sharedtarget；M15snapshotcheckedcast/Undefined/放在call之后/alias重用错覆盖，validator必须失败。
-
-**验收**：G0 + `cargo test -p diana-decomp --test contracts t17_`；T18后补B(F16,F17)。**完成**：计划与证书可复算，不能“生成了几个shadow变量”即算异常SSA lowering完整。
-
-**不扩展**：复杂cleanup变量合并、把所有exceptions装箱动态解释、异常路径deadcopyheuristic。
-
-## T18 — 受限 try/catch Java 与保护域 ownership
-
-**依赖**：T17、T13。**Phase**：P7/P8。**参考**：DX-07、KU-07。
-
-**文件**：`src/p7_regions/{protection,verify}.rs`、`src/p8_java/{structured,declarations,verify}.rs`。
-
-**输入→输出**：单连续interval、独立handlers、清晰normaljoin→ProtectionCertificate→JavaTry/Catch；不满足profileSmali，ordinarydispatcher不得接异常graph。
-
-**步骤**：
-1. exactprotectedoperation集映射Java try；catch顺序按DEX链，catch-all先catchThrowable并保留代码，不猜finally。
-2. handlerexclusiveentry、noordinaryreentry、join/return/throw可表示，catchunreachability和checkedthrows同P4合同。
-3. 对beforethrowsnapshot找到相同保护域的sourceop之前位置；normalexitcopy和exceptioningresscopy全部消费。
-4. copiedcleanup在不同路径原样保留；try大小不能扩到normalcleanup或额外call，以免exception二次捕获行为变化。
-5. 一层nested采用ALGORITHMS §10：handler内throw依赖指向outer，先归约inner try+handlers再被outer包含；最终逐site重算catch-stack第一匹配目标。siblings catch不捕获handler自身异常。shared/crossing不匹配则拒绝，不猜finally。
-
-**不变量 / 限额**：每protectedsite原handler选择一致、throw/return完成性一致、catch无法直接向scope外goto；certificate失败为InternalInvariant/Unsupported的定义必须区分算法BUG和不支持形态。
-
-**测试**：B(F16,F17)；F18 `ProtectedControl`：orderedsubtypecatch、unexpectedError走catch-all/rethrow、cleanupreturn/throw、cleanup自己抛出、nestedonelevel；U03 `ComplexProtection`normalreentry/sharedhandlers/release未知需Smali；M16漏edge/try扩大/把call外异常吞掉。
-
-**验收**：G0与本卡公开核心case（统一规则见§4）；B(F16,F17,F18) + S(U03)。**完成**：positiveprotected方法真实Java运行，negative保持smali，notfullfinally恢复不影响真实trace。
-
-**不扩展**：arbitraryexceptionownership、全路径finally美化、labelgoto跨try、吞异常使javac通过。
-
-## T19 — Monitor scope 证书与 synchronized
-
-**依赖**：T18、T12。**Phase**：P2/P7/P8。**参考**：DX-07（synchronization）。
-
-**文件**：`src/p7_regions/monitors.rs`、`src/p2_flow/effects.rs`、`src/p8_java/{structured,declarations,verify}.rs`。
-
-**输入→输出**：declarationflag或显式balancedmonitor CFG→MonitorCertificate→Java synchronized；未知/mismatched锁状态→Smali，不输出伪Java关键字。
-
-**步骤**：
-1. rawflag语义审阅，method-synchronized隐式lock与explicitmonitor分开；静态lockClass对象、实例lockthis明确。
-2. 按ALGORITHMS §11求有限reference-root；One还须root producer在整个持锁scope外且不会重执行，不能凭同静态AllocationId跨迭代认同对象。lock-stack在join一致，enter异常不push，exit精确pop，重入按层计。
-3. singleentryscope、null锁throw时机、releasehandlerinterval/protectedsite一致；match后仅以证书替换原enter/exit/catchcleanup。
-4. nestedbalancedprofile逐scope核，不证明的路径不跳过monitor；scopebodycall绝不放到synchronized之外。
-
-**不变量 / 限额**：锁effect不是pure，noinline/hoist；证书有all-exitwalkbudget，循环不靠无界enumeration。无法证明停止该profile而非假定balance。
-
-**测试**：F19 `MonitorScope`：return/throw/nulllock、nested/reentrant、methodstatic/instance，body中`Thread.holdsLock`driver、finallythrow后lock释放；U04 mismatchedlock/exitmissing/multientry→Smali；nativeverifynegativecoverage。 D081/82固定动态根重执行拒绝和参数根循环接受，不能按“有loop”一概raw。
-
-**验收**：G0与本卡公开核心case（统一规则见§4）；B(F19) + S(U04)。**完成**：有明确语义trace/holdsLock/释放检查（并发stress仅补充不当完整证明），rawflags不直接打印declared_synchronized。
-
-**不扩展**：跨锁aliasvalue猜测、arbitrarymonitorstate、去除“多余”锁、生产运行动态验证。
-
-## T20 — <clinit>/<init>、encoded 初值与 final 字段
-
-**依赖**：T19、T15。**Phase**：P1/P4/P8。**参考**：DX-08/09（initialization）。
-
-**文件**：`src/p8_java/{initializers,declarations,verify}.rs`、`src/p1_input/values.rs`。
-
-**输入→输出**：staticencodedvalues+clinit、constructorfieldwrites→合法classdecl/initializerplan；不能完整shell表示则Mixed保留raw字段/方法，不能给finaldefault再写。
-
-**步骤**：
-1. 按ALGORITHMS §12绑定encoded/default：nonfinal非默认值先发static block；final无原写则连default也显式赋一次，有原写只接受default preparation且不另赋值。static final primitive/String不发常量字段initializer，防内联sget/删class-init。
-2. clinit按ALGORITHMS §12发static block，return-void转break init label，必定abrupt的body按既定if(true)规则合法化；不造<clinit>方法，不改变read触发初始化。
-3. 按ALGORITHMS §12用有限{0,1,Many}路径写次数集合，join并集/写入递增；每条正常构造链/clinit结束须恰1。this委托继承目标写集合、不重复发初值；重写/缺失/未知路径不补default凑编译。
-4. 无constructorbody未赋final不能默认初始化“凑编译”；classshellfailure不影响独立methodanalysis，但报告Mixed。
-5. 初始化相关throws与classfinalmodifier/rawvisibility证据由P4/metadata而非printedtext猜。
-
-**不变量 / 限额**：sourceconstantfinal可能改变classinittrigger必须核；初始化次数/order和失败路径可见；clinitfield重写不丢origin。
-
-**测试**：F20 `Initialization`：nonconstantstaticfieldtrace、multipleconstructors、thisdelegate、blankfinal、encodednull/false/floatbits、initexception；U05 complexfinalreassignment/default不可证→Mixed/Smali；B(F20)每driver新进程防classinit已发生。 D046必须看到显式encoded tags；D079分别恢复并联合编译Case/Reader，核class-init和实际getstatic。
-
-**验收**：G0与本卡公开核心case（统一规则见§4）；B(F20) + S(U05)。**完成**：合法unitinittrace一致，无法sourcefinal表达明确decl状态，不删finalcontract隐藏。
-
-**不扩展**：fieldinitializer美化、constructorfactorycarrier、interproceduralinit优化、constant传播。
-
-## T21 — Raw generic、bridge/override 与 source 绑定合法性
-
-**依赖**：T20、T11。**Phase**：P0/P4/P5/P8。**参考**：DX-08及signature/sourceABI问题。
-
-**文件**：`src/p4_calls/{contracts,members}.rs`、`src/p0_knowledge/declarations.rs`、`src/p8_java/{declarations,expressions,verify}.rs`。
-
-**输入→输出**：Signature metadata可保留raw而不必恢复`List<T>`；Javaeraseddecl/override/callbinding证据全通才成功，return-onlycollision不能随意renameexternals。
-
-**步骤**：
-1. 审阅DEXdescriptor与Signature差异，保留metadata原记录；rawdecl不改变binarymemberproto，typedcasts不新增runtimecheck。
-2. 采用ALGORITHMS §12的MemberEmission::Generated：精确override事实与canonical moves/cast→target call→return匹配，且source会生成同签名同行为bridge才不重复打印。Generated仍有code/原MethodKey，不计DeclarationOnly；单独请求无法独立表达的bridge返回原Smali。
-3. Java实现interface/override方法return/throws/visibility与rawcontract一致，genericparentmember绑定不能只依localdescriptor猜。
-4. 不完整catalog的相关方法fallback，不让missingtypeexception“忽略javacerrors”变contract。
-
-**不变量 / 限额**：puregeneric美化可省，bindingcorrectness不可省；overloadcomplete状态与EnvironmentId稳定，sourcepublicidentity不改。
-
-**测试**：F21 `ErasedContracts`：selfmadegenericList/identity、covariantbridge、rawinterfaceimpl、nulloverload；U06 return-onlyDEXoverload、bridgeeffect不同、unknownparentcontract→Smali/Mixed；B(F21)配套完整selfmadeclasspath。 D048/D084分别要求canonical Generated和有effect bridge拒绝；D075含无code声明目标边界，D078要求2200个abstract声明完整组成JavaUnit，不用pool估算拒绝。
-
-**验收**：G0与本卡公开核心case（统一规则见§4）；B(F21) + S(U06)。**完成**：raw泛型警告可接受，但真正编译错误不可忽略；legacyfulltypesolver不整体搬入。
-
-**不扩展**：完整GenericTypeSolver/variance/inference美化、通用wildcardprojection、随意sneakythrow/externalsrenaming。
-
-## T22 — 命名 nested class、捕获与 unit ownership
-
-**依赖**：T21、T12。**Phase**：P1/P4/P8。**参考**：DX-09/12，RG-04。
-
-**文件**：`src/p8_java/ownership.rs`、`src/p1_input/catalog.rs`、`src/p8_java/declarations.rs`、`src/p9_emit/spans.rs`。
-
-**输入→输出**：可靠Enclosing/InnerClass/MemberClassesmetadata+declarations→命名nestedJava或Mixed；不要求匿名类源码糖化，非法ownership、missingdependency不wholeclasssilentlydrop。
-
-**步骤**：
-1. 元数据ownership图cycle/duplicate验证，`$`名字只是hint，不能独立证明inner。
-2. 显式static/instanceouterbinding、constructorcapturefields、privateaccess事实；原MethodRef/FieldRef保持sidecar映射。
-3. 可用合法nested名称先实现，匿名original可以reportsyntheticnamedclass但访问/捕获/constructor语义必须一致；unexpressibledecl保留smali。
-4. unitpackage/import/name/visibility冲突、顶层static不允许；单innerfragment归入Mixedcontext，不假冒JavaUnit。
-5. finalspans统一relocate，UnicodeUTF8边界与originalclasskey可追踪。
-
-**不变量 / 限额**：nestedclosure依赖/深度/输出有请求预算；no`MemberClasses`漏成员，missinginner明示；renameinternal不能改变外部绑定contract。
-
-**测试**：F22 `NamedNested`：staticnested、nonstaticoutercapture、same-simplename、Unicodeidentifier、privateaccess；U07 metadatacycle/missinginner/ambiguousownership→Malformed/Unsupported正确分类；B(F22)全unit真实classpath编译和capturetrace。
-
-**验收**：G0与本卡公开核心case（统一规则见§4）；B(F22) + nativeownership/spanmutationtests。**完成**：top-levelunit合法，originalidentitymapping完整，singlefragmentstatus正确。
-
-**不扩展**：匿名inline/lambda恢复、无metadata根据名称猜inner、publicexternalmemberremap。
-
-## T23 — 受限 enum / annotation 与完整 shell 分类
-
-**依赖**：T22、T20。**Phase**：P1/P4/P8/P9。**参考**：DX-08/09，RG-09。
-
-**文件**：`src/p8_java/{enums,declarations,verify}.rs`、`src/p1_input/values.rs`、`src/p9_emit/literals.rs`。
-
-**输入→输出**：canonicalselfmadeenum、annotationinterface与runtimevisiblevalues→合法JavaUnit；无法表达identity/initializer/metadata的shell→Mixed，而独立method仍可Java。
-
-**步骤**：
-1. enumconstantfield/order/name/ordinal、canonicalconstructorimplicitEnum参数、values/valueOf契约逐项验证；source必须Javaenum，不ordinaryextendsEnum。
-2. 不把任意syntheticmethod删除；canonicalgeneratedmember要有完整behavior证据，多constantbody/extraeffect留Unsupported。
-3. annotationelementtype/default/Retention/Target/userannotationliteral真实检查；systemSignature/InnerClass当metadata，不fake`@Signature`Java。
-4. rawmetadata保留sidecar但runtimeannotation缺失不能宣称fullclass语义相同；若policy允许inspectionJava片段则Mixed标明非完整unit。
-5. statusassembler核对任何Smali/Unavailable/unsupporteddecl存在必Mixed，不能errorcounter=0即JavaUnit。
-
-**不变量 / 限额**：metadatafullsource与inspectiononly不同；annotationarray/stringUTF16limit递归有界；canonicalenum少一个constant/initializer即拒绝。
-
-**测试**：F23 `EnumAnnotation`：enumiteration/name/ordinal/valuesclone、canonicalvalueOf、runtimeannotationreflect/default/array/UTF16；U08 enumcustombody不可证/invalidannotationelement/missingretentionfacts→Mixed；B(F23)本卡只接受canonicalprofile。 D050使用非字典序常量并核valueOf，不让field表排序碰巧满足期望。
-
-**验收**：G0与本卡公开核心case（统一规则见§4）；B(F23) + S(U08合法raw部分)。**完成**：支持profile可复算、JavaUnit分类与metadata语义合同吻合，无extendsEnum伪合法代码。
-
-**不扩展**：全enum-switch降糖、annotation平台库大catalog、复杂enumconstantbody、反射名rewrite承诺。
-
-## T24 — 可选纯表达式恢复（不是必需核心）
-
-**依赖**：T23、T14。**Phase**：P8/Pipeline/P0。**参考**：KU-04/05/08，DX-06。
-
-**文件**：`src/p8_java/recovery.rs`、`src/pipeline/schedule.rs`（仅实际接线）、`src/p0_knowledge/policy.rs`。
-
-**输入→输出**：verified JavaBody→ALGORITHMS §15规定的整数单use内联→再次verify；inline_pure默认false，关闭不影响CoreRC。
-
-**步骤**：
-1. 仅在P8实现一个真实可选pure函数及明确option，default off；不建PassSpec/registry。按ALGORITHMS §15的Applied/Declined/BUG合同处理，不建插件框架，必需legalization不可关闭。
-2. 仅匹配同block相邻`t=expr; return t`；expr只含规定的int/long纯运算，不含FP/div/rem/heap/call/cast-ref/allocation/同步，不内联Phi/shadow/deferred allocation。
-3. 仅对显式有限配额核副本/验证/完整emit所需资源，默认不设估算拒绝门槛；复制一个JavaBody，按原AST序一次扫描并替换互不重叠的pair，不做repeat或回滚edit-log。
-4. 验证source type/binding/control/effects/Origin与配额；通过Applied，不匹配或配额不足Declined，取消停止、内部错误为BUG。
-
-**不变量 / 限额**：noeffect duplication/motion，postverifiedtypes仍valid；defaultoff和on各有sameprofile行为；不以local数量或文本形态作为正确性判据。
-
-**测试**：F24 `PureRecovery`：purecopyinline正例、call/read/div/monitornegative；B(F24)on/offdriver一致，mutationduplicatedeffect失败；budget不会禁用requiredcopylowering。
-
-**验收**：G0与本卡公开核心case（统一规则见§4）；B(F24)。**完成**：smalloption真正消费、trace可见、失败保留baseline、不影响T25核心gate。
-
-**不扩展**：本卡不做常量分支改CFG、GVN/LICM、stringbuilder/finally还原、全局restart、registry和持久HARDassertions；整数内联的完整支持/拒绝条件以ALGORITHMS §15为准。
-
-## T25 — 固定核心集合加固与 EngineCoreRC
-
-**依赖**：T23、T14。**Phase**：全部/验证。T24为可选美化，不是本卡前置。**参考**：KU-04/08、RG-08、DX-13。
-
-**文件**：`tests/contracts.rs`、薄public adapter、`src/pipeline/control.rs`与实际核心validator，读取root `tests/e2e/manifest.json`/cases/expected/input证书；新crateREADME来源登记和本设计实现状态。不要各crate复制第二套可变fixture/expected。
-
-**输入→输出**：T01–T23的实际supportedprofile→CoreRC证据集：每能力positive/negative/limit/状态、behaviordriver与rawfallback、无panic/mutation、无序输出的身份/内容完整性、source许可证审阅。不是宣布所有DEX可Java。
-
-**步骤**：
-1. 核对B01–B04已固定manifest与实际typed transitions，required成员不按当前实现删/skip；将core-java的失败改为Smali成功不可接受。filterzero断言，known038/039/custom/polymorphic未支持列表与rawcoverage分别明确；unknownformat不能fakefallback。
-2. 生成字节和artifactmutation测试：count/offset/LEB/payload/handler/type/Phi/copy/site/loop/state/outputbudget，固定seed，取消会终止。目标验证覆盖static 255/256、instance 254/255、wide参数words、MUTF8及compiler-owned布局；D077/D078必须Java，D086核默认不限/显式限额。不能用估算费用拒绝，也不能把JVM真格式边界当作可调资源预算。
-3. 每个knownunsupported合法fixtureSgate；malformedUnavailable/rawexcerpt不冒充smali，BUG不算成功。fallback吞掉exception/type错误的策略必须反例失败。
-4. V4按Temurin21.0.8+9 `--release 8 -proc:none -g:none`编译，独立读classfile记录实际code/locals/stack/handler/pool并核真实格式界限与成员布局，不再比较猜测投影；不只检查javac exit0。该检查验证核心生成产物，不是工具自测。跑JSON acceptanceGate=engine/engine-and-application的全部required调用，含D071–D086；不按当前supported或旧D065终点过滤。H卡补application证据，H08汇总产品全部required。单列JVM/ART/规范镜像、catalog、metadata及异常/锁证据。T24off先全core gate，on仅已实现美化另验。
-5. 以不同worker到达次序/HashSeed重复验证记录和产物按原始identity关联、无重无漏、每份实际source合法且spans指向本份文本；不要求生成文本/局部名/声明/诊断序列byte-identical，不为测试加入canonical sort。不同合法调度触发不同预算结果如实分类，但不得因此错语义；不为本卡刻意新建并行。
-6. 记录release耗时/峰值内存方法而不是debug断言快；代表input授权后optin才运行，环境/skip明确。不做promised百分比缩减。
-7. 套用本仓workspacegates、各crate许可来源和self-contained约束；本卡只验收内部EngineCoreRC，root CLI替换由H05/H08验收，不设计MCP。
-
-**不变量 / 限额**：命中显式配额或实际分配失败为Resource，不是Malformed；直接确认的目标格式超限为Unsupported，不按估算拒绝。默认所有Limits为None，显式request配额覆盖多个method，smalllimit不可截断成功。fuzzcase有timeout/seed/range避免unbounded运行。
-
-**测试**：F25 `HardeningMatrix`：所有M/U/Fmanifest登记，实际产物失效、CancelvsFallback、near-boundary分配与reportspans；结果排列/合成ID变化时按原identity核对，不作跨运行全文本相等。knownunsupportedextensions仅raw且有version限制。
-
-**验收**：G0、公开核心t25_行为、JSON engine gate全部required调用的Java/raw/input/resource/041/目标边界证据及根四gate。应用domain/extract不成为engine dev依赖，H08验收产品全部required。选择成员不随实现状态变化，运行命令见§4。
-
-**完成**：可追溯EngineCoreRC报告，JSON所列核心义务/调用全部按独立预期验收；产品总账仍显示全部required，无empty/skip或Java→Smali改答案。若反例未修，能力保持Unsupported但required仍未通过，不能宣布CoreRC。
-
-**不扩展**：生产引擎切换、版本tag/release、自动私有corpus下载、未经测量的cache/parallel、用normalizer修comparison分数。
-
-## 6. 应用任务 H01–H10
-
-## H01 — 产品命名与领域合同冻结
-
-**依赖**：B04。**范围**：Diana应用品牌/CLI/内部crate定位，无MCP新设计。
-
-**文件**：现有 `apps/diana/Cargo.toml`/`src/main.rs` 骨架与`apps/diana/src/lib.rs`、`src/cli/{args,mod}.rs`（均相对 Diana 应用根）；更新README/AGENTS产品说明。旧 rasc 已整体移到 ref-fork，仅参考，不构建/测试；历史release/许可不全局替换；本卡不创建CLI测试文件。
-
-**输入→输出 / Interface**：应用 package/binary `diana`（`apps/diana/`）；内部package`diana-decomp`、path`crates/diana-decomp/`、import`diana_decomp`；原CLI领域/flags/退出码及结果完整性形成基线。输出顺序明确不再保证，独立任务结果按完成/到达顺序发布。rename不代表新算法已替换。
-
-**步骤**：
-1. 登记所有live名字消费者：clapname、crateimports、测试binaryenv、skill、releaseartifact/版本断言；MCP相关只登记延期/必要编译引用，不设计servername/schema迁移。
-2. 对照现有源码与DESIGN.md核对命令/字段/输出通道与迁移清单，不运行CLI黑盒或建立help/格式golden。旧展示顺序与分页接口有意取消；原始身份、解码完整性和文件安全等复杂领域义务由对应module行为测试承担。
-3. 在 apps/diana/入口与内部crate骨架上实现新产品，根已是 Diana-only workspace；旧 rasc 在 ref-fork，不把其 CLI 当别名/依赖。H08 仍须产品能力证据，旧发布工具已归档，Diana 发布政策独立审阅；历史来源不全替换。
-4. 按DESIGN.md冻结11个命令和指定TSV/JSON列、规范at、完整method-selector、默认反编译展示与同结果的JSON表示；旧getclass/findrefs/skill、class-id/memberprefix/require-java不保留alias。新增fields/methods/xrefsites/extract分别由H09/H10实现，不以旧接口限制新设计。
-
-**不变量 / 限额**：活动 workspace 只含 Diana，旧 rasc 完整归档且不构建/测试；Diana 不转发旧 CLI/引擎；无JVM/Python生产runtime；原版权/来源不改。没有执行输出时不能自编基线数字。
-
-**测试**：不新增自动化测试。Q01是命名/基础接口的人工审阅清单，不是测试族；帮助、flags、列名、alias和分页移除与DESIGN.md对照，不写CLI黑盒或golden。复杂身份/解码/文件安全由对应领域任务测试。
-
-**验收**：格式/lint/构建检查 + Q01人工审阅记录，无h01_测试filter。**完成**：包名/十一命令合同与实现一致，未实施能力标明，不要求基础CLI测试。
-
-**不扩展**：MCPschema/server身份迁移、重写archive/query、创建release/tag、改变版本、全局stringsreplace。
-
-## H02 — 安全输入与 CLI request scope
-
-**依赖**：H01。**范围**：root输入生命周期。
-
-**文件**：`src/analysis/{archive,apk}.rs`，参考`src/analysis/session/mod.rs`的snapshot/AllowedRoot；按需新增`src/analysis/input.rs`、`request.rs`及复杂领域测试`tests/product_contracts.rs`，不强行复用带协议依赖的session类型。
-
-**输入→输出 / Interface**：普通path→`InputLease`（私有不可变字节owner、inputscope身份、受限entry元数据）→生命周期内borrowedviews。CLI不新增open/close/status命令，lease在请求结束释放。
-
-**步骤**：
-1. 复用boundedcopy/regularfile/check-before-after思路；明确pathallowed/符号链接策略，允许正常文件但拒绝非普通设备/FIFO。
-2. 读取/分配/映射前核input与directory预算；源码在snapshot创建后被截断/替换不会影响lease。
-3. CLI统一不可变快照可能新增磁盘复制成本，记录意图与release测量，不称性能字节全兼容。
-4. 提供scope内`BytesSource`/borrowedentry，使用安全Rust的owned snapshot或已审阅依赖的safe interface，借用不逃出owner。**活动两包均`unsafe_code=forbid`**，不在输入module开例外；需要unsafe调用的mmap方案不采用。H02/H10所需平台文件primitive若无满足合同的safe interface，先审阅依赖/平台支持决策，不用竞态窗口或放宽安全合同替代。
-5. 请求终止/输出错误drop所有临时文件owner，不误删用户输入。
-
-**不变量 / 限额**：len/offsetchecked，复制变化为INPUT_CHANGED；no unsafe `'static`延长；临时文件scope清理，不跨request伪缓存。
-
-**测试**：Q02普通文件/裸DEX/存储ZIP；反例截断竞态、symlinkescape（有限root模式）、FIFO、超input/dir、owner提前drop；测试临时目录不碰用户真实文件。
-
-**验收**：G0 + `cargo test -p diana --test product_contracts h02_`。**完成**：source改动隔离、cleanup正确、预算前置与borrow边界可测；成本记录不编造收益。
-
-**不扩展**：长期target协议、MCPopen/schema、全平台文件数据库、为快照重写ZIPcodec。
-
-## H03 — 轻量查询、manifest 与完成顺序输出
-
-**依赖**：H02。**范围**：CLI已有非反编译能力。
-
-**文件**：`src/analysis/{apk,archive,query,manifest}.rs`、`src/analysis/dex/`、`src/cli/mod.rs`；既有scanner/unitfixture可复用，vendoredAXML修改需先PATCHES。
-
-**输入→输出 / Interface**：InputLease→classes/strings/entries/manifest及供H09复用的符号/引用扫描基础，不经过Engine/SSA。DESIGN.md指定列是新输出合同，旧scanner只复用读取/查找算法，不复制旧findrefs方法级结果作为xrefsite。
-
-**步骤**：
-1. 依H01基线接新scope，保持rootDEX选择、重复entry规则、最后manifest选择和真实physical/logical/row身份；展示次序不保证，不能按最先完成选择manifest或重复类定义。
-2. 保持ASCII/rawsubstring预筛与非ASCIIfallback、exact/fuzzydomainquery；展示string可与engine精确UTF16literal表示不同，必须明确各合同。
-3. worker按完成/到达顺序提交row/batch，移除按entry ordinal等待、全量排序、reorder buffer和仅为保持输入顺序的领先窗口。保留资源加权admission、有界byte/row队列、背压/取消；no无界parcollect。不同threads只需完整记录多重集合一致，不要求序列一致。
-4. filter保留匹配语义，返回全部匹配结果；删除用户分页参数与对应skip/take、截取计数、分页早停逻辑，不用cursor/preview替代。保留错误/取消/安全预算停止及内部有界batch（batch不是用户分页）。storedentry借用，deflate按需解压；查询不建立fullProgramIndex或反编译IR。
-5. 回归字段/诊断类别/exit；不为旧展示序列加sort/stable mode，记录这一有意变化并测量release成本，不编造无序必然加速。
-
-**不变量 / 限额**：同输入定义/引用索引对应同entry，成功查询返回全部匹配记录、不重不漏；noPython/外部JVM；query预算与engine预算不混用。移除用户数量截取不移除安全限额；超预算必须错误，不能只返回前N条并标成功。
-
-**测试**：Q03通过公开查询module interface验证多DEX/重复entry/重复manifest、UTF16匹配、并发记录完整性与资源错误。受控延迟生产者核对无按序等待且buffer有界，按原identity比较内容；不测CLIflag、表头、基础filter路由、空列表打印，亦不assert私有phase调用次数。
-
-**验收**：G0 + `cargo test -p diana --test product_contracts h03_` + Diana公开领域interface的输入/解压回归。旧selfcontained/inflatepolicy仅供审阅问题，不运行ref-fork测试，不把其通过数计入验收。**完成**：按新CLI指定列返回全部匹配记录；读取/匹配/原身份完整性保持，输出序和用户分页有意取消；慢entry不阻塞无关结果，快路径无需新engine。
-
-**不扩展**：合并全部DEXparsers、MCP通用分页协议、重写AXML、测量debugbuild后声称加速。
-
-## H04 — 原始 DexImage、041 与定义身份 adapter
-
-**依赖**：H03、T04。**范围**：root→internalengine输入interface。
-
-**文件**：`src/analysis/dex/container.rs`、root`analysis`的selectedclass/engineadapter；T04已提供的原生041输入interface与origin/keys；本卡不再承担engine解析器实现。
-
-**输入→输出 / Interface**：`SelectedClass{scope,entry,logical,classdef,descriptor}`→`Vec<DexImage<'a>>`、ClassKey/MethodSelector与有界DeclarationCatalog；结果identity映射回root原输入。
-
-**步骤**：
-1. 按DESIGN.md解析class-at/method-at/field-at/string-at，核physical/logical/class-def/member-index与descriptor；get-class可读名字遇多定义明确ambiguous，不能发入engine又按name任意选。非法at语法/失效索引区分，裸DEX映射e0:l0。
-2. 使用T04的原生041读取；只将原container借用及logical header_offset传入，原ImageOrigin映射物理entry/logical member。不得在本卡overlay或复制container给每个member。
-3. P1/Engine已按DESIGN §3采用borrowed view；H02 lease先取得必要bytes，同scope创建RunContext并调用open/decompile/render，Report为owned结果，不返回临时IR借用。
-4. 依赖declarations用scanner精确定位，在dependencybyte/metadatabudget内生成facts，完整性不够Unknown；不自动解析全APK或信任scanner宽松校验为引擎validator。
-5. fields/methods输出at与get-class/get-method选择来自同原始SelectedClass/MemberRef；原runtimeindexes不随Java重命名变，无--members表格前缀。
-
-**不变量 / 限额**：containeroffset/原site/UTF8span坐标不混；native041是输入支持，不等于所有新版opcode支持；超原rawprofile明确Unsupported不overlay蒙混。
-
-**测试**：Q04通过公开输入/定义解析interface验证041多个logicalmembers、重复definition/physicalentry、跨输入过期identity和descriptor/index不一致；核对原definition/proto与未经修改的raw字节。不测CLI选择器参数语法或字符串格式化。
-
-**验收**：G0 + `cargo test -p diana --test product_contracts h04_` +引擎T02–T04回归。**完成**：borrow/identity/native041及rawfallback完整，不能以scanner能列出等同engine已支持。
-
-**不扩展**：生产parser全量缓存、永久跨文件ID、切默认旧engine、MCPclass-id返回新schema。
-
-## H05 — CLI 接线与公开反编译接口的语义闭环
-
-**依赖**：H04、T06。**范围**：早期CLI接线，不等全engine完成。
-
-**文件**：root`analysis`新engineadapter、`src/cli/{args,mod}.rs`、`tests/product_contracts.rs`、相关fixtures。
-
-**输入→输出 / Interface**：`get-class/get-method`规范selector→Engine Report→默认反编译text或同结果的JSON表示。默认直接交付已有Java/Mixed/Smali/Unavailable内容，局部失败不清空其他成员；无旧命令alias/双engine。
-
-**步骤**：
-1. CLI定位class/exactmethod/proto后borrowedengine执行T06fixture，callback/control由scope提供。
-2. singlemethodsource的knowncontext验证遵循TASKS §4，不把Mixedclass称JavaUnit；不满足Java表示约束的方法保留raw与语言marker。
-3. 按ALGORITHMS §8.1直接展示选中结果：JavaUnit为完整Java，Mixed保留shell/成功Java/失败方法raw或原因；get-method的Smali/Unavailable也直接可见。text/json不改变算法资格，不提供--require-java；硬错误保留非零状态，已有可完整渲染的Report不因此丢弃。
-4. 根据DESIGN.md保存完整method owner/name/proto或method-at，Mixed内含逐方法language/原因/原identity，额外日志走stderr；同次stdout/文件payload一致；JSON不serialize私有arena，不设计MCPenvelope。
-5. 旧实现只保留在ref-fork供阅读，不留活动旧入口/依赖或双引擎路由。Diana请求禁止静默fallback到dexdec，失败只按原rawsmali合同。
-
-**不变量 / 限额**：请求来源/方法proto精确、output status真实，语言资格与完整展示/硬错误分开；无stdio污染，不靠stub通过。缺catalog/表示限制必须局部标注，不能上升成整类默认禁显。
-
-**测试**：Q05通过公开反编译interface运行F05→恢复Java→javac→行为Driver，验证实际返回/语义、原始身份与降级完整性。复杂overload/跨DEX在F10/Q04覆盖；D085另外核默认展示保留Java与invoke-custom raw、完整UTF16/call-site及真实spans；在T04所需格式事实就绪后验收整case。不启动get-class/get-method进程，不测试flag路由、getter、JSON包装或not-found文本。
-
-**验收**：G0 + `cargo test -p diana --test product_contracts h05_` +引擎B(F05)。CLI接线做源码审阅，不加黑盒测试。**完成**：新module真实语义闭环通过，CLI已调用该interface，不仅链接新crate。
-
-**不扩展**：新增MCPgetclass/tool、抛异常stub、未验证shape强行Java、立即删除所有旧依赖。
-
-## H06 — 请求取消、分层预算和输出发布
-
-**依赖**：H05、T09。**范围**：CLI/control/engine输出。
-
-**文件**：rootinput/request/engineadapter/CLIemit；`crates/diana-decomp/src/pipeline/control.rs`；测试privateinput/interrupt/backpressure。
-
-**输入→输出 / Interface**：callerstop/UserInterrupt→RunContext→pipelinecheckpoints；perrequestbyte/work/outputlimits→同一个RunContext；完整text/JSON或明确Resource/Cancel错误。
-
-**步骤**：
-1. 取消callback不引入tokio到engine；每decode/worklist/copy/region/emitcheckpoint检查，Cancelled不继续rawfallback。
-2. 用户文件/scope结束后不发过期结果；同请求cacheloader/reader的owner/reservation释放，失败无半缓存，nohardtimeout承诺。
-3. 创建RunContext时仅组合已显式设置的Limits与scope剩余额度；未设置的保持None，不补固定input/inflate/JSON阈值。dependency/main按同一物理owner去重，派生数据、所有methods和render累计收费；仅显式有限raw配额参与父级预留。
-4. 输出按DESIGN §10.3的max_method_output_bytes、独立fallback_output_bytes及max_report_output_bytes分别核界；P9合计shell/成员/标记/诊断，JSON再按DESIGN §7核实际转义/重复字段/spans后的长度。不把输出长度重复扣成累积分配，也不退款真实work/分配；超限无截断成功，file按安全原子发布。D064分别固定成员与report超限。
-5. CLIstreamqueries的brokenpipe停止producer/背压；不要把SIGPIPEkill进程称catchable取消保证。
-
-**不变量 / 限额**：取消协作式；libdeflate不可抢占明确；默认input/inflate/JSON/engine均无数值配额，显式超限或真实分配失败才报Resource；没有MCPsemaphore/schema新合同。
-
-**测试**：Q06通过公开请求/反编译/提取interface验证长工作取消、owner生命周期、normal/raw预算隔离、大量转义文本的输出字节预算、spans对应实际source、缓存失败reservation、consumer关闭时队列有界。不是简单JSON字段包装或私有phase调用顺序测试；每case有有限timeout。
-
-**验收**：G0 + `cargo test -p diana --test product_contracts h06_` +T09/T25control回归。**完成**：exactoutputlimit和取消state有非空执行证据；不能先构造巨String才声称allocationbudget前置。
-
-**不扩展**：MCPclose/status/permit设计、crash隔离子进程、任意实时抢占、跨进程缓存服务。
-
-## H07 — 十一个命令的统一帮助、输出与 agent 文档
-
-**依赖**：H06、H09、H10。**范围**：CLI消费者与使用文本。
-
-**文件**：`src/cli/{args,mod,agent_skill}.rs`、`skill/SKILL.md`、README；历史来源保留。本卡不新增CLItests、help快照或参数路由测试。
-
-**输入→输出 / Interface**：DESIGN.md的11命令、指定列、规范at、默认反编译text/JSON同结果、extract例外正式冻结；agent使用说明作为普通文档/发行资产，不提供公开skill安装命令。MCP仍延期。
-
-**步骤**：
-1. 帮助恰含get-class/entries/extract/strings/xref/manifest/classes/get-method/fields/methods/help及指定说明/列；TSVheader/escaping与JSONdomain fields按DESIGN.md，不加旧memberprefix。完整method selector包含name+proto，不再--method/--proto分开组合；at可回传。
-2. 默认局部Unsupported的完整Mixed/Smali展示与JSON同样可exit0，不代表JavaUnit；usage2、唯一对象缺失3/歧义4、查询空集合0。Malformed/BUG/Resource/Cancel/I/O仍失败，已有可完整渲染的结果保留并非零退出。旧getclass/findrefs/skill/require-java/class-id/members/paginationflags明确拒绝。
-3. agent文档改用Diana新命令，说明字段/at/JSON、显式外部d8一次转换及复用；不自动移动/删除用户已安装rascskill，不加第十二个skill命令。
-4. stdout/file/help/version/Windowsbinarytarget完整；JSON字段version是本地CLIreport，不设计MCP。
-5. 所有liveCLI品牌消费者改名清单核对；legacyrelease/provenance不是remainingbug。
-
-**不变量 / 限额**：unknownflag不可静默忽略；JavaUnit保持纯Java，Mixed必须明确标语言/原因并保留成员，JSON status按typed Report；TSV字段控制字符/孤立surrogate转义不丢值，at与spans准确；extract二进制只写-o，不能依通用stdout复制规则污染。
-
-**测试**：不新增自动化测试。Q07是DESIGN.md/源码/agent文档的一致性审阅清单，不是测试族；help、路由、flags、列名、旧alias、默认包装不写黑盒/golden。复杂UTF16保真、身份、spans与提取安全由F03/Q04/Q06/Q09/Q10测试，不重复测基础排版。
-
-**验收**：格式/lint/构建检查 + Q07人工审阅，无h07_测试filter。旧测试保存在 ref-fork，不删除但不进入活动 gate。**完成**：十一命令接线与文档一致，复杂领域验证由对应任务提供，MCP不设计。
-
-**不扩展**：MCPinput/outputschema、自动改用户agent配置、全局旧品牌license/historyrewrite、发布。
-
-## H08 — CLIProductRC 与旧代码退役清单
-
-**依赖**：H07、T25、T14。**范围**：整体验收与发行配置准备，MCP仍延期。
-
-**文件**：活动rootCargo/lock、README/AGENTS、应用 query/engineadapter、`apps/diana/tests/product_contracts.rs`；核对无 ref-fork 依赖，不维护旧MCP构建。
-
-**输入→输出 / Interface**：EngineCoreRC+H01–H07证据→CLIProductRC报告、livecallgraph/依赖退役清单、单diana发行配置。验收无序输出的完整性/身份，不要求跨运行source或报告序列一致；本卡不创建tag或上传release。
-
-**步骤**：
-1. DESIGN.md命令/列/路由由源码和文档审阅核对，不新增黑盒；复杂defined-vs-referenced、xrefsite完整性、extract原bytes/CRC/file安全、跨DEX/041身份与引擎行为由Q02–Q06/Q09/Q10和F测试验证。Q01/Q07仅人工清单，Q08汇总，不当执行测试族。
-2. 核查活动 CLI/依赖图无旧 dexdec/MCP/helper 或 ref-fork 调用；旧代码完整保存在参考中，不需编译/跑测试，不为 MCP 新设计 adapter。
-3. ref-fork 不作为生产依赖或 gate，保留原源码/测试/许可/历史，不以当前参考目录存在当作第二发行产品或必须测试的遗留依赖。
-4. 核对活动workspace仅Diana、publish=false、无归档release脚本/CI接线；不得以参考工程构建成绩替代产品验收。
-5. 运行仅 Diana 的 G0 与复杂 H/引擎 CoreRC gate，基础 H01/H07 只审阅，不造空测试；授权代表输入的 release 测量明确 not-run，不运行旧 MCP 回归或发布测试。
-6. 列knownUnsupported/rawcoverage与MCP延期说明：不把CLIProductRC说成全部projectinterfaces已迁移。
-
-**不变量 / 限额**：无静默跨旧enginefallback；singlebinary，不改版本/tag；活动代码须验证；旧参考不参与本分支 gate；不宣称全DEX语义正确。
-
-**测试**：Q08汇总复杂语义/领域测试：跨DEX/041身份、输入/提取/取消/预算，以及T25的行为和降级完整性。不建立整个CLI命令矩阵或branding/help/flags黑盒；CLI接线、旧依赖和发行配置采用源码审阅/本地构建检查。
-
-**验收**：G0 + Q02–Q06/Q09/Q10的实际复杂测试与T25核心gate（非零运行）；Q01/Q07人工核对、Q08汇总，无空h08_测试要求。release artifact本地检查，不发布。**完成**：JSON全部required case/invocation按独立expected验收，复用T25 engine证据，补齐engine-and-application的应用侧及application案例；无删除/skip或core-Java改Smali。MCP延期，基础接口不另建自动化测试。
-
-**不扩展**：MCP迁移、直接删除src/mcp、发行/tag、自动下载私有语料、无证据cache/parallel优化。
-
-## H09 — 定义符号清单与跨 DEX 引用 site
-
-**依赖**：H04。**范围**：fields/methods/xref与指定列，不运行反编译器。
-
-**文件**：root `src/analysis/dex/{mod,members,opcodes}.rs`、`src/analysis/query.rs`、`src/cli/{args,mod}.rs`，按需新增`symbols.rs`/`references.rs`；`tests/product_contracts.rs`的Q09。
-
-**输入→输出 / Interface**：每个class_data实际字段/方法定义→field-at/method-at单列；每个实际opcode引用site→`entry, context, match`三列。methods不是全部method_ids references，xref不是旧findrefs的一方法一行；DESIGN.md是唯一字段/选择器规范。
-
-**步骤**：
-1. 遍历class_defs/class_data，分别读static/instance fields、direct/virtual methods的checked delta index与flags/codeoff；生成携class-def/member-id/owner/name/proto的规范at，abstract/native/constructor/clinit声明也列。
-2. fields/methods `--class`精确选择原定义，`--filter`按语义名称/descriptor字面匹配，输出全部匹配；at与重复classdef核验，不靠排序/位置identity。
-3. xref kind string/type/method/field精确解析target，扫描全部rootDEX/logicalmembers的原code，读取opcode operand/refindex，不从恢复Java字符串搜索。记录referencing MethodKey、code-unit offset与actual matched value/ref。
-4. context拼method-at加`@cu:0x...`，同方法多个真实site各列；对同site多个operand引用按明确operand-site身份建记录，禁止沿用方法级去重掩盖site。
-5. 保持035与已有041扫描格式边界，knownunsupported opcode/profile按原安全合同处理；只为资源背压保留batch，按完成输出，不global sort或分页。
-6. 按DESIGN.md输出TSVheader/escaping或JSON items；字符串真实值UTF16精确与root原scanner展示差异要测，不能replacement后做精确xref。
-
-**不变量 / 限额**：defined与referenced、string pool与const-string site分开；每row原身份明确；所有member/count/code/refindex checked，输出/match scratch有界。成功返回全部匹配项、不重不漏，empty正常；不是原数值index相同就跨DEX合并。
-
-**测试**：Q09通过公开符号/引用module interface验证多DEX同名/同proto、重复classdef、外部method_id不算定义、同方法多个xrefsites、未使用stringpool项、孤立surrogate、非法delta/refindex。核对原身份/site/UTF16值，不测试columns、命令参数、JSONitems排版或简单getter。
-
-**验收**：G0 + `cargo test -p diana --test product_contracts h09_` +H03/H04回归；非零Q09按原identity/site集合核对。**完成**：fields/methods/xref实际CLI接线，definitions与sites精确，不只是新增help命令。
-
-**不扩展**：模糊regex/裸方法名猜重载、全量DEX对象模型、Java源码xref、MCP工具、分页、新增未经要求的默认列。
-
-## H10 — extract：原始 entry bytes 与安全原子文件
-
-**依赖**：H02。**范围**：单physicalentry提取，无批量解包。
-
-**文件**：`src/analysis/archive.rs`、rootinput/requestscope、`src/cli/{args,mod}.rs`，按需`src/analysis/extract.rs`；Q10producttests。若为CRC加入新依赖，需单独理由/许可/lock变更，禁止未经检查的手写宽松CRC。
-
-**输入→输出 / Interface**：APK/ZIP+exactentryname（可`--entry-index`）+必需`-o`→完整解压payload文件。method0字节不改，method8解压原bytes，不normalizeDEX/切041/生成Java，stdout空。
-
-**步骤**：
-1. 目录查找保留所有同名physicalrecords，名字歧义exit4；entry-index和name必须核一致，basename/路径规范化不能改变原名选错记录；bareDEX不当ZIPentry。
-2. 先核local/central结构和data范围，再拒绝EncryptedEntry和非0/8的UnsupportedCompression，之后才按未加密规则核size/CRC。加密stored含额外header，不误报明文等长损坏；无密码/解密路径。审阅codec并用Q10实际输入核对CRC，不能假定默认完整校验。
-3. 只写用户指定文件，entryname不参与路径拼接。拒绝输出目录、符号链接、输入文件本人/hardlink别名；no-force不覆盖。校验与文件打开/发布需使用安全原子primitive，避免exists检查后rename覆盖竞态。
-4. 在目标目录创建私有临时文件，有界借用/解压后写入，完整验证才publish；取消/I/O/CRC/超预算释放临时文件和reservation。`--force`只显式替换允许的普通文件，Windows/Unix语义分别验收。
-5. 字节流不经UTF8/JSON转换，no stdoutbinary或成功状态行；debug/errors仅stderr。采用独立binaryfileoutputadapter，不误用通用emit同时stdout/file。
-
-**不变量 / 限额**：输出与原entry完整解压payload逐字相等，raw041header/checksum保持；不自动创建entryname目录树；不删除用户已有文件/输入；CRC/size失败无假成功或半文件，资源预算不是分页。
-
-**测试**：Q10stored/deflated、含NUL及nonUTF8binary、041originalcontainer、duplicateentryname/indexmismatch、ZIPname`../x`仍只写选定-o、CRC/size坏、unsupportedcompression/encrypted、bomb/limit、cancel、输出存在/no-force/force/symlink/hardlink/input-alias、并发发布竞态。测试均自制临时文件，不触碰真实用户路径。 固定D068–D070按每个invocation的entry/force/errorKind及§4.3.4过程观察验收。
-
-**验收**：G0 + `cargo test -p diana --test product_contracts h10_` +input/archive回归；Q10通过公开提取interface核对原payload/hash、失败目标未变、无临时残留；不启动CLI测试stdout/-o路由。**完成**：原字节、CRC、竞态/alias/限额安全证据成立，不是仅解压到Vec。
-
-**不扩展**：batch-unzip/entry路径自动写盘、压缩流/ZIPlocalheader导出、DEXnormalize、CLI外部进程、MCPextract或release。
+Once real tests exist, run the public contracts by fixed D ID or card prefix; roundtrip
+and assembly are explicit opt-in. A missing tool, fixture or classpath, a nonzero exit,
+a timeout, 0 selected cases, or a missing or truncated artifact fails; a skip MUST NOT
+count as a pass. An approved revision's full suite is not filtered by current engine
+support; a batch MAY select fixed IDs, but the ledger keeps every required case and
+invocation in the JSON, including appended IDs. Do not run the ref-fork gate. The
+workspace having zero tests now is not a pass, and a command interface is not an actual
+run result.
+
+## 5. Engine tasks T01–T25
+
+## T01 — Engine contract and direct typed scheduling
+
+**Dependencies**: B04. **Phase**: P0/Pipeline/P9. **Source references**:
+KU-01/02/04/05, RG-04.
+
+**Target files**: the existing scaffold `crates/diana-decomp/Cargo.toml` (other
+paths in this page are relative to that crate), `src/{lib,engine}.rs`,
+`src/pipeline/{schedule,control,diagnostics}.rs`,
+`src/p0_knowledge/{mod,policy}.rs`, `src/substrate/{ids,origin}.rs`,
+`tests/contracts.rs`. The package is `diana-decomp` and the Rust import is
+`diana_decomp`, separate from the application package `apps/diana/`. The crate
+is already a workspace member, so building the scaffold MUST NOT count as this
+card done. The old dependencies were removed from the main workspace and lock
+and kept in ref-fork; H08 checks that they are not reintroduced. Versions follow
+the formal process, and the author MUST NOT hand-drive a release.
+
+**Input→output / Interface**: implement the
+`DexImage<'a>`/`Engine<'a>`/`RunContext`/
+`Options`/`Request`/`Report`/`MethodOutput`/`ClassOutput` types and classified
+diagnostics of DESIGN §2; an unwired Java path MAY only report Unsupported or
+Unavailable, never a placeholder success. Limits live only in RunContext;
+open/decompile/render share `&mut RunContext`, and Limits default to all None.
+Only an explicit limit uses cumulative used/held quotas and a bounded raw
+reservation. `schedule` calls concrete typed functions directly, and PhaseId is
+a diagnostic label only; the author MUST NOT implement PassSpec, a registry, a
+trait or a macro.
+
+**Steps**:
+1. Create the minimal crate and its test registration; only the owning validator may
+   access the enums and the private Verified constructor.
+2. Confirm the basic enums, interfaces, forwarding and error wrapping by compilation
+   and source review; do not write an "enum value equals itself" or mechanical getter
+   test.
+3. Implement the optional request and method quotas per DESIGN §3.7. The default None
+   adds no threshold and no fixed raw reservation; only an explicit finite raw value
+   claims from the parent quota. The normal and raw work sub-quotas are independent,
+   used quantities are never refunded, and only unconsumed held quantities are
+   returned. open/index/render charge and cancel the same way, Report detaches from
+   temporary IR, and trace is optional and bounded.
+4. Do not write tests for private Pass call order and do not create empty algorithms
+   for unimplemented phases. Verify through a real public request that resource
+   exhaustion and cancellation stop scheduling, with trace as a location aid only.
+5. Fix the diagnostic fields: code, severity, method/site, phase/pass, kind and
+   bounded detail. Wall time MUST NOT enter a text golden.
+
+**Invariants / limits**: Every state is exhaustible; a required typed transition
+MUST NOT be disabled by a recovery policy; no registry or PassId repetition test
+is written. A work or allocation charge MUST NOT overflow, and a refund or retry
+MUST NOT bypass a limit. Cancelled stops the request and does not trigger
+fallback.
+
+**Tests**: F00 focuses on complex resource control: a public request exactly at
+a budget boundary and over it, fallback budget isolation after a resource error,
+stopping after cancellation of long work, and repeated requests or failures that
+bypass no limit and leak nothing. Basic state enums, wrappers and private Pass
+call order are not tested; real Malformed and Unsupported behavior is verified
+by later input and semantic fixtures. While T01 has no runnable real request,
+that part stays a later integration requirement and the author MUST NOT
+fabricate invalid tests to fill it.
+
+**Acceptance**: G0 plus source and interface review. Run the nonzero `t01_`
+domain tests once a real resource or cancellation request exists, and state
+explicitly that the interface awaits T05 wiring while it is unwired; do not
+write an empty green.
+**Completion**: The crate compiles and the resource-control implementation has
+an explicit verification location. Basic enum, routing and forwarding tests are
+not required, and unwired capability MUST NOT count as success.
+
+**Not in scope**: Pass trait/registry/schema generators, TOML/build.rs,
+ActionDatabase, restart, parallel cache, a separate console.
+
+## T02 — Safe DEX catalog and raw method ranges
+
+**Dependencies**: T01. **Phase**: P1/P0. **References**: RG-06, DX-11/12.
+
+**Files**: `src/p1_input/{mod,cursor,header,catalog,code}.rs`,
+`src/p0_knowledge/declarations.rs`, `src/substrate/types.rs`, `tests/input/`.
+
+**Input→output**: `DexImage<'a>` → `ProgramIndex<'a>`, with bytes held by the
+caller's scope. This card uses `header_offset = 0` for an ordinary DEX; T04
+supplies native 041 parsing and H04 supplies application identity adaptation.
+Locate a class by descriptor plus `class_def_idx` and a MethodKey by `name` plus
+`proto`. This card produces `RawMethodView`, which guarantees only that the code
+and tries ranges are safe; T03/T04 construct the `MethodInput` carrying a
+`ValidatedRawMethod` only after the complete P1 `validate_raw`, so an unchecked
+offset never crosses the seam. T04 supplies MUTF-8 decoding, and ASCII MUST NOT
+replace a complete name or descriptor.
+
+**Steps**:
+1. Implement `checked_range(offset, count, stride)` plus u16/u32/ULEB32/SLEB32, and
+   enforce the byte and code-unit type distinction.
+2. Bound and align the header 035, little-endian, file_size, header size, map and ID
+   tables separately. An overrun is Resource and truncation is Malformed; an unknown
+   container or version is Unsupported.
+3. Check the Type/Proto/Field/Method/class_data indexes with `checked_add` on the
+   accumulated delta; handle a duplicate class or ambiguous name by key and proto.
+4. Cover the complete code_item range: `insns_size * 2`, odd padding, try table,
+   handler list base and target ranges. Check the count against the remaining bytes,
+   the minimum record and the global budget before allocating.
+5. Support abstract and native declarations with zero `code_off`, check consistency
+   between proto words and `ins_size` when code exists, and let the raw fallback read
+   only the original validated range.
+
+**Invariants / limits**: Verify lengths before allocating; reject high-bit
+overflow in 5-byte LEB; do not allocate `sleb::MIN` absolute size directly;
+budget decoded metadata in total, not only per table. A locatable local method
+malformation MUST NOT cost the other methods of the class their raw identity.
+
+**Tests**: F01 `TinyDex`: an empty class, an abstract method and an exact-proto
+overload; M01 header truncation, `offset * stride` overflow and map
+out-of-range; M02 method code delta overflow and wrong tries padding or
+`handler_off`; a small Resource limit. Rust builds the tiny DEX itself and
+records the builder source; the test MUST NOT reference an unknown real sample.
+
+**Acceptance**: G0 plus `cargo test -p diana-decomp --test contracts t02_`.
+**Completion**: Correct MethodKey and raw range; every M01/M02 is rejected
+explicitly before allocation, with no panic.
+
+**Not in scope**: APK/JAR loading, all-platform symbol resolution,
+source-support decisions, calling a third-party parser first and guarding
+afterwards.
+
+## T03 — Instruction format table and the independent raw smali path
+
+**Dependencies**: T02. **Phase**: P1/P2 (raw decode)/P9. **References**: DX-11,
+RG-02/05.
+
+**Files**: `src/p1_input/formats.rs`, `src/p2_flow/decode.rs`,
+`src/p9_emit/{mod,smali,spans}.rs`, `src/engine.rs`, smali and input tests.
+
+**Input→output**: `RawMethodView` → `validate_raw(Vec<RawInsn>)` →
+`ValidatedRawMethod` (offset, width, operands, original words) → standard-smali
+MethodOutput. Keep knownUnsupportedJava separate from unknownFormat, where
+unknownFormat is Unavailable plus a hex excerpt. The format table covers the
+standard opcodes registered in ALGORITHMS §1 and their version gates, and Java
+lowering follows the rules of T06–T23.
+
+**Steps**:
+1. Define opcode, mnemonic, format, width and version in one table shared by the
+   decoder, the format validator and the smali printer, so the length table and the
+   printing table do not drift.
+2. The first pass marks instruction starts and payload starts and checks operand
+   registers, indexes and wide words; the second pass checks branches against the
+   relative PC and instruction boundaries. T04 completes fill payloads; for now record
+   the legal format, reject the Java form and do not claim complete metadata smali.
+3. Name emitted labels stably from the code unit and preserve the invoke/range
+   register-word count; do not wrongly split words according to source parameters.
+4. On the Engine Unsupported path discard the partial analysis source and call only
+   the raw adapter. Smali text emits every instruction, a goto MUST NOT be deleted as
+   a Nop, and the header, register and return types are complete.
+5. Add byte spans for the member declaration or reference and for InsnOrigin. Before
+   T04 only a case whose original input has no pending metadata and whose instructions
+   are complete MAY be marked Smali. When unsupported metadata exists, emit
+   Unavailable plus RawExcerpt and never a "metadata incomplete" Smali success.
+
+**Invariants / limits**: Every raw instruction has exactly one standard
+expression or an explicit unsupported raw status; an illegal unknown op MUST NOT
+be guessed as one word and continued. The fallback checks explicit limits only
+and, when none are configured, MUST NOT add a fixed reserve or a code-length
+threshold.
+
+**Tests**: F02 `RawMethods`: return, moves, wide and range invoke, and branches
+without debug or annotation metadata; U01 keeps the complete known raw although
+Java does not support it; M03 truncated operand, branch into an instruction,
+invalid register or index, unknown opcode. Compare the original words and
+offsets item by item, and mark an original input with pending metadata
+explicitly Unavailable.
+
+**Acceptance**: G0 plus `cargo test -p diana-decomp --test contracts t03_`, with
+S(F02) added after T05. **Completion**: No known instruction of the raw fixtures
+is missing, M03 causes no panic, and an unknown word MUST NOT become fake smali.
+
+**Not in scope**: A bytecode interpreter, retrying unsupported as Java,
+generating a throwing stub, spawning the assembler in production.
+
+## T04 — Lossless UTF-16, payload and raw metadata completeness
+
+**Dependencies**: T03. **Phase**: P1/P9. **References**: RG-06/07/09, DX-08/11.
+
+**Files**: `src/p1_input/{strings,payload,values,debug}.rs`,
+`src/p9_emit/{smali,literals}.rs`, `src/substrate/types.rs`, input and literal
+fixtures.
+
+**Input→output**: MUTF-8 → `DexString(Vec<u16>)`; a valid switch/array payload,
+encoded value or raw debug record → complete Method/Declaration raw records.
+Also implement the native 041 `0x78` header and physical offset rules and accept
+the original container plus `header_offset` directly; this card owns the D065
+engine read, and H04 keeps the application adaptation. A diagnostic lossy string
+MUST NOT become literal truth.
+
+**Steps**:
+1. Decode MUTF-8 NUL, surrogate and invalid encoding and declare `utf16_len`. Check
+   the remaining bytes and the string units first, and never let a replacement change
+   the literal.
+2. Base switch payload alignment and targets on the switch PC and check the key
+   monotonicity, uniqueness and count the original format requires; do not reorder the
+   original input for stable output. Check the fill-array width count and preserve the
+   byte bits; a payload is not an executable block.
+3. Decode the debug program opcode by opcode within bounds and check address
+   increments, line values and sign overflow. If that metadata cannot be decoded
+   reliably, mark it Malformed or Unsupported and do not promise complete smali.
+4. Bound the annotation and encoded-array stacks and reject an illegal value width,
+   tag or index. Preserve system metadata under its original identity and do not emit
+   it as a Java keyword.
+5. Handle Java and smali literals per ALGORITHMS §4 for NUL, newline, backslash-u and
+   surrogate. Walk the logical header chain of 041 per §1.1: `file_size` is only a
+   step size, and every section offset stays a physical coordinate that may point to
+   later shared data but never to earlier data. Do not overlay or re-checksum.
+
+**Invariants / limits**: Preserve every u16 and every float/double bit; cover
+all payload bytes and charge the nested count depth; never run
+`Vec::with_capacity(input_count)` before validation.
+
+**Tests**: F03 `Utf16Payload`: unpaired high and low surrogates, NUL, the
+literal `\\u000a`, NaN bit patterns, sparse and packed switch, fill array; M04
+negative relative payload, overlap, oversized array or annotation, bad debug
+target and unterminated MUTF-8. A later S(F03) checks smali → DEX literal and
+payload equivalence.
+
+**Acceptance**: G0 plus `cargo test -p diana-decomp --test contracts t04_`, with
+S(F02, F03) after T05. **Completion**: The raw round-trip comparison explains
+per field either exact preservation or explicit unsupported status, with no
+silently lossy value.
+
+**Not in scope**: Source-level annotation or generic beautification,
+StringBuilder concatenation, all newer DEX metadata.
+
+## T05 — Integrate the frozen E2E suite and the minimal typed product/AST
+
+**Dependencies**: T04. **Phase**: Pipeline/Substrate/P9 and the test system.
+**References**: KU-08, RG-08, DX-13.
+
+**Files**: `src/substrate/{cfg,java}.rs`, `tests/contracts.rs`, the thin
+`tests/support/e2e_adapter.rs`, `examples/inspect_class.rs`; read the root
+`tests/e2e/` cases, manifest, expected values and locked harness that B01–B04
+prepared, and do not copy a second oracle or tool source.
+
+**Input→output**: Build the Flow/Ssa/Typed/Storage/PlannedBody backbone and its
+private constructors per DESIGN §3.2; the fixture manifest drives native input
+tests, the smali assembly check and the javac/d8 round trip. Verify
+DeclarationOnly and a raw method first, and never treat an empty AST as success.
+
+**Steps**:
+1. Adopt the ownership wrappers of DESIGN §3 without variation; a raw view borrows
+   caller-owned bytes, each method gets an owned arena, and an ID is never recycled.
+   Use the schema of DESIGN §3 and do not substitute a second context system. Create
+   only the artifacts actually consumed now and do not pre-lay a complete AST.
+2. `MinimalJavaAst` supports a legal declaration and literal/return placeholders; a
+   Validated or Verified value MUST NOT be publicly constructible, and P9 accepts
+   verified input only.
+3. Read the manifest, D cases, expected values, `toolchain.lock.json` and input
+   certificates frozen by B01–B04. This card MUST NOT refill expected values or
+   generate a golden from engine output, and a different public interface changes only
+   the thin adapter.
+4. Integrate the team-reproducible root test tool and driver, taken from the public
+   content lock and the checkout cache; do not look for a personal SDK, a platform jar
+   or a local reference-repository directory. A missing tool or wrong hash fails, and
+   subprocesses run test tooling only.
+5. Wire raw → smali → controlled assembler → independent raw projection comparison and
+   check it against the frozen original-content evidence such as D059–D061; do not
+   delete a catch, string or payload expectation for current capability.
+6. Have the public development example emit Report status and spans, reused by the
+   other core tests, instead of calling a private printer directly.
+
+**Invariants / limits**: Test fixtures are self-made and authorized with fixed
+sources; no third-party pickle is loaded; an error normalizer MUST NOT delete a
+type or catch difference; a zero run count or a nonzero timeout is not a pass.
+
+**Tests**: B04 already falsified harness faults; this card verifies only the
+actual Engine result integration: a real wrong return, missing event, wrong raw
+or compile error is rejected by the same comparator, and a correct source
+reference is accepted. A missing tool or hash error stays a failure, and a
+required member MUST NOT change because the real engine does not support it.
+S(F02/F03 fixed D case groups) MUST run through the real assembler.
+
+**Acceptance**: G0 plus nonzero real semantic and raw tests of the public
+adapter, referencing the suite frozen by B04. **Completion**: The same fixed
+case, expected value and harness connect to the real public library without
+redesigning the oracle; unimplemented cases still report not passing, and
+complete semantic verification MUST NOT be claimed.
+
+**Not in scope**: Large-corpus campaigns, CI auto-download of private APKs, RG
+cache copies, production CLI wiring.
+
+## T06 — First Java end to end: constants, parameters and explicit scalar locals
+
+**Dependencies**: T05. **Phase**: P2–P9 minimal profile. **References**:
+DX-01/02/08, RG-02.
+
+**Files**: `src/p2_flow/{mod,build,results,effects,verify}.rs`,
+`src/p3_ssa/{mod,inputs,build,verify}.rs`, `src/p4_calls/mod.rs`,
+`src/p5_types/{mod,constraints,lattice,solve}.rs`,
+`src/p6_variables/{mod,locals,definitions}.rs`, `src/p7_regions/mod.rs`,
+`src/p8_java/{mod,expressions,declarations,verify}.rs`, `src/p9_emit/java.rs`.
+
+**Input→output**: The selected static method of F05 `ScalarReturn` yields a
+VerifiedJavaMethod through the real schedule. A class containing an unsupported
+member such as a constructor is honestly marked Mixed, and an unsupported other
+method stays raw smali. This card does not require a complete ordinary class to
+be a JavaUnit. P4 returns an empty valid binding when there is no call, and P7
+returns a single-block plan when there is no complex region; the card MUST NOT
+claim either is fully implemented.
+
+**Steps**:
+1. Supported ops: constants, parameter moves, simple int add/sub/mul and return.
+   Verify the normal terminal, and still validate raw code after the return.
+2. Bind input words, op result ValueIds and simple type constraints, and map ValueId to
+   LocalId with an explicit assignment, without prior GVN or inlining.
+3. Emit an int literal with its original bits and appropriate signed spelling; a Java
+   expression statement covers only call, new and update, and arithmetic writes a local
+   assignment.
+4. Check the Java AST completion, return type and identifiers, and mark a method
+   Verified only after checking the directly determinable signature, MUTF-8 and member
+   facts per ALGORITHMS §12.4–§12.6. The card MUST NOT predict code, locals, stack or
+   pool and then reject source; a static declaration of 256 ints MUST be
+   Unsupported/raw, and an unused parameter MUST NOT be deleted. P9 emits the method
+   and context status plus origin spans and does not guess a proto from the name. The
+   F05 compile replaces the selected method only inside the known context of the
+   original self-made source, keeps the constructor and other members from the original
+   source, and generates no semantic stub; therefore it counts only the Java legality
+   of the selected method and does not count Mixed as a complete Diana JavaUnit.
+5. Real input produces a result through the implemented typed transitions, and a
+   failure leaves no Java fragment. Accept the result through the semantics, error
+   status and budget/cancellation observations of the public interface. Artifacts and
+   trace only aid location, and the card adds no private Pass call-order, call-count or
+   per-phase count test.
+
+**Invariants / limits**: No handler and no monitor; an undefined read MUST be
+rejected; long and double word contracts arrive only in T10, so an unknown
+profile is Unsupported instead of a guessed int; an effectful expression MUST
+NOT be inlined.
+
+**Tests**: T06 actually runs the fixed D009 of B01–B04 (int addition/overflow)
+rather than a new answer/inc fixture generated during development; `answer() ->
+7` and similar cases only illustrate the implementation. Undefined reads, wide
+values and budgets connect through D055–D064 and the fixed task mapping, and an
+insufficient scope still fails without changing expected values. D009 runs the
+recovered method in a known legal context, and an unsupported default
+constructor MUST NOT be counted as a complete class JavaUnit.
+
+**Acceptance**: G0 plus this card's public core cases (unified rules in §4);
+B(F05).
+**Completion**: At least one non-empty method completes the real
+compile-and-execute loop, and the negative cases are not default-value
+"successes".
+
+**Not in scope**: Complex branches, handlers, variable merge, expression
+beautification, generic typed-helper generation.
+
+## T07 — SSA for branches and join Phi with fixed identity
+
+**Dependencies**: T06. **Phase**: P2/P3/P5/P6. **References**: DX-03/04, RG-03.
+
+**Files**: `src/p2_flow/build.rs`, `src/p3_ssa/{liveness,build,verify}.rs`,
+`src/p5_types/constraints.rs`, `tests/pipeline/ssa.rs`.
+
+**Input→output**: normal-branch FlowBody → SsaBody with join inputs identified
+by EdgeId and stable ValueIds. A method that Java copy lowering does not fully
+support yet MAY be Smali, but the internal SSA MUST be fully verified.
+
+**Steps**:
+1. Build block leaders from the entry, branch targets and after-terminal positions;
+   normal branches have exact true and false targets, and a goto is a terminator, not
+   an effect NOP.
+2. Compute the monotonically growing live-in slot set backwards per ALGORITHMS §3, and
+   keep the normal write kill separate from the throw-before requirement. Build a fixed
+   Phi for every live-in slot of every block, including a single predecessor; a virtual
+   EntrySeed provides the parameters.
+3. Scan each block once: bind all reads and save the required throw old values first,
+   then invalidate overlapping slots and write fixed definitions. Connect every incoming
+   once; an unfilled Option is not a semantic Undefined.
+4. Keep the Phi closure from actual uses and propagate Bad and grounded monotonically.
+   Reject a missing definition, a partial wide value and a rootless definition cycle.
+   The validator replays the block's latest definition and the normal/exception origin,
+   and MUST NOT substitute a normal dominator for the exception check.
+5. Do not eliminate trivial Phis or shrink aliases; types keep finite constraints. Drop
+   the Env and live scratch after sealing while keeping the necessary Phi inputs and use
+   bindings for P5/P6.
+
+**Invariants / limits**: A finite worklist; a loop-preallocated Phi is
+internally testable even though this card emits no loop; a branch condition
+binds exactly one use; every eligible edge gets one Phi input.
+
+**Tests**: F06 `DiamondPhi`: `choose` with two const or param values, a nested
+diamond and the same block reached by two edges; M06 missing Phi input,
+wrong-edge ValueId, non-dominating use and undefined branch join. Positive input
+SSA plus mutation counterexamples.
+
+**Acceptance**: G0 plus `cargo test -p diana-decomp --test contracts t07_`.
+**Completion**: The join certificate is really generated and independently
+checked, with stable-ID and budget tests; T08 MUST connect the F06 Java
+behavior.
+
+**Not in scope**: Exception SSA, full heritage, dominance-frontier optimization,
+coalescing. A card MUST NOT call something SSA from a variable table alone while
+omitting the join.
+
+## T08 — Independent Local allocation, edge parallel copy and loop values
+
+**Dependencies**: T07. **Phase**: P3/P5/P6/P8 minimal transfer. **References**:
+DX-04/05.
+
+**Files**: `src/p6_variables/{locals,copies,definitions}.rs`,
+`src/p3_ssa/build.rs`, the minimal diamond adapter in
+`src/p8_java/structured.rs`, storage tests.
+
+**Input→output**: TypedBody → StorageBody plus a normal CopyPlan; every
+non-literal definition and Phi gets an independent LocalId. The F06 simple
+diamond can emit Java; a loop is verified first through an internal plan, and
+T09 provides general execution.
+
+**Steps**:
+1. A parameter and `this` are pinned bindings, and different ValueIds do not share
+   locals by default; a register number MUST NOT become a LocalId directly.
+2. `Phi.inputs` produce parallel assignments by EdgeId, and a critical edge keeps its
+   edge-copy placement instead of landing at the end of the source block.
+3. Use the parallel sequentialization of ALGORITHMS §5 strictly: emit a destination only
+   when it is not in the remaining sources, otherwise save one cycle source into an
+   exact-type temp and rewrite every use of that source. An entry copy runs before the
+   first entry, and a branch or latch copy runs after the selected edge.
+4. `DefinitionCertificate` independently derives original-use and edge-copy availability.
+   Only an ordinary local already proven unobservable MAY use default initialization to
+   satisfy Java DA.
+5. Preallocate and propagate the several Phis of a loop entry or latch, and verify the
+   normal copy plan through an internal interpreter in tests; the minimal-diamond P8
+   implements single-condition evaluation and transfer.
+
+**Invariants / limits**: A dead default is no excuse to read Undefined; a copy
+cycle charges a temp and proves the source-destination type; the edge is
+selected before the copy, and every copy is pure with no throw. Uninit MUST NOT
+be initialized to null to impersonate a Ref.
+
+**Tests**: F06 `choose` with positive and negative conditions in two drivers;
+F07 `CopyCycleLoop`: `a<-b, b<-a` expecting a swap, 2- and 3-cycles, a critical
+edge, and a loop entry and latch; M07 naive sequential assignment, a copy placed
+on the wrong branch, an observed default and a type-cast copy. B(F07) follows
+after T09.
+
+**Acceptance**: G0 plus this card's public core cases (unified rules in §4);
+B(F06).
+**Completion**: The simple branch is real Java; the validator fails every cycle
+and critical-edge parallel-copy counterexample; the loop-copy obligation is
+explicit and the card MUST NOT claim all loops are Java complete.
+
+**Not in scope**: Interference coloring, local-name role inference, exception
+shadow, cross-region leave-copy heuristics.
+
+## T09 — Ordinary CFG dispatcher and end-to-end loops
+
+**Dependencies**: T08. **Phase**: P7/P8/P9. **References**: KU-06/07. The
+approach is a new DEX adapter that does not copy Cgoto.
+
+**Files**: `src/p7_regions/{normal,verify}.rs`,
+`src/p8_java/{dispatcher,verify}.rs`, `src/p9_emit/java.rs`.
+
+**Input→output**: A StorageBody without handlers, monitors or Uninit →
+DispatchPlan → VerifiedJava, with one case per reachable block. The local pc
+takes the value matching this run's BlockId, and case display order need not
+match across runs.
+
+**Steps**:
+1. Check eligibility explicitly; a graph containing any handler stays out of the
+   dispatcher, and a constructor uninit is likewise rejected.
+2. Inside a case follow the original op order; each arm of a Branch emits the
+   corresponding copy, the pc next value and a continue, while return and throw exit.
+   Certify that the default pc is unreachable.
+3. Route loops entirely through the edge pc and do not recognize while or for first;
+   nested cases keep legal Java brace scopes with all locals visible in the outer scope.
+4. `StructureCertificate` re-enumerates ops and edges to confirm coverage. The synthetic
+   pc assignment has no heap effect and no allocation, but the default-unreachable
+   assertion MUST NOT depend on a guess about user input.
+5. Support an ordinary irreducible multiple-entry loop, where an extended budget affects
+   Resource only and not output semantics; a no-handler case MUST NOT fall back wrongly
+   because natural structuring failed.
+
+**Invariants / limits**: Evaluate the condition once, copy the edge before
+assigning the pc, and map case targets and keys to block identity; the display
+order of dispatcher cases that do not fall through to each other need not be
+stable. Reserve an output estimate against the limit first, and never build a
+full string and then drop it.
+
+**Tests**: B(F07) swap loop with several iterations, 0 iterations, continue and
+break; F08 `DispatchGraph`: simple cycle, two-entry cycle, multiple exits and
+throw terminal; M08 missing edge, duplicated effect, reachable default and
+ineligible handler. A hand- made two-entry CFG uses the T05 tests-only scalar
+interpreter as an independent oracle and is compared against the actual
+execution of recovered Java; this card introduces no fake source substitute for
+an original hand-made CFG that the JVM cannot generate directly, and exception
+or monitor cases do not use this simplified oracle.
+
+**Acceptance**: G0 plus this card's public core cases (unified rules in §4);
+B(F07, F08). **Completion**: A complex ordinary graph yields legal Java instead
+of goto pseudo code, and an eligibility negative MUST NOT be accepted.
+
+**Not in scope**: A try/monitor state machine, an `Object[]` register-boxing
+interpreter, duplicating the effect tail, byte identity as a natural-structure
+quality metric.
+
+## T10 — Complete primitive/null/FP legalization
+
+**Dependencies**: T09. **Phase**: P2/P5/P8/P9. **References**: DX-08, RG-09.
+
+**Files**: `src/p5_types/{lattice,constraints,solve,conversions}.rs`,
+`src/p2_flow/decode.rs`, `src/p8_java/expressions.rs`,
+`src/p9_emit/literals.rs`.
+
+**Input→output**: bit and word types plus use constraints →
+TypedBody/UseConversion → legal primitive or ref-null Java. The card supports
+boolean, byte/short/char/int/long, float/double, cmp/cmpl/cmpg, conversions and
+shift; insufficient type evidence is explicitly Unsupported.
+
+**Steps**:
+1. Close the descriptor facts and the family equations per ALGORITHMS §4, then
+   propagate origins, Known01 and producer ranges monotonically. After sealing, select
+   the source type once and give each use of a literal its own view. ProvenNarrow
+   accepts only a lossless conversion that falls entirely inside the target range.
+2. Check wide word pairs and alias overlap or partial reads; map every shift mask,
+   signed and unsigned operation, narrowing and DEX type semantic table entry to its
+   opcode.
+3. Express a boolean bitwise operation as legal truth values and `eqz` on a ref as
+   `== null`; an ambiguous non-literal value MUST NOT be reinterpreted as a direct cast.
+4. Emit an FP cmp as `x < y ? -1 : x > y ? 1 : x == y ? 0 : bias`, where x and y are
+   locals and bias is -1 or +1. No `isNaN` library call is needed and the NaN branch is
+   not folded away. Do not reassociate FP. A NaN payload or bitcast that cannot be
+   expressed exactly is Unsupported, and recovery adds no library call for it.
+5. Have the typed literal escape cover negative MIN, Infinity, -0 and surrogate, and
+   keep every UseConversion checkable for no-extra-runtime-check.
+
+**Invariants / limits**: Finite constraints converge and a Conflict is rejected
+explicitly; overflow and Java numeric promotion do not rely on a host Rust
+default guess.
+
+**Tests**: F09 `PrimitiveBits`: boolean negation and bit operations,
+0/null/false, MIN/-1, shift -1/32/64, NaN cmpl/cmpg, negative zero, float→int
+boundaries and wide overlap; M09 wrong kind, partial wide and unresolved
+primitive. Confirm that a byte parameter can narrow losslessly after an int Phi
+and that a value mixed with short/int arithmetic sources MUST NOT be proven
+byte. B(F09) compares bits and traces, not formatted text. The primitive
+positives of F09 introduce no library call, and a bitcast without an exact
+expression rule is Unsupported/raw. An existing library call in the original
+program binds per T11 and gets no new synthetic call. This card supplies the
+type evidence for the fixed D071 return and D072; the D071 call completes the
+whole case only after T11 binding. D076 covers the MUTF-8 target byte boundary.
+
+**Acceptance**: G0 plus this card's public core cases (unified rules in §4);
+B(F09).
+**Completion**: Every family of the primitive matrix has a positive and a
+boundary case, and a ruleless bitcast or a synthetic intrinsic MUST NOT be
+marked supported.
+
+**Not in scope**: Full reference generics, arithmetic constant folding or GVN,
+FP algebraic compression, universal numeric reinterpretation.
+
+## T11 — Exact call contracts, external declarations and result binding
+
+**Dependencies**: T10. **Phase**: P0/P2/P4/P5/P8. **References**: DX-02/06/08,
+KU-01.
+
+**Files**: `src/p0_knowledge/declarations.rs`, `src/p2_flow/results.rs`,
+`src/p4_calls/{mod,members,contracts}.rs`, `src/p5_types/constraints.rs`,
+`src/p8_java/expressions.rs`.
+
+**Input→output**: raw invoke plus a complete or unknown catalog → CallEvidence
+with exact kind, owner and proto, a bound receiver plus argument words, and a
+typed result; missing binding facts → Smali, never "the call looks right, so
+emit it".
+
+**Steps**:
+1. Check the invoke format and range, receiver first and descriptor words; a move-result
+   MUST follow a legal producer, have the correct kind and not be a branch target. An
+   unconsumed call result still keeps the call.
+2. A self-made complete catalog supplies static/direct/virtual/interface/super,
+   visibility, overload groups and throws; keep Unknown separate from Partial. P4
+   produces descriptor constraints and BindingObligations and does not require a source
+   type that P5 has not solved.
+3. After P5 finishes types and UseConversion, P8 discharges the exact Java binding:
+   receiver or static owner, argument static types, unique overload or dispatch
+   equivalence. A cast MUST be no-extra-check or the original checkcast.
+4. Treat a call as conservatively may-throw and do not DCE an unused result; checked
+   throws agree with the caller declaration and override, and the card MUST NOT add a
+   sneaky throw, wrap a catch or widen the contract.
+5. The report keeps the original MethodRef and the EnvironmentId, and a same-name-
+   different-proto request selects precisely.
+
+**Invariants / limits**: Charging a catalog candidate scan; Unknown never fills
+a default public; argument evaluation is not reordered; any added runtime check
+needs evidence.
+
+**Tests**: F10 `CallKinds`: overload int/long/Ref/null, virtual override,
+interface, private/direct, super, effect arguments, unused throwing call; F11
+`MissingCatalog` gives Java for the same input when complete and explicit Smali
+when empty; M10 bad result/argument words/static receiver/visibility/return-only
+overload. The D071 call consumes the sealed range; D080 verifies Constant and
+Unknown rejection separately and adds no initialization helper.
+
+**Acceptance**: G0 plus this card's public core cases (unified rules in §4);
+B(F10) plus S(F11). **Completion**: Every kind has a behavior driver and a
+reject case; a missing catalog is an expected degradation, not a pass that
+"ignores errors".
+
+**Not in scope**: Native calling conventions, reflective inference, dynamic
+invoke-custom or bootstrap Java semantics, an all-platform catalog.
+
+## T12 — Object initialization identity and restricted constructors
+
+**Dependencies**: T11. **Phase**: P3/P4/P5/P8. **References**: DX-09, DX-02
+RecoverConstructors.
+
+**Files**: `src/p4_calls/allocation.rs`, `src/p3_ssa/{inputs,verify}.rs`,
+`src/p5_types/lattice.rs`, `src/p8_java/declarations.rs`.
+
+**Input→output**: An adjacent new-instance and invoke-direct init → allocation
+evidence and a legal Java `new`; the UninitThis of `<init>` → a single legal
+super or this chain → a normal Ref body.
+
+**Steps**:
+1. Track only a pure move-object with an AllocationId and forbid uninit escape, an
+   ordinary call or a field read. Verify availability per use after init completes
+   normally, and use DeferredAllocation in P6 instead of globally turning the ValueId
+   into a Ref or assigning null.
+2. Require the arguments to be prepared before `new`, or to be literals, with no
+   intervening effect or may-throw; the Java `new` and constructor combination MUST NOT
+   move an effect across the allocation or class-init timing.
+3. A constructor prologue permits only pure argument preparation that does not observe
+   uninit this, plus a single expressible chain; the real super or this behavior is not
+   deleted.
+4. Check ownership and proto access fully; multiple init, a joined uninit or an illegal
+   Java argument order → Unsupported, preserved by the raw fallback.
+5. T20 handles complex final-field assignment in full; this card keeps a simple
+   post-super field write eligible first and does not move it to an initializer early.
+
+**Invariants / limits**: Uninit MUST NOT become an ordinary Ref through a
+default null; new and init are consumed by one source event while both origins
+are preserved; there is no universal static helper.
+
+**Tests**: F12 `AdjacentConstruction`: pure move alias, arguments ready before
+allocation, super trace → body trace, this chain; U02 `ConstructorPrologue`: a
+pre-super this field, control flow/monitor/may-throw arguments, duplicate init,
+which MUST be Smali rather than Java.
+
+**Acceptance**: G0 plus this card's public core cases (unified rules in §4);
+B(F12) plus S(U02). **Completion**: The constructor trace order agrees, every
+uninit negative is handled explicitly, and an unsupported special case MUST NOT
+delete super to hide it.
+
+**Not in scope**: An arbitrary constructor carrier or helper, anonymous capture,
+an enum implicit constructor, a large rewrite of object allocation.
+
+## T13 — Reducible if/while natural-structure adapter
+
+**Dependencies**: T10. **Phase**: P7/P8. **References**: KU-06/07, the DX-07
+region responsibilities.
+
+**Files**: `src/p7_regions/{normal,verify}.rs`,
+`src/p8_java/{structured,verify}.rs`.
+
+**Input→output**: normal StorageBody → private SESE/SCC region plan → natural
+Java; when the schema cannot cover the graph, the ordinary dispatcher of T09
+applies and the original CFG is not modified.
+
+**Steps**:
+1. Build Sequence/Diamond/NaturalLoop from the RPO, normal dominance and post-dominance
+   the algorithm needs, and reduce the region node count on each collapse. Add no stable
+   sort or tie-break to force one source form.
+2. Keep the EdgeId of the loop header, latch and exit; copies for continue and break run
+   before the transfer, and the tail MUST NOT be deleted by block visitation.
+3. Support the restricted profile of a single-entry loop with multiple exits, where the
+   legal `while (true)` plus `if break` form suffices, and do not sugar it into for or
+   foreach.
+4. `RegionCoverage` verifies that the leaf block sets do not overlap and that Transfer
+   maps exactly; origin and effect coverage is not a text count.
+5. For the same fixture, compare behavior evidence through the StructuredThenDispatch
+   and DispatchOnly adapters; a pure readability difference does not require identical
+   text.
+
+**Invariants / limits**: The original topology, SSA and CopyPlan are unchanged;
+the private arena is bounded; an irreducible graph uses the existing legal
+dispatcher, and a handler or monitor graph still forbids an ordinary fallback.
+
+**Tests**: F13 `NaturalControl`: diamond, while with 0 and several iterations,
+nested loops, conditional break and continue, copy on exit; M11 lost edge, wrong
+scope, duplicated region; B(F13) with both modes agreeing on result and trace.
+
+**Acceptance**: G0 plus this card's public core cases (unified rules in §4);
+B(F13).
+**Completion**: A simple loop yields an explicit natural AST and a hard graph
+uses the dispatcher; an invalid certificate MUST NOT degrade into a lenient
+success.
+
+**Not in scope**: NoMoreGotos/tail-dup/full SAILR, exception regions,
+variable-count reduction, goto quality as a correctness oracle.
+
+## T14 — Integer switch, payload and fallthrough structure
+
+**Dependencies**: T13. **Phase**: P2/P7/P8. **References**: RG-02, DX-07, KU-06.
+
+**Files**: `src/p2_flow/build.rs`, `src/p7_regions/normal.rs`,
+`src/p8_java/structured.rs`, `src/p9_emit/java.rs`.
+
+**Input→output**: A verified packed or sparse payload → key and EdgeId mapping →
+a Java switch or the dispatcher, with shared targets and fallthrough preserved.
+
+**Steps**:
+1. Keys are ordered and unique and relative offsets are correct; the default edge MUST
+   NOT be faked as the last case.
+2. Merge a shared target into one case but keep the original keys and origin edges;
+   fallthrough, return and break targets are explicit and different copy plans are not
+   merged.
+3. When edges with different Phi inputs reach the same target, run the corresponding
+   copy inside the case before transferring to the target; the edge difference MUST NOT
+   be lost because the block is the same.
+4. Prefer the dispatcher for a non-SESE case or a loop inside a case, and an ordinary
+   graph structuring failure MUST NOT emit an undefined goto.
+
+**Invariants / limits**: The selector is evaluated once; every key is
+semantically exact; switch key count and output bytes are bounded; a payload is
+not an executable op.
+
+**Tests**: F14 `IntegerSwitch`: negative/min/max keys, shared target, default,
+fallthrough, loop break, case edge copy; M12 duplicate key, out of range, branch
+into a payload. B(F14) covers every case and the default with a side-effect
+selector. The fixed D083 extreme keys verify bounded completion and the real
+branch without asserting an AST print form.
+
+**Acceptance**: G0 plus this card's public core cases (unified rules in §4);
+B(F14).
+**Completion**: Ordinary integer switch coverage is complete, a string or enum
+switch keeps its integer control flow, and no unspecified switch sugar is
+generated.
+
+**Not in scope**: String hash-switch or enum ordinal sugar, unknown bootstrap
+switches, automatic restart of branch cascades.
+
+## T15 — Fields, arrays, explicit check-cast and visible effects
+
+**Dependencies**: T12. **Phase**: P2/P4/P5/P8. **References**: DX-06/08, RG-06.
+
+**Files**: `src/p2_flow/{decode,effects}.rs`, `src/p4_calls/members.rs`,
+`src/p5_types/{constraints,conversions}.rs`, `src/p8_java/expressions.rs`.
+
+**Input→output**: iget/iput/sget/sput, array load/store/new/fill/length and
+instanceof/checkcast → exact typed ops and legal Java, with raw member identity
+not overwritten by a source name.
+
+**Steps**:
+1. Match the descriptor kind against the narrow, wide or reference opcode, and infer
+   null and array types from constraints instead of guessing String at first use.
+2. Take field static/instance, visibility and volatile/class-init facts from the complete
+   catalog; unknown flags conservatively affect the effect, and the card MUST NOT assume
+   public final.
+3. Keep the original array index, value and receiver order. Handle fill per ALGORITHMS
+   §2.4: with count 0 still emit the length read and keep the NPE; for a non-empty fill,
+   expand the stores in the original order only under a FreshArray proof of sufficient
+   length and no escape, keeping the bits of each element; every other shape is raw and
+   the card MUST NOT invent an exception or helper.
+4. An unused field or array read and a cast still produce a typed temp that keeps the
+   throw, init or volatile effect; the original checkcast MUST NOT be deleted because
+   the result is unused.
+5. Convert a reference join only with no-extra-check evidence; a new cast on Object MUST
+   NOT exist merely so javac passes.
+
+**Invariants / limits**: Default heap read, heap write and call barriers, with
+no DCE or hoisting; every array allocation and count is charged; a static-init
+field read does not become a literal constant and lose its trigger.
+
+**Tests**: F15 `HeapEffects`: field get/set and static-init trace, array
+load/store order, null and bounds, an unused checkcast throw, preserved volatile
+instructions, wide and float array bits; D027 MUST be Java, a zero-element fill
+still NPEs on null, and a non-empty missing shape MUST be proven raw without
+partial writes followed by a claim of original semantics; M13 wrong field
+opcode, array payload type, missing catalog. B(F15) compares the result, the
+mutation log and the exception class. D027 needs a real fill/FreshArray
+certificate; D073/74 cover the zero-count exception and the complete raw result
+for a non-FreshArray respectively.
+
+**Acceptance**: G0 plus this card's public core cases (unified rules in §4);
+B(F15).
+**Completion**: Every supported heap op has a throw and effect negative, and the
+original member span is located correctly.
+
+**Not in scope**: A heap alias optimizer, static final constant propagation,
+generic field type projection, removal of an unused throwing expression.
+
+## T16 — Ordered exception graph and SSA environment per throwing site
+
+**Dependencies**: T15, T07. **Phase**: P1/P2/P3. **References**: DX-03/07.
+
+**Files**: `src/p2_flow/{protection,build,verify}.rs`,
+`src/p3_ssa/{liveness,build,verify}.rs`, `src/p1_input/code.rs`.
+
+**Input→output**: checked try/handler raw code plus may-throw ops → ordered
+ExceptionEdges; an SsaBody with the exception environment before the throw and a
+handler ExceptionValue. This card verifies internally first; the Java protected
+profile completes in T18.
+
+**Steps**:
+1. Split every protected may-throw op into terminal sites and split the try boundaries
+   too. Preserve the handler list order and the catch-all position, and keep the normal
+   and exception graphs independent.
+2. A successful instruction result commits only on the normal edge; the exception edge of
+   a throwing definition that overwrites an old register keeps the old value, and every
+   other opcode-specific transfer is listed explicitly.
+3. A handler entry move-exception gets a new ValueId, and a typed chain or common handler
+   may have several exception edges; incoming Phis follow the original EdgeId.
+4. The exception SSA validator MUST NOT substitute the normal dominator tree for exception
+   availability; a read-before-def stays Malformed and an unknown type is not marked
+   correct.
+5. A normal jump into a handler, an overlapping exception region or an illegal range is an
+   explicit error or Unsupported at the raw and flow layers, and is not fixed by
+   reordering.
+
+**Invariants / limits**: Each throw edge corresponds to the actual opcode effect
+of its site; may-throw classification is conservative; graph expansion charges
+the limits, and an over-complex graph MUST NOT be treated as handler-free.
+
+**Tests**: F16 `ThrowState`: `v = old; v = call(); catch { use(v) }`, multiple
+typed catch and catch-all, shared handler, throw in a handler; M14 using the
+normal new result, a reordered catch rank, an illegal move-exception target, a
+try in the middle of an instruction. Tests check the environment, not source
+text alone.
+
+**Acceptance**: G0 plus `cargo test -p diana-decomp --test contracts t16_`.
+**Completion**: The exception site and old-state chain certificates are
+complete; while Java protected capability is absent the card does not pass as
+that Java feature, and T18 MUST add B.
+
+**Not in scope**: finally merging, converting every catch-all to finally, a
+general monitor, a dispatcher across a try.
+
+## T17 — Handler Phi shadow snapshots and exception ingress copies
+
+**Dependencies**: T16, T08. **Phase**: P6. **References**: DX-05.
+
+**Files**: `src/p6_variables/{exceptional,copies,definitions}.rs`,
+`tests/pipeline/exception_storage.rs`.
+
+**Input→output**: exception SSA plus TypedBody → a pure pre-throw ShadowSnapshot
+and HandlerIngress CopyPlan, with a typed source proof for the handler Phi of
+every incoming throwing site.
+
+**Steps**:
+1. Enumerate the eligible exception edges of every handler-retained Phi and create a
+   ShadowLocal with a fixed identity inside the request; the number need not match across
+   runs. The card MUST NOT insert intermediate catch code through ordinary critical edges.
+2. Save the old-state value of that edge before the throw site, so that every snapshot of
+   every possible handler is no-throw, no-allocation and local-only; bind the catch
+   ingress to the PhiLocal.
+3. Each (handler, Phi) pair always gets an exclusive shadow, and a throw inside a nested
+   inner handler likewise saves the old value for the outer handler; do not merge slots by
+   type. Protection ownership follows the one-nested-layer rule of ALGORITHMS §10, and a
+   shared or crossing graph is rejected only when ownership cannot be assigned; the card
+   MUST NOT use "the latest register value".
+4. `DefinitionCertificate` verifies that each snapshot source is defined at that site and
+   that the conversion is exact and introduces no runtime check; a frame-level default
+   slot is unobservable.
+5. P8 produces an explicit placement obligation list, and the try construction MUST
+   consume the same-site position; a source copy MUST NOT land in another protection
+   domain.
+
+**Invariants / limits**: A shadow affects only synthetic locals, with no heap
+and no extra exception; the total number of handler snapshot copies is bounded
+and copy cycles are serialized per T08. Every throw edge has a source, and a
+value MUST NOT be guessed from the handler's last write.
+
+**Tests**: F16 old-value internal storage, F17 `HandlerPhi` with two sites
+holding different old values, a loop try shadow, a shared target; M15 a snapshot
+checked cast, an Undefined snapshot, a snapshot placed after the call, an alias
+reuse that overwrites wrongly; the validator MUST fail.
+
+**Acceptance**: G0 plus `cargo test -p diana-decomp --test contracts t17_`, with
+B(F16, F17) added after T18. **Completion**: The plan and the certificates are
+recomputable, and "some shadow variables were generated" MUST NOT count as
+complete exception SSA lowering.
+
+**Not in scope**: Complex cleanup variable merging, dynamic interpretation that
+boxes every exception, a dead-copy heuristic on exception paths.
+
+## T18 — Restricted try/catch Java and protection-domain ownership
+
+**Dependencies**: T17, T13. **Phase**: P7/P8. **References**: DX-07, KU-07.
+
+**Files**: `src/p7_regions/{protection,verify}.rs`,
+`src/p8_java/{structured,declarations,verify}.rs`.
+
+**Input→output**: A single contiguous interval with independent handlers and a
+clear normal join → ProtectionCertificate → Java try/catch. A graph outside the
+profile stays Smali, and the ordinary dispatcher MUST NOT accept an exception
+graph.
+
+**Steps**:
+1. Map the exact protected operation set to a Java try, order the catches by the DEX
+   chain, catch Throwable first for a catch-all while keeping its code, and never guess
+   finally.
+2. The handler has an exclusive entry with no ordinary reentry, and join/return/throw are
+   expressible; catch unreachability and checked throws follow the same P4 contract.
+3. For a pre-throw snapshot, find the position before the source op in the same protection
+   domain, and consume all normal exit copies and exception ingress copies.
+4. Keep a copied cleanup unchanged on the different paths; the try size MUST NOT expand to
+   a normal cleanup or an extra call, which would change the second-catch behavior of an
+   exception.
+5. Handle one nested layer per ALGORITHMS §10: a throw inside a handler points to the
+   outer domain, so reduce the inner try and handlers first and then let the outer domain
+   contain them, and then recompute the first matching catch-stack target per site. A
+   sibling catch does not catch the handler's own exception. Reject a shared or crossing
+   graph that does not match, and never guess finally.
+
+**Invariants / limits**: The original handler selection of every protected site
+agrees, throw and return completeness agrees, and a catch cannot goto directly
+outside the scope. The definition of a certificate failure as InternalInvariant
+or Unsupported MUST distinguish an algorithm BUG from an unsupported shape.
+
+**Tests**: B(F16, F17); F18 `ProtectedControl`: ordered subtype catches, an
+unexpected error through catch-all or rethrow, cleanup return or throw, cleanup
+throwing itself, one nested level; U03 `ComplexProtection` with normal reentry,
+shared handlers or an unknown release needs Smali; M16 a missing edge, an
+expanded try, swallowing an exception from outside the call.
+
+**Acceptance**: G0 plus this card's public core cases (unified rules in §4);
+B(F16, F17, F18) plus S(U03). **Completion**: A positive protected method really
+runs as Java, a negative stays smali, and an incomplete finally recovery does
+not affect the real trace.
+
+**Not in scope**: Arbitrary exception ownership, finally beautification on all
+paths, a label goto across a try, swallowing an exception so that javac passes.
+
+## T19 — Monitor scope certificate and synchronized
+
+**Dependencies**: T18, T12. **Phase**: P2/P7/P8. **References**: DX-07
+(synchronization).
+
+**Files**: `src/p7_regions/monitors.rs`, `src/p2_flow/effects.rs`,
+`src/p8_java/{structured,declarations,verify}.rs`.
+
+**Input→output**: A declaration flag or an explicit balanced monitor CFG →
+MonitorCertificate → Java synchronized; an unknown or mismatched lock state →
+Smali, never a fake Java keyword.
+
+**Steps**:
+1. Review the raw flag semantics and keep the implicit lock of a synchronized method separate
+   from an explicit monitor; a static lock on the Class object and an instance lock on this
+   are explicit.
+2. Derive a finite reference root per ALGORITHMS §11. For One the root producer MUST also
+   lie outside the whole holding scope and MUST NOT re-execute, so the same static
+   AllocationId MUST NOT identify one object across iterations. The lock stack agrees at a
+   join, an exception on enter pushes nothing, an exit pops exactly and a reentrant acquire
+   counts per layer.
+3. Check the single-entry scope, the throw timing of a null lock and the release handler
+   interval or protected site for agreement; after the match, replace the original enter,
+   exit and catch cleanup only through the certificate.
+4. Verify a nested balanced profile scope by scope and never skip a monitor on an unproven
+   path; a call in the scope body MUST NOT be moved outside synchronized.
+
+**Invariants / limits**: A lock effect is not pure, so no inlining or hoisting;
+the certificate has an all-exit walk budget and a loop does not rely on
+unbounded enumeration. When stopping cannot be proven, the card stops at that
+profile instead of assuming balance.
+
+**Tests**: F19 `MonitorScope`: return/throw/null lock, nested/reentrant, static
+and instance method, a `Thread.holdsLock` driver in the body, lock release after
+a finally throw; U04 mismatched lock, missing exit, multiple entry → Smali;
+negative coverage on native verify. D081/82 fix rejection of a re-executed
+dynamic root and acceptance of a parameter root in a loop, and MUST NOT fall
+back to raw just because a loop exists.
+
+**Acceptance**: G0 plus this card's public core cases (unified rules in §4);
+B(F19) plus S(U04). **Completion**: An explicit semantic trace, holdsLock and
+release check exists (a concurrency stress run only supplements and is not a
+complete proof), and raw flags do not print declared synchronized directly.
+
+**Not in scope**: Guessing an alias value across locks, an arbitrary monitor
+state, removing "redundant" locks, dynamic verification in a production run.
+
+## T20 — <clinit>/<init>, encoded initial values and final fields
+
+**Dependencies**: T19, T15. **Phase**: P1/P4/P8. **References**: DX-08/09
+(initialization).
+
+**Files**: `src/p8_java/{initializers,declarations,verify}.rs`,
+`src/p1_input/values.rs`.
+
+**Input→output**: static encoded values plus clinit and constructor field writes
+→ a legal class declaration and initializer plan; when the complete shell cannot
+be represented, Mixed keeps the raw field or method, and a final field MUST NOT
+get a default and a second write.
+
+**Steps**:
+1. Bind encoded and default values per ALGORITHMS §12: emit a static block first for a
+   non-final non-default value. For a final field with no original write, assign even the
+   default explicitly once; with an original write, accept only default preparation and
+   write nothing else. Do not emit a constant field initializer for a static final primitive
+   or String, because that would inline sget and remove class-init.
+2. Emit clinit as a static block per ALGORITHMS §12, turn return-void into a break of the init
+   label, and legalize an always-abrupt body per the established if (true) rule. Do not
+   create a `<clinit>` method and do not change the read that triggers initialization.
+3. Track write counts per ALGORITHMS §12 with the finite {0, 1, Many} path set, joining by
+   union and incrementing on write; every normal construction chain and clinit end MUST
+   write exactly once. A this delegation inherits the target write set and emits no repeated
+   initial value; an overridden, missing or unknown path MUST NOT be patched with a default
+   to make the compile pass.
+4. A final field left unassigned without a constructor body MUST NOT be default-initialized
+   to make the compile pass; a class shell failure does not affect independent method
+   analysis but is reported as Mixed.
+5. Take initialization throws and class final modifier or raw visibility evidence from P4
+   and metadata, not from printed text.
+
+**Invariants / limits**: Verify that a source-constant final cannot change the
+class-init trigger; initialization count, order and failure paths are visible; a
+clinit field overwrite loses no origin.
+
+**Tests**: F20 `Initialization`: non-constant static field trace, multiple
+constructors, this delegate, blank final, encoded null/false/float bits, init
+exception; U05 complex final reassignment or an unprovable default →
+Mixed/Smali; B(F20) runs each driver in a new process so class-init has not
+already happened. D046 MUST show explicit encoded tags; D079 recovers Case and
+Reader separately and compiles them together, checking class-init and the real
+getstatic.
+
+**Acceptance**: G0 plus this card's public core cases (unified rules in §4);
+B(F20) plus S(U05). **Completion**: The init trace of a legal unit agrees, a
+final that source cannot express gets an explicit declaration status, and the
+final contract MUST NOT be deleted to hide the problem.
+
+**Not in scope**: Field initializer beautification, a constructor factory
+carrier, interprocedural init optimization, constant propagation.
+
+## T21 — Raw generics, bridge/override and source binding legality
+
+**Dependencies**: T20, T11. **Phase**: P0/P4/P5/P8. **References**: DX-08 and
+the signature/source ABI questions.
+
+**Files**: `src/p4_calls/{contracts,members}.rs`,
+`src/p0_knowledge/declarations.rs`,
+`src/p8_java/{declarations,expressions,verify}.rs`.
+
+**Input→output**: Signature metadata MAY stay raw without recovering `List<T>`;
+an erased declaration, override and call binding succeeds only when all Java
+evidence passes, and a return-only collision MUST NOT rename externals
+arbitrarily.
+
+**Steps**:
+1. Review the difference between the DEX descriptor and the Signature and keep the original
+   metadata record; a raw declaration does not change the binary member proto, and a typed
+   cast adds no runtime check.
+2. Use `MemberEmission::Generated` of ALGORITHMS §12: exact override facts MUST match the
+   canonical moves, cast, target call and return, and the source MUST generate a bridge with
+   the same signature and behavior before the card suppresses the duplicate print. Generated
+   still has code and an original MethodKey and does not count as DeclarationOnly; a bridge
+   that a standalone request cannot express returns the original Smali.
+3. A Java interface or override implementation keeps its return, throws and visibility
+   consistent with the raw contract, and a generic parent member binding MUST NOT be guessed
+   from the local descriptor alone.
+4. Fall back for the affected methods under an incomplete catalog, and never let a
+   missing-type exception "ignore javac errors" and become the contract.
+
+**Invariants / limits**: Pure generic beautification is optional, binding
+correctness is not; the overload-complete status and EnvironmentId stay stable,
+and source public identity is unchanged.
+
+**Tests**: F21 `ErasedContracts`: self-made generic List/identity, covariant
+bridge, raw interface impl, null overload; U06 a return-only DEX overload, a
+differing bridge effect, an unknown parent contract → Smali/Mixed; B(F21) with a
+matching complete self-made classpath. D048/D084 require a canonical Generated
+bridge and rejection of an effectful bridge respectively; D075 includes the
+target boundary of a code-free declaration, and D078 requires 2200 abstract
+declarations to form a complete JavaUnit without rejection by a pool estimate.
+
+**Acceptance**: G0 plus this card's public core cases (unified rules in §4);
+B(F21) plus S(U06).
+**Completion**: A raw generic warning is acceptable but a real compile error is
+not ignorable; the legacy full type solver is not imported wholesale.
+
+**Not in scope**: A complete GenericTypeSolver/variance/inference
+beautification, general wildcard projection, arbitrary sneaky throw or externals
+renaming.
+
+## T22 — Named nested classes, capture and unit ownership
+
+**Dependencies**: T21, T12. **Phase**: P1/P4/P8. **References**: DX-09/12,
+RG-04.
+
+**Files**: `src/p8_java/ownership.rs`, `src/p1_input/catalog.rs`,
+`src/p8_java/declarations.rs`, `src/p9_emit/spans.rs`.
+
+**Input→output**: Reliable Enclosing/InnerClass/MemberClasses metadata plus
+declarations → named nested Java or Mixed; anonymous-class source sugar is not
+required, and an illegal ownership or missing dependency MUST NOT silently drop
+the whole class.
+
+**Steps**:
+1. Verify the metadata ownership graph for cycles and duplicates; a `$` name is only a hint
+   and does not prove an inner class on its own.
+2. Establish explicit static or instance outer binding, constructor capture fields and private
+   access facts; keep the original MethodRef and FieldRef in a sidecar mapping.
+3. Implement a legal nested name first; an anonymous original MAY be reported as a synthetic
+   named class, but access, capture and constructor semantics MUST agree; an inexpressible
+   declaration keeps smali.
+4. Reject a package, import, name or visibility conflict in the unit and a top-level static
+   class; route a single inner fragment into a Mixed context and do not impersonate a
+   JavaUnit.
+5. Relocate final spans consistently and keep Unicode UTF-8 boundaries and the original class
+   key traceable.
+
+**Invariants / limits**: Nested closure dependency, depth and output have a
+request budget; `MemberClasses` MUST NOT miss a member and a missing inner class
+is explicit; an internal rename cannot change the external binding contract.
+
+**Tests**: F22 `NamedNested`: static nested, non-static outer capture, the same
+simple name, Unicode identifier, private access; U07 metadata cycle, missing
+inner, ambiguous ownership → correctly classified Malformed/Unsupported; B(F22)
+with a real classpath compile of the whole unit and a capture trace.
+
+**Acceptance**: G0 plus this card's public core cases (unified rules in §4);
+B(F22) plus native ownership and span mutation tests. **Completion**: The
+top-level unit is legal, the original identity mapping is complete, and the
+single-fragment status is correct.
+
+**Not in scope**: Anonymous inline or lambda recovery, guessing an inner class
+from a name without metadata, public external member remapping.
+
+## T23 — Restricted enum/annotation and complete shell classification
+
+**Dependencies**: T22, T20. **Phase**: P1/P4/P8/P9. **References**: DX-08/09,
+RG-09.
+
+**Files**: `src/p8_java/{enums,declarations,verify}.rs`,
+`src/p1_input/values.rs`, `src/p9_emit/literals.rs`.
+
+**Input→output**: A canonical self-made enum, an annotation interface and
+runtime-visible values → a legal JavaUnit; a shell that cannot express its
+identity, initializer or metadata → Mixed, while an independent method may still
+be Java.
+
+**Steps**:
+1. Verify the enum constant field, order, name and ordinal, the canonical constructor
+   implicit Enum parameters and the values/valueOf contract item by item; the source MUST be
+   a Java enum and not an ordinary class extending Enum.
+2. Do not delete an arbitrary synthetic method; a canonical generated member needs complete
+   behavior evidence, and a multi-constant body or extra effect stays Unsupported.
+3. Really check the annotation element type, default, Retention, Target and user annotation
+   literal; treat system Signature and InnerClass as metadata and do not fake `@Signature`
+   Java.
+4. Keep raw metadata in a sidecar, but a missing runtime annotation MUST NOT claim identical
+   full-class semantics; when policy allows an inspection-only Java fragment, Mixed marks it
+   as not a complete unit.
+5. The status assembler verifies that any Smali, Unavailable or unsupported declaration makes
+   the result Mixed; an error counter of 0 MUST NOT be taken as a JavaUnit.
+
+**Invariants / limits**: Metadata full source differs from inspection only;
+annotation array and string UTF-16 limits are recursively bounded; a canonical
+enum missing one constant or initializer is rejected.
+
+**Tests**: F23 `EnumAnnotation`: enum iteration/name/ordinal/values clone,
+canonical valueOf, runtime annotation reflect/default/array/UTF-16; U08 an
+unprovable enum custom body, an invalid annotation element, missing retention
+facts → Mixed; B(F23) accepts the canonical profile only in this card. D050 uses
+non-lexicographic constants and checks valueOf so that field-table ordering
+cannot coincidentally satisfy the expectation.
+
+**Acceptance**: G0 plus this card's public core cases (unified rules in §4);
+B(F23) plus S(U08) on its legal raw part. **Completion**: The supported profile
+is recomputable, the JavaUnit classification matches the metadata semantics
+contract, and no `extends Enum` pseudo-legal code exists.
+
+**Not in scope**: Full enum-switch desugaring, a large annotation
+platform-library catalog, complex enum constant bodies, a reflective-name
+rewrite promise.
+
+## T24 — Optional pure-expression recovery (not required core)
+
+**Dependencies**: T23, T14. **Phase**: P8/Pipeline/P0. **References**:
+KU-04/05/08, DX-06.
+
+**Files**: `src/p8_java/recovery.rs`, `src/pipeline/schedule.rs` (actual wiring
+only), `src/p0_knowledge/policy.rs`.
+
+**Input→output**: verified JavaBody → the single-use integer inlining of
+ALGORITHMS §15 → verified again. `inline_pure` defaults to false, and turning it
+off does not affect CoreRC.
+
+**Steps**:
+1. Implement one real optional pure function with an explicit option in P8 only, default off;
+   create no PassSpec or registry. Handle it per the Applied/Declined/BUG contract of
+   ALGORITHMS §15, build no plugin framework, and keep required legalization non-optional.
+2. Match only an adjacent `t = expr; return t` in the same block; expr contains only the
+   specified pure int/long operations and none of FP, div, rem, heap, call, ref cast or
+   allocation or synchronization, and the card MUST NOT inline a Phi, shadow or deferred
+   allocation.
+3. Check the resources needed for the copy, the verification and the complete emit against
+   an explicit finite quota only, with no estimated rejection threshold by default. Copy the
+   JavaBody, scan once in the original AST order and replace non-overlapping pairs, without a
+   repeat pass or a rollback edit log.
+4. Verify source type, binding, control, effects, Origin and the quota. Report Applied on
+   success, Declined on a mismatch or an insufficient quota, and stop on cancellation; an
+   internal error is a BUG.
+
+**Invariants / limits**: No effect duplication or motion, and post-verified
+types stay valid; the default-off and default-on runs each keep the same profile
+behavior; a local count or text shape MUST NOT become a correctness criterion.
+ALGORITHMS §15 governs the complete accept and reject conditions of integer
+inlining.
+
+**Tests**: F24 `PureRecovery`: a pure-copy inline positive and
+call/read/div/monitor negatives; B(F24) with on and off drivers agreeing, a
+mutation with a duplicated effect failing, and the budget never disabling
+required copy lowering.
+
+**Acceptance**: G0 plus this card's public core cases (unified rules in §4);
+B(F24).
+**Completion**: The small option is really consumed, its trace is visible, a
+failure keeps the baseline, and the card does not affect the T25 core gate.
+
+**Not in scope**: Constant-branch-to-CFG conversion, GVN/LICM, StringBuilder or
+finally recovery, a global restart, a registry and persistent HARD assertions.
+
+## T25 — Fixed core-set hardening and EngineCoreRC
+
+**Dependencies**: T23, T14. **Phase**: all/verification. T24 is optional
+beautification and is not a prerequisite of this card. **References**: KU-04/08,
+RG-08, DX-13.
+
+**Files**: `tests/contracts.rs`, the thin public adapter,
+`src/pipeline/control.rs` and the actual core validators; read the root
+`tests/e2e/manifest.json`, cases, expected values and input certificates; a new
+crate README source register and the implementation status of this design. Each
+crate MUST NOT copy a second mutable fixture or expected value.
+
+**Input→output**: The actual supported profiles of T01–T23 → the CoreRC evidence
+set: a positive, negative, limit and status per capability, behavior drivers and
+raw fallbacks, no panic and mutation coverage, identity and content completeness
+of unordered output, and a source license review. This does not declare that
+every DEX is Java.
+
+**Steps**:
+1. Check the manifest fixed by B01–B04 against the actual typed transitions; a required
+   member MUST NOT be deleted or skipped because of the current implementation, and
+   turning a core-Java failure into a Smali success is unacceptable. Assert that no filter
+   reduces the required set to zero; state the unsupported lists for known 038/039, custom
+   and polymorphic cases and their raw coverage separately; an unknown format MUST NOT fake
+   a fallback.
+2. Generate byte and artifact mutation tests for count, offset, LEB, payload, handler, type,
+   Phi, copy, site, loop, state and output budget with a fixed seed, where cancellation
+   terminates. Target verification covers static 255/256, instance 254/255, wide parameter
+   words, MUTF-8 and compiler-owned layout; D077/D078 MUST be Java and D086 checks the
+   default-unlimited and explicit-limit contrast. Rejection MUST NOT use an estimated cost,
+   and a real JVM format boundary MUST NOT become a configurable resource budget.
+3. Every known-unsupported legal fixture gets an S gate; a Malformed Unavailable or raw
+   excerpt does not impersonate smali, and a BUG does not count as success. A fallback policy
+   that swallows an exception or type error MUST fail its counterexample.
+4. V4 compiles with Temurin 21.0.8+9 `--release 8 -proc:none -g:none`, reads the classfile
+   independently and records the actual code, locals, stack, handler and pool, checking the
+   real format limits and member layout instead of a guessed projection; javac exit 0 alone
+   is not checked. This check verifies core generated artifacts, not tooling self-tests. Run
+   every required invocation whose JSON `acceptanceGate` is `engine` or
+   `engine-and-application`, including D071–D086, without filtering by current support or by
+   the old D065 endpoint. H cards add application evidence, and H08 rolls up every required
+   product invocation. List JVM, ART and specification-mirror, catalog, metadata and exception
+   or lock evidence separately. T24 off runs the whole core gate first, and T24 on is verified
+   separately as implemented beautification only.
+5. Repeat verification with different worker arrival orders and hash seeds: records and
+   artifacts stay linked by original identity, with no duplication and no loss, each source is
+   actually legal and each span points into this text. Generated text, local names, declarations
+   and diagnostic sequences need not be byte-identical, and the test adds no canonical sort.
+   Different legal schedules that trigger different budget results are classified honestly, but
+   they MUST NOT cause wrong semantics; this card does not deliberately create parallelism.
+6. Record release elapsed time and peak memory with the method stated, rather than a debug
+   assertion that something is fast; a representative input runs opt-in after authorization,
+   and environment and skip status are explicit. Make no promised percentage reduction.
+7. Apply this repository's workspace gates, per-crate license sources and self-contained
+   constraints; this card accepts only the internal EngineCoreRC, the root CLI replacement is
+   accepted by H05/H08, and no MCP is designed.
+
+**Invariants / limits**: A hit on an explicit quota or an actual allocation
+failure is Resource, not Malformed; a directly confirmed target format overrun
+is Unsupported and is not rejected by an estimate. All Limits default to None,
+an explicit request quota covers several methods, and a small limit MUST NOT
+truncate into success. A fuzz case has a timeout, seed and range to avoid an
+unbounded run.
+
+**Tests**: F25 `HardeningMatrix`: every M/U/F is registered in the manifest,
+actual artifacts fail, cancel versus fallback, near-boundary allocation and
+report spans; when result ordering or synthetic IDs vary, the check uses
+original identity and does not require full text equality across runs. A
+known-unsupported extension is raw only and has a version restriction.
+
+**Acceptance**: G0, the public core `t25_` behavior,
+Java/raw/input/resource/041/target-boundary evidence for every required
+invocation of the JSON engine gate, and the four root gates. Application domain
+and extract checks do not become engine development dependencies, and H08
+accepts every required product invocation. The selected members do not change
+with implementation status, and §4 lists the run commands.
+
+**Completion**: A traceable EngineCoreRC report where every core obligation and
+invocation listed in the JSON is accepted against independent expectations; the
+product ledger still shows every required item, with no empty or skipped item
+and no Java-to-Smali answer change. While a counterexample is unfixed, the
+capability stays Unsupported and the required item still does not pass, so the
+author MUST NOT declare CoreRC.
+
+**Not in scope**: A production engine switch, version tags or releases,
+automatic private-corpus downloads, unmeasured cache or parallelism, fixing a
+comparison score with a normalizer.
+
+## 6. Application tasks H01–H10
+
+## H01 — Product naming and domain contract freeze
+
+**Dependencies**: B04. **Scope**: Diana application branding, CLI and
+internal-crate positioning; no new MCP design.
+
+**Files**: the existing `apps/diana/Cargo.toml`/`src/main.rs` scaffold plus
+`apps/diana/src/lib.rs` and `src/cli/{args,mod}.rs` (all relative to the Diana
+application root); update the README/AGENTS product description. The old rasc
+tree already moved entirely to ref-fork and is reference-only, never built or
+tested; the historical release and license text is not replaced globally; this
+card creates no CLI test file.
+
+**Input→output / Interface**: the application package and binary `diana`
+(`apps/diana/`); the internal package `diana-decomp`, path
+`crates/diana-decomp/` and import `diana_decomp`; the original CLI domain,
+flags, exit codes and result completeness form the baseline. Output order is
+explicitly no longer guaranteed, and independent task results publish in
+completion or arrival order. A rename does not mean the new algorithm has
+replaced the old one.
+
+**Steps**:
+1. Register every live consumer of the name: the clap name, crate imports, test binary
+   environment, skill, release artifact and version assertions. Register MCP items only as
+   deferred or as necessary compile references, and design no server-name or schema
+   migration.
+2. Check the commands, fields and output channels against the existing source and DESIGN.md
+   and the migration list; do not run CLI black-box checks or establish help or format
+   goldens. The old display order and pagination interfaces are deliberately cancelled; the
+   corresponding module behavior tests carry complex domain obligations such as original
+   identity, decode completeness and file safety.
+3. Implement the new product in the `apps/diana/` entry point and the internal-crate
+   scaffold; the root is already a Diana-only workspace. The old rasc stays in ref-fork and
+   its CLI MUST NOT serve as an alias or dependency. H08 still needs product capability
+   evidence, the old release tooling is archived, the Diana release policy is reviewed
+   separately, and historical sources are not replaced wholesale.
+4. Freeze the 11 commands per DESIGN.md, with their specified TSV/JSON columns, canonical
+   `at`, complete method selector, default decompilation display and the JSON representation
+   of the same result; the old getclass/findrefs/skill, class-id, member prefix and
+   require-java keep no alias. H09/H10 implement the new fields, methods, xref sites and
+   extract respectively, and the old interface MUST NOT constrain the new design.
+
+**Invariants / limits**: The active workspace contains Diana only, and the old
+rasc is fully archived and never built or tested; Diana forwards to no old CLI
+or engine; there is no JVM or Python production runtime; the original copyright
+and sources are unchanged. A baseline number MUST NOT be invented without
+execution output.
+
+**Tests**: No automated test is added. Q01 is a manual review checklist for
+naming and the basic interface, not a test family; help, flags, column names,
+alias and pagination removal are checked against DESIGN.md, with no CLI
+black-box or golden. The matching domain task tests complex identity, decoding
+and file safety.
+
+**Acceptance**: Format, lint and build checks plus the recorded Q01 manual
+review, with no `h01_` test filter. **Completion**: The package name and the
+eleven-command contract match the implementation, unimplemented capability is
+marked, and no basic CLI test is required.
+
+**Not in scope**: MCP schema or server identity migration, rewriting
+archive/query, creating a release or tag, changing the version, global string
+replacement.
+
+## H02 — Safe input and the CLI request scope
+
+**Dependencies**: H01. **Scope**: root input lifetime.
+
+**Files**: `src/analysis/{archive,apk}.rs`, referencing the snapshot and
+AllowedRoot of `src/analysis/session/mod.rs`; add `src/analysis/input.rs`,
+`request.rs` and the complex domain test `tests/product_contracts.rs` as needed,
+and do not force reuse of session types that carry protocol dependencies.
+
+**Input→output / Interface**: an ordinary path → `InputLease` (a private
+immutable byte owner, the input-scope identity and restricted entry metadata) →
+borrowed views within the lifetime. The CLI adds no open, close or status
+command, and the lease releases at request end.
+
+**Steps**:
+1. Reuse the bounded-copy, regular-file and check-before-after approach; state the allowed
+   path and symlink policy explicitly, permitting a normal file and rejecting a
+   non-regular device or FIFO.
+2. Check the input and directory budgets before reading, allocating or mapping; a source
+   truncated or replaced after the snapshot is created does not affect the lease.
+3. A unified immutable CLI snapshot may add disk-copy cost; record the intent and measure
+   it on a release build, and do not claim byte-identical performance.
+4. Provide `BytesSource` and borrowed entries inside the scope using a safe-Rust owned
+   snapshot or the safe interface of a reviewed dependency, and never let a borrow escape
+   its owner. **Both active packages set `unsafe_code = forbid`**, so the input module gets
+   no exception; an mmap approach that needs unsafe calls is not adopted. If the platform
+   file primitive H02/H10 needs has no safe interface that meets the contract, review the
+   dependency and platform-support decision first and do not substitute a race window or a
+   weakened safety contract.
+5. A terminated request or an output error drops every temporary-file owner and MUST NOT
+   delete the user's input.
+
+**Invariants / limits**: Lengths and offsets are checked, a copy that changes is
+INPUT_CHANGED; no unsafe `'static` extension; temporary files are cleaned per
+scope and never faked into a cross-request cache.
+
+**Tests**: Q02 ordinary file, bare DEX and stored ZIP; counterexamples for the
+truncation race, symlink escape (limited-root mode), FIFO, an over-budget input
+or directory and an early owner drop; the test temporary directory never touches
+real user files.
+
+**Acceptance**: G0 plus `cargo test -p diana --test product_contracts h02_`.
+**Completion**: The source change is isolated, cleanup is correct, and the
+budget-first behavior and the borrow boundary are testable; the cost record
+invents no gain.
+
+**Not in scope**: A long-term target protocol, MCP open or schema, an
+all-platform file database, rewriting the ZIP codec for the snapshot.
+
+## H03 — Lightweight query, manifest and completion-order output
+
+**Dependencies**: H02. **Scope**: the existing non-decompilation CLI capability.
+
+**Files**: `src/analysis/{apk,archive,query,manifest}.rs`, `src/analysis/dex/`,
+`src/cli/mod.rs`; the existing scanner and unit fixtures are reusable, and a
+vendored AXML change needs PATCHES first.
+
+**Input→output / Interface**: InputLease → classes/strings/entries/manifest plus
+the symbol and reference scan foundation that H09 reuses, without going through
+the Engine or SSA. The columns DESIGN.md specifies are the new output contract;
+the old scanner only supplies the read and lookup algorithms, and the old
+method-level findrefs result MUST NOT be copied as an xref site.
+
+**Steps**:
+1. Wire the new scope onto the H01 baseline and keep root DEX selection, the duplicate-entry
+   rule, the last-manifest selection and the real physical, logical and row identity; display
+   order is not guaranteed, and the last manifest or a duplicate class definition MUST NOT be
+   chosen by whichever finished first.
+2. Keep the ASCII and raw-substring prefilter with its non-ASCII fallback and the exact or
+   fuzzy domain query; the displayed string may differ from the engine's exact UTF-16 literal
+   representation, so each contract is explicit.
+3. Workers submit a row or batch in completion or arrival order, so remove the wait by entry
+   ordinal, the full sort, the reorder buffer and the lead window that only preserves input
+   order. Keep weighted-resource admission, bounded byte and row queues, backpressure and
+   cancellation; there is no unbounded parallel collect. Different threads only need the same
+   complete record multiset, not the same sequence.
+4. A filter keeps its match semantics and returns every match; delete the user pagination
+   arguments with their skip/take, truncation count and pagination early-stop logic, and do
+   not substitute a cursor or preview. Keep error, cancellation and safety-budget stops and
+   the internal bounded batch (a batch is not user pagination). A stored entry is borrowed and
+   deflate decompresses on demand; a query builds no full ProgramIndex and no decompilation
+   IR.
+5. Regress fields, diagnostic category and exit; do not add a sort or stable mode for the
+   old display sequence, record this deliberate change and measure its release cost, and
+   never invent a claim that unordered output is necessarily faster.
+
+**Invariants / limits**: The definition and reference indexes of the same input
+correspond to the same entry, and a successful query returns every matching
+record with no duplication or loss; no Python or external JVM; the query budget
+and the engine budget are not mixed. Removing user count truncation does not
+remove the safety limit; an over-budget query MUST fail rather than return the
+first N rows and mark success.
+
+**Tests**: Q03 verifies multi-DEX, duplicate entries, duplicate manifests,
+UTF-16 matching, concurrent record completeness and resource errors through the
+public query module interface. A controlled delayed producer confirms that there
+is no ordinal wait and that the buffer is bounded, comparing content by original
+identity; the test does not check CLI flags, table headers, basic filter routing
+or empty-list printing, and does not assert private phase call counts.
+
+**Acceptance**: G0 plus `cargo test -p diana --test product_contracts h03_` plus
+input and decompression regression through the Diana public domain interface.
+The old self-contained and inflate policy serve only as a review question;
+ref-fork tests are not run and their pass counts are not part of acceptance.
+**Completion**: The new CLI columns return every matching record; reading,
+matching and original-identity completeness hold, and output order and user
+pagination are deliberately cancelled; a slow entry does not block unrelated
+results, and the fast path needs no new engine.
+
+**Not in scope**: Merging every DEX parser, an MCP general pagination protocol,
+rewriting AXML, claiming a speedup after measuring a debug build.
+
+## H04 — Raw DexImage, 041 and definition-identity adapter
+
+**Dependencies**: H03, T04. **Scope**: the root → internal-engine input
+interface.
+
+**Files**: `src/analysis/dex/container.rs`, the selected-class and engine
+adapter of the root `analysis`; the native 041 input interface plus origin and
+keys already provided by T04. This card no longer carries the engine parser
+implementation.
+
+**Input→output / Interface**:
+`SelectedClass{scope,entry,logical,classdef,descriptor}` → `Vec<DexImage<'a>>`,
+ClassKey/MethodSelector and a bounded DeclarationCatalog, with the result
+identity mapped back to the root's original input.
+
+**Steps**:
+1. Parse class-at, method-at, field-at and string-at per DESIGN.md and check the physical,
+   logical, class-def and member index against the descriptor. When a readable get-class
+   name has several definitions, report it explicitly as ambiguous; the card MUST NOT feed
+   the engine and then pick arbitrarily by name. Distinguish an illegal `at` syntax from an
+   invalid index, and map a bare DEX to `e0:l0`.
+2. Read native 041 through T04 and pass only the borrowed original container plus the logical
+   `header_offset`, mapping the original ImageOrigin to the physical entry and logical member.
+   This card MUST NOT overlay or copy the container per member.
+3. P1 and the Engine already adopt a borrowed view per DESIGN §3. The H02 lease obtains the
+   necessary bytes first, then the same scope creates the RunContext and calls
+   open/decompile/render; Report is an owned result and no temporary IR borrow is returned.
+4. Locate a dependency declaration precisely with the scanner and generate facts within the
+   dependency byte and metadata budget; report Unknown when completeness is insufficient.
+   Do not parse the whole APK automatically or trust the lenient scanner validation as the
+   engine validator.
+5. The fields/methods output `at` and the get-class/get-method selection come from the same
+   original SelectedClass or MemberRef; an original runtime index does not change with a Java
+   rename, and there is no `--members` table prefix.
+
+**Invariants / limits**: Container offsets, original sites and UTF-8 span
+coordinates are not mixed; native 041 support is input support and does not
+imply support for every newer opcode; a case beyond the original raw profile is
+explicitly Unsupported and MUST NOT be overlaid through.
+
+**Tests**: Q04 verifies several logical 041 members, a duplicate definition or
+physical entry, an identity that expires across inputs and a descriptor or index
+mismatch through the public input and definition-parsing interface, and checks
+the original definition and proto against the unmodified raw bytes. The test
+does not check CLI selector argument syntax or string formatting.
+
+**Acceptance**: G0 plus `cargo test -p diana --test product_contracts h04_` plus
+the engine T02–T04 regression. **Completion**: Borrowing, identity, native 041
+and the raw fallback are complete, and the scanner being able to list something
+MUST NOT be equated with engine support.
+
+**Not in scope**: A full production-parser cache, a permanent cross-file ID,
+switching the default to the old engine, MCP class-id returning the new schema.
+
+## H05 — CLI wiring and the semantic loop of the public decompilation interface
+
+**Dependencies**: H04, T06. **Scope**: early CLI wiring that does not wait for
+the whole engine.
+
+**Files**: the new engine adapter of the root `analysis`,
+`src/cli/{args,mod}.rs`, `tests/product_contracts.rs` and the relevant fixtures.
+
+**Input→output / Interface**: a canonical `get-class`/`get-method` selector →
+Engine Report → default decompilation text or the JSON representation of the
+same result. By default the CLI delivers the existing
+Java/Mixed/Smali/Unavailable content directly, and a local failure does not
+clear the other members; there is no old-command alias and no dual engine.
+
+**Steps**:
+1. After the CLI locates the class, exact method and proto, the borrowed engine runs the T06
+   fixture, with callback and control provided by the scope.
+2. Known-context validation of a single-method source follows TASKS §4, and a Mixed class
+   MUST NOT be called a JavaUnit; a method that does not meet the Java representation
+   constraints keeps raw plus its language marker.
+3. Display the selected result directly per ALGORITHMS §8.1: a JavaUnit as complete Java, and
+   Mixed keeping the shell, the successful Java and the raw or reason of the failing method;
+   the Smali or Unavailable of get-method is equally visible. Text and JSON do not change
+   algorithm eligibility, and no `--require-java` exists; a hard error keeps its nonzero
+   status, and an existing fully renderable Report is not discarded because of it.
+4. Keep the complete method owner/name/proto or method-at per DESIGN.md, with Mixed carrying
+   the per-method language, reason and original identity, and extra logging on stderr; the
+   stdout and file payload of the same run agree; JSON does not serialize the private arena,
+   and no MCP envelope is designed.
+5. Keep the old implementation in ref-fork for reading only, leaving no active old entry
+   point, dependency or dual-engine routing. A Diana request MUST NOT silently fall back to
+   dexdec; a failure follows only the original raw smali contract.
+
+**Invariants / limits**: The request source and method proto are exact and the
+output status is truthful, with language eligibility separated from full display
+and hard errors; no stdio pollution, and no stub-based pass. A missing catalog
+or representation limit MUST be marked locally and MUST NOT escalate into
+suppressing display for the whole class by default.
+
+**Tests**: Q05 runs F05 → recovered Java → javac → behavior Driver through the
+public decompilation interface and verifies the actual return and semantics, the
+original identity and degradation completeness. F10/Q04 cover complex overloads
+and cross-DEX; D085 additionally checks that default display keeps Java and the
+invoke-custom raw, the complete UTF-16 and call site, and the real spans; the
+whole case is accepted once the format facts T04 needs are ready. The test
+starts no get-class/get-method process and does not check flag routing, a
+getter, JSON wrapping or not-found text.
+
+**Acceptance**: G0 plus `cargo test -p diana --test product_contracts h05_` plus
+engine B(F05). CLI wiring is source-reviewed and gets no black-box test.
+**Completion**: The new module passes the real semantic loop and the CLI already
+calls that interface rather than merely linking the new crate.
+
+**Not in scope**: A new MCP getclass tool, a throwing stub, forcing Java for an
+unverified shape, immediately deleting every old dependency.
+
+## H06 — Request cancellation, layered budgets and output publication
+
+**Dependencies**: H05, T09. **Scope**: CLI, control and engine output.
+
+**Files**: the root input, request, engine adapter and CLI emit;
+`crates/diana-decomp/src/pipeline/control.rs`; tests for private input,
+interrupt and backpressure.
+
+**Input→output / Interface**: caller stop or UserInterrupt → RunContext →
+pipeline checkpoints; per-request byte, work and output limits → the same
+RunContext; complete text or JSON, or an explicit Resource or Cancel error.
+
+**Steps**:
+1. The cancellation callback MUST NOT introduce tokio into the engine; check it at every
+   decode, worklist, copy, region and emit checkpoint, and Cancelled does not continue into
+   the raw fallback.
+2. After the user file or scope ends, no stale result is emitted; the owner and reservation of
+   the same request's cache loader or reader are released, a failure leaves no half cache, and
+   no hard timeout is promised.
+3. When creating the RunContext, combine only the explicitly set Limits with the remaining
+   scope allowance; an unset limit stays None, and no fixed input, inflate or JSON threshold is
+   added. Deduplicate a dependency and a main declaration by the same physical owner, charge
+   derived data, all methods and render cumulatively, and let only an explicit finite raw quota
+   participate in the parent reservation.
+4. Check output separately against `max_method_output_bytes`, the independent
+   `fallback_output_bytes` and `max_report_output_bytes` of DESIGN §10.3; P9 sums the shell,
+   members, markers and diagnostics, and JSON checks the length after the actual escaping,
+   repeated fields and spans per DESIGN §7. Output length MUST NOT be charged twice as an
+   allocation, and real work or allocation is never refunded; an overrun is never a truncated
+   success, and the file publishes atomically and safely. D064 fixes the member overrun and the
+   report overrun separately.
+5. A broken pipe in a CLI stream query stops the producer and backpressures; a SIGPIPE that
+   kills the process MUST NOT be called a catchable cancellation guarantee.
+
+**Invariants / limits**: Cancellation is cooperative and the non-preemptible
+libdeflate is explicit; by default input, inflate, JSON and engine have no
+numeric quota, and Resource is reported only on an explicit overrun or a real
+allocation failure; there is no new MCP semaphore or schema contract.
+
+**Tests**: Q06 verifies long-work cancellation, owner lifetime, normal/raw
+budget isolation, the output byte budget for heavily escaped text, spans
+pointing into the actual source, a cache failure reservation and a bounded queue
+when the consumer closes, through the public request, decompilation and
+extraction interface. It is not a simple JSON field wrapping or private phase
+call-order test, and each case has a finite timeout.
+
+**Acceptance**: G0 plus `cargo test -p diana --test product_contracts h06_` plus
+the T09/T25 control regression. **Completion**: The exact output limit and the
+cancellation state have non-empty execution evidence, and the card MUST NOT
+build a huge String first and then claim the allocation budget is checked in
+advance.
+
+**Not in scope**: MCP close/status/permit design, a crash-isolated subprocess,
+arbitrary real-time preemption, a cross-process cache service.
+
+## H07 — Unified help, output and agent documentation for the eleven commands
+
+**Dependencies**: H06, H09, H10. **Scope**: CLI consumers and usage text.
+
+**Files**: `src/cli/{args,mod,agent_skill}.rs`, `skill/SKILL.md`, README; the
+historical sources stay. This card adds no CLI test, help snapshot or
+argument-routing test.
+
+**Input→output / Interface**: the 11 commands, specified columns, canonical
+`at`, default decompilation text and the same-result JSON, and the extract
+exception, all formally frozen; the agent usage text is an ordinary document and
+release asset, and no public skill-install command is provided. MCP stays
+deferred.
+
+**Steps**:
+1. Help lists exactly get-class, entries, extract, strings, xref, manifest, classes,
+   get-method, fields, methods and help, with the specified descriptions and columns; the
+   TSV header and escaping and the JSON domain fields follow DESIGN.md, and no old member
+   prefix is added. The complete method selector contains name and proto instead of the old
+   separate `--method`/`--proto` pair, and `at` can be passed back.
+2. A complete Mixed or Smali display of a local default Unsupported may exit 0 exactly like
+   JSON without becoming a JavaUnit; usage errors exit 2, a missing single object exits 3,
+   ambiguity exits 4 and an empty query set exits 0. Malformed, BUG, Resource, Cancel and I/O
+   still fail, and an existing fully renderable result is kept with a nonzero exit. The old
+   getclass, findrefs, skill, require-java, class-id, members and pagination flags are
+   explicitly rejected.
+3. The agent documentation switches to the new Diana commands and explains the fields, `at`,
+   JSON, the one explicit external d8 conversion and its reuse; it MUST NOT move or delete a
+   user-installed rasc skill automatically, and adds no twelfth skill command.
+4. Stdout, file, help, version and the Windows binary target are complete; the JSON `version`
+   field is a local CLI report and no MCP is designed.
+5. Check the rename list of every live CLI brand consumer; a legacy release or provenance item
+   is not a remaining bug.
+
+**Invariants / limits**: An unknown flag MUST NOT be silently ignored; a
+JavaUnit stays pure Java, Mixed MUST mark language and reason explicitly and
+keep its members, and the JSON status follows the typed Report; TSV
+control-character and isolated-surrogate escaping loses no value, and `at` and
+spans are accurate; extract binary output writes only `-o` and MUST NOT be
+polluted by the generic stdout copy rule.
+
+**Tests**: No automated test is added. Q07 is a consistency review checklist for
+DESIGN.md, the source and the agent documentation, not a test family; help,
+routing, flags, column names, old aliases and default wrapping get no black-box
+or golden. F03/Q04/Q06/Q09/Q10 test complex UTF-16 fidelity, identity, spans and
+extraction safety, and basic layout is not retested.
+
+**Acceptance**: Format, lint and build checks plus the Q07 manual review, with
+no `h07_` test filter. The old tests stay in ref-fork; they are not deleted but
+enter no active gate. **Completion**: The eleven-command wiring matches the
+documentation, the matching domain task supplies complex verification, and no
+MCP is designed.
+
+**Not in scope**: MCP input or output schema, automatic changes to a user's
+agent configuration, a global old-brand license or history rewrite, a release.
+
+## H08 — CLIProductRC and the old-code retirement list
+
+**Dependencies**: H07, T25, T14. **Scope**: overall acceptance and release
+configuration preparation; MCP stays deferred.
+
+**Files**: the active root Cargo manifest and lock, README/AGENTS, the
+application query and engine adapter, `apps/diana/tests/product_contracts.rs`;
+verify that no ref-fork dependency exists, and maintain no old MCP build.
+
+**Input→output / Interface**: EngineCoreRC plus H01–H07 evidence → a
+CLIProductRC report, a live call-graph and dependency retirement list, and a
+single-diana release configuration. Acceptance covers the completeness and
+identity of unordered output and does not require cross-run source or report
+sequences to match; this card creates no tag and uploads no release.
+
+**Steps**:
+1. Check the DESIGN.md commands, columns and routing by source and document review without
+   adding a black-box test; Q02–Q06/Q09/Q10 and the F tests verify complex
+   defined-versus-referenced behavior, xref site completeness, extract original bytes/CRC/file
+   safety, cross-DEX and 041 identity, and engine behavior. Q01/Q07 are manual checklists only,
+   Q08 rolls them up, and they MUST NOT be treated as executable test families.
+2. Verify that the active CLI and dependency graph contains no call to the old dexdec, MCP,
+   helper or ref-fork code; the old code stays complete in the reference and needs no compile or
+   test run, and no new adapter is designed for MCP.
+3. ref-fork is neither a production dependency nor a gate; it keeps its original source, tests,
+   license and history, and the existence of the current reference directory MUST NOT make it a
+   second release product or a legacy dependency that must be tested.
+4. Verify that the active workspace contains Diana only, that packages stay `publish=false`, and
+   that no archived release script or CI wiring exists; a reference-project build result MUST NOT
+   replace product acceptance.
+5. Run the Diana-only G0 and the complex H and engine CoreRC gates, reviewing basic H01/H07 only
+   and creating no empty test; an authorized representative-input release measurement is explicitly
+   not-run, and no old MCP regression or release test runs.
+6. List knownUnsupported, raw coverage and the deferred-MCP statement, and do not describe
+   CLIProductRC as a migration of every project interface.
+
+**Invariants / limits**: No silent fallback across the old engine; a single
+binary with no version or tag change; active code MUST be verified; the old
+reference does not participate in this branch's gate; the card MUST NOT claim
+all DEX semantics are correct.
+
+**Tests**: Q08 rolls up the complex semantic and domain tests: cross-DEX and 041
+identity, input, extraction, cancellation and budgets, plus the T25 behavior and
+degradation completeness. It establishes no whole CLI command matrix and no
+branding, help or flag black-box; CLI wiring, old dependencies and the release
+configuration use source review and a local build check.
+
+**Acceptance**: G0 plus the actual complex Q02–Q06/Q09/Q10 tests and the T25
+core gate (nonzero runs); Q01/Q07 are manual checks, Q08 rolls them up, and no
+empty `h08_` test is required. The release artifact is checked locally and not
+published.
+**Completion**: Every required case and invocation in the JSON is accepted
+against independent expectations, reusing T25 engine evidence and completing the
+application side of engine-and-application and the application cases; nothing is
+removed or skipped and no core Java becomes Smali. MCP stays deferred, and the
+basic interface gets no additional automated test.
+
+**Not in scope**: MCP migration, directly deleting `src/mcp`, a release or tag,
+automatic private-corpus downloads, cache or parallel optimization without
+evidence.
+
+## H09 — Defined symbol listing and cross-DEX reference sites
+
+**Dependencies**: H04. **Scope**: fields/methods/xref with the specified
+columns, without running the decompiler.
+
+**Files**: root `src/analysis/dex/{mod,members,opcodes}.rs`,
+`src/analysis/query.rs`, `src/cli/{args,mod}.rs`, plus `symbols.rs` and
+`references.rs` as needed; Q09 in `tests/product_contracts.rs`.
+
+**Input→output / Interface**: every actual field or method definition of a
+class_data → a single field-at or method-at column; every actual opcode
+reference site → the three columns `entry`, `context` and `match`. methods is
+not all method_ids references, and xref is not the old findrefs
+one-method-per-row form; DESIGN.md is the only field and selector specification.
+
+**Steps**:
+1. Walk class_defs and class_data and read the checked delta index, flags and code offset of
+   static and instance fields and of direct and virtual methods separately; generate the canonical
+   `at` carrying the class-def, member-id, owner, name and proto, and list abstract, native,
+   constructor and clinit declarations too.
+2. `fields`/`methods --class` selects the original definition exactly, and `--filter` matches a
+   semantic name or descriptor literally and outputs every match; verify `at` against a duplicate
+   class_def and do not rely on ordering or positional identity.
+3. `xref` resolves the kind string/type/method/field target exactly and scans the original code of
+   every root DEX logical member, reading the opcode operand and ref index instead of searching the
+   recovered Java text. Record the referencing MethodKey, the code-unit offset and the actual
+   matched value or ref.
+4. Build the context as method-at plus `@cu:0x...`, and list each real site of a method separately;
+   for several operand references at one site, create records with an explicit operand-site identity
+   and do not reuse method-level deduplication that hides sites.
+5. Keep the 035 and existing 041 scan format boundaries, handle a known-unsupported opcode or profile
+   per the original safety contract, and keep a batch only for resource backpressure and completion-
+   order output, with no global sort or pagination.
+6. Output the TSV header and escaping or the JSON items per DESIGN.md; test the difference between the
+   exact UTF-16 string value and the root original scanner display, and never do an exact xref after a
+   replacement.
+
+**Invariants / limits**: Defined and referenced, the string pool and a
+const-string site stay separate; every row has an explicit original identity;
+every member, count, code and ref index is checked and the output and match
+scratch are bounded. A successful query returns every match with no duplication
+or loss, and empty is normal; an equal numeric index MUST NOT merge records
+across DEX files.
+
+**Tests**: Q09 verifies multi-DEX same-name and same-proto, duplicate class_def,
+an external method_id that is not a definition, several xref sites in one
+method, an unused string-pool entry, an isolated surrogate and an illegal delta
+or ref index through the public symbol and reference module interface. It checks
+the original identity, site and UTF-16 value and does not test columns, command
+arguments, JSON item layout or a simple getter.
+
+**Acceptance**: G0 plus `cargo test -p diana --test product_contracts h09_` plus
+the H03/H04 regression; the nonzero Q09 checks the original identity and site
+set.
+**Completion**: fields/methods/xref are really wired into the CLI and the
+definitions and sites are exact, not just a new help command.
+
+**Not in scope**: Fuzzy regex or bare-method-name overload guessing, a complete
+DEX object model, Java source xref, an MCP tool, pagination, new unrequested
+default columns.
+
+## H10 — extract: original entry bytes and safe atomic files
+
+**Dependencies**: H02. **Scope**: single physical-entry extraction, with no
+batch unpacking.
+
+**Files**: `src/analysis/archive.rs`, the root input and request scope,
+`src/cli/{args,mod}.rs`, plus `src/analysis/extract.rs` as needed; Q10 product
+tests. A new dependency for CRC needs its own reason, license and lock change,
+and a hand-written lenient CRC check without review is forbidden.
+
+**Input→output / Interface**: an APK/ZIP plus an exact entry name (optionally
+`--entry-index`) plus the required `-o` → a complete decompressed payload file.
+Method 0 leaves the bytes unchanged, method 8 decompresses the original bytes,
+the card MUST NOT normalize the DEX, switch to 041 or generate Java, and stdout
+stays empty.
+
+**Steps**:
+1. The directory lookup keeps every physical record with the same name and exits 4 on an
+   ambiguous name; the entry index and the name MUST agree, and basename or path normalization
+   MUST NOT change the original name or select the wrong record; a bare DEX is not a ZIP entry.
+2. Check the local and central structure and the data range first, then reject EncryptedEntry
+   and UnsupportedCompression other than 0 or 8, and only then check size and CRC under the
+   unencrypted rules. An encrypted stored entry carries an extra header, so the card MUST NOT
+   wrongly report equal-length plaintext damage; there is no password or decryption path.
+   Review the codec and check CRC with the actual Q10 inputs, and MUST NOT assume the default
+   performs complete validation.
+3. Write only the user-specified file, and the entry name takes no part in path construction.
+   Reject an output directory, a symlink, and the input file itself or a hardlink alias to it;
+   no-force never overwrites. Validation and file open or publication use a safe atomic
+   primitive to avoid a race where rename overwrites after an exists check.
+4. Create a private temporary file in the target directory, borrow or decompress within bounds
+   and write, and publish only after complete validation; cancellation, I/O, CRC and budget
+   overrun release the temporary file and the reservation. `--force` replaces only a permitted
+   ordinary file explicitly, with Windows and Unix semantics accepted separately.
+5. The byte stream passes through no UTF-8 or JSON conversion, there is no binary stdout or
+   success status line, and debug output and errors go only to stderr. Use an independent binary
+   file output adapter and do not misuse the generic emit for stdout and file at once.
+
+**Invariants / limits**: The output equals the complete decompressed payload of
+the original entry word for word and the raw 041 header and checksum are
+preserved; the card MUST NOT create an entry-name directory tree automatically;
+it MUST NOT delete an existing user file or the input; a CRC or size failure
+produces no false success and no half file, and a resource budget is not
+pagination.
+
+**Tests**: Q10 stored and deflated entries, binary content containing NUL and
+non-UTF-8 bytes, an original 041 container, a duplicate entry name or index
+mismatch, a ZIP name `../x` that still writes only the selected `-o`, bad CRC or
+size, unsupported compression or encryption, a bomb or limit, cancel, an
+existing output with no-force, force, symlink, hardlink and input alias, and a
+concurrent publication race. Every test uses a self-made temporary file and
+touches no real user path. The fixed D068–D070 are accepted per each
+invocation's entry, force and error kind and the process observation of §4.3.4.
+
+**Acceptance**: G0 plus `cargo test -p diana --test product_contracts h10_` plus
+the input and archive regression; Q10 checks the original payload and hash, an
+unchanged target after failure and no temporary residue through the public
+extraction interface; the test starts no CLI to check stdout or `-o` routing.
+**Completion**: Evidence exists for the original bytes, CRC, race, alias and
+limit safety, and the card is not merely a decompression into a Vec.
+
+**Not in scope**: Batch unzip or automatic writing to an entry path, exporting a
+compressed stream or the ZIP local header, DEX normalization, a CLI external
+process, MCP extract or a release.

@@ -20,5 +20,5 @@ The source baseline is the public rasc commit
 `ef8a4c92c6b89e8afed9ccbc1552feae67b6982d`; the retained working tree is not
 a new upstream release. Fixed upstream paths in Diana SOURCE_MAP remain relative
 to that commit; in this checkout prefix those paths with `ref-fork/rasc/`.
-See [Diana structure](../docs/diana/STRUCTURE.md) and
+See [product boundary](../docs/diana/DESIGN.md#1-product-boundary-and-engineering-scope) and
 [source evidence](../docs/diana/SOURCE_MAP.md).
