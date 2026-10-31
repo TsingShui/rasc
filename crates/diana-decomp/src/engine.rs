@@ -427,6 +427,15 @@ fn normal_member(
                     });
                 }
             }
+            if raw.layout().is_reachable(pc)
+                && let crate::raw::LayoutKind::Instruction(spec) = layout.kind()
+                && matches!(spec.opcode, 0x60..=0x66)
+                && let Some(reference) = layout.references()[0]
+                && let crate::raw::OperandReference::Field(id) = reference.target
+                && !index.field_owner_defined(id, budget)?
+            {
+                crate::p4_calls::check_external_static_read(&input, catalog, id, pc, budget)?;
+            }
             pc = pc
                 .checked_advance(layout.width())
                 .ok_or(RequestError::InternalInvariant(

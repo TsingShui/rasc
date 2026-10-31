@@ -40,6 +40,16 @@ pub enum RequestError {
         reference: crate::MethodId,
         pc: crate::CodeUnitOffset,
     },
+    #[error("binding evidence missing for field {reference:?} at {pc:?}")]
+    FieldBindingEvidenceMissing {
+        reference: crate::FieldId,
+        pc: crate::CodeUnitOffset,
+    },
+    #[error("Java source may inline constant field {reference:?} read at {pc:?}")]
+    JavaConstantFieldRead {
+        reference: crate::FieldId,
+        pc: crate::CodeUnitOffset,
+    },
     #[error("requested DEX identity does not exist")]
     UnknownDex,
     #[error("JavaTargetLimit: {item:?} uses {actual}, maximum {maximum}")]
@@ -63,9 +73,10 @@ impl RequestError {
             Self::UnknownDex | Self::UndefinedRegister { .. } | Self::InvalidWideRead { .. } => {
                 FailureKind::Malformed
             }
-            Self::JavaTargetLimit { .. } | Self::BindingEvidenceMissing { .. } => {
-                FailureKind::Unsupported
-            }
+            Self::JavaTargetLimit { .. }
+            | Self::BindingEvidenceMissing { .. }
+            | Self::FieldBindingEvidenceMissing { .. }
+            | Self::JavaConstantFieldRead { .. } => FailureKind::Unsupported,
             Self::InternalInvariant(_) => FailureKind::InternalInvariant,
         }
     }

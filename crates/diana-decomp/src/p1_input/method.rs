@@ -91,6 +91,13 @@ impl<'i, 'a> MethodInput<'i, 'a> {
     ) -> Result<Option<super::catalog::LocalMethod<'a>>, InputError> {
         self.index.local_method(id, budget)
     }
+    pub(crate) fn field_reference(
+        &self,
+        id: crate::FieldId,
+        budget: &mut MethodBudget<'_, '_>,
+    ) -> Result<super::catalog::FieldReference<'a>, InputError> {
+        self.index.field_reference(id, budget)
+    }
     pub(crate) fn method_reference(
         &self,
         id: MethodId,

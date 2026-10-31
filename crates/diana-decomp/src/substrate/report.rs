@@ -162,7 +162,9 @@ fn request_code(error: &crate::RequestError) -> crate::DiagnosticCode {
         RequestError::UndefinedRegister { .. } => Code::UndefinedRegister,
         RequestError::InvalidWideRead { .. } => Code::InvalidWideRead,
         RequestError::JavaTargetLimit { .. } => Code::JavaTargetLimit,
-        RequestError::BindingEvidenceMissing { .. } => Code::BindingEvidenceMissing,
+        RequestError::BindingEvidenceMissing { .. }
+        | RequestError::FieldBindingEvidenceMissing { .. } => Code::BindingEvidenceMissing,
+        RequestError::JavaConstantFieldRead { .. } => Code::JavaConstantFieldRead,
         RequestError::InternalInvariant(_) => Code::InternalInvariant,
     }
 }

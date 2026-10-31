@@ -356,6 +356,21 @@ impl<'a> ProgramIndex<'a> {
         Ok(self.type_descriptor(id, control)?.0)
     }
 
+    pub(crate) fn field_owner_defined(
+        &self,
+        id: crate::FieldId,
+        control: &mut impl InputControl,
+    ) -> Result<bool, InputError> {
+        let mut field = self.table(TableKey::Field(id), control)?;
+        let owner = TypeId(u32::from(field.read_u16_with(control)?));
+        for index in 0..self.header.class_defs.count {
+            let mut class = self.table(TableKey::Class(ClassDefId(index)), control)?;
+            if TypeId(class.read_u32_with(control)?) == owner {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
     pub(crate) fn method_has_definition(
         &self,
         method_id: MethodId,

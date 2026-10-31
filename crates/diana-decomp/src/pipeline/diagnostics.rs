@@ -29,6 +29,7 @@ pub enum DiagnosticCode {
     MethodNotDefined,
     MetadataUnavailable,
     BindingEvidenceMissing,
+    JavaConstantFieldRead,
     BranchJavaUnsupported,
     JavaAnalysisUnavailable,
     JavaDeclarationUnsupported,

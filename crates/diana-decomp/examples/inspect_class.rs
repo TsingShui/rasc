@@ -49,6 +49,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         methods: Vec<ExternalMethodSignature>,
         #[serde(default)]
         classes: Vec<diana_decomp::ExternalClassDeclaration>,
+        #[serde(default)]
+        fields: Vec<diana_decomp::ExternalFieldEvidence>,
     }
     let catalog = if let Some(path) = catalog_path {
         let facts: CatalogInput = serde_json::from_reader(std::fs::File::open(path)?)?;
@@ -57,6 +59,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             facts.methods,
             facts.classes,
         )
+        .with_field_evidence(facts.fields)
     } else {
         DeclarationCatalog::empty(EnvironmentId(0))
     };

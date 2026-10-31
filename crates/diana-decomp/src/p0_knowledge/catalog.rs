@@ -36,6 +36,7 @@ pub struct DeclarationCatalog {
     pub(crate) environment: EnvironmentId,
     methods: Vec<ExternalMethodSignature>,
     classes: Vec<super::ExternalClassDeclaration>,
+    fields: Vec<super::ExternalFieldEvidence>,
 }
 
 impl DeclarationCatalog {
@@ -44,6 +45,7 @@ impl DeclarationCatalog {
             environment,
             methods: Vec::new(),
             classes: Vec::new(),
+            fields: Vec::new(),
         }
     }
 
@@ -58,6 +60,7 @@ impl DeclarationCatalog {
             environment,
             methods,
             classes: Vec::new(),
+            fields: Vec::new(),
         }
     }
     /// Takes caller-owned directories with explicit per-class coverage. Native
@@ -72,7 +75,36 @@ impl DeclarationCatalog {
             environment,
             methods,
             classes,
+            fields: Vec::new(),
         }
+    }
+    /// Takes caller-owned exact field facts. Missing/duplicate entries remain unproven and
+    /// consumers still validate the original identity and declaration scope.
+    pub fn with_field_evidence(mut self, fields: Vec<super::ExternalFieldEvidence>) -> Self {
+        self.fields = fields;
+        self
+    }
+    pub(crate) fn field<'c>(
+        &'c self,
+        owner: DexString<'_>,
+        name: DexString<'_>,
+        field_type: DexString<'_>,
+        budget: &mut impl InputControl,
+    ) -> Result<Option<&'c super::ExternalFieldEvidence>, InputError> {
+        let mut found = None;
+        for field in &self.fields {
+            budget.charge_work(1)?;
+            if owner.matches_with(&field.owner, budget)?
+                && name.matches_with(&field.name, budget)?
+                && field_type.matches_with(&field.field_type, budget)?
+            {
+                if found.is_some() {
+                    return Ok(None);
+                }
+                found = Some(field);
+            }
+        }
+        Ok(found)
     }
     pub(crate) fn class<'c>(
         &'c self,

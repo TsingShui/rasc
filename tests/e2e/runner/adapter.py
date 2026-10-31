@@ -76,7 +76,7 @@ def run_public(root, cache, spec, manifest, case_ids=None):
                     argv.extend(['--control',control_path])
                     record['request_controls']={'path':relative(control_path)}
                     catalog_path=work/'method-signatures.json'
-                    save(catalog_path,_catalog(root,assets,cert['catalog']['asset_id']))
+                    save(catalog_path,_catalog(root,assets,cert['catalog']['asset_id'],invocation['input'].get('javaConstantKind')))
                     argv.extend(['--catalog',catalog_path])
                     public_path=work/'public.json'
                     relative(public_path)
@@ -170,7 +170,7 @@ def run_public(root, cache, spec, manifest, case_ids=None):
     return report
 
 
-def _catalog(root, assets, identity):
+def _catalog(root, assets, identity,field_kind=None):
     from e2e import PreparationError, load
     by_path={a['path']:a for a in assets.values()}
     def checked(asset):
@@ -183,8 +183,10 @@ def _catalog(root, assets, identity):
     declarations=list(api_declarations)
     source_declarations=list(catalog['source_classfiles'].values())
     declarations.extend(source_declarations)
+    explicit_entries=[]
     for path in catalog['explicit_facts']:
         for entry in checked(by_path[path])['entries']:
+            explicit_entries.append(entry)
             if entry.get('declared') is True:declarations.append(entry)
     methods=[]
     def units(text):
@@ -202,7 +204,27 @@ def _catalog(root, assets, identity):
                         'field_names':[units(field['name']) for field in declaration['fields']],
                         'coverage':coverage,
                         'generic':'Signature' in attributes,'enclosing_scope':any(attribute in attributes for attribute in ('InnerClasses','EnclosingMethod','NestHost','NestMembers'))})
-    return {'environment_id':0,'methods':methods,'classes':classes}
+    fields={}
+    for declaration,coverage in [(declaration,'exported_api') for declaration in api_declarations]+[(declaration,'all_declarations') for declaration in source_declarations]:
+        for field in declaration['fields']:
+            kind='constant' if 'ConstantValue' in field['attributes'] and field.get('constant_value') is not None else 'non_constant' if coverage=='all_declarations' else 'unknown'
+            key=(declaration['descriptor'],field['name'],field['proto'])
+            fields[key]={'owner':units(key[0]),'name':units(key[1]),'field_type':units(key[2]),'access_flags':field['flags'],'constant_kind':kind}
+    matched_variant=False
+    flag_bits={'public':1,'private':2,'protected':4,'static':8,'final':16,'volatile':64,'transient':128,'synthetic':4096,'enum':16384}
+    for declaration in explicit_entries:
+        for field in declaration.get('fields',[]):
+            if field_kind is None or field.get('javaConstantKind')!=field_kind:continue
+            key=(declaration['descriptor'],field['name'],field['type'])
+            flags=0
+            for flag in field['accessFlags']:
+                if flag not in flag_bits:raise PreparationError('unknown explicit field access flag')
+                flags|=flag_bits[flag]
+            kind={'Constant':'constant','NonConstant':'non_constant','Unknown':'unknown'}[field_kind]
+            fields[key]={'owner':units(key[0]),'name':units(key[1]),'field_type':units(key[2]),'access_flags':flags,'constant_kind':kind}
+            matched_variant=True
+    if field_kind is not None and not matched_variant:raise PreparationError('requested field evidence variant is not certified')
+    return {'environment_id':0,'methods':methods,'classes':classes,'fields':list(fields.values())}
 
 
 def _units(value):
