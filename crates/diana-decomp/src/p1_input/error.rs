@@ -9,6 +9,7 @@ pub enum InputProblem {
     InvalidLeb32,
     FileSizeMismatch,
     InvalidHeaderSize,
+    InvalidHeaderChain,
     InvalidEndianTag,
     InvalidSectionPair,
     InvalidAlignment,

@@ -4,11 +4,9 @@ use crate::input::catalog::{FieldEntry, FieldStorage, MemberEntry, MemberSelecti
 use crate::input::formats::encoding_head;
 use crate::input::{
     ClassView, Cursor, InputError, MethodBody, MethodEntry, MethodError, ProgramIndex,
-    RawMethodView,
+    RawMethodView, UnsupportedInput,
 };
-use crate::raw::{
-    DexVersion, LayoutKind, OperandReference, RawCodeItem, RawDecodeError, RawLiteral,
-};
+use crate::raw::{LayoutKind, OperandReference, RawCodeItem, RawDecodeError, RawLiteral};
 use crate::{
     ByteLength, ByteOffset, ClassDefId, CodeUnitCount, CodeUnitOffset, FailureKind, FallbackBudget,
     MethodId, TypeId,
@@ -186,7 +184,7 @@ impl ProgramIndex<'_> {
             budget.check_code_units(CodeUnitCount(1))?;
             budget.charge_work(1)?;
             let word = u16::from_le_bytes(*word);
-            if let Err(error) = encoding_head(word, CodeUnitOffset(0), DexVersion::V035) {
+            if let Err(error) = encoding_head(word, CodeUnitOffset(0), self.header.version) {
                 missing(
                     issues,
                     DebugIssue::Code {
@@ -196,7 +194,14 @@ impl ProgramIndex<'_> {
                     },
                     budget,
                 )?;
-                return write_excerpt(&class, method, word, issues, budget);
+                return write_excerpt(
+                    self.header.header_offset,
+                    &class,
+                    method,
+                    word,
+                    issues,
+                    budget,
+                );
             }
         }
         self.write_snapshot(&class, method, budget, issues)
@@ -212,9 +217,14 @@ impl ProgramIndex<'_> {
         let class_id = class.class_def_idx;
         let mut output = JsonBuffer::new();
         output.push(
-            "{\"schema\":\"diana.dex-debug/1\",\"classes\":[{\"class_def_idx\":",
+            "{\"schema\":\"diana.dex-debug/1\",\"header_offset\":",
             budget,
         )?;
+        output.unsigned(
+            u64::try_from(self.header.header_offset.0).map_err(|_| DebugError::PlatformCapacity)?,
+            budget,
+        )?;
+        output.push(",\"classes\":[{\"class_def_idx\":", budget)?;
         output.unsigned(u64::from(class_id.0), budget)?;
         output.push(",\"descriptor\":", budget)?;
         output.string(class.descriptor, budget)?;
@@ -406,6 +416,7 @@ fn selected_method<'i, 'a>(
 }
 
 fn write_excerpt(
+    header_offset: ByteOffset,
     class: &ClassView<'_, '_>,
     method: MethodEntry<'_, '_>,
     word: u16,
@@ -414,9 +425,14 @@ fn write_excerpt(
 ) -> Result<DebugSource, DebugError> {
     let mut output = JsonBuffer::new();
     output.push(
-        "{\"kind\":\"original_word_excerpt\",\"complete\":false,\"class_def_idx\":",
+        "{\"kind\":\"original_word_excerpt\",\"complete\":false,\"header_offset\":",
         budget,
     )?;
+    output.unsigned(
+        u64::try_from(header_offset.0).map_err(|_| DebugError::PlatformCapacity)?,
+        budget,
+    )?;
+    output.push(",\"class_def_idx\":", budget)?;
     output.unsigned(u64::from(class.class_def_idx.0), budget)?;
     output.push(",\"method_id_idx\":", budget)?;
     output.unsigned(u64::from(method.method_idx.0), budget)?;
@@ -542,9 +558,16 @@ pub(super) fn write_reference(
             output.string(proto.return_type, budget)?;
         }
         OperandReference::CallSite(_) | OperandReference::MethodHandle(_) => {
-            return Err(DebugError::InternalInvariant(
-                "035 snapshot reached a newer reference domain",
-            ));
+            let kind = if matches!(reference, OperandReference::CallSite(_)) {
+                0x0007
+            } else {
+                0x0008
+            };
+            return Err(InputError::Unsupported {
+                reason: UnsupportedInput::MapType(kind),
+                offset_byte: index.header.header_offset,
+            }
+            .into());
         }
     }
     output.push("}", budget)

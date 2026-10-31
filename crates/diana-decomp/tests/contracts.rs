@@ -2,6 +2,8 @@
 mod annotations;
 #[path = "input/catalog.rs"]
 mod catalog;
+#[path = "input/container.rs"]
+mod container;
 #[path = "input/debug.rs"]
 mod debug;
 #[path = "input/debug_program.rs"]

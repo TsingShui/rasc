@@ -7,7 +7,7 @@ use super::formats::{FlowKind, RegisterShape, RegisterWidth, ResultRole, wide_wo
 use super::operands::{RawOperands, RegisterEncoding, instruction_operands};
 use super::{Cursor, InputError, ProgramIndex, RawMethodView};
 use crate::raw::{
-    DexVersion, Format, InsnLayout, LayoutKind, OpcodeSpec, OperandReference, RawDecodeError,
+    Format, InsnLayout, LayoutKind, OpcodeSpec, OperandReference, RawDecodeError,
     instruction_layout,
 };
 use crate::{
@@ -114,7 +114,9 @@ impl<'a> ProgramIndex<'a> {
         budget: &mut MethodBudget<'_, '_>,
     ) -> Result<CheckedMethodLayout<'a>, MethodError> {
         budget.checkpoint()?;
-        if !std::ptr::eq(self.bytes, original.source_bytes) {
+        if !std::ptr::eq(self.bytes, original.source_bytes)
+            || self.header.header_offset != original.header_offset
+        {
             return Err(MethodError::ForeignInput);
         }
         budget.check_code_units(original.code_units())?;
@@ -161,8 +163,7 @@ impl<'a> ProgramIndex<'a> {
             OperandReference::Field(id) => id.0 < self.header.field_ids.count,
             OperandReference::Method(id) => id.0 < self.header.method_ids.count,
             OperandReference::Proto(id) => id.0 < self.header.proto_ids.count,
-            // ProgramIndex currently accepts 035 only; newer opcodes fail the
-            // shared version check before references reach this boundary.
+            // These reference tables are not accepted by the map reader yet.
             OperandReference::CallSite(_) | OperandReference::MethodHandle(_) => false,
         }
     }
@@ -196,12 +197,7 @@ impl RawMethodView<'_> {
     }
 
     fn layout_at(&self, pc: CodeUnitOffset) -> Result<InsnLayout, MethodError> {
-        // The range reader constructs RawMethodView only from accepted 035 images.
-        Ok(instruction_layout(
-            self.instructions(),
-            pc,
-            DexVersion::V035,
-        )?)
+        Ok(instruction_layout(self.instructions(), pc, self.version)?)
     }
 
     fn signed_word(&self, pc: CodeUnitOffset, delta: u32) -> Result<i32, MethodError> {

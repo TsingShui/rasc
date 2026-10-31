@@ -17,6 +17,8 @@ pub enum MethodBody<'a> {
 #[derive(Clone, Debug)]
 pub struct RawMethodView<'a> {
     pub(super) source_bytes: &'a [u8],
+    pub(super) header_offset: ByteOffset,
+    pub(super) version: super::formats::DexVersion,
     registers_size: u16,
     ins_size: u16,
     outs_size: u16,
@@ -113,6 +115,8 @@ pub(super) fn read_code<'a>(
     }
     Ok(MethodBody::Code(RawMethodView {
         source_bytes: index.bytes,
+        header_offset: index.header.header_offset,
+        version: index.header.version,
         registers_size,
         ins_size,
         outs_size,

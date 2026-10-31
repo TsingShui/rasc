@@ -2,7 +2,8 @@ use super::code::read_code;
 use super::header::{SUPPORTED_MAP_KINDS, map_kind};
 use super::strings::{DexString, TypeShape};
 use super::{
-    Cursor, DexHeader, InputError, InputProblem, checked_range, count_usize, file_offset, malformed,
+    Cursor, DexContainer, DexHeader, InputError, InputProblem, checked_range, count_usize,
+    file_offset, malformed,
 };
 use crate::pipeline::control::InputControl;
 use crate::{
@@ -21,7 +22,8 @@ struct Section {
 /// on demand; it owns neither a decoded string pool nor method result buffers.
 pub struct ProgramIndex<'a> {
     pub(super) bytes: &'a [u8],
-    pub(super) header: DexHeader,
+    pub(crate) header: DexHeader,
+    container: DexContainer<'a>,
     sections: [Option<Section>; SUPPORTED_MAP_KINDS],
 }
 
@@ -34,7 +36,17 @@ impl<'a> ProgramIndex<'a> {
         bytes: &'a [u8],
         control: &mut impl InputControl,
     ) -> Result<Self, InputError> {
-        let header = super::header::read_header_with(bytes, control)?;
+        let container = DexContainer::open_with(bytes, control)?;
+        Self::from_container(container, ByteOffset(0), control)
+    }
+
+    pub(super) fn from_container(
+        container: DexContainer<'a>,
+        header_offset: ByteOffset,
+        control: &mut impl InputControl,
+    ) -> Result<Self, InputError> {
+        let bytes = container.bytes;
+        let header = super::header::read_member_header(container, header_offset, control)?;
         let mut cursor = Cursor::bounded(
             bytes,
             header.map_byte_range.start,
@@ -79,6 +91,7 @@ impl<'a> ProgramIndex<'a> {
         Ok(Self {
             bytes,
             header,
+            container,
             sections: by_kind,
         })
     }
@@ -179,7 +192,18 @@ impl<'a> ProgramIndex<'a> {
         if !offset_byte.0.is_multiple_of(alignment) {
             return Err(malformed(InputProblem::InvalidAlignment, offset_byte));
         }
-        Cursor::bounded(self.bytes, offset_byte, section.end_byte)
+        let mut end = self
+            .container
+            .item_end(offset_byte, control)?
+            .min(section.end_byte);
+        let link = self.header.link_byte_range;
+        if offset_byte >= link.start && offset_byte < link.end {
+            return Err(malformed(InputProblem::OverlappingSections, offset_byte));
+        }
+        if offset_byte < link.start {
+            end = end.min(link.start);
+        }
+        Cursor::bounded(self.bytes, offset_byte, end)
     }
 
     fn table(

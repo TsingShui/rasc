@@ -288,17 +288,18 @@ fn t02_image_and_cumulative_metadata_limits() {
 
 #[test]
 fn t02_cancellation_during_header_work_remains_terminal() {
-    let bytes = empty_dex();
-    let checks = Cell::new(0);
-    let cancel = || {
-        checks.set(checks.get() + 1);
-        checks.get() == 8
-    };
-    let mut control = RunContext::new(Limits::default(), &cancel);
-    let error = read_header(&bytes, &mut control).unwrap_err();
-    assert_eq!(error.kind(), FailureKind::Cancelled);
-    assert_eq!(
-        read_header(&bytes, &mut control).unwrap_err().kind(),
-        FailureKind::Cancelled
-    );
+    for (bytes, cancel_after) in [(empty_dex(), 8), (super::container::d065(), 14)] {
+        let checks = Cell::new(0);
+        let cancel = || {
+            checks.set(checks.get() + 1);
+            checks.get() == cancel_after
+        };
+        let mut control = RunContext::new(Limits::default(), &cancel);
+        let error = read_header(&bytes, &mut control).unwrap_err();
+        assert_eq!(error.kind(), FailureKind::Cancelled);
+        assert_eq!(
+            read_header(&bytes, &mut control).unwrap_err().kind(),
+            FailureKind::Cancelled
+        );
+    }
 }
