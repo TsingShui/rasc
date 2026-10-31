@@ -14,6 +14,9 @@ fn read(
     values: &[Option<Number>],
 ) -> Number {
     match view {
+        super::Conversion::BooleanToInt(_) | super::Conversion::Proven01ToBoolean(_) => {
+            panic!("unexpected boolean conversion in numeric example")
+        }
         super::Conversion::Identity(value) => {
             values[usize::try_from(value.0).unwrap()].expect("read of an unmaterialized value")
         }

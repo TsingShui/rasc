@@ -96,6 +96,16 @@ fn scalar(
                 views.right
             };
             match conversion {
+                Some(Conversion::BooleanToInt(original)) if original.0 == value.0 => {
+                    output.push("(", budget)?;
+                    named(value, output, budget)?;
+                    output.push(" ? 1 : 0)", budget)
+                }
+                Some(Conversion::Proven01ToBoolean(original)) if original.0 == value.0 => {
+                    output.push("(", budget)?;
+                    named(value, output, budget)?;
+                    output.push(" != 0)", budget)
+                }
                 Some(Conversion::Identity(original)) if original.0 == value.0 => {
                     named(value, output, budget)
                 }
@@ -163,6 +173,16 @@ fn scalar(
     output.push("return ", budget)?;
     match typing.returned {
         Conversion::Identity(value) if value.0 == returned.0 => named(value, output, budget)?,
+        Conversion::BooleanToInt(value) if value.0 == returned.0 => {
+            output.push("(", budget)?;
+            named(value, output, budget)?;
+            output.push(" ? 1 : 0)", budget)?;
+        }
+        Conversion::Proven01ToBoolean(value) if value.0 == returned.0 => {
+            output.push("(", budget)?;
+            named(value, output, budget)?;
+            output.push(" != 0)", budget)?;
+        }
         Conversion::LiteralView { value, kind } if value.0 == returned.0 => {
             super::literals::numeric(&definitions[at(value)?].expression, kind, output, budget)?
         }
@@ -170,6 +190,28 @@ fn scalar(
             return Err(RequestError::InternalInvariant(
                 "verified scalar return changed its use site",
             ));
+        }
+    }
+    output.push(";\n", budget)
+}
+pub(super) fn returned(
+    value: crate::p8_java::branch::Return,
+    output: &mut TextBuffer,
+    budget: &mut MethodBudget<'_, '_>,
+) -> Result<(), RequestError> {
+    use crate::p8_java::branch::Return;
+    output.push("return ", budget)?;
+    match value {
+        Return::Direct(value) => local(value, output, budget)?,
+        Return::Boolean01(value) => {
+            output.push("(", budget)?;
+            local(value, output, budget)?;
+            output.push(" != 0)", budget)?;
+        }
+        Return::BooleanWord(value) => {
+            output.push("(", budget)?;
+            local(value, output, budget)?;
+            output.push(" ? 1 : 0)", budget)?;
         }
     }
     output.push(";\n", budget)
@@ -230,6 +272,7 @@ fn diamond(
             match declaration.kind {
                 Kind::Int => "int ",
                 Kind::Boolean => "boolean ",
+                Kind::Object => "java.lang.Object ",
             },
             budget,
         )?;
@@ -248,6 +291,17 @@ fn diamond(
                 output.push("!", budget)?;
             }
             local(body.condition, output, budget)?;
+        }
+        Kind::Object => {
+            local(body.condition, output, budget)?;
+            output.push(
+                if body.opcode == 0x38 {
+                    " == null"
+                } else {
+                    " != null"
+                },
+                budget,
+            )?;
         }
         Kind::Int => {
             local(body.condition, output, budget)?;
@@ -273,7 +327,6 @@ fn diamond(
     assignments(&body.yes, output, budget)?;
     output.push("} else {\n", budget)?;
     assignments(&body.no, output, budget)?;
-    output.push("}\nreturn ", budget)?;
-    local(body.returned, output, budget)?;
-    output.push(";\n", budget)
+    output.push("}\n", budget)?;
+    returned(body.returned, output, budget)
 }

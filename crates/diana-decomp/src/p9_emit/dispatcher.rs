@@ -25,6 +25,7 @@ pub(super) fn write(
             match declaration.kind {
                 Kind::Int => "int ",
                 Kind::Boolean => "boolean ",
+                Kind::Object => "java.lang.Object ",
             },
             budget,
         )?;
@@ -39,6 +40,7 @@ pub(super) fn write(
                 match declaration.kind {
                     Kind::Int => " = 0",
                     Kind::Boolean => " = false",
+                    Kind::Object => " = null",
                 },
                 budget,
             )?;
@@ -74,11 +76,7 @@ pub(super) fn write(
                 edge(default, output, budget)?;
                 output.push("}\n}\n", budget)?;
             }
-            Transfer::Return(value) => {
-                output.push("return ", budget)?;
-                local(*value, output, budget)?;
-                output.push(";\n", budget)?;
-            }
+            Transfer::Return(value) => super::java::returned(*value, output, budget)?,
             Transfer::Jump(target) => edge(target, output, budget)?,
             Transfer::Branch {
                 left,
@@ -115,7 +113,7 @@ pub(super) fn write(
                     if let Some(right) = right {
                         local(*right, output, budget)?;
                     } else {
-                        output.push("0", budget)?;
+                        output.push(if *kind == Kind::Object { "null" } else { "0" }, budget)?;
                     }
                 }
                 output.push(") {\n", budget)?;

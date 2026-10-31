@@ -13,6 +13,16 @@ pub(crate) struct ValueId(pub u32);
 pub(crate) enum Kind {
     Int,
     Boolean,
+    Object,
+}
+impl Kind {
+    pub(crate) fn spelling(self) -> &'static str {
+        match self {
+            Self::Int => "int",
+            Self::Boolean => "boolean",
+            Self::Object => "java.lang.Object",
+        }
+    }
 }
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub(crate) enum Sym {
@@ -104,6 +114,8 @@ pub(crate) struct BoundBlock {
 pub(crate) struct VerifiedSsa<'a> {
     _sealed: (),
     pub switches: Vec<Switch>,
+    pub result: Kind,
+    pub integral_bits: Vec<u8>,
     pub raw: RawMethodView<'a>,
     pub parameters: Vec<Kind>,
     pub blocks: Vec<Block>,
@@ -128,6 +140,7 @@ enum Decoded {
     ),
 }
 struct Flow<'a> {
+    result: Kind,
     switches: Vec<Switch>,
     raw: RawMethodView<'a>,
     parameters: Vec<Kind>,
@@ -266,16 +279,26 @@ fn flow<'a>(
         return Ok(None);
     };
     let raw = checked.layout().original().clone();
-    if input.access_flags() & 8 == 0
-        || !raw.try_byte_range().as_range().is_empty()
-        || !input
-            .declaration()
-            .prototype
-            .return_type
-            .matches_with(&[73], budget)?
-    {
+    if input.access_flags() & 8 == 0 || !raw.try_byte_range().as_range().is_empty() {
         return Ok(None);
     }
+    let result = if input
+        .declaration()
+        .prototype
+        .return_type
+        .matches_with(&[73], budget)?
+    {
+        Kind::Int
+    } else if input
+        .declaration()
+        .prototype
+        .return_type
+        .matches_with(&[90], budget)?
+    {
+        Kind::Boolean
+    } else {
+        return Ok(None);
+    };
     let mut parameters = Vec::new();
     let mut supported = true;
     input.declaration().prototype.visit_parameter_types(
@@ -285,6 +308,13 @@ fn flow<'a>(
                 Kind::Int
             } else if name.matches_with(&[90], budget)? {
                 Kind::Boolean
+            } else if name.matches_with(
+                &[
+                    76, 106, 97, 118, 97, 47, 108, 97, 110, 103, 47, 79, 98, 106, 101, 99, 116, 59,
+                ],
+                budget,
+            )? {
+                Kind::Object
             } else {
                 supported = false;
                 return Ok(());
@@ -571,6 +601,7 @@ fn flow<'a>(
         }
     }
     Ok(Some(Flow {
+        result,
         switches,
         raw,
         parameters,
@@ -857,6 +888,8 @@ pub(crate) fn build<'a>(
     let ssa = VerifiedSsa {
         _sealed: (),
         switches: flow.switches,
+        result: flow.result,
+        integral_bits: Vec::new(),
         raw: flow.raw,
         parameters: flow.parameters,
         blocks: flow.blocks,
@@ -1060,9 +1093,25 @@ fn verify<'a>(
     }
     let mut bad = Vec::new();
     let mut grounded = Vec::new();
+    let mut integral_bits = Vec::new();
     let mut kinds = Vec::new();
     let mut type_conflict = false;
     for definition in &ssa.values {
+        let bits = match definition {
+            Definition::Parameter(index) => match ssa.parameters[ix(*index)?] {
+                Kind::Boolean => 3,
+                Kind::Int => 7,
+                Kind::Object => 0,
+            },
+            Definition::Constant(value) => match value {
+                0 => 1,
+                1 => 2,
+                _ => 4,
+            },
+            Definition::Binary(_, _, _) => 7,
+            _ => 0,
+        };
+        push(&mut integral_bits, bits, budget)?;
         push(&mut bad, false, budget)?;
         push(
             &mut grounded,
@@ -1106,6 +1155,11 @@ fn verify<'a>(
                     bad[index] = true;
                     changed = true;
                 }
+                let merged = integral_bits[index] | integral_bits[source];
+                if merged != integral_bits[index] {
+                    integral_bits[index] = merged;
+                    changed = true;
+                }
                 if kinds[index].is_none() && kinds[source].is_some() {
                     kinds[index] = kinds[source];
                     changed = true;
@@ -1127,6 +1181,11 @@ fn verify<'a>(
                         let source = ix(source.0)?;
                         if bad[source] && !bad[index] {
                             bad[index] = true;
+                            changed = true;
+                        }
+                        let merged = integral_bits[index] | integral_bits[source];
+                        if merged != integral_bits[index] {
+                            integral_bits[index] = merged;
                             changed = true;
                         }
                         if grounded[source] && !grounded[index] {
@@ -1210,5 +1269,6 @@ fn verify<'a>(
         return Ok(None);
     }
     ssa.kinds = kinds;
+    ssa.integral_bits = integral_bits;
     Ok(Some(ssa))
 }

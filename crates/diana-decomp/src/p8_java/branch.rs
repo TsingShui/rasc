@@ -22,6 +22,37 @@ pub(crate) struct Assignment {
     pub target: LocalId,
     pub expression: Expression,
 }
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub(crate) enum Return {
+    Direct(LocalId),
+    Boolean01(LocalId),
+    BooleanWord(LocalId),
+}
+impl Return {
+    pub(crate) fn value(self) -> LocalId {
+        match self {
+            Self::Direct(value) | Self::Boolean01(value) | Self::BooleanWord(value) => value,
+        }
+    }
+}
+pub(super) fn returned(
+    ssa: &VerifiedSsa<'_>,
+    value: LocalId,
+) -> Result<Option<Return>, RequestError> {
+    let index = ix(value.0)?;
+    Ok(match (ssa.kinds[index], ssa.result) {
+        (Some(Kind::Int), Kind::Int) | (Some(Kind::Boolean), Kind::Boolean) => {
+            Some(Return::Direct(value))
+        }
+        (Some(Kind::Boolean), Kind::Int) => Some(Return::BooleanWord(value)),
+        (Some(Kind::Int), Kind::Boolean)
+            if ssa.integral_bits[index] != 0 && ssa.integral_bits[index] & 4 == 0 =>
+        {
+            Some(Return::Boolean01(value))
+        }
+        _ => None,
+    })
+}
 pub(crate) struct Diamond {
     pub locals: Vec<Local>,
     pub entry: Vec<Assignment>,
@@ -30,7 +61,7 @@ pub(crate) struct Diamond {
     pub condition: LocalId,
     pub condition_kind: Kind,
     pub opcode: u8,
-    pub returned: LocalId,
+    pub returned: Return,
 }
 fn ix(id: u32) -> Result<usize, RequestError> {
     usize::try_from(id).map_err(|_| RequestError::PlatformCapacity)
@@ -116,6 +147,7 @@ pub(super) fn copies(
                 LocalTypeId(match local.kind {
                     Kind::Int => 0,
                     Kind::Boolean => 1,
+                    Kind::Object => 2,
                 }),
                 1,
             )?,
@@ -133,6 +165,7 @@ pub(super) fn copies(
         let kind = match (temporary.kind.identity.0, temporary.kind.width) {
             (0, Width::One) => Kind::Int,
             (1, Width::One) => Kind::Boolean,
+            (2, Width::One) => Kind::Object,
             _ => {
                 return Err(RequestError::InternalInvariant(
                     "diamond copy temporary has a foreign type",
@@ -327,7 +360,7 @@ fn verify_diamond(
             .0,
     );
     let condition_kind = locals[ix(condition.0)?].kind;
-    if condition_kind == Kind::Boolean && !matches!(opcode, 0x38 | 0x39) {
+    if matches!(condition_kind, Kind::Boolean | Kind::Object) && !matches!(opcode, 0x38 | 0x39) {
         return Ok(None);
     }
     let returned = LocalId(
@@ -338,9 +371,9 @@ fn verify_diamond(
             ))?
             .0,
     );
-    if locals[ix(returned.0)?].kind != Kind::Int {
+    let Some(returned) = self::returned(ssa, returned)? else {
         return Ok(None);
-    }
+    };
     let mut entry = Vec::new();
     copies(ssa, None, BlockId(0), &mut entry, &mut locals, budget)?;
     operations(ssa, BlockId(0), &mut entry, budget)?;
@@ -401,7 +434,8 @@ fn verify_diamond(
             header.push(text, budget)?;
         }
     }
-    header.push("int ", budget)?;
+    header.push(ssa.result.spelling(), budget)?;
+    header.push(" ", budget)?;
     for unit in name {
         header.character(
             char::from_u32(u32::from(unit)).ok_or(RequestError::InternalInvariant(
@@ -420,6 +454,7 @@ fn verify_diamond(
             match kind {
                 Kind::Int => "int p",
                 Kind::Boolean => "boolean p",
+                Kind::Object => "java.lang.Object p",
             },
             budget,
         )?;

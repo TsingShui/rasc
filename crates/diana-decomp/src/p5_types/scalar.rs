@@ -5,6 +5,8 @@ use crate::{MethodBudget, RequestError};
 #[derive(Clone, Copy)]
 pub(crate) enum Conversion {
     Identity(ValueId),
+    BooleanToInt(ValueId),
+    Proven01ToBoolean(ValueId),
     LiteralView { value: ValueId, kind: ScalarType },
 }
 #[derive(Clone, Copy)]
@@ -37,7 +39,7 @@ fn push<T>(
 fn mask(kind: ScalarType) -> u8 {
     use ScalarType::*;
     match kind {
-        Int => 1,
+        Int | Boolean => 1,
         Float => 2,
         Long => 4,
         Double => 8,
@@ -53,6 +55,7 @@ fn literal(definition: &Definition) -> bool {
 }
 fn literal_valid(definition: &Definition, kind: ScalarType) -> bool {
     match (&definition.expression, kind) {
+        (Expression::Constant(bits), ScalarType::Boolean) => matches!(*bits, 0 | 1),
         (Expression::Constant(_), ScalarType::Int)
         | (Expression::ConstantWide(_), ScalarType::Long) => true,
         (Expression::Constant(bits), ScalarType::Float) => {
@@ -135,6 +138,7 @@ impl Families {
 fn use_view(
     definitions: &[Definition],
     types: &[ScalarType],
+    facts: &[u8],
     value: ValueId,
     kind: ScalarType,
 ) -> Result<Option<Conversion>, RequestError> {
@@ -147,10 +151,70 @@ fn use_view(
         }
     } else if types[index] == kind {
         Some(Conversion::Identity(value))
+    } else if types[index] == ScalarType::Boolean && kind == ScalarType::Int {
+        Some(Conversion::BooleanToInt(value))
+    } else if types[index] == ScalarType::Int
+        && kind == ScalarType::Boolean
+        && facts[index] != 0
+        && facts[index] & 4 == 0
+    {
+        Some(Conversion::Proven01ToBoolean(value))
     } else {
         None
     })
 }
+fn definition_boolean(definition: &Definition, types: &[ScalarType]) -> Result<bool, RequestError> {
+    Ok(if let Expression::Copy(source) = definition.expression {
+        types[ix(source)?] == ScalarType::Boolean
+    } else {
+        definition.kind == ScalarType::Boolean
+    })
+}
+fn known_bits(
+    definitions: &[Definition],
+    types: &[ScalarType],
+    budget: &mut MethodBudget<'_, '_>,
+) -> Result<Vec<u8>, RequestError> {
+    let mut facts = Vec::new();
+    for (index, definition) in definitions.iter().enumerate() {
+        budget.charge_work(1)?;
+        let known = |value: ValueId| -> Result<bool, RequestError> {
+            let bits = facts[ix(value)?];
+            Ok(bits != 0 && bits & 4 == 0)
+        };
+        let fact = match definition.expression {
+            Expression::Constant(bits) => match bits {
+                0 => 1,
+                1 => 2,
+                _ => 4,
+            },
+            Expression::Copy(source) => facts[ix(source)?],
+            Expression::Binary(a, op, b)
+                if matches!(op, Binary::And | Binary::Or | Binary::Xor) =>
+            {
+                let one = |value: ValueId| -> Result<bool, RequestError> {
+                    Ok(matches!(
+                        definitions[ix(value)?].expression,
+                        Expression::Constant(1)
+                    ))
+                };
+                if (matches!(op, Binary::And) && (one(a)? || one(b)?)) || (known(a)? && known(b)?) {
+                    3
+                } else {
+                    7
+                }
+            }
+            _ => match types[index] {
+                ScalarType::Boolean => 3,
+                ScalarType::Int => 7,
+                _ => 0,
+            },
+        };
+        push(&mut facts, fact, budget)?;
+    }
+    Ok(facts)
+}
+
 pub(crate) fn solve(
     definitions: &[Definition],
     returned: ValueId,
@@ -225,7 +289,7 @@ pub(crate) fn solve(
         return Ok(None);
     }
     let mut types = Vec::new();
-    for index in 0..definitions.len() {
+    for (index, definition) in definitions.iter().enumerate() {
         budget.charge_work(1)?;
         let root = families.root(index, budget)?;
         let allowed = families.allowed[root];
@@ -240,8 +304,14 @@ pub(crate) fn solve(
         } else {
             return Ok(None);
         };
+        let kind = if definition_boolean(definition, &types)? {
+            ScalarType::Boolean
+        } else {
+            kind
+        };
         push(&mut types, kind, budget)?;
     }
+    let facts = known_bits(definitions, &types, budget)?;
     let mut uses = Vec::new();
     for (index, definition) in definitions.iter().enumerate() {
         budget.charge_work(1)?;
@@ -265,7 +335,7 @@ pub(crate) fn solve(
         for (position, requirement) in requirements.into_iter().enumerate() {
             budget.charge_work(1)?;
             if let Some((value, kind)) = requirement {
-                let Some(view) = use_view(definitions, &types, value, kind)? else {
+                let Some(view) = use_view(definitions, &types, &facts, value, kind)? else {
                     return Ok(None);
                 };
                 views[position] = Some(view);
@@ -280,7 +350,7 @@ pub(crate) fn solve(
             budget,
         )?;
     }
-    let Some(returned) = use_view(definitions, &types, returned, result)? else {
+    let Some(returned) = use_view(definitions, &types, &facts, returned, result)? else {
         return Ok(None);
     };
     Ok(Some(Solved {

@@ -123,7 +123,7 @@ fn t09_two_entry_dispatcher_preserves_edges_and_never_reads_da_defaults() {
                         .find(|(key, _)| *key == selector)
                         .map_or(default, |(_, edge)| edge)
                 }
-                Transfer::Return(value) => return read(&values, *value),
+                Transfer::Return(value) => return read(&values, value.value()),
                 Transfer::Jump(edge) => edge,
                 Transfer::Branch {
                     left,

@@ -9,6 +9,9 @@ pub(super) fn numeric(
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<(), RequestError> {
     match (expression, kind) {
+        (Expression::Constant(value @ (0 | 1)), ScalarType::Boolean) => {
+            output.push(if *value == 0 { "false" } else { "true" }, budget)
+        }
         (Expression::Constant(value), ScalarType::Int) => {
             output.arguments(format_args!("{value}"), budget)
         }

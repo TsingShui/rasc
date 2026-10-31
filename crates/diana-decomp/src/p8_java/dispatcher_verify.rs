@@ -23,6 +23,7 @@ fn ty(kind: Kind) -> Result<LocalType, RequestError> {
         LocalTypeId(match kind {
             Kind::Int => 0,
             Kind::Boolean => 1,
+            Kind::Object => 2,
         }),
         1,
     )
@@ -299,7 +300,23 @@ pub(super) fn verify(
             }
             (Transfer::Return(actual), Terminal::Return(_)) => {
                 if !outgoing.is_empty()
-                    || ssa.bound[index].terminal.map(|id| id.0) != Some(actual.0)
+                    || ssa.bound[index].terminal.map(|id| id.0) != Some(actual.value().0)
+                    || {
+                        let at = ix(actual.value().0)?;
+                        use super::branch::Return;
+                        !match actual {
+                            Return::Direct(_) => ssa.kinds[at] == Some(ssa.result),
+                            Return::BooleanWord(_) => {
+                                ssa.result == Kind::Int && ssa.kinds[at] == Some(Kind::Boolean)
+                            }
+                            Return::Boolean01(_) => {
+                                ssa.result == Kind::Boolean
+                                    && ssa.kinds[at] == Some(Kind::Int)
+                                    && ssa.integral_bits[at] != 0
+                                    && ssa.integral_bits[at] & 4 == 0
+                            }
+                        }
+                    }
                 {
                     return Err(RequestError::InternalInvariant(
                         "dispatcher changed return control",

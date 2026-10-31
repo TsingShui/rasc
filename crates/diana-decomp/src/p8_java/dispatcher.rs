@@ -15,7 +15,7 @@ pub(crate) enum Transfer {
         cases: Vec<(i32, Edge)>,
         default: Edge,
     },
-    Return(LocalId),
+    Return(super::branch::Return),
     Jump(Edge),
     Branch {
         left: LocalId,
@@ -227,9 +227,9 @@ pub(crate) fn verify(
                         ))?
                         .0,
                 );
-                if locals[ix(value.0)?].kind != Kind::Int {
+                let Some(value) = super::branch::returned(ssa, value)? else {
                     return Ok(None);
-                }
+                };
                 Transfer::Return(value)
             }
             Terminal::Jump(target) => {
@@ -263,7 +263,9 @@ pub(crate) fn verify(
                 {
                     return Ok(None);
                 }
-                if kind == Kind::Boolean && !matches!(opcode, 0x32 | 0x33 | 0x38 | 0x39) {
+                if matches!(kind, Kind::Boolean | Kind::Object)
+                    && !matches!(opcode, 0x32 | 0x33 | 0x38 | 0x39)
+                {
                     return Ok(None);
                 }
                 Transfer::Branch {
@@ -306,7 +308,8 @@ pub(crate) fn verify(
             header.push(text, budget)?;
         }
     }
-    header.push("int ", budget)?;
+    header.push(ssa.result.spelling(), budget)?;
+    header.push(" ", budget)?;
     for unit in name {
         header.character(
             char::from_u32(u32::from(unit)).ok_or(RequestError::InternalInvariant(
@@ -325,6 +328,7 @@ pub(crate) fn verify(
             match kind {
                 Kind::Int => "int p",
                 Kind::Boolean => "boolean p",
+                Kind::Object => "java.lang.Object p",
             },
             budget,
         )?;

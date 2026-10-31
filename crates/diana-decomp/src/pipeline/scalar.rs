@@ -96,6 +96,7 @@ struct ResolvedBody<'a> {
 }
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub(crate) enum ScalarType {
+    Boolean,
     Int,
     Long,
     Float,
@@ -106,6 +107,7 @@ pub(crate) enum ScalarType {
 impl ScalarType {
     pub(crate) fn spelling(self) -> Result<&'static str, RequestError> {
         Ok(match self {
+            Self::Boolean => "boolean",
             Self::Int => "int",
             Self::Long => "long",
             Self::Float => "float",
@@ -119,7 +121,7 @@ impl ScalarType {
     }
     pub(crate) fn words(self) -> usize {
         match self {
-            Self::Int | Self::Float | Self::Bits32 => 1,
+            Self::Boolean | Self::Int | Self::Float | Self::Bits32 => 1,
             _ => 2,
         }
     }
@@ -224,6 +226,13 @@ fn flow<'a>(
         .matches_with(&[u16::from(b'D')], budget)?
     {
         ScalarType::Double
+    } else if input
+        .declaration()
+        .prototype
+        .return_type
+        .matches_with(&[u16::from(b'Z')], budget)?
+    {
+        ScalarType::Boolean
     } else {
         return Ok(None);
     };
@@ -240,6 +249,8 @@ fn flow<'a>(
                 ScalarType::Float
             } else if name.matches_with(&[u16::from(b'D')], budget)? {
                 ScalarType::Double
+            } else if name.matches_with(&[u16::from(b'Z')], budget)? {
+                ScalarType::Boolean
             } else {
                 supported = false;
                 return Ok(());
