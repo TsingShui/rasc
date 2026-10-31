@@ -83,6 +83,7 @@ pub(super) fn write(
             }
         }
         match &case.transfer {
+            Transfer::ReturnVoid => output.push("return;\n", budget)?,
             Transfer::Switch {
                 value,
                 cases,

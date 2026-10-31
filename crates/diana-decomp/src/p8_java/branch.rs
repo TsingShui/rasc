@@ -48,8 +48,11 @@ pub(super) fn returned(
     value: LocalId,
 ) -> Result<Option<ValueUse>, RequestError> {
     let index = ix(value.0)?;
-    use crate::pipeline::branch::DeclarationType;
-    if let DeclarationType::Narrow(kind) = ssa.result {
+    use crate::pipeline::branch::{DeclarationType, ResultType};
+    let ResultType::Value(result) = ssa.result else {
+        return Ok(None);
+    };
+    if let DeclarationType::Narrow(kind) = result {
         let mut range = ssa.ranges[index];
         if ssa.integral_bits[index] != 0 && ssa.integral_bits[index] & 4 == 0 {
             range = range.and_then(crate::p5_types::IntRange::known01);
@@ -64,7 +67,7 @@ pub(super) fn returned(
             },
         );
     }
-    Ok(match (ssa.kinds[index], ssa.result.kind()) {
+    Ok(match (ssa.kinds[index], result.kind()) {
         (Some(Kind::Int), Kind::Int) | (Some(Kind::Boolean), Kind::Boolean) => {
             Some(ValueUse::Direct(value))
         }

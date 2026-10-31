@@ -46,6 +46,46 @@ fn t03_invoke_count_matches_prototype_including_receiver() {
 }
 
 #[test]
+fn t11_known_invoke_kind_is_checked_before_java_or_catalog_selection() {
+    use diana_decomp::input::{MethodError, MethodProblem};
+    use diana_decomp::{CodeUnitOffset, MethodId};
+    for opcode in [0x6e, 0x6f, 0x70, 0x72, 0x74, 0x75, 0x76, 0x78, 0x71, 0x77] {
+        let is_static = matches!(opcode, 0x71 | 0x77);
+        let range = opcode >= 0x74;
+        // Method 0 is defined static f(I)I; method 2 is nonstatic abstract g()V.
+        let count = if is_static { 0 } else { 2 };
+        let words = [
+            opcode | (count << if range { 8 } else { 12 }),
+            if is_static { 2 } else { 0 },
+            if range { 0 } else { 0x0010 },
+            0x000f,
+        ];
+        let fixture = code(&words, 2, 2);
+        let mut control = RunContext::new(Limits::default(), &|| false);
+        let index = ProgramIndex::open(&fixture.bytes, &mut control).unwrap();
+        let mut budget = control.method_budget().unwrap();
+        let error = match index.method_input(
+            ClassDefId(0),
+            MethodId(fixture.primary_method_idx),
+            &mut budget,
+        ) {
+            Err(error) => error,
+            Ok(_) => panic!("known invoke kind mismatch was admitted"),
+        };
+        assert!(
+            matches!(
+                error,
+                MethodError::Malformed {
+                    pc: CodeUnitOffset(0),
+                    problem: MethodProblem::InvalidInvokeKind
+                }
+            ),
+            "{error:?}"
+        );
+    }
+}
+
+#[test]
 fn t03_invoke_wide_argument_words_are_adjacent_in_original_order() {
     for opcode in [0x71, 0x6e] {
         let receiver = u16::from(opcode != 0x71);

@@ -403,8 +403,10 @@ impl<'a> ProgramIndex<'a> {
                                     access_flags,
                                     owner_access_flags: class.access_flags,
                                     parent: context.superclass?,
-                                    plain_scope: context.annotations_offset.0 == 0
-                                        && context.interfaces?.is_empty(),
+                                    plain_scope: self.no_class_annotations(
+                                        context.annotations_offset,
+                                        control,
+                                    )? && context.interfaces?.is_empty(),
                                 });
                             }
                         }

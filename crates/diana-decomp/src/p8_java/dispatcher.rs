@@ -10,6 +10,7 @@ pub(crate) struct Edge {
     pub target: BlockId,
 }
 pub(crate) enum Transfer {
+    ReturnVoid,
     Switch {
         value: LocalId,
         cases: Vec<(i32, Edge)>,
@@ -161,6 +162,16 @@ pub(crate) fn verify(
         };
         let bound = &ssa.bound[index];
         let transfer = match block.terminal {
+            Terminal::ReturnVoid => {
+                if !outgoing.is_empty()
+                    || !matches!(ssa.result, crate::pipeline::branch::ResultType::Void)
+                {
+                    return Err(RequestError::InternalInvariant(
+                        "void exit changed its original contract",
+                    ));
+                }
+                Transfer::ReturnVoid
+            }
             Terminal::Switch { table, .. } => {
                 let table =
                     ssa.switches

@@ -104,7 +104,11 @@ impl<'i, 'a> MethodInput<'i, 'a> {
         budget: &mut MethodBudget<'_, '_>,
     ) -> Result<bool, crate::RequestError> {
         let context = self.index.class_context(self.class_id, budget)?;
-        if context.annotations_offset.0 != 0 || !context.interfaces?.is_empty() {
+        if !self
+            .index
+            .no_class_annotations(context.annotations_offset, budget)?
+            || !context.interfaces?.is_empty()
+        {
             return Ok(false);
         }
         Ok(match (context.superclass?, parent) {
@@ -276,6 +280,16 @@ impl<'a> ProgramIndex<'a> {
                         }
                         OperandReference::Method(id) => {
                             self.method_reference(id, budget)?;
+                            if matches!(spec.opcode,0x6e..=0x72|0x74..=0x78)
+                                && let Some(target) = self.local_method(id, budget)?
+                                && (target.access_flags & 8 != 0)
+                                    != matches!(spec.opcode, 0x71 | 0x77)
+                            {
+                                return Err(MethodError::Malformed {
+                                    pc,
+                                    problem: super::MethodProblem::InvalidInvokeKind,
+                                });
+                            }
                         }
                         OperandReference::Proto(id) => {
                             self.prototype(id, budget)?;

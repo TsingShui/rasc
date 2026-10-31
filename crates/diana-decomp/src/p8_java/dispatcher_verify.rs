@@ -368,6 +368,16 @@ pub(super) fn verify(
             }
         }
         match (&case.transfer, block.terminal) {
+            (Transfer::ReturnVoid, Terminal::ReturnVoid) => {
+                if !outgoing.is_empty()
+                    || !matches!(ssa.result, crate::pipeline::branch::ResultType::Void)
+                    || ssa.bound[index].terminal.is_some()
+                {
+                    return Err(RequestError::InternalInvariant(
+                        "void return certificate acquired a value or successor",
+                    ));
+                }
+            }
             (
                 Transfer::Switch {
                     value,
@@ -409,6 +419,11 @@ pub(super) fn verify(
                 edge(ssa, body, default, outgoing[cases.len()], &types, budget)?;
             }
             (Transfer::Return(actual), Terminal::Return(_)) => {
+                let crate::pipeline::branch::ResultType::Value(result) = ssa.result else {
+                    return Err(RequestError::InternalInvariant(
+                        "value return certificate has void descriptor",
+                    ));
+                };
                 if !outgoing.is_empty()
                     || ssa.bound[index].terminal.map(|id| id.0) != Some(actual.value().0)
                     || {
@@ -417,10 +432,10 @@ pub(super) fn verify(
                         !match actual {
                             ValueUse::Direct(_) => {
                                 matches!(
-                                    ssa.result,
+                                    result,
                                     crate::pipeline::branch::DeclarationType::Int
                                         | crate::pipeline::branch::DeclarationType::Boolean
-                                ) && ssa.kinds[at] == Some(ssa.result.kind())
+                                ) && ssa.kinds[at] == Some(result.kind())
                             }
                             ValueUse::Narrow { kind, .. } => {
                                 let range = ssa.ranges[at];
@@ -431,19 +446,17 @@ pub(super) fn verify(
                                 } else {
                                     range
                                 };
-                                matches!(ssa.result,crate::pipeline::branch::DeclarationType::Narrow(declared) if declared==*kind)
+                                matches!(result,crate::pipeline::branch::DeclarationType::Narrow(declared) if declared==*kind)
                                     && ssa.kinds[at] == Some(Kind::Int)
                                     && range.is_some_and(|range| range.within(kind.range()))
                             }
                             ValueUse::BooleanWord(_) => {
-                                matches!(ssa.result, crate::pipeline::branch::DeclarationType::Int)
+                                matches!(result, crate::pipeline::branch::DeclarationType::Int)
                                     && ssa.kinds[at] == Some(Kind::Boolean)
                             }
                             ValueUse::Boolean01(_) => {
-                                matches!(
-                                    ssa.result,
-                                    crate::pipeline::branch::DeclarationType::Boolean
-                                ) && ssa.kinds[at] == Some(Kind::Int)
+                                matches!(result, crate::pipeline::branch::DeclarationType::Boolean)
+                                    && ssa.kinds[at] == Some(Kind::Int)
                                     && ssa.integral_bits[at] != 0
                                     && ssa.integral_bits[at] & 4 == 0
                             }

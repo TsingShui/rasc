@@ -26,6 +26,13 @@ fn records<'a>(
 }
 
 impl<'a> ProgramIndex<'a> {
+    pub(crate) fn no_class_annotations(
+        &self,
+        directory: ByteOffset,
+        control: &mut impl InputControl,
+    ) -> Result<bool, InputError> {
+        Ok(directory.0 == 0 || self.annotation_directory(directory, control)?.class.0 == 0)
+    }
     pub(crate) fn annotation_directory(
         &self,
         offset: ByteOffset,

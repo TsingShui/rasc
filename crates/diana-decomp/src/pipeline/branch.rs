@@ -42,6 +42,19 @@ impl DeclarationType {
         }
     }
 }
+#[derive(Clone, Copy)]
+pub(crate) enum ResultType {
+    Void,
+    Value(DeclarationType),
+}
+impl ResultType {
+    pub(crate) fn spelling(self) -> &'static str {
+        match self {
+            Self::Void => "void",
+            Self::Value(value) => value.spelling(),
+        }
+    }
+}
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub(crate) enum Kind {
     Int,
@@ -114,6 +127,7 @@ pub(crate) struct Switch {
 }
 #[derive(Clone, Copy)]
 pub(crate) enum Terminal {
+    ReturnVoid,
     Switch {
         register: RegisterId,
         table: SwitchId,
@@ -171,7 +185,7 @@ pub(crate) struct VerifiedSsa<'a> {
     pub switches: Vec<Switch>,
     pub calls: Vec<CallSite>,
     pub bound_calls: Vec<Option<BoundCall>>,
-    pub result: DeclarationType,
+    pub result: ResultType,
     pub integral_bits: Vec<u8>,
     pub ranges: Vec<Option<crate::p5_types::IntRange>>,
     pub raw: RawMethodView<'a>,
@@ -185,6 +199,7 @@ pub(crate) struct VerifiedSsa<'a> {
 }
 #[derive(Clone, Copy)]
 enum Decoded {
+    ReturnVoid,
     Switch(RegisterId, u32),
     Op(Op),
     Return(RegisterId),
@@ -199,7 +214,7 @@ enum Decoded {
 }
 struct Flow<'a> {
     calls: Vec<CallSite>,
-    result: DeclarationType,
+    result: ResultType,
     switches: Vec<Switch>,
     raw: RawMethodView<'a>,
     parameters: Vec<DeclarationType>,
@@ -300,7 +315,7 @@ fn terminal_register(terminal: Terminal) -> Option<RegisterId> {
         Terminal::Return(r)
         | Terminal::Test { register: r, .. }
         | Terminal::Switch { register: r, .. } => Some(r),
-        Terminal::Jump(_) => None,
+        Terminal::Jump(_) | Terminal::ReturnVoid => None,
     }
 }
 fn contains_pc(
@@ -351,39 +366,50 @@ fn flow<'a>(
         .declaration()
         .prototype
         .return_type
-        .matches_with(&[73], budget)?
+        .matches_with(&[86], budget)?
     {
-        DeclarationType::Int
-    } else if input
-        .declaration()
-        .prototype
-        .return_type
-        .matches_with(&[90], budget)?
-    {
-        DeclarationType::Boolean
-    } else if input
-        .declaration()
-        .prototype
-        .return_type
-        .matches_with(&[66], budget)?
-    {
-        DeclarationType::Narrow(crate::p5_types::Narrow::Byte)
-    } else if input
-        .declaration()
-        .prototype
-        .return_type
-        .matches_with(&[83], budget)?
-    {
-        DeclarationType::Narrow(crate::p5_types::Narrow::Short)
-    } else if input
-        .declaration()
-        .prototype
-        .return_type
-        .matches_with(&[67], budget)?
-    {
-        DeclarationType::Narrow(crate::p5_types::Narrow::Char)
+        ResultType::Void
     } else {
-        return Ok(None);
+        ResultType::Value(
+            if input
+                .declaration()
+                .prototype
+                .return_type
+                .matches_with(&[73], budget)?
+            {
+                DeclarationType::Int
+            } else if input
+                .declaration()
+                .prototype
+                .return_type
+                .matches_with(&[90], budget)?
+            {
+                DeclarationType::Boolean
+            } else if input
+                .declaration()
+                .prototype
+                .return_type
+                .matches_with(&[66], budget)?
+            {
+                DeclarationType::Narrow(crate::p5_types::Narrow::Byte)
+            } else if input
+                .declaration()
+                .prototype
+                .return_type
+                .matches_with(&[83], budget)?
+            {
+                DeclarationType::Narrow(crate::p5_types::Narrow::Short)
+            } else if input
+                .declaration()
+                .prototype
+                .return_type
+                .matches_with(&[67], budget)?
+            {
+                DeclarationType::Narrow(crate::p5_types::Narrow::Char)
+            } else {
+                return Ok(None);
+            },
+        )
     };
     let mut parameters = Vec::new();
     let mut supported = true;
@@ -509,6 +535,7 @@ fn flow<'a>(
                     };
                     Decoded::Op(Op::Binary(reg(0)?, left, arithmetic, right))
                 }
+                0xe => Decoded::ReturnVoid,
                 0xf => Decoded::Return(reg(0)?),
                 0x2b | 0x2c => {
                     has_branch = true;
@@ -653,7 +680,7 @@ fn flow<'a>(
     }
     if !has_branch
         && calls.is_empty()
-        && !matches!(result, DeclarationType::Narrow(_))
+        && !matches!(result, ResultType::Value(DeclarationType::Narrow(_)))
         && !parameters
             .iter()
             .any(|kind| matches!(kind, DeclarationType::Narrow(_)))
@@ -718,6 +745,7 @@ fn flow<'a>(
                     ));
                 }
             }
+            Decoded::ReturnVoid => Some(Terminal::ReturnVoid),
             Decoded::Return(r) => Some(Terminal::Return(r)),
             Decoded::Jump(to) => Some(Terminal::Jump(block_at(&pcs, to, budget)?)),
             Decoded::Test(r, other, opcode, yes, no) => Some(Terminal::Test {
