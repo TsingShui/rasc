@@ -24,6 +24,7 @@ pub enum InputProblem {
     InvalidCode,
     InvalidHandler,
     InvalidDebug,
+    InvalidEncodedValue,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -31,6 +32,7 @@ pub enum UnsupportedInput {
     Container,
     ReverseEndian,
     MapType(u16),
+    EncodedValueTag(u8),
 }
 
 /// Errors retain physical byte coordinates without allocating diagnostic strings.

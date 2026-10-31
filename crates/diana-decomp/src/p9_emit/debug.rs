@@ -251,23 +251,20 @@ impl ProgramIndex<'_> {
                 output.unavailable(error.kind(), budget)?;
             }
         }
-        match context.values_offset {
-            Ok(Some(offset)) => missing(
-                issues,
-                DebugIssue::Metadata {
-                    name: "encoded_static_values",
-                    offset,
-                },
-                budget,
-            )?,
-            Err(error) => missing(issues, DebugIssue::Input(error), budget)?,
-            Ok(None) => {}
+        if let Err(error) = context.values_offset {
+            missing(issues, DebugIssue::Input(error), budget)?;
         }
         output.push(",\"fields\":[", budget)?;
         let mut first_field = true;
+        let mut static_fields = 0u32;
         let visit: Result<(), DebugError> =
             class.visit_members_with(budget, MemberSelection::Fields, |member, budget| {
                 if let MemberEntry::Field(field) = member {
+                    if matches!(&field.storage, FieldStorage::Static { .. }) {
+                        static_fields = static_fields
+                            .checked_add(1)
+                            .ok_or(DebugError::PlatformCapacity)?;
+                    }
                     if !first_field {
                         output.push(",", budget)?;
                     }
@@ -276,6 +273,7 @@ impl ProgramIndex<'_> {
                 }
                 Ok(())
             });
+        let fields_complete = visit.is_ok();
         if let Err(error) = visit {
             match error {
                 DebugError::Input(error) => {
@@ -285,7 +283,18 @@ impl ProgramIndex<'_> {
                 other => return Err(other),
             }
         }
-        output.push("],\"methods\":[{\"method_id_idx\":", budget)?;
+        output.push("]", budget)?;
+        if let Ok(Some(offset)) = context.values_offset {
+            super::values::write_values(
+                self,
+                &mut output,
+                offset,
+                fields_complete.then_some(static_fields),
+                issues,
+                budget,
+            )?;
+        }
+        output.push(",\"methods\":[{\"method_id_idx\":", budget)?;
         output.unsigned(u64::from(method.method_idx.0), budget)?;
         output.push(",\"flags\":", budget)?;
         output.unsigned(u64::from(method.access_flags), budget)?;
@@ -463,10 +472,7 @@ fn write_field(
     output.push(",\"initial\":", budget)?;
     match (field.storage, values_offset) {
         (FieldStorage::Static { ordinal }, Ok(Some(_))) => {
-            output.push(
-                "{\"unavailable\":\"encoded_static_values\",\"ordinal\":",
-                budget,
-            )?;
+            output.push("{\"encoded_static_values_ordinal\":", budget)?;
             output.unsigned(u64::from(ordinal), budget)?;
             output.push("}", budget)?;
         }
@@ -476,7 +482,7 @@ fn write_field(
     output.push("}", budget)
 }
 
-fn write_reference(
+pub(super) fn write_reference(
     index: &ProgramIndex<'_>,
     output: &mut JsonBuffer,
     reference: OperandReference,

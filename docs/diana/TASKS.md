@@ -4,7 +4,7 @@
 control, method normal/raw reservations and cancellation are implemented;
 T02 typed reader, declaration-index and code-range tests pass. T03 instruction
 layout, whole-method structure and 035 invoke prototype/result tests pass.
-T04 original debug-program snapshot tests pass; no T/H task or engine E2E case is accepted. The frozen draft-7 specification holds 86 required cases and 177 must-run invocation scenarios.**
+T04 original debug-program and encoded-value snapshot tests pass; no T/H task or engine E2E case is accepted. The frozen draft-7 specification holds 86 required cases and 177 must-run invocation scenarios.**
 This page owns the workflow, preparation, task cards and verification. Read
 [DESIGN.md](DESIGN.md) for interfaces and data, [ALGORITHMS.md](ALGORITHMS.md) for
 algorithms, and [SOURCE_MAP.md](SOURCE_MAP.md) for sources.
@@ -151,7 +151,9 @@ width. [Invoke structure](batches/t03-invoke-structure.md) validates 035 argumen
 word counts, wide word adjacency and move-result kinds using the normal method
 ledger. [Original debug programs](batches/t04-debug-program.md) retain parameters,
 line/PC changes and local-variable events, with classified local failures and
-partial byte ranges. [Core test consolidation](batches/core-test-consolidation.md)
+partial byte ranges. [Encoded values](batches/t04-encoded-values.md) add checked
+static-value counts, exact bits/references and iterative nested arrays/annotations
+with explicit partial coverage. [Core test consolidation](batches/core-test-consolidation.md)
 groups the invoke/debug regression coverage and reuses resource/cancellation
 tests. T05 later connects the prepared runner to the real public library. Missing
 Engine entrypoints currently produce `not_implemented` for the complete suite.

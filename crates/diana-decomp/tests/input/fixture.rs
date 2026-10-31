@@ -43,7 +43,15 @@ pub(super) fn build(
     huge_handler: bool,
     second_delta: Option<u32>,
 ) -> Fixture {
-    build_internal(name, protected, huge_handler, second_delta, None, None)
+    build_internal(
+        name,
+        protected,
+        huge_handler,
+        second_delta,
+        None,
+        None,
+        None,
+    )
 }
 
 #[derive(Clone, Copy)]
@@ -54,11 +62,15 @@ pub(super) struct CodeRecipe<'a> {
 }
 
 pub(super) fn with_code(recipe: CodeRecipe<'_>) -> Fixture {
-    build_internal("f", false, false, None, Some(recipe), None)
+    build_internal("f", false, false, None, Some(recipe), None, None)
 }
 
 pub(super) fn with_debug(recipe: CodeRecipe<'_>, program: &[u8]) -> Fixture {
-    build_internal("f", false, false, None, Some(recipe), Some(program))
+    build_internal("f", false, false, None, Some(recipe), Some(program), None)
+}
+
+pub(super) fn with_values(values: &[u8]) -> Fixture {
+    build_internal("f", false, false, None, None, None, Some(values))
 }
 
 fn build_internal(
@@ -68,6 +80,7 @@ fn build_internal(
     second_delta: Option<u32>,
     override_code: Option<CodeRecipe<'_>>,
     debug_program: Option<&[u8]>,
+    static_values: Option<&[u8]>,
 ) -> Fixture {
     let mut strings: Vec<Vec<u16>> = [
         "I",
@@ -241,6 +254,10 @@ fn build_internal(
         }
         bytes.push(0);
     }
+    let values_start = bytes.len();
+    if let Some(values) = static_values {
+        bytes.extend_from_slice(values);
+    }
     align(&mut bytes);
     let map = bytes.len();
     let mut entries = vec![
@@ -259,6 +276,9 @@ fn build_internal(
     ];
     if debug_program.is_some() {
         entries.insert(9, (0x2003, 1, debug_start));
+    }
+    if static_values.is_some() {
+        entries.insert(entries.len() - 1, (0x2005, 1, values_start));
     }
     bytes.extend_from_slice(&(entries.len() as u32).to_le_bytes());
     for (kind, count, offset) in entries {
@@ -313,6 +333,14 @@ fn build_internal(
         (class_defs + 8, 4),
         (class_defs + 16, u32::MAX as usize),
         (class_defs + 24, class_data),
+        (
+            class_defs + 28,
+            if static_values.is_some() {
+                values_start
+            } else {
+                0
+            },
+        ),
     ] {
         put(&mut bytes, field, value as u32);
     }

@@ -25,7 +25,10 @@ ledger; known malformed input remains classified even if output later exhausts
 resources. Original debug programs retain parameter names, line/PC state, ordered
 local-variable events and encoded bytes. Their reader checks instruction
 boundaries, reference indices and local lifetimes; a failure retains the decoded
-prefix with partial coverage. Core tests exercise malformed input, UTF16
+prefix with partial coverage. Static encoded values retain original tags, signed
+integers, float/double bits, references and nested array/annotation order. Their
+explicit stack uses checked counts and fallback accounting; malformed tails
+retain their checked prefix. Core tests exercise malformed input, UTF16
 integrity, resource limits and cancellation.
 The Engine interface awaits integration.
 

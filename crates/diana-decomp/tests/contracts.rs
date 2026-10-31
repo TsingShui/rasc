@@ -18,3 +18,5 @@ mod operands;
 mod reader;
 #[path = "input/structure.rs"]
 mod structure;
+#[path = "input/values.rs"]
+mod values;

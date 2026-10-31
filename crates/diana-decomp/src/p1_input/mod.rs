@@ -12,6 +12,7 @@ mod header;
 pub(crate) mod operands;
 mod strings;
 mod structure;
+pub(crate) mod values;
 
 pub use catalog::{ClassView, MethodDeclaration, MethodEntry, ProgramIndex, Prototype};
 pub use code::{MethodBody, RawMethodView};
