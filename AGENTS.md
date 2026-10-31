@@ -69,11 +69,12 @@ completion still requires its fixed acceptance evidence, never empty scaffolds.
 
 ## Current state and test-first gate
 
-Only package scaffolds exist. No Engine/CLI commands/phase implementation or
-executable E2E suite exists. User-authorized structure-first work does not mark
-H01/T01 or B01–B04 complete. Complete `docs/diana/TASKS.md` B01–B04
-(independent specifications, tool/fixture lock, input/reference certification,
-comparator falsification) before production feature work.
+Production packages remain scaffolds; no Engine/CLI commands or compute phases
+exist. B01–B04 preparation is accepted for the executed profile in
+`docs/diana/TASKS.md` §3. The prepared runner reports the absent engine as
+not-implemented, not passing. H01/T01 remain unaccepted. Keep the full B01–B04
+requirements for any new or revised preparation evidence; structure-only work
+never substitutes for input/reference certification or comparator falsification.
 
 Tests cross public libraries/modules for complex semantic, raw-integrity, malformed
 input and resource/file-safety behavior. Do not add CLI black-box/help/version/

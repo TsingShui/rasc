@@ -1,0 +1,104 @@
+{
+  "schemaVersion": 1,
+  "case": "D014",
+  "specRevision": "draft-6",
+  "specRef": {
+    "case": "/cases/13",
+    "targets": "/cases/13/targets",
+    "inputRecipe": "/cases/13/inputRecipe"
+  },
+  "targets": {
+    "case": {
+      "kind": "class",
+      "input_role": "original",
+      "descriptor": "Lfixtures/Case;"
+    }
+  },
+  "fixture": {
+    "sources": [
+      "fixtures/Case.java"
+    ],
+    "replacesOriginalClasses": [
+      "Lfixtures/Case;"
+    ]
+  },
+  "dependencies": {
+    "sources": [],
+    "unchanged": true
+  },
+  "javac": {
+    "profile": "javac-release-8-proc-none-gnone",
+    "args": [
+      "--release",
+      "8",
+      "-proc:none",
+      "-g:none"
+    ]
+  },
+  "dex": {
+    "tool": "com.android.tools:r8:8.3.37",
+    "mainClass": "com.android.tools.r8.D8",
+    "toolSpec": "docs/diana/TASKS.md#45-pinned-tools-and-content-locks",
+    "inputClasses": [
+      "fixtures/Case.class"
+    ],
+    "profile": {
+      "minApi": 23,
+      "dexVersion": "035"
+    },
+    "certification": "requires-pinned-D8-and-independent-projection"
+  },
+  "driver": {
+    "class": "driver.Driver",
+    "entry": "main",
+    "sources": [
+      "driver/Driver.java"
+    ],
+    "inDexInput": false,
+    "argv": [
+      "<invocation-id>"
+    ],
+    "isolation": "fresh-jvm-per-invocation"
+  },
+  "invocations": [
+    {
+      "id": "v1",
+      "inputRef": "/cases/13/invocations/0/input",
+      "expectedRef": "/cases/13/invocations/0/expected",
+      "method": "n(Ljava/lang/Object;)Z",
+      "resultKind": "boolean",
+      "setup": "argument null"
+    },
+    {
+      "id": "v2",
+      "inputRef": "/cases/13/invocations/1/input",
+      "expectedRef": "/cases/13/invocations/1/expected",
+      "method": "n(Ljava/lang/Object;)Z",
+      "resultKind": "boolean",
+      "setup": "argument new java.lang.Object with identity token object-1"
+    },
+    {
+      "id": "v3",
+      "inputRef": "/cases/13/invocations/2/input",
+      "expectedRef": "/cases/13/invocations/2/expected",
+      "method": "b()Z",
+      "resultKind": "boolean"
+    },
+    {
+      "id": "v4",
+      "inputRef": "/cases/13/invocations/3/input",
+      "expectedRef": "/cases/13/invocations/3/expected",
+      "method": "i()I",
+      "resultKind": "int"
+    }
+  ],
+  "roleBindings": [
+    {
+      "role": "case",
+      "selector": {
+        "kind": "class",
+        "descriptor": "Lfixtures/Case;"
+      }
+    }
+  ]
+}

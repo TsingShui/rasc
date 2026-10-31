@@ -1,0 +1,158 @@
+{
+  "schemaVersion": 1,
+  "case": "D055",
+  "inputKind": "self-made-byte-mutation",
+  "dexVersion": "035",
+  "builder": {
+    "path": "fixtures/build_dex.py",
+    "argv": [
+      "python3",
+      "fixtures/build_dex.py",
+      ".cache/e2e/D055"
+    ],
+    "outputs": [
+      ".cache/e2e/D055/original.dex",
+      ".cache/e2e/D055/insns-count.dex",
+      ".cache/e2e/D055/handler-count.dex"
+    ],
+    "language": "python3 standard library only; no network, no subprocess, no JVM tool",
+    "reason": "The two faults are single count fields in an otherwise reviewed input; the handler variant additionally needs the variable-length handler record rebuilt so the count fault stays the only malformed field."
+  },
+  "originalInput": {
+    "asset": ".cache/e2e/D055/original.dex",
+    "method": "Lfixtures/Case;->f()I",
+    "registersSize": 2,
+    "insSize": 0,
+    "outsSize": 0,
+    "triesSize": 1,
+    "insnsSize": 6,
+    "codeUnits": [
+      "0x5012",
+      "0x000f",
+      "0x010d",
+      "0x0113",
+      "0x0007",
+      "0x010f"
+    ],
+    "tryItem": {
+      "start_addr": 0,
+      "insn_count": 2,
+      "handler_off": 1
+    },
+    "encodedCatchHandler": {
+      "listCount": 1,
+      "size": 1,
+      "typed": [
+        {
+          "type": "Ljava/lang/RuntimeException;",
+          "addr": 2
+        }
+      ],
+      "catchAll": 0
+    },
+    "anchors": {
+      "f_code_off": 376,
+      "f_insns_size_off": 388,
+      "f_try_item_off": 404,
+      "f_handler_list_off": 412,
+      "f_handler_size_off": 413,
+      "class_data_off": 416,
+      "map_off": 432,
+      "file_size": 556
+    },
+    "note": "Every register word (v0, v1 with registers_size 2), the one type reference and the handler address 2 (inside the 6-unit method) are in range, so both variants start from a reviewed valid input. The method declares outs_size 0 and contains no invoke, so no external binding is required.",
+    "codeUnitMeaning": "unit0 const/4 v0,5 (normal path); unit1 return v0; unit2 move-exception v1 (handler entry at addr 2); unit3 const/16 v1,7; unit4 is the literal word 7 of the 21s const/16, not a separate instruction; unit5 return v1. The handler therefore returns the separately defined int 7 instead of the caught reference, so f()I is type-correct on both paths.",
+    "handlerOffMeaning": "try_item.handler_off is measured from the start of encoded_catch_handler_list, so it is 1 to skip the list's own ULEB count at byte 0; the single encoded_catch_handler therefore begins at f_handler_list_off+1 and its record ends exactly at class_data_off with no padding gap."
+  },
+  "variants": [
+    {
+      "invocation": "insns-count",
+      "asset": ".cache/e2e/D055/insns-count.dex",
+      "field": "code_item.insns_size u32",
+      "anchorFileOffset": 388,
+      "originalValue": 6,
+      "mutatedValue": 2147483647,
+      "minimumRequiredBytes": 4294967294,
+      "remainingBytesAfterField": 164,
+      "overrunProved": true,
+      "changedByteCount": 28,
+      "changedBytesNote": "the four patched bytes at 0x184..0x187 plus the recomputed 4-byte header checksum and 20-byte signature at 0x08..0x1f"
+    },
+    {
+      "invocation": "handler-count",
+      "asset": ".cache/e2e/D055/handler-count.dex",
+      "field": "encoded_catch_handler.size (positive SLEB32)",
+      "anchorFileOffset": 413,
+      "originalValue": 1,
+      "mutatedValue": 2147483647,
+      "slebEncodingBytes": [
+        "0xff",
+        "0xff",
+        "0xff",
+        "0xff",
+        "0x07"
+      ],
+      "minimumRequiredBytes": 4294967294,
+      "remainingBytesAfterSleb": 142,
+      "overrunProved": true,
+      "rebuiltDependents": "The handler record grows 1 -> 5 bytes at offset 413, so every later byte shifts by 4: class_data_off moves 416 -> 420, map_off 432 -> 436 and file_size 556 -> 560 before the count fault is applied.",
+      "rebuiltAnchors": {
+        "f_code_off": 376,
+        "f_insns_size_off": 388,
+        "f_try_item_off": 404,
+        "f_handler_list_off": 412,
+        "f_handler_size_off": 413,
+        "class_data_off": 420,
+        "map_off": 436,
+        "file_size": 560
+      },
+      "insertedByteCount": 4,
+      "changedBytesNote": "A positional byte comparison reports 88 differing offsets, which is the 4-byte shift artifact, not 88 independent edits: the only authored edits are the 1-byte ULEB count replaced by the 5-byte SLEB at 413 and the recomputed header checksum and signature."
+    }
+  ],
+  "roleBindings": [
+    {
+      "role": "case",
+      "selector": {
+        "kind": "method",
+        "owner": "Lfixtures/Case;",
+        "name": "f",
+        "proto": "()I"
+      }
+    }
+  ],
+  "invocations": [
+    {
+      "id": "insns-count",
+      "inputRef": "/cases/54/invocations/0/input",
+      "expectedRef": "/cases/54/invocations/0/expected"
+    },
+    {
+      "id": "handler-count",
+      "inputRef": "/cases/54/invocations/1/input",
+      "expectedRef": "/cases/54/invocations/1/expected"
+    }
+  ],
+  "certificationObligations": [
+    "Each variant runs independently; neither is merged into one any-error invocation.",
+    "The fault certificate proves the field overrun from the checked minimum byte count: insns_size*2 = 4294967294 bytes against 164 remaining bytes, and handler |size|*2 >= 4294967294 bytes against 142 remaining bytes after the SLEB.",
+    "The handler variant certifies that the SLEB32 5th byte payload is 0x07, inside the allowed 0x00..0x07 range, so the encoding is legal while the count is not.",
+    "The certificate records the original field value, the patch offset and the rebuilt hash for each variant, and confirms no second malformed field was added.",
+    "An independent decoder confirms both variants keep the same declaration, refs, version and register words as the original; the only malformed field is the patched count."
+  ],
+  "gaps": [
+    "The independent dexlib2 projection and the Engine classification are not executable here; B03 owns the projection and its hashes.",
+    "Misclassification as BudgetExceeded versus Malformed is an Engine behavior this worktree cannot observe."
+  ],
+  "pathBase": "case-root: every repository source path is relative to tests/e2e/sources/<case>/, and every generated artifact path is relative to the repository root under .cache/e2e/.",
+  "measurementPolicy": "Asset sizes and hashes are produced by preparation from actual bytes under the ignored execution workspace; no author cache or hand-maintained measurement file is a prerequisite.",
+  "targets": {
+    "case": {
+      "kind": "method",
+      "input_role": "original",
+      "owner": "Lfixtures/Case;",
+      "name": "f",
+      "proto": "()I"
+    }
+  }
+}

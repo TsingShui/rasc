@@ -1,0 +1,91 @@
+{
+  "schemaVersion": 1,
+  "case": "D059",
+  "requestMethods": {"v1": "f()V"},
+  "inputKind": "self-made-byte-mutation",
+  "dexVersion": "035",
+  "builder": {
+    "path": "fixtures/build_dex.py",
+    "argv": [
+      "python3",
+      "fixtures/build_dex.py",
+      ".cache/e2e/D059"
+    ],
+    "outputs": [
+      ".cache/e2e/D059/original.dex",
+      ".cache/e2e/D059/mutated.dex"
+    ],
+    "language": "python3 standard library only; no network, no subprocess, no JVM tool",
+    "reason": "The case needs one unused opcode byte in an otherwise valid method; no source compiler can emit it."
+  },
+  "originalInput": {
+    "asset": ".cache/e2e/D059/original.dex",
+    "method": "Lfixtures/Case;->f()V",
+    "registersSize": 0,
+    "insSize": 0,
+    "outsSize": 0,
+    "triesSize": 0,
+    "insnsSize": 1,
+    "codeUnits": [
+      "0x000e"
+    ],
+    "decode": "code unit 0 = return-void (10x), the whole body",
+    "anchors": {
+      "f_code_off": 312,
+      "f_insns_size_off": 324,
+      "f_insn0_off": 328,
+      "class_data_off": 330,
+      "map_off": 344,
+      "file_size": 468
+    }
+  },
+  "mutation": {
+    "asset": ".cache/e2e/D059/mutated.dex",
+    "field": "code_unit[0] low opcode byte of Lfixtures/Case;->f()V",
+    "anchorFileOffset": 328,
+    "originalValue": "0x0e",
+    "mutatedValue": "0x3e",
+    "highByte": "0x00 unchanged, so the code unit is 0x003e",
+    "unchanged": "code range (insns_size=1), declaration, version 035, register sizes and the empty field/string reference usage",
+    "rehash": "header checksum at 0x08..0x0b and signature at 0x0c..0x1f recomputed; together with the single patched opcode byte at 0x148 these are the only 24 changed offsets",
+    "changedByteCount": 24,
+    "opcodeSpace": "0x3e is unused in the 035 registry (0x3e..0x43 are not assigned), so no standard instruction width or mnemonic exists for it"
+  },
+  "roleBindings": [
+    {
+      "role": "case",
+      "selector": {
+        "kind": "method",
+        "owner": "Lfixtures/Case;",
+        "name": "f",
+        "proto": "()V"
+      }
+    }
+  ],
+  "invocations": [
+    {
+      "id": "v1",
+      "inputRef": "/cases/58/invocations/0/input",
+      "expectedRef": "/cases/58/invocations/0/expected"
+    }
+  ],
+  "certificationObligations": [
+    "An independent decoder confirms the mutated code unit 0 is 0x003e and that the 035 opcode registry assigns no format to 0x3e, so the width is genuinely unknown.",
+    "An independent decoder confirms every other field equals the original: the same single code unit range, the same declaration, version 035, and zero register words.",
+    "The fault certificate records the anchor offset, the original and mutated opcode bytes and both SHA-256 values."
+  ],
+  "gaps": [
+    "The independent dexlib2 projection is not executable in this worktree; B03 owns that step.",
+    "The Unavailable/excerpt outcome and the rejection of a fabricated nop or .word are Engine behavior not observable here."
+  ],
+  "pathBase": "case-root: every repository source path is relative to tests/e2e/sources/<case>/, and every generated artifact path is relative to the repository root under .cache/e2e/.",
+  "targets": {
+    "case": {
+      "kind": "method",
+      "input_role": "original",
+      "owner": "Lfixtures/Case;",
+      "name": "f",
+      "proto": "()V"
+    }
+  }
+}

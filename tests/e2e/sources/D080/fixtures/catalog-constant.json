@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "case": "D080",
+  "variant": "known-constant",
+  "description": "Catalog variant with complete owner/access/type facts for the external field, plus an independent Java classfile ConstantValue proof, so JavaConstantKind is Constant. Lfixtures/External; has no class_def: the facts come from a separate declaration asset.",
+  "entries": [
+    {
+      "descriptor": "Ljava/lang/Object;",
+      "hasClassDef": false,
+      "accessFlags": ["public"],
+      "methods": [
+        {"name": "<init>", "proto": "()V", "accessFlags": ["public", "constructor"]}
+      ],
+      "fields": []
+    },
+    {
+      "descriptor": "Lfixtures/External;",
+      "hasClassDef": false,
+      "accessFlags": ["public"],
+      "methods": [],
+      "fields": [
+        {
+          "name": "C",
+          "type": "I",
+          "accessFlags": ["public", "static", "final"],
+          "javaConstantKind": "Constant",
+          "constantValueEvidence": {
+            "source": "javac --release 8 -proc:none -g:none of tests/e2e/sources/D080/fixtures/External.java",
+            "classfileAttribute": "ConstantValue",
+            "constantValue": 1
+          }
+        }
+      ]
+    }
+  ]
+}

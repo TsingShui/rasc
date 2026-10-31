@@ -1,0 +1,139 @@
+{
+  "schemaVersion": 1,
+  "case": "D073",
+  "inputKind": "self-made-smali-with-proved-reference-java",
+  "dexVersion": "035",
+  "sources": [
+    "fixtures/Case.smali",
+    "fixtures/Case.java",
+    "fixtures/Driver.java"
+  ],
+  "tools": [
+    {
+      "id": "smali-2.5.2",
+      "artifact": "org.smali:smali:2.5.2",
+      "mainClass": "org.jf.smali.Main",
+      "availableInThisWorktree": false,
+      "note": "TASKS 4.5 pinned assembler; absent here, so no DEX hash is claimed."
+    },
+    {
+      "id": "javac-temurin-21.0.8+9",
+      "artifact": "Eclipse Temurin 21.0.8+9 javac",
+      "flags": [
+        "--release",
+        "8",
+        "-proc:none",
+        "-g:none"
+      ],
+      "availableInThisWorktree": "only-locally-21.0.12.1"
+    }
+  ],
+  "builds": [
+    {
+      "id": "case-dex",
+      "argv": [
+        "java",
+        "-cp",
+        "<smali-2.5.2-lock-classpath>",
+        "org.jf.smali.Main",
+        "assemble",
+        "--api",
+        "23",
+        "-o",
+        ".cache/e2e/D073/case.dex",
+        "fixtures/Case.smali"
+      ],
+      "output": ".cache/e2e/D073/case.dex"
+    },
+    {
+      "id": "mirror-javac",
+      "argv": [
+        "javac",
+        "--release",
+        "8",
+        "-proc:none",
+        "-g:none",
+        "-d",
+        ".cache/e2e/D073/ref",
+        "fixtures/Case.java",
+        "fixtures/Driver.java"
+      ],
+      "output": ".cache/e2e/D073/ref/fixtures/Driver.class"
+    }
+  ],
+  "mirrorRuns": {
+    "argv": [
+      "java",
+      "-cp",
+      ".cache/e2e/D073/ref",
+      "fixtures.Driver",
+      "<invocation-id>"
+    ],
+    "observed": {
+      "empty-array": "{\"case\":\"D073\",\"invocation\":\"empty-array\",\"returnVoid\":true,\"arrayInt\":[],\"exception\":null,\"completed\":true}",
+      "null-array": "{\"case\":\"D073\",\"invocation\":\"null-array\",\"exception\":\"java.lang.NullPointerException\",\"completed\":false}"
+    },
+    "limit": "The mirror is the closed semantic counterpart the specification names: one length read of the argument array and no write. It is not an execution of the original DEX."
+  },
+  "expectedInputFacts": {
+    "f": {
+      "proto": "([I)V",
+      "registersSize": 1,
+      "insSize": 1,
+      "outsSize": 0,
+      "triesSize": 0,
+      "insns": "fill-array-data p0, :array_zero; return-void",
+      "payload": {
+        "elementWidth": 4,
+        "count": 0,
+        "units": []
+      }
+    },
+    "certificationOfCountZero": "the array-data block declares element_width 4 and zero payload elements, so the encoded count is genuinely 0 and not an assembler-omitted payload"
+  },
+  "stateDerivation": {
+    "entry": "the single fill site is the only entry, with no handler",
+    "nonNullState": "a non-null int[] completes normally with no store, because count is 0, and the length read is the only observable operation",
+    "nullState": "a null argument throws java.lang.NullPointerException at the fill site, because fill-array-data is may-throw regardless of count",
+    "correspondence": "the reference Java has the same single entry, normal return and exception exit; the derivation is closed over this one Op and is not an exception or lock interpreter"
+  },
+  "invocations": [
+    {
+      "id": "empty-array",
+      "inputRef": "/cases/72/invocations/0/input",
+      "expectedRef": "/cases/72/invocations/0/expected"
+    },
+    {
+      "id": "null-array",
+      "inputRef": "/cases/72/invocations/1/input",
+      "expectedRef": "/cases/72/invocations/1/expected"
+    }
+  ],
+  "certificationObligations": [
+    "Confirm independently that the payload count really is 0, the component is int and the original fill site is reachable, with no other operation that could determine the exception.",
+    "B03 must record the state-by-state normative derivation from this closed single Op to the array-length read, with the correspondence of the same single entry, normal return and exception exit.",
+    "The reference Java is a semantic mirror; it does not claim that a JVM executed the original DEX and it must not be generalized into an exception interpreter."
+  ],
+  "gaps": [
+    "The locked smali build and the independent dexlib2 projection are absent here; B03 owns that step and the hashes.",
+    "The reference run used local javac 21.0.12.1, not the pinned 21.0.8+9 artifact.",
+    "No authorized ART environment is available; the original DEX was not executed."
+  ],
+  "pathBase": "case-root: every repository source path is relative to tests/e2e/sources/<case>/, and every generated artifact path is relative to the repository root under .cache/e2e/.",
+  "targets": {
+    "case": {
+      "kind": "class",
+      "input_role": "original",
+      "descriptor": "Lfixtures/Case;"
+    }
+  },
+  "roleBindings": [
+    {
+      "role": "case",
+      "selector": {
+        "kind": "class",
+        "descriptor": "Lfixtures/Case;"
+      }
+    }
+  ]
+}

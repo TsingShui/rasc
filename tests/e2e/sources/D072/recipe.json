@@ -1,0 +1,106 @@
+{
+  "schemaVersion": 1,
+  "case": "D072",
+  "specRevision": "draft-6",
+  "specRef": {
+    "case": "/cases/71",
+    "targets": "/cases/71/targets",
+    "inputRecipe": "/cases/71/inputRecipe"
+  },
+  "targets": {
+    "case": {
+      "kind": "class",
+      "input_role": "original",
+      "descriptor": "Lfixtures/Case;"
+    }
+  },
+  "fixture": {
+    "sources": [
+      "fixtures/Case.java"
+    ],
+    "replacesOriginalClasses": [
+      "Lfixtures/Case;"
+    ]
+  },
+  "dependencies": {
+    "sources": [],
+    "unchanged": true
+  },
+  "javac": {
+    "profile": "javac-release-8-proc-none-gnone",
+    "args": [
+      "--release",
+      "8",
+      "-proc:none",
+      "-g:none"
+    ]
+  },
+  "dex": {
+    "tool": "com.android.tools:r8:8.3.37",
+    "mainClass": "com.android.tools.r8.D8",
+    "toolSpec": "docs/diana/TASKS.md#45-pinned-tools-and-content-locks",
+    "inputClasses": [
+      "fixtures/Case.class"
+    ],
+    "profile": {
+      "minApi": 23,
+      "dexVersion": "035"
+    },
+    "certification": "requires-pinned-D8-and-independent-projection"
+  },
+  "catalog": "complete declaration catalog over Case",
+  "driver": {
+    "class": "driver.Driver",
+    "entry": "main",
+    "sources": [
+      "driver/Driver.java"
+    ],
+    "inDexInput": false,
+    "argv": [
+      "<invocation-id>"
+    ],
+    "isolation": "fresh-jvm-per-invocation"
+  },
+  "invocations": [
+    {
+      "id": "sum-positive",
+      "inputRef": "/cases/71/invocations/0/input",
+      "expectedRef": "/cases/71/invocations/0/expected",
+      "method": "sum(BB)I",
+      "resultKind": "int"
+    },
+    {
+      "id": "sum-negative",
+      "inputRef": "/cases/71/invocations/1/input",
+      "expectedRef": "/cases/71/invocations/1/expected",
+      "method": "sum(BB)I",
+      "resultKind": "int"
+    },
+    {
+      "id": "mixed-byte",
+      "inputRef": "/cases/71/invocations/2/input",
+      "expectedRef": "/cases/71/invocations/2/expected",
+      "method": "mix(ZBC)I",
+      "resultKind": "int"
+    },
+    {
+      "id": "mixed-char",
+      "inputRef": "/cases/71/invocations/3/input",
+      "expectedRef": "/cases/71/invocations/3/expected",
+      "method": "mix(ZBC)I",
+      "resultKind": "int"
+    }
+  ],
+  "inputRequirementRefs": [
+    "/cases/71/inputRequirements/0"
+  ],
+  "roleBindings": [
+    {
+      "role": "case",
+      "selector": {
+        "kind": "class",
+        "descriptor": "Lfixtures/Case;"
+      }
+    }
+  ]
+}

@@ -1,0 +1,310 @@
+{
+  "schemaVersion": 1,
+  "case": "D075",
+  "specRevision": "draft-6",
+  "specRef": {
+    "case": "/cases/74",
+    "targets": "/cases/74/targets",
+    "inputRecipe": "/cases/74/inputRecipe",
+    "inputRequirements": "/cases/74/inputRequirements"
+  },
+  "targets": {
+    "static255": {
+      "kind": "method",
+      "input_role": "static255",
+      "owner": "Lfixtures/Case;",
+      "name": "f",
+      "proto": "(IIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIII)I"
+    },
+    "static256": {
+      "kind": "method",
+      "input_role": "static256",
+      "owner": "Lfixtures/Case;",
+      "name": "f",
+      "proto": "(IIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIII)I"
+    },
+    "instance254": {
+      "kind": "method",
+      "input_role": "instance254",
+      "owner": "Lfixtures/Case;",
+      "name": "f",
+      "proto": "(IIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIII)I"
+    },
+    "instance255": {
+      "kind": "method",
+      "input_role": "instance255",
+      "owner": "Lfixtures/Case;",
+      "name": "f",
+      "proto": "(IIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIII)I"
+    },
+    "abstract254": {
+      "kind": "method",
+      "input_role": "abstract254",
+      "owner": "Lfixtures/Case;",
+      "name": "f",
+      "proto": "(IIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIII)I"
+    },
+    "abstract255": {
+      "kind": "method",
+      "input_role": "abstract255",
+      "owner": "Lfixtures/Case;",
+      "name": "f",
+      "proto": "(IIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIII)I"
+    }
+  },
+  "inputKind": "self-made-dex-builder",
+  "sources": [
+    "fixtures/build_dex.py",
+    "fixtures/gen_reference.py",
+    "reference/static255/fixtures/Case.java",
+    "reference/instance254/fixtures/Case.java",
+    "reference/abstract254/fixtures/Case.java",
+    "driver/static255/Driver.java",
+    "driver/instance254/Driver.java"
+  ],
+  "dex": {
+    "builder": "fixtures/build_dex.py",
+    "outputs": [
+      "static255.dex",
+      "static256.dex",
+      "instance254.dex",
+      "instance255.dex",
+      "abstract254.dex",
+      "abstract255.dex"
+    ],
+    "outputDirectory": ".cache/e2e/D075/",
+    "format": "dex 035, one class Lfixtures/Case; per role",
+    "toolSpec": "docs/diana/TASKS.md#45-pinned-tools-and-content-locks",
+    "certification": "Asset hashes and independent input certificates must be produced from the corrected builder by preparation; local draft hashes are not an approved lock."
+  },
+  "catalog": "complete declaration catalog over Case",
+  "referenceJava": {
+    "roles": [
+      "static255",
+      "instance254",
+      "abstract254"
+    ],
+    "absent": [
+      {
+        "role": "static256",
+        "reason": "256 parameter words exceed the Java limit; javac reports 'too many parameters', so no legal Java baseline exists and only DEX integrity plus the raw round trip apply"
+      },
+      {
+        "role": "instance255",
+        "reason": "255 formals plus this is 256 parameter words; javac reports 'too many parameters'"
+      },
+      {
+        "role": "abstract255",
+        "reason": "255 formals plus this is 256 parameter words; javac reports 'too many parameters'"
+      }
+    ],
+    "javac": [
+      "--release",
+      "8",
+      "-proc:none",
+      "-g:none"
+    ]
+  },
+  "driver": {
+    "perRole": true,
+    "classes": [
+      {
+        "role": "static255",
+        "class": "driver.Driver",
+        "path": "driver/static255/Driver.java",
+        "invocation": "static-at",
+        "arguments": 255
+      },
+      {
+        "role": "instance254",
+        "class": "driver.Driver",
+        "path": "driver/instance254/Driver.java",
+        "invocation": "instance-at",
+        "arguments": 254
+      }
+    ],
+    "whyPerRole": "every role owns its own fixtures/Case class, so a single Driver cannot link two roles at once; each Driver is compiled against that role's single input asset in an isolated classpath"
+  },
+  "invocations": [
+    {
+      "id": "static-at",
+      "inputRef": "/cases/74/invocations/0/input",
+      "expectedRef": "/cases/74/invocations/0/expected",
+      "inputAsset": "static255.dex",
+      "method": "(I x 255)I",
+      "resultKind": "int",
+      "driverSetup": "call f with 255 arguments, first 7 and the rest 0"
+    },
+    {
+      "id": "static-over",
+      "inputRef": "/cases/74/invocations/1/input",
+      "expectedRef": "/cases/74/invocations/1/expected",
+      "inputAsset": "static256.dex",
+      "method": "(I x 256)I",
+      "observation": "public classification, typed target reason and an independent raw projection; no Driver exists because the role has no legal Java baseline"
+    },
+    {
+      "id": "instance-at",
+      "inputRef": "/cases/74/invocations/2/input",
+      "expectedRef": "/cases/74/invocations/2/expected",
+      "inputAsset": "instance254.dex",
+      "method": "(I x 254)I",
+      "resultKind": "int",
+      "driverSetup": "call f on a new Case with 254 arguments, first 7 and the rest 0"
+    },
+    {
+      "id": "instance-over",
+      "inputRef": "/cases/74/invocations/3/input",
+      "expectedRef": "/cases/74/invocations/3/expected",
+      "inputAsset": "instance255.dex",
+      "method": "(I x 255)I",
+      "observation": "public classification, typed target reason and an independent raw projection; no Driver exists"
+    },
+    {
+      "id": "abstract-at",
+      "inputRef": "/cases/74/invocations/4/input",
+      "expectedRef": "/cases/74/invocations/4/expected",
+      "inputAsset": "abstract254.dex",
+      "method": "(I x 254)I",
+      "observation": "declaration projection only; the role has no code, so hasBody is false and there is no Driver"
+    },
+    {
+      "id": "abstract-over",
+      "inputRef": "/cases/74/invocations/5/input",
+      "expectedRef": "/cases/74/invocations/5/expected",
+      "inputAsset": "abstract255.dex",
+      "method": "(I x 255)I",
+      "observation": "public classification, typed target reason and an independent raw declaration projection; hasBody is false"
+    }
+  ],
+  "inputShape": {
+    "wordCountRule": "ALGORITHMS 12.4 / JVMS 4.3.3: parameter words are implicit this (1 for non-static) plus one word per formal of the binary proto; every formal here is I and the return type is not counted",
+    "roles": [
+      {
+        "role": "static255",
+        "kind": "static",
+        "formals": 255,
+        "parameterWords": 255,
+        "accepted": true,
+        "body": "return v0 (the first int parameter)",
+        "registersSize": 255
+      },
+      {
+        "role": "static256",
+        "kind": "static",
+        "formals": 256,
+        "parameterWords": 256,
+        "accepted": false,
+        "body": "return v0",
+        "registersSize": 256
+      },
+      {
+        "role": "instance254",
+        "kind": "instance",
+        "formals": 254,
+        "parameterWords": 255,
+        "accepted": true,
+        "body": "return v1 (the first int parameter, v0 is this)",
+        "registersSize": 255
+      },
+      {
+        "role": "instance255",
+        "kind": "instance",
+        "formals": 255,
+        "parameterWords": 256,
+        "accepted": false,
+        "body": "return v1",
+        "registersSize": 256
+      },
+      {
+        "role": "abstract254",
+        "kind": "abstract",
+        "formals": 254,
+        "parameterWords": 255,
+        "accepted": true,
+        "body": "none; code_off=0, no registers_size",
+        "registersSize": 0
+      },
+      {
+        "role": "abstract255",
+        "kind": "abstract",
+        "formals": 255,
+        "parameterWords": 256,
+        "accepted": false,
+        "body": "none; code_off=0, no registers_size",
+        "registersSize": 0
+      }
+    ],
+    "dexValidity": "a 256-word ins_size is a legal u2 value, so every role is structurally valid DEX; the over-limit roles are rejected by the Java parameter-word check, never by DEX integrity",
+    "abstractOwners": "abstract254 and abstract255 are marked ACC_ABSTRACT and keep the canonical Object.<init>()V constructor with real code, exactly as every other owner does; only the original f declaration is code-less (code_off=0, no .registers) and no synthetic body is invented for it",
+    "localProbe": {
+      "observed": "local javac --release 8 -proc:none -g:none compiled static255, instance254 and abstract254 with their full parameter lists and rejected static256, instance255 and abstract255 with 'too many parameters'",
+      "scope": "local JDK 21.0.12.1 corroboration of the reference-side boundary only; it is not the TASKS-pinned toolchain and not original DEX certification"
+    },
+    "publishedFormatChecks": {
+      "reader": "fixtures/verify_dex.py",
+      "observed": "independent decode of all six artifacts: map_list uses type_list code 0x1001 for the parameter-list proto, no annotation_set_item entry exists, each class_data group accumulates its method_idx delta from 0, every abstract f has code_off 0 and every owner resolves only its own method_ids",
+      "scope": "derived from the published DEX layout, not from this case's builder constants; it is not pinned-toolchain certification"
+    }
+  },
+  "inputRequirementRefs": [
+    "/cases/74/inputRequirements/0",
+    "/cases/74/inputRequirements/1"
+  ],
+  "roleBindings": [
+    {
+      "role": "static255",
+      "selector": {
+        "kind": "method",
+        "owner": "Lfixtures/Case;",
+        "name": "f",
+        "proto": "(IIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIII)I"
+      }
+    },
+    {
+      "role": "static256",
+      "selector": {
+        "kind": "method",
+        "owner": "Lfixtures/Case;",
+        "name": "f",
+        "proto": "(IIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIII)I"
+      }
+    },
+    {
+      "role": "instance254",
+      "selector": {
+        "kind": "method",
+        "owner": "Lfixtures/Case;",
+        "name": "f",
+        "proto": "(IIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIII)I"
+      }
+    },
+    {
+      "role": "instance255",
+      "selector": {
+        "kind": "method",
+        "owner": "Lfixtures/Case;",
+        "name": "f",
+        "proto": "(IIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIII)I"
+      }
+    },
+    {
+      "role": "abstract254",
+      "selector": {
+        "kind": "method",
+        "owner": "Lfixtures/Case;",
+        "name": "f",
+        "proto": "(IIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIII)I"
+      }
+    },
+    {
+      "role": "abstract255",
+      "selector": {
+        "kind": "method",
+        "owner": "Lfixtures/Case;",
+        "name": "f",
+        "proto": "(IIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIII)I"
+      }
+    }
+  ]
+}

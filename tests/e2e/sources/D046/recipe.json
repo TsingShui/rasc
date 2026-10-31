@@ -1,0 +1,130 @@
+{
+  "schemaVersion": 1,
+  "case": "D046",
+  "inputKind": "self-made-dex-builder-with-reference-java",
+  "dexVersion": "035",
+  "sources": [
+    "fixtures/Case.java",
+    "fixtures/Driver.java"
+  ],
+  "builder": {
+    "path": "fixtures/build_dex.py",
+    "argv": [
+      "python3",
+      "fixtures/build_dex.py",
+      ".cache/e2e/D046/case.dex"
+    ],
+    "output": ".cache/e2e/D046/case.dex",
+    "language": "python3 standard library only; no network, no subprocess, no JVM tool",
+    "reason": "A Java-to-DEX compiler is free to omit an all-default static_values array, so the explicit encoded array of the recipe must be written directly."
+  },
+  "expectedAnchors": {
+    "note": "Anchors recorded by the builder run in this worktree; they are input facts, not engine output.",
+    "observedRun": "python3 fixtures/build_dex.py .cache/e2e/D046",
+    "classDefsOff": 236,
+    "classDataOff": 392,
+    "staticValuesOff": 408,
+    "mapOff": 416,
+    "staticValues": [
+      {
+        "index": 0,
+        "field": "b:Z",
+        "tag": "VALUE_BOOLEAN",
+        "tagByte": 31,
+        "value": false
+      },
+      {
+        "index": 1,
+        "field": "i:I",
+        "tag": "VALUE_INT",
+        "tagByte": 4,
+        "value": 0
+      },
+      {
+        "index": 2,
+        "field": "s:Ljava/lang/String;",
+        "tag": "VALUE_NULL",
+        "tagByte": 30,
+        "value": null
+      }
+    ],
+    "staticValuesBytes": "03 1f 04 00 1e 00 00 00"
+  },
+  "tools": [
+    {
+      "id": "python-stdlib",
+      "artifact": "python3 >= 3.11",
+      "availableInThisWorktree": true,
+      "note": "Development-only builder; production crates never depend on it."
+    },
+    {
+      "id": "javac-temurin-21.0.8+9",
+      "artifact": "Eclipse Temurin 21.0.8+9 javac",
+      "flags": [
+        "--release",
+        "8",
+        "-proc:none",
+        "-g:none"
+      ],
+      "availableInThisWorktree": false,
+      "note": "Only local 21.0.12.1 is present; the pinned artifact and hash are B02 work."
+    }
+  ],
+  "referenceRun": {
+    "argv": [
+      "javac",
+      "--release",
+      "8",
+      "-proc:none",
+      "-g:none",
+      "-d",
+      ".cache/e2e/D046/ref",
+      "fixtures/Case.java",
+      "fixtures/Driver.java"
+    ],
+    "runArgv": [
+      "java",
+      "-cp",
+      ".cache/e2e/D046/ref",
+      "fixtures.Driver",
+      "v1"
+    ],
+    "observedOutput": "{\"case\":\"D046\",\"invocation\":\"v1\",\"result\":{\"kind\":\"void\"},\"heap\":{\"s\":null,\"b\":false,\"i\":0},\"exception\":null,\"completed\":true}"
+  },
+  "roleBindings": [
+    {
+      "role": "case",
+      "selector": {
+        "kind": "class",
+        "descriptor": "Lfixtures/Case;"
+      }
+    }
+  ],
+  "invocations": [
+    {
+      "id": "v1",
+      "inputRef": "/cases/45/invocations/0/input",
+      "expectedRef": "/cases/45/invocations/0/expected"
+    }
+  ],
+  "certificationObligations": [
+    "An independent decoder reads the static_values encoded_array at the recorded offset: size 3 and the tags VALUE_BOOLEAN(false), VALUE_INT(0), VALUE_NULL in that order, bound to static_fields b:Z, i:I, s:Ljava/lang/String; in class_data order.",
+    "The independent decoder confirms static_values_off is non-zero and the array is not truncated; a missing offset or a short array is a preparation failure.",
+    "The three original fields, the canonical constructor and its flags stay complete, so an added default constructor cannot determine the unit state.",
+    "The reference Driver reads the three fields after class initialization and must print null / false / 0; the mirror is not an execution of the original DEX."
+  ],
+  "gaps": [
+    "The independent dexlib2 projection is not executable in this worktree; B03 owns that step.",
+    "The reference Java run used local javac 21.0.12.1, not the pinned 21.0.8+9 artifact, so it is corroboration rather than a pinned-toolchain certificate.",
+    "No authorized ART environment is available, so the original DEX static-field initialization is not executed on ART."
+  ],
+  "pathBase": "case-root: every repository source path is relative to tests/e2e/sources/<case>/, and every generated artifact path is relative to the repository root under .cache/e2e/.",
+  "measurementPolicy": "Asset sizes and hashes are produced by preparation from actual bytes under the ignored execution workspace; no author cache or hand-maintained measurement file is a prerequisite.",
+  "targets": {
+    "case": {
+      "kind": "class",
+      "input_role": "original",
+      "descriptor": "Lfixtures/Case;"
+    }
+  }
+}

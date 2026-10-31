@@ -1,45 +1,31 @@
 # B01 specification and selection review
 
-Goal: review the complete required execution set, symbolic targets, independent
-expectations and mutation observations before fixture production.
-Producer: B01; TASKS §3/§4, DESIGN §2/§5/§6 and ALGORITHMS §1/§7/§12.
-Expected values remain only in `docs/diana/e2e_cases.json`.
+Goal: review every required symbolic target, invocation, independent oracle,
+assertion source and mutation obligation before production implementation.
+Producer/contracts: B01; TASKS §3/§4, DESIGN §2/§5/§6,
+ALGORITHMS §1/§7/§12. Reviewer: the coding-assistant session; no second-person
+approval or engine-output oracle is claimed.
 
-Input: draft-5,
-SHA-256 `4517e2f620bc6b481ef2468b06f47655e5d9c6a613ff7663a47f1abe5b1e60ab`;
-preflight clarification
-SHA-256 `c4a9a71ba3d512fda7daac153bf864ae3e1b9cbc8830103ae5bdc10cc7086485`.
-Reviewed output: draft-6,
-SHA-256 `f1a95873d730aedcd25305c0e4304d85c7fea5b3b2b88ed91aa9a60e2dec082e`.
-These hashes identify reviewed bytes, not an approved freeze.
+Approved revision: draft-6, SHA-256
+`f1a95873d730aedcd25305c0e4304d85c7fea5b3b2b88ed91aa9a60e2dec082e`.
+The specification bytes, invocation inputs and independent expected values remain
+unchanged. Approval is recorded here, not by rewriting the frozen JSON's draft
+metadata or manufacturing an engine result.
 
-Changes: explicit symbolic targets for all cases, an evidence-source mapping for
-every expected field, case-specific mutation observations, and the derived
-`tests/e2e/cases.json` execution view with pointers rather than copied truth.
-D055–D058/D060 raw recipes are concrete. Original invocation inputs and expected
-values are unchanged. No case is deleted or downgraded.
+The review covers all required D001–D086 invocations, full symbolic protos,
+physical/logical scope, assertion-source mappings and case-specific mutation
+observations. Required Java is not downgraded to raw. Source JVM, restricted
+pure-register execution, closed fill mirrors, format-invalid inputs and
+raw-integrity evidence retain their distinct scopes. Exception and monitor
+behavior is not delegated to a simplified interpreter.
 
-Reviewer: the coding-assistant session; no independent second-reviewer approval
-is claimed. On macOS arm64 with local javac 21.0.12.1, 120 source/mirror invocations
-corroborate D001–D054/D071/D072/D073/D079/D082/D083. Eleven Java boundary compilation
-probes corroborate the D075–D078 reference-side forms. D027/D046/D073 are source
-mirrors only, not execution of original DEX. D079 uses separate processes per
-invocation and one JVM per repeated-call group; javap shows getstatic and no
-ConstantValue. The local JDK is not the TASKS-pinned toolchain.
+Evidence: local source/JVM preflight under `.cache/e2e/preflight-draft5/`, the
+[fixture corrections](fixture-source-review.md), and the locked-tool independent
+projections/reference runs in [preparation acceptance](b02-b04-preparation.md).
+The latter replaces local-JDK corroboration as the accepted preparation evidence.
+All inputRequirements have indexed input-certification or result-validation
+bindings; recovered-result predicates remain mandatory when T/H execution exists.
 
-Commands: `javac --release 8 -proc:none -g:none`, `java -cp`, `javap -p -c` and
-`javap -p -v`. Java8 source/target warnings were retained. Evidence lives in
-`.cache/e2e/preflight-draft5/`, including the three observation TSVs, separate
-initialization TSVs, classfile projections and `boundaries/`. Cache evidence is
-not a checked-in fixture dependency or an E2E harness.
-
-Checks: `git diff --check`, JSON parse/ID/proto/role/assertion review, comparison of
-original invocation inputs and expected values, full producer links and
-`python3 tools/audit/desensitize_check.py --range HEAD`.
-
-B01 remains unapproved: independent case review and complete concrete oracle /
-mutation evidence are still required. B02 sources/recipes, actual platform tool
-locks and preparer, B03 original-input certificates/scalar oracle, and B04
-comparator/runner/fault-falsification evidence are not accepted. No auxiliary-tool
-self-test, production implementation, reference-project build/test or ART run was
-performed. TASKS §3 retains the gate and authorization boundary.
+B01 is accepted for the identified revision. B02–B04 acceptance and executed
+platform limitations are recorded separately. No production implementation,
+reference-project build/test or ART execution is claimed.

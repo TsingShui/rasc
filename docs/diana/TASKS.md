@@ -1,8 +1,8 @@
 # Diana tasks and acceptance
 
-**Status: package scaffolds only; 39 B/T/H tasks are not yet accepted. The case
-specification draft-6 holds 86 required cases and 177 must-run invocation
-scenarios and remains designed-not-built.**
+**Status: B01–B04 preparation is accepted on macOS arm64. Production packages
+remain scaffolds; no T/H task or engine E2E case is accepted. The frozen draft-6
+specification holds 86 required cases and 177 must-run invocation scenarios.**
 This page owns the workflow, preparation, task cards and verification. Read
 [DESIGN.md](DESIGN.md) for interfaces and data, [ALGORITHMS.md](ALGORITHMS.md) for
 algorithms, and [SOURCE_MAP.md](SOURCE_MAP.md) for sources.
@@ -105,20 +105,15 @@ text, and MUST NOT be renamed as "core E2E preparation" to bypass that rule.
 Independent semantic certification of self-made sources and inputs remains
 preparation for core cases; keep the two categories distinct.
 
-**B04 keeps its original pass conditions and full prerequisites, but its tool
-self-test implementation is currently blocked by authorization.** B04 work
-requires explicit user authorization of a bounded scope, or a separately approved
-change to the preparation gate. An author MUST NOT omit that work and then claim
-B04 passed, and MUST NOT treat one manual trial run as the original
-fault-falsification guarantee. This section's authorization boundary governs.
-The block does not prohibit B01 review, B02 fixture/preparer implementation or
-B03 independent core-input certification. Those activities do not authorize
-preparer/comparator self-tests or satisfy B04's missing falsification evidence.
-A documentation revision alone approves no case, dependency or executable gate.
+The operator explicitly requested completion of B01–B04, authorizing only their
+listed preparer and comparator/runner fault tests. This bounded authorization and
+the actual execution evidence are recorded in
+[preparation acceptance](batches/b02-b04-preparation.md). It does not authorize
+other auxiliary tests, CLI black-box tests or ART execution. The original pass
+conditions remain unchanged.
 
-Development-entry evidence from [B01 review](batches/b01-spec-review.md): local
-source/JVM checks corroborate the reviewed expectations, but B01 is not approved.
-The remaining preparation sequence is concrete:
+[B01 review](batches/b01-spec-review.md) approves the unchanged draft-6 bytes.
+The preparation artifacts satisfy the following gates:
 
 | Gate | Required artifact before production implementation |
 |---|---|
@@ -127,8 +122,12 @@ The remaining preparation sequence is concrete:
 | B03 | Actual independent DEX/041/AXML/ZIP projections and source references, staged input certificates, and any scalar oracle needed before engine integration |
 | B04 | Comparator/runner using those certificates, plus rejection of every listed injected fault under explicit self-test authorization |
 
-B02 fixture/preparer work is possible without the separate self-test permission;
-B04 completion is not. Production T01/H01 still wait for all four accepted gates.
+B01–B04 are accepted for the executed `darwin-aarch64` profile. The checked-in
+sources, tool lock, manifest and runner reproduce from a clean source snapshot
+and cache, including a checkout path with spaces and a different working directory.
+Windows, Linux and ART are not-run, not passes. The first production batch is
+T01; T05 later connects the prepared runner to the real public library. Missing
+Engine entrypoints currently produce `not_implemented` for the complete suite.
 
 ## B01 — Case and expected-value specification review, freeze v1
 
@@ -406,8 +405,8 @@ store Limits a second time, and Report holds only owned result facts. Sources an
 expected values are independent of Diana; F/Q labels are historical capability
 tags. Compute the actual execution set and both denominators from the JSON
 `required`, `acceptanceGate` and `invocations` fields; the current specification
-holds 86 cases and 177 invocation scenarios. Fixtures, tool hashes and the runner
-are all not yet established.
+holds 86 cases and 177 invocation scenarios. The accepted preparation artifacts
+are recorded in §3; engine results remain not-implemented.
 
 ### Case format, revision basis and obligation mapping
 
@@ -477,8 +476,8 @@ This mapping MUST NOT automatically classify new cases as Java positive. The
 support or rejection result of each invocation comes only from the JSON. Method,
 declaration and pool boundary checks are core semantics, not CLI arguments, getters
 or tool self-tests. A new specification or specification derivation does not replace
-B01 approval, B03 input and compiler-artifact certification, and does not lift the
-B04 tool-self-test authorization block.
+B01 approval, B03 input and compiler-artifact certification, or explicit bounded
+authorization for B04 tool self-tests.
 
 Preflight clarification of draft-5 preserves every case/invocation and every
 expected value. It makes D059's unknown-opcode mutation and D062/D063 target
@@ -1021,8 +1020,7 @@ shapes, byte offsets guessed from output, or values refreshed from Diana.
 ### 4.7 Execution and failure determination
 
 The development tool interface is
-`python3 tools/e2e.py fetch-tools|prepare|verify-inputs|verify-harness`; the script
-does not exist yet. Only `fetch` may use the network; the other commands read only the
+`python3 tools/e2e.py fetch-tools|prepare|verify-inputs|verify-harness`. Only `fetch` may use the network; the other commands read only the
 locked tools and checked-in sources and MUST NOT scan the home directory, an SDK or a
 cache. Subprocesses use argument arrays and the locked classpath, Windows uses
 `join_paths`, and no command may assume a bare `smali.jar` runs with `java -jar`.

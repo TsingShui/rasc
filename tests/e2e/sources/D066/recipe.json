@@ -1,0 +1,69 @@
+{
+  "schemaVersion": 1,
+  "case": "D066",
+  "inputKind": "self-made-smali",
+  "dexVersion": "035",
+  "sources": [
+    "fixtures/Own.smali"
+  ],
+  "tools": [
+    {
+      "id": "smali-2.5.2",
+      "artifact": "org.smali:smali:2.5.2",
+      "mainClass": "org.jf.smali.Main",
+      "availableInThisWorktree": false,
+      "note": "TASKS 4.5 pinned assembler; not present in this worktree, so the build below was not executed locally and no DEX hash is claimed."
+    }
+  ],
+  "builds": [
+    {
+      "id": "own-dex",
+      "inputs": [
+        "fixtures/Own.smali"
+      ],
+      "argv": [
+        "java",
+        "-cp",
+        "<smali-2.5.2-lock-classpath>",
+        "org.jf.smali.Main",
+        "assemble",
+        "--api",
+        "23",
+        "-o",
+        ".cache/e2e/D066/own.dex",
+        "fixtures/Own.smali"
+      ],
+      "output": ".cache/e2e/D066/own.dex"
+    }
+  ],
+  "roleBindings": [
+    {
+      "role": "own-image",
+      "selector": {
+        "kind": "image"
+      }
+    }
+  ],
+  "invocations": [
+    {
+      "id": "all-definitions",
+      "inputRef": "/cases/65/invocations/0/input",
+      "expectedRef": "/cases/65/invocations/0/expected"
+    }
+  ],
+  "certificationObligations": [
+    "The independent decoder lists class_data direct/virtual definitions of this member: exactly Lfixtures/Own;-><init>()V and Lfixtures/Own;->f()V.",
+    "The same decoder lists method_ids entries Ljava/lang/Object;-><init>()V and Lfixtures/External;->g()V as references whose owner has no class_def; they are not definitions.",
+    "The query request has a null name filter and no display-name truncation; the comparison uses complete descriptors."
+  ],
+  "gaps": [
+    "The DEX build and the independent dexlib2 projection require the locked smali/dexlib2 tools, which are absent here; B03 owns that projection and its hashes."
+  ],
+  "pathBase": "case-root: every repository source path is relative to tests/e2e/sources/<case>/, and every generated artifact path is relative to the repository root under .cache/e2e/.",
+  "targets": {
+    "own-image": {
+      "kind": "image",
+      "input_role": "original"
+    }
+  }
+}

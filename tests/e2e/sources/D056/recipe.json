@@ -1,0 +1,103 @@
+{
+  "schemaVersion": 1,
+  "case": "D056",
+  "requestMethods": {"v1": "f()I"},
+  "inputKind": "self-made-byte-mutation",
+  "dexVersion": "035",
+  "builder": {
+    "path": "fixtures/build_dex.py",
+    "argv": [
+      "python3",
+      "fixtures/build_dex.py",
+      ".cache/e2e/D056"
+    ],
+    "outputs": [
+      ".cache/e2e/D056/baseline.dex",
+      ".cache/e2e/D056/mutated.dex"
+    ],
+    "language": "python3 standard library only; no network, no subprocess, no JVM tool",
+    "reason": "The mutation is one code-unit patch inside a reviewed baseline; a source compiler cannot produce a branch into the operand word of a multiword const."
+  },
+  "originalInput": {
+    "asset": ".cache/e2e/D056/baseline.dex",
+    "method": "Lfixtures/Case;->f()I",
+    "registersSize": 1,
+    "insSize": 0,
+    "outsSize": 0,
+    "triesSize": 0,
+    "insnsSize": 5,
+    "codeUnits": [
+      "0x0014",
+      "0x0007",
+      "0x0000",
+      "0xfd28",
+      "0x000f"
+    ],
+    "decode": [
+      "units 0..2: const v0, 7 (31i, three words: opcode word 0x0014, literal words 0x0007 0x0000)",
+      "unit 3: goto -3 (10t, target unit 0, the const opcode word)",
+      "unit 4: return v0 (11x, unreachable but format-valid)"
+    ],
+    "note": "The baseline loop is unbounded, so no execution oracle is claimed for it.",
+    "anchors": {
+      "f_code_off": 336,
+      "f_insns_size_off": 348,
+      "f_insns_off": 352,
+      "goto_unit_index": 3,
+      "goto_unit_file_offset": 358,
+      "class_data_off": 368,
+      "map_off": 384,
+      "file_size": 500
+    }
+  },
+  "mutation": {
+    "asset": ".cache/e2e/D056/mutated.dex",
+    "field": "code_unit[3] of Lfixtures/Case;->f()I",
+    "anchorFileOffset": 358,
+    "originalValue": "0xfd28",
+    "mutatedValue": "0xfe28",
+    "intendedChange": "goto delta -3 -> -2, so the branch target moves from unit 0 (the 31i const opcode word) to unit 1, which is the first literal word of that three-word const and therefore not an instruction boundary",
+    "unchanged": "file_size, header, tables, refs, declaration, version, code range and the remaining three code units",
+    "rehash": "header checksum at 0x08..0x0b and signature at 0x0c..0x1f recomputed over the mutated bytes; together with the one patched byte at 0x167 these are the only 25 changed offsets",
+    "changedByteCount": 25,
+    "changedFileOffset": 359,
+    "note_on_offsets": "the goto code unit stored at file offset 0x166 is 0xfd28; 10t keeps its signed 8-bit delta in the high byte, so only the high byte at 0x167 changes 0xfd -> 0xfe and the low byte 0x28 stays identical"
+  },
+  "roleBindings": [
+    {
+      "role": "case",
+      "selector": {
+        "kind": "method",
+        "owner": "Lfixtures/Case;",
+        "name": "f",
+        "proto": "()I"
+      }
+    }
+  ],
+  "invocations": [
+    {
+      "id": "v1",
+      "inputRef": "/cases/55/invocations/0/input",
+      "expectedRef": "/cases/55/invocations/0/expected"
+    }
+  ],
+  "certificationObligations": [
+    "An independent decoder proves the mutated branch target is code unit 1, which is the operand word of the 21s const/16 at units 0..1, and not an instruction boundary.",
+    "An independent decoder confirms every other field of the mutated file equals the baseline: same five code units except the patched word, same declaration, same version, same empty reference tables.",
+    "The fault certificate records the anchor file offset, the original and mutated code units and both SHA-256 values; no second malformed field is introduced."
+  ],
+  "gaps": [
+    "The independent dexlib2 projection is not executable in this worktree; B03 owns that step and confirms the same anchors against the locked decoder.",
+    "The engine rejection itself is not observed here."
+  ],
+  "pathBase": "case-root: every repository source path is relative to tests/e2e/sources/<case>/, and every generated artifact path is relative to the repository root under .cache/e2e/.",
+  "targets": {
+    "case": {
+      "kind": "method",
+      "input_role": "original",
+      "owner": "Lfixtures/Case;",
+      "name": "f",
+      "proto": "()I"
+    }
+  }
+}

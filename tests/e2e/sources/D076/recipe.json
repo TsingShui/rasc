@@ -1,0 +1,205 @@
+{
+  "schemaVersion": 1,
+  "case": "D076",
+  "specRevision": "draft-6",
+  "specRef": {
+    "case": "/cases/75",
+    "targets": "/cases/75/targets",
+    "inputRecipe": "/cases/75/inputRecipe",
+    "inputRequirements": "/cases/75/inputRequirements"
+  },
+  "targets": {
+    "nul32767": {
+      "kind": "class",
+      "input_role": "nul32767",
+      "descriptor": "Lfixtures/Case;"
+    },
+    "nul32767-A": {
+      "kind": "class",
+      "input_role": "nul32767-A",
+      "descriptor": "Lfixtures/Case;"
+    },
+    "nul32768": {
+      "kind": "class",
+      "input_role": "nul32768",
+      "descriptor": "Lfixtures/Case;"
+    }
+  },
+  "inputKind": "self-made-dex-builder-with-reference-java",
+  "sources": [
+    "fixtures/build_dex.py",
+    "fixtures/gen_reference.py",
+    "driver/Driver.java"
+  ],
+  "referenceJava": {
+    "roles": [
+      "nul32767",
+      "nul32767-A"
+    ],
+    "absent": [
+      {
+        "role": "nul32768",
+        "reason": "A 65536-byte CONSTANT_Utf8 exceeds the JVMS bound, so no legal Java source expresses this role; local javac rejects it with 'UTF8 representation ... is too long'. This is the accepted evidence that the role is over-limit, not a missing reference."
+      }
+    ],
+    "javac": [
+      "--release",
+      "8",
+      "-proc:none",
+      "-g:none"
+    ],
+    "generator": {
+      "path": "fixtures/gen_reference.py",
+      "emits": [
+        ".cache/e2e/D076/reference/nul32767/fixtures/Case.java",
+        ".cache/e2e/D076/reference/nul32767-A/fixtures/Case.java"
+      ],
+      "emittedSha256": {
+        "nul32767": "7211064b4961dc5708870cec8c3b0051648c382121dbeeebbcb4e87cb91b154d",
+        "nul32767-A": "57ec9d8a11d9c9afd0ba17bcc114497f799520be09b06c7736ccb58d542e090d"
+      },
+      "role": "emits the two legal reference sources into the ignored execution workspace; each is 66 KB of octal NUL escapes whose reviewable facts are the unit count and the optional tail recorded in inputShape"
+    }
+  },
+  "dex": {
+    "builder": "fixtures/build_dex.py",
+    "outputs": [
+      "nul32767.dex",
+      "nul32767-A.dex",
+      "nul32768.dex"
+    ],
+    "outputDirectory": ".cache/e2e/D076/",
+    "format": "dex 035, one class Lfixtures/Case; per input",
+    "toolSpec": "docs/diana/TASKS.md#45-pinned-tools-and-content-locks",
+    "certification": "Asset hashes and independent input certificates must be produced from the corrected builder by preparation; local draft hashes are not an approved lock."
+  },
+  "catalog": "complete declaration catalog over Case",
+  "driver": {
+    "class": "driver.Driver",
+    "entry": "main",
+    "argv": [
+      "<role>",
+      "<invocation-id>"
+    ],
+    "isolation": "fresh-jvm-per-invocation; compiled once against each role's reference classpath",
+    "observations": [
+      "returned",
+      "utf16Units",
+      "codeUnits",
+      "codeUnitsHex"
+    ],
+    "absent": [
+      {
+        "role": "nul32768",
+        "reason": "the over-limit role has no legal Java form, so there is no executable baseline; it is observed only by public classification, a typed target reason and an independent raw projection"
+      }
+    ],
+    "runs": [
+      {
+        "role": "nul32767",
+        "invocation": "below",
+        "observed": "utf16Units=32767, every code unit 0, completed=true, exception=null, codeUnitsHex length 131068"
+      },
+      {
+        "role": "nul32767-A",
+        "invocation": "at",
+        "observed": "utf16Units=32768, 32767 NUL units then unit 0x0041, completed=true, exception=null, codeUnitsHex length 131072"
+      }
+    ],
+    "scope": "local JDK 21.0.12.1 execution of the reference Java against the case Driver; it is corroboration of the accepted roles' returned u16 vector, not original-DEX certification and not a pinned-toolchain run"
+  },
+  "invocations": [
+    {
+      "id": "below",
+      "inputRef": "/cases/75/invocations/0/input",
+      "expectedRef": "/cases/75/invocations/0/expected",
+      "method": "f()Ljava/lang/String;",
+      "inputAsset": "nul32767.dex",
+      "request": {
+        "targetRole": "nul32767",
+        "method": "f()Ljava/lang/String;"
+      },
+      "observation": "public classification plus the complete u16 vector observed by executing f() with the case Driver on its reference and recovered sources"
+    },
+    {
+      "id": "at",
+      "inputRef": "/cases/75/invocations/1/input",
+      "expectedRef": "/cases/75/invocations/1/expected",
+      "method": "f()Ljava/lang/String;",
+      "inputAsset": "nul32767-A.dex",
+      "request": {
+        "targetRole": "nul32767-A",
+        "method": "f()Ljava/lang/String;"
+      },
+      "observation": "public classification plus an exact u16 string pattern ending in 'A' ; the case Driver executes f() for real and reports the complete u16 vector"
+    },
+    {
+      "id": "over",
+      "inputRef": "/cases/75/invocations/2/input",
+      "expectedRef": "/cases/75/invocations/2/expected",
+      "method": "f()Ljava/lang/String;",
+      "inputAsset": "nul32768.dex",
+      "request": {
+        "targetRole": "nul32768",
+        "method": "f()Ljava/lang/String;"
+      },
+      "observation": "public classification, typed target reason and an independent raw projection"
+    }
+  ],
+  "inputShape": {
+    "sharedForm": "each owner keeps the canonical Object constructor and a static f()Ljava/lang/String; whose code_item is const-string v0, <literal>; return-object v0 with registers_size=1, ins_size=0, outs_size=0, tries_size=0",
+    "roles": [
+      {
+        "role": "nul32767",
+        "utf16Units": 32767,
+        "mutf8Bytes": 65534,
+        "stringPattern": "32767 NUL units, no tail unit"
+      },
+      {
+        "role": "nul32767-A",
+        "utf16Units": 32768,
+        "mutf8Bytes": 65535,
+        "stringPattern": "32767 NUL units then one 'A' (0x0041)"
+      },
+      {
+        "role": "nul32768",
+        "utf16Units": 32768,
+        "mutf8Bytes": 65536,
+        "stringPattern": "32768 NUL units, no tail unit"
+      }
+    ],
+    "mutf8Rule": "ALGORITHMS 4.8: NUL encodes to 2 bytes and ASCII to 1, so the bound is measured in encoded bytes, not in u16 units and not in the length of the Java source escape",
+    "budget": "every analysis and output quota is sufficient; no output limit may mask the target error",
+    "localProbe": {
+      "observed": "local javac --release 8 -proc:none -g:none built the two legal references with CONSTANT_Utf8 sizes 65534 and 65535 bytes (32767 NUL pairs each) and rejected the 32768-unit literal as 'UTF8 representation ... is too long'",
+      "scope": "local JDK 21.0.12.1 corroboration of the reference-side boundary only; it is not the TASKS-pinned toolchain and not original DEX certification"
+    }
+  },
+  "inputRequirementRefs": [
+    "/cases/75/inputRequirements/0",
+    "/cases/75/inputRequirements/1"
+  ],
+  "roleBindings": [
+    {
+      "role": "nul32767",
+      "selector": {
+        "kind": "class",
+        "descriptor": "Lfixtures/Case;"
+      }
+    },
+    {
+      "role": "nul32767-A",
+      "selector": {
+        "kind": "class",
+        "descriptor": "Lfixtures/Case;"
+      }
+    },
+    {
+      "role": "nul32768",
+      "selector": {
+        "kind": "class",
+        "descriptor": "Lfixtures/Case;"
+      }
+    }
+  ]
+}

@@ -1,8 +1,9 @@
 # Diana Design and Implementation
 
-Only the Diana package scaffolds exist. The Engine, runnable fixtures and runner
-have not yet been implemented. Research and design are not evidence of capability
-acceptance.
+The Diana packages remain scaffolds. B01–B04 preparation is accepted on macOS
+arm64: self-made inputs, locked tools, independent certificates and the comparator
+are executable. The Engine is not implemented; preparation is not engine acceptance.
+See [preparation evidence](batches/b02-b04-preparation.md).
 
 Diana is a decompiler: it displays recovered code by default. A failed method is
 shown in its original position and identity as Smali or with a reason; a Mixed
@@ -31,11 +32,12 @@ targets and assertion evidence bindings. Evidence-based corrections
 and additions are allowed; incorrect formats or gaps are not retained merely to
 preserve a count. There is no separate copy of the expectations or web mirror.
 The tool lock points directly to TASKS without a historical redirect.
-B01–B04 have not passed. [B01 review](batches/b01-spec-review.md) records local
-source/JVM corroboration and the remaining preparation artifacts; it is not
-locked-toolchain or engine certification. TASKS §3 gives the development-entry
-sequence and the authorization block on tool self-tests; production feature work
-cannot begin early.
+[B01 review](batches/b01-spec-review.md) approves the unchanged specification;
+TASKS §3 records preparation acceptance and its bounded self-test authorization.
+The frozen JSON retains its draft metadata rather than acting as a progress counter.
+Windows/Linux and ART are not-run. Next is I0: T01 resource/cancellation control,
+T02–T04 safe input/raw/metadata and T05 real-library integration, then D009 Java
+recovery before D001 and D002/D003.
 
 For implementation, read DESIGN, then the relevant section of ALGORITHMS, then
 the current TASKS card. Consult SOURCE_MAP when checking evidence. Every authored

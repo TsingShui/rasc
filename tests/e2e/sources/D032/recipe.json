@@ -1,0 +1,80 @@
+{
+  "schemaVersion": 1,
+  "case": "D032",
+  "specRevision": "draft-6",
+  "specRef": {
+    "path": "docs/diana/e2e_cases.json",
+    "schemaVersion": 2,
+    "sha256": "f1a95873d730aedcd25305c0e4304d85c7fea5b3b2b88ed91aa9a60e2dec082e",
+    "casePointer": "/cases/31"
+  },
+  "targets": {
+    "case": {
+      "kind": "class",
+      "input_role": "original",
+      "descriptor": "Lfixtures/Case;"
+    }
+  },
+  "fixture": {
+    "sources": [
+      "fixtures/Case.java"
+    ],
+    "replacesOriginalClasses": [
+      "Lfixtures/Case;"
+    ]
+  },
+  "dependencies": {
+    "sources": [
+      "fixtures/Dep.java",
+      "fixtures/ExpectedError.java"
+    ],
+    "unchanged": true
+  },
+  "driver": {
+    "class": "fixtures.Driver",
+    "sources": [
+      "driver/Driver.java"
+    ],
+    "inDexInput": false
+  },
+  "javac": {
+    "profile": "javac-release-8-proc-none-gnone",
+    "args": [
+      "--release",
+      "8",
+      "-proc:none",
+      "-g:none"
+    ]
+  },
+  "dex": {
+    "tool": {
+      "artifact": "com.android.tools:r8",
+      "version": "8.3.37",
+      "mainClass": "com.android.tools.r8.D8"
+    },
+    "minApi": null,
+    "dexVersion": null,
+    "status": "blocked",
+    "blockedReason": "TASKS 4.5 pins r8 8.3.37/com.android.tools.r8.D8, but this worktree has no tests/e2e/toolchain.lock.json and no fetched artifact, so min-api/dex-version agreement and content hashes are unverified; no DEX asset is claimed."
+  },
+  "invocations": [
+    {
+      "id": "v1",
+      "inputRef": "/cases/31/invocations/0/input",
+      "expectedRef": "/cases/31/invocations/0/expected",
+      "driverArgv": [
+        "v1"
+      ],
+      "isolation": "fresh-jvm"
+    }
+  ],
+  "roleBindings": [
+    {
+      "role": "case",
+      "selector": {
+        "kind": "class",
+        "descriptor": "Lfixtures/Case;"
+      }
+    }
+  ]
+}

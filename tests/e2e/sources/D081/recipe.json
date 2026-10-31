@@ -1,0 +1,71 @@
+{
+  "schemaVersion": 1,
+  "case": "D081",
+  "inputKind": "self-made-smali",
+  "dexVersion": "035",
+  "sources": [
+    "fixtures/Case.smali"
+  ],
+  "catalog": "fixtures/catalog.json",
+  "tools": [
+    {
+      "id": "smali-2.5.2",
+      "artifact": "org.smali:smali:2.5.2",
+      "mainClass": "org.jf.smali.Main",
+      "availableInThisWorktree": false,
+      "note": "TASKS 4.5 pinned assembler; absent here, so no DEX hash is claimed."
+    }
+  ],
+  "builds": [
+    {
+      "id": "case-dex",
+      "argv": [
+        "java",
+        "-cp",
+        "<smali-2.5.2-lock-classpath>",
+        "org.jf.smali.Main",
+        "assemble",
+        "--api",
+        "23",
+        "-o",
+        ".cache/e2e/D081/case.dex",
+        "fixtures/Case.smali"
+      ],
+      "output": ".cache/e2e/D081/case.dex"
+    }
+  ],
+  "roleBindings": [
+    {
+      "role": "case",
+      "selector": {
+        "kind": "class",
+        "descriptor": "Lfixtures/Case;"
+      }
+    }
+  ],
+  "invocations": [
+    {
+      "id": "reexecuted-root",
+      "inputRef": "/cases/80/invocations/0/input",
+      "expectedRef": "/cases/80/invocations/0/expected"
+    }
+  ],
+  "certificationObligations": [
+    "The independent projection proves the actual backedge: the goto at the end of the lock branch targets the same instruction PC as the new-instance, so the same static allocation site runs twice.",
+    "The independent projection proves the monitor-exit at :exit consumes the value defined by the most recent new-instance/init on the taken path, not the object locked on the earlier iteration, so no dynamic-identity/join certificate exists.",
+    "The independent projection confirms there is no encoded handler, that both monitor opcodes are 11x, and that every ref resolves to a complete catalog declaration.",
+    "The complete raw method is preserved after the rejection; no interpreter that ignores monitors is used and no ART verifier acceptance is claimed."
+  ],
+  "gaps": [
+    "The locked smali/dexlib2 build and projection are absent here; B03 owns that step, the dynamic-identity certificate and the hashes.",
+    "No authorized ART environment is available, so the runtime lock behavior of this hand-made graph is not observed."
+  ],
+  "pathBase": "case-root: every repository source path is relative to tests/e2e/sources/<case>/, and every generated artifact path is relative to the repository root under .cache/e2e/.",
+  "targets": {
+    "case": {
+      "kind": "class",
+      "input_role": "original",
+      "descriptor": "Lfixtures/Case;"
+    }
+  }
+}

@@ -1,0 +1,72 @@
+{
+  "schemaVersion": 1,
+  "case": "D063",
+  "specRevision": "draft-6",
+  "specRef": {
+    "case": "/cases/62",
+    "targets": "/cases/62/targets",
+    "inputRecipe": "/cases/62/inputRecipe",
+    "inputRequirements": "/cases/62/inputRequirements"
+  },
+  "targets": {
+    "case": {
+      "kind": "method",
+      "input_role": "original",
+      "owner": "Lfixtures/Case;",
+      "name": "f",
+      "proto": "(I)I"
+    }
+  },
+  "sources": [
+    "fixtures/Case.java"
+  ],
+  "javac": [
+    "--release",
+    "8",
+    "-proc:none",
+    "-g:none"
+  ],
+  "dex": {
+    "tool": "com.android.tools:r8:8.3.37",
+    "mainClass": "com.android.tools.r8.D8",
+    "toolSpec": "docs/diana/TASKS.md#45-pinned-tools-and-content-locks"
+  },
+  "catalog": "complete declaration catalog over Case",
+  "driver": null,
+  "inputShape": {
+    "sourceForm": "256 sequential x+=1 statements followed by return x; no loop, no call, no payload, no handler",
+    "statementCount": 256,
+    "localProbe": "javac --release 8 -proc:none -g:none emits 256 iinc instructions inside f(I)I; the probe only shows the shape is expressible",
+    "compilerCollapseRule": "If the pinned D8 collapses the straight-line chain, preparation blocks instead of substituting a smaller graph"
+  },
+  "invocations": [
+    {
+      "id": "v1",
+      "inputRef": "/cases/62/invocations/0/input",
+      "expectedRef": "/cases/62/invocations/0/expected",
+      "method": "f(I)I",
+      "request": {
+        "targetRole": "case",
+        "cancellation": {
+          "arm": "after-open",
+          "cancelAfterChecks": 64
+        }
+      },
+      "observation": "public classification only; this invocation decompiles the method and never executes it in a Driver"
+    }
+  ],
+  "inputRequirementRefs": [
+    "/cases/62/inputRequirements/0"
+  ],
+  "roleBindings": [
+    {
+      "role": "case",
+      "selector": {
+        "kind": "method",
+        "owner": "Lfixtures/Case;",
+        "name": "f",
+        "proto": "(I)I"
+      }
+    }
+  ]
+}

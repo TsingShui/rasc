@@ -1,0 +1,187 @@
+{
+  "schemaVersion": 1,
+  "case": "D069",
+  "inputKind": "self-made-zip",
+  "builder": {
+    "path": "fixtures/build_zip.py",
+    "argv": [
+      "python3",
+      "fixtures/build_zip.py",
+      ".cache/e2e/D069"
+    ],
+    "outputs": [
+      ".cache/e2e/D069/bad-crc.zip",
+      ".cache/e2e/D069/over-budget.zip",
+      ".cache/e2e/D069/unsupported.zip",
+      ".cache/e2e/D069/encrypted.zip"
+    ],
+    "language": "python3 standard library only; no network, no subprocess",
+    "reason": "Each rejection needs one independent, structurally legal ZIP whose single defect is the field under test; a BZIP2 stream and a ZipCrypto stream must be real, not flag-only stubs."
+  },
+  "targetPreparation": {
+    "kind": "regular file KEEP([75,69,69,80])",
+    "force": true,
+    "note": "Every invocation replaces an existing regular file, so the target must not be blocked by TargetExists before the CRC/budget/compression/encryption validation.",
+    "notSymlink": true,
+    "notDirectory": true,
+    "notInputAlias": true
+  },
+  "scenarios": [
+    {
+      "invocation": "bad-crc",
+      "path": ".cache/e2e/D069/bad-crc.zip",
+      "entry": {
+        "name": "bad.bin",
+        "ordinal": 0,
+        "method": 0,
+        "crc": "0x83582823"
+      },
+      "payload": [
+        0,
+        255,
+        65,
+        0,
+        128,
+        10
+      ],
+      "correctCrc": "0x83582822",
+      "recordedCrc": "0x83582823",
+      "crcDelta": "recorded = correct xor 1; local and central agree",
+      "verification": "the stored bytes read from the local record equal [0,255,65,0,128,10] and their recomputed CRC is 0x83582822, so only the CRC field is wrong"
+    },
+    {
+      "invocation": "inflate-budget",
+      "path": ".cache/e2e/D069/over-budget.zip",
+      "entry": {
+        "name": "large.bin",
+        "ordinal": 0,
+        "method": 8,
+        "crc": "0xb737fb1a"
+      },
+      "uncompressedSize": 1024,
+      "compressedSize": 11,
+      "crc": "0xb737fb1a",
+      "inflateLimitBytes": 128,
+      "payloadPattern": "byte i = 0x41 for all i",
+      "verification": "the standard-library deflate reader returns exactly 1024 bytes of 0x41 and the CRC matches"
+    },
+    {
+      "invocation": "unsupported-compression",
+      "path": ".cache/e2e/D069/unsupported.zip",
+      "entry": {
+        "name": "unsupported.bin",
+        "ordinal": 0,
+        "method": 12,
+        "crc": "0x83582822"
+      },
+      "versionNeeded": 46,
+      "flagBits": 0,
+      "streamHeader": [
+        66,
+        90,
+        104,
+        57
+      ],
+      "compressedSize": 46,
+      "crc": "0x83582822",
+      "payload": [
+        0,
+        255,
+        65,
+        0,
+        128,
+        10
+      ],
+      "verification": "a real BZIP2 stream (header 'BZh9') decompresses to the payload with the standard-library bz2 decompressor and through zipfile method 12; CRC and sizes are correct, so compression method is the only rejection reason"
+    },
+    {
+      "invocation": "encrypted-entry",
+      "path": ".cache/e2e/D069/encrypted.zip",
+      "entry": {
+        "name": "encrypted.bin",
+        "ordinal": 0,
+        "method": 0,
+        "crc": "0x83582822"
+      },
+      "flagBits": "0x0001 (bit0 set; bit3 and bit6 clear)",
+      "versionNeeded": 20,
+      "password": "fixture",
+      "headerPlaintext": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        131
+      ],
+      "headerLastByte": "0x83, the high byte of the plaintext CRC 0x83582822",
+      "payloadPlaintext": [
+        0,
+        255,
+        65,
+        0,
+        128,
+        10
+      ],
+      "compressedSize": 18,
+      "uncompressedSize": 6,
+      "crc": "0x83582822",
+      "verification": "the CPython zipfile ZipCrypto path with password 'fixture' decrypts the 12-byte header and returns exactly the 6-byte payload; compressed_size 18 = 12 + 6, so the extra header must not be misreported as an equal-length corruption"
+    }
+  ],
+  "roleBindings": [
+    {
+      "role": "input",
+      "selector": {
+        "kind": "image"
+      }
+    }
+  ],
+  "invocations": [
+    {
+      "id": "bad-crc",
+      "inputRef": "/cases/68/invocations/0/input",
+      "expectedRef": "/cases/68/invocations/0/expected"
+    },
+    {
+      "id": "inflate-budget",
+      "inputRef": "/cases/68/invocations/1/input",
+      "expectedRef": "/cases/68/invocations/1/expected"
+    },
+    {
+      "id": "unsupported-compression",
+      "inputRef": "/cases/68/invocations/2/input",
+      "expectedRef": "/cases/68/invocations/2/expected"
+    },
+    {
+      "id": "encrypted-entry",
+      "inputRef": "/cases/68/invocations/3/input",
+      "expectedRef": "/cases/68/invocations/3/expected"
+    }
+  ],
+  "certificationObligations": [
+    "All four targets are safely overwritable and are not blocked by TargetExists first; each invocation uses force=true against the same regular KEEP file.",
+    "The independent reader checks the header, range, CRC and size of each ZIP and identifies exactly one rejection reason per scenario.",
+    "An independent reference decompressor verifies the plaintext of the BZIP2 stream, and the public fixture password 'fixture' decrypts the ZipCrypto entry with its plaintext, CRC and 12-byte header verified; a corrupt file that merely sets bit0 must not substitute for it.",
+    "Each rejection must leave KEEP unchanged at [75,69,69,80] and must leave zero temp files; Malformed, a decode failure or another error kind must not match the expectation."
+  ],
+  "gaps": [
+    "The extract seam, its error kinds and the publication/temp-file cleanup are application behavior not observable in this worktree; no file publisher is implemented here.",
+    "The independent ZIP reference is python3 zipfile/bz2 only; a separately locked tool is B02/B03 work.",
+    "Production provides no password or decryption path, so the encrypted entry is a rejection fixture only."
+  ],
+  "pathBase": "case-root: every repository source path is relative to tests/e2e/sources/<case>/, and every generated artifact path is relative to the repository root under .cache/e2e/.",
+  "measurementPolicy": "Asset sizes and hashes are produced by preparation from actual bytes under the ignored execution workspace; no author cache or hand-maintained measurement file is a prerequisite.",
+  "targets": {
+    "input": {
+      "kind": "image",
+      "input_role": "zip"
+    }
+  }
+}

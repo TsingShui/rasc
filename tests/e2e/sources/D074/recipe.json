@@ -1,0 +1,175 @@
+{
+  "schemaVersion": 1,
+  "case": "D074",
+  "inputKind": "self-made-smali",
+  "dexVersion": "035",
+  "sources": [
+    "fixtures/parameter/Case.smali",
+    "fixtures/too-short/Case.smali",
+    "fixtures/unknown-length/Case.smali",
+    "fixtures/escaped/Case.smali"
+  ],
+  "catalog": "fixtures/catalog.json",
+  "tools": [
+    {
+      "id": "smali-2.5.2",
+      "artifact": "org.smali:smali:2.5.2",
+      "mainClass": "org.jf.smali.Main",
+      "availableInThisWorktree": false,
+      "note": "TASKS 4.5 pinned assembler; absent here, so no DEX hash is claimed."
+    }
+  ],
+  "builds": [
+    {
+      "id": "parameter",
+      "role": "parameter",
+      "argv": [
+        "java",
+        "-cp",
+        "<smali-2.5.2-lock-classpath>",
+        "org.jf.smali.Main",
+        "assemble",
+        "--api",
+        "23",
+        "-o",
+        ".cache/e2e/D074/parameter.dex",
+        "fixtures/parameter/Case.smali"
+      ],
+      "output": ".cache/e2e/D074/parameter.dex"
+    },
+    {
+      "id": "too-short",
+      "role": "too-short",
+      "argv": [
+        "java",
+        "-cp",
+        "<smali-2.5.2-lock-classpath>",
+        "org.jf.smali.Main",
+        "assemble",
+        "--api",
+        "23",
+        "-o",
+        ".cache/e2e/D074/too-short.dex",
+        "fixtures/too-short/Case.smali"
+      ],
+      "output": ".cache/e2e/D074/too-short.dex"
+    },
+    {
+      "id": "unknown-length",
+      "role": "unknown-length",
+      "argv": [
+        "java",
+        "-cp",
+        "<smali-2.5.2-lock-classpath>",
+        "org.jf.smali.Main",
+        "assemble",
+        "--api",
+        "23",
+        "-o",
+        ".cache/e2e/D074/unknown-length.dex",
+        "fixtures/unknown-length/Case.smali"
+      ],
+      "output": ".cache/e2e/D074/unknown-length.dex"
+    },
+    {
+      "id": "escaped",
+      "role": "escaped",
+      "argv": [
+        "java",
+        "-cp",
+        "<smali-2.5.2-lock-classpath>",
+        "org.jf.smali.Main",
+        "assemble",
+        "--api",
+        "23",
+        "-o",
+        ".cache/e2e/D074/escaped.dex",
+        "fixtures/escaped/Case.smali"
+      ],
+      "output": ".cache/e2e/D074/escaped.dex"
+    }
+  ],
+  "roleBindings": [
+    {
+      "role": "parameter",
+      "selector": {
+        "kind": "class",
+        "descriptor": "Lfixtures/Case;"
+      }
+    },
+    {
+      "role": "too-short",
+      "selector": {
+        "kind": "class",
+        "descriptor": "Lfixtures/Case;"
+      }
+    },
+    {
+      "role": "unknown-length",
+      "selector": {
+        "kind": "class",
+        "descriptor": "Lfixtures/Case;"
+      }
+    },
+    {
+      "role": "escaped",
+      "selector": {
+        "kind": "class",
+        "descriptor": "Lfixtures/Case;"
+      }
+    }
+  ],
+  "invocations": [
+    {
+      "id": "parameter",
+      "inputRef": "/cases/73/invocations/0/input",
+      "expectedRef": "/cases/73/invocations/0/expected"
+    },
+    {
+      "id": "too-short",
+      "inputRef": "/cases/73/invocations/1/input",
+      "expectedRef": "/cases/73/invocations/1/expected"
+    },
+    {
+      "id": "unknown-length",
+      "inputRef": "/cases/73/invocations/2/input",
+      "expectedRef": "/cases/73/invocations/2/expected"
+    },
+    {
+      "id": "escaped",
+      "inputRef": "/cases/73/invocations/3/input",
+      "expectedRef": "/cases/73/invocations/3/expected"
+    }
+  ],
+  "certificationObligations": [
+    "The independent projection proves for each input that the failing FillPlan condition is the source condition only: parameter array (no FreshArray), length 1 < count 2, unknown length, and prior publication through Lfixtures/Dep;->publish([I)V.",
+    "The independent projection decodes both I32 payload elements 7 and 8 and their order in every input, and confirms that the complete raw form of each method exists after the rejection.",
+    "Metadata, catalog completeness and opcode support are excluded as causes: every owner/proto/ref is declared in catalog.json and every opcode used is a defined 035 opcode."
+  ],
+  "gaps": [
+    "The locked smali/dexlib2 build and the independent projection are not executable in this worktree; B03 owns that step and the resulting hashes."
+  ],
+  "pathBase": "case-root: every repository source path is relative to tests/e2e/sources/<case>/, and every generated artifact path is relative to the repository root under .cache/e2e/.",
+  "targets": {
+    "parameter": {
+      "kind": "class",
+      "input_role": "parameter",
+      "descriptor": "Lfixtures/Case;"
+    },
+    "too-short": {
+      "kind": "class",
+      "input_role": "too-short",
+      "descriptor": "Lfixtures/Case;"
+    },
+    "unknown-length": {
+      "kind": "class",
+      "input_role": "unknown-length",
+      "descriptor": "Lfixtures/Case;"
+    },
+    "escaped": {
+      "kind": "class",
+      "input_role": "escaped",
+      "descriptor": "Lfixtures/Case;"
+    }
+  }
+}

@@ -1,0 +1,243 @@
+{
+  "schemaVersion": 1,
+  "case": "D070",
+  "inputKind": "self-made-zip-and-temp-files",
+  "builder": {
+    "path": "fixtures/build_zip.py",
+    "argv": [
+      "python3",
+      "fixtures/build_zip.py",
+      ".cache/e2e/D070/entries.zip"
+    ],
+    "output": ".cache/e2e/D070/entries.zip",
+    "language": "python3 standard library only; no network, no subprocess",
+    "reason": "The case needs a legal ZIP with a traversal-shaped entry name and two different 16 MiB deterministic payloads; the builder writes them directly and re-reads each record completely."
+  },
+  "capabilityReport": {
+    "path": "fixtures/capability_report.py",
+    "argv": [
+      "python3",
+      "fixtures/capability_report.py"
+    ],
+    "platform": "Darwin 25.5.0 arm64, python 3.14.7, tempfile.TemporaryDirectory",
+    "observed": {
+      "symlink_create": true,
+      "hardlink_create": true,
+      "atomic_rename": true,
+      "file_handle_identity": true,
+      "large_payload_reader": true
+    },
+    "note": "A platform lacking any of these fails D070 preparation for that platform; the invocations are not merged or degraded."
+  },
+  "asset": {
+    "path": ".cache/e2e/D070/entries.zip"
+  },
+  "entries": [
+    {
+      "ordinal": 0,
+      "name": "safe.bin",
+      "method": 8,
+      "crc": "0x83582822",
+      "compressedSize": 8,
+      "uncompressedSize": 6,
+      "localHeaderOffset": 0,
+      "payload": [
+        0,
+        255,
+        65,
+        0,
+        128,
+        10
+      ],
+      "payloadSha256": "e87e06da1763ec67a6ce001f8dfd2f4b1112bac3e2342744dc08cca352b31027"
+    },
+    {
+      "ordinal": 1,
+      "name": "../escape",
+      "method": 0,
+      "crc": "0x83582822",
+      "compressedSize": 6,
+      "uncompressedSize": 6,
+      "localHeaderOffset": 46,
+      "payload": [
+        0,
+        255,
+        65,
+        0,
+        128,
+        10
+      ],
+      "payloadSha256": "e87e06da1763ec67a6ce001f8dfd2f4b1112bac3e2342744dc08cca352b31027"
+    },
+    {
+      "ordinal": 2,
+      "name": "pattern17.bin",
+      "method": 8,
+      "crc": "0x562b09ab",
+      "compressedSize": 65393,
+      "uncompressedSize": 16777216,
+      "localHeaderOffset": 91,
+      "pattern": {
+        "length": 16777216,
+        "multiplier": 17,
+        "add": 3
+      },
+      "payloadSha256": "71b83c780eeb1a2665d5aabf71229490ae069450ef9b88ca91d1229fe17f45c6"
+    },
+    {
+      "ordinal": 3,
+      "name": "pattern29.bin",
+      "method": 8,
+      "crc": "0xbdc6a6f7",
+      "compressedSize": 65393,
+      "uncompressedSize": 16777216,
+      "localHeaderOffset": 65527,
+      "pattern": {
+        "length": 16777216,
+        "multiplier": 29,
+        "add": 11
+      },
+      "payloadSha256": "bdca5168f7429d43acdbfda35f7efb952ddb97e8142573f5846be9aac505204e"
+    }
+  ],
+  "targetMatrix": [
+    {
+      "invocation": "existing-no-force",
+      "target": "existing regular file KEEP",
+      "force": false
+    },
+    {
+      "invocation": "symlink-force",
+      "target": "symlink whose referent holds a sentinel",
+      "force": true
+    },
+    {
+      "invocation": "input-path-force",
+      "target": "the original input path of entries.zip",
+      "force": true
+    },
+    {
+      "invocation": "input-hardlink-force",
+      "target": "a hardlink to entries.zip",
+      "force": true
+    },
+    {
+      "invocation": "directory-force",
+      "target": "a directory",
+      "force": true
+    },
+    {
+      "invocation": "traversal-name-safe-target",
+      "entry": {
+        "name": "../escape",
+        "ordinal": 1
+      },
+      "target": "explicit safe output path",
+      "force": false
+    },
+    {
+      "invocation": "two-publishers",
+      "entries": [
+        2,
+        3
+      ],
+      "target": "absent",
+      "force": false
+    },
+    {
+      "invocation": "force-atomic-replace",
+      "entry": 2,
+      "target": "existing regular file KEEP",
+      "force": true
+    }
+  ],
+  "roleBindings": [
+    {
+      "role": "input",
+      "selector": {
+        "kind": "image"
+      }
+    }
+  ],
+  "observationContract": {
+    "observer": "public cancellation callback that always returns false and reads only the final path, plus a concurrent reader with a deadline",
+    "forbidden": "a private phase hook, a call-count assertion or a phase matcher",
+    "readRule": "each read opens one handle and checks the complete content through that handle, so content before and after a rename is never concatenated",
+    "noForceAllowed": [
+      "absent file",
+      "one complete payload"
+    ],
+    "forceAllowed": [
+      "old KEEP",
+      "one complete new payload"
+    ],
+    "fails": [
+      "empty file",
+      "prefix",
+      "mixed content"
+    ],
+    "finalRequirement": "the complete new file is observed at least once and no temp file remains; an absent file must not pass vacuously"
+  },
+  "invocations": [
+    {
+      "id": "existing-no-force",
+      "inputRef": "/cases/69/invocations/0/input",
+      "expectedRef": "/cases/69/invocations/0/expected"
+    },
+    {
+      "id": "symlink-force",
+      "inputRef": "/cases/69/invocations/1/input",
+      "expectedRef": "/cases/69/invocations/1/expected"
+    },
+    {
+      "id": "input-path-force",
+      "inputRef": "/cases/69/invocations/2/input",
+      "expectedRef": "/cases/69/invocations/2/expected"
+    },
+    {
+      "id": "input-hardlink-force",
+      "inputRef": "/cases/69/invocations/3/input",
+      "expectedRef": "/cases/69/invocations/3/expected"
+    },
+    {
+      "id": "directory-force",
+      "inputRef": "/cases/69/invocations/4/input",
+      "expectedRef": "/cases/69/invocations/4/expected"
+    },
+    {
+      "id": "traversal-name-safe-target",
+      "inputRef": "/cases/69/invocations/5/input",
+      "expectedRef": "/cases/69/invocations/5/expected"
+    },
+    {
+      "id": "two-publishers",
+      "inputRef": "/cases/69/invocations/6/input",
+      "expectedRef": "/cases/69/invocations/6/expected"
+    },
+    {
+      "id": "force-atomic-replace",
+      "inputRef": "/cases/69/invocations/7/input",
+      "expectedRef": "/cases/69/invocations/7/expected"
+    }
+  ],
+  "certificationObligations": [
+    "The Windows/symlink/hardlink/atomic-rename capabilities are measured during preparation; a platform lacking a capability fails preparation, and the eight invocations are not merged into one any-error.",
+    "An observation reads the complete bytes through a single opened handle, and each pattern byte is determined independently as (i*multiplier+add)%256, matching the recorded payload SHA-256.",
+    "originalFilesUnchanged checks the original input path, the original handle and a sentinel at the same time; force must not bypass the symlink or input-alias check.",
+    "../escape appears only as an entry name: the explicit safe output must receive the payload and no path outside the output directory may exist.",
+    "Two publishers use different payloads; exactly one may succeed, the other must observe TargetExists, and the final file must equal the actually successful payload byte for byte."
+  ],
+  "gaps": [
+    "The extract seam, its publication primitive and its error kinds are application behavior; this worktree has no file publisher and no Engine, so no observation was manufactured.",
+    "The atomicity claim rests on the measured platform primitives and the ALGORITHMS 14.3 review; a finite reader sampling does not prove all OS scheduling.",
+    "Only this platform (Darwin arm64) was measured; Windows capability remains unmeasured."
+  ],
+  "pathBase": "case-root: every repository source path is relative to tests/e2e/sources/<case>/, and every generated artifact path is relative to the repository root under .cache/e2e/.",
+  "measurementPolicy": "Asset sizes and hashes are produced by preparation from actual bytes under the ignored execution workspace; no author cache or hand-maintained measurement file is a prerequisite.",
+  "targets": {
+    "input": {
+      "kind": "image",
+      "input_role": "zip"
+    }
+  }
+}

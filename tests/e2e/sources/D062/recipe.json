@@ -1,0 +1,136 @@
+{
+  "schemaVersion": 1,
+  "case": "D062",
+  "inputKind": "self-made-java-to-dex",
+  "dexVersion": "035",
+  "sources": [
+    "fixtures/Case.java"
+  ],
+  "tools": [
+    {
+      "id": "javac-temurin-21.0.8+9",
+      "artifact": "Eclipse Temurin 21.0.8+9 javac",
+      "flags": [
+        "--release",
+        "8",
+        "-proc:none",
+        "-g:none"
+      ],
+      "availableInThisWorktree": "only-locally-21.0.12.1",
+      "note": "The pinned 21.0.8+9 artifact and its hash are B02 work; a local javac 21.0.12.1 ran with the same flags as corroboration."
+    },
+    {
+      "id": "r8-d8-8.3.37",
+      "artifact": "com.android.tools:r8:8.3.37",
+      "mainClass": "com.android.tools.r8.D8",
+      "availableInThisWorktree": false,
+      "note": "Pinned per TASKS 4.5; absent here, so no DEX artifact or hash is claimed."
+    }
+  ],
+  "builds": [
+    {
+      "id": "javac",
+      "argv": [
+        "javac",
+        "--release",
+        "8",
+        "-proc:none",
+        "-g:none",
+        "-d",
+        ".cache/e2e/D062/classes",
+        "fixtures/Case.java"
+      ],
+      "output": ".cache/e2e/D062/classes/fixtures/Case.class"
+    },
+    {
+      "id": "d8",
+      "inputs": [
+        ".cache/e2e/D062/classes/fixtures/Case.class"
+      ],
+      "argv": [
+        "java",
+        "-cp",
+        "<r8-8.3.37-lock-classpath>",
+        "com.android.tools.r8.D8",
+        "--min-api",
+        "23",
+        "--output",
+        ".cache/e2e/D062",
+        ".cache/e2e/D062/classes/fixtures/Case.class"
+      ],
+      "output": ".cache/e2e/D062/classes.dex",
+      "status": "not-run"
+    }
+  ],
+  "localCorroboration": {
+    "command": "javap -p -c .cache/e2e/D062/classes/fixtures/Case.class",
+    "observed": "public static int f(int) bytecode is iload_0; iconst_1; iadd; ireturn, with no branch, payload, handler or call",
+    "limit": "This is the Java classfile of a local javac, not the pinned javac and not a D8 DEX; the DEX raw form is B03 evidence."
+  },
+  "roleBindings": [
+    {
+      "role": "case",
+      "selector": {
+        "kind": "method",
+        "owner": "Lfixtures/Case;",
+        "name": "f",
+        "proto": "(I)I"
+      }
+    }
+  ],
+  "requests": [
+    {
+      "invocation": "v1",
+      "limits": {
+        "max_work_steps": 0
+      },
+      "omittedLimits": [
+        "fallback_work_steps",
+        "raw work steps",
+        "request quotas"
+      ],
+      "note": "Only the normal allowance is set; the omitted raw/request quotas stay None, so complete raw fallback is available."
+    },
+    {
+      "invocation": "v2",
+      "limits": {
+        "max_work_steps": 0,
+        "fallback_work_steps": 0
+      },
+      "note": "The raw allowance is explicitly zero as well; Some(0) is not the unlimited sentinel."
+    }
+  ],
+  "invocations": [
+    {
+      "id": "v1",
+      "inputRef": "/cases/61/invocations/0/input",
+      "expectedRef": "/cases/61/invocations/0/expected"
+    },
+    {
+      "id": "v2",
+      "inputRef": "/cases/61/invocations/1/input",
+      "expectedRef": "/cases/61/invocations/1/expected"
+    }
+  ],
+  "certificationObligations": [
+    "The independent projection confirms f(I)I holds exactly the parameter read, the integer increment and the return, with no branch, payload, handler, call, field or allocation, and records the complete raw form.",
+    "The independent projection confirms both request bindings resolve to f(I)I and not to the constructor.",
+    "Both limit objects are explicit: Some(0) is a real zero budget and not the None sentinel; the omitted fields in v1 stay None so the raw allowance is available.",
+    "The two outcomes are separate invocations of the same bound method; neither is merged or retried."
+  ],
+  "gaps": [
+    "Neither the pinned javac nor the pinned R8/D8 is available here, so no DEX artifact, DEX hash or raw projection exists; B03 owns that step.",
+    "The two resource outcomes are Engine behavior and are not observed in this worktree.",
+    "The local javap output is a javac/classfile corroboration of the source shape only."
+  ],
+  "pathBase": "case-root: every repository source path is relative to tests/e2e/sources/<case>/, and every generated artifact path is relative to the repository root under .cache/e2e/.",
+  "targets": {
+    "case": {
+      "kind": "method",
+      "input_role": "original",
+      "owner": "Lfixtures/Case;",
+      "name": "f",
+      "proto": "(I)I"
+    }
+  }
+}

@@ -1,0 +1,88 @@
+{
+  "schemaVersion": 1,
+  "case": "D012",
+  "specRevision": "draft-6",
+  "specRef": {
+    "case": "/cases/11",
+    "targets": "/cases/11/targets",
+    "inputRecipe": "/cases/11/inputRecipe"
+  },
+  "targets": {
+    "case": {
+      "kind": "class",
+      "input_role": "original",
+      "descriptor": "Lfixtures/Case;"
+    }
+  },
+  "fixture": {
+    "sources": [
+      "fixtures/Case.java"
+    ],
+    "replacesOriginalClasses": [
+      "Lfixtures/Case;"
+    ]
+  },
+  "dependencies": {
+    "sources": [],
+    "unchanged": true
+  },
+  "javac": {
+    "profile": "javac-release-8-proc-none-gnone",
+    "args": [
+      "--release",
+      "8",
+      "-proc:none",
+      "-g:none"
+    ]
+  },
+  "dex": {
+    "tool": "com.android.tools:r8:8.3.37",
+    "mainClass": "com.android.tools.r8.D8",
+    "toolSpec": "docs/diana/TASKS.md#45-pinned-tools-and-content-locks",
+    "inputClasses": [
+      "fixtures/Case.class"
+    ],
+    "profile": {
+      "minApi": 23,
+      "dexVersion": "035"
+    },
+    "certification": "requires-pinned-D8-and-independent-projection"
+  },
+  "driver": {
+    "class": "driver.Driver",
+    "entry": "main",
+    "sources": [
+      "driver/Driver.java"
+    ],
+    "inDexInput": false,
+    "argv": [
+      "<invocation-id>"
+    ],
+    "isolation": "fresh-jvm-per-invocation"
+  },
+  "invocations": [
+    {
+      "id": "v1",
+      "inputRef": "/cases/11/invocations/0/input",
+      "expectedRef": "/cases/11/invocations/0/expected",
+      "method": "f(I)I",
+      "resultKind": "int"
+    },
+    {
+      "id": "v2",
+      "inputRef": "/cases/11/invocations/1/input",
+      "expectedRef": "/cases/11/invocations/1/expected",
+      "method": "g(I)I",
+      "resultKind": "int"
+    }
+  ],
+  "roleBindings": [
+    {
+      "role": "case",
+      "selector": {
+        "kind": "class",
+        "descriptor": "Lfixtures/Case;"
+      }
+    }
+  ]
+}
