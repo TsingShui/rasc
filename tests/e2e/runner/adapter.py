@@ -121,7 +121,7 @@ def run_public(root, cache, spec, manifest, case_ids=None):
                                 else:original_path=cache/'prepared'/case['id']/'reference'/binding['role']/Path(selector['descriptor'][1:-1]+'.java')
                             original_source=original_path.read_text(encoding='utf-8')
                         for fragment in executable_sources:
-                            pattern=r'(?m)^([ \t]*(?:public|private|protected|static|final|strictfp|synchronized|\s)+(?:void|int|long|float|double|boolean|byte|short|char|(?:java\.lang\.)?String)\s+'+re.escape(fragment['name'])+r'\s*\([^)]*\)\s*)\{'
+                            pattern=r'(?m)^([ \t]*(?:public|private|protected|static|final|strictfp|synchronized|\s)+(?:void|int|long|float|double|boolean|byte|short|char|(?:java\.lang\.)?String|[\w.$]+(?:\[\])*)\s+'+re.escape(fragment['name'])+r'\s*\([^)]*\)\s*)\{'
                             matches=list(re.finditer(pattern,original_source))
                             if len(matches)!=1:raise ValueError('known source context does not identify one selected method')
                             match=matches[0];position=match.end();depth=1

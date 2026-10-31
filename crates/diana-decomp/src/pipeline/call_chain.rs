@@ -10,36 +10,46 @@ pub(crate) enum ValueType {
     Reference(Vec<u16>),
 }
 pub(crate) enum Target {
+    Constructor(crate::p4_calls::allocation::ConstructorContract),
     Static(crate::p4_calls::StaticContract),
     Receiver(crate::p4_calls::ReceiverContract),
 }
 impl Target {
     pub(crate) fn reference(&self) -> crate::MethodId {
         match self {
+            Self::Constructor(c) => c.reference,
             Self::Static(c) => c.reference,
             Self::Receiver(c) => c.reference,
         }
     }
     pub(crate) fn owner(&self) -> &[u16] {
         match self {
+            Self::Constructor(c) => &c.owner,
             Self::Static(c) => &c.owner,
             Self::Receiver(c) => &c.owner,
         }
     }
     pub(crate) fn name(&self) -> &[u16] {
         match self {
+            Self::Constructor(_) => &[60, 105, 110, 105, 116, 62],
             Self::Static(c) => &c.name,
             Self::Receiver(c) => &c.name,
         }
     }
     pub(crate) fn prototype(&self) -> &[u16] {
         match self {
+            Self::Constructor(c) => &c.prototype,
             Self::Static(c) => &c.prototype,
             Self::Receiver(c) => &c.prototype,
         }
     }
 }
 pub(crate) enum Operation {
+    Construct {
+        allocation: crate::p4_calls::allocation::AdjacentAllocation,
+        arguments: Vec<ValueId>,
+        value: ValueId,
+    },
     Constant {
         pc: CodeUnitOffset,
         value: ValueId,
@@ -59,6 +69,7 @@ pub(crate) struct Chain<'a> {
     pub operations: Vec<Operation>,
     pub types: Vec<ValueType>,
     pub returned: ValueId,
+    pub declared_result: ValueType,
     pub return_pc: CodeUnitOffset,
 }
 fn push<T>(
@@ -104,13 +115,24 @@ pub(crate) fn build<'a>(
     if input.access_flags() & 8 == 0
         || raw.ins_size() != 0
         || !raw.try_byte_range().as_range().is_empty()
-        || !input
-            .declaration()
-            .prototype
-            .matches_with(&[40, 41, 73], budget)?
     {
         return Ok(None);
     }
+    let declared_result = if input
+        .declaration()
+        .prototype
+        .return_type
+        .matches_with(&[73], budget)?
+    {
+        ValueType::Int
+    } else {
+        let descriptor =
+            crate::substrate::owned::copy_units(input.declaration().prototype.return_type, budget)?;
+        if !crate::p4_calls::source_type(input, catalog, &descriptor, budget)? {
+            return Ok(None);
+        }
+        ValueType::Reference(descriptor)
+    };
     let mut slots = Vec::new();
     reserve(&mut slots, usize::from(raw.registers_size()), budget)?;
     for _ in 0..raw.registers_size() {
@@ -165,6 +187,65 @@ pub(crate) fn build<'a>(
                     Operation::Constant { pc, value, literal },
                     budget,
                 )?;
+            }
+            0x22 => {
+                let allocation =
+                    crate::p4_calls::allocation::pair(input, &raw, pc, catalog, budget)?;
+                let mut arguments = Vec::new();
+                for &register in &allocation.arguments {
+                    budget.charge_work(1)?;
+                    let value = read(&slots, register, allocation.init)?;
+                    if !matches!(types[index(value)?], ValueType::Int) {
+                        return Err(RequestError::InitializationUnavailable {
+                            pc: allocation.init,
+                        });
+                    }
+                    push(&mut arguments, value, budget)?;
+                }
+                let mut descriptor = Vec::new();
+                reserve(&mut descriptor, allocation.contract.owner.len(), budget)?;
+                for &unit in &allocation.contract.owner {
+                    budget.charge_work(1)?;
+                    descriptor.push(unit);
+                }
+                let value = define(&mut types, ValueType::Reference(descriptor), budget)?;
+                // Only normal init completion makes these aliases readable Refs.
+                for &alias in &allocation.aliases {
+                    budget.charge_work(1)?;
+                    slots[slot(alias)?] = Some(value);
+                }
+                next = allocation.resume;
+                calls = calls.checked_add(1).ok_or(RequestError::PlatformCapacity)?;
+                push(
+                    &mut operations,
+                    Operation::Construct {
+                        allocation,
+                        arguments,
+                        value,
+                    },
+                    budget,
+                )?;
+            }
+            0x70 | 0x76 => {
+                let Some(reference) = layout.references()[0] else {
+                    return Err(RequestError::InternalInvariant(
+                        "direct call lost reference",
+                    ));
+                };
+                let OperandReference::Method(reference) = reference.target else {
+                    return Err(RequestError::InternalInvariant(
+                        "direct call changed reference kind",
+                    ));
+                };
+                if input
+                    .method_reference(reference, budget)?
+                    .declaration
+                    .name
+                    .matches_with(&[60, 105, 110, 105, 116, 62], budget)?
+                {
+                    return Err(RequestError::InitializationUnavailable { pc });
+                }
+                return Ok(None);
             }
             0x6e | 0x72 | 0x74 | 0x78 | 0x71 | 0x77 => {
                 let Some(reference) = layout.references()[0] else {
@@ -243,6 +324,11 @@ pub(crate) fn build<'a>(
                 }
                 let arity = match &target {
                     Target::Static(c) => c.formals.len(),
+                    Target::Constructor(_) => {
+                        return Err(RequestError::InternalInvariant(
+                            "constructor entered ordinary invoke",
+                        ));
+                    }
                     Target::Receiver(c) => c.int_arity,
                 };
                 if arguments.len() != arity {
@@ -301,10 +387,19 @@ pub(crate) fn build<'a>(
                     budget,
                 )?;
             }
-            0x0f => {
+            0x0f | 0x11 => {
                 let returned = read(&slots, reg(0)?, pc)?;
-                if calls == 0 || !matches!(types[index(returned)?], ValueType::Int) {
+                if calls == 0 {
                     return Ok(None);
+                }
+                match (&types[index(returned)?], &declared_result) {
+                    (ValueType::Int, ValueType::Int) if spec.opcode == 0x0f => {}
+                    (ValueType::Reference(from), ValueType::Reference(to))
+                        if spec.opcode == 0x11
+                            && crate::p4_calls::source_subtype(
+                                input, catalog, from, to, budget,
+                            )? => {}
+                    _ => return Ok(None),
                 }
                 return Ok(Some(Chain {
                     _sealed: (),
@@ -312,6 +407,7 @@ pub(crate) fn build<'a>(
                     operations,
                     types,
                     returned,
+                    declared_result,
                     return_pc: pc,
                 }));
             }

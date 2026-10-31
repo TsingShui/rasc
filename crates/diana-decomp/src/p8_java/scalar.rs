@@ -66,6 +66,7 @@ impl VerifiedJavaMethod {
                 super::calls::Statement::StaticCall { call, .. } => Some(super::JavaCallSite {
                     reference: call.reference,
                     receiver: None,
+                    allocation: None,
                     owner: &call.original_owner,
                     name: &call.original_name,
                     prototype: &call.prototype,
@@ -79,6 +80,7 @@ impl VerifiedJavaMethod {
             MethodBody::Receiver(body) => Some(super::JavaCallSite {
                 reference: body.contract.reference,
                 receiver: Some(body.receiver),
+                allocation: None,
                 owner: &body.contract.owner,
                 name: &body.contract.name,
                 prototype: &body.contract.prototype,
@@ -105,6 +107,7 @@ impl VerifiedJavaMethod {
                     Some(super::JavaCallSite {
                         reference: contract.reference,
                         receiver: None,
+                        allocation: None,
                         owner: &contract.owner,
                         name: &contract.name,
                         prototype: &contract.prototype,
@@ -121,21 +124,33 @@ impl VerifiedJavaMethod {
         };
         let chained = chain.into_iter().flatten().map(|call| {
             let super::call_chain::Call {
-                pc,
-                target,
-                receiver,
-                result,
-                ..
+                pc, target, form, ..
             } = call;
+            let (receiver, result, allocation) = match form {
+                super::call_chain::CallForm::Invoke {
+                    receiver, result, ..
+                } => (
+                    receiver.map(|(_, register)| register),
+                    result.as_ref().map(|local| local.pc),
+                    None,
+                ),
+                super::call_chain::CallForm::Construct { binding, .. } => {
+                    (Some(binding.receiver), None, Some(binding.allocation.0))
+                }
+            };
             super::JavaCallSite {
                 reference: target.reference(),
-                receiver: receiver.map(|(_, register)| register),
+                receiver,
+                allocation,
                 owner: target.owner(),
                 name: target.name(),
                 prototype: target.prototype(),
                 invoke: *pc,
-                result: result.as_ref().map(|local| local.pc),
+                result,
                 kind: match target {
+                    crate::pipeline::call_chain::Target::Constructor(_) => {
+                        super::JavaInvokeKind::Direct
+                    }
                     crate::pipeline::call_chain::Target::Static(_) => super::JavaInvokeKind::Static,
                     crate::pipeline::call_chain::Target::Receiver(c) => match c.kind {
                         crate::p4_calls::ReceiverKind::Virtual => super::JavaInvokeKind::Virtual,

@@ -15,12 +15,22 @@ pub(crate) enum Statement {
 }
 #[derive(Clone, Copy)]
 pub(crate) struct CallId(pub u32);
+pub(crate) enum CallForm {
+    Invoke {
+        receiver: Option<(ValueId, crate::RegisterId)>,
+        result: Option<ResultLocal>,
+        upcast: Option<String>,
+    },
+    Construct {
+        binding: crate::p6_variables::allocation::DeferredAllocation,
+        source_type: String,
+    },
+}
 pub(crate) struct Call {
     pub pc: CodeUnitOffset,
     pub target: Target,
-    pub receiver: Option<(ValueId, crate::RegisterId)>,
+    pub form: CallForm,
     pub arguments: Vec<ValueId>,
-    pub result: Option<ResultLocal>,
     pub qualifier: Option<String>,
     pub method: String,
 }
@@ -37,7 +47,12 @@ fn bad<T>() -> Result<T, RequestError> {
 fn register(register: crate::RegisterId) -> Result<usize, RequestError> {
     usize::try_from(register.0).map_err(|_| RequestError::PlatformCapacity)
 }
-fn replay(chain: &Chain<'_>, budget: &mut MethodBudget<'_, '_>) -> Result<(), RequestError> {
+fn replay(
+    input: &MethodInput<'_, '_>,
+    catalog: &crate::DeclarationCatalog,
+    chain: &Chain<'_>,
+    budget: &mut MethodBudget<'_, '_>,
+) -> Result<(), RequestError> {
     let raw = &chain.raw;
     let mut slots = Vec::new();
     reserve(&mut slots, usize::from(raw.registers_size()), budget)?;
@@ -101,6 +116,29 @@ fn replay(chain: &Chain<'_>, budget: &mut MethodBudget<'_, '_>) -> Result<(), Re
                     .checked_add(1)
                     .ok_or(RequestError::PlatformCapacity)?;
             }
+            0x22 => {
+                let Some(Operation::Construct {
+                    allocation,
+                    arguments,
+                    value,
+                }) = chain.operations.get(cursor)
+                else {
+                    return bad();
+                };
+                if allocation.id.0 != pc || value.0 != next_value {
+                    return bad();
+                }
+                super::allocation_verify::verify(
+                    input, chain, allocation, arguments, *value, &mut slots, budget,
+                )?;
+                next = allocation.resume;
+                next_value = next_value
+                    .checked_add(1)
+                    .ok_or(RequestError::PlatformCapacity)?;
+                cursor = cursor
+                    .checked_add(1)
+                    .ok_or(RequestError::PlatformCapacity)?;
+            }
             0x6e | 0x72 | 0x74 | 0x78 | 0x71 | 0x77 => {
                 let Some(Operation::Call {
                     pc: origin,
@@ -119,6 +157,7 @@ fn replay(chain: &Chain<'_>, budget: &mut MethodBudget<'_, '_>) -> Result<(), Re
                 }
                 let mut words = operands.registers().iter();
                 match target {
+                    Target::Constructor(_) => return bad(),
                     Target::Static(contract) => {
                         if !matches!(spec.opcode, 0x71 | 0x77)
                             || receiver.is_some()
@@ -158,7 +197,13 @@ fn replay(chain: &Chain<'_>, budget: &mut MethodBudget<'_, '_>) -> Result<(), Re
                         else {
                             return bad();
                         };
-                        if !crate::p0_knowledge::same_units(descriptor, &contract.owner, budget)? {
+                        if !crate::p4_calls::source_subtype(
+                            input,
+                            catalog,
+                            descriptor,
+                            &contract.owner,
+                            budget,
+                        )? {
                             return bad();
                         }
                     }
@@ -235,18 +280,23 @@ fn replay(chain: &Chain<'_>, budget: &mut MethodBudget<'_, '_>) -> Result<(), Re
                     .checked_add(1)
                     .ok_or(RequestError::PlatformCapacity)?;
             }
-            0x0f => {
+            0x0f | 0x11 => {
                 if pc != chain.return_pc
                     || slots[register(reg(0)?)?] != Some(chain.returned)
                     || cursor != chain.operations.len()
                     || usize::try_from(next_value).map_err(|_| RequestError::PlatformCapacity)?
                         != chain.types.len()
-                    || !matches!(
-                        chain.types.get(index(chain.returned)?),
-                        Some(ValueType::Int)
-                    )
                 {
                     return bad();
+                }
+                match (&chain.types[index(chain.returned)?], &chain.declared_result) {
+                    (ValueType::Int, ValueType::Int) if spec.opcode == 0x0f => {}
+                    (ValueType::Reference(from), ValueType::Reference(to))
+                        if spec.opcode == 0x11
+                            && crate::p4_calls::source_subtype(
+                                input, catalog, from, to, budget,
+                            )? => {}
+                    _ => return bad(),
                 }
                 return Ok(());
             }
@@ -264,17 +314,27 @@ pub(crate) fn verify(
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<Option<VerifiedJavaMethod>, RequestError> {
     super::declarations::check_target(input, budget)?;
-    replay(&chain, budget)?;
+    replay(input, catalog, &chain, budget)?;
     for operation in &chain.operations {
         budget.charge_work(1)?;
         if let Operation::Call { target, .. } = operation {
             let declared = match target {
+                Target::Constructor(contract) => &contract.declared_throws,
                 Target::Static(contract) => &contract.declared_throws,
                 Target::Receiver(contract) => &contract.declared_throws,
             };
             if !crate::p4_calls::compatible_throws(input, catalog, Some(declared), budget)? {
                 return Ok(None);
             }
+        } else if let Operation::Construct { allocation, .. } = operation
+            && !crate::p4_calls::compatible_throws(
+                input,
+                catalog,
+                Some(&allocation.contract.declared_throws),
+                budget,
+            )?
+        {
+            return Ok(None);
         }
     }
     let RawPrintable::Method(raw) = input.raw() else {
@@ -315,7 +375,19 @@ pub(crate) fn verify(
             header.push(text, budget)?;
         }
     }
-    header.push("int ", budget)?;
+    match &chain.declared_result {
+        ValueType::Int => header.push("int", budget)?,
+        ValueType::Reference(descriptor) => {
+            if !crate::p4_calls::source_type(input, catalog, descriptor, budget)? {
+                return Ok(None);
+            }
+            let Some(name) = super::calls::type_name(descriptor, budget)? else {
+                return Ok(None);
+            };
+            header.push(&name, budget)?;
+        }
+    }
+    header.push(" ", budget)?;
     header.push(&name, budget)?;
     header.push("()", budget)?;
     let Some(throws) = crate::p4_calls::source_throws(input, catalog, budget)? else {
@@ -335,6 +407,37 @@ pub(crate) fn verify(
         budget.charge_work(1)?;
         let statement = match operation {
             Operation::Constant { value, literal, .. } => Statement::Constant { value, literal },
+            Operation::Construct {
+                allocation,
+                arguments,
+                value,
+            } => {
+                let binding = crate::p6_variables::allocation::bind(&allocation, value)?;
+                let Some(source_type) =
+                    super::calls::type_name(&allocation.contract.owner, budget)?
+                else {
+                    return Ok(None);
+                };
+                let Some(qualifier) = super::calls::type_name(&allocation.contract.owner, budget)?
+                else {
+                    return Ok(None);
+                };
+                let id =
+                    CallId(u32::try_from(calls.len()).map_err(|_| RequestError::PlatformCapacity)?);
+                reserve(&mut calls, 1, budget)?;
+                calls.push(Call {
+                    pc: allocation.init,
+                    target: Target::Constructor(allocation.contract),
+                    form: CallForm::Construct {
+                        binding,
+                        source_type,
+                    },
+                    arguments,
+                    qualifier: Some(qualifier),
+                    method: String::new(),
+                });
+                Statement::Call(id)
+            }
             Operation::Call {
                 pc,
                 target,
@@ -353,6 +456,7 @@ pub(crate) fn verify(
                         Some(text)
                     }
                     Target::Receiver(_) => None,
+                    Target::Constructor(_) => return bad(),
                 };
                 let result = if let Some((value, pc)) = result {
                     let source_type = match &chain.types[index(value)?] {
@@ -376,15 +480,33 @@ pub(crate) fn verify(
                 } else {
                     None
                 };
+                let upcast = if let Some((receiver, _)) = receiver {
+                    let ValueType::Reference(descriptor) = &chain.types[index(receiver)?] else {
+                        return bad();
+                    };
+                    if !crate::p0_knowledge::same_units(descriptor, target.owner(), budget)? {
+                        let Some(name) = super::calls::type_name(target.owner(), budget)? else {
+                            return Ok(None);
+                        };
+                        Some(name)
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
                 let id =
                     CallId(u32::try_from(calls.len()).map_err(|_| RequestError::PlatformCapacity)?);
                 reserve(&mut calls, 1, budget)?;
                 calls.push(Call {
                     pc,
                     target,
-                    receiver,
+                    form: CallForm::Invoke {
+                        receiver,
+                        result,
+                        upcast,
+                    },
                     arguments,
-                    result,
                     qualifier,
                     method,
                 });

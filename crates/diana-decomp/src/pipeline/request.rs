@@ -35,6 +35,8 @@ pub enum RequestError {
         register: crate::RegisterId,
         pc: crate::CodeUnitOffset,
     },
+    #[error("allocation/initialization cannot be represented at {pc:?}")]
+    InitializationUnavailable { pc: crate::CodeUnitOffset },
     #[error("binding evidence missing for method {reference:?} at {pc:?}")]
     BindingEvidenceMissing {
         reference: crate::MethodId,
@@ -74,6 +76,7 @@ impl RequestError {
                 FailureKind::Malformed
             }
             Self::JavaTargetLimit { .. }
+            | Self::InitializationUnavailable { .. }
             | Self::BindingEvidenceMissing { .. }
             | Self::FieldBindingEvidenceMissing { .. }
             | Self::JavaConstantFieldRead { .. } => FailureKind::Unsupported,

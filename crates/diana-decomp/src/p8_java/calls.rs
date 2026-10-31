@@ -17,6 +17,7 @@ pub enum JavaInvokeKind {
 pub struct JavaCallSite<'a> {
     pub reference: MethodId,
     pub receiver: Option<crate::RegisterId>,
+    pub allocation: Option<CodeUnitOffset>,
     pub owner: &'a [u16],
     pub name: &'a [u16],
     pub prototype: &'a [u16],

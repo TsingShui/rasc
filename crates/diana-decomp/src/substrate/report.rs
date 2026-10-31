@@ -165,6 +165,7 @@ fn request_code(error: &crate::RequestError) -> crate::DiagnosticCode {
         RequestError::BindingEvidenceMissing { .. }
         | RequestError::FieldBindingEvidenceMissing { .. } => Code::BindingEvidenceMissing,
         RequestError::JavaConstantFieldRead { .. } => Code::JavaConstantFieldRead,
+        RequestError::InitializationUnavailable { .. } => Code::InitializationUnavailable,
         RequestError::InternalInvariant(_) => Code::InternalInvariant,
     }
 }

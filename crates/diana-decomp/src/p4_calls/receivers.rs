@@ -30,12 +30,11 @@ pub(crate) fn resolve_receiver(
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<Option<ReceiverContract>, RequestError> {
     let method = input.method_reference(reference, budget)?;
-    if (!matches!(kind, ReceiverKind::Super) && !method.owner.matches_with(parameter, budget)?)
-        || !method
-            .declaration
-            .prototype
-            .return_type
-            .matches_with(&[73], budget)?
+    if !method
+        .declaration
+        .prototype
+        .return_type
+        .matches_with(&[73], budget)?
     {
         return Ok(None);
     }
@@ -57,6 +56,11 @@ pub(crate) fn resolve_receiver(
         return Ok(None);
     }
     let owner = copy_units(method.owner, budget)?;
+    if !matches!(kind, ReceiverKind::Super)
+        && !super::reference_types::source_subtype(input, catalog, parameter, &owner, budget)?
+    {
+        return Ok(None);
+    }
     let name = copy_units(method.declaration.name, budget)?;
     let prototype = copy_proto(&method.declaration.prototype, budget)?;
     let caller = copy_units(input.owner(), budget)?;

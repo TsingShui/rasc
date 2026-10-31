@@ -1,3 +1,4 @@
+mod allocation_verify;
 pub(crate) mod branch;
 pub(crate) mod call_chain;
 pub(crate) mod calls;

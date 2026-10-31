@@ -267,6 +267,14 @@ pub(crate) fn plan<'a>(
                 } else {
                     crate::p4_calls::ReceiverKind::Virtual
                 };
+                if !matches!(kind, crate::p4_calls::ReceiverKind::Super)
+                    && !input
+                        .method_reference(reference, budget)?
+                        .owner
+                        .matches_with(&parameter, budget)?
+                {
+                    return Ok(None);
+                }
                 let result = instruction_layout(raw.instructions(), next, raw.version())
                     .map_err(crate::input::MethodError::Decode)?;
                 if !matches!(result.kind(),LayoutKind::Instruction(spec) if spec.opcode==0x0a) {

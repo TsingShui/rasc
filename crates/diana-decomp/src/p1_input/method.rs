@@ -87,6 +87,13 @@ impl<'i, 'a> MethodInput<'i, 'a> {
         };
         super::throws::read(self.index, annotations.method_range(), budget)
     }
+    pub(crate) fn type_name(
+        &self,
+        id: crate::TypeId,
+        budget: &mut MethodBudget<'_, '_>,
+    ) -> Result<DexString<'a>, InputError> {
+        self.index.type_name(id, budget)
+    }
     pub(crate) fn string_literal(
         &self,
         id: crate::StringId,
