@@ -5,31 +5,36 @@ use diana_decomp::{
     RunContext, SourceLanguage, render,
 };
 use serde_json::{Value, json};
+use std::cell::Cell;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut arguments: Vec<_> = std::env::args().skip(1).collect();
     let mut output = None;
     let mut catalog_path = None;
+    let mut control_path = None;
     while arguments.len() >= 2 {
         let flag = arguments[arguments.len() - 2].as_str();
-        if !matches!(flag, "--output" | "--catalog") {
+        if !matches!(flag, "--output" | "--catalog" | "--control") {
             break;
         }
         let catalog_flag = flag == "--catalog";
+        let control_flag = flag == "--control";
         let path = arguments.pop().ok_or("missing path")?;
         arguments.pop();
         if catalog_flag {
             catalog_path = Some(path);
+        } else if control_flag {
+            control_path = Some(path);
         } else {
             output = Some(path);
         }
     }
     if !matches!(arguments.len(), 3 | 5) {
-        return Err("usage: inspect_class <dex> <header-offset> <class-def-index> [<method-name> <full-proto>] [--catalog <signature-json>] [--output <json-path>]".into());
+        return Err("usage: inspect_class <dex> <header-offset> <class-def-index> [<method-name> <full-proto>] [--catalog <signature-json>] [--control <control-json>] [--output <json-path>]".into());
     }
     let bytes = std::fs::read(&arguments[0])?;
     let header_offset = ByteOffset(arguments[1].parse()?);
-    let class_def = ClassDefId(arguments[2].parse()?);
+    let class_selection = &arguments[2];
     let method = if arguments.len() == 5 {
         Some(MethodSelector {
             name: arguments[3].encode_utf16().collect(),
@@ -49,8 +54,46 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     } else {
         DeclarationCatalog::empty(EnvironmentId(0))
     };
-    let mut control = RunContext::new(Limits::default(), &|| false);
-    let engine = Engine::open(
+    #[derive(Default, serde::Deserialize)]
+    #[serde(default, deny_unknown_fields)]
+    struct Controls {
+        limits: Limits,
+        cancellation: Option<Cancellation>,
+    }
+    #[derive(serde::Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct Cancellation {
+        arm: String,
+        #[serde(rename = "cancelAfterChecks")]
+        after: u64,
+    }
+    let controls: Controls = if let Some(path) = control_path {
+        serde_json::from_reader(std::fs::File::open(path)?)?
+    } else {
+        Controls::default()
+    };
+    if controls
+        .cancellation
+        .as_ref()
+        .is_some_and(|policy| policy.arm != "after-open")
+    {
+        return Err("unsupported cancellation arm".into());
+    }
+    let armed = Cell::new(false);
+    let checks = Cell::new(0u64);
+    let cancelled = || {
+        let Some(policy) = &controls.cancellation else {
+            return false;
+        };
+        if !armed.get() {
+            return false;
+        }
+        let count = checks.get().saturating_add(1);
+        checks.set(count);
+        count >= policy.after
+    };
+    let mut control = RunContext::new(controls.limits, &cancelled);
+    let engine = match Engine::open(
         vec![DexImage {
             bytes: &bytes,
             header_offset,
@@ -59,8 +102,36 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Options::default(),
         catalog,
         &mut control,
-    )?;
-    let report = engine.decompile(
+    ) {
+        Ok(engine) => engine,
+        Err(error) => return write_value(failure(DiagnosticCause::Input(error), false), output),
+    };
+    armed.set(true);
+    let class_def = if class_selection.starts_with('L') {
+        if header_offset != ByteOffset(0) {
+            return Err("symbolic caller selection requires a standalone DEX".into());
+        }
+        let header = diana_decomp::input::read_header(&bytes, &mut control)?;
+        let index = diana_decomp::input::ProgramIndex::open(&bytes, &mut control)?;
+        let descriptor: Vec<u16> = class_selection.encode_utf16().collect();
+        let mut found = None;
+        for id in 0..header.class_defs.count {
+            if index
+                .class(ClassDefId(id), &mut control)?
+                .descriptor
+                .matches(&descriptor, &mut control)?
+            {
+                if found.is_some() {
+                    return Err("ambiguous caller class selection".into());
+                }
+                found = Some(ClassDefId(id));
+            }
+        }
+        found.ok_or("caller class selection is not defined")?
+    } else {
+        ClassDefId(class_selection.parse()?)
+    };
+    let report = match engine.decompile(
         Request {
             class: ClassKey {
                 dex: DexId(0),
@@ -69,10 +140,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             method,
         },
         &mut control,
-    )?;
+    ) {
+        Ok(report) => report,
+        Err(error) => return write_value(failure(DiagnosticCause::Request(error), false), output),
+    };
     drop(engine);
     drop(bytes);
-    let rendered = render(&report, &mut control)?;
+    let rendered = match render(&report, &mut control) {
+        Ok(rendered) => rendered,
+        Err(error) => return write_value(failure(DiagnosticCause::Request(error), true), output),
+    };
     let members: Vec<Value> = match report.class() {
         ClassOutput::Mixed { members, .. } => members.iter().map(|member| {
             let key = member.key();
@@ -109,6 +186,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         ..
     } = report.class();
     let value = json!({"schema":"diana.inspect/1","status":"mixed","header_offset":report.image().header_offset.0,"class_def_idx":class_def.0,"descriptor_units":descriptor,"access_flags":access_flags,"members":members,"diagnostics":diagnostics,"text":rendered.source,"spans":spans});
+    write_value(value, output)
+}
+
+fn failure(cause: DiagnosticCause, report_present: bool) -> Value {
+    let diagnostic = diana_decomp::Diagnostic {
+        method: None,
+        cause,
+    };
+    json!({"schema":"diana.inspect/1","status":"request_error","report":if report_present {Some(json!({"available":true}))} else {None},"published_success":false,"diagnostics":[{"kind":kind(diagnostic.cause.kind()),"code":format!("{:?}",diagnostic.code()),"severity":"error","cause":format!("{:?}",diagnostic.cause)}]})
+}
+
+fn write_value(value: Value, output: Option<String>) -> Result<(), Box<dyn std::error::Error>> {
     if let Some(path) = output {
         serde_json::to_writer(std::fs::File::create(path)?, &value)?;
     } else {

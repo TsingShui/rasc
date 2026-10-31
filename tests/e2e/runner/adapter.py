@@ -48,26 +48,35 @@ def run_public(root, cache, spec, manifest, case_ids=None):
         cert = certified[(case['id'],invocation['id'])]
         work = output/case['id']/invocation['id']/seam
         try:
-            if seam not in {'decompile-method','decompile-class','decompile-and-render'}:
+            if seam not in {'decompile-method','decompile-class','decompile-and-render','open-or-decompile'}:
                 record['reason'] = 'the public Engine adapter does not implement this seam'
             elif len(cert['bindings']) != 1:
                 record['reason'] = 'multi-target public requests are not implemented'
-            elif invocation['input'].get('limits') or invocation['input'].get('cancellation'):
-                record['reason'] = 'the development entry does not accept request-control overrides yet'
+            elif {'max_method_output_bytes','max_report_output_bytes'} & invocation['input'].get('limits',{}).keys():
+                record['reason'] = 'normal member/report output limits are not implemented yet'
             else:
                 binding = cert['bindings'][0]
                 selector, origin = binding['selector'], binding['origin']
                 asset = assets[origin['asset_id']]
                 if not asset['path'].endswith('.dex'):
                     record['reason'] = 'the application input boundary is not implemented'
-                elif selector['kind'] not in {'class','method'}:
+                elif selector['kind'] not in {'class','method','request'}:
                     record['reason'] = 'the requested selector is not implemented'
                 else:
                     path = root/asset['path']
                     if not path.is_file() or path.stat().st_size != asset['size']:
                         raise PreparationError('missing/changed certified input')
-                    argv = [executable,path,str(origin['header_offset']),str(selector['class_def_idx'])]
-                    if selector['kind']=='method':argv.extend([selector['name'],selector['proto']])
+                    if selector['kind']=='request':
+                        target=case['targets'][binding['role']]
+                        if target['kind']!='method':raise PreparationError('symbolic caller selection requires a method target')
+                        argv=[executable,path,'0',target['owner'],target['name'],target['proto']]
+                    else:
+                        argv = [executable,path,str(origin['header_offset']),str(selector['class_def_idx'])]
+                        if selector['kind']=='method':argv.extend([selector['name'],selector['proto']])
+                    control_path=work/'controls.json'
+                    save(control_path,{key:invocation['input'][key] for key in ('limits','cancellation') if key in invocation['input']})
+                    argv.extend(['--control',control_path])
+                    record['request_controls']={'path':relative(control_path)}
                     catalog_path=work/'method-signatures.json'
                     save(catalog_path,_catalog(root,assets,cert['catalog']['asset_id']))
                     argv.extend(['--catalog',catalog_path])
@@ -119,7 +128,7 @@ def run_public(root, cache, spec, manifest, case_ids=None):
     all_runs=required_runs(spec)
     report={'execution':'passed' if len(passed)==len(selected_cases) else 'failed',
             'spec_revision':spec['specRevision'],'engine_revision':{'commit':revision,'working_tree_dirty':dirty},
-            'profile':'native-public-library; certified partial external signatures; default limits; recovery disabled',
+            'profile':'native-public-library; certified partial external signatures; caller limits/cancellation; recovery disabled',
             'full_required_set':case_ids is None,'selected_cases':len(selected_cases),
             'selected_invocations':len({(c['id'],i['id']) for c,i,_ in runs}),'selected_seams':len(runs),
             'passed_cases':len(passed),'passed_seams':sum(r['execution']=='passed' for r in results),
@@ -162,16 +171,23 @@ def _units(value):
 
 def _artifacts(actual, cert):
     binding=cert['bindings'][0];selector=binding['selector'];origin=binding['origin']
-    if actual['schema']!='diana.inspect/1' or actual['header_offset']!=origin['header_offset'] or actual['class_def_idx']!=selector['class_def_idx']:
+    if actual['schema']!='diana.inspect/1':raise ValueError('unknown public result schema')
+    if actual['status']=='request_error':
+        return {'outcome':{'outcome':'error','status':'request_error','selected':cert['bindings'],'members':[],
+                           'diagnostics':actual['diagnostics'],'report':actual['report'],'published_success':actual['published_success']},
+                'text':b'','rendered':{'spans':[],'raw_excerpt_ranges':[]}}
+    if selector['kind']!='request' and (actual['header_offset']!=origin['header_offset'] or actual['class_def_idx']!=selector['class_def_idx']):
         raise ValueError('public result has a different logical/class identity')
     owner=_units(actual['descriptor_units'])
-    if owner!=selector['descriptor']:raise ValueError('public result has a different owner')
+    if selector['kind']!='request' and owner!=selector['descriptor']:raise ValueError('public result has a different owner')
     members=[];identities={}
     for member in actual['members']:
         source=member['source'];language=member['language']
         if not isinstance(source,str):raise ValueError('public member has no source slice')
         if member['name_units'] is not None:
             name,proto=_units(member['name_units']),_units(member['proto_units'])
+        elif language=='diagnostic':
+            name,proto=None,None
         else:
             decoded=json.loads(source)
             if language=='original_excerpt':name,proto=decoded['name'],decoded['proto']
@@ -183,9 +199,10 @@ def _artifacts(actual, cert):
         identities[mid]=(name,proto)
         members.append({'owner':owner,'name':name,'proto':proto,'method_id_idx':mid,
                         'language':language,'source':source,'status':member['status']})
-    if selector['kind']=='method':
-        if identities!={selector['method_id_idx']:(selector['name'],selector['proto'])}:
+    if selector['kind'] in {'method','request'}:
+        if selector['kind']=='method' and (set(identities)!={selector['method_id_idx']} or identities[selector['method_id_idx']] not in {(None,None),(selector['name'],selector['proto'])}):
             raise ValueError('public result differs from the certified method selection')
+        if len(actual['members'])!=1:raise ValueError('method request did not return exactly one original key')
         selected=actual['members'][0]
         status=selected['status'];outcome={'declaration_only':'declaration-only','debug':'debug','unavailable':'unavailable'}[status]
         reason=selected['reason']
@@ -196,14 +213,20 @@ def _artifacts(actual, cert):
     spans=[];excerpts=[]
     for span in actual['spans']:
         name,proto=identities[span['method_id_idx']]
-        value={**span,'owner':owner,'method':name+proto,
+        if name is None and selector['kind']=='method' and span['method_id_idx']==selector['method_id_idx']:
+            name,proto=selector['name'],selector['proto']
+        value={**span,'owner':owner,'method':None if name is None else name+proto,
                'failure':next(m for m in actual['members'] if m['method_id_idx']==span['method_id_idx'])['reason'] is not None}
         spans.append(value)
         if span['language']=='original_excerpt':excerpts.append(value)
         submitted=next(m for m in members if m['method_id_idx']==span['method_id_idx'])['source'].encode('utf-8')
         if text[span['start']:span['end']]!=submitted:raise ValueError('public member source differs from its rendered slice')
-    public={'outcome':outcome,'status':status,'selected':cert['bindings'],'members':members,'diagnostics':diagnostics}
-    groups={'outcome':public,'text':text,'rendered':{'spans':spans,'raw_excerpt_ranges':excerpts}}
+    if any(d['kind'] in {'malformed','cancelled','internal_invariant'} for d in diagnostics):
+        outcome,status='error','request_error'
+    public={'outcome':outcome,'status':status,'selected':cert['bindings'],'members':members,'diagnostics':diagnostics,
+            'report':{'available':True},'published_success':False}
+    groups={'outcome':public,'text':text}
+    if outcome!='error':groups['rendered']={'spans':spans,'raw_excerpt_ranges':excerpts}
     if outcome=='declaration-only':
         name=owner[1:-1].split('/')[-1];package=owner[1:-1].rsplit('/',1)[0].replace('/','.') if '/' in owner else ''
         if any(not part.isidentifier() for part in (package.split('.') if package else [])+[name]):raise ValueError('unsupported known Java context name')

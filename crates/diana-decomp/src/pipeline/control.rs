@@ -3,7 +3,8 @@ use std::fmt;
 use thiserror::Error;
 
 /// Optional bounds. `None` imposes no quota; `Some(0)` permits no use.
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, serde::Deserialize)]
+#[serde(default, deny_unknown_fields)]
 pub struct Limits {
     pub max_image_bytes: Option<u64>,
     pub max_metadata_items: Option<u64>,

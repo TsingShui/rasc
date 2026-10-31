@@ -89,7 +89,7 @@ def observations(root,case,invocation,certificate,manifest,result,groups):
             raise Mismatch('Driver observation is not from compiled recovered source')
         snapshots=[];member_sources={}
         for member in public.get('members',[]):
-            if member['language']!='dex_debug':continue
+            if member['language']!='dex_debug' or member['status']=='unavailable':continue
             source=member['source']
             try:snapshot=json.loads(source)
             except (ValueError,TypeError) as exc:raise Mismatch('public debug source is not a readable snapshot') from exc
