@@ -21,6 +21,7 @@ pub(crate) enum MethodBody {
         definitions: Vec<Definition>,
         locals: Vec<LocalId>,
         returned: ValueId,
+        typing: crate::p5_types::Solved,
     },
     Diamond(super::branch::Diamond),
     Dispatcher(super::dispatcher::Dispatcher),
@@ -172,7 +173,7 @@ pub(crate) fn verify(
             header.push(text, budget)?;
         }
     }
-    header.push(plan.result.spelling(), budget)?;
+    header.push(plan.result.spelling()?, budget)?;
     header.push(" ", budget)?;
     for unit in name {
         header.character(
@@ -188,7 +189,7 @@ pub(crate) fn verify(
         if parameter != 0 {
             header.push(", ", budget)?;
         }
-        header.push(kind.spelling(), budget)?;
+        header.push(kind.spelling()?, budget)?;
         header.push(" p", budget)?;
         header.unsigned(
             u64::try_from(parameter).map_err(|_| RequestError::PlatformCapacity)?,
@@ -203,6 +204,7 @@ pub(crate) fn verify(
             definitions: plan.definitions,
             locals: plan.locals,
             returned: plan.returned,
+            typing: plan.typing,
         },
         environment,
     }))

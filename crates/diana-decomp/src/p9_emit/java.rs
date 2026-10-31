@@ -17,7 +17,8 @@ pub(crate) fn java(
             definitions,
             locals,
             returned,
-        } => scalar(definitions, locals, *returned, &mut output, budget)?,
+            typing,
+        } => scalar(definitions, locals, *returned, typing, &mut output, budget)?,
         MethodBody::Diamond(body) => diamond(body, &mut output, budget)?,
         MethodBody::Dispatcher(body) => super::dispatcher::write(body, &mut output, budget)?,
     }
@@ -29,60 +30,112 @@ fn scalar(
     definitions: &[Definition],
     locals: &[ScalarLocalId],
     returned: ValueId,
+    typing: &crate::p5_types::Solved,
     output: &mut TextBuffer,
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<(), RequestError> {
+    use crate::p5_types::Conversion;
+    use crate::pipeline::scalar::Unary;
+    let at = |id: ValueId| -> Result<usize, RequestError> {
+        usize::try_from(id.0).map_err(|_| RequestError::PlatformCapacity)
+    };
+    let named = |id: ValueId,
+                 output: &mut TextBuffer,
+                 budget: &mut MethodBudget<'_, '_>|
+     -> Result<(), RequestError> {
+        let local = locals.get(at(id)?).ok_or(RequestError::InternalInvariant(
+            "verified scalar use has no local",
+        ))?;
+        output.push("v", budget)?;
+        output.unsigned(u64::from(local.0), budget)
+    };
     for (index, definition) in definitions.iter().enumerate() {
         budget.charge_work(1)?;
-        output.push(definition.kind.spelling(), budget)?;
-        output.push(" v", budget)?;
-        let target = locals.get(index).ok_or(RequestError::InternalInvariant(
-            "verified definition lost its local",
-        ))?;
-        output.unsigned(u64::from(target.0), budget)?;
-        output.push(" = ", budget)?;
-        let local = |id: ValueId,
-                     output: &mut TextBuffer,
-                     budget: &mut MethodBudget<'_, '_>|
-         -> Result<(), RequestError> {
-            let index = usize::try_from(id.0).map_err(|_| RequestError::PlatformCapacity)?;
-            let local = locals.get(index).ok_or(RequestError::InternalInvariant(
-                "verified scalar use has no local",
+        if matches!(
+            definition.expression,
+            Expression::Constant(_) | Expression::ConstantWide(_)
+        ) {
+            continue;
+        }
+        let views = typing
+            .uses
+            .get(index)
+            .ok_or(RequestError::InternalInvariant(
+                "verified scalar lost its use conversions",
             ))?;
-            output.push("v", budget)?;
-            output.unsigned(u64::from(local.0), budget)
+        for (position, conversion) in [views.left, views.right].into_iter().enumerate() {
+            budget.charge_work(1)?;
+            if let Some(Conversion::LiteralView { value, kind }) = conversion {
+                output.push(kind.spelling()?, budget)?;
+                output.arguments(format_args!(" c{index}_{position} = "), budget)?;
+                super::literals::numeric(
+                    &definitions[at(value)?].expression,
+                    kind,
+                    output,
+                    budget,
+                )?;
+                output.push(";\n", budget)?;
+            }
+        }
+        output.push(typing.types()[index].spelling()?, budget)?;
+        output.push(" ", budget)?;
+        named(
+            ValueId(u32::try_from(index).map_err(|_| RequestError::PlatformCapacity)?),
+            output,
+            budget,
+        )?;
+        output.push(" = ", budget)?;
+        let operand = |value: ValueId,
+                       position: usize,
+                       output: &mut TextBuffer,
+                       budget: &mut MethodBudget<'_, '_>|
+         -> Result<(), RequestError> {
+            let conversion = if position == 0 {
+                views.left
+            } else {
+                views.right
+            };
+            match conversion {
+                Some(Conversion::Identity(original)) if original.0 == value.0 => {
+                    named(value, output, budget)
+                }
+                Some(Conversion::LiteralView {
+                    value: original, ..
+                }) if original.0 == value.0 => {
+                    output.arguments(format_args!("c{index}_{position}"), budget)
+                }
+                _ => Err(RequestError::InternalInvariant(
+                    "verified scalar operand changed its use site",
+                )),
+            }
         };
         match definition.expression {
             Expression::Parameter(parameter) => {
                 output.push("p", budget)?;
                 output.unsigned(u64::from(parameter), budget)?;
             }
-            Expression::Constant(value) => output.arguments(format_args!("{value}"), budget)?,
-            Expression::ConstantWide(value) => {
-                output.arguments(format_args!("{value}L"), budget)?
+            Expression::Copy(value) => operand(value, 0, output, budget)?,
+            Expression::Unary(op, value) => {
+                match op {
+                    Unary::Neg | Unary::NegLong | Unary::NegFloat | Unary::NegDouble => {
+                        output.push("-", budget)?
+                    }
+                    Unary::Not | Unary::NotLong => output.push("~", budget)?,
+                    Unary::Byte => output.push("(byte) ", budget)?,
+                    Unary::Char => output.push("(char) ", budget)?,
+                    Unary::Short => output.push("(short) ", budget)?,
+                    Unary::IntToLong | Unary::LongToInt | Unary::Convert { .. } => {
+                        output.push("(", budget)?;
+                        output.push(op.signature().1.spelling()?, budget)?;
+                        output.push(") ", budget)?;
+                    }
+                }
+                operand(value, 0, output, budget)?;
             }
-            Expression::Unary(kind, id) => {
+            Expression::Binary(a, op, b) => {
+                operand(a, 0, output, budget)?;
                 output.push(
-                    match kind {
-                        crate::pipeline::scalar::Unary::Neg
-                        | crate::pipeline::scalar::Unary::NegLong => "-",
-                        crate::pipeline::scalar::Unary::Not
-                        | crate::pipeline::scalar::Unary::NotLong => "~",
-                        crate::pipeline::scalar::Unary::IntToLong => "(long) ",
-                        crate::pipeline::scalar::Unary::LongToInt => "(int) ",
-                        crate::pipeline::scalar::Unary::Byte => "(byte) ",
-                        crate::pipeline::scalar::Unary::Char => "(char) ",
-                        crate::pipeline::scalar::Unary::Short => "(short) ",
-                    },
-                    budget,
-                )?;
-                local(id, output, budget)?;
-            }
-            Expression::Copy(id) => local(id, output, budget)?,
-            Expression::Binary(a, kind, b) => {
-                local(a, output, budget)?;
-                output.push(
-                    match kind {
+                    match op {
                         Binary::Add => " + ",
                         Binary::Sub => " - ",
                         Binary::Mul => " * ",
@@ -97,17 +150,28 @@ fn scalar(
                     },
                     budget,
                 )?;
-                local(b, output, budget)?;
+                operand(b, 1, output, budget)?;
+            }
+            Expression::Constant(_) | Expression::ConstantWide(_) => {
+                return Err(RequestError::InternalInvariant(
+                    "literal entered a nonliteral statement",
+                ));
             }
         }
         output.push(";\n", budget)?;
     }
-    let returned = usize::try_from(returned.0).map_err(|_| RequestError::PlatformCapacity)?;
-    let local = locals.get(returned).ok_or(RequestError::InternalInvariant(
-        "verified return has no local",
-    ))?;
-    output.push("return v", budget)?;
-    output.unsigned(u64::from(local.0), budget)?;
+    output.push("return ", budget)?;
+    match typing.returned {
+        Conversion::Identity(value) if value.0 == returned.0 => named(value, output, budget)?,
+        Conversion::LiteralView { value, kind } if value.0 == returned.0 => {
+            super::literals::numeric(&definitions[at(value)?].expression, kind, output, budget)?
+        }
+        _ => {
+            return Err(RequestError::InternalInvariant(
+                "verified scalar return changed its use site",
+            ));
+        }
+    }
     output.push(";\n", budget)
 }
 pub(super) fn local(

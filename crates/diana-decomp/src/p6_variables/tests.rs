@@ -3,9 +3,7 @@ use crate::{Limits, RunContext};
 
 // Reuse the shared DEX source; its other metadata recipes belong to the
 // integration-test binary and are not exercised by this dispatcher case.
-#[allow(dead_code)]
-#[path = "../../tests/input/fixture.rs"]
-mod fixture;
+use crate::test_fixture as fixture;
 
 #[test]
 fn t08_parallel_copies_preserve_chains_cycles_fanout_and_wide_bits() {

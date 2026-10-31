@@ -5,9 +5,14 @@ mod p0_knowledge;
 pub use p0_knowledge::{DeclarationCatalog, ExternalMethodSignature};
 #[path = "p1_input/mod.rs"]
 pub mod input;
+mod p5_types;
 mod p6_variables;
 mod p8_java;
 mod p9_emit;
+#[cfg(test)]
+#[allow(dead_code)]
+#[path = "../tests/input/fixture.rs"]
+mod test_fixture;
 pub use engine::{DexImage, Engine, MethodSelector, Options, RecoveryPolicy, Request};
 pub use p8_java::{CompilationContract, JavaMethodDecl, VerifiedJavaMethod};
 pub use p9_emit::render;

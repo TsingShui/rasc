@@ -32,6 +32,23 @@ pub(crate) enum Unary {
     NotLong,
     IntToLong,
     LongToInt,
+    NegFloat,
+    NegDouble,
+    Convert { from: ScalarType, to: ScalarType },
+}
+impl Unary {
+    pub(crate) fn signature(self) -> (ScalarType, ScalarType) {
+        use ScalarType::*;
+        match self {
+            Self::NegLong | Self::NotLong => (Long, Long),
+            Self::IntToLong => (Int, Long),
+            Self::LongToInt => (Long, Int),
+            Self::NegFloat => (Float, Float),
+            Self::NegDouble => (Double, Double),
+            Self::Convert { from, to } => (from, to),
+            _ => (Int, Int),
+        }
+    }
 }
 #[derive(Clone, Copy)]
 enum Operand {
@@ -42,6 +59,7 @@ enum Op {
     ConstantWide(RegisterId, i64),
     MoveWide(RegisterId, RegisterId),
     BinaryWide(RegisterId, RegisterId, Binary, RegisterId),
+    BinaryFp(RegisterId, RegisterId, Binary, RegisterId, ScalarType),
     ReturnWide(RegisterId),
     Constant(RegisterId, i32),
     Move(RegisterId, RegisterId),
@@ -80,24 +98,35 @@ struct ResolvedBody<'a> {
 pub(crate) enum ScalarType {
     Int,
     Long,
+    Float,
+    Double,
+    Bits32,
+    Bits64,
 }
 impl ScalarType {
-    pub fn spelling(self) -> &'static str {
-        match self {
+    pub(crate) fn spelling(self) -> Result<&'static str, RequestError> {
+        Ok(match self {
             Self::Int => "int",
             Self::Long => "long",
-        }
+            Self::Float => "float",
+            Self::Double => "double",
+            _ => {
+                return Err(RequestError::InternalInvariant(
+                    "unsealed scalar type entered source emission",
+                ));
+            }
+        })
     }
-    fn words(self) -> usize {
+    pub(crate) fn words(self) -> usize {
         match self {
-            Self::Int => 1,
-            Self::Long => 2,
+            Self::Int | Self::Float | Self::Bits32 => 1,
+            _ => 2,
         }
     }
 }
 struct TypedBody<'a> {
     resolved: ResolvedBody<'a>,
-    types: Vec<ScalarType>,
+    typing: crate::p5_types::Solved,
 }
 struct StorageBody<'a> {
     typed: TypedBody<'a>,
@@ -111,6 +140,7 @@ pub(crate) struct PlannedBody<'a> {
     pub returned: ValueId,
     pub parameters: Vec<ScalarType>,
     pub result: ScalarType,
+    pub typing: crate::p5_types::Solved,
 }
 
 pub(crate) fn plan<'a>(
@@ -123,78 +153,18 @@ pub(crate) fn plan<'a>(
     let ssa = bind(flow, budget)?;
     // The closed Op vocabulary has neither calls nor reference-valued operations.
     let resolved = ResolvedBody { ssa };
-    let mut types = Vec::new();
-    for (index, definition) in resolved.ssa.definitions.iter().enumerate() {
-        budget.charge_work(1)?;
-        let check = |id: ValueId| -> Result<(), RequestError> {
-            if usize::try_from(id.0).map_err(|_| RequestError::PlatformCapacity)? >= index {
-                return Err(RequestError::InternalInvariant(
-                    "scalar use is not dominated by its definition",
-                ));
-            }
-            Ok(())
-        };
-        match definition.expression {
-            Expression::Copy(id) | Expression::Unary(_, id) => check(id)?,
-            Expression::Binary(a, _, b) => {
-                check(a)?;
-                check(b)?;
-            }
-            _ => {}
-        }
-        reserve(&mut types, 1, budget)?;
-        let use_kind = |id: ValueId| -> Result<ScalarType, RequestError> {
-            Ok(resolved
-                .ssa
-                .definitions
-                .get(usize::try_from(id.0).map_err(|_| RequestError::PlatformCapacity)?)
-                .ok_or(RequestError::InternalInvariant(
-                    "typed scalar use disappeared",
-                ))?
-                .kind)
-        };
-        let valid =
-            match definition.expression {
-                Expression::Parameter(parameter) => {
-                    resolved.ssa.flow.parameters.get(
-                        usize::try_from(parameter).map_err(|_| RequestError::PlatformCapacity)?,
-                    ) == Some(&definition.kind)
-                }
-                Expression::Constant(_) => definition.kind == ScalarType::Int,
-                Expression::ConstantWide(_) => definition.kind == ScalarType::Long,
-                Expression::Copy(id) => use_kind(id)? == definition.kind,
-                Expression::Unary(op, id) => {
-                    let (source, target) = match op {
-                        Unary::NegLong | Unary::NotLong => (ScalarType::Long, ScalarType::Long),
-                        Unary::IntToLong => (ScalarType::Int, ScalarType::Long),
-                        Unary::LongToInt => (ScalarType::Long, ScalarType::Int),
-                        _ => (ScalarType::Int, ScalarType::Int),
-                    };
-                    use_kind(id)? == source && definition.kind == target
-                }
-                Expression::Binary(a, op, b) => {
-                    use_kind(a)? == definition.kind
-                        && use_kind(b)?
-                            == if matches!(op, Binary::Shl | Binary::Shr | Binary::Ushr) {
-                                ScalarType::Int
-                            } else {
-                                definition.kind
-                            }
-                }
-            };
-        if !valid {
-            return Ok(None);
-        }
-        types.push(definition.kind);
-    }
-    let returned =
-        usize::try_from(resolved.ssa.returned.0).map_err(|_| RequestError::PlatformCapacity)?;
-    if types[returned] != resolved.ssa.flow.result {
+    let Some(typing) = crate::p5_types::solve(
+        &resolved.ssa.definitions,
+        resolved.ssa.returned,
+        resolved.ssa.flow.result,
+        budget,
+    )?
+    else {
         return Ok(None);
-    }
-    let typed = TypedBody { resolved, types };
+    };
+    let typed = TypedBody { resolved, typing };
     let mut locals = Vec::new();
-    for index in 0..typed.types.len() {
+    for index in 0..typed.typing.types().len() {
         budget.charge_work(1)?;
         let id = LocalId(u32::try_from(index).map_err(|_| RequestError::PlatformCapacity)?);
         reserve(&mut locals, 1, budget)?;
@@ -211,6 +181,7 @@ pub(crate) fn plan<'a>(
         returned: ssa.returned,
         parameters: ssa.flow.parameters,
         result: ssa.flow.result,
+        typing: storage.typed.typing,
     }))
 }
 
@@ -239,6 +210,20 @@ fn flow<'a>(
         .matches_with(&[u16::from(b'J')], budget)?
     {
         ScalarType::Long
+    } else if input
+        .declaration()
+        .prototype
+        .return_type
+        .matches_with(&[u16::from(b'F')], budget)?
+    {
+        ScalarType::Float
+    } else if input
+        .declaration()
+        .prototype
+        .return_type
+        .matches_with(&[u16::from(b'D')], budget)?
+    {
+        ScalarType::Double
     } else {
         return Ok(None);
     };
@@ -251,6 +236,10 @@ fn flow<'a>(
                 ScalarType::Int
             } else if name.matches_with(&[u16::from(b'J')], budget)? {
                 ScalarType::Long
+            } else if name.matches_with(&[u16::from(b'F')], budget)? {
+                ScalarType::Float
+            } else if name.matches_with(&[u16::from(b'D')], budget)? {
+                ScalarType::Double
             } else {
                 supported = false;
                 return Ok(());
@@ -327,6 +316,55 @@ fn flow<'a>(
                         }
                     },
                 )),
+                0x7f | 0x80 => Some(Op::Unary(
+                    reg(0)?,
+                    if spec.opcode == 0x7f {
+                        Unary::NegFloat
+                    } else {
+                        Unary::NegDouble
+                    },
+                    reg(1)?,
+                )),
+                0x82 | 0x83 | 0x85..=0x8c => {
+                    use ScalarType::*;
+                    let (from, to) = match spec.opcode {
+                        0x82 => (Int, Float),
+                        0x83 => (Int, Double),
+                        0x85 => (Long, Float),
+                        0x86 => (Long, Double),
+                        0x87 => (Float, Int),
+                        0x88 => (Float, Long),
+                        0x89 => (Float, Double),
+                        0x8a => (Double, Int),
+                        0x8b => (Double, Long),
+                        _ => (Double, Float),
+                    };
+                    Some(Op::Unary(reg(0)?, Unary::Convert { from, to }, reg(1)?))
+                }
+                0xa6..=0xaf | 0xc6..=0xcf => {
+                    let normalized = if spec.opcode >= 0xc6 {
+                        spec.opcode - 32
+                    } else {
+                        spec.opcode
+                    };
+                    let kind = if normalized <= 0xaa {
+                        ScalarType::Float
+                    } else {
+                        ScalarType::Double
+                    };
+                    let offset = if kind == ScalarType::Float {
+                        normalized - 0xa6
+                    } else {
+                        normalized - 0xab
+                    };
+                    let op = binary(0x90 + offset);
+                    let (a, b) = if spec.opcode >= 0xc6 {
+                        (reg(0)?, reg(1)?)
+                    } else {
+                        (reg(1)?, reg(2)?)
+                    };
+                    Some(Op::BinaryFp(reg(0)?, a, op, b, kind))
+                }
                 0x7d | 0x7e | 0x81 | 0x84 => Some(Op::Unary(
                     reg(0)?,
                     match spec.opcode {
@@ -449,12 +487,12 @@ fn read(
                 [usize::try_from(value.0).map_err(|_| RequestError::PlatformCapacity)?]
             .kind;
             if wide {
-                if kind != ScalarType::Long
+                if kind.words() != 2
                     || !matches!(slots.get(index.checked_add(1).ok_or(RequestError::PlatformCapacity)?),Some(Word::High(high)) if high.0==value.0)
                 {
                     return Err(RequestError::InvalidWideRead { register, pc });
                 }
-            } else if kind != ScalarType::Int {
+            } else if kind.words() != 1 {
                 return Err(RequestError::InvalidWideRead { register, pc });
             }
             Ok(value)
@@ -477,7 +515,7 @@ fn write(
             "scalar destination is outside its frame",
         ))?;
     destination[0] = Word::Low(value);
-    if kind == ScalarType::Long {
+    if kind.words() == 2 {
         destination[1] = Word::High(value);
     }
     Ok(())
@@ -518,32 +556,33 @@ fn bind<'a>(
     for &(pc, ref op) in &flow.ops {
         budget.charge_work(1)?;
         let (destination, kind, expression) = match *op {
-            Op::Constant(reg, value) => (reg, ScalarType::Int, Expression::Constant(value)),
+            Op::Constant(reg, value) => (reg, ScalarType::Bits32, Expression::Constant(value)),
             Op::ConstantWide(reg, value) => {
-                (reg, ScalarType::Long, Expression::ConstantWide(value))
+                (reg, ScalarType::Bits64, Expression::ConstantWide(value))
             }
             Op::Move(reg, source) => (
                 reg,
-                ScalarType::Int,
+                ScalarType::Bits32,
                 Expression::Copy(read(&slots, &definitions, source, false, pc)?),
             ),
             Op::MoveWide(reg, source) => (
                 reg,
-                ScalarType::Long,
+                ScalarType::Bits64,
                 Expression::Copy(read(&slots, &definitions, source, true, pc)?),
             ),
             Op::Unary(reg, op, source) => {
-                let wide = matches!(op, Unary::NegLong | Unary::NotLong | Unary::LongToInt);
-                let kind = if matches!(op, Unary::NegLong | Unary::NotLong | Unary::IntToLong) {
-                    ScalarType::Long
-                } else {
-                    ScalarType::Int
-                };
+                let (source_kind, kind) = op.signature();
+                let wide = source_kind.words() == 2;
                 (
                     reg,
                     kind,
                     Expression::Unary(op, read(&slots, &definitions, source, wide, pc)?),
                 )
+            }
+            Op::BinaryFp(reg, a, op, b, kind) => {
+                let a = read(&slots, &definitions, a, kind.words() == 2, pc)?;
+                let b = read(&slots, &definitions, b, kind.words() == 2, pc)?;
+                (reg, kind, Expression::Binary(a, op, b))
             }
             Op::BinaryWide(reg, a, op, b) => {
                 let a = read(&slots, &definitions, a, true, pc)?;

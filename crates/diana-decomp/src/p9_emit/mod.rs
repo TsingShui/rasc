@@ -5,6 +5,7 @@ mod dispatcher;
 mod error;
 mod java;
 mod json;
+mod literals;
 mod report;
 pub(crate) use java::java;
 pub use report::render;
