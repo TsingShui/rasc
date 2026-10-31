@@ -70,6 +70,7 @@ pub struct MethodInput<'i, 'a> {
     header_offset: ByteOffset,
     owner: DexString<'a>,
     access_flags: u32,
+    owner_access_flags: u32,
     declaration: MethodDeclaration<'i, 'a>,
     raw: RawPrintable<'a>,
 }
@@ -89,6 +90,9 @@ impl<'i, 'a> MethodInput<'i, 'a> {
     }
     pub fn access_flags(&self) -> u32 {
         self.access_flags
+    }
+    pub fn owner_access_flags(&self) -> u32 {
+        self.owner_access_flags
     }
     pub fn declaration(&self) -> &MethodDeclaration<'i, 'a> {
         &self.declaration
@@ -164,6 +168,7 @@ impl<'a> ProgramIndex<'a> {
             header_offset: self.header.header_offset,
             owner: class.descriptor,
             access_flags: method.access_flags,
+            owner_access_flags: class.access_flags,
             declaration,
             raw,
         })

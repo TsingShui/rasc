@@ -97,3 +97,30 @@ pub struct CallSiteId(pub u32);
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct MethodHandleId(pub u32);
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub struct DexId(pub u32);
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub struct InputId(pub u64);
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub struct EnvironmentId(pub u64);
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ClassKey {
+    pub dex: DexId,
+    pub class_def: ClassDefId,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct MethodKey {
+    pub class: ClassKey,
+    pub method: MethodId,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct SourceByteOffset(pub usize);
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct DiagnosticId(pub usize);

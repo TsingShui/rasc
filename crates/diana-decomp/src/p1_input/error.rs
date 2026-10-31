@@ -17,6 +17,8 @@ pub enum InputProblem {
     InvalidTableCount,
     InvalidMap,
     InvalidReference,
+    ConflictingOrigin,
+    DuplicateImage,
     InvalidMutf8,
     InvalidName,
     InvalidDescriptor,
@@ -51,6 +53,10 @@ pub enum InputError {
     },
     #[error("input size is not representable on this platform at file byte {offset_byte}")]
     PlatformCapacity { offset_byte: ByteOffset },
+    #[error("input index allocation failed at file byte {offset_byte}")]
+    Allocation { offset_byte: ByteOffset },
+    #[error("BUG: {0}")]
+    InternalInvariant(&'static str),
     #[error(transparent)]
     Control(#[from] ControlError),
 }
@@ -60,8 +66,9 @@ impl InputError {
         match self {
             Self::Malformed { .. } => FailureKind::Malformed,
             Self::Unsupported { .. } => FailureKind::Unsupported,
-            Self::PlatformCapacity { .. } => FailureKind::BudgetExceeded,
+            Self::PlatformCapacity { .. } | Self::Allocation { .. } => FailureKind::BudgetExceeded,
             Self::Control(error) => error.kind(),
+            Self::InternalInvariant(_) => FailureKind::InternalInvariant,
         }
     }
 }

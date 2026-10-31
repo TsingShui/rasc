@@ -861,7 +861,9 @@ fn write_missing(
                 InputError::Malformed { offset_byte, .. }
                 | InputError::Unsupported { offset_byte, .. }
                 | InputError::PlatformCapacity { offset_byte } => *offset_byte,
-                InputError::Control(_) => {
+                InputError::Control(_)
+                | InputError::Allocation { .. }
+                | InputError::InternalInvariant(_) => {
                     return Err(DebugError::InternalInvariant(
                         "resource failure stored as a missing fact",
                     ));
