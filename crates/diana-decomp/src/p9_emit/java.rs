@@ -13,6 +13,7 @@ pub(crate) fn java(
     output.push(&method.header, budget)?;
     output.push(" {\n", budget)?;
     match &method.body {
+        MethodBody::Constructor(body) => super::constructor::write(body, &mut output, budget)?,
         MethodBody::CallChain(body) => super::call_chain::write(body, &mut output, budget)?,
         MethodBody::Receiver(body) => {
             if body.invoke.0 >= body.result.0 || body.result.0 >= body.returned.0 {
@@ -20,41 +21,12 @@ pub(crate) fn java(
                     "verified receiver origins were reordered",
                 ));
             }
-            let mut previous = None;
-            for statement in &body.prefix {
-                budget.charge_work(1)?;
-                let pc = match statement {
-                    crate::p8_java::receiver::PrefixStatement::String { value, units, pc } => {
-                        output.push("java.lang.String ", budget)?;
-                        local(LocalId(value.0), &mut output, budget)?;
-                        output.push(" = ", budget)?;
-                        super::literals::string(units, &mut output, budget)?;
-                        output.push(";\n", budget)?;
-                        *pc
-                    }
-                    crate::p8_java::receiver::PrefixStatement::Effect {
-                        argument,
-                        qualifier,
-                        method,
-                        pc,
-                        ..
-                    } => {
-                        output.push(qualifier, budget)?;
-                        output.push(".", budget)?;
-                        output.push(method, budget)?;
-                        output.push("(", budget)?;
-                        local(LocalId(argument.0), &mut output, budget)?;
-                        output.push(");\n", budget)?;
-                        *pc
-                    }
-                };
-                if pc.0 >= body.invoke.0 || previous.is_some_and(|prior| pc.0 <= prior) {
-                    return Err(RequestError::InternalInvariant(
-                        "owned prefix origins reordered",
-                    ));
-                }
-                previous = Some(pc.0);
-            }
+            super::prefix::write(
+                &body.prefix,
+                super::prefix::Scope::Before(body.invoke),
+                &mut output,
+                budget,
+            )?;
             output.push(
                 match body.expression {
                     crate::p8_java::receiver::ReceiverExpression::Parameter => "return p0.",

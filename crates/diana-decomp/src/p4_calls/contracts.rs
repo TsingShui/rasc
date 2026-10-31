@@ -123,6 +123,18 @@ pub(super) fn clear_scope(
         }
     }
 }
+pub(crate) fn qualifier_available(
+    input: &MethodInput<'_, '_>,
+    catalog: &DeclarationCatalog,
+    prefix: &[u16],
+    budget: &mut MethodBudget<'_, '_>,
+) -> Result<bool, RequestError> {
+    let caller = copy_units(input.owner(), budget)?;
+    Ok(
+        !input.qualifier_shadowed(prefix, budget)?
+            && clear_scope(catalog, &caller, prefix, budget)?,
+    )
+}
 pub(crate) fn resolve_static(
     input: &MethodInput<'_, '_>,
     catalog: &DeclarationCatalog,

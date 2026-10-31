@@ -17,6 +17,7 @@ pub struct VerifiedJavaMethod {
     environment: EnvironmentId,
 }
 pub(crate) enum MethodBody {
+    Constructor(super::constructor::ConstructorBody),
     CallChain(super::call_chain::Body),
     Receiver(super::receiver::ReceiverMethod),
     Scalar {
@@ -29,6 +30,17 @@ pub(crate) enum MethodBody {
     Dispatcher(super::dispatcher::Dispatcher),
 }
 impl VerifiedJavaMethod {
+    pub(super) fn constructor(
+        header: String,
+        body: super::constructor::ConstructorBody,
+        environment: EnvironmentId,
+    ) -> Self {
+        Self {
+            header,
+            body: MethodBody::Constructor(body),
+            environment,
+        }
+    }
     pub(super) fn call_chain(
         header: String,
         body: super::call_chain::Body,
@@ -97,6 +109,7 @@ impl VerifiedJavaMethod {
         };
         let prefix = match &self.body {
             MethodBody::Receiver(body) => Some(body.prefix.as_slice()),
+            MethodBody::Constructor(body) => Some(body.body.as_slice()),
             _ => None,
         };
         let effects = prefix
@@ -163,7 +176,25 @@ impl VerifiedJavaMethod {
                 },
             }
         });
-        statics.chain(effects).chain(receiver).chain(chained)
+        let constructor = match &self.body {
+            MethodBody::Constructor(body) => Some(super::JavaCallSite {
+                reference: body.chain.reference,
+                receiver: Some(body.receiver),
+                allocation: None,
+                owner: &body.chain.owner,
+                name: &[60, 105, 110, 105, 116, 62],
+                prototype: &body.chain.prototype,
+                invoke: body.chain_pc,
+                result: None,
+                kind: super::JavaInvokeKind::Direct,
+            }),
+            _ => None,
+        };
+        statics
+            .chain(constructor)
+            .chain(effects)
+            .chain(receiver)
+            .chain(chained)
     }
     pub(super) fn dispatcher(
         header: String,

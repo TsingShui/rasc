@@ -1,6 +1,7 @@
 mod annotations;
 mod call_chain;
 mod comparison;
+mod constructor;
 mod debug;
 mod debug_program;
 mod dispatcher;
@@ -8,6 +9,7 @@ mod error;
 mod java;
 mod json;
 mod literals;
+mod prefix;
 mod report;
 pub(crate) use java::java;
 pub use report::render;
