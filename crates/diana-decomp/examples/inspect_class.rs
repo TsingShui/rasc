@@ -67,6 +67,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     #[serde(default, deny_unknown_fields)]
     struct Controls {
         limits: Limits,
+        representation: diana_decomp::RepresentationPolicy,
         cancellation: Option<Cancellation>,
     }
     #[derive(serde::Deserialize)]
@@ -112,7 +113,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         catalog,
         &mut control,
     ) {
-        Ok(engine) => engine,
+        Ok(engine) => engine.with_representation(controls.representation),
         Err(error) => return write_value(failure(DiagnosticCause::Input(error), None), output),
     };
     armed.set(true);

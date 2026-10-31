@@ -22,6 +22,14 @@ pub enum RecoveryPolicy {
     Disabled,
 }
 
+/// Selects a representation adapter without weakening Java eligibility checks.
+#[derive(Clone, Copy, Debug, Default, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RepresentationPolicy {
+    #[default]
+    StructuredThenDispatch,
+    DispatchOnly,
+}
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Options {
     pub recovery: RecoveryPolicy,
@@ -47,10 +55,17 @@ struct IndexedImage<'a> {
 pub struct Engine<'a> {
     images: Vec<IndexedImage<'a>>,
     options: Options,
+    representation: RepresentationPolicy,
     catalog: DeclarationCatalog,
 }
 
 impl<'a> Engine<'a> {
+    /// Selects the region adapter for subsequent requests without allocating,
+    /// reading input again or changing recovery and Java eligibility rules.
+    pub fn with_representation(mut self, representation: RepresentationPolicy) -> Self {
+        self.representation = representation;
+        self
+    }
     /// Admits physical bytes and selected logical catalogs. The same physical
     /// slice's header chain is checked once. Conflicting origins, duplicate
     /// logical identities, malformed input and allocation/control failures are
@@ -130,6 +145,7 @@ impl<'a> Engine<'a> {
         Ok(Self {
             images: indexed,
             options,
+            representation: RepresentationPolicy::default(),
             catalog,
         })
     }
@@ -261,7 +277,7 @@ impl<'a> Engine<'a> {
     ) -> Result<MethodOutput, RequestError> {
         let candidate = {
             let mut budget = control.method_budget()?;
-            let normal = normal_member(index, key, &self.catalog, &mut budget);
+            let normal = normal_member(index, key, &self.catalog, self.representation, &mut budget);
             let (facts, cause) = match normal {
                 Ok(NormalMember::Java {
                     facts,
@@ -390,6 +406,7 @@ fn normal_member(
     index: &ProgramIndex<'_>,
     key: MethodKey,
     catalog: &DeclarationCatalog,
+    representation: RepresentationPolicy,
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<NormalMember, RequestError> {
     let input = index.method_input(key.class.class_def, key.method, budget)?;
@@ -497,9 +514,13 @@ fn normal_member(
     if crate::p8_java::source_group_admitted(index, key, &facts, budget)?
         && let Some(ssa) = crate::pipeline::branch::build(&input, catalog, budget)?
     {
-        if let Some(declaration) =
-            crate::p8_java::branch::verify(&input, ssa, catalog.environment, budget)?
-        {
+        if let Some(declaration) = crate::p8_java::branch::verify(
+            &input,
+            ssa,
+            catalog.environment,
+            representation,
+            budget,
+        )? {
             let source = crate::p9_emit::java(&declaration, budget)?;
             return Ok(NormalMember::Java {
                 facts,

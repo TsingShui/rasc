@@ -14,7 +14,7 @@ fn edge(
     output.unsigned(u64::from(edge.target.0), budget)?;
     output.push(";\ncontinue;\n", budget)
 }
-pub(super) fn write(
+pub(super) fn locals(
     body: &Dispatcher,
     output: &mut TextBuffer,
     budget: &mut MethodBudget<'_, '_>,
@@ -51,38 +51,114 @@ pub(super) fn write(
         output.push(";\n", budget)?;
     }
     assignments(&body.entry, output, budget)?;
+
+    Ok(())
+}
+pub(super) fn statements(
+    case: &crate::p8_java::dispatcher::Case,
+    output: &mut TextBuffer,
+    budget: &mut MethodBudget<'_, '_>,
+) -> Result<(), RequestError> {
+    for statement in &case.statements {
+        budget.charge_work(1)?;
+        match statement {
+            crate::p8_java::calls::Statement::Assignment(statement) => {
+                assignments(std::slice::from_ref(statement), output, budget)?
+            }
+            crate::p8_java::calls::Statement::StaticCall { target, call } => {
+                if let Some(target) = target {
+                    local(*target, output, budget)?;
+                    output.push(" = ", budget)?;
+                }
+                output.push(&call.qualifier, budget)?;
+                output.push(".", budget)?;
+                output.push(&call.method, budget)?;
+                output.push("(", budget)?;
+                for (index, &argument) in call.arguments.iter().enumerate() {
+                    budget.charge_work(1)?;
+                    if index != 0 {
+                        output.push(", ", budget)?;
+                    }
+                    super::java::value_use(argument, output, budget)?;
+                }
+                output.push(");\n", budget)?;
+            }
+        }
+    }
+
+    Ok(())
+}
+pub(super) fn open_if(
+    transfer: &Transfer,
+    output: &mut TextBuffer,
+    budget: &mut MethodBudget<'_, '_>,
+) -> Result<(), RequestError> {
+    let Transfer::Branch {
+        left,
+        right,
+        kind,
+        opcode,
+        ..
+    } = transfer
+    else {
+        return Err(RequestError::InternalInvariant(
+            "structured condition lost original branch",
+        ));
+    };
+    output.push("if (", budget)?;
+    if *kind == Kind::Boolean && right.is_none() {
+        if *opcode == 0x38 {
+            output.push("!", budget)?;
+        }
+        local(*left, output, budget)?;
+    } else {
+        local(*left, output, budget)?;
+        output.push(
+            match opcode {
+                0x32 | 0x38 => " == ",
+                0x33 | 0x39 => " != ",
+                0x34 | 0x3a => " < ",
+                0x35 | 0x3b => " >= ",
+                0x36 | 0x3c => " > ",
+                0x37 | 0x3d => " <= ",
+                _ => {
+                    return Err(RequestError::InternalInvariant(
+                        "verified dispatcher comparison is invalid",
+                    ));
+                }
+            },
+            budget,
+        )?;
+        if let Some(right) = right {
+            local(*right, output, budget)?;
+        } else {
+            output.push(
+                if matches!(kind, Kind::Object | Kind::String) {
+                    "null"
+                } else {
+                    "0"
+                },
+                budget,
+            )?;
+        }
+    }
+    output.push(") {\n", budget)?;
+    Ok(())
+}
+
+pub(super) fn write(
+    body: &Dispatcher,
+    output: &mut TextBuffer,
+    budget: &mut MethodBudget<'_, '_>,
+) -> Result<(), RequestError> {
+    locals(body, output, budget)?;
     output.push("int pc = 0;\nwhile (true) {\nswitch (pc) {\n", budget)?;
     for case in &body.cases {
         budget.charge_work(1)?;
         output.push("case ", budget)?;
         output.unsigned(u64::from(case.key.0), budget)?;
         output.push(": {\n", budget)?;
-        for statement in &case.statements {
-            budget.charge_work(1)?;
-            match statement {
-                crate::p8_java::calls::Statement::Assignment(statement) => {
-                    assignments(std::slice::from_ref(statement), output, budget)?
-                }
-                crate::p8_java::calls::Statement::StaticCall { target, call } => {
-                    if let Some(target) = target {
-                        local(*target, output, budget)?;
-                        output.push(" = ", budget)?;
-                    }
-                    output.push(&call.qualifier, budget)?;
-                    output.push(".", budget)?;
-                    output.push(&call.method, budget)?;
-                    output.push("(", budget)?;
-                    for (index, &argument) in call.arguments.iter().enumerate() {
-                        budget.charge_work(1)?;
-                        if index != 0 {
-                            output.push(", ", budget)?;
-                        }
-                        super::java::value_use(argument, output, budget)?;
-                    }
-                    output.push(");\n", budget)?;
-                }
-            }
-        }
+        statements(case, output, budget)?;
         match &case.transfer {
             Transfer::ReturnVoid => output.push("return;\n", budget)?,
             Transfer::Switch {
@@ -107,52 +183,8 @@ pub(super) fn write(
             }
             Transfer::Return(value) => super::java::returned(*value, output, budget)?,
             Transfer::Jump(target) => edge(target, output, budget)?,
-            Transfer::Branch {
-                left,
-                right,
-                kind,
-                opcode,
-                yes,
-                no,
-            } => {
-                output.push("if (", budget)?;
-                if *kind == Kind::Boolean && right.is_none() {
-                    if *opcode == 0x38 {
-                        output.push("!", budget)?;
-                    }
-                    local(*left, output, budget)?;
-                } else {
-                    local(*left, output, budget)?;
-                    output.push(
-                        match opcode {
-                            0x32 | 0x38 => " == ",
-                            0x33 | 0x39 => " != ",
-                            0x34 | 0x3a => " < ",
-                            0x35 | 0x3b => " >= ",
-                            0x36 | 0x3c => " > ",
-                            0x37 | 0x3d => " <= ",
-                            _ => {
-                                return Err(RequestError::InternalInvariant(
-                                    "verified dispatcher comparison is invalid",
-                                ));
-                            }
-                        },
-                        budget,
-                    )?;
-                    if let Some(right) = right {
-                        local(*right, output, budget)?;
-                    } else {
-                        output.push(
-                            if matches!(kind, Kind::Object | Kind::String) {
-                                "null"
-                            } else {
-                                "0"
-                            },
-                            budget,
-                        )?;
-                    }
-                }
-                output.push(") {\n", budget)?;
+            Transfer::Branch { yes, no, .. } => {
+                open_if(&case.transfer, output, budget)?;
                 edge(yes, output, budget)?;
                 output.push("} else {\n", budget)?;
                 edge(no, output, budget)?;

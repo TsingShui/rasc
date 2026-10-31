@@ -319,12 +319,17 @@ pub(crate) fn verify(
     input: &MethodInput<'_, '_>,
     ssa: VerifiedSsa<'_>,
     environment: EnvironmentId,
+    representation: crate::RepresentationPolicy,
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<Option<VerifiedJavaMethod>, RequestError> {
-    if let Some(method) = verify_diamond(input, &ssa, environment, budget)? {
+    if matches!(
+        representation,
+        crate::RepresentationPolicy::StructuredThenDispatch
+    ) && let Some(method) = verify_diamond(input, &ssa, environment, budget)?
+    {
         return Ok(Some(method));
     }
-    super::dispatcher::verify(input, &ssa, environment, budget)
+    super::dispatcher::verify(input, &ssa, environment, representation, budget)
 }
 
 fn verify_diamond(

@@ -26,7 +26,7 @@ def required_runs(spec, case_ids=None):
     return runs
 
 
-def run_public(root, cache, spec, manifest, case_ids=None):
+def run_public(root, cache, spec, manifest, case_ids=None,representation=None):
     from e2e import PreparationError, relative, run, save
     from .evaluate import compare_suite
     from .compare import Mismatch
@@ -72,7 +72,9 @@ def run_public(root, cache, spec, manifest, case_ids=None):
                         argv = [executable,path,str(origin['header_offset']),str(selector['class_def_idx'])]
                         if selector['kind']=='method':argv.extend([selector['name'],selector['proto']])
                     control_path=work/'controls.json'
-                    save(control_path,{key:invocation['input'][key] for key in ('limits','cancellation') if key in invocation['input']})
+                    controls={key:invocation['input'][key] for key in ('limits','cancellation') if key in invocation['input']}
+                    if representation is not None:controls['representation']=representation
+                    save(control_path,controls)
                     argv.extend(['--control',control_path])
                     record['request_controls']={'path':relative(control_path)}
                     catalog_path=work/'method-signatures.json'
@@ -174,6 +176,7 @@ def run_public(root, cache, spec, manifest, case_ids=None):
     report={'execution':'passed' if len(passed)==len(selected_cases) else 'failed',
             'spec_revision':spec['specRevision'],'engine_revision':{'commit':revision,'working_tree_dirty':dirty},
             'profile':'native-public-library; certified declarations with per-class coverage; caller limits/cancellation; recovery disabled',
+            'representation':representation or 'structured_then_dispatch',
             'full_required_set':case_ids is None,'selected_cases':len(selected_cases),
             'selected_invocations':len({(c['id'],i['id']) for c,i,_ in runs}),'selected_seams':len(runs),
             'passed_cases':len(passed),'passed_seams':sum(r['execution']=='passed' for r in results),

@@ -9,6 +9,7 @@ mod dispatcher_verify;
 pub(crate) mod receiver;
 mod receiver_verify;
 mod scalar;
+pub(crate) mod structured;
 pub use calls::{JavaCallSite, JavaInvokeKind};
 pub(crate) use scalar::MethodBody;
 pub use scalar::{CompilationContract, VerifiedJavaMethod};

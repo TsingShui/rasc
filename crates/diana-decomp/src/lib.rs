@@ -11,13 +11,16 @@ pub mod input;
 mod p4_calls;
 mod p5_types;
 mod p6_variables;
+mod p7_regions;
 mod p8_java;
 mod p9_emit;
 #[cfg(test)]
 #[allow(dead_code)]
 #[path = "../tests/input/fixture.rs"]
 mod test_fixture;
-pub use engine::{DexImage, Engine, MethodSelector, Options, RecoveryPolicy, Request};
+pub use engine::{
+    DexImage, Engine, MethodSelector, Options, RecoveryPolicy, RepresentationPolicy, Request,
+};
 pub use p8_java::{
     CompilationContract, JavaCallSite, JavaInvokeKind, JavaMethodDecl, VerifiedJavaMethod,
 };

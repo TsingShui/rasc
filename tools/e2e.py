@@ -357,6 +357,7 @@ def main():
     parser.add_argument('--cache', type=Path, default=ROOT / '.cache/e2e')
     parser.add_argument('--jobs', type=int, default=4)
     parser.add_argument('--case', action='append', dest='case_ids', help='run every invocation of the selected fixed case; repeatable')
+    parser.add_argument('--representation',choices=('structured_then_dispatch','dispatch_only'),help='native Java representation adapter for core execution')
     args = parser.parse_args()
     cache = args.cache.resolve()
     relative(cache)
@@ -370,7 +371,7 @@ def main():
     elif args.command == 'run':
         tools.verify()
         from runner.adapter import run_public
-        report = run_public(ROOT,cache,load(SPEC),load(SUITE/'manifest.json'),args.case_ids)
+        report = run_public(ROOT,cache,load(SPEC),load(SUITE/'manifest.json'),args.case_ids,args.representation)
         return 0 if report['execution']=='passed' else 1
     else:
         tools.verify()

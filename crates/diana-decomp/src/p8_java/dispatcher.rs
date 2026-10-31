@@ -81,6 +81,7 @@ pub(crate) fn verify(
     input: &MethodInput<'_, '_>,
     ssa: &VerifiedSsa<'_>,
     environment: EnvironmentId,
+    representation: crate::RepresentationPolicy,
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<Option<VerifiedJavaMethod>, RequestError> {
     let RawPrintable::Method(raw) = input.raw() else {
@@ -353,6 +354,20 @@ pub(crate) fn verify(
         cases,
     };
     super::dispatcher_verify::verify(ssa, &body, budget)?;
+    if matches!(
+        representation,
+        crate::RepresentationPolicy::StructuredThenDispatch
+    ) && let Some(region) = crate::p7_regions::build(&body, budget)?
+    {
+        return Ok(Some(VerifiedJavaMethod::structured(
+            header.finish(),
+            super::structured::StructuredLoop {
+                storage: body,
+                region,
+            },
+            environment,
+        )));
+    }
     Ok(Some(VerifiedJavaMethod::dispatcher(
         header.finish(),
         body,

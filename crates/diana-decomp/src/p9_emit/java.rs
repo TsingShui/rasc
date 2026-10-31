@@ -13,6 +13,7 @@ pub(crate) fn java(
     output.push(&method.header, budget)?;
     output.push(" {\n", budget)?;
     match &method.body {
+        MethodBody::Structured(body) => super::structured::write(body, &mut output, budget)?,
         MethodBody::Constructor(body) => super::constructor::write(body, &mut output, budget)?,
         MethodBody::CallChain(body) => super::call_chain::write(body, &mut output, budget)?,
         MethodBody::Receiver(body) => {

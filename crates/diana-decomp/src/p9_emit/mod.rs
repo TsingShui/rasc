@@ -11,6 +11,7 @@ mod json;
 mod literals;
 mod prefix;
 mod report;
+mod structured;
 pub(crate) use java::java;
 pub use report::render;
 mod initializers;

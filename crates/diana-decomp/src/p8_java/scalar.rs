@@ -17,6 +17,7 @@ pub struct VerifiedJavaMethod {
     environment: EnvironmentId,
 }
 pub(crate) enum MethodBody {
+    Structured(super::structured::StructuredLoop),
     Constructor(super::constructor::ConstructorBody),
     CallChain(super::call_chain::Body),
     Receiver(super::receiver::ReceiverMethod),
@@ -30,6 +31,17 @@ pub(crate) enum MethodBody {
     Dispatcher(super::dispatcher::Dispatcher),
 }
 impl VerifiedJavaMethod {
+    pub(super) fn structured(
+        header: String,
+        body: super::structured::StructuredLoop,
+        environment: EnvironmentId,
+    ) -> Self {
+        Self {
+            header,
+            body: MethodBody::Structured(body),
+            environment,
+        }
+    }
     pub(super) fn constructor(
         header: String,
         body: super::constructor::ConstructorBody,
@@ -68,6 +80,7 @@ impl VerifiedJavaMethod {
     pub fn calls(&self) -> impl Iterator<Item = super::JavaCallSite<'_>> {
         let cases = match &self.body {
             MethodBody::Dispatcher(body) => Some(body.cases.as_slice()),
+            MethodBody::Structured(body) => Some(body.storage.cases.as_slice()),
             _ => None,
         };
         let statics = cases
