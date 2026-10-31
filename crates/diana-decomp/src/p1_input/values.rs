@@ -101,6 +101,38 @@ impl<'a> EncodedValues<'a> {
         })
     }
 
+    pub fn annotation(
+        index: &ProgramIndex<'a>,
+        offset: ByteOffset,
+        budget: &mut FallbackBudget<'_, '_>,
+    ) -> Result<(u8, TypeId, Self), MethodError> {
+        let mut cursor = index.item(0x2004, offset, budget)?;
+        let visibility = cursor.read_array::<1>(budget)?[0];
+        if visibility > 2 {
+            return Err(invalid(offset).into());
+        }
+        let type_id = TypeId(cursor.read_uleb32_with(budget)?);
+        if !matches!(index.type_descriptor(type_id, budget)?.1, TypeShape::Class) {
+            return Err(invalid(offset).into());
+        }
+        let count = count(&mut cursor, 2, None, budget)?;
+        Ok((
+            visibility,
+            type_id,
+            Self {
+                cursor,
+                bytes: index.bytes,
+                root: Frame {
+                    kind: FrameKind::Annotation { last_name: None },
+                    remaining: count,
+                    next: ValueOrdinal(0),
+                },
+                stack: Vec::new(),
+                count,
+            },
+        ))
+    }
+
     pub fn position(&self) -> ByteOffset {
         self.cursor.position_byte()
     }

@@ -10,6 +10,7 @@ pub(super) struct Fixture {
     pub(super) literal_idx: u32,
     pub(super) literal_data: usize,
     pub(super) virtual_delta: usize,
+    pub(super) annotations: Option<AnnotationOffsets>,
 }
 
 pub(super) fn put(bytes: &mut [u8], offset: usize, value: u32) {
@@ -49,8 +50,7 @@ pub(super) fn build(
         huge_handler,
         second_delta,
         None,
-        None,
-        None,
+        MetadataRecipe::default(),
     )
 }
 
@@ -62,15 +62,71 @@ pub(super) struct CodeRecipe<'a> {
 }
 
 pub(super) fn with_code(recipe: CodeRecipe<'_>) -> Fixture {
-    build_internal("f", false, false, None, Some(recipe), None, None)
+    build_internal(
+        "f",
+        false,
+        false,
+        None,
+        Some(recipe),
+        MetadataRecipe::default(),
+    )
 }
 
 pub(super) fn with_debug(recipe: CodeRecipe<'_>, program: &[u8]) -> Fixture {
-    build_internal("f", false, false, None, Some(recipe), Some(program), None)
+    build_internal(
+        "f",
+        false,
+        false,
+        None,
+        Some(recipe),
+        MetadataRecipe {
+            debug: Some(program),
+            ..MetadataRecipe::default()
+        },
+    )
 }
 
 pub(super) fn with_values(values: &[u8]) -> Fixture {
-    build_internal("f", false, false, None, None, None, Some(values))
+    build_internal(
+        "f",
+        false,
+        false,
+        None,
+        None,
+        MetadataRecipe {
+            values: Some(values),
+            ..MetadataRecipe::default()
+        },
+    )
+}
+
+#[derive(Default)]
+struct MetadataRecipe<'a> {
+    debug: Option<&'a [u8]>,
+    values: Option<&'a [u8]>,
+    annotations: bool,
+}
+
+#[derive(Clone, Copy)]
+pub(super) struct AnnotationOffsets {
+    pub(super) directory: usize,
+    pub(super) set: usize,
+    pub(super) item: usize,
+    pub(super) parameters: usize,
+}
+
+pub(super) fn with_annotations() -> Fixture {
+    build_internal(
+        "f",
+        false,
+        false,
+        None,
+        None,
+        MetadataRecipe {
+            annotations: true,
+            ..MetadataRecipe::default()
+        },
+    )
 }
 
 fn build_internal(
@@ -79,8 +135,7 @@ fn build_internal(
     huge_handler: bool,
     second_delta: Option<u32>,
     override_code: Option<CodeRecipe<'_>>,
-    debug_program: Option<&[u8]>,
-    static_values: Option<&[u8]>,
+    metadata: MetadataRecipe<'_>,
 ) -> Fixture {
     let mut strings: Vec<Vec<u16>> = [
         "I",
@@ -213,7 +268,7 @@ fn build_internal(
         }
     }
     let debug_start = bytes.len();
-    if let Some(program) = debug_program {
+    if let Some(program) = metadata.debug {
         put(&mut bytes, code[0] + 8, debug_start as u32);
         bytes.extend_from_slice(program);
     }
@@ -255,8 +310,59 @@ fn build_internal(
         bytes.push(0);
     }
     let values_start = bytes.len();
-    if let Some(values) = static_values {
+    if let Some(values) = metadata.values {
         bytes.extend_from_slice(values);
+    }
+    let mut annotations = None;
+    let mut annotation_map = Vec::new();
+    if metadata.annotations {
+        let item = bytes.len();
+        let mut items = Vec::new();
+        for (visibility, type_id) in [(0, 2), (1, 3), (2, 4)] {
+            items.push(bytes.len());
+            bytes.extend([visibility, type_id, 1, 0, 0x17]);
+            bytes.push(u8::try_from(literal_idx).unwrap());
+        }
+        align(&mut bytes);
+        let set = bytes.len();
+        bytes.extend_from_slice(&3u32.to_le_bytes());
+        for offset in items {
+            bytes.extend_from_slice(&(offset as u32).to_le_bytes());
+        }
+        let empty_set = bytes.len();
+        bytes.extend_from_slice(&0u32.to_le_bytes());
+        let parameters = bytes.len();
+        bytes.extend_from_slice(&1u32.to_le_bytes());
+        bytes.extend_from_slice(&(set as u32).to_le_bytes());
+        let directory = bytes.len();
+        for value in [
+            set as u32,
+            1,
+            2,
+            1,
+            0,
+            set as u32,
+            direct[0],
+            set as u32,
+            direct[1],
+            empty_set as u32,
+            direct[0],
+            parameters as u32,
+        ] {
+            bytes.extend_from_slice(&value.to_le_bytes());
+        }
+        annotations = Some(AnnotationOffsets {
+            directory,
+            set,
+            item,
+            parameters,
+        });
+        annotation_map.extend([
+            (0x2004, 3, item),
+            (0x1003, 2, set),
+            (0x1002, 1, parameters),
+            (0x2006, 1, directory),
+        ]);
     }
     align(&mut bytes);
     let map = bytes.len();
@@ -274,11 +380,14 @@ fn build_internal(
         (0x2002, strings.len(), string_data),
         (0x1000, 1, map),
     ];
-    if debug_program.is_some() {
+    if metadata.debug.is_some() {
         entries.insert(9, (0x2003, 1, debug_start));
     }
-    if static_values.is_some() {
+    if metadata.values.is_some() {
         entries.insert(entries.len() - 1, (0x2005, 1, values_start));
+    }
+    for entry in annotation_map {
+        entries.insert(entries.len() - 1, entry);
     }
     bytes.extend_from_slice(&(entries.len() as u32).to_le_bytes());
     for (kind, count, offset) in entries {
@@ -332,10 +441,11 @@ fn build_internal(
         (class_defs + 4, 0x401),
         (class_defs + 8, 4),
         (class_defs + 16, u32::MAX as usize),
+        (class_defs + 20, annotations.map_or(0, |a| a.directory)),
         (class_defs + 24, class_data),
         (
             class_defs + 28,
-            if static_values.is_some() {
+            if metadata.values.is_some() {
                 values_start
             } else {
                 0
@@ -356,5 +466,6 @@ fn build_internal(
         literal_idx,
         literal_data,
         virtual_delta,
+        annotations,
     }
 }

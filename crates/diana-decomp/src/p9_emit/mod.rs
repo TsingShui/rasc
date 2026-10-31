@@ -1,3 +1,4 @@
+mod annotations;
 mod debug;
 mod debug_program;
 mod error;

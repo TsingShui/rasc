@@ -1,4 +1,4 @@
-use super::fixture::{CodeRecipe, tiny, with_code, with_debug};
+use super::fixture::{CodeRecipe, tiny, with_annotations, with_code, with_debug};
 use diana_decomp::input::ProgramIndex;
 use diana_decomp::{ClassDefId, FailureKind, Limits, MethodId, RunContext};
 use serde_json::Value;
@@ -174,40 +174,41 @@ fn t03_debug_invalid_hierarchy_keeps_method_and_other_context_facts() {
 
 #[test]
 fn t03_debug_output_budget_uses_final_utf8_size_and_keeps_exact_boundary() {
-    let fixture = tiny("函数𝒇", false, false);
-    let size = {
-        let mut control = RunContext::new(Limits::default(), &|| false);
-        let index = ProgramIndex::open(&fixture.bytes, &mut control).unwrap();
-        let mut fallback = control.method_budget().unwrap().into_fallback().unwrap();
-        index
-            .debug_method(
+    for fixture in [tiny("函数𝒇", false, false), with_annotations()] {
+        let size = {
+            let mut control = RunContext::new(Limits::default(), &|| false);
+            let index = ProgramIndex::open(&fixture.bytes, &mut control).unwrap();
+            let mut fallback = control.method_budget().unwrap().into_fallback().unwrap();
+            index
+                .debug_method(
+                    ClassDefId(0),
+                    MethodId(fixture.primary_method_idx),
+                    &mut fallback,
+                )
+                .unwrap()
+                .source()
+                .len()
+        };
+        for limit in [size, size - 1] {
+            let mut control = RunContext::new(
+                Limits {
+                    fallback_output_bytes: Some(limit as u64),
+                    ..Limits::default()
+                },
+                &|| false,
+            );
+            let index = ProgramIndex::open(&fixture.bytes, &mut control).unwrap();
+            let mut fallback = control.method_budget().unwrap().into_fallback().unwrap();
+            let result = index.debug_method(
                 ClassDefId(0),
                 MethodId(fixture.primary_method_idx),
                 &mut fallback,
-            )
-            .unwrap()
-            .source()
-            .len()
-    };
-    for limit in [size, size - 1] {
-        let mut control = RunContext::new(
-            Limits {
-                fallback_output_bytes: Some(limit as u64),
-                ..Limits::default()
-            },
-            &|| false,
-        );
-        let index = ProgramIndex::open(&fixture.bytes, &mut control).unwrap();
-        let mut fallback = control.method_budget().unwrap().into_fallback().unwrap();
-        let result = index.debug_method(
-            ClassDefId(0),
-            MethodId(fixture.primary_method_idx),
-            &mut fallback,
-        );
-        if limit == size {
-            assert_eq!(result.unwrap().source().len(), size);
-        } else {
-            assert_eq!(result.unwrap_err().kind(), FailureKind::BudgetExceeded);
+            );
+            if limit == size {
+                assert_eq!(result.unwrap().source().len(), size);
+            } else {
+                assert_eq!(result.unwrap_err().kind(), FailureKind::BudgetExceeded);
+            }
         }
     }
 }
@@ -241,7 +242,11 @@ fn t03_debug_cancellation_is_terminal_without_a_completed_source() {
         },
         &program,
     );
-    for (fixture, cancel_after) in [(tiny("f", true, false), 64), (metadata, 2048)] {
+    for (fixture, cancel_after) in [
+        (tiny("f", true, false), 64),
+        (metadata, 2048),
+        (with_annotations(), 1024),
+    ] {
         let armed = Cell::new(false);
         let calls = Cell::new(0);
         let cancel = || {

@@ -1,3 +1,5 @@
+#[path = "input/annotations.rs"]
+mod annotations;
 #[path = "input/catalog.rs"]
 mod catalog;
 #[path = "input/debug.rs"]

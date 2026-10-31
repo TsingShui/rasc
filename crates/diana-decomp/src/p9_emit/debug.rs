@@ -294,6 +294,16 @@ impl ProgramIndex<'_> {
                 budget,
             )?;
         }
+        if context.annotations_offset != ByteOffset(0) {
+            super::annotations::write_directory(
+                self,
+                class,
+                &mut output,
+                context.annotations_offset,
+                issues,
+                budget,
+            )?;
+        }
         output.push(",\"methods\":[{\"method_id_idx\":", budget)?;
         output.unsigned(u64::from(method.method_idx.0), budget)?;
         output.push(",\"flags\":", budget)?;

@@ -276,7 +276,7 @@ impl<'a> ProgramIndex<'a> {
         })
     }
 
-    fn method_declaration(
+    pub(super) fn method_declaration(
         &self,
         method_idx: MethodId,
         owner: TypeId,
@@ -296,7 +296,7 @@ impl<'a> ProgramIndex<'a> {
         Ok(MethodDeclaration { name, prototype })
     }
 
-    fn validate_field(
+    pub(super) fn validate_field(
         &self,
         field_idx: FieldId,
         owner: TypeId,
@@ -341,7 +341,9 @@ impl<'a> ProgramIndex<'a> {
         record.skip(2, ByteLength(4), control)?;
         let super_idx = record.read_u32_with(control)?;
         let interfaces_raw = record.read_u32_with(control)?;
-        record.skip(3, ByteLength(4), control)?;
+        record.read_u32_with(control)?;
+        let annotations_raw = record.read_u32_with(control)?;
+        record.read_u32_with(control)?;
         let values_raw = record.read_u32_with(control)?;
         let superclass = local(self.superclass(super_idx, control))?;
         let interfaces = local(self.interfaces(interfaces_raw, control))?;
@@ -350,6 +352,7 @@ impl<'a> ProgramIndex<'a> {
             superclass,
             interfaces,
             values_offset,
+            annotations_offset: file_offset(annotations_raw, self.header.class_defs.offset_byte)?,
         })
     }
 
@@ -453,6 +456,7 @@ pub(crate) struct ClassContext<'a> {
     pub superclass: Result<Option<DexString<'a>>, InputError>,
     pub interfaces: Result<&'a [u8], InputError>,
     pub values_offset: Result<Option<ByteOffset>, InputError>,
+    pub annotations_offset: ByteOffset,
 }
 
 pub(crate) struct MethodReference<'i, 'a> {
@@ -471,7 +475,7 @@ pub struct ClassView<'i, 'a> {
     pub type_idx: TypeId,
     pub access_flags: u32,
     pub descriptor: DexString<'a>,
-    class_data_offset: Option<ByteOffset>,
+    pub(super) class_data_offset: Option<ByteOffset>,
 }
 
 pub struct MethodDeclaration<'i, 'a> {
@@ -483,7 +487,7 @@ pub struct Prototype<'i, 'a> {
     index: &'i ProgramIndex<'a>,
     pub shorty: DexString<'a>,
     pub return_type: DexString<'a>,
-    parameters: &'a [u8],
+    pub(super) parameters: &'a [u8],
     pub parameter_words: RegisterWordCount,
 }
 

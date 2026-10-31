@@ -1,6 +1,7 @@
 //! Checked DEX byte reads and header envelopes. Header acceptance does not
 //! validate variable items, instruction semantics or Java representability.
 
+pub(crate) mod annotations;
 mod binding;
 pub(crate) mod catalog;
 mod code;

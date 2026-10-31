@@ -5,7 +5,7 @@ use crate::input::values::{EncodedKind, EncodedValue, EncodedValues, ValueStep};
 use crate::input::{MethodError, ProgramIndex};
 use crate::{ByteOffset, FallbackBudget};
 
-fn note(
+pub(super) fn note(
     error: MethodError,
     issues: &mut IssueLog,
     budget: &mut FallbackBudget<'_, '_>,
@@ -43,6 +43,28 @@ pub(super) fn write_values(
     };
     output.push(",\"count\":", budget)?;
     output.unsigned(u64::from(values.count), budget)?;
+    let (complete, decoded_end) = write_entries(index, output, &mut values, issues, budget)?;
+    output.push(",\"file_byte_end\":", budget)?;
+    output.unsigned(
+        u64::try_from(decoded_end.0).map_err(|_| DebugError::PlatformCapacity)?,
+        budget,
+    )?;
+    output.push(",\"complete\":", budget)?;
+    output.boolean(complete, budget)?;
+    if complete && static_fields.is_some_and(|fields| values.count < fields) {
+        output.push(",\"implicit_defaults_from_ordinal\":", budget)?;
+        output.unsigned(u64::from(values.count), budget)?;
+    }
+    output.push("}", budget)
+}
+
+pub(super) fn write_entries(
+    index: &ProgramIndex<'_>,
+    output: &mut JsonBuffer,
+    values: &mut EncodedValues<'_>,
+    issues: &mut IssueLog,
+    budget: &mut FallbackBudget<'_, '_>,
+) -> Result<(bool, ByteOffset), DebugError> {
     output.push(",\"entries\":[", budget)?;
     let mut open = 0usize;
     let mut complete = true;
@@ -81,18 +103,8 @@ pub(super) fn write_values(
     for _ in 0..open {
         output.push("]}", budget)?;
     }
-    output.push("],\"file_byte_end\":", budget)?;
-    output.unsigned(
-        u64::try_from(decoded_end.0).map_err(|_| DebugError::PlatformCapacity)?,
-        budget,
-    )?;
-    output.push(",\"complete\":", budget)?;
-    output.boolean(complete, budget)?;
-    if complete && static_fields.is_some_and(|fields| values.count < fields) {
-        output.push(",\"implicit_defaults_from_ordinal\":", budget)?;
-        output.unsigned(u64::from(values.count), budget)?;
-    }
-    output.push("}", budget)
+    output.push("]", budget)?;
+    Ok((complete, decoded_end))
 }
 
 fn write_value(
