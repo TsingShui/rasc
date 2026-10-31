@@ -10,6 +10,11 @@ pub(crate) struct Edge {
     pub target: BlockId,
 }
 pub(crate) enum Transfer {
+    Switch {
+        value: LocalId,
+        cases: Vec<(i32, Edge)>,
+        default: Edge,
+    },
     Return(LocalId),
     Jump(Edge),
     Branch {
@@ -155,6 +160,59 @@ pub(crate) fn verify(
         operations(ssa, key, &mut statements, budget)?;
         let bound = &ssa.bound[index];
         let transfer = match block.terminal {
+            Terminal::Switch { table, .. } => {
+                let table =
+                    ssa.switches
+                        .get(ix(table.0)?)
+                        .ok_or(RequestError::InternalInvariant(
+                            "switch has a foreign payload table",
+                        ))?;
+                if outgoing.len()
+                    != table
+                        .cases
+                        .len()
+                        .checked_add(1)
+                        .ok_or(RequestError::PlatformCapacity)?
+                {
+                    return Err(RequestError::InternalInvariant(
+                        "switch edge coverage is not exact",
+                    ));
+                }
+                let value = LocalId(
+                    bound
+                        .terminal
+                        .ok_or(RequestError::InternalInvariant("switch lost its selector"))?
+                        .0,
+                );
+                if locals[ix(value.0)?].kind != Kind::Int {
+                    return Ok(None);
+                }
+                let mut cases = Vec::new();
+                for (index, &(case_key, target)) in table.cases.iter().enumerate() {
+                    budget.charge_work(1)?;
+                    push(
+                        &mut cases,
+                        (
+                            case_key,
+                            edge(ssa, outgoing[index], key, target, &mut locals, budget)?,
+                        ),
+                        budget,
+                    )?;
+                }
+                let default = edge(
+                    ssa,
+                    outgoing[table.cases.len()],
+                    key,
+                    table.default,
+                    &mut locals,
+                    budget,
+                )?;
+                Transfer::Switch {
+                    value,
+                    cases,
+                    default,
+                }
+            }
             Terminal::Return(_) => {
                 if !outgoing.is_empty() {
                     return Err(RequestError::InternalInvariant(

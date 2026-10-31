@@ -257,6 +257,46 @@ pub(super) fn verify(
             }
         }
         match (&case.transfer, block.terminal) {
+            (
+                Transfer::Switch {
+                    value,
+                    cases,
+                    default,
+                },
+                Terminal::Switch { table, .. },
+            ) => {
+                let original =
+                    ssa.switches
+                        .get(ix(table.0)?)
+                        .ok_or(RequestError::InternalInvariant(
+                            "switch certificate has a foreign table",
+                        ))?;
+                if cases.len() != original.cases.len()
+                    || outgoing.len()
+                        != cases
+                            .len()
+                            .checked_add(1)
+                            .ok_or(RequestError::PlatformCapacity)?
+                    || ssa.bound[index].terminal.map(|id| id.0) != Some(value.0)
+                    || default.target != original.default
+                {
+                    return Err(RequestError::InternalInvariant(
+                        "switch certificate changed selector or edge coverage",
+                    ));
+                }
+                for (position, ((actual_key, actual), (key, target))) in
+                    cases.iter().zip(&original.cases).enumerate()
+                {
+                    budget.charge_work(1)?;
+                    if actual_key != key || actual.target != *target {
+                        return Err(RequestError::InternalInvariant(
+                            "switch certificate changed an original key or target",
+                        ));
+                    }
+                    edge(ssa, body, actual, outgoing[position], &types, budget)?;
+                }
+                edge(ssa, body, default, outgoing[cases.len()], &types, budget)?;
+            }
             (Transfer::Return(actual), Terminal::Return(_)) => {
                 if !outgoing.is_empty()
                     || ssa.bound[index].terminal.map(|id| id.0) != Some(actual.0)

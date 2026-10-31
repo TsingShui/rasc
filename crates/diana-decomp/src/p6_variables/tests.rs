@@ -114,6 +114,17 @@ fn t09_two_entry_dispatcher_preserves_edges_and_never_reads_da_defaults() {
                 .expect("reachable synthetic default");
             assign(&case.statements, &mut values);
             let edge = match &case.transfer {
+                Transfer::Switch {
+                    value,
+                    cases,
+                    default,
+                } => {
+                    let selector = read(&values, *value);
+                    cases
+                        .iter()
+                        .find(|(key, _)| *key == selector)
+                        .map_or(default, |(_, edge)| edge)
+                }
                 Transfer::Return(value) => return read(&values, *value),
                 Transfer::Jump(edge) => edge,
                 Transfer::Branch {

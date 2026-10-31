@@ -54,6 +54,26 @@ pub(super) fn write(
         output.push(": {\n", budget)?;
         assignments(&case.statements, output, budget)?;
         match &case.transfer {
+            Transfer::Switch {
+                value,
+                cases,
+                default,
+            } => {
+                output.push("switch (", budget)?;
+                local(*value, output, budget)?;
+                output.push(") {\n", budget)?;
+                for (key, target) in cases {
+                    budget.charge_work(1)?;
+                    output.push("case ", budget)?;
+                    output.arguments(format_args!("{key}"), budget)?;
+                    output.push(": {\n", budget)?;
+                    edge(target, output, budget)?;
+                    output.push("}\n", budget)?;
+                }
+                output.push("default: {\n", budget)?;
+                edge(default, output, budget)?;
+                output.push("}\n}\n", budget)?;
+            }
             Transfer::Return(value) => {
                 output.push("return ", budget)?;
                 local(*value, output, budget)?;

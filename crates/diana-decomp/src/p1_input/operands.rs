@@ -331,6 +331,36 @@ impl<'a> RawMethodView<'a> {
     }
 }
 
+pub(crate) fn switch_payload(
+    bytes: &[u8],
+    pc: CodeUnitOffset,
+    layout: InsnLayout,
+) -> Result<SwitchCases<'_>, RawDecodeError> {
+    let words = item_words(bytes, pc, layout)?;
+    let data = match layout.kind() {
+        LayoutKind::PackedSwitch { .. } => PayloadData::Packed {
+            first: i32::from_le_bytes(wide_word(bytes, pc, 2)?.to_le_bytes()),
+            targets: &words[8..],
+        },
+        LayoutKind::SparseSwitch { entries } => {
+            let middle = 4 + usize::from(entries) * 4;
+            PayloadData::Sparse {
+                keys: &words[4..middle],
+                targets: &words[middle..],
+            }
+        }
+        _ => return Err(overflow(pc)),
+    };
+    RawPayload {
+        pc,
+        layout,
+        words,
+        data,
+    }
+    .switch_cases()
+    .ok_or_else(|| overflow(pc))
+}
+
 fn overflow(pc: CodeUnitOffset) -> RawDecodeError {
     RawDecodeError::Malformed {
         pc,

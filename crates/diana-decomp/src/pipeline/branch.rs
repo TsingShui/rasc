@@ -44,7 +44,17 @@ pub(crate) enum Op {
     Nop,
 }
 #[derive(Clone, Copy)]
+pub(crate) struct SwitchId(pub u32);
+pub(crate) struct Switch {
+    pub cases: Vec<(i32, BlockId)>,
+    pub default: BlockId,
+}
+#[derive(Clone, Copy)]
 pub(crate) enum Terminal {
+    Switch {
+        register: RegisterId,
+        table: SwitchId,
+    },
     Return(RegisterId),
     Jump(BlockId),
     Test {
@@ -93,6 +103,7 @@ pub(crate) struct BoundBlock {
 }
 pub(crate) struct VerifiedSsa<'a> {
     _sealed: (),
+    pub switches: Vec<Switch>,
     pub raw: RawMethodView<'a>,
     pub parameters: Vec<Kind>,
     pub blocks: Vec<Block>,
@@ -104,6 +115,7 @@ pub(crate) struct VerifiedSsa<'a> {
 }
 #[derive(Clone, Copy)]
 enum Decoded {
+    Switch(RegisterId, u32),
     Op(Op),
     Return(RegisterId),
     Jump(CodeUnitOffset),
@@ -116,6 +128,7 @@ enum Decoded {
     ),
 }
 struct Flow<'a> {
+    switches: Vec<Switch>,
     raw: RawMethodView<'a>,
     parameters: Vec<Kind>,
     blocks: Vec<Block>,
@@ -207,7 +220,9 @@ fn terminal_other(terminal: Terminal) -> Option<RegisterId> {
 }
 fn terminal_register(terminal: Terminal) -> Option<RegisterId> {
     match terminal {
-        Terminal::Return(r) | Terminal::Test { register: r, .. } => Some(r),
+        Terminal::Return(r)
+        | Terminal::Test { register: r, .. }
+        | Terminal::Switch { register: r, .. } => Some(r),
         Terminal::Jump(_) => None,
     }
 }
@@ -281,6 +296,7 @@ fn flow<'a>(
         return Ok(None);
     }
     let mut instructions = Vec::new();
+    let mut raw_switches: Vec<(Vec<(i32, CodeUnitOffset)>, CodeUnitOffset)> = Vec::new();
     let mut leaders = Vec::new();
     push(&mut leaders, CodeUnitOffset(0), budget)?;
     let mut pc = CodeUnitOffset(0);
@@ -369,6 +385,39 @@ fn flow<'a>(
                     Decoded::Op(Op::Binary(reg(0)?, left, arithmetic, right))
                 }
                 0xf => Decoded::Return(reg(0)?),
+                0x2b | 0x2c => {
+                    has_branch = true;
+                    let payload = target()?;
+                    let payload_layout =
+                        instruction_layout(raw.instructions(), payload, raw.version())
+                            .map_err(crate::input::MethodError::Decode)?;
+                    let cases = crate::input::operands::switch_payload(
+                        raw.instructions(),
+                        payload,
+                        payload_layout,
+                    )
+                    .map_err(crate::input::MethodError::Decode)?;
+                    let mut targets = Vec::new();
+                    for case in cases {
+                        budget.charge_work(1)?;
+                        let to =
+                            pc.0.checked_add_signed(case.offset.0)
+                                .map(CodeUnitOffset)
+                                .ok_or(RequestError::InternalInvariant(
+                                    "checked switch target overflowed",
+                                ))?;
+                        let key = i32::try_from(case.key).map_err(|_| {
+                            RequestError::InternalInvariant("checked switch key overflowed")
+                        })?;
+                        push(&mut leaders, to, budget)?;
+                        push(&mut targets, (key, to), budget)?;
+                    }
+                    push(&mut leaders, next, budget)?;
+                    let id = u32::try_from(raw_switches.len())
+                        .map_err(|_| RequestError::PlatformCapacity)?;
+                    push(&mut raw_switches, (targets, next), budget)?;
+                    Decoded::Switch(reg(0)?, id)
+                }
                 0x28..=0x2a => {
                     has_branch = true;
                     let to = target()?;
@@ -410,6 +459,7 @@ fn flow<'a>(
         }
     }
     let mut blocks = Vec::new();
+    let mut switches = Vec::new();
     let mut current = Vec::new();
     let mut start = CodeUnitOffset(0);
     for (position, &(pc, instruction)) in instructions.iter().enumerate() {
@@ -419,6 +469,31 @@ fn flow<'a>(
         }
         let next = instructions.get(position + 1).map(|entry| entry.0);
         let terminal = match instruction {
+            Decoded::Switch(register, id) => {
+                let (targets, default) =
+                    raw_switches
+                        .get(ix(id)?)
+                        .ok_or(RequestError::InternalInvariant(
+                            "switch lost its decoded payload",
+                        ))?;
+                let mut cases = Vec::new();
+                for &(key, to) in targets {
+                    budget.charge_work(1)?;
+                    push(&mut cases, (key, block_at(&pcs, to, budget)?), budget)?;
+                }
+                let table = SwitchId(
+                    u32::try_from(switches.len()).map_err(|_| RequestError::PlatformCapacity)?,
+                );
+                push(
+                    &mut switches,
+                    Switch {
+                        cases,
+                        default: block_at(&pcs, *default, budget)?,
+                    },
+                    budget,
+                )?;
+                Some(Terminal::Switch { register, table })
+            }
             Decoded::Op(op) => {
                 push(&mut current, (pc, op), budget)?;
                 if let Some(next) = next {
@@ -465,6 +540,21 @@ fn flow<'a>(
     for (index, block) in blocks.iter().enumerate() {
         let source = BlockId(u32::try_from(index).map_err(|_| RequestError::PlatformCapacity)?);
         match block.terminal {
+            Terminal::Switch { table, .. } => {
+                let table = &switches[ix(table.0)?];
+                for &(_, target) in &table.cases {
+                    budget.charge_work(1)?;
+                    push(&mut edges, Edge { source, target }, budget)?;
+                }
+                push(
+                    &mut edges,
+                    Edge {
+                        source,
+                        target: table.default,
+                    },
+                    budget,
+                )?;
+            }
             Terminal::Jump(target) => push(&mut edges, Edge { source, target }, budget)?,
             Terminal::Test { yes, no, .. } => {
                 push(
@@ -481,6 +571,7 @@ fn flow<'a>(
         }
     }
     Ok(Some(Flow {
+        switches,
         raw,
         parameters,
         blocks,
@@ -765,6 +856,7 @@ pub(crate) fn build<'a>(
     }
     let ssa = VerifiedSsa {
         _sealed: (),
+        switches: flow.switches,
         raw: flow.raw,
         parameters: flow.parameters,
         blocks: flow.blocks,
