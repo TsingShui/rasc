@@ -3,7 +3,7 @@ use super::{
     Cursor, InputError, InputProblem, MethodError, ProgramIndex, RawMethodView, malformed,
 };
 use crate::pipeline::control::InputControl;
-use crate::raw::{DexVersion, LayoutKind, instruction_layout};
+use crate::raw::{LayoutKind, instruction_layout};
 use crate::{
     ByteOffset, ByteRange, CodeUnitCount, CodeUnitOffset, FallbackBudget, MethodId, RegisterId,
     StringId, TypeId,
@@ -173,7 +173,7 @@ impl<'a> DebugProgram<'a> {
         }
         while self.boundary < self.pc {
             budget.charge_work(1)?;
-            let layout = instruction_layout(code.instructions(), self.boundary, DexVersion::V035)?;
+            let layout = instruction_layout(code.instructions(), self.boundary, code.version)?;
             self.boundary = self
                 .boundary
                 .checked_advance(layout.width())
@@ -184,7 +184,7 @@ impl<'a> DebugProgram<'a> {
         }
         if self.pc.0 < code.code_units().0 {
             budget.charge_work(1)?;
-            let layout = instruction_layout(code.instructions(), self.pc, DexVersion::V035)?;
+            let layout = instruction_layout(code.instructions(), self.pc, code.version)?;
             if !matches!(layout.kind(), LayoutKind::Instruction(_)) {
                 return Err(invalid(offset).into());
             }

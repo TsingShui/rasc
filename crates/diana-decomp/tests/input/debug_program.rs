@@ -60,6 +60,23 @@ fn t04_debug_program_positions_and_original_reference_facts() {
     assert_eq!(events[2]["bytes"], json!([1, 0x81, 0]));
     assert_eq!(events[5]["source_file"], Value::Null);
     assert_eq!(events[6]["source_file"]["index"], 0);
+    for version in [b"039", b"040"] {
+        let mut fixture = with_debug(
+            CodeRecipe {
+                instructions: &[0x00ff, 0, 0x0012, 0x000f],
+                registers_size: 2,
+                outs_size: 0,
+            },
+            &[10, 1, 0, 1, 2, 0x0e, 0],
+        );
+        fixture.bytes[4..7].copy_from_slice(version);
+        let (value, failure) = snapshot(&fixture);
+        assert_eq!(failure, None);
+        let metadata = &value["classes"][0]["methods"][0]["code"]["debug_metadata"];
+        assert_eq!(metadata["complete"], true);
+        assert_eq!(metadata["events"][1]["pc"], 2);
+        assert_eq!(metadata["events"][1]["line"], 10);
+    }
 }
 
 #[test]
