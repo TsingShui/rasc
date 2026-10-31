@@ -136,8 +136,9 @@ impl<'a> Engine<'a> {
 
     /// Retrieves one full-prototype method or all members of a class. A local
     /// method failure retains its classified reason and any original snapshot;
-    /// cancellation and exhausted request resources stop the request. Executable
-    /// Java analysis is explicitly unavailable, never replaced by an empty body.
+    /// cancellation and exhausted request resources stop the request. Java is
+    /// admitted for the closed static single-block int profile; other members
+    /// retain original output, never a fabricated body.
     pub fn decompile(
         &self,
         request: Request,
@@ -261,6 +262,17 @@ impl<'a> Engine<'a> {
             let mut budget = control.method_budget()?;
             let normal = normal_member(index, key, &self.catalog, &mut budget);
             let (facts, cause) = match normal {
+                Ok(NormalMember::Java {
+                    facts,
+                    declaration,
+                    source,
+                }) => {
+                    return Ok(MethodOutput::Java {
+                        facts,
+                        declaration,
+                        source,
+                    });
+                }
                 Ok(NormalMember::Declaration { facts, declaration }) => {
                     return Ok(MethodOutput::DeclarationOnly { facts, declaration });
                 }
@@ -355,6 +367,11 @@ impl<'a> Engine<'a> {
 }
 
 enum NormalMember {
+    Java {
+        facts: MethodFacts,
+        declaration: crate::VerifiedJavaMethod,
+        source: String,
+    },
     Declaration {
         facts: MethodFacts,
         declaration: crate::JavaMethodDecl,
@@ -415,6 +432,18 @@ fn normal_member(
                     "checked call evidence extent overflowed",
                 ))?;
         }
+    }
+    if crate::p8_java::source_group_admitted(index, key, &facts, budget)?
+        && let Some(plan) = crate::pipeline::scalar::plan(&input, budget)?
+        && let Some(declaration) =
+            crate::p8_java::verify(&input, plan, catalog.environment, budget)?
+    {
+        let source = crate::p9_emit::java(&declaration, budget)?;
+        return Ok(NormalMember::Java {
+            facts,
+            declaration,
+            source,
+        });
     }
     let reason = if matches!(input.raw(), RawPrintable::Declaration(_)) {
         OutputReason::JavaDeclarationUnsupported

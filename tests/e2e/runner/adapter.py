@@ -88,6 +88,25 @@ def run_public(root, cache, spec, manifest, case_ids=None):
                     from e2e import load
                     actual=load(public_path)
                     groups = _artifacts(actual, cert)
+                    executable_source = groups.pop('method_source',None)
+                    if executable_source is not None:
+                        if case['validationScope']!='method-in-known-context':raise ValueError('method fragment is not a complete JavaUnit')
+                        source_path=work/'context'/Path(selector['descriptor'][1:-1]+'.java')
+                        source_path.parent.mkdir(parents=True,exist_ok=True)
+                        original_path=root/'tests/e2e/sources'/case['id']/Path(selector['descriptor'][1:-1]+'.java')
+                        original_source=original_path.read_text(encoding='utf-8')
+                        import re
+                        pattern=r'(?m)^([ \t]*(?:public|private|protected|static|final|strictfp|synchronized|\s)+int\s+'+re.escape(selector['name'])+r'\s*\([^)]*\)\s*)\{'
+                        matches=list(re.finditer(pattern,original_source))
+                        if len(matches)!=1:raise ValueError('known source context does not identify one scalar method')
+                        match=matches[0];position=match.end();depth=1
+                        while position<len(original_source) and depth:
+                            if original_source[position]=='{':depth+=1
+                            elif original_source[position]=='}':depth-=1
+                            position+=1
+                        if depth:raise ValueError('unterminated known scalar context')
+                        source_path.write_text(original_source[:match.start()]+executable_source+original_source[position:],encoding='utf-8')
+                        groups['java_input']={'sources':[{'path':relative(source_path)}]}
                     context = groups.pop('declaration_source',None)
                     if context is not None:
                         if case['validationScope']!='method-in-known-context':raise ValueError('declaration fragment has no accepted compilation context')
@@ -204,7 +223,7 @@ def _artifacts(actual, cert):
             raise ValueError('public result differs from the certified method selection')
         if len(actual['members'])!=1:raise ValueError('method request did not return exactly one original key')
         selected=actual['members'][0]
-        status=selected['status'];outcome={'declaration_only':'declaration-only','debug':'debug','unavailable':'unavailable'}[status]
+        status=selected['status'];outcome={'java':'java','declaration_only':'declaration-only','debug':'debug','unavailable':'unavailable'}[status]
         reason=selected['reason']
         diagnostics=[] if reason is None else [actual['diagnostics'][reason]]
     else:
@@ -227,6 +246,7 @@ def _artifacts(actual, cert):
             'report':{'available':True},'published_success':False}
     groups={'outcome':public,'text':text}
     if outcome!='error':groups['rendered']={'spans':spans,'raw_excerpt_ranges':excerpts}
+    if outcome=='java':groups['method_source']=actual['members'][0]['source']
     if outcome=='declaration-only':
         name=owner[1:-1].split('/')[-1];package=owner[1:-1].rsplit('/',1)[0].replace('/','.') if '/' in owner else ''
         if any(not part.isidentifier() for part in (package.split('.') if package else [])+[name]):raise ValueError('unsupported known Java context name')

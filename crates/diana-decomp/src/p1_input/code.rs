@@ -36,6 +36,10 @@ impl<'a> RawMethodView<'a> {
         self.source_bytes
     }
 
+    pub(crate) fn version(&self) -> super::formats::DexVersion {
+        self.version
+    }
+
     pub fn registers_size(&self) -> u16 {
         self.registers_size
     }

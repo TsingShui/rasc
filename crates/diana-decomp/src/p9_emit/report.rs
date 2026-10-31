@@ -51,6 +51,9 @@ pub fn render(
                     control,
                 )?;
                 let (source, language) = match member {
+                    MethodOutput::Java { source, .. } => {
+                        (Some(source.as_str()), SourceLanguage::Java)
+                    }
                     MethodOutput::DeclarationOnly { declaration, .. } => {
                         (Some(declaration.source()), SourceLanguage::Java)
                     }

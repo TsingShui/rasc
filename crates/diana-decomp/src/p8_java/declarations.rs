@@ -108,7 +108,7 @@ pub(crate) fn declaration(
     }))
 }
 
-fn check_target(
+pub(super) fn check_target(
     input: &MethodInput<'_, '_>,
     budget: &mut impl InputControl,
 ) -> Result<(), RequestError> {
@@ -210,7 +210,10 @@ fn primitive_type(
     Ok(true)
 }
 
-fn identifier(name: &[u16], budget: &mut impl InputControl) -> Result<bool, RequestError> {
+pub(super) fn identifier(
+    name: &[u16],
+    budget: &mut impl InputControl,
+) -> Result<bool, RequestError> {
     if name.is_empty() {
         return Ok(false);
     }

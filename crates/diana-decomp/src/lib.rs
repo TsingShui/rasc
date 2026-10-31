@@ -8,7 +8,7 @@ pub mod input;
 mod p8_java;
 mod p9_emit;
 pub use engine::{DexImage, Engine, MethodSelector, Options, RecoveryPolicy, Request};
-pub use p8_java::JavaMethodDecl;
+pub use p8_java::{CompilationContract, JavaMethodDecl, VerifiedJavaMethod};
 pub use p9_emit::render;
 pub use pipeline::request::{JavaTargetItem, RequestError};
 pub use substrate::report::{

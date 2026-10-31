@@ -685,6 +685,7 @@ pub(crate) enum MemberSelection {
     AllMethods,
     Method(MethodId),
     Header(MethodId),
+    AllHeaders,
     Fields,
 }
 
@@ -815,7 +816,9 @@ impl<'i, 'a> ClassView<'i, 'a> {
                         EncodedMember::Field => {
                             if matches!(
                                 selection,
-                                MemberSelection::Method(_) | MemberSelection::Header(_)
+                                MemberSelection::Method(_)
+                                    | MemberSelection::Header(_)
+                                    | MemberSelection::AllHeaders
                             ) {
                                 continue;
                             }
@@ -853,7 +856,10 @@ impl<'i, 'a> ClassView<'i, 'a> {
                                 self.type_idx,
                                 control,
                             ))?;
-                            if matches!(selection, MemberSelection::Header(_)) {
+                            if matches!(
+                                selection,
+                                MemberSelection::Header(_) | MemberSelection::AllHeaders
+                            ) {
                                 visit(
                                     MemberEntry::MethodHeader {
                                         method_idx: MethodId(index),

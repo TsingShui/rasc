@@ -154,13 +154,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         ClassOutput::Mixed { members, .. } => members.iter().map(|member| {
             let key = member.key();
             let (status, facts, reason) = match member {
+                MethodOutput::Java { facts, .. } => ("java",Some(facts),None),
                 MethodOutput::DeclarationOnly { facts, .. } => ("declaration_only", Some(facts), None),
                 MethodOutput::Debug { facts, reason, .. } => ("debug", facts.as_ref(), Some(reason.0)),
                 MethodOutput::Unavailable { facts, reason, .. } => ("unavailable", facts.as_ref(), Some(reason.0)),
             };
             let span = rendered.spans.iter().find(|span| span.method == key);
             let source = span.and_then(|span| rendered.source.get(span.start.0..span.end.0));
-            json!({"method_id_idx":key.method.0,"status":status,"name_units":facts.map(|v| &v.name),"proto_units":facts.map(|v| &v.prototype),"access_flags":facts.map(|v| v.access_flags),"reason":reason,"source":source,"language":span.map(|span|language(span.language))})
+            json!({"method_id_idx":key.method.0,"status":status,"name_units":facts.map(|v| &v.name),"proto_units":facts.map(|v| &v.prototype),"access_flags":facts.map(|v| v.access_flags),"evidence":match member {MethodOutput::Java {declaration,..}=>Some(json!({"environment_id":declaration.environment().0,"compilation_contract":format!("{:?}",declaration.compilation_contract())})),_=>None},"reason":reason,"source":source,"language":span.map(|span|language(span.language))})
         }).collect(),
     };
     let diagnostics: Vec<Value> = report.diagnostics().iter().map(|diagnostic| {

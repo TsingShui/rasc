@@ -24,6 +24,11 @@ pub enum RequestError {
     Allocation(#[source] TryReserveError),
     #[error("request capacity is not representable on this platform")]
     PlatformCapacity,
+    #[error("undefined register {register:?} at {pc:?}")]
+    UndefinedRegister {
+        register: crate::RegisterId,
+        pc: crate::CodeUnitOffset,
+    },
     #[error("requested DEX identity does not exist")]
     UnknownDex,
     #[error("JavaTargetLimit: {item:?} uses {actual}, maximum {maximum}")]
@@ -44,7 +49,7 @@ impl RequestError {
             Self::Debug(error) => error.kind(),
             Self::Control(error) => error.kind(),
             Self::Allocation(_) | Self::PlatformCapacity => FailureKind::BudgetExceeded,
-            Self::UnknownDex => FailureKind::Malformed,
+            Self::UnknownDex | Self::UndefinedRegister { .. } => FailureKind::Malformed,
             Self::JavaTargetLimit { .. } => FailureKind::Unsupported,
             Self::InternalInvariant(_) => FailureKind::InternalInvariant,
         }

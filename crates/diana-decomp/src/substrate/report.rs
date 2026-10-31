@@ -155,6 +155,7 @@ fn request_code(error: &crate::RequestError) -> crate::DiagnosticCode {
         RequestError::Allocation(_) => Code::AllocationFailed,
         RequestError::PlatformCapacity => Code::PlatformCapacity,
         RequestError::UnknownDex => Code::UnknownDex,
+        RequestError::UndefinedRegister { .. } => Code::UndefinedRegister,
         RequestError::JavaTargetLimit { .. } => Code::JavaTargetLimit,
         RequestError::InternalInvariant(_) => Code::InternalInvariant,
     }
@@ -169,6 +170,11 @@ pub struct MethodFacts {
 }
 
 pub enum MethodOutput {
+    Java {
+        facts: MethodFacts,
+        declaration: crate::VerifiedJavaMethod,
+        source: String,
+    },
     DeclarationOnly {
         facts: MethodFacts,
         declaration: JavaMethodDecl,
@@ -189,7 +195,7 @@ pub enum MethodOutput {
 impl MethodOutput {
     pub fn key(&self) -> MethodKey {
         match self {
-            Self::DeclarationOnly { facts, .. } => facts.key,
+            Self::Java { facts, .. } | Self::DeclarationOnly { facts, .. } => facts.key,
             Self::Debug { key, .. } | Self::Unavailable { key, .. } => *key,
         }
     }

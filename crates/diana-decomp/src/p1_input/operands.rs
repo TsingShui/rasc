@@ -352,7 +352,7 @@ fn item_words(
     bytes.get(start.0..end.0).ok_or_else(|| overflow(pc))
 }
 
-pub(super) fn instruction_operands(
+pub(crate) fn instruction_operands(
     bytes: &[u8],
     pc: CodeUnitOffset,
     layout: InsnLayout,

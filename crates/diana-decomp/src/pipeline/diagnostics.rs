@@ -34,6 +34,7 @@ pub enum DiagnosticCode {
     ClassAssemblyUnavailable,
     JavaTargetLimit,
     UnknownDex,
+    UndefinedRegister,
     InternalInvariant,
 }
 
