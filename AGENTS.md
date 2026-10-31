@@ -100,8 +100,14 @@ cargo fmt --all -- --check
 cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
 cargo build --workspace --release --locked
 # Applicable after real Diana tests exist; currently zero tests is not acceptance
-cargo test --workspace --all-features --locked
+cargo nextest run --workspace --all-features --locked
 ```
+
+Contributors MUST use cargo-nextest (`cargo nextest run`) for Rust unit and
+integration test execution, not `cargo test`. If cargo-nextest is unavailable,
+report the test run as blocked rather than silently switching runners. Rustdoc
+doctests require a separate `cargo test --doc` command; obtain operator approval
+before running that exception.
 
 Bare Cargo commands now select Diana only. Do not run old rasc/dexdec tests or
 release preparation to validate this branch. Missing fixture/tools, skipped tests
