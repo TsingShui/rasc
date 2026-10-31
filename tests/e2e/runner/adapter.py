@@ -52,8 +52,6 @@ def run_public(root, cache, spec, manifest, case_ids=None):
                 record['reason'] = 'the public Engine adapter does not implement this seam'
             elif len(cert['bindings']) != 1:
                 record['reason'] = 'multi-target public requests are not implemented'
-            elif {'max_method_output_bytes','max_report_output_bytes'} & invocation['input'].get('limits',{}).keys():
-                record['reason'] = 'normal member/report output limits are not implemented yet'
             else:
                 binding = cert['bindings'][0]
                 selector, origin = binding['selector'], binding['origin']
@@ -188,11 +186,16 @@ def _units(value):
     return b''.join(int(unit).to_bytes(2,'little') for unit in value).decode('utf-16-le')
 
 
+def _failure_outcome(diagnostics):
+    if any(d['kind'] in {'malformed','cancelled','internal_invariant'} for d in diagnostics):return 'error'
+    return 'resource-failure' if any(d['kind']=='budget_exceeded' and d.get('limit') in {'max_method_output_bytes','fallback_output_bytes','max_report_output_bytes'} for d in diagnostics) else 'error'
+
+
 def _artifacts(actual, cert):
     binding=cert['bindings'][0];selector=binding['selector'];origin=binding['origin']
     if actual['schema']!='diana.inspect/1':raise ValueError('unknown public result schema')
     if actual['status']=='request_error':
-        return {'outcome':{'outcome':'error','status':'request_error','selected':cert['bindings'],'members':[],
+        return {'outcome':{'outcome':_failure_outcome(actual['diagnostics']),'status':'request_error','selected':cert['bindings'],'members':[],
                            'diagnostics':actual['diagnostics'],'report':actual['report'],'published_success':actual['published_success']},
                 'text':b'','rendered':{'spans':[],'raw_excerpt_ranges':[]}}
     if selector['kind']!='request' and (actual['header_offset']!=origin['header_offset'] or actual['class_def_idx']!=selector['class_def_idx']):
@@ -242,6 +245,7 @@ def _artifacts(actual, cert):
         if text[span['start']:span['end']]!=submitted:raise ValueError('public member source differs from its rendered slice')
     if any(d['kind'] in {'malformed','cancelled','internal_invariant'} for d in diagnostics):
         outcome,status='error','request_error'
+    if outcome=='unavailable' and _failure_outcome(diagnostics)=='resource-failure':outcome='resource-failure'
     public={'outcome':outcome,'status':status,'selected':cert['bindings'],'members':members,'diagnostics':diagnostics,
             'report':{'available':True},'published_success':False}
     groups={'outcome':public,'text':text}

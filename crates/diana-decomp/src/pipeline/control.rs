@@ -13,6 +13,8 @@ pub struct Limits {
     pub max_request_allocation_bytes: Option<u64>,
     pub max_work_steps: Option<u64>,
     pub max_method_code_units: Option<u64>,
+    pub max_method_output_bytes: Option<u64>,
+    pub max_report_output_bytes: Option<u64>,
     pub max_method_allocation_bytes: Option<u64>,
     pub fallback_work_steps: Option<u64>,
     pub fallback_code_units: Option<u64>,
@@ -38,6 +40,8 @@ pub enum RequestLimit {
     MaxRequestAllocationBytes,
     MaxWorkSteps,
     MaxMethodCodeUnits,
+    MaxMethodOutputBytes,
+    MaxReportOutputBytes,
     MaxMethodAllocationBytes,
     FallbackWorkSteps,
     FallbackCodeUnits,
@@ -55,6 +59,8 @@ impl fmt::Display for RequestLimit {
             Self::MaxRequestAllocationBytes => "max_request_allocation_bytes",
             Self::MaxWorkSteps => "max_work_steps",
             Self::MaxMethodCodeUnits => "max_method_code_units",
+            Self::MaxMethodOutputBytes => "max_method_output_bytes",
+            Self::MaxReportOutputBytes => "max_report_output_bytes",
             Self::MaxMethodAllocationBytes => "max_method_allocation_bytes",
             Self::FallbackWorkSteps => "fallback_work_steps",
             Self::FallbackCodeUnits => "fallback_code_units",
@@ -143,6 +149,10 @@ impl<'c> RunContext<'c> {
         Ok(())
     }
 
+    pub(crate) fn report_output_limit(&self) -> Option<u64> {
+        self.limits.max_report_output_bytes
+    }
+
     pub fn usage(&self) -> ResourceUsage {
         ResourceUsage {
             work_steps: self.work.used,
@@ -213,6 +223,9 @@ pub struct MethodBudget<'m, 'c> {
 }
 
 impl<'m, 'c> MethodBudget<'m, 'c> {
+    pub(crate) fn output_limit(&self) -> Option<u64> {
+        self.ledger.context.limits.max_method_output_bytes
+    }
     pub fn checkpoint(&mut self) -> Result<(), ControlError> {
         self.ledger.context.checkpoint()
     }

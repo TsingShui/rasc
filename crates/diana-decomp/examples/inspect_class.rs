@@ -104,7 +104,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         &mut control,
     ) {
         Ok(engine) => engine,
-        Err(error) => return write_value(failure(DiagnosticCause::Input(error), false), output),
+        Err(error) => return write_value(failure(DiagnosticCause::Input(error), None), output),
     };
     armed.set(true);
     let class_def = if class_selection.starts_with('L') {
@@ -142,13 +142,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         &mut control,
     ) {
         Ok(report) => report,
-        Err(error) => return write_value(failure(DiagnosticCause::Request(error), false), output),
+        Err(error) => return write_value(failure(DiagnosticCause::Request(error), None), output),
     };
     drop(engine);
     drop(bytes);
     let rendered = match render(&report, &mut control) {
         Ok(rendered) => rendered,
-        Err(error) => return write_value(failure(DiagnosticCause::Request(error), true), output),
+        Err(error) => {
+            return write_value(
+                failure(DiagnosticCause::Request(error), Some(&report)),
+                output,
+            );
+        }
     };
     let members: Vec<Value> = match report.class() {
         ClassOutput::Mixed { members, .. } => members.iter().map(|member| {
@@ -164,13 +169,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             json!({"method_id_idx":key.method.0,"status":status,"name_units":facts.map(|v| &v.name),"proto_units":facts.map(|v| &v.prototype),"access_flags":facts.map(|v| v.access_flags),"evidence":match member {MethodOutput::Java {declaration,..}=>Some(json!({"environment_id":declaration.environment().0,"compilation_contract":format!("{:?}",declaration.compilation_contract())})),_=>None},"reason":reason,"source":source,"language":span.map(|span|language(span.language))})
         }).collect(),
     };
-    let diagnostics: Vec<Value> = report.diagnostics().iter().map(|diagnostic| {
-        let limit = match &diagnostic.cause {
-            DiagnosticCause::Request(RequestError::JavaTargetLimit {item,actual,maximum}) => Some((match item {JavaTargetItem::ParameterWords=>"parameter_words",JavaTargetItem::MethodName=>"method_name",JavaTargetItem::MethodDescriptor=>"method_descriptor"},actual,maximum)),
-            _ => None,
-        };
-        json!({"method_id_idx":diagnostic.method.map(|v|v.method.0),"kind":kind(diagnostic.cause.kind()),"code":format!("{:?}",diagnostic.code()),"severity":if diagnostic.cause.kind()==FailureKind::Unsupported {"warning"} else {"error"},"cause":format!("{:?}",diagnostic.cause),"target_item":limit.map(|v|v.0),"actual":limit.map(|v|v.1),"maximum":limit.map(|v|v.2)})
-    }).collect();
+    let diagnostics: Vec<Value> = report.diagnostics().iter().map(diagnostic_value).collect();
     let spans: Vec<Value> = rendered
         .spans
         .iter()
@@ -190,12 +189,87 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     write_value(value, output)
 }
 
-fn failure(cause: DiagnosticCause, report_present: bool) -> Value {
+fn failure(cause: DiagnosticCause, report: Option<&diana_decomp::Report>) -> Value {
     let diagnostic = diana_decomp::Diagnostic {
         method: None,
         cause,
     };
-    json!({"schema":"diana.inspect/1","status":"request_error","report":if report_present {Some(json!({"available":true}))} else {None},"published_success":false,"diagnostics":[{"kind":kind(diagnostic.cause.kind()),"code":format!("{:?}",diagnostic.code()),"severity":"error","cause":format!("{:?}",diagnostic.cause)}]})
+    let mut diagnostics = Vec::new();
+    if diagnostic.cause.kind() != FailureKind::Cancelled
+        && let Some(report) = report
+    {
+        for original in report.diagnostics() {
+            if matches!(
+                original.cause.kind(),
+                FailureKind::Malformed | FailureKind::InternalInvariant | FailureKind::Cancelled
+            ) {
+                diagnostics.push(diagnostic_value(original));
+            }
+        }
+    }
+    diagnostics.push(diagnostic_value(&diagnostic));
+    json!({"schema":"diana.inspect/1","status":"request_error","report":report.map(|_|json!({"available":true})),"published_success":false,"diagnostics":diagnostics})
+}
+
+fn diagnostic_value(diagnostic: &diana_decomp::Diagnostic) -> Value {
+    let target = match &diagnostic.cause {
+        DiagnosticCause::Request(RequestError::JavaTargetLimit {
+            item,
+            actual,
+            maximum,
+        }) => Some((
+            match item {
+                JavaTargetItem::ParameterWords => "parameter_words",
+                JavaTargetItem::MethodName => "method_name",
+                JavaTargetItem::MethodDescriptor => "method_descriptor",
+            },
+            actual,
+            maximum,
+        )),
+        _ => None,
+    };
+    let control = match &diagnostic.cause {
+        DiagnosticCause::Input(error) => input_control(error),
+        DiagnosticCause::Method(error) => method_control(error),
+        DiagnosticCause::Debug(error) => debug_control(error),
+        DiagnosticCause::Request(error) => match error {
+            RequestError::Control(error) => Some(error),
+            RequestError::Input(error) => input_control(error),
+            RequestError::Method(error) => method_control(error),
+            RequestError::Debug(error) => debug_control(error),
+            _ => None,
+        },
+        _ => None,
+    };
+    let limit = match control {
+        Some(diana_decomp::ControlError::BudgetExceeded { limit, .. }) => Some(limit.to_string()),
+        Some(diana_decomp::ControlError::AccountingOverflow { resource, .. }) => {
+            Some(resource.to_string())
+        }
+        _ => None,
+    };
+    json!({"method_id_idx":diagnostic.method.map(|v|v.method.0),"kind":kind(diagnostic.cause.kind()),"code":format!("{:?}",diagnostic.code()),"severity":if diagnostic.cause.kind()==FailureKind::Unsupported {"warning"} else {"error"},"cause":format!("{:?}",diagnostic.cause),"target_item":target.map(|v|v.0),"actual":target.map(|v|v.1),"maximum":target.map(|v|v.2),"limit":limit})
+}
+fn input_control(error: &diana_decomp::input::InputError) -> Option<&diana_decomp::ControlError> {
+    match error {
+        diana_decomp::input::InputError::Control(error) => Some(error),
+        _ => None,
+    }
+}
+fn method_control(error: &diana_decomp::input::MethodError) -> Option<&diana_decomp::ControlError> {
+    match error {
+        diana_decomp::input::MethodError::Control(error) => Some(error),
+        diana_decomp::input::MethodError::Input(error) => input_control(error),
+        _ => None,
+    }
+}
+fn debug_control(error: &diana_decomp::DebugError) -> Option<&diana_decomp::ControlError> {
+    match error {
+        diana_decomp::DebugError::Control(error) => Some(error),
+        diana_decomp::DebugError::Input(error) => input_control(error),
+        diana_decomp::DebugError::Method(error) => method_control(error),
+        _ => None,
+    }
 }
 
 fn write_value(value: Value, output: Option<String>) -> Result<(), Box<dyn std::error::Error>> {

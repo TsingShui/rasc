@@ -11,7 +11,7 @@ pub fn render(
     report: &Report,
     control: &mut RunContext<'_>,
 ) -> Result<RenderedReport, RequestError> {
-    let mut output = TextBuffer::new();
+    let mut output = TextBuffer::report(control);
     let mut spans = Vec::new();
     match &report.class {
         ClassOutput::Mixed {

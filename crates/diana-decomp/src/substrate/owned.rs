@@ -99,11 +99,29 @@ pub(crate) fn copy_proto(
 
 pub(crate) struct TextBuffer {
     text: String,
+    limit: Option<(u64, crate::RequestLimit)>,
 }
 impl TextBuffer {
     pub fn new() -> Self {
         Self {
             text: String::new(),
+            limit: None,
+        }
+    }
+    pub fn method(budget: &crate::MethodBudget<'_, '_>) -> Self {
+        Self {
+            text: String::new(),
+            limit: budget
+                .output_limit()
+                .map(|maximum| (maximum, crate::RequestLimit::MaxMethodOutputBytes)),
+        }
+    }
+    pub fn report(control: &crate::RunContext<'_>) -> Self {
+        Self {
+            text: String::new(),
+            limit: control
+                .report_output_limit()
+                .map(|maximum| (maximum, crate::RequestLimit::MaxReportOutputBytes)),
         }
     }
     pub fn len(&self) -> usize {
@@ -119,6 +137,18 @@ impl TextBuffer {
             .len()
             .checked_add(text.len())
             .ok_or(RequestError::PlatformCapacity)?;
+        control.checkpoint()?;
+        if let Some((maximum, limit)) = self.limit
+            && u64::try_from(needed).map_err(|_| RequestError::PlatformCapacity)? > maximum
+        {
+            return Err(crate::ControlError::BudgetExceeded {
+                limit,
+                maximum,
+                used: u64::try_from(self.text.len()).map_err(|_| RequestError::PlatformCapacity)?,
+                requested: u64::try_from(text.len()).map_err(|_| RequestError::PlatformCapacity)?,
+            }
+            .into());
+        }
         if needed > isize::MAX as usize {
             return Err(RequestError::PlatformCapacity);
         }

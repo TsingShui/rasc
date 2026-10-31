@@ -48,7 +48,7 @@ pub(crate) fn declaration(
     if !identifier(&name, budget)? {
         return Ok(None);
     }
-    let mut output = TextBuffer::new();
+    let mut output = TextBuffer::method(budget);
     for (bit, word) in [
         (1, "public "),
         (2, "private "),

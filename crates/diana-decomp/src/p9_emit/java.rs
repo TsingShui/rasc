@@ -6,7 +6,7 @@ pub(crate) fn java(
     method: &VerifiedJavaMethod,
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<String, RequestError> {
-    let mut output = TextBuffer::new();
+    let mut output = TextBuffer::method(budget);
     output.push(&method.header, budget)?;
     output.push(" {\n", budget)?;
     for (index, definition) in method.definitions.iter().enumerate() {
