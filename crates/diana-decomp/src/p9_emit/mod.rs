@@ -1,6 +1,7 @@
 mod annotations;
 mod debug;
 mod debug_program;
+mod dispatcher;
 mod error;
 mod java;
 mod json;

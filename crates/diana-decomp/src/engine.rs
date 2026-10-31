@@ -137,7 +137,8 @@ impl<'a> Engine<'a> {
     /// Retrieves one full-prototype method or all members of a class. A local
     /// method failure retains its classified reason and any original snapshot;
     /// cancellation and exhausted request resources stop the request. Java is
-    /// admitted for closed static int sequence/diamond profiles; other members
+    /// admitted for closed static scalar sequence/diamond/dispatcher profiles;
+    /// other members
     /// retain original output, never a fabricated body.
     pub fn decompile(
         &self,

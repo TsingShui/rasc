@@ -1,6 +1,8 @@
 mod copies;
 
-pub(crate) use copies::{Copy, LocalId, LocalType, LocalTypeId, Width, plan};
+pub(crate) use copies::{
+    Copy, CopyPlan, LocalId, LocalType, LocalTypeId, Temporary, Width, plan, verify,
+};
 
 #[cfg(test)]
 mod tests;

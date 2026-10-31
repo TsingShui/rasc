@@ -171,7 +171,7 @@ pub(crate) fn plan(
 
 /// Replays a simultaneous old-store correspondence, independently of leaf/cycle
 /// choices. SSA supplies edge-source availability; this check adds no defaults.
-pub(super) fn verify(
+pub(crate) fn verify(
     parallel: &[Copy],
     types: &[LocalType],
     plan: &CopyPlan,

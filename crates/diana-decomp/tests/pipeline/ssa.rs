@@ -1,4 +1,59 @@
 use super::structure::code;
+
+#[test]
+fn t09_ordinary_dispatcher_rejects_even_an_unthrowing_protected_method() {
+    let mut fixture = super::fixture::tiny("f", true, false);
+    let instructions = fixture.code[0] + 16;
+    fixture.bytes[instructions + 2..instructions + 4].copy_from_slice(&0x0090u16.to_le_bytes());
+    fixture.bytes[instructions + 4..instructions + 6].copy_from_slice(&0x0100u16.to_le_bytes());
+    // The protected interval ends at the complete add instruction boundary.
+    fixture.bytes[fixture.code[0] + 36..fixture.code[0] + 38].copy_from_slice(&3u16.to_le_bytes());
+    let mut control = RunContext::new(Limits::default(), &|| false);
+    let engine = diana_decomp::Engine::open(
+        vec![diana_decomp::DexImage {
+            bytes: &fixture.bytes,
+            header_offset: diana_decomp::ByteOffset(0),
+            origin: diana_decomp::ImageOrigin {
+                input: diana_decomp::InputId(0),
+            },
+        }],
+        diana_decomp::Options::default(),
+        diana_decomp::DeclarationCatalog::empty(diana_decomp::EnvironmentId(0)),
+        &mut control,
+    )
+    .unwrap();
+    let report = engine
+        .decompile(
+            diana_decomp::Request {
+                class: diana_decomp::ClassKey {
+                    dex: diana_decomp::DexId(0),
+                    class_def: diana_decomp::ClassDefId(0),
+                },
+                method: Some(diana_decomp::MethodSelector {
+                    name: "f".encode_utf16().collect(),
+                    prototype: "(I)I".encode_utf16().collect(),
+                }),
+            },
+            &mut control,
+        )
+        .unwrap();
+    let diana_decomp::ClassOutput::Mixed { members, .. } = report.class();
+    let diana_decomp::MethodOutput::Debug { source, reason, .. } = &members[0] else {
+        panic!("protected method entered the no-handler profile")
+    };
+    assert_eq!(
+        report.diagnostics()[reason.0].cause.kind(),
+        diana_decomp::FailureKind::Unsupported
+    );
+    assert_eq!(source.failure_kind(), None);
+    let original: serde_json::Value = serde_json::from_str(source.source()).unwrap();
+    assert!(
+        !original["classes"][0]["methods"][0]["code"]["tries"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+}
 use diana_decomp::{
     ByteOffset, ClassDefId, ClassKey, ClassOutput, DeclarationCatalog, DexId, DexImage,
     DiagnosticCode, Engine, EnvironmentId, FailureKind, ImageOrigin, InputId, Limits, MethodOutput,
@@ -88,7 +143,25 @@ fn t07_branch_inputs_preserve_edge_identity_and_reject_undefined_joins() {
         let ClassOutput::Mixed { members, .. } = report.class();
         assert_eq!(members.len(), 1);
         match expected {
-            Expected::Original | Expected::Budget => {
+            Expected::Original => {
+                let MethodOutput::Java { source, facts, .. } = &members[0] else {
+                    panic!("valid branch SSA did not produce owned Java: {words:?}");
+                };
+                let rendered = diana_decomp::render(&report, &mut control).unwrap();
+                let span = rendered
+                    .spans
+                    .iter()
+                    .find(|span| span.method == facts.key)
+                    .unwrap();
+                assert_eq!(&rendered.source[span.start.0..span.end.0], source);
+                assert!(!report.diagnostics().iter().any(|diagnostic| matches!(
+                    diagnostic.cause.kind(),
+                    FailureKind::Malformed
+                        | FailureKind::InternalInvariant
+                        | FailureKind::Cancelled
+                )));
+            }
+            Expected::Budget => {
                 let MethodOutput::Debug { source, reason, .. } = &members[0] else {
                     panic!("normal SSA exit must retain its original source: {words:?}");
                 };

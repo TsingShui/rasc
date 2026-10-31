@@ -23,8 +23,20 @@ pub(crate) enum MethodBody {
         returned: ValueId,
     },
     Diamond(super::branch::Diamond),
+    Dispatcher(super::dispatcher::Dispatcher),
 }
 impl VerifiedJavaMethod {
+    pub(super) fn dispatcher(
+        header: String,
+        body: super::dispatcher::Dispatcher,
+        environment: EnvironmentId,
+    ) -> Self {
+        Self {
+            header,
+            body: MethodBody::Dispatcher(body),
+            environment,
+        }
+    }
     pub(super) fn diamond(
         header: String,
         body: super::branch::Diamond,

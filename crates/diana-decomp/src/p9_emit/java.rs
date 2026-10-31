@@ -19,6 +19,7 @@ pub(crate) fn java(
             returned,
         } => scalar(definitions, locals, *returned, &mut output, budget)?,
         MethodBody::Diamond(body) => diamond(body, &mut output, budget)?,
+        MethodBody::Dispatcher(body) => super::dispatcher::write(body, &mut output, budget)?,
     }
     output.push("}\n", budget)?;
     budget.checkpoint()?;
@@ -80,7 +81,7 @@ fn scalar(
     output.unsigned(u64::from(local.0), budget)?;
     output.push(";\n", budget)
 }
-fn local(
+pub(super) fn local(
     id: LocalId,
     output: &mut TextBuffer,
     budget: &mut MethodBudget<'_, '_>,
@@ -88,7 +89,7 @@ fn local(
     output.push("v", budget)?;
     output.unsigned(u64::from(id.0), budget)
 }
-fn assignments(
+pub(super) fn assignments(
     statements: &[Assignment],
     output: &mut TextBuffer,
     budget: &mut MethodBudget<'_, '_>,
@@ -98,6 +99,24 @@ fn assignments(
         local(statement.target, output, budget)?;
         output.push(" = ", budget)?;
         match statement.expression {
+            BranchExpression::Binary(left, kind, ref right) => {
+                local(left, output, budget)?;
+                output.push(
+                    match kind {
+                        crate::pipeline::branch::Arithmetic::Add => " + ",
+                        crate::pipeline::branch::Arithmetic::Sub => " - ",
+                        crate::pipeline::branch::Arithmetic::Mul => " * ",
+                        crate::pipeline::branch::Arithmetic::And => " & ",
+                    },
+                    budget,
+                )?;
+                match right {
+                    crate::p8_java::branch::Right::Local(id) => local(*id, output, budget)?,
+                    crate::p8_java::branch::Right::Literal(value) => {
+                        output.arguments(format_args!("{value}"), budget)?
+                    }
+                }
+            }
             BranchExpression::Local(id) => local(id, output, budget)?,
             BranchExpression::Constant(value) => {
                 output.arguments(format_args!("{value}"), budget)?

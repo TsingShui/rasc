@@ -19,8 +19,26 @@ pub(crate) enum Sym {
     Value(ValueId),
     Bad,
 }
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub(crate) enum Arithmetic {
+    Add,
+    Sub,
+    Mul,
+    And,
+}
+#[derive(Clone, Copy)]
+pub(crate) enum Operand {
+    Register(RegisterId),
+    Literal(i32),
+}
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub(crate) enum BoundOperand {
+    Value(ValueId),
+    Literal(i32),
+}
 #[derive(Clone, Copy)]
 pub(crate) enum Op {
+    Binary(RegisterId, RegisterId, Arithmetic, Operand),
     Constant(RegisterId, i32),
     Move(RegisterId, RegisterId),
     Nop,
@@ -31,6 +49,7 @@ pub(crate) enum Terminal {
     Jump(BlockId),
     Test {
         register: RegisterId,
+        other: Option<RegisterId>,
         opcode: u8,
         yes: BlockId,
         no: BlockId,
@@ -51,6 +70,7 @@ pub(crate) enum Definition {
     Parameter(u32),
     Constant(i32),
     Move(ValueId),
+    Binary(ValueId, Arithmetic, BoundOperand),
     Phi,
 }
 pub(crate) struct Phi {
@@ -64,10 +84,12 @@ pub(crate) struct BoundOp {
     pub op: Op,
     pub result: Option<ValueId>,
     pub source: Option<ValueId>,
+    pub other: Option<BoundOperand>,
 }
 pub(crate) struct BoundBlock {
     pub ops: Vec<BoundOp>,
     pub terminal: Option<ValueId>,
+    pub other: Option<ValueId>,
 }
 pub(crate) struct VerifiedSsa<'a> {
     _sealed: (),
@@ -85,7 +107,13 @@ enum Decoded {
     Op(Op),
     Return(RegisterId),
     Jump(CodeUnitOffset),
-    Test(RegisterId, u8, CodeUnitOffset, CodeUnitOffset),
+    Test(
+        RegisterId,
+        Option<RegisterId>,
+        u8,
+        CodeUnitOffset,
+        CodeUnitOffset,
+    ),
 }
 struct Flow<'a> {
     raw: RawMethodView<'a>,
@@ -155,13 +183,25 @@ fn value(sym: Sym, register: RegisterId, pc: CodeUnitOffset) -> Result<ValueId, 
 }
 fn destination(op: Op) -> Option<RegisterId> {
     match op {
-        Op::Constant(r, _) | Op::Move(r, _) => Some(r),
+        Op::Constant(r, _) | Op::Move(r, _) | Op::Binary(r, _, _, _) => Some(r),
         Op::Nop => None,
     }
 }
 fn use_register(op: Op) -> Option<RegisterId> {
     match op {
-        Op::Move(_, r) => Some(r),
+        Op::Move(_, r) | Op::Binary(_, r, _, _) => Some(r),
+        _ => None,
+    }
+}
+fn other_register(op: Op) -> Option<RegisterId> {
+    match op {
+        Op::Binary(_, _, _, Operand::Register(register)) => Some(register),
+        _ => None,
+    }
+}
+fn terminal_other(terminal: Terminal) -> Option<RegisterId> {
+    match terminal {
+        Terminal::Test { other, .. } => other,
         _ => None,
     }
 }
@@ -294,6 +334,40 @@ fn flow<'a>(
                         _ => return Err(RequestError::InternalInvariant("scalar constant absent")),
                     },
                 )),
+                0x90..=0x92
+                | 0x95
+                | 0xb0..=0xb2
+                | 0xb5
+                | 0xd0
+                | 0xd2
+                | 0xd5
+                | 0xd8
+                | 0xda
+                | 0xdd => {
+                    let arithmetic = match spec.opcode {
+                        0x90 | 0xb0 | 0xd0 | 0xd8 => Arithmetic::Add,
+                        0x91 | 0xb1 => Arithmetic::Sub,
+                        0x95 | 0xb5 | 0xd5 | 0xdd => Arithmetic::And,
+                        _ => Arithmetic::Mul,
+                    };
+                    let (left, right) = match spec.opcode {
+                        0x90..=0x92 | 0x95 => (reg(1)?, Operand::Register(reg(2)?)),
+                        0xb0..=0xb2 | 0xb5 => (reg(0)?, Operand::Register(reg(1)?)),
+                        _ => (
+                            reg(1)?,
+                            Operand::Literal(match operands.literal() {
+                                Some(RawLiteral::Signed8(v)) => i32::from(v),
+                                Some(RawLiteral::Signed16(v)) => i32::from(v),
+                                _ => {
+                                    return Err(RequestError::InternalInvariant(
+                                        "checked arithmetic immediate absent",
+                                    ));
+                                }
+                            }),
+                        ),
+                    };
+                    Decoded::Op(Op::Binary(reg(0)?, left, arithmetic, right))
+                }
                 0xf => Decoded::Return(reg(0)?),
                 0x28..=0x2a => {
                     has_branch = true;
@@ -301,12 +375,22 @@ fn flow<'a>(
                     push(&mut leaders, to, budget)?;
                     Decoded::Jump(to)
                 }
-                0x38..=0x3d => {
+                0x32..=0x3d => {
                     has_branch = true;
                     let to = target()?;
                     push(&mut leaders, to, budget)?;
                     push(&mut leaders, next, budget)?;
-                    Decoded::Test(reg(0)?, spec.opcode, to, next)
+                    Decoded::Test(
+                        reg(0)?,
+                        if spec.opcode <= 0x37 {
+                            Some(reg(1)?)
+                        } else {
+                            None
+                        },
+                        spec.opcode,
+                        to,
+                        next,
+                    )
                 }
                 _ => return Ok(None),
             };
@@ -351,8 +435,9 @@ fn flow<'a>(
             }
             Decoded::Return(r) => Some(Terminal::Return(r)),
             Decoded::Jump(to) => Some(Terminal::Jump(block_at(&pcs, to, budget)?)),
-            Decoded::Test(r, opcode, yes, no) => Some(Terminal::Test {
+            Decoded::Test(r, other, opcode, yes, no) => Some(Terminal::Test {
                 register: r,
+                other,
                 opcode,
                 yes: block_at(&pcs, yes, budget)?,
                 no: block_at(&pcs, no, budget)?,
@@ -431,6 +516,9 @@ pub(crate) fn build<'a>(
             if let Some(register) = terminal_register(block.terminal) {
                 add_register(&mut needed, register, budget)?;
             }
+            if let Some(register) = terminal_other(block.terminal) {
+                add_register(&mut needed, register, budget)?;
+            }
             for &(_, op) in block.ops.iter().rev() {
                 budget.charge_work(1)?;
                 if let Some(destination) = destination(op) {
@@ -445,6 +533,9 @@ pub(crate) fn build<'a>(
                     }
                 }
                 if let Some(register) = use_register(op) {
+                    add_register(&mut needed, register, budget)?;
+                }
+                if let Some(register) = other_register(op) {
                     add_register(&mut needed, register, budget)?;
                 }
             }
@@ -522,7 +613,35 @@ pub(crate) fn build<'a>(
             } else {
                 None
             };
+            let other = match op {
+                Op::Binary(_, _, _, Operand::Register(register)) => Some(BoundOperand::Value(
+                    value(lookup(&env, register, budget)?, register, pc)?,
+                )),
+                Op::Binary(_, _, _, Operand::Literal(literal)) => {
+                    Some(BoundOperand::Literal(literal))
+                }
+                _ => None,
+            };
             let result = match op {
+                Op::Binary(_, _, arithmetic, _) => {
+                    let id = ValueId(
+                        u32::try_from(values.len()).map_err(|_| RequestError::PlatformCapacity)?,
+                    );
+                    push(
+                        &mut values,
+                        Definition::Binary(
+                            source.ok_or(RequestError::InternalInvariant(
+                                "arithmetic left use absent",
+                            ))?,
+                            arithmetic,
+                            other.ok_or(RequestError::InternalInvariant(
+                                "arithmetic right use absent",
+                            ))?,
+                        ),
+                        budget,
+                    )?;
+                    Some(id)
+                }
                 Op::Nop => None,
                 Op::Constant(_, constant) => {
                     let id = ValueId(
@@ -563,6 +682,7 @@ pub(crate) fn build<'a>(
                     op,
                     result,
                     source,
+                    other,
                 },
                 budget,
             )?;
@@ -576,7 +696,24 @@ pub(crate) fn build<'a>(
         } else {
             None
         };
-        push(&mut bound, BoundBlock { ops, terminal }, budget)?;
+        let other = if let Some(register) = terminal_other(block.terminal) {
+            Some(value(
+                lookup(&env, register, budget)?,
+                register,
+                block.terminal_pc,
+            )?)
+        } else {
+            None
+        };
+        push(
+            &mut bound,
+            BoundBlock {
+                ops,
+                terminal,
+                other,
+            },
+            budget,
+        )?;
         let mut snapshot = Vec::new();
         for edge in &flow.edges {
             budget.charge_work(1)?;
@@ -713,7 +850,29 @@ fn verify<'a>(
                     "SSA use is not the latest local definition",
                 ));
             }
+            let expected_other = match *op {
+                Op::Binary(_, _, _, Operand::Register(register)) => Some(BoundOperand::Value(
+                    value(lookup(&env, register, budget)?, register, *pc)?,
+                )),
+                Op::Binary(_, _, _, Operand::Literal(literal)) => {
+                    Some(BoundOperand::Literal(literal))
+                }
+                _ => None,
+            };
+            if bound.other != expected_other {
+                return Err(RequestError::InternalInvariant(
+                    "SSA changed the arithmetic right use",
+                ));
+            }
             match *op {
+                Op::Binary(_, _, arithmetic, _) => {
+                    if !matches!(bound.result.and_then(|id|ssa.values.get(usize::try_from(id.0).ok()?)),Some(Definition::Binary(left,kind,right)) if Some(*left)==bound.source && *kind==arithmetic && Some(*right)==bound.other)
+                    {
+                        return Err(RequestError::InternalInvariant(
+                            "SSA changed an arithmetic definition",
+                        ));
+                    }
+                }
                 Op::Constant(_, literal) => {
                     if !matches!(bound.result.and_then(|id|ssa.values.get(usize::try_from(id.0).ok()?)),Some(Definition::Constant(actual)) if *actual==literal)
                     {
@@ -759,6 +918,20 @@ fn verify<'a>(
         {
             return Err(RequestError::InternalInvariant(
                 "SSA terminal does not read the latest definition",
+            ));
+        }
+        let expected_other = if let Some(register) = terminal_other(block.terminal) {
+            Some(value(
+                lookup(&env, register, budget)?,
+                register,
+                block.terminal_pc,
+            )?)
+        } else {
+            None
+        };
+        if ssa.bound[index].other != expected_other {
+            return Err(RequestError::InternalInvariant(
+                "SSA changed the comparison right use",
             ));
         }
         for (edge_index, edge) in ssa.edges.iter().enumerate() {
@@ -808,7 +981,7 @@ fn verify<'a>(
             &mut kinds,
             match definition {
                 Definition::Parameter(index) => Some(ssa.parameters[ix(*index)?]),
-                Definition::Constant(_) => Some(Kind::Int),
+                Definition::Constant(_) | Definition::Binary(_, _, _) => Some(Kind::Int),
                 _ => None,
             },
             budget,
@@ -818,6 +991,23 @@ fn verify<'a>(
         let mut changed = false;
         for (index, definition) in ssa.values.iter().enumerate() {
             budget.charge_work(1)?;
+            if let Definition::Binary(left, _, right) = definition {
+                let mut sources = [Some(*left), None];
+                if let BoundOperand::Value(right) = right {
+                    sources[1] = Some(*right);
+                }
+                for source in sources.into_iter().flatten() {
+                    budget.charge_work(1)?;
+                    let source = ix(source.0)?;
+                    if bad[source] && !bad[index] {
+                        bad[index] = true;
+                        changed = true;
+                    }
+                    if kinds[source].is_some_and(|kind| kind != Kind::Int) {
+                        type_conflict = true;
+                    }
+                }
+            }
             if let Definition::Move(source) = definition {
                 let source = ix(source.0)?;
                 if bad[source] && !bad[index] {
@@ -896,6 +1086,32 @@ fn verify<'a>(
                     pc: block.terminal_pc,
                 });
             }
+        }
+    }
+    for (index, block) in ssa.blocks.iter().enumerate() {
+        budget.charge_work(1)?;
+        for op in &ssa.bound[index].ops {
+            budget.charge_work(1)?;
+            if let Some(BoundOperand::Value(source)) = op.other
+                && (bad[ix(source.0)?] || !grounded[ix(source.0)?])
+            {
+                return Err(RequestError::UndefinedRegister {
+                    register: other_register(op.op).ok_or(RequestError::InternalInvariant(
+                        "bad arithmetic right use has no register",
+                    ))?,
+                    pc: op.pc,
+                });
+            }
+        }
+        if let Some(source) = ssa.bound[index].other
+            && (bad[ix(source.0)?] || !grounded[ix(source.0)?])
+        {
+            return Err(RequestError::UndefinedRegister {
+                register: terminal_other(block.terminal).ok_or(RequestError::InternalInvariant(
+                    "bad comparison right use has no register",
+                ))?,
+                pc: block.terminal_pc,
+            });
         }
     }
     if type_conflict {

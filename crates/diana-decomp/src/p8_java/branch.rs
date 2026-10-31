@@ -9,7 +9,12 @@ pub(crate) struct Local {
     pub kind: Kind,
     pub parameter: Option<u32>,
 }
+pub(crate) enum Right {
+    Local(LocalId),
+    Literal(i32),
+}
 pub(crate) enum Expression {
+    Binary(LocalId, crate::pipeline::branch::Arithmetic, Right),
     Local(LocalId),
     Constant(i32),
 }
@@ -59,7 +64,7 @@ fn edge(
     }
     found.ok_or(RequestError::InternalInvariant("diamond edge is missing"))
 }
-fn copies(
+pub(super) fn copies(
     ssa: &VerifiedSsa<'_>,
     incoming: Option<EdgeId>,
     target: BlockId,
@@ -157,7 +162,7 @@ fn copies(
     }
     Ok(())
 }
-fn operations(
+pub(super) fn operations(
     ssa: &VerifiedSsa<'_>,
     block: BlockId,
     output: &mut Vec<Assignment>,
@@ -166,6 +171,22 @@ fn operations(
     for op in &ssa.bound[ix(block.0)?].ops {
         budget.charge_work(1)?;
         let expression = match op.op {
+            Op::Binary(_, _, kind, _) => Expression::Binary(
+                LocalId(
+                    op.source
+                        .ok_or(RequestError::InternalInvariant(
+                            "verified arithmetic left local absent",
+                        ))?
+                        .0,
+                ),
+                kind,
+                match op.other.ok_or(RequestError::InternalInvariant(
+                    "verified arithmetic right local absent",
+                ))? {
+                    crate::pipeline::branch::BoundOperand::Value(id) => Right::Local(LocalId(id.0)),
+                    crate::pipeline::branch::BoundOperand::Literal(value) => Right::Literal(value),
+                },
+            ),
             Op::Nop => continue,
             Op::Constant(_, value) => Expression::Constant(value),
             Op::Move(_, _) => Expression::Local(LocalId(
@@ -200,11 +221,24 @@ pub(crate) fn verify(
     environment: EnvironmentId,
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<Option<VerifiedJavaMethod>, RequestError> {
+    if let Some(method) = verify_diamond(input, &ssa, environment, budget)? {
+        return Ok(Some(method));
+    }
+    super::dispatcher::verify(input, &ssa, environment, budget)
+}
+
+fn verify_diamond(
+    input: &MethodInput<'_, '_>,
+    ssa: &VerifiedSsa<'_>,
+    environment: EnvironmentId,
+    budget: &mut MethodBudget<'_, '_>,
+) -> Result<Option<VerifiedJavaMethod>, RequestError> {
     if ssa.blocks.len() != 4 {
         return Ok(None);
     }
     let Terminal::Test {
         register: _,
+        other,
         opcode,
         yes,
         no,
@@ -212,6 +246,9 @@ pub(crate) fn verify(
     else {
         return Ok(None);
     };
+    if other.is_some() {
+        return Ok(None);
+    }
     if yes == no || yes == BlockId(0) || no == BlockId(0) {
         return Ok(None);
     }
@@ -305,21 +342,21 @@ pub(crate) fn verify(
         return Ok(None);
     }
     let mut entry = Vec::new();
-    copies(&ssa, None, BlockId(0), &mut entry, &mut locals, budget)?;
-    operations(&ssa, BlockId(0), &mut entry, budget)?;
+    copies(ssa, None, BlockId(0), &mut entry, &mut locals, budget)?;
+    operations(ssa, BlockId(0), &mut entry, budget)?;
     let mut yes_statements = Vec::new();
     copies(
-        &ssa,
-        Some(edge(&ssa, BlockId(0), yes, budget)?),
+        ssa,
+        Some(edge(ssa, BlockId(0), yes, budget)?),
         yes,
         &mut yes_statements,
         &mut locals,
         budget,
     )?;
-    operations(&ssa, yes, &mut yes_statements, budget)?;
+    operations(ssa, yes, &mut yes_statements, budget)?;
     copies(
-        &ssa,
-        Some(edge(&ssa, yes, join, budget)?),
+        ssa,
+        Some(edge(ssa, yes, join, budget)?),
         join,
         &mut yes_statements,
         &mut locals,
@@ -327,17 +364,17 @@ pub(crate) fn verify(
     )?;
     let mut no_statements = Vec::new();
     copies(
-        &ssa,
-        Some(edge(&ssa, BlockId(0), no, budget)?),
+        ssa,
+        Some(edge(ssa, BlockId(0), no, budget)?),
         no,
         &mut no_statements,
         &mut locals,
         budget,
     )?;
-    operations(&ssa, no, &mut no_statements, budget)?;
+    operations(ssa, no, &mut no_statements, budget)?;
     copies(
-        &ssa,
-        Some(edge(&ssa, no, join, budget)?),
+        ssa,
+        Some(edge(ssa, no, join, budget)?),
         join,
         &mut no_statements,
         &mut locals,
