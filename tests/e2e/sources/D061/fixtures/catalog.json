@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "case": "D061",
   "catalogId": "d061-complete-except-one-reachable-external-invoke",
-  "description": "Catalog for D061. Everything is declared except the binding of the single reachable external invoke Lfixtures/External;->g()V. The entry is listed with hasClassDef=false and declared=false so the gap is explicit and intentional: the missing declaration of that one used invoke is what forces Unsupported -> complete raw, while an unused gap would not. The two typed catch types Lfixtures/ErrA; and Lfixtures/ErrB; are self-made and unrelated to each other, so neither shadows the other and every declared handler priority stays reachable.",
+  "description": "Catalog for D061. Everything is declared except the binding of the single reachable external invoke Lfixtures/External;->g()V. The entry is listed with hasClassDef=false and declared=false so the gap is explicit and intentional: the missing declaration of that one used invoke is what forces Unsupported with original debug information, while an unused gap would not. The two typed catch types Lfixtures/ErrA; and Lfixtures/ErrB; are self-made and unrelated to each other, so neither shadows the other and every declared handler priority stays reachable.",
   "entries": [
     {
       "descriptor": "Ljava/lang/Object;",

@@ -195,7 +195,7 @@
     "The rejection comes only from InvokeCustomUnsupported and not from a missing catalog entry or damaged byte format; catalog.json declares every referenced owner.",
     "The original class_data direct_methods order has aDynamic before zAdd, so stopping analysis of the remaining methods on a failure becomes visible.",
     "A class invocation keeps every original member: the verified Java of zAdd and the complete Smali of aDynamic are both locatable, exactly once each.",
-    "Each original member is located by the UTF8 source ranges of the output and its raw slice is independently reassembled and decoded, rather than compared through language getters or a private AST.",
+    "Each original member is located by the UTF8 source ranges of the output and its debug snapshot is independently parsed and compared with the original facts, rather than compared through language getters or a private AST.",
     "The literal contains '*/' and a backslash-u sequence, so a Java comment wrapper must not be used and the u16 vector must survive rendering.",
     "This case verifies complex-result preservation, raw, identity and spans; it does not claim that Mixed as a whole passes javac, and it does not claim the original invoke-custom ran on ART."
   ],

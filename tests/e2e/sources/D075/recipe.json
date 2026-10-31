@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "case": "D075",
-  "specRevision": "draft-6",
+  "specRevision": "draft-7",
   "specRef": {
     "case": "/cases/74",
     "targets": "/cases/74/targets",
@@ -87,7 +87,7 @@
     "absent": [
       {
         "role": "static256",
-        "reason": "256 parameter words exceed the Java limit; javac reports 'too many parameters', so no legal Java baseline exists and only DEX integrity plus the raw round trip apply"
+        "reason": "256 parameter words exceed the Java limit; javac reports 'too many parameters', so no legal Java baseline exists and only DEX integrity plus the debug-fact comparison apply"
       },
       {
         "role": "instance255",

@@ -45,7 +45,7 @@ Do not reuse SLEIGH, p-code, native calling-convention inference, code discovery
 | DX-04 | `src/ir/analysis/source_variables.rs:45–267` | Liveness/interference, coalescing, normal/exceptional Phi placement, types and lexical-exit handling work together. | Remove only **optional coalescing**; retain Phi typing, edge-copy, exceptional ingress preservation and lexical transfer placement obligations. |
 | DX-05 | `src/ir/analysis/source_variables/phi.rs:1274–1361`: `ExceptionalCopyPlacement`; `:1785–1847`: `sequentialize` | Parallel-copy cycles need temporaries; exceptional edge copies require availability validation and saving before the throw site. | Use separate locals and explicit edge copies, with distinct normal/exceptional copy plans. Do not call one assignment per Phi a complete solution. |
 | DX-06 | `src/ir/analysis/effects.rs`: `InstructionEffects`, `ThrowEffect` | Shared facts for reads, writes, calls, exceptions and synchronization; unknown calls are conservative. | Use an effect table with fewer fields but conservative defaults; an unused result is not a reason to remove a call, field read or exception. |
-| DX-07 | `src/ir/exception.rs`; `src/ir/exception/cleanup.rs`; `src/ir/region/{exceptions,synchronization,exits}.rs` | Handles DEX intervals, handler ownership, cleanup equivalence, monitors and cross-region leaves. | Do not copy wholesale; control complexity with a restricted expressible profile, explicit structure certificates and Smali fallback. |
+| DX-07 | `src/ir/exception.rs`; `src/ir/exception/cleanup.rs`; `src/ir/region/{exceptions,synchronization,exits}.rs` | Handles DEX intervals, handler ownership, cleanup equivalence, monitors and cross-region leaves. | Do not copy wholesale; control complexity with a restricted expressible profile, explicit structure certificates and original-information debug output. |
 | DX-08 | `src/language/java/{dex,source_types,literals,assignment}.rs` | Legalization of boolean/int, null/0, generics/erasure/overloads, literals and definite assignment is not mere formatting. | Primitive/null handling and precise call binding are core; generic beautification may be deferred, but erasure contracts and overload ambiguity cannot be ignored. |
 | DX-09 | `src/analysis/java_backend/constructor_syntax.rs`: `apply_with_method_returns` | Multiple pre-super extraction/scheduling/helper-generation techniques handle differences between Java and DEX constructor constraints. | Accept adjacent new/init and legal constructor prologues; do not promise that arbitrary prefixes can be converted to static helpers. |
 | DX-10 | `src/analysis/java_backend/declaration_lowering.rs:1381`: `failure_body` | Recovery failure can produce a body that throws `UnsupportedOperationException`. | Do not inherit that successful representation; retain the raw method and explicitly classify the downgrade in the result model. |
@@ -104,15 +104,16 @@ The table at the top of [the download script](../../tools/fetch_references.py) i
 | jadx | Implementation and Java test-support sources for IntegrationTest/SmaliTest | Learn input, recompilation and execution observation during E2E preparation; do not copy text goldens, private seams or skip strategies. |
 | ssa-construction / cranelift | Braun et al. 2013 SSA paper and Rust SSA builder/IR verifier | T07; borrow fixed-identity/Phi and verification ideas, without automatically replacing the chosen algorithm. DEX exceptional state still needs its own proof. |
 | out-of-ssa | Boissinot et al. 2009 Out-of-SSA paper | T08/T09, D002/D003; handle parallel copies correctly before considering optional variable coalescing. |
-| smali | Google smali/dexlib2 implementation | Raw projection/round trip; not an E2E tool-version upgrade. Assembler success does not imply semantic correctness. |
+| smali | Google smali/dexlib2 implementation | Fixture assembly and independent input projection; not a production-output reassembly requirement or an E2E tool-version upgrade. Assembler success does not imply semantic correctness. |
 | soot / dexpler | Soot Dexpler type/exception-graph source and 2012 paper | Reference for type/exception batches; do not bring in the whole Jimple/Soot framework. |
 | phoenix / sailr | 2013 Phoenix and 2024 SAILR structuring papers | T13/T14; native/C-oriented, not directly applicable to Java's no-goto, handler and monitor constraints. |
 | vineflower | Java declaration and recovery source | Read as needed for constructor/nested/enum batches; do not treat recovered reference text as truth. |
 
-Syntax/format anchors for ALGORITHMS §7.3/§14.4: the locked Smali 2.5.2
+Fixture-authoring and AXML format anchors: the locked Smali 2.5.2
 [parser](https://github.com/JesusFreke/smali/blob/v2.5.2/smali/src/main/antlr/smaliParser.g),
 [lexer](https://github.com/JesusFreke/smali/blob/v2.5.2/smali/src/main/jflex/smaliLexer.jflex)
-and tree walker define directives, escapes, typed literals and operand shapes;
+and tree walker define input-fixture directives, escapes, literals and operands;
+ALGORITHMS §7 requires only analyzable original debug information, not this grammar.
 AOSP Android 15 [ResourceTypes.h](https://android.googlesource.com/platform/frameworks/base/+/refs/tags/android-15.0.0_r1/libs/androidfw/include/androidfw/ResourceTypes.h)
 defines ResChunk_header, ResStringPool and ResXMLTree field layouts. These are
 online source anchors, not new downloaded tool assets or a claim of round-trip
@@ -190,7 +191,7 @@ This section connects sources to concrete implementation rules. DESIGN/ALGORITHM
 
 ### 9.1 Existing supported choices retained
 
-1. **Semantics first; distinguish success from fallback:** D-Helix, empirical Java research and CompCert all indicate that source-like appearance or compilability does not substitute for behavior. Retain Java/Smali/Unavailable; do not report success with exception stubs.
+1. **Semantics first; distinguish success from fallback:** D-Helix, empirical Java research and CompCert all indicate that source-like appearance or compilability does not substitute for behavior. Retain Java/Debug/Unavailable with original facts and explicit coverage; do not report Java success with exception stubs.
 2. **Three-address CFG → fixed-identity SSA → type/storage → region/Java** remains a reasonable conservative engineering choice. Recent POPL work presents a joint-analysis alternative; it does not prove independent phases wrong or require importing GVN/BDD.
 3. **Phi parallel copies, exceptional old state and strict preservation of may-throw operations** have more direct evidence: R8/ART explicitly distinguish exceptional and normal state. Do not give every predecessor the same successful state.
 4. **A restricted dispatcher as a fallback and honest fallback for complex protected regions** are not overturned by DREAM/SAILR. No goto does not remove type/exception/lock proof obligations.

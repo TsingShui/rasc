@@ -6,7 +6,7 @@ are executable. The Engine is not implemented; preparation is not engine accepta
 See [preparation evidence](batches/b02-b04-preparation.md).
 
 Diana is a decompiler: it displays recovered code by default. A failed method is
-shown in its original position and identity as Smali or with a reason; a Mixed
+shown in its original position with its reason and analyzable original DEX debug information; a Mixed
 result does not suppress the rest of the class. Complete JavaUnit qualification
 is separate from normal display, and text/JSON do not change recovery capability.
 Resource quotas are unlimited by default; only caller-configured limits apply.
@@ -26,14 +26,17 @@ generator, or duplicate workflow, review or task document:
 | [WRITING.md](WRITING.md) | Writing rules: requirement strength, sentence roles, terminology, numbers, negation ownership |
 
 [e2e_cases.json](e2e_cases.json) is the sole case and independent-expectation
-specification. Schema 2 binds input and expected results per invocation; draft-6
+specification. Schema 2 binds input and expected results per invocation; draft-7
 contains 86 required cases and 177 invocation scenarios, with explicit symbolic
 targets and assertion evidence bindings. Evidence-based corrections
 and additions are allowed; incorrect formats or gaps are not retained merely to
 preserve a count. There is no separate copy of the expectations or web mirror.
 The tool lock points directly to TASKS without a historical redirect.
-[B01 review](batches/b01-spec-review.md) approves the unchanged specification;
-TASKS §3 records preparation acceptance and its bounded self-test authorization.
+[B01 review](batches/b01-spec-review.md) records draft-6 approval;
+[debug fallback](batches/debug-fallback.md) records the operator-approved draft-7
+revision. Failed Java retains checked original instructions, references and coverage
+for analysis; it does not promise standard-Smali output or reassembly. TASKS §3
+owns revision-specific acceptance and bounded self-test authorization.
 The frozen JSON retains its draft metadata rather than acting as a progress counter.
 Windows/Linux and ART are not-run. Next is I0: T01 resource/cancellation control,
 T02–T04 safe input/raw/metadata and T05 real-library integration, then D009 Java

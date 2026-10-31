@@ -1,11 +1,11 @@
 {
   "schemaVersion": 1,
   "case": "D043",
-  "specRevision": "draft-6",
+  "specRevision": "draft-7",
   "specRef": {
     "path": "docs/diana/e2e_cases.json",
     "schemaVersion": 2,
-    "sha256": "f1a95873d730aedcd25305c0e4304d85c7fea5b3b2b88ed91aa9a60e2dec082e",
+    "sha256": "f12616d01422de7693a299f022ede154a19122c30f573b8ea886c68c57a8dc5a",
     "casePointer": "/cases/42"
   },
   "targets": {

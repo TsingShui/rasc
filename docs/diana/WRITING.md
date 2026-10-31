@@ -185,7 +185,9 @@ pronoun is acceptable when its referent is unambiguous. Remove filler that adds 
 meaning. Name components instead of an ambiguous “we.” Prefer full forms such as
 “do not” and “for example.” Participles and established terms such as “reaching
 definitions” are allowed. Preserve the official spelling of DEX, APK, ART, R8 and D8;
-use Smali for the output language without renaming `smali` commands or packages.
+use Smali for the fixture assembly language without renaming `smali` commands or
+packages. Production debug information is labeled Debug/`dex_debug`, not promised
+as standard Smali or reassemblable source.
 
 ## 7. Numbers and protected technical content
 

@@ -1,7 +1,7 @@
-"""Materialize actual Java/raw observations from public adapter artifacts.
+"""Materialize actual Java/debug observations from public adapter artifacts.
 
-The adapter cannot supply a successful compile flag, a canned Driver result or a
-rawExact boolean. Compilation, execution and independent reassembly happen here.
+Java is compiled and executed here. Non-Java information comes from the actual
+public member source, parsed as a debug snapshot; no output assembler is used.
 """
 from __future__ import annotations
 from collections import Counter
@@ -11,6 +11,7 @@ from pathlib import Path
 import tempfile
 from . import classfile
 from .compare import Mismatch
+from .evaluate import normalized_debug
 
 
 def observations(root,case,invocation,certificate,manifest,result,groups):
@@ -18,7 +19,9 @@ def observations(root,case,invocation,certificate,manifest,result,groups):
     assets={a['id']:a for a in manifest['assets']}
     original=assets[certificate['input_assets'][0]]
     cache=root/original['path'].split('/prepared/',1)[0]
-    tools=Tools(cache);tools.verify()
+    tools=None
+    if 'java_input' in groups:
+        tools=Tools(cache);tools.verify()
     recipe_root=root/'tests/e2e/sources'/case['id'];recipe=load(recipe_root/'recipe.json')
     public=groups['outcome']
     if Counter(json.dumps(b,sort_keys=True) for b in public.get('selected',[]))!=Counter(json.dumps(b,sort_keys=True) for b in certificate['bindings']):
@@ -84,19 +87,33 @@ def observations(root,case,invocation,certificate,manifest,result,groups):
             raise Mismatch('Java result has no compilable submitted source')
         elif 'driver' in groups:
             raise Mismatch('Driver observation is not from compiled recovered source')
-        if 'raw_input' in groups:
-            sources=checked_sources(groups['raw_input'],'.smali')
-            dex=work/'raw.dex'
-            run([tools.java,'-cp',tools.cp,'org.jf.smali.Main','assemble','--api','28' if original['path'].endswith('D085/case.dex') else '23','-o',dex,*sources],root,logs/'assemble.log')
-            if not dex.is_file():raise Mismatch('assembler produced no complete artifact')
-            text=run([tools.java,'-cp',os.pathsep.join([str(cache/'projector/classes'),tools.cp]),'ProjectDex',dex],root,logs/'decode.log',output_cap=64*1024*1024)
-            groups['raw']={'actual':json.loads(text)}
+        snapshots=[];member_sources={}
+        for member in public.get('members',[]):
+            if member['language']!='dex_debug':continue
+            source=member['source']
+            try:snapshot=json.loads(source)
+            except (ValueError,TypeError) as exc:raise Mismatch('public debug source is not a readable snapshot') from exc
+            if snapshot.get('schema')!='diana.dex-debug/1' or type(snapshot.get('complete')) is not bool:
+                raise Mismatch('public debug source lacks its schema/coverage')
+            identities={(c['descriptor'],m['name'],m['proto']) for c in snapshot['classes'] for m in c['methods']}
+            identity=(member['owner'],member['name'],member['proto'])
+            if identities!={identity} or identity in member_sources:raise Mismatch('debug source does not identify exactly its original member')
+            member_sources[identity]=source.encode('utf-8');snapshots.append(snapshot)
+        if snapshots:
+            merged={};undecoded=[]
+            for snapshot in snapshots:
+                undecoded.extend(snapshot.get('undecoded_ranges',[]))
+                for c in snapshot['classes']:
+                    owner=c['descriptor'];header={**c,'methods':[]}
+                    if owner in merged and normalized_debug({'classes':[header]})!=normalized_debug({'classes':[{**merged[owner],'methods':[]}]}):
+                        raise Mismatch('inconsistent original debug declaration context')
+                    if owner not in merged:merged[owner]=header
+                    merged[owner]['methods'].extend(c['methods'])
+            groups['debug']={'actual':{'schema':'diana.dex-debug/1','complete':all(s['complete'] for s in snapshots),'classes':list(merged.values()),'undecoded_ranges':undecoded}}
             for span in groups.get('rendered',{}).get('spans',[]):
-                if span['language']=='smali':
-                    binding=span['raw_slice'];path=root/binding['path']
-                    if path not in sources:raise Mismatch('raw span is not the assembled source')
-                    source=path.read_bytes()[binding['start']:binding['end']]
-                    if source!=groups['text'][span['start']:span['end']]:raise Mismatch('rendered raw slice differs from independently assembled code')
-        elif 'raw' in groups:
-            raise Mismatch('raw observation is not from independently assembled output')
+                if span['language']=='dex_debug':
+                    name,proto=span['method'].split('(',1);identity=(span['owner'],name,'('+proto)
+                    if member_sources.get(identity)!=groups['text'][span['start']:span['end']]:raise Mismatch('rendered debug slice differs from the actual public member source')
+        elif 'debug' in groups:
+            raise Mismatch('debug facts did not come from actual public member source')
     return groups

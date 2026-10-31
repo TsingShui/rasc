@@ -54,7 +54,7 @@
     "The independent projection proves the actual backedge: the goto at the end of the lock branch targets the same instruction PC as the new-instance, so the same static allocation site runs twice.",
     "The independent projection proves the monitor-exit at :exit consumes the value defined by the most recent new-instance/init on the taken path, not the object locked on the earlier iteration, so no dynamic-identity/join certificate exists.",
     "The independent projection confirms there is no encoded handler, that both monitor opcodes are 11x, and that every ref resolves to a complete catalog declaration.",
-    "The complete raw method is preserved after the rejection; no interpreter that ignores monitors is used and no ART verifier acceptance is claimed."
+    "The original instruction/lock facts remain analyzable after rejection; no interpreter that ignores monitors is used and no ART verifier acceptance is claimed."
   ],
   "gaps": [
     "The locked smali/dexlib2 build and projection are absent here; B03 owns that step, the dynamic-identity certificate and the hashes.",

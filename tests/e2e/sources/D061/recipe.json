@@ -65,7 +65,7 @@
     "The ordered typed handlers and the catchall are checked independently: IllegalArgument, then NumberFormat, then catchall, all over the same try range [try_start, try_end).",
     "The const-string UTF-16 vector is checked independently as [U+D800, U+0041]; the isolated high surrogate must survive the MUTF-8 round trip.",
     "Every full member reference is checked independently: the owner/name/proto of the external invoke and of the Object constructor.",
-    "The raw round trip must reproduce every instruction site, payload bit, handler priority, string unit and member ref; assembling successfully while dropping a catch, a key, a literal or a changed proto is a failure."
+    "The actual debug snapshot must preserve every original instruction site, payload bit, handler priority, string unit and member ref; omitting or changing any such fact fails without invoking an output assembler."
   ],
   "gaps": [
     "The locked smali/dexlib2 tools and the independent normalized raw projection are absent in this worktree; B03 owns that step and the hashes.",

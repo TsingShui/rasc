@@ -2,10 +2,10 @@
   "schema_version": 1,
   "spec": {
     "path": "docs/diana/e2e_cases.json",
-    "revision": "draft-6",
-    "sha256": "f1a95873d730aedcd25305c0e4304d85c7fea5b3b2b88ed91aa9a60e2dec082e"
+    "revision": "draft-7",
+    "sha256": "f12616d01422de7693a299f022ede154a19122c30f573b8ea886c68c57a8dc5a"
   },
-  "state": "reviewed-not-approved",
+  "state": "spec-approved",
   "cases": [
     {
       "id": "D001",

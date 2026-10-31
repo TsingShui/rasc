@@ -32,7 +32,7 @@ Use source ideas only through explicit review and focused extraction/reimplement
 
 Diana is a decompiler: default class/method retrieval MUST expose available
 code, not require an entirely verified Java unit before showing anything.
-Keep partial Java, raw Smali and unavailable reasons explicit; a local failure
+Keep partial Java, original DEX debug information and unavailable reasons explicit; a local failure
 MUST NOT discard other members. Text/JSON are presentations of the same result,
 not capability gates. Preserve hard errors and strict Java/JavaUnit acceptance;
 a readable Mixed result is not permission to count required Java as passed.
@@ -83,7 +83,8 @@ B01 freezes a reviewed revision, not an arbitrary case count or faulty format.
 Correct faulty recipes/oracles with independent evidence and recorded review;
 preserve problem IDs and valid semantics, append new counterexamples, and derive
 case/invocation denominators from the specification. Never drop required cases,
-change required Java to Smali success or refresh truth from engine actual output.
+change required Java to debug output to manufacture success or refresh truth
+from engine actual output.
 A specification revision is not B01 approval, fixture certification, production
 implementation permission or authorization for auxiliary-tool self-tests.
 Existing legacy tests remain in the reference but are not Diana acceptance.
@@ -137,6 +138,18 @@ as same-name UTF-8 TXT only: reuse existing text, otherwise convert with Poppler
 the original public URLs for online consultation. This does not change the
 separate core E2E fixture/toolchain integrity requirements.
 
+## SHA-256 verification
+
+Agents MUST NOT initiate or repeat SHA-256 verification of downloads, tools,
+fixtures or caches without explicit user authorization for that verification.
+"Best practice", an existing hash field/lockfile, old planning text or a generic
+request to finish a task is not sufficient authorization. If an acceptance
+command includes SHA-256 verification, explain why it is necessary and obtain
+permission before running it; do not silently waive the gate or run it anyway.
+Reuse existing evidence for unchanged artifacts. Do not add repeated whole-JDK,
+dependency-tree or cache scans, or expand verification into scripts, self-tests
+or CI without separately authorized scope.
+
 ## Engineering constraints
 
 - Treat APK/DEX input as untrusted. Check lengths/offsets/counts before slicing or
@@ -152,8 +165,10 @@ separate core E2E fixture/toolchain integrity requirements.
   unmeasured default budgets or speculative JVM-size rejection formulas. Enforce
   explicitly configured quotas without silent successful truncation; real format
   limits still apply.
-- Source semantics beat beauty; Java-unrepresentable methods use honest raw Smali
-  or Unavailable according to the design, never fake successful source.
+- Source semantics beat beauty; Java-unrepresentable methods retain their reason
+  and available original DEX facts/debug information, or an explicit Unavailable
+  with a safe excerpt. No standard-Smali/reassembly guarantee or fake successful
+  source is implied.
 - Measure performance on release builds and authorized representative inputs.
 - Keep changes focused. Read design/source/fork notes before reuse. Preserve
   reference byte content except explicitly reviewed path/provenance edits.

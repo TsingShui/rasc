@@ -1,7 +1,7 @@
 # Diana tasks and acceptance
 
 **Status: B01–B04 preparation is accepted on macOS arm64. Production packages
-remain scaffolds; no T/H task or engine E2E case is accepted. The frozen draft-6
+remain scaffolds; no T/H task or engine E2E case is accepted. The frozen draft-7
 specification holds 86 required cases and 177 must-run invocation scenarios.**
 This page owns the workflow, preparation, task cards and verification. Read
 [DESIGN.md](DESIGN.md) for interfaces and data, [ALGORITHMS.md](ALGORITHMS.md) for
@@ -56,7 +56,7 @@ input.
 
 | Increment | Tasks | Delivered behavior | Hard acceptance / condition that blocks the next increment |
 |---|---|---|---|
-| I0 Safe input | T01–T05 | Original scope/exact proto; 035 and T04 native 041; format/metadata/raw path; the same control wiring | Check ranges before allocating, never guess an unknown width; a complete raw status never omits metadata; unprepared tools or fixtures are not a pass |
+| I0 Safe input | T01–T05 | Original scope/exact proto; 035 and T04 native 041; format/metadata/raw path; the same control wiring | Check ranges before allocating, never guess an unknown width; complete decoded coverage never omits required original facts; unprepared tools or fixtures are not a pass |
 | I1 Scalar and loops | T06–T10 | Parameters/arithmetic/return, D001 merge, D002/3 loop copy and dispatcher, primitive/null/FP | Fixed SSA, parallel copy, DA initial values unobservable; cmp NaN bias and word width correct |
 | I2 Calls and objects | T11–T12, T15 | Descriptor binding, receiver/args order, adjacent new/init, field/array/cast effects | Complete catalog and checked throws, no-extra-check, allocation/init and volatile/class-init not moved |
 | I3 Ordinary natural structure | T13–T14 | Bounded Sequence/Diamond/Loop/Switch; an unmatched graph still uses the legal dispatcher | Same-case behavior equal, never compare text; charge before candidates, no duplicated effect, no reordered copy |
@@ -112,7 +112,7 @@ the actual execution evidence are recorded in
 other auxiliary tests, CLI black-box tests or ART execution. The original pass
 conditions remain unchanged.
 
-[B01 review](batches/b01-spec-review.md) approves the unchanged draft-6 bytes.
+[B01 review](batches/b01-spec-review.md) approves the original draft-6 bytes; [debug-fallback revision](batches/debug-fallback.md) records the operator-approved draft-7 output contract.
 The preparation artifacts satisfy the following gates:
 
 | Gate | Required artifact before production implementation |
@@ -152,10 +152,10 @@ specification version; these are not fake engine results.
 2. Confirm seam and validationScope, and keep method-in-known-context, full-unit,
    full-unit-set and rendered-result separate. An internal op interpreter MUST NOT
    serve as an exception or lock oracle.
-3. Mark a known-legal example that Java cannot express as Smali/Mixed. Mark a
+3. Mark a known-legal example that Java cannot express as Debug/Mixed. Mark a
    damaged input as Malformed/Unavailable; do not assert a uniform any-error for
    every negative case.
-4. Verify that a case requiring Java capability does not switch to expectedSmali
+4. Verify that a case requiring Java capability does not switch to expectedDebug
    because an implementation is missing. Specify optional beautification
    separately so that it does not affect core expectations.
 5. Lock the suite members, inputs, expected values, schema and distributable
@@ -333,16 +333,14 @@ E2E as passing.
    context, and compare return bits, u16 values, events, exception and heap through
    the Driver. Fail immediately on a missing class, error, timeout or empty output;
    do not grep javac errors away.
-3. The raw smali adapter assembles the original class shell with the original
-   required methods and then compares through an independent projection. A lost
-   branch, payload, handler, UTF-16 value or reference MUST fail.
+3. Parse the actual debug source snapshot and compare it with independently decoded original facts. Lost instructions/register words, branches, payloads, handler priority, UTF16 units or references fail. No standard-Smali syntax, complete assembly shell or output reassembly is required.
 4. Injected result mutations verify the verifier only: wrong return, missing event,
    swapped catch, changed float 0, lossy surrogate, truncated raw, wrong error
    kind, missing invocation, missing artifact, timeout and 0 cases. `verify-harness`
    MUST reject each item; D069 `TargetExists` MUST NOT match a CRC or budget error,
    and D070 empty output MUST NOT match success. A correct reference is acceptable.
    Implementing these tool self-tests still needs separate authorization.
-5. Fix the `expected_java` and `expected_raw` classification; do not dynamically
+5. Fix the `expected_java` and `expected_debug` classification; do not dynamically
    filter required members by the engine's current capabilities. An implementation
    milestone selects a fixed ID group explicitly, while the whole core suite
    always reports the full required denominator as not passing.
@@ -390,7 +388,7 @@ a wrong oracle:
 | Specification or oracle is genuinely wrong | Re-verification against the original source, the JVM, the DEX specification or an independent decoder; never engine output | Independent review, case revision, keep the old reason with the new expected value; no refresh hidden in an implementation PR |
 | Tool version or fixture rebuild | New artifact hash, recipe difference, input semantic projection and reference result | Independent tool-lock change; MUST NOT hide a regression or delete a critical opcode |
 | Public interface implementation change | A thin adapter update where the problem and expected values stay unchanged | Change only the adapter; do not bulk-edit cases to follow private phase structures |
-| Not-yet-implemented Java feature | No evidence permits changing expected values | The case still fails or reports not-implemented; do not switch it to a Smali success or exclude it |
+| Not-yet-implemented Java feature | No evidence permits changing expected values | The case still fails or reports not-implemented; do not switch it to a Debug success or exclude it |
 
 Core Java, negative raw, invalid input and the safety/domain suites are reported
 separately. During implementation, each task card turns a fixed case group green
@@ -412,7 +410,7 @@ are recorded in §3; engine results remain not-implemented.
 
 In schema 2 each invocation carries its own id, input and expected value, and a case
 carries `acceptanceGate`, `designRefs`, `inputRequirements` and symbolic `targets`.
-draft-6 maps each used expected field through `assertionSources` and records a
+draft-7 maps each used expected field through `assertionSources` and records a
 case-specific `mutationObservation`. These records are in the sole case
 specification, not an adapter inference from expected values. The specification
 MUST NOT pack several inputs into one any-error and MUST NOT count a case as passing
@@ -463,13 +461,13 @@ values.
 | D081–D082 | Dynamic lock mismatch at one static site is rejected, and a legal loop over a parameter lock is accepted | T19; T25 |
 | D083 | Extreme signed sparse keys with bounded handling | T14; T25 |
 | D084 | A non-canonical synthetic bridge keeps raw/effect and is not labeled Generated | T21; T25 |
-| D085 | When a local invoke-custom fails, Java/Smali, UTF-16, original identity and spans are all preserved, and default text does not hide Mixed | T03/T04/P9, H05; T25/H08 own their seams |
+| D085 | When a local invoke-custom fails, Java/Debug, UTF-16, original identity and spans are all preserved, and default text does not hide Mixed | T03/T04/P9, H05; T25/H08 own their seams |
 
 T01/T03/T04 supply the D086 input and resource contrast between default-unlimited,
 explicit `Some(n)` and complete raw; T25 rolls it up. D085 verifies complex result
 preservation and raw/UTF-16/span integrity through a public module without starting
 the CLI, and adds no test for a format flag, a status getter or output formatting. A
-default-display correction MUST NOT turn an existing positive Java case into a Smali
+default-display correction MUST NOT turn an existing positive Java case into a Debug
 success.
 
 This mapping MUST NOT automatically classify new cases as Java positive. The
@@ -496,7 +494,7 @@ clarifications are not B01 approval or B03 input certification.
 | V3 Structure | op/edge coverage, transfer target, try/handler order, monitor release | Independent verification of Structure/Protection/Monitor certificates; matching behavior fixtures | Fewer labels/gotos/states does not prove correctness; a visited set is not enough |
 | V4 JavaLegality | method/class context, member binding, primitive/ref/null, checked throws, constructor/final/nested/enum/annotation | P8 validator plus **a real javac exit=0 on the complete classpath** | Compilable Java does not prove equivalence; ignoring a missing-dependency error is not a pass |
 | V5 Behavior | return, heap/call log, exception and cleanup, loops, locks, initialization, string/FP bits | Isolated-run differential between self-made baseline source and recovered Java; authorized ART environment when required | Implementation-dependent behavior where JVM≠ART, uncovered paths, all inputs |
-| V6 RawFallback | standard smali completeness and original instruction/metadata semantics | Self-made legal fixture → smali → controlled assembler → DEX semantic field comparison | A raw excerpt is not smali; byte-identical offsets are not a necessary condition |
+| V6 DebugInformation | Available original code/declaration facts and honest coverage after Java failure | Public debug snapshot and actual rendered source slice versus independent original-input projection | Debug information is neither verified Java nor reassemblable Smali; a byte excerpt does not imply decoded coverage |
 | V7 System | status denominators, budget/trace/catalog consistency, actual source spans, unordered-output completeness, license, performance | A report with no empty run, identity-linked records and evidence, several arrival orders, document/schema checks | Cross-run text or record arrangement is not required to match; a release success or multithreading does not prove quality |
 
 Each capability has at least one positive case, one counterexample that can break its
@@ -526,9 +524,10 @@ denominator at the same time:
   records the owner generation rule; the report MUST NOT print a conflicting
   declaration twice or count it as DeclarationOnly. A full unit MUST generate the
   expected behavior from that owner syntax; a get-method that cannot be expressed on
-  its own still yields the original Smali and gets no invented wrapper.
-- `Smali` (verified raw plus all instructions and required metadata); kept separate
-  from `Unavailable`.
+  its own still yields the original Debug and gets no invented wrapper.
+- `Debug` (checked original facts with explicit complete/partial coverage); it is
+  neither executable source nor a reassembly promise, and remains distinct from
+  `Unavailable` with only a safe excerpt or no recoverable information.
 - `Unavailable` (damaged/unknown width/no reliable fallback/resource failure), with
   the diagnostic reason Malformed, Unsupported, BudgetExceeded or InternalInvariant.
 - `JavaUnit` and `Mixed` class counts; a single inner fragment, missing shell
@@ -538,7 +537,7 @@ denominator at the same time:
 - Per-reason counts for missing catalog, known unsupported instruction, exception
   profile, monitor profile and constructor profile.
 
-For example, report `Java=12/20 executable, DeclarationOnly=3, Smali=5,
+For example, report `Java=12/20 executable, DeclarationOnly=3, Debug=5,
 Unavailable=3; JavaUnit=1/4; BehaviorVerified=10/12 in env X` rather than
 "17/20 can be emitted, so 85% succeeded". A Java fragment that cannot really compile
 MUST NOT count as a V4 pass even when P8 succeeds.
@@ -727,10 +726,10 @@ Engine::Report or the CLI command surface.
 
 | Expected assertion family | Independent actual source and comparison |
 |---|---|
-| `outcome`, Java/Smali inclusion, `hasBody`, `noJava`, `noFakeJavaUnit`, `noFallbackReport` | Public Report/RequestError and complete original-member set; Java capability requires the fixed validationScope, and resource/cancel/BUG cannot become Unsupported success |
+| `outcome`, Java/Debug inclusion, `hasBody`, `noJava`, `noFakeJavaUnit`, `noFallbackReport` | Public Report/RequestError and complete original-member set; Java capability requires the fixed validationScope, and resource/cancel/BUG cannot become Unsupported success |
 | `reason`, `unsupportedReason`, `errorKind`, `otherErrorKind`, `limit`, `targetItem` | Typed failure kind/code and configured failing item; snake_case projects public domain reasons, while named Unsupported reasons retain their specific code |
 | Returns, FP bits, string units, events, exception, heap, monitor and enum/annotation observations | Same isolated Driver and fixed entry/setup on baseline and recovered code; exact program order and type-directed bits/u16 comparison under §4.3.1 |
-| `rawExact` and declaration/dynamic/bridge/payload/handler/ref/string integrity | Independently decoded original fixture versus reassembled output projection; compare original opcode forms, register words, ordered targets/effects, metadata and encoded value kinds/bits, not output text |
+| `debugFactsExact` and declaration/dynamic/bridge/payload/handler/ref/string integrity | Actual original-information snapshot versus the certified input projection; preserve original PCs, opcodes/registers, ordered targets/effects/handlers, payload bits, references and u16 values. Parse the actual rendered snapshot independently; no assembly or text-layout golden |
 | Original members, Generated, final fields/proto, `orderedInvokeSites`, `declarationsPreserved`, `constantValueAbsent` | Original certified declaration/code projection plus actual compiled output/reflection where required; inspect all selected members, not only ones that compiled |
 | `sourceSpansExact`, `textAvailable`, `failedMethodHasNoJavaBody` | Real rendered UTF8 and original-key spans; bounds and exact member/raw slice extraction, with relocated Mixed prefixes; no private AST or language-getter substitute |
 | Defined methods, absent refs, referencing method/site count and `allCertifiedSites` | Public query's original-key multiset versus certified definitions or direct operand sites; independent row order ignored, duplicate/missing sites fail |
@@ -800,7 +799,7 @@ abstract declarations get their own count.
 |---|---|---|---|
 | F00 ResourceControl | Budget isolation, failure release and cancellation stop of a public request | Real boundaries and overrun, fallback does not bypass the budget; basic enums, wrappers and private call order are not tested | T01/T05; V7 |
 | F01 TinyDex | Self-made small header/catalog/exact proto/abstract | Exact method key and raw ranges; M01/M02 out-of-range, LEB and count failures | T02; V0 |
-| F02 RawMethods | move/return/wide/range/branch formats | Complete standard raw smali; U01 keeps raw although Java does not support it; M03 unknown width MUST NOT fake smali | T03/T05; V0/V6 |
+| F02 RawMethods | move/return/wide/range/branch formats | Original DEX facts remain analyzable when Java is unsupported; M03 unknown width keeps explicit original bytes without guessed instructions | T03/T05; V0/V6 |
 | F03 Utf16Payload | NUL, quote, backslash-u, isolated surrogate, switch/fill, debug/encoded | u16/bits/payload target preserved; M04 truncated/overflow/metadata rejection | T04/T05; V0/V6 |
 | F04 HarnessSelfTest | Missing tool, wrong checksum, 0 selected, syntax or behavior failure | The harness itself MUST be red and contributes no Java result; separate §3 authorization remains required | B02/B04, reused in T05; V7 |
 | F05 ScalarReturn | answer 7, param 41+1, int wrap MAX+1 | The target method returns correctly with correct locals; early runs may use method-in-known-context with the class honestly marked Mixed; M05 undefined/bad return/instruction/cancel rejection | T06; V0/V1/V2/V4/V5 |
@@ -809,7 +808,7 @@ abstract declarations get their own count.
 | F08 DispatchGraph | Ordinary two-entry cycle, multiple exits, throw terminal | Dispatcher returns and logs agree; M08 lost/duplicate/default/eligibility failures | T09; V3/V4/V5 (with the smali oracle limitation) |
 | F09 PrimitiveBits | boolean/int/ref 0, wide, shift, FP NaN/-0/cmp bias/conversion | Core bits and exceptions agree without library calls; a bitcast subcase without P4 evidence stays Unsupported in this card; M09 partial-wide/unresolved-type rejection | T10; V1/V4/V5 |
 | F10 CallKinds | static/private/super/virtual/interface, overload/null, effect args | Same callee, argument order and call result; M10 bad result/kind/proto/visibility | T11; V1/V4/V5 |
-| F11 MissingCatalog | F10 legal raw with empty/partial external facts | Smali plus BindingEvidenceMissing; Java with a complete catalog; public facts MUST NOT be invented | T11; V6/V7 |
+| F11 MissingCatalog | F10 legal raw with empty/partial external facts | Debug plus BindingEvidenceMissing; Java with a complete catalog; public facts MUST NOT be invented | T11; V6/V7 |
 | F12 AdjacentConstruction | Args ready, new/init/pure alias, super/this chain | Construction trace identical; U02 complex pre-super/may-throw/lock rejection | T12; V1/V4/V5/V6 |
 | F13 NaturalControl | Ordinary if/while, nested loop, break/continue | Both the natural and dispatch adapter agree; M11 duplicate region/lost edge | T13; V3/V4/V5 |
 | F14 IntegerSwitch | packed/sparse, negative/extreme/shared/fall/default | Selector evaluated once, copy edge exact; M12 payload/key/bounds | T14; V0/V3/V5 |
@@ -1055,11 +1054,7 @@ Acceptance notation (it applies to every later task card):
   independent oracle, compares return, exception, heap, effect, UTF-16 and FP bits.
   The evidence scope of a mirror, hand-written scalar or ART case obeys §4.3 and does
   not check javac success alone.
-- **S(F…/U…)**: the Smali loop of the corresponding legal raw case. The recovered
-  complete Smali method or declaration assembles through the pinned assembler inside
-  the original shell, and an independent projection compares opcode, words, refs,
-  targets, payload, handler priority, UTF-16 and metadata. An Unavailable or excerpt
-  result for a Malformed or unknown-width input is not an S pass.
+- **S(F…/U…)**: the original-information check of the corresponding fixed case. Compare actual public debug source/facts with the independent input projection, including identity, opcode/register words, PCs, refs, targets, payloads, handler order and UTF16. Malformed or unknown-width inputs retain their actual failure and safe excerpts, not a fabricated complete-decoding pass.
 - The parenthesized labels are capability-family and counterexample tags, not
   executable case selectors. Concrete inputs and expected values come only from the
   JSON and the D ID named by the task card (for example D009 in T06); an author MUST
@@ -1207,65 +1202,57 @@ explicitly before allocation, with no panic.
 source-support decisions, calling a third-party parser first and guarding
 afterwards.
 
-## T03 — Instruction format table and the independent raw smali path
+## T03 — Instruction formats and the original-information debug exit
 
 **Dependencies**: T02. **Phase**: P1/P2 (raw decode)/P9. **References**: DX-11,
 RG-02/05.
 
 **Files**: `src/p1_input/formats.rs`, `src/p2_flow/decode.rs`,
-`src/p9_emit/{mod,smali,spans}.rs`, `src/engine.rs`, smali and input tests.
+`src/p9_emit/{mod,debug,spans}.rs`, `src/engine.rs`, input/debug tests.
 
-**Input→output**: `RawMethodView` → `validate_raw(Vec<RawInsn>)` →
-`ValidatedRawMethod` (offset, width, operands, original words) → standard-smali
-MethodOutput. Keep knownUnsupportedJava separate from unknownFormat, where
-unknownFormat is Unavailable plus a hex excerpt. The format table covers the
-standard opcodes registered in ALGORITHMS §1 and their version gates, and Java
-lowering follows the rules of T06–T23.
+**Input→output**: checked original ranges → original instruction/declaration
+facts → readable debug snapshots under ALGORITHMS §7. Java analysis consumes
+validated raw facts; the debug exit retains available facts even when the whole
+method cannot be validated. Known unsupported Java and unknown instruction width
+remain distinct. No standard-Smali or reassembly guarantee is made.
 
 **Steps**:
-1. Define opcode, mnemonic, format, width and version in one table shared by the
-   decoder, the format validator and the smali printer, so the length table and the
-   printing table do not drift.
-2. The first pass marks instruction starts and payload starts and checks operand
-   registers, indexes and wide words; the second pass checks branches against the
-   relative PC and instruction boundaries. T04 completes fill payloads; for now record
-   the legal format, reject the Java form and do not claim complete metadata smali.
-3. Name emitted labels stably from the code unit and preserve the invoke/range
-   register-word count; do not wrongly split words according to source parameters.
-4. On the Engine Unsupported path discard the partial analysis source and call only
-   the raw adapter. Smali text emits every instruction, a goto MUST NOT be deleted as
-   a Nop, and the header, register and return types are complete.
-5. Add byte spans for the member declaration or reference and for InsnOrigin. Before
-   T04 only a case whose original input has no pending metadata and whose instructions
-   are complete MAY be marked Smali. When unsupported metadata exists, emit
-   Unavailable plus RawExcerpt and never a "metadata incomplete" Smali success.
+1. Share opcode, mnemonic, format, width and version facts between the decoder,
+   validator and debug renderer. Do not guess a missing instruction width.
+2. Check instruction/payload starts, registers, word counts, references and branch
+   targets. Preserve original PCs and invoke word order; T04 supplies payloads,
+   strings and metadata facts.
+3. On Java failure discard its unverified source, release unused scratch and show
+   the original method identity, typed reason, reliable instructions, targets,
+   payloads, handler order and referenced values. Other methods keep their Java.
+4. Expose the same snapshot in default text and JSON, with actual source spans.
+   Partial decoding identifies missing ranges and any safe original-byte excerpt;
+   it never fabricates instructions, Java bodies or complete coverage.
+5. Charge the same request and any explicit fallback quota. Cancellation stops
+   immediately; Malformed/BUG/resource failures retain their actual failure kind.
 
-**Invariants / limits**: Every raw instruction has exactly one standard
-expression or an explicit unsupported raw status; an illegal unknown op MUST NOT
-be guessed as one word and continued. The fallback checks explicit limits only
-and, when none are configured, MUST NOT add a fixed reserve or a code-length
-threshold.
+**Invariants / limits**: The debug exit reads only original checked bytes/facts,
+not private Java analysis products. It does not assemble, retry another engine,
+raise limits or introduce numeric default quotas.
 
-**Tests**: F02 `RawMethods`: return, moves, wide and range invoke, and branches
-without debug or annotation metadata; U01 keeps the complete known raw although
-Java does not support it; M03 truncated operand, branch into an instruction,
-invalid register or index, unknown opcode. Compare the original words and
-offsets item by item, and mark an original input with pending metadata
-explicitly Unavailable.
+**Tests**: F02 and the fixed negative cases compare actual original-information
+snapshots with independent decoded inputs, including words, PCs, references,
+branches and explicit unknown regions. Unavailable/partial information remains
+honest; it is not counted as verified Java or executable source.
 
-**Acceptance**: G0 plus `cargo test -p diana-decomp --test contracts t03_`, with
-S(F02) added after T05. **Completion**: No known instruction of the raw fixtures
-is missing, M03 causes no panic, and an unknown word MUST NOT become fake smali.
+**Acceptance**: G0 plus nonzero `t03_` public-interface cases and S(F02) after T05.
+**Completion**: Supported facts stay analyzable after Java rejection; a local or
+unknown-width failure neither guesses code nor discards other members.
 
-**Not in scope**: A bytecode interpreter, retrying unsupported as Java,
-generating a throwing stub, spawning the assembler in production.
+**Not in scope**: A bytecode VM, standard-Smali output, output reassembly,
+alternative engines, exception stubs or a recovery subsystem.
 
 ## T04 — Lossless UTF-16, payload and raw metadata completeness
 
 **Dependencies**: T03. **Phase**: P1/P9. **References**: RG-06/07/09, DX-08/11.
 
 **Files**: `src/p1_input/{strings,payload,values,debug}.rs`,
-`src/p9_emit/{smali,literals}.rs`, `src/substrate/types.rs`, input and literal
+`src/p9_emit/{debug,literals}.rs`, `src/substrate/types.rs`, input and literal
 fixtures.
 
 **Input→output**: MUTF-8 → `DexString(Vec<u16>)`; a valid switch/array payload,
@@ -1285,11 +1272,11 @@ MUST NOT become literal truth.
    byte bits; a payload is not an executable block.
 3. Decode the debug program opcode by opcode within bounds and check address
    increments, line values and sign overflow. If that metadata cannot be decoded
-   reliably, mark it Malformed or Unsupported and do not promise complete smali.
+   reliably, retain the actual failure and mark the unavailable metadata explicitly; other checked facts remain visible.
 4. Bound the annotation and encoded-array stacks and reject an illegal value width,
    tag or index. Preserve system metadata under its original identity and do not emit
    it as a Java keyword.
-5. Handle Java and smali literals per ALGORITHMS §4 for NUL, newline, backslash-u and
+5. Handle Java literals and JSON debug snapshots per ALGORITHMS §4 for NUL, newline, backslash-u and
    surrogate. Walk the logical header chain of 041 per §1.1: `file_size` is only a
    step size, and every section offset stays a physical coordinate that may point to
    later shared data but never to earlier data. Do not overlay or re-checksum.
@@ -1301,11 +1288,11 @@ all payload bytes and charge the nested count depth; never run
 **Tests**: F03 `Utf16Payload`: unpaired high and low surrogates, NUL, the
 literal `\\u000a`, NaN bit patterns, sparse and packed switch, fill array; M04
 negative relative payload, overlap, oversized array or annotation, bad debug
-target and unterminated MUTF-8. A later S(F03) checks smali → DEX literal and
-payload equivalence.
+target and unterminated MUTF-8. A later S(F03) checks original debug facts against independently decoded literal and
+payload values.
 
 **Acceptance**: G0 plus `cargo test -p diana-decomp --test contracts t04_`, with
-S(F02, F03) after T05. **Completion**: The raw round-trip comparison explains
+S(F02, F03) after T05. **Completion**: The original-information comparison explains
 per field either exact preservation or explicit unsupported status, with no
 silently lossy value.
 
@@ -1324,7 +1311,7 @@ prepared, and do not copy a second oracle or tool source.
 
 **Input→output**: Build the Flow/Ssa/Typed/Storage/PlannedBody backbone and its
 private constructors per DESIGN §3.2; the fixture manifest drives native input
-tests, the smali assembly check and the javac/d8 round trip. Verify
+tests, independent debug-fact comparison and the javac/d8 behavior loop. Verify
 DeclarationOnly and a raw method first, and never treat an empty AST as success.
 
 **Steps**:
@@ -1344,9 +1331,7 @@ DeclarationOnly and a raw method first, and never treat an empty AST as success.
    content lock and the checkout cache; do not look for a personal SDK, a platform jar
    or a local reference-repository directory. A missing tool or wrong hash fails, and
    subprocesses run test tooling only.
-5. Wire raw → smali → controlled assembler → independent raw projection comparison and
-   check it against the frozen original-content evidence such as D059–D061; do not
-   delete a catch, string or payload expectation for current capability.
+5. Compare the actual debug snapshot and its rendered source slice against the independent original-content evidence, including D059–D061. Keep original identities, instruction/register/target/payload/handler/reference facts and UTF16 units; no output assembler is involved.
 6. Have the public development example emit Report status and spans, reused by the
    other core tests, instead of calling a private printer directly.
 
@@ -1359,7 +1344,7 @@ actual Engine result integration: a real wrong return, missing event, wrong raw
 or compile error is rejected by the same comparator, and a correct source
 reference is accepted. A missing tool or hash error stays a failure, and a
 required member MUST NOT change because the real engine does not support it.
-S(F02/F03 fixed D case groups) MUST run through the real assembler.
+S(F02/F03 fixed D case groups) MUST inspect the actual public debug output and its original-fact projection.
 
 **Acceptance**: G0 plus nonzero real semantic and raw tests of the public
 adapter, referencing the suite frozen by B04. **Completion**: The same fixed
@@ -1384,7 +1369,7 @@ DX-01/02/08, RG-02.
 **Input→output**: The selected static method of F05 `ScalarReturn` yields a
 VerifiedJavaMethod through the real schedule. A class containing an unsupported
 member such as a constructor is honestly marked Mixed, and an unsupported other
-method stays raw smali. This card does not require a complete ordinary class to
+method stays original DEX debug. This card does not require a complete ordinary class to
 be a JavaUnit. P4 returns an empty valid binding when there is no call, and P7
 returns a single-block plan when there is no complex region; the card MUST NOT
 claim either is fully implemented.
@@ -1444,7 +1429,7 @@ beautification, generic typed-helper generation.
 
 **Input→output**: normal-branch FlowBody → SsaBody with join inputs identified
 by EdgeId and stable ValueIds. A method that Java copy lowering does not fully
-support yet MAY be Smali, but the internal SSA MUST be fully verified.
+support yet MAY be Debug, but the internal SSA MUST be fully verified.
 
 **Steps**:
 1. Build block leaders from the entry, branch targets and after-terminal positions;
@@ -1650,7 +1635,7 @@ KU-01.
 
 **Input→output**: raw invoke plus a complete or unknown catalog → CallEvidence
 with exact kind, owner and proto, a bound receiver plus argument words, and a
-typed result; missing binding facts → Smali, never "the call looks right, so
+typed result; missing binding facts → Debug, never "the call looks right, so
 emit it".
 
 **Steps**:
@@ -1676,7 +1661,7 @@ needs evidence.
 
 **Tests**: F10 `CallKinds`: overload int/long/Ref/null, virtual override,
 interface, private/direct, super, effect arguments, unused throwing call; F11
-`MissingCatalog` gives Java for the same input when complete and explicit Smali
+`MissingCatalog` gives Java for the same input when complete and explicit Debug
 when empty; M10 bad result/argument words/static receiver/visibility/return-only
 overload. The D071 call consumes the sealed range; D080 verifies Constant and
 Unknown rejection separately and adds no initialization helper.
@@ -1724,7 +1709,7 @@ are preserved; there is no universal static helper.
 **Tests**: F12 `AdjacentConstruction`: pure move alias, arguments ready before
 allocation, super trace → body trace, this chain; U02 `ConstructorPrologue`: a
 pre-super this field, control flow/monitor/may-throw arguments, duplicate init,
-which MUST be Smali rather than Java.
+which MUST be Debug rather than Java.
 
 **Acceptance**: G0 plus this card's public core cases (unified rules in §4);
 B(F12) plus S(U02). **Completion**: The constructor trace order agrees, every
@@ -1972,7 +1957,7 @@ boxes every exception, a dead-copy heuristic on exception paths.
 
 **Input→output**: A single contiguous interval with independent handlers and a
 clear normal join → ProtectionCertificate → Java try/catch. A graph outside the
-profile stays Smali, and the ordinary dispatcher MUST NOT accept an exception
+profile stays Debug, and the ordinary dispatcher MUST NOT accept an exception
 graph.
 
 **Steps**:
@@ -2000,12 +1985,12 @@ or Unsupported MUST distinguish an algorithm BUG from an unsupported shape.
 **Tests**: B(F16, F17); F18 `ProtectedControl`: ordered subtype catches, an
 unexpected error through catch-all or rethrow, cleanup return or throw, cleanup
 throwing itself, one nested level; U03 `ComplexProtection` with normal reentry,
-shared handlers or an unknown release needs Smali; M16 a missing edge, an
+shared handlers or an unknown release needs Debug; M16 a missing edge, an
 expanded try, swallowing an exception from outside the call.
 
 **Acceptance**: G0 plus this card's public core cases (unified rules in §4);
 B(F16, F17, F18) plus S(U03). **Completion**: A positive protected method really
-runs as Java, a negative stays smali, and an incomplete finally recovery does
+runs as Java, a negative retains original debug information, and an incomplete finally recovery does
 not affect the real trace.
 
 **Not in scope**: Arbitrary exception ownership, finally beautification on all
@@ -2021,7 +2006,7 @@ paths, a label goto across a try, swallowing an exception so that javac passes.
 
 **Input→output**: A declaration flag or an explicit balanced monitor CFG →
 MonitorCertificate → Java synchronized; an unknown or mismatched lock state →
-Smali, never a fake Java keyword.
+Debug, never a fake Java keyword.
 
 **Steps**:
 1. Review the raw flag semantics and keep the implicit lock of a synchronized method separate
@@ -2045,7 +2030,7 @@ profile instead of assuming balance.
 
 **Tests**: F19 `MonitorScope`: return/throw/null lock, nested/reentrant, static
 and instance method, a `Thread.holdsLock` driver in the body, lock release after
-a finally throw; U04 mismatched lock, missing exit, multiple entry → Smali;
+a finally throw; U04 mismatched lock, missing exit, multiple entry → Debug;
 negative coverage on native verify. D081/82 fix rejection of a re-executed
 dynamic root and acceptance of a parameter root in a loop, and MUST NOT fall
 back to raw just because a loop exists.
@@ -2098,7 +2083,7 @@ clinit field overwrite loses no origin.
 **Tests**: F20 `Initialization`: non-constant static field trace, multiple
 constructors, this delegate, blank final, encoded null/false/float bits, init
 exception; U05 complex final reassignment or an unprovable default →
-Mixed/Smali; B(F20) runs each driver in a new process so class-init has not
+Mixed/Debug; B(F20) runs each driver in a new process so class-init has not
 already happened. D046 MUST show explicit encoded tags; D079 recovers Case and
 Reader separately and compiles them together, checking class-init and the real
 getstatic.
@@ -2133,7 +2118,7 @@ arbitrarily.
    canonical moves, cast, target call and return, and the source MUST generate a bridge with
    the same signature and behavior before the card suppresses the duplicate print. Generated
    still has code and an original MethodKey and does not count as DeclarationOnly; a bridge
-   that a standalone request cannot express returns the original Smali.
+   that a standalone request cannot express returns the original Debug.
 3. A Java interface or override implementation keeps its return, throws and visibility
    consistent with the raw contract, and a generic parent member binding MUST NOT be guessed
    from the local descriptor alone.
@@ -2146,7 +2131,7 @@ and source public identity is unchanged.
 
 **Tests**: F21 `ErasedContracts`: self-made generic List/identity, covariant
 bridge, raw interface impl, null overload; U06 a return-only DEX overload, a
-differing bridge effect, an unknown parent contract → Smali/Mixed; B(F21) with a
+differing bridge effect, an unknown parent contract → Debug/Mixed; B(F21) with a
 matching complete self-made classpath. D048/D084 require a canonical Generated
 bridge and rejection of an effectful bridge respectively; D075 includes the
 target boundary of a code-free declaration, and D078 requires 2200 abstract
@@ -2181,7 +2166,7 @@ the whole class.
    access facts; keep the original MethodRef and FieldRef in a sidecar mapping.
 3. Implement a legal nested name first; an anonymous original MAY be reported as a synthetic
    named class, but access, capture and constructor semantics MUST agree; an inexpressible
-   declaration keeps smali.
+   declaration keeps original debug information.
 4. Reject a package, import, name or visibility conflict in the unit and a top-level static
    class; route a single inner fragment into a Mixed context and do not impersonate a
    JavaUnit.
@@ -2230,7 +2215,7 @@ be Java.
 4. Keep raw metadata in a sidecar, but a missing runtime annotation MUST NOT claim identical
    full-class semantics; when policy allows an inspection-only Java fragment, Mixed marks it
    as not a complete unit.
-5. The status assembler verifies that any Smali, Unavailable or unsupported declaration makes
+5. The status assembler verifies that any Debug, Unavailable or unsupported declaration makes
    the result Mixed; an error counter of 0 MUST NOT be taken as a JavaUnit.
 
 **Invariants / limits**: Metadata full source differs from inspection only;
@@ -2321,7 +2306,7 @@ every DEX is Java.
 **Steps**:
 1. Check the manifest fixed by B01–B04 against the actual typed transitions; a required
    member MUST NOT be deleted or skipped because of the current implementation, and
-   turning a core-Java failure into a Smali success is unacceptable. Assert that no filter
+   turning a core-Java failure into a Debug success is unacceptable. Assert that no filter
    reduces the required set to zero; state the unsupported lists for known 038/039, custom
    and polymorphic cases and their raw coverage separately; an unknown format MUST NOT fake
    a fallback.
@@ -2332,7 +2317,7 @@ every DEX is Java.
    default-unlimited and explicit-limit contrast. Rejection MUST NOT use an estimated cost,
    and a real JVM format boundary MUST NOT become a configurable resource budget.
 3. Every known-unsupported legal fixture gets an S gate; a Malformed Unavailable or raw
-   excerpt does not impersonate smali, and a BUG does not count as success. A fallback policy
+   excerpt does not impersonate decoded instructions, and a BUG does not count as success. A fallback policy
    that swallows an exception or type error MUST fail its counterexample.
 4. V4 compiles with Temurin 21.0.8+9 `--release 8 -proc:none -g:none`, reads the classfile
    independently and records the actual code, locals, stack, handler and pool, checking the
@@ -2380,7 +2365,7 @@ with implementation status, and §4 lists the run commands.
 **Completion**: A traceable EngineCoreRC report where every core obligation and
 invocation listed in the JSON is accepted against independent expectations; the
 product ledger still shows every required item, with no empty or skipped item
-and no Java-to-Smali answer change. While a counterexample is unfixed, the
+and no Java-to-Debug answer change. While a counterexample is unfixed, the
 capability stays Unsupported and the required item still does not pass, so the
 author MUST NOT declare CoreRC.
 
@@ -2629,7 +2614,7 @@ the whole engine.
 **Input→output / Interface**: a canonical `get-class`/`get-method` selector →
 Engine Report → default decompilation text or the JSON representation of the
 same result. By default the CLI delivers the existing
-Java/Mixed/Smali/Unavailable content directly, and a local failure does not
+Java/Mixed/Debug/Unavailable content directly, and a local failure does not
 clear the other members; there is no old-command alias and no dual engine.
 
 **Steps**:
@@ -2640,7 +2625,7 @@ clear the other members; there is no old-command alias and no dual engine.
    constraints keeps raw plus its language marker.
 3. Display the selected result directly per ALGORITHMS §8.1: a JavaUnit as complete Java, and
    Mixed keeping the shell, the successful Java and the raw or reason of the failing method;
-   the Smali or Unavailable of get-method is equally visible. Text and JSON do not change
+   the Debug or Unavailable of get-method is equally visible. Text and JSON do not change
    algorithm eligibility, and no `--require-java` exists; a hard error keeps its nonzero
    status, and an existing fully renderable Report is not discarded because of it.
 4. Keep the complete method owner/name/proto or method-at per DESIGN.md, with Mixed carrying
@@ -2649,7 +2634,7 @@ clear the other members; there is no old-command alias and no dual engine.
    and no MCP envelope is designed.
 5. Keep the old implementation in ref-fork for reading only, leaving no active old entry
    point, dependency or dual-engine routing. A Diana request MUST NOT silently fall back to
-   dexdec; a failure follows only the original raw smali contract.
+   dexdec; a failure follows only the original original DEX debug contract.
 
 **Invariants / limits**: The request source and method proto are exact and the
 output status is truthful, with language eligibility separated from full display
@@ -2749,7 +2734,7 @@ deferred.
    TSV header and escaping and the JSON domain fields follow DESIGN.md, and no old member
    prefix is added. The complete method selector contains name and proto instead of the old
    separate `--method`/`--proto` pair, and `at` can be passed back.
-2. A complete Mixed or Smali display of a local default Unsupported may exit 0 exactly like
+2. A complete Mixed or Debug display of a local default Unsupported may exit 0 exactly like
    JSON without becoming a JavaUnit; usage errors exit 2, a missing single object exits 3,
    ambiguity exits 4 and an empty query set exits 0. Malformed, BUG, BudgetExceeded, Cancel and I/O
    still fail, and an existing fully renderable result is kept with a nonzero exit. The old
@@ -2839,7 +2824,7 @@ published.
 **Completion**: Every required case and invocation in the JSON is accepted
 against independent expectations, reusing T25 engine evidence and completing the
 application side of engine-and-application and the application cases; nothing is
-removed or skipped and no core Java becomes Smali. MCP stays deferred, and the
+removed or skipped and no core Java becomes Debug. MCP stays deferred, and the
 basic interface gets no additional automated test.
 
 **Not in scope**: MCP migration, directly deleting `src/mcp`, a release or tag,

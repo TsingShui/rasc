@@ -2,13 +2,12 @@
 from __future__ import annotations
 import copy
 import json
-import os
 from pathlib import Path
 import sys
 
 from .adapter import required_runs, run_unimplemented
 from .compare import Mismatch, exact
-from .evaluate import compare_suite
+from .evaluate import compare_suite, debug_view, original_debug_facts
 from .filesystem import assertions as file_assertions
 
 REFERENCE_CASES=['D009','D018','D016','D052','D061','D069']
@@ -34,19 +33,19 @@ def verify_harness(root,cache,tools):
     locked={(c['id'],i['id']):i for c in manifest['cases'] for i in c['invocations']}
     assets={a['id']:a for a in manifest['assets']}
     records=[]
-    # A correct raw control is independently assembled again from the complete
-    # checked-in owner; it is not Diana output or a mock engine.
-    raw_dex=directory/'raw-reference.dex'
-    run([tools.java,'-cp',tools.cp,'org.jf.smali.Main','assemble','--api','23','-o',raw_dex,
-         root/'tests/e2e/sources/D061/fixtures/Case.smali'],root,directory/'raw-assemble.log')
-    raw_text=run([tools.java,'-cp',os.pathsep.join([str(cache/'projector/classes'),tools.cp]),'ProjectDex',raw_dex],root,directory/'raw-project.log')
-    raw_control=json.loads(raw_text)
+    # The positive control is an original-fact snapshot, not a mock Engine and
+    # not output reconstructed through an assembler.
+    binding=locked[('D061','v1')];original=assets[binding['input_assets'][0]]
+    decoded=load(root/str(Path(original['path']).with_suffix('.dexlib.json')))
+    physical=load(root/(original['path']+'.layout.json'))['members'][0]
+    selected=[b['selector'] for b in binding['bindings'] if b['selector']['kind']=='method']
+    debug_control=debug_view(original_debug_facts(decoded,physical),selected)
     for case,invocation,seam in required_runs(spec,REFERENCE_CASES):
         cid,iid=case['id'],invocation['id'];binding=locked[(cid,iid)]
         groups={};public={'outcome':'java','status':'java','diagnostics':[]}
         if cid=='D061':
-            public={'outcome':'smali','status':'smali','diagnostics':[{'kind':'unsupported','code':'BindingEvidenceMissing'}]}
-            groups['raw']=artifact(cid+'-'+iid+'-raw',{'actual':raw_control})
+            public={'outcome':'debug','status':'debug','diagnostics':[{'kind':'unsupported','code':'BindingEvidenceMissing'}]}
+            groups['debug']=artifact(cid+'-'+iid+'-debug',{'actual':debug_control})
         elif cid=='D069':
             original=assets[binding['input_assets'][0]];zip_doc=load(root/(original['path']+'.layout.json'));entry=zip_doc['entries'][0]
             kind='crc_mismatch' if not entry['crc_valid'] else 'encrypted_entry' if entry['flags']&1 else 'unsupported_compression' if entry['method'] not in [0,8] else 'budget_exceeded'
@@ -81,14 +80,14 @@ def verify_harness(root,cache,tools):
     def catch(value):
         m=next(m for c in value['actual']['classes'] for m in c['methods'] if m['name']=='f')
         handlers=m['code']['tries'][0]['handlers'];handlers[0],handlers[1]=handlers[1],handlers[0]
-    reject('swapped-catch',lambda:compare(changed('D061','raw',catch,'catch')))
+    reject('swapped-catch',lambda:compare(changed('D061','debug',catch,'catch')))
     reject('changed-float-zero',lambda:compare(changed('D016','driver',lambda v:v['result'].__setitem__('bits','00000000'),'zero','v1')))
     def surrogate(value):
         units=value['result']['units'];units[units.index(55296)]=65533
     reject('lossy-surrogate',lambda:compare(changed('D052','driver',surrogate,'surrogate')))
     def truncate(value):
         next(m for c in value['actual']['classes'] for m in c['methods'] if m['name']=='f')['code']['instructions'].pop()
-    reject('truncated-raw',lambda:compare(changed('D061','raw',truncate,'raw')))
+    reject('truncated-debug',lambda:compare(changed('D061','debug',truncate,'debug')))
     for iid in ['bad-crc','inflate-budget']:
         reject('wrong-error-kind-'+iid,lambda iid=iid:compare(changed('D069','outcome',lambda v:v['diagnostics'][0].__setitem__('kind','target_exists'),'error-'+iid,iid)))
     reject('missing-invocation',lambda:compare(records[:-1]))

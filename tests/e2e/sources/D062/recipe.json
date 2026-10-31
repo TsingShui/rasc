@@ -89,7 +89,7 @@
         "raw work steps",
         "request quotas"
       ],
-      "note": "Only the normal allowance is set; the omitted raw/request quotas stay None, so complete raw fallback is available."
+      "note": "Only the normal allowance is set; the omitted raw/request quotas stay None, so the original-information debug view is available."
     },
     {
       "invocation": "v2",

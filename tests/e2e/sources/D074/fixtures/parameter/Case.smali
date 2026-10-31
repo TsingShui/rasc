@@ -5,7 +5,7 @@
 # D074 target role "parameter". f([I)V fills the argument array with the two
 # I32 payload elements [7, 8] and returns. The array is not created in this
 # method, so there is no FreshArray proof: Java must stay Unsupported/ArrayFillShape
-# and the complete raw method must survive.
+# and its original instruction/payload facts remain available for analysis.
 
 .method public constructor <init>()V
     .registers 1

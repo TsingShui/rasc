@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "case": "D086",
-  "specRevision": "draft-6",
+  "specRevision": "draft-7",
   "specRef": {
     "case": "/cases/85",
     "targets": "/cases/85/targets",
@@ -83,7 +83,7 @@
           "max_method_code_units": 131072
         }
       },
-      "observation": "public classification, typed budget failure and an independent raw projection; the raw-related fields stay None so the complete round trip keeps the first return and every nop"
+      "observation": "public classification, typed budget failure and an independent raw projection; the raw-related fields stay None so the debug snapshot keeps the first return and every original nop fact"
     }
   ],
   "inputShape": {

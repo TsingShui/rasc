@@ -13,39 +13,67 @@ from .adapter import required_runs
 from .compare import Mismatch, driver_assertions, exact
 
 
-def normalized_raw(doc):
-    # Independent declarations have no report-order guarantee. Instruction,
-    # handler, argument, payload and debug sequences deliberately stay ordered.
+def original_debug_facts(original, layout):
+    # Attach original code words/counts from the independent physical reader.
+    classes=[]
+    for c in original['classes']:
+        raw_class=next(x for x in layout['classes'] if x['descriptor']==c['descriptor'])
+        methods=[]
+        for m in c['methods']:
+            raw=next(x for x in raw_class['methods'] if x['name']==m['name'] and x['proto']==m['proto'])
+            code=m['code']
+            if code is not None:
+                code={**code,'raw_words':raw['code']['units'],'ins_size':raw['code']['ins_size'],'outs_size':raw['code']['outs_size']}
+            methods.append({**m,'code':code})
+        classes.append({**c,'methods':methods})
+    return {**original,'classes':classes}
+
+
+def debug_view(original, selected):
+    wanted={(s['descriptor'],s['name'],s['proto']) for s in selected}
+    classes=[]
+    for c in original['classes']:
+        methods=[m for m in c['methods'] if (c['descriptor'],m['name'],m['proto']) in wanted]
+        if methods:classes.append({**c,'methods':methods})
+    if sum(len(c['methods']) for c in classes)!=len(wanted):raise Mismatch('missing selected debug method')
+    return {'schema':'diana.dex-debug/1','complete':True,'classes':classes,'undecoded_ranges':[]}
+
+
+def normalized_debug(doc):
+    # Only original analysis facts are mandatory, not assembly shell/debug syntax.
     classes={}
     for c in doc['classes']:
-        if c['descriptor'] in classes: raise Mismatch('duplicate original class')
-        value={k:v for k,v in c.items() if k not in {'class_def_idx','methods','fields'}}
+        if c['descriptor'] in classes:raise Mismatch('duplicate original debug class')
+        value={k:c[k] for k in ['class_def_idx','flags','super','interfaces']}
         members={}
         for m in c['methods']:
             key=m['name']+m['proto']
-            if key in members: raise Mismatch('duplicate original method')
-            members[key]={k:v for k,v in m.items() if k!='method_id_idx'}
+            if key in members:raise Mismatch('duplicate original debug method')
+            member={k:m[k] for k in ['method_id_idx','name','proto','flags']}
+            member['code']=None if m['code'] is None else {k:m['code'][k] for k in ['registers_size','ins_size','outs_size','insns_size','raw_words','instructions','tries']}
+            members[key]=member
         value['methods']=members
         fields={}
         for f in c['fields']:
             key=f['name']+':'+f['type']
-            if key in fields: raise Mismatch('duplicate original field')
-            fields[key]=f
+            if key in fields:raise Mismatch('duplicate original debug field')
+            fields[key]={k:f[k] for k in ['name','type','flags','initial']}
         value['fields']=fields;classes[c['descriptor']]=value
-    return {'classes':classes,'call_sites':doc['call_sites'],'method_handles':doc['method_handles']}
+    return classes
 
 
-def raw_assertions(original, actual):
-    # Equality is bidirectional: dropping an unmentioned original member fails.
-    left,right=normalized_raw(original),normalized_raw(actual)
-    if left!=right: raise Mismatch('raw instruction/payload/handler/ref/metadata mismatch')
+def debug_assertions(original, actual, selected):
+    if actual.get('schema')!='diana.dex-debug/1' or actual.get('complete') is not True or actual.get('undecoded_ranges')!=[]:
+        raise Mismatch('missing/partial debug snapshot cannot claim complete original facts')
+    expected=debug_view(original,selected)
+    left,right=normalized_debug(expected),normalized_debug(actual)
+    if left!=right:raise Mismatch('original debug instruction/word/payload/handler/reference mismatch')
+    exact(left,right,'$.original_debug_facts')
     methods=[m for c in actual['classes'] for m in c['methods'] if m['name']!='<init>']
     bridge=[m for m in methods if m['flags'] & 0x1040 == 0x1040]
-    log_units=[i['reference']['units'] for m in bridge if m['code'] for i in m['code']['instructions']
-               if i.get('reference',{}).get('kind')=='string']
-    return {k:True for k in ['rawExact','rawDeclarationExact','rawDynamicExact','allInstructionSites','payloadBitsExact',
-                             'handlerPriorityExact','stringUnitsExact','memberRefsExact','effectfulBridgeRawPreserved']} | {
-        'rawMethodsPreserved':len(methods),'rawBridgeLogArgumentUnits':log_units[0] if log_units else None}
+    log_units=[i['reference']['units'] for m in bridge if m['code'] for i in m['code']['instructions'] if i.get('reference',{}).get('kind')=='string']
+    return {k:True for k in ['debugFactsExact','debugDeclarationExact','debugDynamicExact','allInstructionSites','payloadBitsExact','handlerPriorityExact','stringUnitsExact','memberRefsExact','effectfulBridgeDebugPreserved']} | {
+        'debugMethodsPreserved':len(methods),'debugBridgeLogArgumentUnits':log_units[0] if log_units else None}
 
 
 def public_assertions(value):
@@ -54,16 +82,16 @@ def public_assertions(value):
     kinds={d.get('kind') for d in value.get('diagnostics',[])}
     if outcome=='java' and kinds & {'malformed','unsupported','budget_exceeded','cancelled','internal_invariant'}:
         raise Mismatch('failed Java cannot be counted as a success')
-    if outcome in {'smali','mixed'} and kinds & {'malformed','cancelled','internal_invariant'}:
+    if outcome in {'debug','mixed'} and kinds & {'malformed','cancelled','internal_invariant'}:
         raise Mismatch('hard failure cannot become trusted raw success')
-    allowed={'java':{'java','java_unit'},'smali':{'smali'},'mixed':{'mixed'},'unavailable':{'unavailable'},
+    allowed={'java':{'java','java_unit'},'debug':{'debug'},'mixed':{'mixed'},'unavailable':{'unavailable'},
              'declaration-only':{'declaration_only'},'error':{'request_error'},'resource-failure':{'request_error','unavailable'},'data':{'data'}}
     if outcome not in allowed or value.get('status') not in allowed[outcome]:raise Mismatch('inconsistent public classification')
     if any(d.get('kind')=='internal_invariant' or d.get('bug') for d in value.get('diagnostics',[])):
         raise Mismatch('BUG/InternalInvariant is a hard failure')
-    return {'outcome':outcome,'java':outcome=='java','standardSmali':outcome=='smali',
+    return {'outcome':outcome,'java':outcome=='java','decodedDebug':outcome=='debug',
             'noJava':not any(m['language']=='java' for m in members) and outcome!='java',
-            'noTrustedSmali':not any(m['language']=='smali' for m in members) and outcome!='smali',
+            'noExecutableSource':not any(m['language']=='java' for m in members) and outcome!='java',
             'noFakeJavaUnit':outcome!='java' and value.get('status')!='java_unit',
             'noFallbackReport':'report' in value and value['report'] is None,
             'resourceFailureExplicit':outcome=='resource-failure' and any(d.get('kind')=='budget_exceeded' for d in value.get('diagnostics',[])),
@@ -112,13 +140,29 @@ def rendered_assertions(value, text, original):
         text[start:end].decode('utf-8',errors='strict')
         identity=(s['owner'],s['method']);identities.append(identity)
         if identity not in members:raise Mismatch('span has foreign original identity')
-        (java if s['language']=='java' else raw if s['language']=='smali' else []).append(s['method'])
-        if s['language']=='smali' and 'raw_slice' not in s:raise Mismatch('raw span lacks independently reassembled slice binding')
+        (java if s['language']=='java' else raw if s['language']=='dex_debug' else []).append(s['method'])
+        if s['language']=='dex_debug':
+            try:snapshot=json.loads(text[start:end])
+            except (ValueError,UnicodeError) as exc:raise Mismatch('debug span is not the actual readable snapshot') from exc
+            if snapshot.get('schema')!='diana.dex-debug/1':raise Mismatch('debug span has no original-information schema')
     if len(set(identities))!=len(identities):raise Mismatch('duplicate original source span')
+    excerpts=value.get('raw_excerpt_ranges',[])
+    for span in excerpts:
+        start,end=span['start'],span['end']
+        if type(start) is not int or type(end) is not int or not 0<=start<end<=len(text):raise Mismatch('excerpt source range')
+        try:excerpt=json.loads(text[start:end])
+        except (ValueError,UnicodeError) as exc:raise Mismatch('excerpt does not expose original words') from exc
+        name,proto=span['method'].split('(',1)
+        methods=[m for c in original['classes'] if c['descriptor']==span['owner'] for m in c['methods'] if m['name']==name and m['proto']=='('+proto]
+        if len(methods)!=1 or methods[0]['code'] is None:raise Mismatch('excerpt has no original code identity')
+        code=methods[0]['code'];words=code.get('raw_words',code.get('units'))
+        first=excerpt['code_unit_start'];actual=excerpt['words']
+        if type(first) is not int or first<0 or not isinstance(actual,list) or not actual or any(type(w) is not int or not 0<=w<=65535 for w in actual) or first+len(actual)>len(words) or words[first:first+len(actual)]!=actual:
+            raise Mismatch('excerpt differs from the checked original word range')
     return {'textAvailable':bool(text),'sourceSpansExact':True,'allOriginalMembersPresent':set(identities)==members,
-            'eachOriginalMemberOnce':len(identities)==len(members),'mustIncludeJavaMethods':java,'mustIncludeSmaliMethods':raw,
+            'eachOriginalMemberOnce':len(identities)==len(members),'mustIncludeJavaMethods':java,'mustIncludeDebugMethods':raw,
             'failedMethodHasNoJavaBody':all(s['language']!='java' for s in spans if s.get('failure')),
-            'rawExcerpt':bool(value.get('raw_excerpt_ranges'))}
+            'rawExcerpt':bool(excerpts)}
 
 
 def query_assertions(value, original):
@@ -161,6 +205,13 @@ def compare_suite(root, spec, manifest, records, case_ids=None, reference=False)
             p=root/projection_path
             if not p.is_file() or sha(p)!=projection_asset['sha256']:raise Mismatch('missing/changed certified independent projection')
             original=load(p)
+        layout_asset=next((a for a in assets.values() if a['path']==original_asset['path']+'.layout.json'),None)
+        if layout_asset is not None and original_asset['path'].endswith('.dex'):
+            path=root/layout_asset['path']
+            if sha(path)!=layout_asset['sha256']:raise Mismatch('changed original physical projection')
+            logical=cert['bindings'][0]['origin']['logical_ordinal'] or 0
+            raw_original=load(path)['members'][logical]
+            original=original_debug_facts(original,raw_original) if original is not None else raw_original
         groups={}
         for group,artifact in result['artifacts'].items():
             p=root/artifact['path']
@@ -178,14 +229,17 @@ def compare_suite(root, spec, manifest, records, case_ids=None, reference=False)
             if (observed['case'],observed['invocation'])!=key[:2]:raise Mismatch('wrong Driver identity')
             driver_assertions(spec,invocation['expected'],observed)
             measured['driver']={}
-        if 'raw' in groups:
-            pair=groups['raw']
-            if original is None:raise Mismatch('raw lacks a certified original projection')
-            measured['raw']=raw_assertions(original,pair['actual'])
+        if 'debug' in groups:
+            pair=groups['debug']
+            if original is None:raise Mismatch('debug lacks a certified original projection')
             selected=[b['selector'] for b in cert['bindings'] if b['selector']['kind']=='method']
+            if not selected:
+                selected=[{'descriptor':m['owner'],'name':m['name'],'proto':m['proto']} for m in public.get('members',[]) if m['language']=='dex_debug']
+            if not selected:raise Mismatch('debug snapshot lacks selected original method identities')
+            measured['debug']=debug_assertions(original,pair['actual'],selected)
             if selected:
                 bodies=[m['code'] is not None for s in selected for c in pair['actual']['classes'] if c['descriptor']==s['descriptor'] for m in c['methods'] if m['name']==s['name'] and m['proto']==s['proto']]
-                if len(bodies)!=len(selected):raise Mismatch('missing selected raw declaration')
+                if len(bodies)!=len(selected):raise Mismatch('missing selected debug declaration')
                 measured.setdefault('declaration',{}).update(hasBody=any(bodies),protoPreserved=True)
         if 'declaration' in groups:
             pair=groups['declaration']
@@ -218,7 +272,7 @@ def compare_suite(root, spec, manifest, records, case_ids=None, reference=False)
             got=measured[source][field]
             if field=='mustNotInclude':
                 if any(item in got for item in want):raise Mismatch('referenced-only member reported as definition')
-            elif field in {'definedMethods','mustIncludeJavaMethods','mustIncludeSmaliMethods'}:
+            elif field in {'definedMethods','mustIncludeJavaMethods','mustIncludeDebugMethods'}:
                 if field=='definedMethods' and Counter(got)!=Counter(want) or field!='definedMethods' and not set(want)<=set(got):raise Mismatch('original member multiset mismatch')
             elif field=='observationsOnly':
                 if not got or not set(got)<=set(want):raise Mismatch('forbidden/empty file observation sequence')

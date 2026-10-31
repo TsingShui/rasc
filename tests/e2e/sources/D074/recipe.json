@@ -143,7 +143,7 @@
   ],
   "certificationObligations": [
     "The independent projection proves for each input that the failing FillPlan condition is the source condition only: parameter array (no FreshArray), length 1 < count 2, unknown length, and prior publication through Lfixtures/Dep;->publish([I)V.",
-    "The independent projection decodes both I32 payload elements 7 and 8 and their order in every input, and confirms that the complete raw form of each method exists after the rejection.",
+    "The independent projection decodes both I32 payload elements 7 and 8 and their order in every input, and confirms that the original instruction/payload facts of each method remain available after rejection.",
     "Metadata, catalog completeness and opcode support are excluded as causes: every owner/proto/ref is declared in catalog.json and every opcode used is a defined 035 opcode."
   ],
   "gaps": [

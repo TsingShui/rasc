@@ -1,7 +1,7 @@
 # Diana core algorithm technical specification
 
 This document specifies the algorithms, state transitions and rejection conditions for DEX
-decoding, analysis and Java/Smali representation.
+decoding, analysis and Java/debug representation.
 Interfaces and ownership are defined in [DESIGN.md](DESIGN.md); validation rules are in
 [TASKS.md](TASKS.md).
 
@@ -249,7 +249,7 @@ printed as independent Java assignments before their producer succeeds. Known
 newer raw-only families follow §2 and §8. A classification dispatches to those
 rules; it does not authorize lowering without their type/effect/binding checks.
 The implementation MUST NOT keep a second width/mnemonic table in the printer or
-scanner; Smali operand shapes are defined in §7.3.
+scanner; The analysis-oriented debug snapshot is defined in §7.3.
 
 ### 1.3 Two-pass validation and CFG splitting
 
@@ -295,9 +295,9 @@ sites; Java operand evaluation and other calls MUST NOT be widened into the try.
   end_local, 6 is restart_local, 7/8 are prologue/epilogue, 9 is set_file; >=0x0a updates by
   `adj=op-0x0a; pc+=adj/15; line+=-4+adj%15`. Addresses and lines are checked, and local lifetimes
   are valid.
-- When the required metadata is not fully decoded, the implementation MUST NOT return “complete
-  Smali”. Header structure, method-local damage and unsupported current metadata are reported
-  separately, and other locatable methods are not discarded.
+- When metadata cannot be decoded, report the actual failure and missing range without
+  discarding other checked code/declaration facts. Debug coverage MUST NOT claim that the
+  missing information was decoded; header damage and method-local failures stay distinct.
 
 ### 1.5 Derivation and execution order of range checks
 
@@ -399,7 +399,7 @@ landing point in the Java plan. The known format of invoke-custom[/range] and it
 call_site/method_handle/proto metadata are fully validated and kept by the raw layer; the main
 Java path is Unsupported/InvokeCustomUnsupported, and the implementation MUST NOT guess an
 ordinary invoke or an unknown width. A rejection affects that method only, and the class can
-still show other recovered members and the original Smali of that method.
+still show other recovered members and the original debug information of that method.
 The design has no optimizer: no heap CSE, no call-purity inference, no constant-field propagation
 and no deletion of exception paths.
 The handler selection for a `monitor-exit` exception follows Dalvik's “PC has advanced” rule and
@@ -931,7 +931,7 @@ evaluate it on the host and then drop the negative-zero/NaN policy.
 A String is escaped unit by unit as UTF16 without NFC/NFKC normalization, and a surrogate pair
 MUST NOT be combined before counting the length.
 quote/backslash/CR/LF use language-specific escapes, an original backslash is output as a pair to
-avoid an unintended Unicode escape; Java and smali do not use the same escape function. The
+avoid an unintended Unicode escape; Java source escaping is not reused for JSON debug snapshots. The
 CONSTANT_Utf8 of a Java classfile has a further 65535-byte bound: per u16 unit, MUTF8 length is
 0→2, 1..127→1, 128..2047→2 and everything else→3. The six-character `\uXXXX` in Java source is
 not the same measure as this length; exceeding the bound MUST NOT be avoided by concatenating
@@ -1209,142 +1209,92 @@ protected graph MUST NOT use it to skip catch/monitor constraints. A logic BUG i
 MUST NOT be called “another unsupported case”. Literal similarity, span coverage and the path
 execution relation are different checks.
 
-## 7. Simple raw output
+## 7. Original DEX debug output
 
-A method with code MUST have a ValidatedRawMethod; an abstract/native method without code MUST
-have a ValidatedRawDeclaration, which emits only the complete flags/proto/annotations and the
-`.method`/`.end method` block and MUST NOT fabricate `.registers` or a body.
-The standard smali printer emits mnemonics, registers, refs, labels, payloads and complete
-metadata at their original positions. When a format cannot be identified reliably, the result is
-Unavailable plus a bounded excerpt.
-A Java failure goes only through this single exit; the implementation MUST NOT retry another
-engine or a wider profile. The assembler and an independent projection belong to development
-acceptance, not to production dependencies; their details belong to TASKS §4, and this core
-algorithm document MUST NOT grow a test-tool framework.
+When Java recovery fails, Diana retains the original method identity, typed reason
+and available original facts for an Agent to inspect. This is an analysis view,
+not executable source, a standard Smali document or a promise of reassembly.
+Production uses the checked original bytes and decoded facts; it does not run an
+assembler, another engine or another recovery attempt.
 
-### 7.1 Raw closure and labels
+### 7.1 Facts and coverage
 
-Raw outputability is not “the opcode has a name”. Before generating any string, the implementation
-checks that every opcode, ref, handler, payload, literal and necessary metadata actually used by
-that method has a complete representation in the selected standard-smali syntax.
-Missing any item yields Unavailable plus a bounded excerpt; the result MUST NOT be called complete
-Smali while an annotation or catch is missing.
+The debug snapshot contains only original facts, never a failed Java AST, guessed
+types, invented registers or reconstructed effects. It records:
 
-Code labels are associated with the validated original boundaries; branches, catches, tries and
-debug entries keep their original logical landing points, and payload labels are kept separate
-from actual instruction labels. A switch payload target offset is relative to **the switch pc that
-references it**, never to the payload pc. When one payload is referenced by several switches, the
-context MUST be checked per ref; the printer MUST NOT pick an arbitrary owner. A shared form that
-cannot be expressed faithfully in a single standard representation is
-UnsupportedRawSyntax; the implementation MUST NOT copy the payload privately, delete refs or relax
-the fixed projection.
-
-Original instruction forms, mnemonics and operands are emitted in their original order, and
-absolute v numbering for registers avoids miscounting p aliases of parameters. An originally
-invalid width MUST NOT be masked with `.word` fallback. An offset or string-pool index that may be
-legally re-encoded is not held to byte equality, but instructions, refs, targets, payloads,
-handlers, UTF16 and metadata MUST be compared through an independent projection; assembler
-acceptance MUST NOT prove that these contents were preserved.
-
-### 7.2 One exit, not a recovery system
-
-After a normal failure, the implementation first stops consuming its graph and drops scratch that
-is no longer needed, then reads only the validated raw and prints it completely within the
-remaining request resources and any explicit raw quota. Malformed MUST NOT use trusted raw;
-Cancelled ends directly; a BUG keeps its BUG status even with raw attached.
-A raw failure MUST NOT retry normal, switch engines or widen configuration. Production only prints
-and MUST NOT spawn an assembler; the D061 round trip runs in a development tool, and an
-incomplete declaration causing Java rejection MUST NOT destroy the original raw member identity.
-
-### 7.3 Standard Smali syntax and literals
-
-The printer uses the standard Smali grammar identified in SOURCE_MAP §7 and the
-controlled assembler profile in TASKS §4.5. Tool versions are development locks,
-not production dependencies. Emit the following forms only from validated raw
-facts; absent metadata does not cause the printer to invent source/debug names.
-
-| Raw fact | Emitted form / rule |
+| Fact | Required information when safely readable |
 |---|---|
-| Class / hierarchy | `.class <flags> <descriptor>`, `.super <descriptor>`, one `.implements` per original interface; Object alone may have no super |
-| Source file | `.source "..."` for the actual value; debug set-file remains at its original CodeUnit, including the absent-file form |
-| Field | `.field <flags> <name>:<type> [= <encoded literal>]`; annotations close with `.end field`; values bind to the original field, never a sorted field position |
-| Method | `.method <flags> <name><proto>` through `.end method`; preserve constructor/synthetic/bridge/declared-synchronized flags separately from Java modifiers |
-| Register count | Exactly `.registers <registers_size>` for a method with code; no `.locals`, parameter aliases or invented register count |
-| Parameter metadata | `.param vN[, "name"]` for each explicit formal's first word, followed by its annotations and `.end param`; `N=registers_size-ins_size+(static?0:1)+preceding_formal_words`; implicit this has no parameter annotation/name record, and absent name is not an empty name |
-| Annotation | `.annotation <visibility> <type>` (`build`, `runtime` or `system`) and `.end annotation`; `name = literal`, arrays `{...}`, `.subannotation`/`.end subannotation`, `.enum <field-ref>` preserve nesting and encoded kinds |
-| Debug location | `.line <line>`, `.local vN[, <name-or-null>:<type>[, "signature"]]`, `.end local vN`, `.restart local vN`, `.prologue`, `.epilogue` at their original logical positions |
-| Typed catch / catchall | `.catch <type> {:start .. :end} :handler` / `.catchall {:start .. :end} :handler`; interval is half-open and priority remains original |
-| Packed switch | `.packed-switch <first-key>` with target labels in original key order and `.end packed-switch` |
-| Sparse switch | `.sparse-switch`, original signed `key -> :target` pairs, `.end sparse-switch` |
-| Array payload | `.array-data <width>` (1, 2, 4 or 8), exact-width integral element bits, `.end array-data`; odd-byte padding is not an extra element |
-| Method/field/type ref | Full `Lowner;->name<proto>`, `Lowner;->name:type`, or descriptor; proto includes the return type, and lookup never uses a display-name first match |
-| Method handle / type | `<handle-kind>@<full-ref>` / `<full-proto>`; handle kind is not inferred from the name |
-| Call site | `<site-name>("invoked-name", <proto>[, <encoded-args>])@<bootstrap-method-ref>`; unique site names retain distinct original call-site identities |
+| Identity and declaration | Physical/logical origin, class and method indices, owner, full name/proto and raw flags; no-code declarations remain code-free |
+| Code layout | Original code range, code-unit count, register/parameter-word counts and instruction PCs/widths |
+| Instructions | Original mnemonic, ordered register words, exact literal bits and full references; invoke word order is not collapsed into source arguments |
+| Control and data | Branch targets at original code units, switch keys/targets and array payload width/count/bits |
+| Exceptions | Original protected intervals and handlers in priority order |
+| Referenced values | Exact UTF16 units, field/method/type/proto references and used call-site/method-handle data |
+| Context | Available hierarchy, fields, encoded values and their ownership; debug names/annotations may be included without requiring Smali directives |
+| Missing information | Explicit undecoded ranges and the reason; safe original bytes may accompany them |
 
-Code labels use `:c_<CodeUnit-in-hex>` and payload labels use
-`:p_<CodeUnit-in-hex>` within each method; both are synthetic transport names.
-End-of-code labels are available for legal metadata interval endpoints, not for
-an invalid executable target. A comment `# cu:0x...` can show original positions;
-comments never replace OriginSpan evidence. The printer MUST retain every
-instruction and metadata landing point under §7.1, not require output byte
-addresses to remain identical after legal assembler re-encoding. Payload alignment
-inserted by the assembler is separately identified by V6; it never authorizes
-omitting an original nop, dead instruction or payload.
+A complete decoded view retains every original instruction, including dead nops,
+and the associated targets, payloads, handlers and referenced values. Optional
+source/debug names and annotation syntax are not output-completeness gates.
+A partial view MUST identify what is missing; it MUST NOT claim complete coverage.
+Unknown instruction width stops decoding that range. The renderer MUST NOT guess
+NOP, advance by a guessed width or invent a standard instruction. Local damage
+MUST NOT erase facts already read safely or completed Java from other members.
 
-Let R mean `vN`, L a code label, P a payload label, C the correctly typed ref, and
-K a literal. The same OpcodeSpec supplies the original mnemonic:
+### 7.2 One read-only exit
 
-| Instruction format | Smali operand shape |
-|---|---|
-| 10x / 11x | no operand / `R` |
-| 12x, 22x, 32x / 23x | `R, R` / `R, R, R` |
-| 11n, 21s, 21h, 31i, 51l | `R, K`; high16 uses the expanded original value, not its unshifted encoded word; Smali 2.5.2's const-wide/high16 parser requires a fixed-32 literal, so its expanded 64-bit word is supplied as an `L` literal under that grammar |
-| 10t, 20t, 30t / 21t / 22t | `L` / `R, L` / `R, R, L` |
-| 21c, 31c / 22c | `R, C` / `R, R, C` |
-| 22s, 22b / 31t | `R, R, K` / `R, P` |
-| 35c / 3rc | `{R, ...}, C` / `{vFirst .. vLast}, C`; zero words use `{}`, and wide words are not collapsed into one register |
-| 45cc / 4rcc | The respective list/range above, method ref, then the explicit proto ref |
+After a normal failure, release unused analysis scratch and produce debug output
+from the original checked facts within the remaining RunContext resources and any
+explicit fallback quota. The existing fallback_* fields govern this debug work;
+there is no separate recovery subsystem. Cancellation stops immediately. A known
+Malformed or BUG remains a hard failure even when useful debug information exists.
+Insufficient resources leave an explicit Unavailable reason and any safe excerpt;
+Diana MUST NOT retry normal analysis, increase limits or silently truncate a view
+marked complete. Omitted quotas remain None, not zero or an invented default cap.
 
-Instruction constants and array elements use original integer bits at the
-required width, with `L` for 64-bit values; an FP-looking bit pattern does not
-cause numeric conversion. Encoded metadata uses kind-preserving literals:
-byte/short/long suffixes `t/s/L`, quoted char, float/double `f/d`, boolean/null,
-string and typed refs. Finite FP metadata uses a spelling that parses back to
-the same bits; signed zero is explicit. A NaN spelling that cannot preserve the
-required payload or an assembler profile that loses a required encoded kind or
-value is UnsupportedRawSyntax, not permission to alter the projection.
+### 7.3 Readable snapshot, not an assembly language
 
-Smali strings and chars escape backslash, their quote and controls with
-`\\`, `\"`/`\'`, `\b`, `\t`, `\n`, `\f`, `\r`, or exactly four hex digits after
-`\u`. NUL uses `\u0000`, not a Java octal escape or `\0`; surrogate units use
-individual `\uXXXX` escapes without replacement. Literal backslash followed by
-`u` is escaped as a backslash, not interpreted as a Unicode escape by Diana.
-Descriptor/name quoting uses the grammar's backticks only when that original
-version/name permits it. It does not reuse string escaping or rename a member.
-Any valid raw fact that the selected syntax cannot represent follows §7.1's
-Unavailable/excerpt rule; the printer MUST NOT silently omit it.
+Debug source is a readable JSON snapshot, tagged `diana.dex-debug/1`, with explicit
+coverage. It exposes original declaration/code facts rather than SSA, CFG or AST
+objects. Default text places that snapshot at the failed member; JSON exposes the
+same member source with language `dex_debug`. No extra format switch is needed.
+Object key order and whitespace are not stable. Instruction, argument, payload and
+handler arrays retain program order. The acceptance adapter independently parses
+the actual source slice and compares its facts with the certified original input.
+
+The snapshot carries class/method declaration records, code records and referenced
+call-site/method-handle data. A code record contains original register/count facts,
+ordered instruction records and protected intervals. No-code declarations use a
+null code record, not an invented body. Partial decoding identifies undecoded
+ranges separately from decoded records. An unavailable method may instead show
+only checked offsets and original byte/word values, clearly marked as an excerpt.
+A method-word excerpt exposes its original member identity, `code_unit_start` and
+`words` (u16 values) as readable JSON. A physical-byte excerpt instead names its
+file-byte coordinate and byte values; neither assigns an unknown opcode width.
+
+Strings and arbitrary UTF16 values use exact u16 vectors where UTF8 cannot carry
+them; readable spellings never replace their units. Numeric literals and payloads
+retain their original width/bits, without FP conversion. JSON escaping handles
+quotes, controls, backslash-u and text containing */. Debug output is never put
+inside a Java comment or a fake executable method. No Smali labels, directives,
+class shell, assembler grammar or byte-for-byte rebuilt DEX is required.
 
 ## 8. Deterministic rules for representation selection
 
 Each method runs exactly one analysis chain and selects a result by the following conditions:
 
 1. Cancellation stops the request immediately and MUST NOT continue raw per method.
-2. A proven Malformed yields Unavailable and MUST NOT output trusted Smali. abstract/native
-   produce DeclarationOnly only when both the declaration and the target-representation checks
-   pass; otherwise they return the complete Smali declaration or Unavailable.
+2. A proven Malformed yields Unavailable with any safe original debug excerpt; it never becomes a normal success. abstract/native produce DeclarationOnly only when declaration and target checks pass; otherwise retain their code-free declaration as debug facts or Unavailable.
 3. When all Java checks pass, the result is Java; a failing method does not print its unvalidated
    half AST, and other completed methods are not discarded.
-4. Unsupported/BudgetExceeded enter the raw path once. If normal has not yet completed raw
-   validation, the raw path completes validation from the original RawMethodView with the
-   available resources and any explicit raw quota, and then prints. A confirmed Malformed MUST NOT
-   be revoked by re-reading.
-5. When raw validation, syntax or budget cannot be satisfied, the result is Unavailable. When raw
+4. Unsupported/BudgetExceeded enter the debug exit once. Read only facts whose original ranges/widths are checked, retain their coverage and mark unavailable regions. Any further read uses the same request resources and explicit fallback quota. A confirmed Malformed MUST NOT be revoked by re-reading.
+5. When a decoded debug view cannot be produced safely within available resources, the result is Unavailable with any safe excerpt. When raw
    newly discovers definite damage, keep the Malformed fact; InternalInvariant keeps its BUG
    status even with raw attached. The implementation MUST NOT rerun normal or change the engine
    or limits.
 
 When the caller explicitly sets normal work to 0 and raw is still available, the result MAY be
-complete Smali; when the explicit raw quota is also 0, the result is Unavailable.
+a decoded debug view; when the explicit fallback quota is also 0, the result is Unavailable.
 None is not 0, and an unlimited default quota MUST NOT be treated as an exhausted budget.
 This is a single branch from a failure result to the read-only raw exit, not a recovery
 scheduler.
@@ -1359,7 +1309,7 @@ refuse to call the renderer because a class is Mixed:
    keeps the shell/fields according to the real DeclarationOutput. Members are presented
    segment by segment according to their original MethodKey: Java keeps the validated declaration
    or body; Generated references only the proven owner syntax and the original key mapping and
-   MUST NOT fabricate an independent method; Smali keeps the complete raw and the reason;
+   MUST NOT fabricate an independent method; Debug keeps the available original facts, their coverage and the reason;
    Unavailable keeps the identity, the reason and any available excerpt. An unexplainable shell is
    marked as such, and available methods MUST NOT be deleted because of it.
 3. The language/reason marker and the source segment are charged UTF8 bytes separately, and
@@ -1598,7 +1548,7 @@ This directly covers the old values of D029/D030, the priority of D031, cleanup 
 D032, the explicit return/throw cleanup paths of D033/D034 and the one nesting level of D035.
 Existing duplicate cleanup and Throwable rethrow are preserved and MUST NOT be sugared into
 finally; when the implementation does not reach a required behavior, that case is still incomplete
-and MUST NOT be changed to a Smali expectation.
+and MUST NOT be changed to a debug expectation.
 
 ## 11. monitor and synchronized (T19)
 
@@ -1679,7 +1629,7 @@ stop per the request rules, and an unprocessed prefix MUST NOT be passed off as 
 Finally the unit-level checks of final/constructor/override and of the actual Generated layout are
 performed. The original code of a Generated member is consumed by the template rule, and budget and
 target admission still apply; its body is not required to be an independently valid Java method
-first. A single-method request without owner-generating syntax still returns the Smali of that
+first. A single-method request without owner-generating syntax still returns debug information for that
 original method per §12.3. Any shell or member lacking evidence makes the class Mixed, while
 independent explicit methods MAY still be Java. An illegal original Java member name MUST NOT be
 renamed globally; only synthetic locals MAY be named safely.
@@ -1762,7 +1712,7 @@ only the owner syntax and MUST NOT also print duplicate declarations that confli
 javac-generated members; the raw identity is still mapped to the actual source spans of that
 owner.
 When a single get-method is requested and the generated member has no independently valid Java
-declaration, the printer returns the Smali of that original method and MUST NOT fabricate a
+declaration, the printer returns debug information for that original method and MUST NOT fabricate a
 wrapper.
 
 Concretely, only the following rules are accepted:
@@ -2003,7 +1953,7 @@ go through safe interfaces.
 6. After the output file succeeds, stdout carries no binary content or status line; the text/JSON of
    query/get is kept separate from the binary output adapter. BrokenPipe or an I/O error stops the
    request, the erroneous target is unchanged before file publication, and no half file remains. By
-   default get generates the complete bounded Java/Mixed/Smali/Unavailable presentation per §8.1 and
+   default get generates the complete bounded Java/Mixed/Debug/Unavailable presentation per §8.1 and
    then writes it, does not let JavaUnit eligibility block Mixed, and does not equate a
    deliberately marked partial-failure result with a writer truncation.
 

@@ -3,7 +3,7 @@
 .source "Case.smali"
 
 # D061 original input. f(I)I is a valid composite raw method that must survive an
-# independent reassembly:
+# independent original-information comparison:
 #   - a packed-switch payload with keys 0 and 1 and a distinct default target;
 #   - a const-string whose value is the two UTF-16 units [U+D800, U+0041], an
 #     isolated high surrogate followed by a normal unit, so a lossy UTF-8
@@ -14,7 +14,7 @@
 #     supertype match and every declared priority is reachable;
 #   - one reachable external invoke, Lfixtures/External;->g()V, whose owner has
 #     no class_def, so the binding catalog is exactly missing that declaration and
-#     the method outcome is Unsupported -> complete raw.
+#     the method outcome is Unsupported with original debug information.
 # The class shell declares only the canonical Object constructor. No source
 # engine and no execution oracle is claimed for this hand-written graph.
 
