@@ -180,6 +180,42 @@ or CI without separately authorized scope.
   reference byte content except explicitly reviewed path/provenance edits.
 - MCP is deferred; old MCP is reference material, not a current interface to migrate.
 
+## Code comments
+
+Contributors MUST add comments only to explain non-obvious invariants, algorithm
+choices, format constraints, units or failure behavior that the code does not
+express clearly. Contributors MUST NOT add comments that restate code, narrate
+edits, decorate sections or describe speculative future work. Prefer clearer
+names and smaller functions over explanatory comments for avoidable complexity.
+
+Public API documentation MUST describe the contract needed by callers, including
+relevant errors and resource or cancellation behavior, without duplicating the
+design documents. Contributors MUST preserve comments that carry still-valid
+correctness or safety reasoning and MUST update or remove comments made stale by
+a code change. Comment edits MUST NOT weaken technical requirements.
+
+## Dependency conventions
+
+Diana production packages MUST use `serde_json` major version 1 for JSON
+encoding and decoding, with `serde` major version 1 for serialization traits
+and derives where needed. Contributors MUST obtain operator approval before
+introducing an alternative JSON library. Add dependencies only when an actual
+capability consumes them; this choice does not waive resource-control or
+original-data preservation requirements.
+
+Performance timeline instrumentation MUST use `fastrace` major/minor version
+0.7 behind the opt-in `perf` Cargo feature, disabled by default. The application
+owns reporter initialization and flushing; the engine MUST NOT initialize a
+global reporter. Contributors MUST keep instrumentation limited to actual
+compute stages and MUST NOT record input contents or sensitive identities.
+Timeline spans do not replace CPU sampling, benchmarks or resource accounting.
+
+## diana-decomp
+
+Before working on files under `crates/diana-decomp/`, contributors MUST read
+and follow [the engine instructions](crates/diana-decomp/AGENTS.md) in addition
+to this file. A link does not automatically load the referenced instructions.
+
 ## Corpus data and sensitive inputs
 
 Do not commit private/unauthorized APKs, real-corpus identifiers or identity-revealing

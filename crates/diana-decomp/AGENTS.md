@@ -12,6 +12,15 @@ Read ../../docs/diana/DESIGN.md, ../../docs/diana/ALGORITHMS.md and
   filesystem/ZIP/CLI loading, external runtime/process or MCP adapter here.
 - Remain independent of rasc, dexdec, rusty-dex, Kuna and radguard code. Consult
   SOURCE_MAP.md before using reference material; respect its license limits.
+- The engine MUST use `thiserror` major version 2 for typed error definitions.
+  Public interfaces MUST preserve concrete error types rather than erase them
+  into strings. Error classification follows ../../docs/diana/DESIGN.md §2.3.
+  Contributors MUST obtain operator approval before introducing an alternative
+  error framework.
+- The engine MUST use `rayon` major version 1 for parallel compute scheduling.
+  Contributors MUST obtain operator approval before introducing an alternative
+  parallel compute scheduler. Rayon does not replace the cancellation, budget
+  or backpressure requirements in the design.
 - Add only modules consumed by an actual capability; no speculative P0–P9 trees,
   fake successful Engine results or placeholder getters/tests.
 - Keep unsafe code forbidden. Preserve raw identity and program effect/handler/

@@ -9,6 +9,14 @@ older design paths.
 - The current package is only a scaffold. Implement no CLI/query/input behavior
   before B01–B04 E2E preparation is independently accepted. Structure-first does
   not mark H01, T01 or E2E complete.
+- The application MUST use `clap` major version 4 with the `derive` feature
+  for CLI argument parsing. Contributors MUST obtain operator approval before
+  introducing an alternative argument parser. Input validation, query semantics
+  and resource control remain in their owning modules, not in the parser.
+- The application MUST use `libdeflater` major version 1 for ZIP DEFLATE
+  decompression. Its bundled native C dependency is approved; application and
+  engine Rust code MUST keep unsafe code forbidden. Contributors MUST obtain
+  operator approval before adding an alternative DEFLATE backend.
 - Keep CLI/input/snapshot/ZIP/query/result adaptation here. Do not depend on rasc,
   dexdec or rusty-dex, copy their whole tree, or delegate to their CLI/engine.
 - Use ../../crates/diana-decomp for the native engine. Reuse legacy input/ZIP
