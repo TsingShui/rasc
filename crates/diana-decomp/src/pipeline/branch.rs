@@ -14,6 +14,7 @@ pub(crate) enum DeclarationType {
     Int,
     Boolean,
     Object,
+    String,
     Float,
     Narrow(crate::p5_types::Narrow),
 }
@@ -23,6 +24,7 @@ impl DeclarationType {
             Self::Int | Self::Narrow(_) => Kind::Int,
             Self::Boolean => Kind::Boolean,
             Self::Object => Kind::Object,
+            Self::String => Kind::String,
             Self::Float => Kind::Float,
         }
     }
@@ -38,7 +40,7 @@ impl DeclarationType {
             Self::Int => Some(IntRange::ALL),
             Self::Boolean => Some(IntRange::BOOLEAN),
             Self::Narrow(kind) => Some(kind.range()),
-            Self::Object | Self::Float => None,
+            Self::Object | Self::String | Self::Float => None,
         }
     }
 }
@@ -60,6 +62,7 @@ pub(crate) enum Kind {
     Int,
     Boolean,
     Object,
+    String,
     Float,
 }
 impl Kind {
@@ -68,6 +71,7 @@ impl Kind {
             Self::Int => "int",
             Self::Boolean => "boolean",
             Self::Object => "java.lang.Object",
+            Self::String => "java.lang.String",
             Self::Float => "float",
         }
     }
@@ -406,6 +410,16 @@ fn flow<'a>(
                 .matches_with(&[67], budget)?
             {
                 DeclarationType::Narrow(crate::p5_types::Narrow::Char)
+            } else if input.declaration().prototype.return_type.matches_with(
+                crate::p5_types::BuiltinReference::String.descriptor(),
+                budget,
+            )? {
+                DeclarationType::String
+            } else if input.declaration().prototype.return_type.matches_with(
+                crate::p5_types::BuiltinReference::Object.descriptor(),
+                budget,
+            )? {
+                DeclarationType::Object
             } else {
                 return Ok(None);
             },
@@ -435,6 +449,11 @@ fn flow<'a>(
                 budget,
             )? {
                 DeclarationType::Object
+            } else if name.matches_with(
+                crate::p5_types::BuiltinReference::String.descriptor(),
+                budget,
+            )? {
+                DeclarationType::String
             } else {
                 supported = false;
                 return Ok(());
@@ -491,7 +510,7 @@ fn flow<'a>(
             };
             let decoded = match spec.opcode {
                 0 => Decoded::Op(Op::Nop),
-                1..=3 => Decoded::Op(Op::Move(reg(0)?, reg(1)?)),
+                1..=3 | 7..=9 => Decoded::Op(Op::Move(reg(0)?, reg(1)?)),
                 0x12..=0x15 => Decoded::Op(Op::Constant(
                     reg(0)?,
                     match operands.literal() {
@@ -536,7 +555,7 @@ fn flow<'a>(
                     Decoded::Op(Op::Binary(reg(0)?, left, arithmetic, right))
                 }
                 0xe => Decoded::ReturnVoid,
-                0xf => Decoded::Return(reg(0)?),
+                0xf | 0x11 => Decoded::Return(reg(0)?),
                 0x2b | 0x2c => {
                     has_branch = true;
                     let payload = target()?;
@@ -612,9 +631,18 @@ fn flow<'a>(
                         let result_layout =
                             instruction_layout(raw.instructions(), next, raw.version())
                                 .map_err(crate::input::MethodError::Decode)?;
-                        if matches!(result_layout.kind(),LayoutKind::Instruction(spec) if spec.opcode==0x0a)
+                        if matches!(result_layout.kind(),LayoutKind::Instruction(spec) if matches!(spec.opcode,0x0a|0x0c))
                         {
-                            if contract.result != crate::p4_calls::StaticResult::Int {
+                            let valid = match contract.result {
+                                crate::p4_calls::StaticResult::Int => {
+                                    matches!(result_layout.kind(),LayoutKind::Instruction(spec) if spec.opcode==0x0a)
+                                }
+                                crate::p4_calls::StaticResult::Reference(_) => {
+                                    matches!(result_layout.kind(),LayoutKind::Instruction(spec) if spec.opcode==0x0c)
+                                }
+                                crate::p4_calls::StaticResult::Void => false,
+                            };
+                            if !valid {
                                 return Err(RequestError::InternalInvariant(
                                     "void call acquired move-result",
                                 ));
@@ -1330,7 +1358,12 @@ fn verify<'a>(
                             result,
                         )
                         .map_err(crate::input::MethodError::Decode)?;
-                        if !matches!(result.kind(),LayoutKind::Instruction(spec) if spec.opcode==0x0a)
+                        let expected = match site.contract.result {
+                            crate::p4_calls::StaticResult::Int => Some(0x0a),
+                            crate::p4_calls::StaticResult::Reference(_) => Some(0x0c),
+                            crate::p4_calls::StaticResult::Void => None,
+                        };
+                        if !matches!(result.kind(),LayoutKind::Instruction(spec) if Some(spec.opcode)==expected)
                             || operands.registers().iter().next() != destination
                         {
                             return Err(RequestError::InternalInvariant(
@@ -1488,24 +1521,33 @@ fn verify<'a>(
             Definition::Parameter(index) => match ssa.parameters[ix(*index)?].kind() {
                 Kind::Boolean => 3,
                 Kind::Int => 7,
-                Kind::Object | Kind::Float => 0,
+                Kind::Object | Kind::String | Kind::Float => 0,
             },
             Definition::Constant(value) => match value {
                 0 => 1,
                 1 => 2,
                 _ => 4,
             },
-            Definition::Binary(_, _, _)
-            | Definition::Compare(_, _, _)
-            | Definition::CallResult(_) => 7,
+            Definition::Binary(_, _, _) | Definition::Compare(_, _, _) => 7,
+            Definition::CallResult(call) => match ssa.calls[ix(call.0)?].contract.result {
+                crate::p4_calls::StaticResult::Int => 7,
+                _ => 0,
+            },
             _ => 0,
         };
         let range = match definition {
             Definition::Parameter(index) => ssa.parameters[ix(*index)?].range(),
             Definition::Constant(value) => Some(crate::p5_types::IntRange::literal(*value)),
-            Definition::Binary(_, _, _)
-            | Definition::Compare(_, _, _)
-            | Definition::CallResult(_) => Some(crate::p5_types::IntRange::ALL),
+            Definition::Binary(_, _, _) | Definition::Compare(_, _, _) => {
+                Some(crate::p5_types::IntRange::ALL)
+            }
+            Definition::CallResult(call) => {
+                if ssa.calls[ix(call.0)?].contract.result == crate::p4_calls::StaticResult::Int {
+                    Some(crate::p5_types::IntRange::ALL)
+                } else {
+                    None
+                }
+            }
             _ => None,
         };
         push(&mut ranges, range, budget)?;
@@ -1522,8 +1564,23 @@ fn verify<'a>(
                 Definition::Parameter(index) => Some(ssa.parameters[ix(*index)?].kind()),
                 Definition::Constant(_)
                 | Definition::Binary(_, _, _)
-                | Definition::Compare(_, _, _)
-                | Definition::CallResult(_) => Some(Kind::Int),
+                | Definition::Compare(_, _, _) => Some(Kind::Int),
+                Definition::CallResult(call) => {
+                    Some(match ssa.calls[ix(call.0)?].contract.result {
+                        crate::p4_calls::StaticResult::Int => Kind::Int,
+                        crate::p4_calls::StaticResult::Reference(
+                            crate::p5_types::BuiltinReference::Object,
+                        ) => Kind::Object,
+                        crate::p4_calls::StaticResult::Reference(
+                            crate::p5_types::BuiltinReference::String,
+                        ) => Kind::String,
+                        crate::p4_calls::StaticResult::Void => {
+                            return Err(RequestError::InternalInvariant(
+                                "void call acquired a value definition",
+                            ));
+                        }
+                    })
+                }
                 _ => None,
             },
             budget,

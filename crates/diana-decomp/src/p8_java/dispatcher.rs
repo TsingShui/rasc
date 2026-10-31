@@ -278,7 +278,7 @@ pub(crate) fn verify(
                 {
                     return Ok(None);
                 }
-                if matches!(kind, Kind::Boolean | Kind::Object)
+                if matches!(kind, Kind::Boolean | Kind::Object | Kind::String)
                     && !matches!(opcode, 0x32 | 0x33 | 0x38 | 0x39)
                 {
                     return Ok(None);

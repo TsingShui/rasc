@@ -6,13 +6,15 @@ use crate::{
 };
 
 #[derive(Clone, Copy)]
-pub(crate) enum IntegralFormal {
+pub(crate) enum CallFormal {
     Int,
     Boolean,
     Narrow(crate::p5_types::Narrow),
+    Reference(crate::p5_types::BuiltinReference),
 }
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub(crate) enum StaticResult {
+    Reference(crate::p5_types::BuiltinReference),
     Int,
     Void,
 }
@@ -24,7 +26,7 @@ pub(crate) struct StaticContract {
     pub owner: Vec<u16>,
     pub name: Vec<u16>,
     pub prototype: Vec<u16>,
-    pub formals: Vec<IntegralFormal>,
+    pub formals: Vec<CallFormal>,
     pub result: StaticResult,
 }
 fn package(descriptor: &[u16]) -> &[u16] {
@@ -150,7 +152,9 @@ pub(crate) fn resolve_static(
     let mut target = None;
     for method in &target_class.methods {
         budget.charge_work(1)?;
-        if crate::p0_knowledge::same_units(&method.name, &name, budget)? {
+        if crate::p0_knowledge::same_units(&method.name, &name, budget)?
+            && crate::p0_knowledge::same_units(&method.prototype, &prototype, budget)?
+        {
             if target.is_some() {
                 return Ok(None);
             }
@@ -160,6 +164,9 @@ pub(crate) fn resolve_static(
     let Some(target) = target else {
         return Ok(None);
     };
+    if !super::overloads::unique_static_target(target_class, &name, &prototype, budget)? {
+        return Ok(None);
+    }
     if !crate::p0_knowledge::same_units(&target.prototype, &prototype, budget)?
         || target.access_flags & 9 != 9
         || target.access_flags & (0x40 | 0x80) != 0
@@ -242,6 +249,16 @@ pub(crate) fn resolve_static(
         .matches_with(&[73], budget)?
     {
         StaticResult::Int
+    } else if reference.declaration.prototype.return_type.matches_with(
+        crate::p5_types::BuiltinReference::String.descriptor(),
+        budget,
+    )? {
+        StaticResult::Reference(crate::p5_types::BuiltinReference::String)
+    } else if reference.declaration.prototype.return_type.matches_with(
+        crate::p5_types::BuiltinReference::Object.descriptor(),
+        budget,
+    )? {
+        StaticResult::Reference(crate::p5_types::BuiltinReference::Object)
     } else if reference
         .declaration
         .prototype
@@ -259,15 +276,25 @@ pub(crate) fn resolve_static(
         |name, budget| -> Result<(), RequestError> {
             use crate::p5_types::Narrow;
             let formal = if name.matches_with(&[73], budget)? {
-                IntegralFormal::Int
+                CallFormal::Int
             } else if name.matches_with(&[90], budget)? {
-                IntegralFormal::Boolean
+                CallFormal::Boolean
             } else if name.matches_with(&[66], budget)? {
-                IntegralFormal::Narrow(Narrow::Byte)
+                CallFormal::Narrow(Narrow::Byte)
             } else if name.matches_with(&[83], budget)? {
-                IntegralFormal::Narrow(Narrow::Short)
+                CallFormal::Narrow(Narrow::Short)
             } else if name.matches_with(&[67], budget)? {
-                IntegralFormal::Narrow(Narrow::Char)
+                CallFormal::Narrow(Narrow::Char)
+            } else if name.matches_with(
+                crate::p5_types::BuiltinReference::Object.descriptor(),
+                budget,
+            )? {
+                CallFormal::Reference(crate::p5_types::BuiltinReference::Object)
+            } else if name.matches_with(
+                crate::p5_types::BuiltinReference::String.descriptor(),
+                budget,
+            )? {
+                CallFormal::Reference(crate::p5_types::BuiltinReference::String)
             } else {
                 supported = false;
                 return Ok(());
@@ -276,6 +303,15 @@ pub(crate) fn resolve_static(
         },
     )?;
     if !supported {
+        return Ok(None);
+    }
+    if (matches!(result, StaticResult::Reference(_))
+        || formals
+            .iter()
+            .any(|formal| matches!(formal, CallFormal::Reference(_))))
+        && (input.qualifier_shadowed(&[106, 97, 118, 97], budget)?
+            || !clear_scope(catalog, &caller, &[106, 97, 118, 97], budget)?)
+    {
         return Ok(None);
     }
     Ok(Some(StaticContract {

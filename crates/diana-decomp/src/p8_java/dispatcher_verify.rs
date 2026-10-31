@@ -24,6 +24,7 @@ fn ty(kind: Kind) -> Result<LocalType, RequestError> {
             Kind::Int => 0,
             Kind::Boolean => 1,
             Kind::Object => 2,
+            Kind::String => 4,
             Kind::Float => 3,
         }),
         1,
@@ -113,7 +114,7 @@ fn static_call(
         return Ok(false);
     }
     use super::branch::ValueUse;
-    use crate::p4_calls::IntegralFormal;
+    use crate::p4_calls::CallFormal;
     for ((&view, &value), &formal) in actual
         .arguments
         .iter()
@@ -126,13 +127,31 @@ fn static_call(
             return Ok(false);
         }
         let valid = match (view, formal, ssa.kinds[at]) {
-            (ValueUse::Direct(_), IntegralFormal::Int, Some(Kind::Int))
-            | (ValueUse::Direct(_), IntegralFormal::Boolean, Some(Kind::Boolean))
-            | (ValueUse::BooleanWord(_), IntegralFormal::Int, Some(Kind::Boolean)) => true,
-            (ValueUse::Boolean01(_), IntegralFormal::Boolean, Some(Kind::Int)) => {
+            (ValueUse::Null { kind, .. }, CallFormal::Reference(expected), _) => {
+                kind == expected && matches!(ssa.values[at], Definition::Constant(0))
+            }
+            (
+                ValueUse::Direct(_),
+                CallFormal::Reference(crate::p5_types::BuiltinReference::Object),
+                Some(Kind::Object),
+            )
+            | (
+                ValueUse::Direct(_),
+                CallFormal::Reference(crate::p5_types::BuiltinReference::String),
+                Some(Kind::String),
+            )
+            | (
+                ValueUse::UpcastObject(_),
+                CallFormal::Reference(crate::p5_types::BuiltinReference::Object),
+                Some(Kind::String),
+            ) => true,
+            (ValueUse::Direct(_), CallFormal::Int, Some(Kind::Int))
+            | (ValueUse::Direct(_), CallFormal::Boolean, Some(Kind::Boolean))
+            | (ValueUse::BooleanWord(_), CallFormal::Int, Some(Kind::Boolean)) => true,
+            (ValueUse::Boolean01(_), CallFormal::Boolean, Some(Kind::Int)) => {
                 ssa.integral_bits[at] != 0 && ssa.integral_bits[at] & 4 == 0
             }
-            (ValueUse::Narrow { kind, .. }, IntegralFormal::Narrow(formal), Some(Kind::Int))
+            (ValueUse::Narrow { kind, .. }, CallFormal::Narrow(formal), Some(Kind::Int))
                 if kind == formal =>
             {
                 let range = ssa.ranges[at];
@@ -430,11 +449,18 @@ pub(super) fn verify(
                         let at = ix(actual.value().0)?;
                         use super::branch::ValueUse;
                         !match actual {
+                            ValueUse::Null { .. } => false,
+                            ValueUse::UpcastObject(_) => {
+                                matches!(result, crate::pipeline::branch::DeclarationType::Object)
+                                    && ssa.kinds[at] == Some(Kind::String)
+                            }
                             ValueUse::Direct(_) => {
                                 matches!(
                                     result,
                                     crate::pipeline::branch::DeclarationType::Int
                                         | crate::pipeline::branch::DeclarationType::Boolean
+                                        | crate::pipeline::branch::DeclarationType::Object
+                                        | crate::pipeline::branch::DeclarationType::String
                                 ) && ssa.kinds[at] == Some(result.kind())
                             }
                             ValueUse::Narrow { kind, .. } => {

@@ -26,6 +26,7 @@ pub(super) fn write(
                 Kind::Int => "int ",
                 Kind::Boolean => "boolean ",
                 Kind::Object => "java.lang.Object ",
+                Kind::String => "java.lang.String ",
                 Kind::Float => "float ",
             },
             budget,
@@ -41,7 +42,7 @@ pub(super) fn write(
                 match declaration.kind {
                     Kind::Int => " = 0",
                     Kind::Boolean => " = false",
-                    Kind::Object => " = null",
+                    Kind::Object | Kind::String => " = null",
                     Kind::Float => " = 0.0f",
                 },
                 budget,
@@ -141,7 +142,14 @@ pub(super) fn write(
                     if let Some(right) = right {
                         local(*right, output, budget)?;
                     } else {
-                        output.push(if *kind == Kind::Object { "null" } else { "0" }, budget)?;
+                        output.push(
+                            if matches!(kind, Kind::Object | Kind::String) {
+                                "null"
+                            } else {
+                                "0"
+                            },
+                            budget,
+                        )?;
                     }
                 }
                 output.push(") {\n", budget)?;

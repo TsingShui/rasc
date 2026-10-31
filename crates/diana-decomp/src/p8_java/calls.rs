@@ -1,5 +1,5 @@
 use super::branch::{Assignment, LocalId, ValueUse};
-use crate::p4_calls::IntegralFormal;
+use crate::p4_calls::CallFormal;
 use crate::pipeline::branch::{CallId, Kind, Op, VerifiedSsa};
 use crate::substrate::owned::{TextBuffer, reserve};
 use crate::{CodeUnitOffset, MethodBudget, MethodId, RequestError};
@@ -63,20 +63,41 @@ fn text(units: &[u16], budget: &mut MethodBudget<'_, '_>) -> Result<Option<Strin
 pub(super) fn argument(
     ssa: &VerifiedSsa<'_>,
     value: LocalId,
-    formal: IntegralFormal,
+    formal: CallFormal,
 ) -> Result<Option<ValueUse>, RequestError> {
     let index = ix(value.0)?;
+    if let CallFormal::Reference(kind) = formal {
+        return Ok(
+            if matches!(
+                ssa.values[index],
+                crate::pipeline::branch::Definition::Constant(0)
+            ) {
+                Some(ValueUse::Null { value, kind })
+            } else {
+                match (ssa.kinds[index], kind) {
+                    (Some(Kind::Object), crate::p5_types::BuiltinReference::Object)
+                    | (Some(Kind::String), crate::p5_types::BuiltinReference::String) => {
+                        Some(ValueUse::Direct(value))
+                    }
+                    (Some(Kind::String), crate::p5_types::BuiltinReference::Object) => {
+                        Some(ValueUse::UpcastObject(value))
+                    }
+                    _ => None,
+                }
+            },
+        );
+    }
     Ok(match (ssa.kinds[index], formal) {
-        (Some(Kind::Int), IntegralFormal::Int) | (Some(Kind::Boolean), IntegralFormal::Boolean) => {
+        (Some(Kind::Int), CallFormal::Int) | (Some(Kind::Boolean), CallFormal::Boolean) => {
             Some(ValueUse::Direct(value))
         }
-        (Some(Kind::Boolean), IntegralFormal::Int) => Some(ValueUse::BooleanWord(value)),
-        (Some(Kind::Int), IntegralFormal::Boolean)
+        (Some(Kind::Boolean), CallFormal::Int) => Some(ValueUse::BooleanWord(value)),
+        (Some(Kind::Int), CallFormal::Boolean)
             if ssa.integral_bits[index] != 0 && ssa.integral_bits[index] & 4 == 0 =>
         {
             Some(ValueUse::Boolean01(value))
         }
-        (Some(Kind::Int), IntegralFormal::Narrow(kind)) => {
+        (Some(Kind::Int), CallFormal::Narrow(kind)) => {
             let range = ssa.ranges[index];
             let range = if ssa.integral_bits[index] != 0 && ssa.integral_bits[index] & 4 == 0 {
                 range.and_then(crate::p5_types::IntRange::known01)

@@ -25,6 +25,11 @@ pub(crate) struct Assignment {
 }
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub(crate) enum ValueUse {
+    Null {
+        value: LocalId,
+        kind: crate::p5_types::BuiltinReference,
+    },
+    UpcastObject(LocalId),
     Direct(LocalId),
     Boolean01(LocalId),
     BooleanWord(LocalId),
@@ -39,7 +44,9 @@ impl ValueUse {
             Self::Direct(value)
             | Self::Boolean01(value)
             | Self::BooleanWord(value)
-            | Self::Narrow { value, .. } => value,
+            | Self::Narrow { value, .. }
+            | Self::UpcastObject(value)
+            | Self::Null { value, .. } => value,
         }
     }
 }
@@ -68,10 +75,12 @@ pub(super) fn returned(
         );
     }
     Ok(match (ssa.kinds[index], result.kind()) {
-        (Some(Kind::Int), Kind::Int) | (Some(Kind::Boolean), Kind::Boolean) => {
-            Some(ValueUse::Direct(value))
-        }
+        (Some(Kind::Int), Kind::Int)
+        | (Some(Kind::Boolean), Kind::Boolean)
+        | (Some(Kind::Object), Kind::Object)
+        | (Some(Kind::String), Kind::String) => Some(ValueUse::Direct(value)),
         (Some(Kind::Boolean), Kind::Int) => Some(ValueUse::BooleanWord(value)),
+        (Some(Kind::String), Kind::Object) => Some(ValueUse::UpcastObject(value)),
         (Some(Kind::Int), Kind::Boolean)
             if ssa.integral_bits[index] != 0 && ssa.integral_bits[index] & 4 == 0 =>
         {
@@ -175,6 +184,7 @@ pub(super) fn copies(
                     Kind::Int => 0,
                     Kind::Boolean => 1,
                     Kind::Object => 2,
+                    Kind::String => 4,
                     Kind::Float => 3,
                 }),
                 1,
@@ -194,6 +204,7 @@ pub(super) fn copies(
             (0, Width::One) => Kind::Int,
             (1, Width::One) => Kind::Boolean,
             (2, Width::One) => Kind::Object,
+            (4, Width::One) => Kind::String,
             (3, Width::One) => Kind::Float,
             _ => {
                 return Err(RequestError::InternalInvariant(
@@ -419,7 +430,9 @@ fn verify_diamond(
     if condition_kind == Kind::Float {
         return Ok(None);
     }
-    if matches!(condition_kind, Kind::Boolean | Kind::Object) && !matches!(opcode, 0x38 | 0x39) {
+    if matches!(condition_kind, Kind::Boolean | Kind::Object | Kind::String)
+        && !matches!(opcode, 0x38 | 0x39)
+    {
         return Ok(None);
     }
     let returned = LocalId(

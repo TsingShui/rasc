@@ -224,6 +224,15 @@ pub(super) fn value_use(
 ) -> Result<(), RequestError> {
     use crate::p8_java::branch::ValueUse;
     match value {
+        ValueUse::Null { kind, .. } => {
+            output.push("(", budget)?;
+            output.push(kind.spelling(), budget)?;
+            output.push(") null", budget)?;
+        }
+        ValueUse::UpcastObject(value) => {
+            output.push("(java.lang.Object) ", budget)?;
+            local(value, output, budget)?;
+        }
         ValueUse::Direct(value) => local(value, output, budget)?,
         ValueUse::Boolean01(value) => {
             output.push("(", budget)?;
@@ -307,6 +316,7 @@ fn diamond(
                 Kind::Int => "int ",
                 Kind::Boolean => "boolean ",
                 Kind::Object => "java.lang.Object ",
+                Kind::String => "java.lang.String ",
                 Kind::Float => "float ",
             },
             budget,
@@ -332,7 +342,7 @@ fn diamond(
             }
             local(body.condition, output, budget)?;
         }
-        Kind::Object => {
+        Kind::Object | Kind::String => {
             local(body.condition, output, budget)?;
             output.push(
                 if body.opcode == 0x38 {
