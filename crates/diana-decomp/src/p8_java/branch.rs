@@ -3,8 +3,7 @@ use crate::pipeline::branch::{BlockId, Definition, EdgeId, Kind, Op, Sym, Termin
 use crate::substrate::owned::{TextBuffer, copy_units, reserve};
 use crate::{EnvironmentId, MethodBudget, RequestError, VerifiedJavaMethod};
 
-#[derive(Clone, Copy, Eq, PartialEq)]
-pub(crate) struct LocalId(pub u32);
+pub(crate) use crate::p6_variables::LocalId;
 pub(crate) struct Local {
     pub id: LocalId,
     pub kind: Kind,
@@ -65,9 +64,11 @@ fn copies(
     incoming: Option<EdgeId>,
     target: BlockId,
     output: &mut Vec<Assignment>,
+    locals: &mut Vec<Local>,
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<(), RequestError> {
-    let start = output.len();
+    use crate::p6_variables::{Copy, LocalType, LocalTypeId, Width};
+    let mut parallel = Vec::new();
     for phi in &ssa.phis {
         budget.charge_work(1)?;
         if phi.block == target {
@@ -92,28 +93,67 @@ fn copies(
                 ));
             };
             append(
-                output,
-                Assignment {
+                &mut parallel,
+                Copy {
                     target: LocalId(phi.result.0),
-                    expression: Expression::Local(LocalId(source.0)),
+                    source: LocalId(source.0),
                 },
                 budget,
             )?;
         }
     }
-    // This acyclic profile cannot need a copy cycle. Check that certificate,
-    // rather than silently serializing a general parallel assignment.
-    for assignment in &output[start..] {
-        if let Expression::Local(source) = assignment.expression {
-            for destination in &output[start..] {
-                budget.charge_work(1)?;
-                if source == destination.target {
-                    return Err(RequestError::InternalInvariant(
-                        "acyclic diamond has an overlapping edge copy",
-                    ));
-                }
-            }
+    let mut types = Vec::new();
+    for local in locals.iter() {
+        budget.charge_work(1)?;
+        append(
+            &mut types,
+            LocalType::new(
+                LocalTypeId(match local.kind {
+                    Kind::Int => 0,
+                    Kind::Boolean => 1,
+                }),
+                1,
+            )?,
+            budget,
+        )?;
+    }
+    let plan = crate::p6_variables::plan(&parallel, &types, budget)?;
+    for temporary in plan.temporaries {
+        budget.charge_work(1)?;
+        if ix(temporary.local.0)? != locals.len() {
+            return Err(RequestError::InternalInvariant(
+                "copy temporary does not extend local storage",
+            ));
         }
+        let kind = match (temporary.kind.identity.0, temporary.kind.width) {
+            (0, Width::One) => Kind::Int,
+            (1, Width::One) => Kind::Boolean,
+            _ => {
+                return Err(RequestError::InternalInvariant(
+                    "diamond copy temporary has a foreign type",
+                ));
+            }
+        };
+        append(
+            locals,
+            Local {
+                id: temporary.local,
+                kind,
+                parameter: None,
+            },
+            budget,
+        )?;
+    }
+    for copy in plan.steps {
+        budget.charge_work(1)?;
+        append(
+            output,
+            Assignment {
+                target: copy.target,
+                expression: Expression::Local(copy.source),
+            },
+            budget,
+        )?;
     }
     Ok(())
 }
@@ -265,7 +305,7 @@ pub(crate) fn verify(
         return Ok(None);
     }
     let mut entry = Vec::new();
-    copies(&ssa, None, BlockId(0), &mut entry, budget)?;
+    copies(&ssa, None, BlockId(0), &mut entry, &mut locals, budget)?;
     operations(&ssa, BlockId(0), &mut entry, budget)?;
     let mut yes_statements = Vec::new();
     copies(
@@ -273,6 +313,7 @@ pub(crate) fn verify(
         Some(edge(&ssa, BlockId(0), yes, budget)?),
         yes,
         &mut yes_statements,
+        &mut locals,
         budget,
     )?;
     operations(&ssa, yes, &mut yes_statements, budget)?;
@@ -281,6 +322,7 @@ pub(crate) fn verify(
         Some(edge(&ssa, yes, join, budget)?),
         join,
         &mut yes_statements,
+        &mut locals,
         budget,
     )?;
     let mut no_statements = Vec::new();
@@ -289,6 +331,7 @@ pub(crate) fn verify(
         Some(edge(&ssa, BlockId(0), no, budget)?),
         no,
         &mut no_statements,
+        &mut locals,
         budget,
     )?;
     operations(&ssa, no, &mut no_statements, budget)?;
@@ -297,6 +340,7 @@ pub(crate) fn verify(
         Some(edge(&ssa, no, join, budget)?),
         join,
         &mut no_statements,
+        &mut locals,
         budget,
     )?;
     // Join operations are a sequence after both incoming copy plans. The first

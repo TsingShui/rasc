@@ -5,6 +5,7 @@ mod p0_knowledge;
 pub use p0_knowledge::{DeclarationCatalog, ExternalMethodSignature};
 #[path = "p1_input/mod.rs"]
 pub mod input;
+mod p6_variables;
 mod p8_java;
 mod p9_emit;
 pub use engine::{DexImage, Engine, MethodSelector, Options, RecoveryPolicy, Request};
