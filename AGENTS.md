@@ -119,24 +119,24 @@ opt-in and authorized reproducible inputs; no private APKs are committed.
 
 ## Test scope: core project code only
 
-Do not write tests for ANY non-core project code unless the user explicitly
-authorizes that specific testing work. This applies repository-wide, not just
-to reference downloads. Non-core code includes development/maintenance scripts,
-downloaders, documentation/board generators, build/release helpers and other
-auxiliary tooling. A request to implement or improve such code is not permission
-to add tests.
+Contributors MUST NOT write tests for any non-core project code. This prohibition
+applies repository-wide, not just to reference downloads, and has no authorization
+exception. Non-core code includes development/maintenance scripts, downloaders,
+documentation/board generators, build/release helpers and other auxiliary tooling.
+A request to implement or improve such code does not permit tests.
 
 Do not add unit, integration or CLI tests, test fixtures/harnesses, or CI test
 jobs for non-core code. Do not bypass this rule by calling them self-tests,
 validation scripts or automated smoke checks. Inspect the code and, when useful,
 manually exercise the requested operation; report limitations/failures honestly.
-Existing plans mentioning auxiliary-tool or comparator/harness self-tests do not
-supply authorization for writing those tests; ask before implementing them.
+Existing plans, task cards and historical authorizations for auxiliary-tool or
+comparator/harness self-tests do not override this prohibition. Contributors MUST
+NOT request an exception.
 
 The previously agreed tests of Diana core behavior remain in scope: native
 DEX/decompiler semantics, input/query/extraction correctness and resource/file
 safety through public interfaces. Test tooling MAY support those core E2E cases,
-but testing the tooling itself requires separate explicit authorization. Basic
+but contributors MUST NOT test the tooling itself. Basic
 CLI/help/getter/forwarding tests remain excluded as described above.
 
 Before adding a core test, contributors MUST identify its invariant or regression
@@ -301,8 +301,8 @@ Prefer small self-made fixtures with documented source/license/recipe.
 ## Contribution and releases
 
 Check existing design first; include independent semantic tests for core behavior
-changes within the agreed test scope. Do not write tests for non-core code without
-explicit user authorization. Run applicable active-only gates and report blocked
+changes within the agreed test scope. Contributors MUST NOT write tests for
+non-core code. Run applicable active-only gates and report blocked
 or not-run evidence.
 Use Conventional Commit messages. Agents MUST prefix every commit subject with
 `[AUTOMATED] ` before the Conventional Commit type, for example
