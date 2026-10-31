@@ -109,6 +109,17 @@ The table at the top of [the download script](../../tools/fetch_references.py) i
 | phoenix / sailr | 2013 Phoenix and 2024 SAILR structuring papers | T13/T14; native/C-oriented, not directly applicable to Java's no-goto, handler and monitor constraints. |
 | vineflower | Java declaration and recovery source | Read as needed for constructor/nested/enum batches; do not treat recovered reference text as truth. |
 
+Syntax/format anchors for ALGORITHMS §7.3/§14.4: the locked Smali 2.5.2
+[parser](https://github.com/JesusFreke/smali/blob/v2.5.2/smali/src/main/antlr/smaliParser.g),
+[lexer](https://github.com/JesusFreke/smali/blob/v2.5.2/smali/src/main/jflex/smaliLexer.jflex)
+and tree walker define directives, escapes, typed literals and operand shapes;
+AOSP Android 15 [ResourceTypes.h](https://android.googlesource.com/platform/frameworks/base/+/refs/tags/android-15.0.0_r1/libs/androidfw/include/androidfw/ResourceTypes.h)
+defines ResChunk_header, ResStringPool and ResXMLTree field layouts. These are
+online source anchors, not new downloaded tool assets or a claim of round-trip
+certification. The archived AXML PATCHES and `src/analysis/manifest.rs` are reuse
+evidence only; neither certifies Diana allocation, cancellation or malformed-read
+safety.
+
 Choose at most one main algorithm reference and one implementation reference per batch, producing a decision, invariant or counterexample. Do not turn close reading of every paper or building whole projects into a new prerequisite. Pin the URL/commit of a new reference in the script first, record its use and applicability limits, and do not automatically update existing expectations or expand implementation scope. Downloaded material is for development review only; public availability does not imply permission to copy or redistribute code/fixtures.
 
 ## 8. Additional research: major venues, foundational work and mature projects

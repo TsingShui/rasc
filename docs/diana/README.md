@@ -25,13 +25,17 @@ generator, or duplicate workflow, review or task document:
 | [WRITING.md](WRITING.md) | Writing rules: requirement strength, sentence roles, terminology, numbers, negation ownership |
 
 [e2e_cases.json](e2e_cases.json) is the sole case and independent-expectation
-specification. Schema 2 binds input and expected results per invocation; draft-5
-contains 86 required cases and 177 invocation scenarios. Evidence-based corrections
+specification. Schema 2 binds input and expected results per invocation; draft-6
+contains 86 required cases and 177 invocation scenarios, with explicit symbolic
+targets and assertion evidence bindings. Evidence-based corrections
 and additions are allowed; incorrect formats or gaps are not retained merely to
 preserve a count. There is no separate copy of the expectations or web mirror.
 The tool lock points directly to TASKS without a historical redirect.
-B01–B04 have not passed. TASKS describes the authorization block on tool
-self-tests; production feature work cannot begin early.
+B01–B04 have not passed. [B01 review](batches/b01-spec-review.md) records local
+source/JVM corroboration and the remaining preparation artifacts; it is not
+locked-toolchain or engine certification. TASKS §3 gives the development-entry
+sequence and the authorization block on tool self-tests; production feature work
+cannot begin early.
 
 For implementation, read DESIGN, then the relevant section of ALGORITHMS, then
 the current TASKS card. Consult SOURCE_MAP when checking evidence. Every authored

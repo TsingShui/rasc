@@ -1,12 +1,13 @@
 {
   "schemaVersion": 2,
-  "specRevision": "draft-5",
+  "specRevision": "draft-6",
   "state": "designed-not-built",
   "interfacePolicy": "public-library-and-complex-domain-modules-no-cli-blackbox",
   "frozenPolicy": "B01 approves a reviewed revision, not an immutable case count. Preserve existing required problems and valid semantics; revise faulty recipes/oracles with independent evidence and review, append new counterexamples, never refresh from engine output or change required Java to Smali to obtain a pass.",
-  "designNotice": "Specifications, not runnable assets. Schema 2 binds each invocation id/input/expected together. B01 review, B02 executable assets/tool locks, B03 independent certification and B04 authorized harness falsification are all still required; draft-5 is not approval or execution evidence. Resource quotas are opt-in; no speculative JVM-size admission.",
+  "designNotice": "Specifications, not runnable assets. Schema 2 binds each invocation id/input/expected together. draft-6 adds explicit symbolic targets and assertion evidence bindings without changing the required invocation inputs or expected values. B01 review, B02 executable assets/tool locks, B03 independent certification and B04 authorized harness falsification are all still required; this revision is not approval or execution evidence. Resource quotas are opt-in; no speculative JVM-size admission.",
   "toolchainSpec": "TASKS.md#45-pinned-tools-and-content-locks",
   "caseCount": 86,
+  "targetPolicy": "Case targets bind symbolic roles to independently chosen original input/class/full-method selectors. input_role identifies a self-made recipe output within that case, not a display path. B02 materializes the original table indices and physical/header identity; B03 independently checks both directions. A class-seam method is a Driver entry, not permission to request only that method. Missing assets, indices or certification block preparation rather than authorizing first-match selection.",
   "invocationPolicy": {
     "required": "Every invocation is required. Match by case id + invocation id; no index-zipped expected arrays, optional branches, any-error substitution or partial case pass.",
     "selectors": "targetRole(s) and full name+proto are resolved by the independent manifest to original physical/logical ClassKey/MethodKey, never display-name first match. The default role case must also be bound explicitly in that manifest. When method is omitted at a method/raw seam, the role itself must bind exactly one original MethodKey; a class role alone is insufficient. args=[] is implicit only for a zero-parameter call.",
@@ -19,9 +20,11 @@
     "gates": "engine cases and engine-and-application cases count toward EngineCoreRC; application cases join ProductRC. engine-and-application needs both seam evidences for every invocation but counts once. ProductRC includes every required case and every invocation.",
     "assertions": "Most expected values compare exactly. mustNotInclude asserts absence from the complete original-key result; observationsOnly is a whitelist for every actual file observation (not a required sampling order/count); stringPattern expands the full exact u16 vector. Boolean integrity assertions must be computed from actual independent artifacts/state, never copied from input or expected."
   },
+  "assertionSources": {"outcome":{"source":"outcome","comparison":"public-classification"},"java":{"source":"outcome","comparison":"public-classification"},"standardSmali":{"source":"outcome","comparison":"public-classification"},"noJava":{"source":"outcome","comparison":"public-classification"},"noTrustedSmali":{"source":"outcome","comparison":"public-classification"},"noFakeJavaUnit":{"source":"outcome","comparison":"public-classification"},"noFallbackReport":{"source":"outcome","comparison":"public-classification"},"resourceFailureExplicit":{"source":"outcome","comparison":"public-classification"},"noTruncatedSuccess":{"source":"outcome","comparison":"public-classification"},"reason":{"source":"diagnostic","comparison":"typed-failure"},"unsupportedReason":{"source":"diagnostic","comparison":"typed-failure"},"errorKind":{"source":"diagnostic","comparison":"typed-failure"},"otherErrorKind":{"source":"diagnostic","comparison":"typed-failure"},"limit":{"source":"diagnostic","comparison":"typed-failure"},"targetItem":{"source":"diagnostic","comparison":"typed-failure"},"return":{"source":"driver","comparison":"exact-driver-value"},"returnLong":{"source":"driver","comparison":"exact-driver-value"},"returnFloatBits":{"source":"driver","comparison":"exact-driver-value"},"returnStringUnits":{"source":"driver","comparison":"exact-driver-value"},"returnVoid":{"source":"driver","comparison":"exact-driver-value"},"returns":{"source":"driver","comparison":"exact-driver-value"},"returnsStringUnits":{"source":"driver","comparison":"exact-driver-value"},"lt":{"source":"driver","comparison":"exact-driver-value"},"le":{"source":"driver","comparison":"exact-driver-value"},"gt":{"source":"driver","comparison":"exact-driver-value"},"ge":{"source":"driver","comparison":"exact-driver-value"},"events":{"source":"driver","comparison":"exact-driver-value"},"exception":{"source":"driver","comparison":"exact-driver-value"},"heap":{"source":"driver","comparison":"exact-driver-value"},"arrayInt":{"source":"driver","comparison":"exact-driver-value"},"arrayFloatBits":{"source":"driver","comparison":"exact-driver-value"},"monitorAfter":{"source":"driver","comparison":"exact-driver-value"},"enumNames":{"source":"driver","comparison":"exact-driver-value"},"enumOrdinals":{"source":"driver","comparison":"exact-driver-value"},"valuesFresh":{"source":"driver","comparison":"exact-driver-value"},"valueOfNames":{"source":"driver","comparison":"exact-driver-value"},"valueOfUnknownException":{"source":"driver","comparison":"exact-driver-value"},"valueOfNullException":{"source":"driver","comparison":"exact-driver-value"},"annotation":{"source":"driver","comparison":"exact-driver-value"},"stringPattern":{"source":"driver","comparison":"exact-driver-value"},"rawExact":{"source":"raw","comparison":"independent-raw-projection"},"rawDeclarationExact":{"source":"raw","comparison":"independent-raw-projection"},"rawDynamicExact":{"source":"raw","comparison":"independent-raw-projection"},"allInstructionSites":{"source":"raw","comparison":"independent-raw-projection"},"payloadBitsExact":{"source":"raw","comparison":"independent-raw-projection"},"handlerPriorityExact":{"source":"raw","comparison":"independent-raw-projection"},"stringUnitsExact":{"source":"raw","comparison":"independent-raw-projection"},"memberRefsExact":{"source":"raw","comparison":"independent-raw-projection"},"rawMethodsPreserved":{"source":"raw","comparison":"independent-raw-projection"},"effectfulBridgeRawPreserved":{"source":"raw","comparison":"independent-raw-projection"},"rawBridgeLogArgumentUnits":{"source":"raw","comparison":"independent-raw-projection"},"protoPreserved":{"source":"declaration","comparison":"independent-declaration-projection"},"hasBody":{"source":"declaration","comparison":"independent-declaration-projection"},"finalFieldPreserved":{"source":"declaration","comparison":"independent-declaration-projection"},"generatedBridgePreserved":{"source":"declaration","comparison":"independent-declaration-projection"},"declarationsPreserved":{"source":"declaration","comparison":"independent-declaration-projection"},"orderedInvokeSites":{"source":"declaration","comparison":"independent-declaration-projection"},"fieldReadsPreserved":{"source":"declaration","comparison":"independent-declaration-projection"},"constantValueAbsent":{"source":"declaration","comparison":"independent-declaration-projection"},"textAvailable":{"source":"rendered","comparison":"actual-utf8-identity-slices"},"sourceSpansExact":{"source":"rendered","comparison":"actual-utf8-identity-slices"},"failedMethodHasNoJavaBody":{"source":"rendered","comparison":"actual-utf8-identity-slices"},"mustIncludeJavaMethods":{"source":"rendered","comparison":"actual-utf8-identity-slices"},"mustIncludeSmaliMethods":{"source":"rendered","comparison":"actual-utf8-identity-slices"},"allOriginalMembersPresent":{"source":"rendered","comparison":"actual-utf8-identity-slices"},"eachOriginalMemberOnce":{"source":"rendered","comparison":"actual-utf8-identity-slices"},"rawExcerpt":{"source":"rendered","comparison":"actual-utf8-identity-slices"},"definedMethods":{"source":"query","comparison":"original-key-multiset"},"mustNotInclude":{"source":"query","comparison":"original-key-multiset"},"referencingMethod":{"source":"query","comparison":"original-key-multiset"},"siteCount":{"source":"query","comparison":"original-key-multiset"},"allCertifiedSites":{"source":"query","comparison":"original-key-multiset"},"fileBytes":{"source":"filesystem","comparison":"complete-file-observation"},"targetBytes":{"source":"filesystem","comparison":"complete-file-observation"},"targetAbsent":{"source":"filesystem","comparison":"complete-file-observation"},"tempFilesRemaining":{"source":"filesystem","comparison":"complete-file-observation"},"originalFilesUnchanged":{"source":"filesystem","comparison":"complete-file-observation"},"outputOnlyExplicitPath":{"source":"filesystem","comparison":"complete-file-observation"},"escapePathAbsent":{"source":"filesystem","comparison":"complete-file-observation"},"exactlyOnePublish":{"source":"filesystem","comparison":"complete-file-observation"},"targetEqualsSuccessfulPublisher":{"source":"filesystem","comparison":"complete-file-observation"},"targetEqualsSelectedPayload":{"source":"filesystem","comparison":"complete-file-observation"},"observationsOnly":{"source":"filesystem","comparison":"complete-file-observation"},"completePayloadObserved":{"source":"filesystem","comparison":"complete-file-observation"}},
   "cases": [
     {
       "id": "D001",
+      "targets": {"case":{"kind":"class","input_role":"original","descriptor":"Lfixtures/Case;"}},
       "family": "control",
       "title": "Branch merge does not overwrite the untaken path",
       "suite": "core-java",
@@ -34,6 +37,7 @@
         {"id":"v1","input":{"targetRole":"case","method":"choose(ZII)I","args":[true,10,20]},"expected":{"outcome":"java","return":10}},
         {"id":"v2","input":{"targetRole":"case","method":"choose(ZII)I","args":[false,10,20]},"expected":{"outcome":"java","return":20}}
       ],
+      "mutationObservation": "Changing one selected branch to use the other argument changes at least one fixed return; a missing selected edge is not a completed invocation.",
       "mustRejectMutation": "The decompiler MUST NOT hoist the Phi copy of one branch ahead of all branches, and MUST NOT omit an incoming edge.",
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "checked-in self-made source only; fixed JDK/R8; no platform SDK",
@@ -43,6 +47,7 @@
     },
     {
       "id": "D002",
+      "targets": {"case":{"kind":"class","input_role":"original","descriptor":"Lfixtures/Case;"}},
       "family": "control",
       "title": "Parallel-copy swap loop",
       "suite": "core-java",
@@ -56,6 +61,7 @@
         {"id":"v2","input":{"targetRole":"case","method":"swap(III)I","args":[10,20,1]},"expected":{"outcome":"java","return":2010}},
         {"id":"v3","input":{"targetRole":"case","method":"swap(III)I","args":[10,20,2]},"expected":{"outcome":"java","return":1020}}
       ],
+      "mutationObservation": "Sequentially overwriting both carried registers with one old value changes the one-iteration result; entry and two-iteration results also remain mandatory.",
       "mustRejectMutation": "The decompiler MUST NOT serialize the parallel copies a<-b,b<-a into a=b;b=a.",
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "checked-in self-made source only; fixed JDK/R8; no platform SDK",
@@ -65,6 +71,7 @@
     },
     {
       "id": "D003",
+      "targets": {"case":{"kind":"class","input_role":"original","descriptor":"Lfixtures/Case;"}},
       "family": "control",
       "title": "Synchronous rotation of three loop-carried values",
       "suite": "core-java",
@@ -78,6 +85,7 @@
         {"id":"v2","input":{"targetRole":"case","method":"rotate(IIII)I","args":[1,2,3,2]},"expected":{"outcome":"java","return":312}},
         {"id":"v3","input":{"targetRole":"case","method":"rotate(IIII)I","args":[1,2,3,3]},"expected":{"outcome":"java","return":123}}
       ],
+      "mutationObservation": "Reusing an overwritten rotation source changes the first or second rotation; the third rotation checks the full cycle.",
       "mustRejectMutation": "The decompiler MUST NOT keep only one overwritten source, and MUST NOT omit an entry or latch edge copy.",
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "checked-in self-made source only; fixed JDK/R8; no platform SDK",
@@ -87,6 +95,7 @@
     },
     {
       "id": "D004",
+      "targets": {"case":{"kind":"class","input_role":"original","descriptor":"Lfixtures/Case;"}},
       "family": "control",
       "title": "Update before continue and the carried value",
       "suite": "core-java",
@@ -99,6 +108,7 @@
         {"id":"v1","input":{"targetRole":"case","method":"count(I)I","args":[0]},"expected":{"outcome":"java","return":0}},
         {"id":"v2","input":{"targetRole":"case","method":"count(I)I","args":[6]},"expected":{"outcome":"java","return":9}}
       ],
+      "mutationObservation": "Skipping the update on continue prevents bounded completion or changes the sum; a timeout is not a correct return.",
       "mustRejectMutation": "The decompiler MUST NOT let continue bypass the update, which yields an infinite loop or a duplicated contribution.",
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "checked-in self-made source only; fixed JDK/R8; no platform SDK",
@@ -108,6 +118,7 @@
     },
     {
       "id": "D005",
+      "targets": {"case":{"kind":"class","input_role":"original","descriptor":"Lfixtures/Case;"}},
       "family": "control",
       "title": "Named exit from a nested loop",
       "suite": "core-java",
@@ -119,6 +130,7 @@
       "invocations": [
         {"id":"v1","input":{"targetRole":"case","method":"nested()I","args":[]},"expected":{"outcome":"java","return":6}}
       ],
+      "mutationObservation": "An inner-only break executes additional outer iterations and changes the final count.",
       "mustRejectMutation": "The decompiler MUST NOT turn break outer into an inner break, and MUST NOT omit the exit Phi.",
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "checked-in self-made source only; fixed JDK/R8; no platform SDK",
@@ -128,6 +140,7 @@
     },
     {
       "id": "D006",
+      "targets": {"case":{"kind":"class","input_role":"original","descriptor":"Lfixtures/Case;"}},
       "family": "control",
       "title": "A condition with side effects executes only the actual branch",
       "suite": "core-java",
@@ -140,6 +153,7 @@
         {"id":"v1","input":{"targetRole":"case","method":"and()Z","args":[]},"expected":{"outcome":"java","return":false,"events":["A"]}},
         {"id":"v2","input":{"targetRole":"case","method":"or()Z","args":[]},"expected":{"outcome":"java","return":true,"events":["A","B"]}}
       ],
+      "mutationObservation": "Unconditional RHS evaluation adds B to and; repeating a side-effecting operand adds a duplicated event.",
       "mustRejectMutation": "The decompiler MUST NOT expand a short-circuit condition into two unconditional calls, and MUST NOT evaluate an operand more than once.",
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "checked-in self-made source only; fixed JDK/R8; no platform SDK",
@@ -149,6 +163,7 @@
     },
     {
       "id": "D007",
+      "targets": {"case":{"kind":"class","input_role":"original","descriptor":"Lfixtures/Case;"}},
       "family": "control",
       "title": "switch with shared cases and fallthrough",
       "suite": "core-java",
@@ -163,6 +178,7 @@
         {"id":"v3","input":{"targetRole":"case","method":"f(I)I","args":[2]},"expected":{"outcome":"java","return":2}},
         {"id":"v4","input":{"targetRole":"case","method":"f(I)I","args":[9]},"expected":{"outcome":"java","return":7}}
       ],
+      "mutationObservation": "Deleting either shared key, inserting a break before the increment, or changing default alters one fixed key result.",
       "mustRejectMutation": "The decompiler MUST NOT drop a key from a shared target, add a break to a fallthrough case, or misplace the default.",
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "checked-in self-made source only; fixed JDK/R8; no platform SDK",
@@ -172,6 +188,7 @@
     },
     {
       "id": "D008",
+      "targets": {"case":{"kind":"class","input_role":"original","descriptor":"Lfixtures/Case;"}},
       "family": "control",
       "title": "A loop with multiple exits preserves the final value",
       "suite": "core-java",
@@ -185,6 +202,7 @@
         {"id":"v2","input":{"targetRole":"case","method":"f(I)I","args":[2]},"expected":{"outcome":"java","return":12}},
         {"id":"v3","input":{"targetRole":"case","method":"f(I)I","args":[10]},"expected":{"outcome":"java","return":33}}
       ],
+      "mutationObservation": "Dropping the break or reading the wrong exit state changes the break-path value; zero and ordinary loop exits remain separate.",
       "mustRejectMutation": "The decompiler MUST NOT take the wrong header or latch value for an exit copy.",
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "checked-in self-made source only; fixed JDK/R8; no platform SDK",
@@ -194,6 +212,7 @@
     },
     {
       "id": "D009",
+      "targets": {"case":{"kind":"class","input_role":"original","descriptor":"Lfixtures/Case;"}},
       "family": "numeric",
       "title": "Integer overflow keeps the bit width",
       "suite": "core-java",
@@ -206,6 +225,7 @@
         {"id":"v1","input":{"targetRole":"case","method":"add(II)I","args":[2147483647,1]},"expected":{"outcome":"java","return":-2147483648}},
         {"id":"v2","input":{"targetRole":"case","method":"add(II)I","args":[-2147483648,-1]},"expected":{"outcome":"java","return":2147483647}}
       ],
+      "mutationObservation": "Saturating or widening addition changes at least one of the two exact signed overflow results.",
       "mustRejectMutation": "The decompiler MUST NOT widen an int result to long, clamp it, or evaluate it as host-checked arithmetic.",
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "checked-in self-made source only; fixed JDK/R8; no platform SDK",
@@ -215,6 +235,7 @@
     },
     {
       "id": "D010",
+      "targets": {"case":{"kind":"class","input_role":"original","descriptor":"Lfixtures/Case;"}},
       "family": "numeric",
       "title": "Integer divide-by-zero exception and MIN divided by negative one",
       "suite": "core-java",
@@ -227,6 +248,7 @@
         {"id":"v1","input":{"targetRole":"case","method":"div(II)I","args":[-2147483648,-1]},"expected":{"outcome":"java","return":-2147483648}},
         {"id":"v2","input":{"targetRole":"case","method":"div(II)I","args":[7,0]},"expected":{"outcome":"java","exception":"java.lang.ArithmeticException"}}
       ],
+      "mutationObservation": "Suppressing divide-by-zero loses the exception; checked-host MIN/-1 division must not abort the reference run.",
       "mustRejectMutation": "The decompiler MUST NOT delete the divide-by-zero exception of an unused or folded div, and MUST NOT change the MIN/-1 behavior.",
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "checked-in self-made source only; fixed JDK/R8; no platform SDK",
@@ -236,6 +258,7 @@
     },
     {
       "id": "D011",
+      "targets": {"case":{"kind":"class","input_role":"original","descriptor":"Lfixtures/Case;"}},
       "family": "numeric",
       "title": "Signed and unsigned shift masks",
       "suite": "core-java",
@@ -249,6 +272,7 @@
         {"id":"v2","input":{"targetRole":"case","method":"f(II)I","args":[-1,-1]},"expected":{"outcome":"java","return":1}},
         {"id":"v3","input":{"targetRole":"case","method":"g(JI)J","args":["1",64]},"expected":{"outcome":"java","returnLong":"1"}}
       ],
+      "mutationObservation": "Using signed instead of unsigned shift or failing to mask a negative/word-sized count changes a fixed result.",
       "mustRejectMutation": "The decompiler MUST NOT leave the shift count unmasked, and MUST NOT use a signed shift where an unsigned shift applies.",
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "checked-in self-made source only; fixed JDK/R8; no platform SDK",
@@ -258,6 +282,7 @@
     },
     {
       "id": "D012",
+      "targets": {"case":{"kind":"class","input_role":"original","descriptor":"Lfixtures/Case;"}},
       "family": "numeric",
       "title": "Narrowing to byte/char preserves the sign",
       "suite": "core-java",
@@ -270,6 +295,7 @@
         {"id":"v1","input":{"targetRole":"case","method":"f(I)I","args":[255]},"expected":{"outcome":"java","return":-1}},
         {"id":"v2","input":{"targetRole":"case","method":"g(I)I","args":[-1]},"expected":{"outcome":"java","return":65535}}
       ],
+      "mutationObservation": "Zero-extending byte or sign-extending char changes the fixed narrowing result.",
       "mustRejectMutation": "The decompiler MUST NOT interpret byte as unsigned or char as signed.",
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "checked-in self-made source only; fixed JDK/R8; no platform SDK",
@@ -279,6 +305,7 @@
     },
     {
       "id": "D013",
+      "targets": {"case":{"kind":"class","input_role":"original","descriptor":"Lfixtures/Case;"}},
       "family": "numeric",
       "title": "A boolean bit operation is not an int expression",
       "suite": "core-java",
@@ -293,6 +320,7 @@
         {"id":"v3","input":{"targetRole":"case","method":"f(ZZ)Z","args":[true,false]},"expected":{"outcome":"java","return":false}},
         {"id":"v4","input":{"targetRole":"case","method":"f(ZZ)Z","args":[true,true]},"expected":{"outcome":"java","return":false}}
       ],
+      "mutationObservation": "Replacing boolean logic with invalid integer operations fails compilation or the complete boolean truth table.",
       "mustRejectMutation": "The decompiler MUST NOT emit invalid Java such as boolean ^ 1, and MUST NOT change the logic.",
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "checked-in self-made source only; fixed JDK/R8; no platform SDK",
@@ -302,6 +330,7 @@
     },
     {
       "id": "D014",
+      "targets": {"case":{"kind":"class","input_role":"original","descriptor":"Lfixtures/Case;"}},
       "family": "numeric",
       "title": "Zero values are not interchanged across ref/boolean/int contexts",
       "suite": "core-java",
@@ -316,6 +345,7 @@
         {"id":"v3","input":{"targetRole":"case","method":"b()Z","args":[]},"expected":{"outcome":"java","return":false}},
         {"id":"v4","input":{"targetRole":"case","method":"i()I","args":[]},"expected":{"outcome":"java","return":0}}
       ],
+      "mutationObservation": "Confusing null, nonnull, false and integer zero changes a type-directed return or makes Java fail compilation.",
       "mustRejectMutation": "The decompiler MUST NOT confuse a reference with 0 or a boolean with null, and MUST NOT use a bare literal in the wrong context.",
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "checked-in self-made source only; fixed JDK/R8; no platform SDK",
@@ -325,6 +355,7 @@
     },
     {
       "id": "D015",
+      "targets": {"case":{"kind":"class","input_role":"original","descriptor":"Lfixtures/Case;"}},
       "family": "numeric",
       "title": "cmpl/cmpg NaN bias",
       "suite": "core-java",
@@ -337,6 +368,7 @@
         {"id":"v1","input":{"calls":[{"targetRole":"case","method":"lt(FF)Z","args":[{"floatBits":"7fc00000"},{"floatBits":"3f800000"}]},{"targetRole":"case","method":"le(FF)Z","args":[{"floatBits":"7fc00000"},{"floatBits":"3f800000"}]},{"targetRole":"case","method":"gt(FF)Z","args":[{"floatBits":"7fc00000"},{"floatBits":"3f800000"}]},{"targetRole":"case","method":"ge(FF)Z","args":[{"floatBits":"7fc00000"},{"floatBits":"3f800000"}]}]},"expected":{"outcome":"java","lt":false,"le":false,"gt":false,"ge":false}},
         {"id":"v2","input":{"calls":[{"targetRole":"case","method":"lt(FF)Z","args":[{"floatBits":"3f800000"},{"floatBits":"7fc00000"}]},{"targetRole":"case","method":"le(FF)Z","args":[{"floatBits":"3f800000"},{"floatBits":"7fc00000"}]},{"targetRole":"case","method":"gt(FF)Z","args":[{"floatBits":"3f800000"},{"floatBits":"7fc00000"}]},{"targetRole":"case","method":"ge(FF)Z","args":[{"floatBits":"3f800000"},{"floatBits":"7fc00000"}]}]},"expected":{"outcome":"java","lt":false,"le":false,"gt":false,"ge":false}}
       ],
+      "mutationObservation": "Changing NaN bias or the branch relation makes at least one four-method NaN-position group produce a wrong boolean.",
       "mustRejectMutation": "The decompiler MUST NOT convert a cmpl/cmpg result unconditionally into an ordinary relational expression, which misdirects the NaN branch.",
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "checked-in self-made source only; fixed JDK/R8; no platform SDK",
@@ -348,6 +380,7 @@
     },
     {
       "id": "D016",
+      "targets": {"case":{"kind":"class","input_role":"original","descriptor":"Lfixtures/Case;"}},
       "family": "numeric",
       "title": "Negative zero and floating-point division by zero",
       "suite": "core-java",
@@ -360,6 +393,7 @@
         {"id":"v1","input":{"targetRole":"case","method":"negzero()F","args":[]},"expected":{"outcome":"java","returnFloatBits":"80000000"}},
         {"id":"v2","input":{"targetRole":"case","method":"divide(FF)F","args":[{"floatBits":"3f800000"},{"floatBits":"00000000"}]},"expected":{"outcome":"java","returnFloatBits":"7f800000"}}
       ],
+      "mutationObservation": "Canonicalizing signed zero changes the raw return bits; integer-style divide-by-zero creates a forbidden exception.",
       "mustRejectMutation": "The decompiler MUST NOT turn negative zero into positive zero, and MUST NOT turn an FP division by zero into an ArithmeticException.",
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "checked-in source; JDK Driver uses Float.floatToRawIntBits only as observer, not target call",
@@ -369,6 +403,7 @@
     },
     {
       "id": "D017",
+      "targets": {"case":{"kind":"class","input_role":"original","descriptor":"Lfixtures/Case;"}},
       "family": "numeric",
       "title": "NaN, infinity and truncation in FP-to-int conversion",
       "suite": "core-java",
@@ -384,6 +419,7 @@
         {"id":"v4","input":{"targetRole":"case","method":"f(F)I","args":[{"floatBits":"4079999a"}]},"expected":{"outcome":"java","return":3}},
         {"id":"v5","input":{"targetRole":"case","method":"f(F)I","args":[{"floatBits":"c079999a"}]},"expected":{"outcome":"java","return":-3}}
       ],
+      "mutationObservation": "Rounding or mishandling NaN/infinity changes a fixed int return; both signed fractional samples are checked.",
       "mustRejectMutation": "The decompiler MUST NOT substitute rounding for truncation, and MUST NOT mishandle NaN or overflow.",
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "checked-in self-made source only; fixed JDK/R8; no platform SDK",
@@ -393,6 +429,7 @@
     },
     {
       "id": "D018",
+      "targets": {"case":{"kind":"class","input_role":"original","descriptor":"Lfixtures/Case;"}},
       "family": "calls",
       "title": "Arguments evaluate left to right and the receiver first",
       "suite": "core-java",
@@ -404,6 +441,7 @@
       "invocations": [
         {"id":"v1","input":{"targetRole":"case","method":"target()I","args":[]},"expected":{"outcome":"java","return":3,"events":["R","A1","A2","SUM"]}}
       ],
+      "mutationObservation": "Receiver/argument reordering or repeated evaluation changes the exact call event sequence.",
       "mustRejectMutation": "The decompiler MUST NOT reverse the argument order, re-evaluate the receiver, or merge expressions so that a call happens more than once.",
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "self-made Dep complete declaration catalog, checked-in source",
@@ -413,6 +451,7 @@
     },
     {
       "id": "D019",
+      "targets": {"case":{"kind":"class","input_role":"original","descriptor":"Lfixtures/Case;"}},
       "family": "calls",
       "title": "Static overload selection follows the descriptor",
       "suite": "core-java",
@@ -424,6 +463,7 @@
       "invocations": [
         {"id":"v1","input":{"targetRole":"case","method":"target()Ljava/lang/String;","args":[]},"expected":{"outcome":"java","returnStringUnits":[79],"events":["pick:Object"]}}
       ],
+      "mutationObservation": "Choosing the String overload changes both returned UTF16 units and the original overload event.",
       "mustRejectMutation": "The decompiler MUST NOT select the String overload because of a null literal or an added cast.",
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "self-made Dep complete overload catalog",
@@ -433,6 +473,7 @@
     },
     {
       "id": "D020",
+      "targets": {"case":{"kind":"class","input_role":"original","descriptor":"Lfixtures/Case;"}},
       "family": "calls",
       "title": "Virtual dispatch preserves the override",
       "suite": "core-java",
@@ -444,6 +485,7 @@
       "invocations": [
         {"id":"v1","input":{"targetRole":"case","method":"target()I","args":[]},"expected":{"outcome":"java","return":2}}
       ],
+      "mutationObservation": "Dispatching directly to Base changes the return; dropping a selected override or target member fails full-unit validation.",
       "mustRejectMutation": "The decompiler MUST NOT turn the call into a static or direct call on Base, and MUST NOT omit the override.",
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "self-made Base/Child complete catalog; adjacent constructor profile",
@@ -453,6 +495,7 @@
     },
     {
       "id": "D021",
+      "targets": {"child":{"kind":"class","input_role":"original","descriptor":"Lfixtures/Child;"}},
       "family": "calls",
       "title": "invoke-super does not become virtual",
       "suite": "core-java",
@@ -464,6 +507,7 @@
       "invocations": [
         {"id":"v1","input":{"targetRole":"child","method":"f()I","args":[],"receiver":{"new":"fixtures.Child","identity":"child-1"}},"expected":{"outcome":"java","return":2,"events":["C","B"]}}
       ],
+      "mutationObservation": "Virtual recursion instead of invoke-super times out/fails or changes the ordered child/base events.",
       "mustRejectMutation": "The decompiler MUST NOT rewrite super into this.f, which causes recursion or the wrong target.",
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "self-made Base/Child complete declarations",
@@ -473,6 +517,7 @@
     },
     {
       "id": "D022",
+      "targets": {"case":{"kind":"class","input_role":"original","descriptor":"Lfixtures/Case;"}},
       "family": "calls",
       "title": "An unused call still throws and executes its effects",
       "suite": "core-java",
@@ -484,6 +529,7 @@
       "invocations": [
         {"id":"v1","input":{"targetRole":"case","method":"target()V","args":[]},"expected":{"outcome":"java","exception":"fixtures.ExpectedError","events":["B"],"heap":{"counter":1}}}
       ],
+      "mutationObservation": "Dropping the unused call loses the exception, event or counter update.",
       "mustRejectMutation": "The decompiler MUST NOT delete the call or its exception through DCE of an unused return value.",
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "self-made Dep/Error complete declarations",
@@ -493,6 +539,7 @@
     },
     {
       "id": "D023",
+      "targets": {"case":{"kind":"class","input_role":"original","descriptor":"Lfixtures/Case;"}},
       "family": "calls",
       "title": "Interface dispatch preserves the implementation",
       "suite": "core-java",
@@ -505,6 +552,7 @@
         {"id":"v1","input":{"targetRole":"case","method":"f(Lfixtures/I;)I","args":[{"new":"fixtures.Impl","identity":"impl-1"}]},"expected":{"outcome":"java","return":9}},
         {"id":"v2","input":{"targetRole":"case","method":"f(Lfixtures/I;)I","args":[null]},"expected":{"outcome":"java","exception":"java.lang.NullPointerException"}}
       ],
+      "mutationObservation": "Choosing the interface declaration instead of the implementation changes the return; skipping a null receiver changes the exception.",
       "mustRejectMutation": "The decompiler MUST NOT bind the interface call to the wrong target, and MUST NOT change the timing of the null check.",
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "self-made I/Impl complete catalog; dependency remains original source",
@@ -514,6 +562,7 @@
     },
     {
       "id": "D024",
+      "targets": {"case":{"kind":"class","input_role":"original","descriptor":"Lfixtures/Case;"}},
       "family": "heap",
       "title": "An out-of-bounds array access keeps the effect prefix",
       "suite": "core-java",
@@ -526,6 +575,7 @@
         {"id":"v1","input":{"targetRole":"case","method":"f([I)I","args":[{"arrayType":"[I","values":[7]}]},"expected":{"outcome":"java","exception":"java.lang.ArrayIndexOutOfBoundsException","events":["IDX"]}},
         {"id":"v2","input":{"targetRole":"case","method":"f([I)I","args":[null]},"expected":{"outcome":"java","exception":"java.lang.NullPointerException","events":["IDX"]}}
       ],
+      "mutationObservation": "Moving the array check ahead of index computation loses the index event before the fixed exception.",
       "mustRejectMutation": "The decompiler MUST NOT hoist the null or bounds check, and MUST NOT delete the index effect.",
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "self-made Dep complete catalog",
@@ -535,6 +585,7 @@
     },
     {
       "id": "D025",
+      "targets": {"case":{"kind":"class","input_role":"original","descriptor":"Lfixtures/Case;"}},
       "family": "heap",
       "title": "An unused check-cast still performs the check",
       "suite": "core-java",
@@ -548,6 +599,7 @@
         {"id":"v2","input":{"targetRole":"case","method":"f(Ljava/lang/Object;)V","args":[{"new":"java.lang.Object","identity":"object-1"}]},"expected":{"outcome":"java","exception":"java.lang.ClassCastException"}},
         {"id":"v3","input":{"targetRole":"case","method":"f(Ljava/lang/Object;)V","args":[null]},"expected":{"outcome":"java","returnVoid":true}}
       ],
+      "mutationObservation": "Dropping the unused check-cast makes the non-String case complete without the required exception.",
       "mustRejectMutation": "The decompiler MUST NOT delete the bytecode checkcast because its result is unused.",
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "checked-in self-made source only; fixed JDK/R8; no platform SDK",
@@ -560,6 +612,7 @@
     },
     {
       "id": "D026",
+      "targets": {"case":{"kind":"class","input_role":"original","descriptor":"Lfixtures/Case;"}},
       "family": "heap",
       "title": "array-store performs the runtime type check",
       "suite": "core-java",
@@ -573,6 +626,7 @@
         {"id":"v2","input":{"targetRole":"case","method":"f([Ljava/lang/Object;Ljava/lang/Object;)V","args":[{"arrayType":"[Ljava/lang/String;","values":[{"stringUnits":[111,108,100]}],"identity":"strings-1"},{"stringUnits":[111,107]}]},"expected":{"outcome":"java","returnVoid":true,"heap":{"firstString":"ok"}}},
         {"id":"v3","input":{"targetRole":"case","method":"f([Ljava/lang/Object;Ljava/lang/Object;)V","args":[null,{"new":"java.lang.Object","identity":"object-1"}]},"expected":{"outcome":"java","exception":"java.lang.NullPointerException"}}
       ],
+      "mutationObservation": "Removing the runtime array component check loses ArrayStoreException; the successful store and null-array exception remain separate.",
       "mustRejectMutation": "The decompiler MUST NOT generalize to Object[] and thereby erase the runtime component check.",
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "checked-in self-made source only; fixed JDK/R8; no platform SDK",
@@ -582,6 +636,7 @@
     },
     {
       "id": "D027",
+      "targets": {"case":{"kind":"class","input_role":"original","descriptor":"Lfixtures/Case;"}},
       "family": "heap",
       "title": "Array literal element bit patterns",
       "suite": "core-java",
@@ -594,6 +649,7 @@
         {"id":"v1","input":{"targetRole":"case","method":"a()[I","args":[]},"expected":{"outcome":"java","arrayInt":[-1,0,2147483647]}},
         {"id":"v2","input":{"targetRole":"case","method":"b()[F","args":[]},"expected":{"outcome":"java","arrayFloatBits":["80000000","3f800000"]}}
       ],
+      "mutationObservation": "Changing component width, signed interpretation or payload order changes full returned array bits/values.",
       "mustRejectMutation": "The decompiler MUST NOT interpret the fill-array payload with the wrong width, the wrong type or the wrong byte order.",
       "oracle": "dalvik-fill-fresh-array-proof-plus-reference-java-driver",
       "dependencies": "checked-in self-made source only; fixed JDK/R8; no platform SDK",
@@ -607,6 +663,7 @@
     },
     {
       "id": "D028",
+      "targets": {"case":{"kind":"class","input_role":"original","descriptor":"Lfixtures/Case;"}},
       "family": "heap",
       "title": "Field read and write order",
       "suite": "core-java",
@@ -619,6 +676,7 @@
         {"id":"v1","input":{"targetRole":"case","method":"f(Lfixtures/Box;)I","args":[{"new":"fixtures.Box","identity":"box-1","fields":{"n":4}}]},"expected":{"outcome":"java","return":4,"heap":{"n":7}}},
         {"id":"v2","input":{"targetRole":"case","method":"f(Lfixtures/Box;)I","args":[null]},"expected":{"outcome":"java","exception":"java.lang.NullPointerException"}}
       ],
+      "mutationObservation": "Returning the overwritten register instead of the old field changes the return; wrong write order changes the heap.",
       "mustRejectMutation": "The decompiler MUST NOT let a physical register overwrite the old value, and MUST NOT reorder field reads and writes.",
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "self-made Box complete field declarations",
@@ -628,6 +686,7 @@
     },
     {
       "id": "D029",
+      "targets": {"case":{"kind":"class","input_role":"original","descriptor":"Lfixtures/Case;"}},
       "family": "exceptions",
       "title": "A failing call in an assignment: the catch observes the old value",
       "suite": "core-java",
@@ -639,6 +698,7 @@
       "invocations": [
         {"id":"v1","input":{"targetRole":"case","method":"f()I","args":[]},"expected":{"outcome":"java","return":7,"events":["CALL","OLD:7"]}}
       ],
+      "mutationObservation": "Using the successful call result or a default instead of the pre-throw value changes the catch event or return.",
       "mustRejectMutation": "The decompiler MUST NOT use the normal result in the exception environment, take the snapshot after the call, or fall back to a default 0.",
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "self-made Dep/Error complete declarations",
@@ -650,6 +710,7 @@
     },
     {
       "id": "D030",
+      "targets": {"case":{"kind":"class","input_role":"original","descriptor":"Lfixtures/Case;"}},
       "family": "exceptions",
       "title": "Two throw sites select their respective shadowed old value",
       "suite": "core-java",
@@ -662,6 +723,7 @@
         {"id":"v1","input":{"targetRole":"case","method":"f(Z)I","args":[true]},"expected":{"outcome":"java","return":7,"events":["A","OLD:7"]}},
         {"id":"v2","input":{"targetRole":"case","method":"f(Z)I","args":[false]},"expected":{"outcome":"java","return":9,"events":["B","OLD:9"]}}
       ],
+      "mutationObservation": "Using one previous-site value for both paths changes one handler observation; both throw sites must reach the certified handler.",
       "mustRejectMutation": "The decompiler MUST NOT share one shadow and thereby keep the value of the previous site or the overwritten value.",
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "self-made Dep/Error complete declarations",
@@ -673,6 +735,7 @@
     },
     {
       "id": "D031",
+      "targets": {"case":{"kind":"class","input_role":"original","descriptor":"Lfixtures/Case;"}},
       "family": "exceptions",
       "title": "Catch subtypes take precedence over type ordering",
       "suite": "core-java",
@@ -686,6 +749,7 @@
         {"id":"v2","input":{"targetRole":"case","method":"f(I)I","args":[2]},"expected":{"outcome":"java","return":2}},
         {"id":"v3","input":{"targetRole":"case","method":"f(I)I","args":[0]},"expected":{"outcome":"java","return":0}}
       ],
+      "mutationObservation": "Giving BaseError precedence over SubError changes the subtype-path return.",
       "mustRejectMutation": "The decompiler MUST NOT change the handler precedence through the ordering of catch targets or catch types, and MUST NOT generalize the catch type to Throwable.",
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "complete self-made Dep/BaseError/SubError catalog",
@@ -695,6 +759,7 @@
     },
     {
       "id": "D032",
+      "targets": {"case":{"kind":"class","input_role":"original","descriptor":"Lfixtures/Case;"}},
       "family": "exceptions",
       "title": "A cleanup exception outside the try is not caught by the old handler",
       "suite": "core-java",
@@ -706,6 +771,7 @@
       "invocations": [
         {"id":"v1","input":{"targetRole":"case","method":"f()I","args":[]},"expected":{"outcome":"java","exception":"fixtures.ExpectedError","events":["OK","CLEANUP"]}}
       ],
+      "mutationObservation": "Widening the catch to include cleanup turns the escaping exception into a normal return or wrong trace.",
       "mustRejectMutation": "The decompiler MUST NOT widen the try to cover the cleanup, change the return to -1, or swallow the exception.",
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "self-made Dep/Error complete catalog",
@@ -715,6 +781,7 @@
     },
     {
       "id": "D033",
+      "targets": {"case":{"kind":"class","input_role":"original","descriptor":"Lfixtures/Case;"}},
       "family": "exceptions",
       "title": "finally runs before the return, but the return value is read first",
       "suite": "core-java",
@@ -726,6 +793,7 @@
       "invocations": [
         {"id":"v1","input":{"targetRole":"case","method":"f()I","args":[]},"expected":{"outcome":"java","return":3,"events":["FINAL:8"]}}
       ],
+      "mutationObservation": "Reading the return value after cleanup changes the return; removing cleanup loses its event.",
       "mustRejectMutation": "The decompiler MUST NOT select the return value after finally, and MUST NOT omit the cleanup.",
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "self-made Dep complete catalog",
@@ -735,6 +803,7 @@
     },
     {
       "id": "D034",
+      "targets": {"case":{"kind":"class","input_role":"original","descriptor":"Lfixtures/Case;"}},
       "family": "exceptions",
       "title": "A new exception thrown by finally overrides the return",
       "suite": "core-java",
@@ -746,6 +815,7 @@
       "invocations": [
         {"id":"v1","input":{"targetRole":"case","method":"f()I","args":[]},"expected":{"outcome":"java","exception":"fixtures.FinalError","events":["FINAL"]}}
       ],
+      "mutationObservation": "Completing the original return instead of propagating the cleanup exception changes termination and its event prefix.",
       "mustRejectMutation": "The decompiler MUST NOT return 3 unconditionally, throw the original error, or use the wrong catch range.",
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "self-made Dep/FinalError complete catalog",
@@ -755,6 +825,7 @@
     },
     {
       "id": "D035",
+      "targets": {"case":{"kind":"class","input_role":"original","descriptor":"Lfixtures/Case;"}},
       "family": "exceptions",
       "title": "A throw inside catch is caught by the outer handler",
       "suite": "core-java",
@@ -766,6 +837,7 @@
       "invocations": [
         {"id":"v1","input":{"targetRole":"case","method":"f()I","args":[]},"expected":{"outcome":"java","return":4,"events":["A","B","OUTER"]}}
       ],
+      "mutationObservation": "Losing the outer protection of the inner handler makes ErrorB escape instead of taking the outer catch.",
       "mustRejectMutation": "For a throw inside a handler, the decompiler MUST NOT omit the environment or protected-range edge.",
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "self-made Dep/ErrorA/ErrorB complete catalog",
@@ -775,6 +847,7 @@
     },
     {
       "id": "D036",
+      "targets": {"case":{"kind":"class","input_role":"original","descriptor":"Lfixtures/Case;"}},
       "family": "monitor",
       "title": "A call inside the monitor scope really holds the lock",
       "suite": "core-java",
@@ -787,6 +860,7 @@
         {"id":"v1","input":{"targetRole":"case","method":"f(Ljava/lang/Object;)Z","args":[{"new":"java.lang.Object","identity":"lock-1"}]},"expected":{"outcome":"java","return":true}},
         {"id":"v2","input":{"targetRole":"case","method":"f(Ljava/lang/Object;)Z","args":[null]},"expected":{"outcome":"java","exception":"java.lang.NullPointerException"}}
       ],
+      "mutationObservation": "Moving holdsLock outside the synchronized scope changes the nonnull return; a null lock must still throw at entry.",
       "mustRejectMutation": "The decompiler MUST NOT place the body call outside the lock, and MUST NOT misplace the timing of the null-lock throw.",
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "JDK Thread.holdsLock audited observer declaration, checked-in catalog",
@@ -797,6 +871,7 @@
     },
     {
       "id": "D037",
+      "targets": {"case":{"kind":"class","input_role":"original","descriptor":"Lfixtures/Case;"}},
       "family": "monitor",
       "title": "An abnormal exit really releases the monitor",
       "suite": "core-java",
@@ -808,6 +883,7 @@
       "invocations": [
         {"id":"v1","input":{"targetRole":"case","method":"f(Ljava/lang/Object;)V","args":[{"new":"java.lang.Object","identity":"lock-1"}],"observeMonitorAfter":"lock-1"},"expected":{"outcome":"java","exception":"fixtures.ExpectedError","events":["RAISE"],"monitorAfter":false}}
       ],
+      "mutationObservation": "Omitting or mismatching monitor release leaves the original lock held after the exception.",
       "mustRejectMutation": "The decompiler MUST NOT omit the exception release, and MUST NOT release a different object.",
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "self-made Dep/Error + JDK observer catalog",
@@ -817,6 +893,7 @@
     },
     {
       "id": "D038",
+      "targets": {"case":{"kind":"class","input_role":"original","descriptor":"Lfixtures/Case;"}},
       "family": "monitor",
       "title": "Nested reentry on the same lock and exit",
       "suite": "core-java",
@@ -828,6 +905,7 @@
       "invocations": [
         {"id":"v1","input":{"targetRole":"case","method":"f(Ljava/lang/Object;)Z","args":[{"new":"java.lang.Object","identity":"lock-1"}],"observeMonitorAfter":"lock-1"},"expected":{"outcome":"java","return":true,"events":["IN"],"monitorAfter":false}}
       ],
+      "mutationObservation": "Releasing the outer lock too early changes holdsLock inside the outer scope; omitting a release leaves it held after return.",
       "mustRejectMutation": "The decompiler MUST NOT let an inner release drop the entire count, and MUST NOT treat the outer lock as unheld.",
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "self-made Dep + JDK observer catalog",
@@ -837,6 +915,7 @@
     },
     {
       "id": "D039",
+      "targets": {"case":{"kind":"class","input_role":"original","descriptor":"Lfixtures/Case;"}},
       "family": "monitor",
       "title": "The lock expression evaluates exactly once",
       "suite": "core-java",
@@ -848,6 +927,7 @@
       "invocations": [
         {"id":"v1","input":{"targetRole":"case","method":"f()V","args":[]},"expected":{"outcome":"java","returnVoid":true,"events":["LOCK","BODY"],"heap":{"lockCalls":1}}}
       ],
+      "mutationObservation": "Reevaluating nextLock changes the call count/event sequence; moving BODY outside the certified scope fails lock evidence.",
       "mustRejectMutation": "The decompiler MUST NOT re-evaluate the lock at enter/exit, which changes the object or doubles the effect.",
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "self-made Dep complete catalog",
@@ -857,6 +937,7 @@
     },
     {
       "id": "D040",
+      "targets": {"case":{"kind":"class","input_role":"original","descriptor":"Lfixtures/Case;"}},
       "family": "monitor",
       "title": "Instance and static locks under declared synchronized",
       "suite": "core-java",
@@ -869,6 +950,7 @@
         {"id":"v1","input":{"targetRole":"case","method":"inst()Z","receiver":{"new":"fixtures.Case","identity":"case-1"},"args":[],"observeMonitorAfter":"case-1"},"expected":{"outcome":"java","return":true,"monitorAfter":false}},
         {"id":"v2","input":{"targetRole":"case","method":"stat()Z","args":[],"observeMonitorAfter":"case-class"},"expected":{"outcome":"java","return":true,"monitorAfter":false}}
       ],
+      "mutationObservation": "Losing method synchronization changes holdsLock; adding an extra lock from DECLARED_SYNCHRONIZED fails original scope/flag evidence.",
       "mustRejectMutation": "The decompiler MUST NOT lose the actual monitor effect, get the scope wrong, or select the wrong lock object. Refraining from deriving a lock from DECLARED_SYNCHRONIZED alone is not a behavior error.",
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "JDK observer/type catalog",
@@ -881,6 +963,7 @@
     },
     {
       "id": "D041",
+      "targets": {"case":{"kind":"class","input_role":"original","descriptor":"Lfixtures/Case;"}},
       "family": "construction",
       "title": "The constructor super call precedes the body",
       "suite": "core-java",
@@ -892,17 +975,19 @@
       "invocations": [
         {"id":"v1","input":{"targetRole":"case","construct":{"method":"<init>()V","args":[]}},"expected":{"outcome":"java","events":["BASE","BODY"]}}
       ],
+      "mutationObservation": "Moving BODY ahead of super reverses the constructor event sequence or makes Java fail constructor legality.",
       "mustRejectMutation": "The decompiler MUST NOT delete super, and MUST NOT move the body ahead of super.",
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "self-made Base/Dep complete catalog",
       "acceptanceGate": "engine",
       "designRefs": "ALGORITHMS §9、§12",
       "inputRequirements": [
-        "The unique EntrySeed parameter/this of the constructor is traced through its entry binding; the decompiler MUST NOT emit a local declaration or copy before the super call. The original super site and the body order after the normal path are recorded independently."
+        "Independently record the constructor's original this parameter word, the invoke-direct super constructor site and the following body effect. The recovered Java constructor MUST call super before any local declaration, copy or BODY effect; no private EntrySeed, Phi identity or copy count is asserted."
       ]
     },
     {
       "id": "D042",
+      "targets": {"case":{"kind":"class","input_role":"original","descriptor":"Lfixtures/Case;"}},
       "family": "construction",
       "title": "A this construction chain does not repeat field initialization",
       "suite": "core-java",
@@ -914,6 +999,7 @@
       "invocations": [
         {"id":"v1","input":{"targetRole":"case","construct":{"method":"<init>()V","args":[]}},"expected":{"outcome":"java","heap":{"n":4},"events":["INT:4","ZERO"]}}
       ],
+      "mutationObservation": "Repeating the delegated initialization duplicates the INT event; changing the delegation alters the field/event order.",
       "mustRejectMutation": "The decompiler MUST NOT push the field initializer down so that it repeats, and MUST NOT resolve the this-chain target incorrectly.",
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "self-made Dep + complete Case declarations",
@@ -923,6 +1009,7 @@
     },
     {
       "id": "D043",
+      "targets": {"case":{"kind":"class","input_role":"original","descriptor":"Lfixtures/Case;"}},
       "family": "construction",
       "title": "Adjacent new/init argument effects occur exactly once",
       "suite": "core-java",
@@ -934,6 +1021,7 @@
       "invocations": [
         {"id":"v1","input":{"targetRole":"case","method":"f()Lfixtures/Box;","args":[]},"expected":{"outcome":"java","heap":{"boxN":5},"events":["ARG","CTOR:5"]}}
       ],
+      "mutationObservation": "Moving or repeating argument evaluation changes the constructor event sequence or initialized field.",
       "mustRejectMutation": "The decompiler MUST NOT re-evaluate an inlined argument, turn an argument into a CTOR-before-ARG order, or fail to match the allocation identity.",
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "self-made Dep/Box complete catalog",
@@ -943,6 +1031,7 @@
     },
     {
       "id": "D044",
+      "targets": {"case":{"kind":"class","input_role":"original","descriptor":"Lfixtures/Case;"}},
       "family": "initialization",
       "title": "Static initialization triggers and runs exactly once",
       "suite": "core-java",
@@ -954,6 +1043,7 @@
       "invocations": [
         {"id":"v1","input":{"targetRole":"case","calls":[{"method":"get()I","args":[]},{"method":"get()I","args":[]}],"isolation":"fresh-jvm"},"expected":{"outcome":"java","returns":[7,7],"events":["INIT"]}}
       ],
+      "mutationObservation": "Inlining away the initialization trigger loses INIT; rerunning initialization adds a second INIT within the repeated-call JVM.",
       "mustRejectMutation": "The decompiler MUST NOT delete the trigger by inlining a static field as a constant, and MUST NOT repeat clinit on every call.",
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "self-made Dep complete catalog",
@@ -964,6 +1054,7 @@
     },
     {
       "id": "D045",
+      "targets": {"case":{"kind":"class","input_role":"original","descriptor":"Lfixtures/Case;"}},
       "family": "initialization",
       "title": "A blank final is assigned once in each constructor",
       "suite": "core-java",
@@ -976,6 +1067,7 @@
         {"id":"v1","input":{"targetRole":"case","construct":{"method":"<init>(Z)V","args":[true]}},"expected":{"outcome":"java","heap":{"x":1},"finalFieldPreserved":true}},
         {"id":"v2","input":{"targetRole":"case","construct":{"method":"<init>(Z)V","args":[false]}},"expected":{"outcome":"java","heap":{"x":2},"finalFieldPreserved":true}}
       ],
+      "mutationObservation": "Adding a default final assignment fails Java legality; losing one original assignment changes a branch field or final modifier evidence.",
       "mustRejectMutation": "The decompiler MUST NOT write a default value for the final and then assign it, omit the assignment in a branch, or delete the final semantic.",
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "checked-in self-made source only; fixed JDK/R8; no platform SDK",
@@ -985,6 +1077,7 @@
     },
     {
       "id": "D046",
+      "targets": {"case":{"kind":"class","input_role":"original","descriptor":"Lfixtures/Case;"}},
       "family": "initialization",
       "title": "Explicit encoded null/false/0 is not confused with the implicit default",
       "suite": "core-java",
@@ -996,6 +1089,7 @@
       "invocations": [
         {"id":"v1","input":{"targetRole":"case","observeStaticFields":["s:Ljava/lang/String;","b:Z","i:I"]},"expected":{"outcome":"java","heap":{"s":null,"b":false,"i":0}}}
       ],
+      "mutationObservation": "Dropping or misbinding a null/boolean/int encoded kind changes independently decoded input facts or the final static field state.",
       "mustRejectMutation": "The decompiler MUST NOT turn the null String into an empty string, emit pseudo-Java False/None, or map the encoded defaults incorrectly.",
       "oracle": "dex-format-encoded-value-tags-plus-reference-java-default-state",
       "dependencies": "checked-in self-made source only; fixed JDK/R8; no platform SDK",
@@ -1008,6 +1102,7 @@
     },
     {
       "id": "D047",
+      "targets": {"case":{"kind":"class","input_role":"original","descriptor":"Lfixtures/Case;"}},
       "family": "initialization",
       "title": "Static initialization failure keeps the exception type",
       "suite": "core-java",
@@ -1019,6 +1114,7 @@
       "invocations": [
         {"id":"v1","input":{"targetRole":"case","readStaticField":"n:I","isolation":"fresh-jvm"},"expected":{"outcome":"java","exception":"java.lang.ExceptionInInitializerError","events":["INIT"]}}
       ],
+      "mutationObservation": "Treating clinit as an ordinary call changes the escaping initialization exception or loses INIT.",
       "mustRejectMutation": "The decompiler MUST NOT treat clinit as an ordinary call, swallow the original init failure, or skip the trigger.",
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "self-made Dep/InitError complete catalog",
@@ -1028,6 +1124,7 @@
     },
     {
       "id": "D048",
+      "targets": {"case":{"kind":"class","input_role":"original","descriptor":"Lfixtures/Case;"}},
       "family": "declarations",
       "title": "Call behavior of a covariant bridge",
       "suite": "core-java",
@@ -1039,6 +1136,7 @@
       "invocations": [
         {"id":"v1","input":{"targetRole":"case","receiver":{"new":"fixtures.Case","identity":"case-1"},"invokeAs":"fixtures.Base","method":"get()Ljava/lang/Object;","args":[]},"expected":{"outcome":"java","returnStringUnits":[99,104,105,108,100],"generatedBridgePreserved":true}}
       ],
+      "mutationObservation": "Losing a bridge or its erased descriptor changes original-member/classfile evidence or Base-reference dispatch.",
       "mustRejectMutation": "The decompiler MUST NOT merge the bridge with the actual method and lose the dispatch, and MUST NOT declare the duplicate incorrectly.",
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "self-made Base complete generic/erased contracts",
@@ -1050,6 +1148,7 @@
     },
     {
       "id": "D049",
+      "targets": {"outer":{"kind":"class","input_role":"original","descriptor":"Lfixtures/Outer;","ownership_closure":["Lfixtures/Outer$Inner;"]}},
       "family": "declarations",
       "title": "Inner capture keeps the outer this identity",
       "suite": "core-java",
@@ -1062,6 +1161,7 @@
         {"id":"v1","input":{"targetRole":"outer","scenario":"one-outer","initialN":7},"expected":{"outcome":"java","return":7}},
         {"id":"two-outers","input":{"targetRole":"outer","scenario":"two-outers","outerValuesAfterConstruction":[11,9]},"expected":{"outcome":"java","returns":[11,9]}}
       ],
+      "mutationObservation": "Returning a constant or binding both captures to one outer changes the two-outer observations.",
       "mustRejectMutation": "The decompiler MUST NOT delete the capture into a standalone this, guess a static inner from the $ in the name, or build the constructor parameters incorrectly.",
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "checked-in self-made source only; fixed JDK/R8; no platform SDK",
@@ -1074,6 +1174,7 @@
     },
     {
       "id": "D050",
+      "targets": {"case":{"kind":"class","input_role":"original","descriptor":"Lfixtures/Case;"}},
       "family": "declarations",
       "title": "enum names, ordinals and the values copy",
       "suite": "core-java",
@@ -1085,6 +1186,7 @@
       "invocations": [
         {"id":"enum-contract","input":{"targetRole":"case","scenario":"names-ordinals-values-and-valueOf"},"expected":{"outcome":"java","enumNames":["Z","A"],"enumOrdinals":[0,1],"valuesFresh":true,"valueOfNames":["Z","A"],"valueOfUnknownException":"java.lang.IllegalArgumentException","valueOfNullException":"java.lang.NullPointerException"}}
       ],
+      "mutationObservation": "Alphabetically sorting enum creation swaps names/ordinals; returning backing storage changes the second values result after mutation.",
       "mustRejectMutation": "The decompiler MUST NOT reorder the constants into A,Z by field lexicographic order, emit the wrong name/ordinal, reuse one array for values, lose the valueOf behavior, or output an ordinary class extends Enum.",
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "checked-in self-made source only; fixed JDK/R8; no platform SDK",
@@ -1097,6 +1199,7 @@
     },
     {
       "id": "D051",
+      "targets": {"case":{"kind":"class","input_role":"original","descriptor":"Lfixtures/Case;"}},
       "family": "declarations",
       "title": "Runtime annotation values are not silently dropped",
       "suite": "core-java",
@@ -1108,6 +1211,7 @@
       "invocations": [
         {"id":"v1","input":{"targetRole":"case","reflectAnnotation":"Lfixtures/Mark;"},"expected":{"outcome":"java","annotation":{"valueUnits":[120],"nums":[1,2]}}}
       ],
+      "mutationObservation": "Dropping the runtime annotation changes reflection values or makes the complete JavaUnit ineligible.",
       "mustRejectMutation": "The decompiler MUST NOT present system metadata as a fake annotation, and MUST NOT drop a runtime user annotation while still reporting JavaUnit.",
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "self-made Mark source + JDK annotation declarations",
@@ -1117,6 +1221,7 @@
     },
     {
       "id": "D052",
+      "targets": {"case":{"kind":"class","input_role":"original","descriptor":"Lfixtures/Case;"}},
       "family": "strings",
       "title": "Fidelity for NUL, an unpaired surrogate and backslash-u",
       "suite": "core-java",
@@ -1128,6 +1233,7 @@
       "invocations": [
         {"id":"v1","input":{"targetRole":"case","method":"f()Ljava/lang/String;","args":[]},"expected":{"outcome":"java","returnStringUnits":[0,55296,65,56320,92,117,48,48,48,97]}}
       ],
+      "mutationObservation": "Replacement of surrogate units or accidental Unicode preprocessing changes the exact returned u16 vector.",
       "mustRejectMutation": "The decompiler MUST NOT replace and lose the surrogate, and MUST NOT let Unicode preprocessing turn the literal into a line break.",
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "checked-in self-made source only; fixed JDK/R8; no platform SDK",
@@ -1138,6 +1244,7 @@
     },
     {
       "id": "D053",
+      "targets": {"case":{"kind":"class","input_role":"original","descriptor":"Lfixtures/Case;"}},
       "family": "strings",
       "title": "The empty string versus an actual newline/tab",
       "suite": "core-java",
@@ -1150,6 +1257,7 @@
         {"id":"v1","input":{"targetRole":"case","method":"empty()Ljava/lang/String;","args":[]},"expected":{"outcome":"java","returnStringUnits":[]}},
         {"id":"v2","input":{"targetRole":"case","method":"controls()Ljava/lang/String;","args":[]},"expected":{"outcome":"java","returnStringUnits":[65,10,9,34,92,66]}}
       ],
+      "mutationObservation": "Treating escapes as literal display text or an empty string changes the exact returned u16 vector.",
       "mustRejectMutation": "The decompiler MUST NOT let escaping corrupt the value, and MUST NOT emit an illegal literal.",
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "checked-in self-made source only; fixed JDK/R8; no platform SDK",
@@ -1159,6 +1267,7 @@
     },
     {
       "id": "D054",
+      "targets": {"case":{"kind":"class","input_role":"original","descriptor":"Lfixtures/Case;"}},
       "family": "strings",
       "title": "A non-BMP character consists of two UTF-16 units",
       "suite": "core-java",
@@ -1170,6 +1279,7 @@
       "invocations": [
         {"id":"v1","input":{"targetRole":"case","method":"f()Ljava/lang/String;","args":[]},"expected":{"outcome":"java","returnStringUnits":[55357,56898]}}
       ],
+      "mutationObservation": "Using codepoint count as UTF16 length loses one certified surrogate unit.",
       "mustRejectMutation": "The decompiler MUST NOT use the code-point count as the UTF-16 count, and MUST NOT split the pair.",
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "checked-in self-made source only; fixed JDK/R8; no platform SDK",
@@ -1179,6 +1289,7 @@
     },
     {
       "id": "D055",
+      "targets": {"case":{"kind":"method","input_role":"original","owner":"Lfixtures/Case;","name":"f","proto":"()I"}},
       "family": "input",
       "title": "An oversized count is validated before any allocation",
       "suite": "input-safety",
@@ -1186,11 +1297,12 @@
       "required": true,
       "validationScope": "input",
       "inputKind": "self-made-byte-mutation",
-      "inputRecipe": "Two independent variants are built from the same reviewed tiny DEX: one writes code_item insns_size as 2147483647, and the other writes handler typed_count as 2147483647. The minimum bytes each variant requires exceed the actual remaining bytes, and every other structure stays unchanged; the original field anchors, the exact patch ranges and the artifact hash are recorded.",
+      "inputRecipe": "Build one self-made 035 owner with the canonical Object constructor and static f()I. f uses a const followed by return under one valid typed try handler; the handler starts with move-exception and returns a separately defined int, with all register words and refs in range. Build two independent variants of that reviewed input: replace code_item insns_size with 2147483647, or replace the encoded typed-handler count with positive SLEB32 2147483647. If the variable-length patch grows the handler record, rebuild its recorded ranges and dependent offsets before applying the single intended count fault. Prove each declared minimum size exceeds the actual remaining bytes; record the item anchors and original/patched hashes, without adding a second malformed field.",
       "invocations": [
         {"id":"insns-count","input":{"targetRole":"case","mutation":"insns_size=2147483647-beyond-remaining"},"expected":{"outcome":"error","errorKind":"malformed","noJava":true,"noTrustedSmali":true}},
         {"id":"handler-count","input":{"targetRole":"case","mutation":"handler-typed-count=2147483647-beyond-remaining"},"expected":{"outcome":"error","errorKind":"malformed","noJava":true,"noTrustedSmali":true}}
       ],
+      "mutationObservation": "Allocating before the minimum-byte range check can panic/exhaust resources; misclassification or trusted raw output fails the fixed malformed assertions.",
       "mustRejectMutation": "The decompiler MUST NOT call with_capacity or panic on a slice first, and MUST NOT read 0 for a missing byte.",
       "oracle": "format-violation-at-known-field",
       "dependencies": "checked-in self-made source only; fixed JDK/R8; no platform SDK",
@@ -1203,6 +1315,7 @@
     },
     {
       "id": "D056",
+      "targets": {"case":{"kind":"method","input_role":"original","owner":"Lfixtures/Case;","name":"f","proto":"()I"}},
       "family": "input",
       "title": "A branch into the middle of an instruction is rejected",
       "suite": "input-safety",
@@ -1210,10 +1323,11 @@
       "required": true,
       "validationScope": "input",
       "inputKind": "self-made-byte-mutation",
-      "inputRecipe": "Self-made 035 method uses a multiword const then branch target patched to its second code unit.",
+      "inputRecipe": "A self-made 035 static f()I has registers_size=1, ins/outs/tries=0 and code units [0x0014,0x0007,0x0000,0xfd28,0x000f]: const v0,7; goto at CodeUnit 3 back to the const at 0; return v0 at 4 is unreachable but format-valid. Change only the goto delta from -3 to -2, giving 0xfe28 and a target at the const's operand word at CodeUnit 1. The original finite-size bytes and refs remain unchanged; no execution oracle is claimed for the baseline loop.",
       "invocations": [
         {"id":"v1","input":{"targetRole":"case","mutation":"branch-to-middle-of-multiword-const"},"expected":{"outcome":"error","errorKind":"malformed","noJava":true,"noTrustedSmali":true}}
       ],
+      "mutationObservation": "Accepting a target in a multiword operand incorrectly publishes trusted raw/Java instead of the fixed malformed result.",
       "mustRejectMutation": "The decompiler MUST NOT accept a payload or a mid-operand offset as a legal basic block.",
       "oracle": "format-violation-at-known-target",
       "dependencies": "checked-in self-made source only; fixed JDK/R8; no platform SDK",
@@ -1223,6 +1337,7 @@
     },
     {
       "id": "D057",
+      "targets": {"case":{"kind":"method","input_role":"original","owner":"Lfixtures/Case;","name":"f","proto":"()I"}},
       "family": "input",
       "title": "An actual read-before-def is not a default 0",
       "suite": "input-safety",
@@ -1230,10 +1345,11 @@
       "required": true,
       "validationScope": "input",
       "inputKind": "reviewed-invalid-smali-or-bytes",
-      "inputRecipe": "Self-made method reads an unassigned narrow register on reachable return path; no parameters provide that register.",
+      "inputRecipe": "A self-made 035 static f()I has registers_size=1, ins/outs/tries=0 and only return v0 (0x000f); no parameter or original instruction defines v0. The owner has the canonical Object constructor, and all header, ref and code ranges are independently valid. The reachable undefined-use fact, not a missing catalog, is the intended rejection.",
       "invocations": [
         {"id":"v1","input":{"targetRole":"case","mutation":"reachable-read-before-definition"},"expected":{"outcome":"error","errorKind":"malformed","noJava":true,"noTrustedSmali":true}}
       ],
+      "mutationObservation": "Supplying a default definition turns the original undefined return into fabricated Java/trusted raw.",
       "mustRejectMutation": "The decompiler MUST NOT default the value to 0/null to make java succeed.",
       "oracle": "reachable-undefined-use-proof",
       "dependencies": "checked-in self-made source only; fixed JDK/R8; no platform SDK",
@@ -1243,6 +1359,7 @@
     },
     {
       "id": "D058",
+      "targets": {"case":{"kind":"method","input_role":"original","owner":"Lfixtures/Case;","name":"f","proto":"()J"}},
       "family": "input",
       "title": "A wide register cannot be read after partial overwrite",
       "suite": "input-safety",
@@ -1250,10 +1367,11 @@
       "required": true,
       "validationScope": "input",
       "inputKind": "reviewed-invalid-smali-or-bytes",
-      "inputRecipe": "Self-made const-wide v0; const/4 v1,1; return-wide v0. Register words in range but high half overwritten.",
+      "inputRecipe": "A self-made 035 static f()J has registers_size=2, ins/outs/tries=0 and code units [0x0016,0x0000,0x1112,0x0010]: const-wide/16 v0,0; const/4 v1,1; return-wide v0. Both words are in range but the high-half write invalidates the original wide pair. Keep the owner constructor, proto, refs and byte ranges otherwise valid.",
       "invocations": [
         {"id":"v1","input":{"targetRole":"case","mutation":"wide-high-half-overwrite"},"expected":{"outcome":"error","errorKind":"malformed","noJava":true,"noTrustedSmali":true}}
       ],
+      "mutationObservation": "Keeping a wide definition after an overlapping high-word write publishes trusted output for an invalid pair.",
       "mustRejectMutation": "The decompiler MUST NOT let the wide high half still alias the old ValueId.",
       "oracle": "wide-pair-invalidated-by-overlapping-write",
       "dependencies": "checked-in self-made source only; fixed JDK/R8; no platform SDK",
@@ -1263,6 +1381,7 @@
     },
     {
       "id": "D059",
+      "targets": {"case":{"kind":"method","input_role":"original","owner":"Lfixtures/Case;","name":"f","proto":"()V"}},
       "family": "raw",
       "title": "The width of an unknown opcode must not be guessed as NOP",
       "suite": "raw-integrity",
@@ -1270,10 +1389,11 @@
       "required": true,
       "validationScope": "method-in-known-context",
       "inputKind": "self-made-byte-mutation",
-      "inputRecipe": "Mutate a supported raw method opcode at known site to unrecognized format; version and mutation recorded.",
+      "inputRecipe": "Build a self-made 035 owner with the canonical Object constructor and a public static f()V whose original code is exactly return-void with registers/ins/outs/tries all zero. Change only the low opcode byte of that instruction at CodeUnit 0 from 0x0e to the 035 unused value 0x3e; keep the high byte and the original code range, declaration, version and refs unchanged. Independently record the field anchor and original/mutated hashes; no standard instruction width is assigned to 0x3e.",
       "invocations": [
         {"id":"v1","input":{"targetRole":"case","mutation":"unrecognized-opcode-format"},"expected":{"outcome":"unavailable","java":false,"standardSmali":false,"rawExcerpt":true}}
       ],
+      "mutationObservation": "Guessing the unused opcode as nop or .word changes Unavailable/excerpt into fabricated standard Smali or Java.",
       "mustRejectMutation": "The decompiler MUST NOT default to nop, and MUST NOT fabricate a .word in standard Smali.",
       "oracle": "unknown-format-contract",
       "dependencies": "checked-in self-made source only; fixed JDK/R8; no platform SDK",
@@ -1283,6 +1403,7 @@
     },
     {
       "id": "D060",
+      "targets": {"case":{"kind":"class","input_role":"original","descriptor":"Lfixtures/Case;"}},
       "family": "raw",
       "title": "A legal return-only overload stays raw instead of acquiring a changed public name",
       "suite": "raw-integrity",
@@ -1290,10 +1411,11 @@
       "required": true,
       "validationScope": "full-unit",
       "inputKind": "self-made-smali",
-      "inputRecipe": "Self-made class defines same name and parameter list with only differing return descriptor; Java source cannot faithfully declare both; raw DEX structural validity separately certified.",
+      "inputRecipe": "A self-made 035 class Lfixtures/Case; has the canonical Object constructor and two ordinary static methods f()I and f()J returning 1 and 2 respectively, with no bridge/synthetic flags. These original full protos are distinct in method_ids but have equal name/parameter lists, which Java source cannot declare together. Independently certify all declarations, raw bodies and complete owner/Object facts; no missing constructor or catalog determines the Mixed result.",
       "invocations": [
         {"id":"v1","input":{"targetRole":"case","scenario":"nonbridge-return-only-collision"},"expected":{"outcome":"mixed","rawMethodsPreserved":2,"noFakeJavaUnit":true}}
       ],
+      "mutationObservation": "Dropping, renaming or merging one return-only overload loses an original raw member or fabricates JavaUnit.",
       "mustRejectMutation": "The decompiler MUST NOT rename or drop one of the two overloads to make JavaUnit succeed.",
       "oracle": "raw-member-identity-and-java-representability",
       "dependencies": "checked-in self-made source only; fixed JDK/R8; no platform SDK",
@@ -1305,6 +1427,7 @@
     },
     {
       "id": "D061",
+      "targets": {"case":{"kind":"class","input_role":"original","descriptor":"Lfixtures/Case;"}},
       "family": "raw",
       "title": "A standard Smali round trip covers branch/payload/handler completely",
       "suite": "raw-integrity",
@@ -1316,6 +1439,7 @@
       "invocations": [
         {"id":"v1","input":{"targetRole":"case","method":"f(I)I","catalog":"complete-except-one-reachable-external-invoke"},"expected":{"outcome":"smali","allInstructionSites":true,"payloadBitsExact":true,"handlerPriorityExact":true,"stringUnitsExact":true,"memberRefsExact":true}}
       ],
+      "mutationObservation": "A changed branch, payload, typed catch/catchall, string unit or full member ref fails the independent reassembled projection even if assembly succeeds.",
       "mustRejectMutation": "The round trip MUST NOT pass the assembler while dropping a catch, a key, a literal or a changed proto.",
       "oracle": "independent-dexlib2-normalized-raw-projection",
       "dependencies": "locked smali/dexlib2 plus checked-in class shell; no source-engine oracle",
@@ -1327,6 +1451,7 @@
     },
     {
       "id": "D062",
+      "targets": {"case":{"kind":"method","input_role":"original","owner":"Lfixtures/Case;","name":"f","proto":"(I)I"}},
       "family": "resources",
       "title": "An explicit normal budget failure stays separate from the raw allowance",
       "suite": "resource-safety",
@@ -1334,11 +1459,12 @@
       "required": true,
       "validationScope": "request",
       "inputKind": "self-made-java-to-dex",
-      "inputRecipe": "Known legal pure arithmetic method of reviewed size. First set only normal max_work_steps=0; omitted raw/request quotas remain None, so complete raw fallback is available. Second explicitly sets raw work to zero too. Zero is not the unlimited sentinel.",
+      "inputRecipe": "A self-made 035 owner contains the canonical Object constructor and a public static int f(int x){return x+1;}; preparation certifies the parameter read, integer increment and return with no branch, payload, handler or call, plus the complete raw form and declarations. Both invocations bind exactly f(I)I, not the constructor. First set only normal max_work_steps=0; omitted raw/request quotas remain None, so complete raw fallback is available. Second explicitly sets raw work to zero too. Zero is not the unlimited sentinel.",
       "invocations": [
         {"id":"v1","input":{"targetRole":"case","method":"f(I)I","limits":{"max_work_steps":0}},"expected":{"outcome":"smali","reason":"budget_exceeded","rawExact":true}},
         {"id":"v2","input":{"targetRole":"case","method":"f(I)I","limits":{"max_work_steps":0,"fallback_work_steps":0}},"expected":{"outcome":"unavailable","reason":"budget_exceeded"}}
       ],
+      "mutationObservation": "Treating zero as unlimited, charging raw to the exhausted normal allowance, or retrying changes the two fixed resource outcomes.",
       "mustRejectMutation": "The decompiler MUST NOT treat Some(0) as None, draw the raw path from the normal allowance, widen the explicit limit by retrying, or label a truncated result complete.",
       "oracle": "explicit-resource-contract",
       "dependencies": "reviewed self-made raw method; no Java source VM required",
@@ -1349,6 +1475,7 @@
     },
     {
       "id": "D063",
+      "targets": {"case":{"kind":"method","input_role":"original","owner":"Lfixtures/Case;","name":"f","proto":"(I)I"}},
       "family": "resources",
       "title": "A cancellation request does not turn into fallback",
       "suite": "resource-safety",
@@ -1356,10 +1483,11 @@
       "required": true,
       "validationScope": "request",
       "inputKind": "self-made-java-to-dex",
-      "inputRecipe": "Large finite self-made graph/method; RunContext callback becomes cancelled after a bounded number of observable callback checks; no private phase call count asserted.",
+      "inputRecipe": "The self-made source defines public static int f(int x) as 256 sequential x+=1 statements followed by return x, with no loop, call, payload or handler. B02 uses the pinned D8 and B03 independently certifies at least 256 reachable complete arithmetic instruction sites; if the compiler collapses that shape, preparation blocks rather than inventing a smaller graph. The target role binds exactly f(I)I; this invocation decompiles the method and does not execute it in a Driver. After open completes, arm the public callback; it returns true at its 64th armed check and remains true thereafter, with no wall-clock race or private phase assertion.",
       "invocations": [
         {"id":"v1","input":{"targetRole":"case","method":"f(I)I","cancellation":{"arm":"after-open","cancelAfterChecks":64}},"expected":{"outcome":"error","errorKind":"cancelled","noFallbackReport":true}}
       ],
+      "mutationObservation": "Continuing raw after cancellation produces a forbidden fallback Report; failing to observe the armed token does not complete correctly.",
       "mustRejectMutation": "After cancellation the decompiler MUST NOT run smali method by method, and MUST NOT keep looping without checking the cancellation.",
       "oracle": "public-cancellation-contract",
       "dependencies": "finite self-made input; check callback not private scheduler",
@@ -1371,6 +1499,7 @@
     },
     {
       "id": "D064",
+      "targets": {"case":{"kind":"class","input_role":"original","descriptor":"Lfixtures/Case;"},"report-case":{"kind":"class","input_role":"report-original","descriptor":"Lfixtures/ReportCase;"}},
       "family": "resources",
       "title": "The escaped member budget and the whole-report budget apply separately",
       "suite": "resource-safety",
@@ -1383,6 +1512,7 @@
         {"id":"v1","input":{"targetRole":"case","method":"f()Ljava/lang/String;","stringUnits":[0,0,0,0],"limits":{"max_method_output_bytes":16,"fallback_output_bytes":16}},"expected":{"outcome":"resource-failure","resourceFailureExplicit":true,"noTruncatedSuccess":true}},
         {"id":"report-total","input":{"targetRole":"report-case","selection":"class","limits":{"max_method_output_bytes":65536,"fallback_output_bytes":65536,"max_report_output_bytes":128}},"expected":{"outcome":"resource-failure","limit":"max_report_output_bytes","resourceFailureExplicit":true,"noTruncatedSuccess":true}}
       ],
+      "mutationObservation": "Measuring only unescaped bytes or resetting the report quota per member permits a forbidden successful/truncated payload.",
       "mustRejectMutation": "The decompiler MUST NOT measure a member by its unescaped size, reset the report limit per method, omit the shell or member total from the sum, or label a half-Java/half-Smali result complete.",
       "oracle": "bounded-output-contract",
       "dependencies": "checked-in self-made source only; fixed JDK/R8; no platform SDK",
@@ -1395,6 +1525,7 @@
     },
     {
       "id": "D065",
+      "targets": {"logical0":{"kind":"class","input_role":"container","descriptor":"Lfixtures/Case;","logical_ordinal":0},"logical1":{"kind":"class","input_role":"container","descriptor":"Lfixtures/Case;","logical_ordinal":1}},
       "family": "identity",
       "title": "041: equal numeric indices on different logical members do not chain definitions",
       "suite": "identity-semantics",
@@ -1407,6 +1538,7 @@
         {"id":"v1","input":{"targetRole":"logical0","method":"f()I","args":[],"through":["engine-original-view","application-original-view"]},"expected":{"outcome":"java","return":11}},
         {"id":"v2","input":{"targetRole":"logical1","method":"f()I","args":[],"through":["engine-original-view","application-original-view"]},"expected":{"outcome":"java","return":22}}
       ],
+      "mutationObservation": "Resolving identical numeric indices in the wrong logical member changes one selected return or original-origin association.",
       "mustRejectMutation": "The decompiler MUST NOT omit header_offset from the normalized header, and MUST NOT pick an arbitrary first entry by descriptor.",
       "oracle": "worked-return-values-plus-independent-container-projection",
       "dependencies": "checked-in self-made source only; fixed JDK/R8; no platform SDK",
@@ -1419,6 +1551,7 @@
     },
     {
       "id": "D066",
+      "targets": {"own-image":{"kind":"image","input_role":"original"}},
       "family": "identity",
       "title": "Defined methods stay separate from external method-id references",
       "suite": "domain-integrity",
@@ -1430,6 +1563,7 @@
       "invocations": [
         {"id":"all-definitions","input":{"targetRole":"own-image","query":"defined-methods","nameFilter":null},"expected":{"outcome":"data","definedMethods":["Lfixtures/Own;-><init>()V","Lfixtures/Own;->f()V"],"mustNotInclude":["Ljava/lang/Object;-><init>()V","Lfixtures/External;->g()V"]}}
       ],
+      "mutationObservation": "Enumerating method_ids instead of class_data adds referenced-only members to the complete original-definition multiset.",
       "mustRejectMutation": "The symbol query MUST NOT list every method_ids entry as a definition.",
       "oracle": "reviewed-input-symbol-manifest",
       "dependencies": "checked-in self-made source only; fixed JDK/R8; no platform SDK",
@@ -1442,6 +1576,7 @@
     },
     {
       "id": "D067",
+      "targets": {"case":{"kind":"class","input_role":"original","descriptor":"Lfixtures/Case;"}},
       "family": "identity",
       "title": "Two reference sites in one method cannot be merged",
       "suite": "domain-integrity",
@@ -1453,6 +1588,7 @@
       "invocations": [
         {"id":"v1","input":{"targetRole":"case","query":"direct-method-xref","methodRef":"Lfixtures/Dep;->f()V"},"expected":{"outcome":"data","siteCount":2,"referencingMethod":"Case.target","allCertifiedSites":true}}
       ],
+      "mutationObservation": "Deduplicating by method instead of operand site removes one certified reference site.",
       "mustRejectMutation": "The reference-site query MUST NOT deduplicate inside one referencing method and thereby omit the second site.",
       "oracle": "independent-raw-site-manifest",
       "dependencies": "self-made Dep reference and locked raw decoder certificate",
@@ -1464,6 +1600,7 @@
     },
     {
       "id": "D068",
+      "targets": {"input":{"kind":"image","input_role":"zip"}},
       "family": "extract",
       "title": "Stored and deflated original payloads match byte for byte",
       "suite": "extract-safety",
@@ -1479,6 +1616,7 @@
         {"id":"duplicate-second","input":{"entry":{"name":"dup.bin","ordinal":3},"force":false,"target":"absent"},"expected":{"outcome":"data","fileBytes":[2]}},
         {"id":"duplicate-unselected","input":{"entry":{"name":"dup.bin"},"force":false,"target":"absent"},"expected":{"outcome":"error","errorKind":"ambiguous_entry","targetAbsent":true,"tempFilesRemaining":0}}
       ],
+      "mutationObservation": "Selecting the wrong duplicate or transforming decompressed bytes changes the complete payload; arbitrary first selection avoids the required ambiguity error.",
       "mustRejectMutation": "The extract command MUST NOT convert binary content through UTF-8, modify the DEX header, drop bytes, or use the wrong duplicate entry.",
       "oracle": "literal-payload-bytes",
       "dependencies": "checked-in ZIP recipe and payload; no engine required",
@@ -1491,6 +1629,7 @@
     },
     {
       "id": "D069",
+      "targets": {"input":{"kind":"image","input_role":"zip"}},
       "family": "extract",
       "title": "CRC, budget and unsupported-entry rejections all leave the target unchanged",
       "suite": "extract-safety",
@@ -1505,6 +1644,7 @@
         {"id":"unsupported-compression","input":{"entry":{"name":"unsupported.bin","ordinal":0},"force":true,"target":{"kind":"regular","bytes":[75,69,69,80]},"inflateBudgetBytes":4096},"expected":{"outcome":"error","errorKind":"unsupported_compression","targetBytes":[75,69,69,80],"tempFilesRemaining":0}},
         {"id":"encrypted-entry","input":{"entry":{"name":"encrypted.bin","ordinal":0},"force":true,"target":{"kind":"regular","bytes":[75,69,69,80]},"inflateBudgetBytes":4096},"expected":{"outcome":"error","errorKind":"encrypted_entry","targetBytes":[75,69,69,80],"tempFilesRemaining":0}}
       ],
+      "mutationObservation": "TargetExists or generic error cannot replace the fixed CRC/budget/compression/encryption reason; pre-validation replacement changes KEEP or leaves temp files.",
       "mustRejectMutation": "The extract command MUST NOT delete the CRC, budget, compression-method or encryption check, and MUST NOT substitute TargetExists or any other error for the specified rejection. It MUST NOT misreport the extra header of the encrypted stored entry as an equal-length corruption, MUST NOT damage KEEP before the validation, and MUST NOT leave a temp or partial file behind.",
       "oracle": "literal-target-and-input-invalidity",
       "dependencies": "self-made temporary directories and ZIP only",
@@ -1517,6 +1657,7 @@
     },
     {
       "id": "D070",
+      "targets": {"input":{"kind":"image","input_role":"zip"}},
       "family": "extract",
       "title": "no-clobber and input alias/ZipSlip safety",
       "suite": "extract-safety",
@@ -1535,6 +1676,7 @@
         {"id":"two-publishers","input":{"force":false,"target":{"kind":"absent"},"publishers":[{"entryOrdinal":2,"pattern":{"length":16777216,"multiplier":17,"add":3}},{"entryOrdinal":3,"pattern":{"length":16777216,"multiplier":29,"add":11}}],"observer":"callback-and-reader"},"expected":{"outcome":"data","exactlyOnePublish":true,"otherErrorKind":"target_exists","targetEqualsSuccessfulPublisher":true,"observationsOnly":["absent","complete-winning-payload"],"completePayloadObserved":true,"tempFilesRemaining":0}},
         {"id":"force-atomic-replace","input":{"entryOrdinal":2,"force":true,"target":{"kind":"regular","bytes":[75,69,69,80]},"observer":"callback-and-reader"},"expected":{"outcome":"data","targetEqualsSelectedPayload":true,"observationsOnly":["old-KEEP","complete-new-payload"],"completePayloadObserved":true,"tempFilesRemaining":0}}
       ],
+      "mutationObservation": "Publishing a prefix/mixed file, overwriting without force, following a target symlink/alias, or deriving a path from entry name fails complete file observations.",
       "mustRejectMutation": "The extract command MUST NOT let force bypass the symlink or input-alias check, MUST NOT let an entry name participate in path concatenation, MUST NOT publish two different payloads successfully, MUST NOT let the callback or reader observe the final path as empty, partial or mixed content, and MUST NOT delete the input or leave a temp file behind on failure.",
       "oracle": "file-safety-contract",
       "dependencies": "checked-in self-made source only; fixed JDK/R8; no platform SDK",
@@ -1548,6 +1690,7 @@
     },
     {
       "id": "D071",
+      "targets": {"case":{"kind":"class","input_role":"original","descriptor":"Lfixtures/Case;"}},
       "family": "numeric",
       "title": "Lossless return/call conversion of byte/short/char through an entry or merged Phi",
       "suite": "core-java",
@@ -1571,12 +1714,14 @@
         {"id":"char-high","input":{"targetRole":"case","method":"c(ZCC)C","args":[false,0,65535]},"expected":{"outcome":"java","return":65535}},
         {"id":"call-byte","input":{"targetRole":"case","method":"call(ZBB)I","args":[true,-128,127]},"expected":{"outcome":"java","return":-128}}
       ],
+      "mutationObservation": "Missing a legal narrow source conversion fails Java compilation; signedness changes a fixed endpoint return/call.",
       "mustRejectMutation": "The decompiler MUST NOT reject a legal byte/short/char return or call, and MUST NOT omit a required static type conversion so that javac fails; it MUST NOT treat byte as unsigned or char as signed.",
       "oracle": "JLS-primitive-ranges-plus-source-jvm-driver",
       "dependencies": "self-made source/DEX with a complete declaration catalog; tool content locks in TASKS §4.5"
     },
     {
       "id": "D072",
+      "targets": {"case":{"kind":"class","input_role":"original","descriptor":"Lfixtures/Case;"}},
       "family": "numeric",
       "title": "A narrow producer does not authorize truncating later int arithmetic or a mixed Phi",
       "suite": "core-java",
@@ -1596,12 +1741,14 @@
         {"id":"mixed-byte","input":{"targetRole":"case","method":"mix(ZBC)I","args":[true,-128,65535]},"expected":{"outcome":"java","return":-128}},
         {"id":"mixed-char","input":{"targetRole":"case","method":"mix(ZBC)I","args":[false,-128,65535]},"expected":{"outcome":"java","return":65535}}
       ],
+      "mutationObservation": "Truncating an int sum or mixed byte/char selection changes a full-width return.",
       "mustRejectMutation": "The decompiler MUST NOT carry the narrow origin of the byte input into the add result, and MUST NOT force the byte/char hull to byte, which corrupts 254 or 65535.",
       "oracle": "worked-integer-ranges-plus-source-jvm-driver",
       "dependencies": "self-made source/DEX with a complete declaration catalog; tool content locks in TASKS §4.5"
     },
     {
       "id": "D073",
+      "targets": {"case":{"kind":"class","input_role":"original","descriptor":"Lfixtures/Case;"}},
       "family": "heap",
       "title": "A zero-element fill still preserves the null exception",
       "suite": "core-java",
@@ -1620,12 +1767,14 @@
         {"id":"empty-array","input":{"targetRole":"case","method":"f([I)V","args":[{"arrayType":"[I","values":[]}]},"expected":{"outcome":"java","returnVoid":true,"arrayInt":[]}},
         {"id":"null-array","input":{"targetRole":"case","method":"f([I)V","args":[null]},"expected":{"outcome":"java","exception":"java.lang.NullPointerException"}}
       ],
+      "mutationObservation": "Deleting the zero fill loses the null-input NPE; an empty array must complete without writes.",
       "mustRejectMutation": "The decompiler MUST NOT delete the whole fill and the NPE because count=0, and MUST NOT switch to raw without justification.",
       "oracle": "dalvik-fill-spec-single-op-proof-plus-reference-java-driver",
       "dependencies": "self-made source/DEX with a complete declaration catalog; tool content locks in TASKS §4.5"
     },
     {
       "id": "D074",
+      "targets": {"parameter":{"kind":"class","input_role":"parameter","descriptor":"Lfixtures/Case;"},"too-short":{"kind":"class","input_role":"too-short","descriptor":"Lfixtures/Case;"},"unknown-length":{"kind":"class","input_role":"unknown-length","descriptor":"Lfixtures/Case;"},"escaped":{"kind":"class","input_role":"escaped","descriptor":"Lfixtures/Case;"}},
       "family": "heap",
       "title": "A non-empty fill without a FreshArray proof stays complete raw",
       "suite": "raw-integrity",
@@ -1645,12 +1794,14 @@
         {"id":"unknown-length","input":{"targetRole":"unknown-length","method":"f(I)[I"},"expected":{"outcome":"smali","reason":"unsupported","unsupportedReason":"ArrayFillShape","rawExact":true}},
         {"id":"escaped","input":{"targetRole":"escaped","method":"f()[I"},"expected":{"outcome":"smali","reason":"unsupported","unsupportedReason":"ArrayFillShape","rawExact":true}}
       ],
+      "mutationObservation": "Claiming Java without sufficient-length/no-escape proof violates the fixed raw-only profile; changing payload/refs fails raw projection.",
       "mustRejectMutation": "The decompiler MUST NOT expand the stores directly for a parameter array, an array of insufficient or unknown length, or an already published array and then claim Java, and MUST NOT drop the payload on rejection.",
       "oracle": "independent-dex-projection-plus-fresh-array-precondition-falsification",
       "dependencies": "self-made source/DEX with a complete declaration catalog; tool content locks in TASKS §4.5"
     },
     {
       "id": "D075",
+      "targets": {"static255":{"kind":"method","input_role":"static255","owner":"Lfixtures/Case;","name":"f","proto":"(IIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIII)I"},"static256":{"kind":"method","input_role":"static256","owner":"Lfixtures/Case;","name":"f","proto":"(IIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIII)I"},"instance254":{"kind":"method","input_role":"instance254","owner":"Lfixtures/Case;","name":"f","proto":"(IIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIII)I"},"instance255":{"kind":"method","input_role":"instance255","owner":"Lfixtures/Case;","name":"f","proto":"(IIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIII)I"},"abstract254":{"kind":"method","input_role":"abstract254","owner":"Lfixtures/Case;","name":"f","proto":"(IIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIII)I"},"abstract255":{"kind":"method","input_role":"abstract255","owner":"Lfixtures/Case;","name":"f","proto":"(IIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIII)I"}},
       "family": "java-target",
       "title": "The 255 boundary for Java parameter words including this and for declarations without code",
       "suite": "target-representability",
@@ -1673,12 +1824,14 @@
         {"id":"abstract-at","input":{"targetRole":"abstract254","parameterWords":255},"expected":{"outcome":"declaration-only","protoPreserved":true,"hasBody":false}},
         {"id":"abstract-over","input":{"targetRole":"abstract255","parameterWords":256},"expected":{"outcome":"smali","reason":"unsupported","unsupportedReason":"JavaTargetLimit","targetItem":"parameter_words","rawDeclarationExact":true,"hasBody":false}}
       ],
+      "mutationObservation": "Omitting this or deleting parameters changes the word-boundary classification/proto; fabricating code for an abstract declaration changes hasBody.",
       "mustRejectMutation": "The decompiler MUST NOT omit this, widen 255 through configurable Limits, delete an unused parameter, misreport the intended rejection as Malformed/BudgetExceeded, or fabricate code for the abstract declarations.",
       "oracle": "JVMS-4.3.3-word-count-plus-independent-dex-and-classfile-projection",
       "dependencies": "self-made source/DEX with a complete declaration catalog; tool content locks in TASKS §4.5"
     },
     {
       "id": "D076",
+      "targets": {"nul32767":{"kind":"class","input_role":"nul32767","descriptor":"Lfixtures/Case;"},"nul32767-A":{"kind":"class","input_role":"nul32767-A","descriptor":"Lfixtures/Case;"},"nul32768":{"kind":"class","input_role":"nul32768","descriptor":"Lfixtures/Case;"}},
       "family": "java-target",
       "title": "MUTF8 is checked by encoded bytes, not by u16 or source escape length",
       "suite": "target-representability",
@@ -1698,12 +1851,14 @@
         {"id":"at","input":{"targetRole":"nul32767-A","method":"f()Ljava/lang/String;"},"expected":{"outcome":"java","stringPattern":{"zeroPrefixUnits":32767,"lastUnit":65}}},
         {"id":"over","input":{"targetRole":"nul32768","method":"f()Ljava/lang/String;"},"expected":{"outcome":"smali","reason":"unsupported","unsupportedReason":"JavaTargetLimit","targetItem":"constant_utf8_bytes","rawExact":true}}
       ],
+      "mutationObservation": "Counting UTF16 units instead of MUTF8 bytes misclassifies a target boundary; losing NUL units changes the full value.",
       "mustRejectMutation": "The decompiler MUST NOT accept the 65536-byte constant-pool item by UTF-16 length, wrongly reject the legal 65535 item by source escape length, or turn NUL into empty and drop units.",
       "oracle": "JVMS-CONSTANT_Utf8-plus-exact-u16-pattern-and-javac",
       "dependencies": "self-made source/DEX with a complete declaration catalog; tool content locks in TASKS §4.5"
     },
     {
       "id": "D077",
+      "targets": {"case":{"kind":"class","input_role":"original","descriptor":"Lfixtures/Case;"}},
       "family": "java-target",
       "title": "A long straight-line call sequence recovers complete Java and keeps every call",
       "suite": "core-java",
@@ -1722,6 +1877,7 @@
       "invocations": [
         {"id":"code-upper-bound","input":{"targetRole":"case","method":"f()V","catalog":"complete","limits":{},"isolation":"fresh-jvm"},"expected":{"outcome":"java","returnVoid":true,"heap":{"ticks":10000},"orderedInvokeSites":10000}}
       ],
+      "mutationObservation": "Deleting/looping/merging calls changes ordered original invoke evidence even if a counter happens to match; speculative rejection fails required Java.",
       "mustRejectMutation": "The decompiler MUST NOT guess a code cost from AST nodes or DEX code units and fall back to raw, MUST NOT delete or merge calls, and MUST NOT report Java success before the output is complete.",
       "oracle": "worked-call-count-plus-source-jvm-driver-and-independent-classfile-projection",
       "dependencies": "self-made source/DEX with a complete declaration catalog; tool content locks in TASKS §4.5",
@@ -1729,6 +1885,7 @@
     },
     {
       "id": "D078",
+      "targets": {"case":{"kind":"class","input_role":"original","descriptor":"Lfixtures/Case;"}},
       "family": "java-target",
       "title": "Complete interface declarations are not downgraded by a repeated-mention estimate",
       "suite": "core-java",
@@ -1747,6 +1904,7 @@
       "invocations": [
         {"id":"class-pool","input":{"targetRole":"case","catalog":"complete","limits":{}},"expected":{"outcome":"java","declarationsPreserved":2200}}
       ],
+      "mutationObservation": "Dropping a declaration changes the full original member set; inventing an interface constructor/body or rejecting estimated pool size fails required Java.",
       "mustRejectMutation": "The decompiler MUST NOT estimate the pool from repeated mentions and return Mixed, MUST NOT report JavaUnit after a dropped or truncated declaration, and MUST NOT synthesize a constructor or body incorrectly; DeclarationOnly MUST NOT inflate the executable Java statistics.",
       "oracle": "independent-full-declaration-manifest-plus-javac-and-classfile-projection",
       "dependencies": "self-made source/DEX with a complete declaration catalog; tool content locks in TASKS §4.5",
@@ -1754,6 +1912,7 @@
     },
     {
       "id": "D079",
+      "targets": {"case":{"kind":"class","input_role":"original","descriptor":"Lfixtures/Case;"},"reader":{"kind":"class","input_role":"original","descriptor":"Lfixtures/Reader;"}},
       "family": "initialization",
       "title": "Recovering a static final removes no downstream read and skips no class-init",
       "suite": "core-java",
@@ -1763,7 +1922,7 @@
       "acceptanceGate": "engine",
       "designRefs": "ALGORITHMS §9.1、§12.2",
       "inputKind": "self-made-java-to-dex",
-      "inputRecipe": "The Case contains a static final int N and a String S, both blank final, which a static block assigns 7 and \"x\" in that order and then logs \"INIT\" through Dep.log. Reader.readInt/readString each log \"READ\" through Dep.log first and then read the Case field. Case and Reader are each recovered as a complete JavaUnit, and only these two recovered sources are compiled together with the unchanged Dep; the Driver calls Reader twice and does not touch Case beforehand. Each read runs in a new JVM.",
+      "inputRecipe": "The Case contains a static final int N and a String S, both blank final, which a static block assigns 7 and \"x\" in that order and then logs \"INIT\" through Dep.log. Reader.readInt/readString each log \"READ\" through Dep.log first and then read the Case field. Case and Reader are each recovered as a complete JavaUnit, and only these two recovered sources are compiled together with the unchanged Dep; the Driver calls Reader twice and does not touch Case beforehand. Each invocation runs in its own new JVM, and its two repeated reads share that JVM; the int-read and string-read invocations do not share initialization state.",
       "inputRequirements": [
         "The original DEX Reader really contains sget/sget-object, the clinit writes of Case and the dependency catalog are complete, and the source constant-ness fact of the Case fields is NonConstant.",
         "Both classes are obtained through public Engine requests; the original Case.class MUST NOT be kept and the original Reader MUST NOT be spliced in. After javac the Case fields have no ConstantValue and Reader still really issues getstatic."
@@ -1772,12 +1931,14 @@
         {"id":"int-read","input":{"targetRoles":["case","reader"],"method":"readInt()I","repeat":2,"isolation":"fresh-jvm","callRole":"reader"},"expected":{"outcome":"java","returns":[7,7],"events":["READ","INIT","READ"],"fieldReadsPreserved":true,"constantValueAbsent":true}},
         {"id":"string-read","input":{"targetRoles":["case","reader"],"method":"readString()Ljava/lang/String;","repeat":2,"isolation":"fresh-jvm","callRole":"reader"},"expected":{"outcome":"java","returnsStringUnits":[[120],[120]],"events":["READ","INIT","READ"],"fieldReadsPreserved":true,"constantValueAbsent":true}}
       ],
+      "mutationObservation": "Turning blank finals into constants removes getstatic/INIT; sharing initialization between invocations or resetting it per repeat changes the event sequence.",
       "mustRejectMutation": "The decompiler MUST NOT turn the static final into a constant field initializer, which lets Reader inline it and omit INIT; it MUST NOT repeat clinit or trigger initialization early.",
       "oracle": "JLS-class-initialization-and-constant-variable-rules-plus-source-jvm-and-classfile",
       "dependencies": "self-made source/DEX with a complete declaration catalog; tool content locks in TASKS §4.5"
     },
     {
       "id": "D080",
+      "targets": {"case":{"kind":"class","input_role":"original","descriptor":"Lfixtures/Case;"}},
       "family": "initialization",
       "title": "An external constant or unknown-constantness field read adds no helper to fake Java",
       "suite": "raw-integrity",
@@ -1795,12 +1956,14 @@
         {"id":"known-constant","input":{"targetRole":"case","method":"f()I","javaConstantKind":"Constant"},"expected":{"outcome":"smali","reason":"unsupported","unsupportedReason":"JavaConstantFieldRead","rawExact":true}},
         {"id":"unknown-constantness","input":{"targetRole":"case","method":"f()I","javaConstantKind":"Unknown"},"expected":{"outcome":"smali","reason":"unsupported","unsupportedReason":"BindingEvidenceMissing","rawExact":true}}
       ],
+      "mutationObservation": "Treating Constant or Unknown as NonConstant wrongly produces Java and loses the fixed raw rejection/ref.",
       "mustRejectMutation": "The decompiler MUST NOT let a direct source read be inlined by javac, MUST NOT guess Unknown as NonConstant, MUST NOT add reflection or an extra initialization helper, and MUST NOT drop the original sget.",
       "oracle": "JLS-constant-inlining-plus-independent-raw-field-reference",
       "dependencies": "self-made source/DEX with a complete declaration catalog; tool content locks in TASKS §4.5"
     },
     {
       "id": "D081",
+      "targets": {"case":{"kind":"class","input_role":"original","descriptor":"Lfixtures/Case;"}},
       "family": "monitor",
       "title": "Re-executing the same allocation site while holding a lock is not the original lock",
       "suite": "raw-integrity",
@@ -1818,12 +1981,14 @@
       "invocations": [
         {"id":"reexecuted-root","input":{"targetRole":"case","method":"f()V","catalog":"complete"},"expected":{"outcome":"smali","reason":"unsupported","unsupportedReason":"MonitorScopeUnproved","rawExact":true}}
       ],
+      "mutationObservation": "Equating a static allocation site with both dynamic objects fabricates a synchronized proof and violates the fixed lock-profile rejection.",
       "mustRejectMutation": "The decompiler MUST NOT emit an apparently balanced synchronized solely because the static AllocationId/ValueId match, and MUST NOT silently repair an unknown lock state.",
       "oracle": "dynamic-object-identity-counterexample-plus-independent-raw-projection",
       "dependencies": "self-made source/DEX with a complete declaration catalog; tool content locks in TASKS §4.5"
     },
     {
       "id": "D082",
+      "targets": {"case":{"kind":"class","input_role":"original","descriptor":"Lfixtures/Case;"}},
       "family": "monitor",
       "title": "A parameter lock reused in a bounded loop is still recovered correctly",
       "suite": "core-java",
@@ -1842,12 +2007,14 @@
         {"id":"twice","input":{"targetRole":"case","method":"f(Ljava/lang/Object;I)I","args":[{"new":"java.lang.Object","identity":"lock-1"},2],"observeMonitorAfter":"lock-1"},"expected":{"outcome":"java","return":2,"monitorAfter":false}},
         {"id":"null-enter","input":{"targetRole":"case","method":"f(Ljava/lang/Object;I)I","args":[null,1]},"expected":{"outcome":"java","exception":"java.lang.NullPointerException"}}
       ],
+      "mutationObservation": "Hoisting lock entry ahead of a zero-trip loop creates a forbidden NPE; missing release changes the post-return lock observation.",
       "mustRejectMutation": "The decompiler MUST NOT hoist the lock expression ahead of the loop that may run zero times, MUST NOT release too few times or place the body outside the lock, and MUST NOT classify every loop as a freshness failure.",
       "oracle": "source-jvm-holdsLock-driver-plus-independent-monitor-projection",
       "dependencies": "self-made source/DEX with a complete declaration catalog; tool content locks in TASKS §4.5"
     },
     {
       "id": "D083",
+      "targets": {"case":{"kind":"class","input_role":"original","descriptor":"Lfixtures/Case;"}},
       "family": "control",
       "title": "An extremely sparse switch is not expanded over its span and loses no key",
       "suite": "core-java",
@@ -1866,12 +2033,14 @@
         {"id":"max","input":{"targetRole":"case","method":"f(I)I","args":[2147483647]},"expected":{"outcome":"java","return":2}},
         {"id":"default","input":{"targetRole":"case","method":"f(I)I","args":[0]},"expected":{"outcome":"java","return":3}}
       ],
+      "mutationObservation": "Expanding the sparse key span fails bounded completion; deleting/truncating an extreme key changes its fixed return.",
       "mustRejectMutation": "The decompiler MUST NOT build a huge table through an i32 overflow of max-min, MUST NOT enumerate the whole span and exhaust the budget, and MUST NOT truncate an extreme key.",
       "oracle": "worked-switch-outcomes-plus-source-jvm-driver",
       "dependencies": "self-made source/DEX with a complete declaration catalog; tool content locks in TASKS §4.5"
     },
     {
       "id": "D084",
+      "targets": {"case":{"kind":"class","input_role":"original","descriptor":"Lfixtures/Case;"}},
       "family": "declarations",
       "title": "A synthetic bridge with extra effects is not dropped as Generated",
       "suite": "raw-integrity",
@@ -1888,12 +2057,14 @@
       "invocations": [
         {"id":"effectful-bridge","input":{"targetRole":"case","catalog":"complete"},"expected":{"outcome":"mixed","effectfulBridgeRawPreserved":true,"noFakeJavaUnit":true,"rawBridgeLogArgumentUnits":[66,82,73,68,71,69]}}
       ],
+      "mutationObservation": "Consuming an effectful synthetic bridge as Generated loses the original log or raw member and fabricates JavaUnit.",
       "mustRejectMutation": "The decompiler MUST NOT delete a member merely because it is synthetic, MUST NOT apply the canonical bridge rule and lose the log, MUST NOT change the public name, and MUST NOT fabricate JavaUnit by printing a conflicting declaration.",
       "oracle": "canonical-bridge-precondition-counterexample-plus-independent-raw-projection",
       "dependencies": "self-made source/DEX with a complete declaration catalog; tool content locks in TASKS §4.5"
     },
     {
       "id": "D085",
+      "targets": {"case":{"kind":"class","input_role":"original","descriptor":"Lfixtures/Case;"}},
       "family": "result-integrity",
       "title": "A local invoke-custom failure does not block whole-class and single-method decompilation display",
       "suite": "domain-integrity",
@@ -1914,12 +2085,14 @@
         {"id":"class-text","input":{"targetRole":"case","format":"text","through":["engine-render","application-default-text"]},"expected":{"outcome":"mixed","textAvailable":true,"mustIncludeJavaMethods":["zAdd(II)I"],"mustIncludeSmaliMethods":["aDynamic()I"],"allOriginalMembersPresent":true,"eachOriginalMemberOnce":true,"failedMethodHasNoJavaBody":true,"rawDynamicExact":true,"stringUnitsExact":true,"sourceSpansExact":true,"noFakeJavaUnit":true}},
         {"id":"method-text","input":{"targetRole":"case","method":"aDynamic()I","format":"text","through":["engine-render","application-default-text"]},"expected":{"outcome":"smali","reason":"unsupported","textAvailable":true,"rawExact":true,"stringUnitsExact":true,"sourceSpansExact":true}}
       ],
+      "mutationObservation": "Stopping at the failing member, corrupting its raw string or shifting its span loses independently locatable Java/raw members.",
       "mustRejectMutation": "The decompiler MUST NOT reject the default text output with a non-JavaUnit status, MUST NOT let one failure clear the other Java members, MUST NOT require JSON before it yields raw, MUST NOT fill in an empty stub, MUST NOT omit a member or modify the call-site or UTF16, and MUST NOT misplace spans after the Mixed prefix.",
       "oracle": "independent-dex-member-and-raw-projection-plus-rendered-source-identity-integrity",
       "dependencies": "self-made 038 builder/Bootstrap declarations/complete Object catalog; pinned smali/dexlib2 development tools; no external APK or CLI is executed"
     },
     {
       "id": "D086",
+      "targets": {"case":{"kind":"class","input_role":"original","descriptor":"Lfixtures/Case;"}},
       "family": "resources",
       "title": "A large code range is unlimited by default and an explicit limit does not break complete raw",
       "suite": "resource-safety",
@@ -1939,6 +2112,7 @@
         {"id":"unlimited-default","input":{"targetRole":"case","method":"f()V","limits":{}},"expected":{"outcome":"java","returnVoid":true}},
         {"id":"explicit-code-limit","input":{"targetRole":"case","method":"f()V","limits":{"max_method_code_units":131072}},"expected":{"outcome":"smali","reason":"budget_exceeded","rawExact":true}}
       ],
+      "mutationObservation": "Reintroducing a default code cap rejects required Java; applying the normal cap to raw or omitting dead nop sites breaks the full raw projection.",
       "mustRejectMutation": "The decompiler MUST NOT restore a hidden default 131072 code/raw threshold, MUST NOT apply the explicit normal limit to raw, MUST NOT allocate before validating an invalid count, and MUST NOT skip format validation of the dead range and then report success.",
       "oracle": "independent-full-code-layout-plus-pure-scalar-reference-and-jvm-driver",
       "dependencies": "self-made 035 builder/complete declarations/the agreed pure-scalar reference and a pinned assembler; no CLI or private phase test is executed",

@@ -118,7 +118,7 @@ The `VerifiedJavaMethod/Unit` fields are private, and the P8 verifier MUST be th
 
 `JavaUnit` requires a valid class shell, every member being Java (including verified Generated) or DeclarationOnly, and the binding/initialization/constructor constraints passing. If one method is Smali/Unavailable or the shell cannot be expressed, the result is Mixed; this is a result eligibility, not a condition for refusing display by default. The CLI MUST retain the successful methods, the failure location, the original identity and the Smali/unavailable reason in a Mixed presentation, and MUST state at the top that it is not a complete Java compilation unit; it MUST NOT fill gaps with an empty body or an exception stub. Diana MUST NOT let the file suffix decide eligibility and MUST NOT automatically choose a `.java` file name for Mixed; it MUST NOT reject an explicit user `-o` because of its suffix, and MUST still retain the marker. Method-level Java MAY exist inside Mixed, while compilation validation MUST still require a legal context; Diana MUST NOT change dependencies to fabricate a stub.
 
-### 2.3 Four failure kinds and cancellation
+### 2.3 Failure kinds and cancellation
 
 | Category | Example | Handling |
 |---|---|---|
@@ -130,6 +130,30 @@ The `VerifiedJavaMethod/Unit` fields are private, and the P8 verifier MUST be th
 
 The engine discards the unverified Java AST/text of a failed method and retains the other completed members; a fallback always reads the original bytes only. Diana MUST NOT modify the configuration of other methods because one method failed. If an unknown opcode's format cannot be identified reliably, only a raw excerpt is allowed (for example offset+hex), and the engine MUST NOT invent a non-standard `.word` and call it smali.
 
+#### Diagnostic contract
+
+| Field | Meaning |
+|---|---|
+| `code` | Typed reason identifier, independent of human-readable detail |
+| `kind` | One failure kind from the table above |
+| `severity` | `warning` for a local Unsupported; `error` for a hard failure, including a BUG with raw attached |
+| `method` / `site` | Optional original MethodKey and CodeUnit; a site implies its method, and absence does not mean offset 0 |
+| `phase` | Optional finite PhaseId identifying the producer; no pass registry or traversal history |
+| `detail` | Owned explanation charged to the request; it does not carry an entire graph, input or unbounded trace |
+
+Class-level reasons retain their original ClassKey in the enclosing result. Input
+and request errors use the same kind/code distinction. A reason does not claim a
+site when global damage prevents locating it. Typed codes already named in
+ALGORITHMS, such as BindingEvidenceMissing, ArrayFillShape, JavaTargetLimit and
+MonitorScopeUnproved, retain those meanings; add a code only with an actual
+failure producer, not a speculative enumeration of every possible rejection.
+
+The application MUST compute request success from the failure kinds and delivery
+state under §6.8, not from severity, the presence of raw, or a single code-to-exit
+lookup. A local Unsupported is distinct from a global unsupported input. The
+acceptance adapter compares these typed facts under TASKS §4.3.5; it MUST NOT
+parse `detail` or stderr to infer the failure category.
+
 ## 3. Modules and data
 
 The three seams are input, method analysis and printing; Diana MUST NOT expose a private CFG/Phi/AST. Diana MUST create only the files and containers that the current implementation actually consumes.
@@ -140,7 +164,7 @@ A phase is an ownership/responsibility split and does not require one file per r
 
 | Module | First actual files / main functions | Owner |
 |---|---|---|
-| Engine/input | engine.rs, p1_input/{mod,cursor,header,code}.rs; open/index/method_input | T01/T02/T04 |
+| Engine/input | engine.rs, p1_input/{mod,cursor,header,catalog,code}.rs; open/index/method_input | T01/T02/T04 |
 | Raw format | p1_input/formats.rs, p2_flow/decode.rs; decode/validate_raw | T03/T04 |
 | Flow | p2_flow/{mod,build,effects,results,protection}.rs; decode_and_bind | T06/T16 |
 | SSA | p3_ssa/{mod,inputs,liveness,build,verify}.rs; build_ssa | T06/T07/T16 |
@@ -162,7 +186,7 @@ The application MUST create one context per request and use it for the whole cha
 
 The application MUST allocate DexIds by enumerating this request's images, and they map to the original ImageOrigin; original identity is the origin plus the original table index/proto, not an output array position. Input admission MUST count the 041 views of the same physical slice once; each logical catalog MUST be independent. The same origin supplied by the caller MUST correspond to the same original bytes/header, and the engine MUST reject a conflicting request.
 
-Report is an owned result: the literal UTF16 in the Java AST, the engine MUST copy or intern the declarations used and the original identity into ResultFacts and charge them against the same request's quota; Report MUST NOT borrow an Env/Phi arena and MUST NOT carry the whole analysis graph. render only needs to read ResultFacts and does not need a live Engine. RenderedReport owns the UTF8 text and spans; JSON, files and the CLI are the application's responsibility.
+Report is an owned result: the literal UTF16 in the Java AST, the engine MUST copy or intern the declarations used and the original identity into ResultFacts and charge them against the same request's quota; Report MUST NOT borrow an Env/Phi arena and MUST NOT carry the whole analysis graph. render only needs to read ResultFacts and does not need a live Engine. RenderedReport owns the UTF8 text and spans; JSON, files and the CLI are the application's responsibility. ResultFacts retains the used DexId-to-ImageOrigin mapping and each emitted original declaration's class/member index and descriptor/name/proto. The application derives §6.3 locators from those facts; it MUST NOT reopen files, retain an Engine or guess an index from result order to render identity. Library-owned origin tokens are caller-supplied, not host file paths.
 
 The input helper shared by the engine and the actual lightweight scanner is
 `raw::instruction_layout(code_bytes: &[u8], pc_cu: u32, version) -> Result<InsnLayout, RawDecodeError>`:
@@ -346,7 +370,7 @@ sets with a conservative bucket/control overhead; the allocator MUST call try_re
 same caller-owned slice borrow. This ledger is a cumulative logical upper bound, and Diana MUST NOT claim it is exact RSS.
 
 Every decode, graph, slot-set/constraint change, copy, subtype and output loop MUST call charge/check_cancel;
-Diana MUST process long strings in fixed chunks, and trace/diagnostic output MUST NOT bypass the limits. The actual default numbers MUST use DESIGN §10.3
+Diana MUST process long strings in fixed chunks, and trace/diagnostic output MUST NOT bypass the limits. The configured limits and their accounting MUST use DESIGN §10.3
 as the single table, and Diana MUST NOT generate a second registry. render MUST emit only the complete result and MUST NOT re-analyze or retry on error.
 
 ## 4. Phases, products and actual order
@@ -566,14 +590,62 @@ diana get-method sample.dex 'e0:l0:c7:m23::Lcom/example/App;->check(I)Z'
 ```
 
 - The CLI MUST display the existing Report directly as default text and MUST NOT use VerifiedJavaUnit as a whole-class switch. When get-class yields a JavaUnit it outputs complete Java; when it yields Mixed it outputs clearly marked decompiled text: the real shell/fields, the recovered Java methods, and the Smali or Unavailable reason annotated per original method. Diana MUST retain every member and MUST NOT discard the other results because one method failed.
-- get-method displays the exactly selected method: Java/DeclarationOnly outputs the complete declaration and the body it should have, Smali outputs the original complete Smali with the reason, and Unavailable outputs the original identity/reason with the bounded raw excerpt that is available. Diana MUST NOT call a raw excerpt standard Smali and MUST NOT fabricate Java with an empty body or a throwing stub. A method fragment needs its owner context, and Diana MUST NOT claim it compiles on its own.
+- get-method displays the exactly selected method: Java outputs the validated declaration and body; DeclarationOnly outputs the code-free declaration only, with no body; Smali outputs the original complete Smali with the reason; and Unavailable outputs the original identity/reason with the bounded raw excerpt that is available. Diana MUST NOT call a raw excerpt standard Smali and MUST NOT fabricate Java with an empty body or a throwing stub. A method fragment needs its owner context, and Diana MUST NOT claim it compiles on its own.
 - text/json only choose the representation of the same result, and they MUST NOT choose the algorithm, the fallback or the recovery threshold; Diana MUST NOT require switching to JSON to see Mixed/raw, and no `--require-java` switch is added. fields/methods remain independent symbol queries, and Diana MUST NOT prefix the source with an index table.
 - When only a local Unsupported is present (including missing catalog, invoke-custom or Java target representation limits), a fully displayed Mixed/Smali/Unavailable result MAY exit0, meaning that the decompilation request and its display completed normally, not that every method was recovered as Java. Malformed, BudgetExceeded, InternalInvariant, Cancelled and I/O still fail per §6.8; a Report that can already be rendered completely MAY be kept for display with a non-zero exit, and Diana MUST NOT use a non-zero code to conceal the error.
 - The top of Mixed and each failed member MUST carry the status/original identity/reason; the language section and OriginSpan can be located exactly. The marker is display metadata, and the CLI MUST NOT add an executable statement to a failed method. Diana MUST write the same display payload for an explicit `-o`; Diana MUST NOT filter out Mixed by suffix and MUST NOT automatically choose a `.java` file name for Mixed; only JavaUnit eligibility means a complete Java compilation unit.
-- JSON keeps `schema_version:1` as the local CLI report format (not MCP) and contains command/selection/status/source/methods/diagnostics/spans. source is the text of the respective display/member and its language is made explicit by status; the CLI MUST NOT serialize the AST/arena. source_range/spans use UTF8 bytes of the corresponding source field, and Diana MUST NOT mistake a Mixed concatenation offset for an in-member offset. Acceptance MUST NOT golden-test format or layout; complex members, retention, raw, UTF16 and original identity/spans are accepted through the public Module interfaces.
+- JSON uses the local report schema below, not an MCP envelope or serialized AST/arena. Acceptance MUST NOT golden-test format or layout; complex members, retention, raw, UTF16 and original identity/spans are accepted through the public Module interfaces.
 
 The validation threshold for JavaUnit and per-method Java is unchanged, and a required Java case MUST NOT pass because "Smali has already been displayed".
 A successful compilation does not mean semantic equivalence; a readable local failure does not mean that a request error was swallowed, and the application MUST NOT treat it as a reason to re-analyze or to start another engine.
+
+#### Decompilation JSON schema 1
+
+The schema applies only to delivered get-class/get-method results. All listed
+fields are present; empty collections are `[]`, and `null` has only the meanings
+specified below. A request that cannot produce a complete payload yields an error,
+not an invented empty report. JSON object-key and independent-member order are
+unconstrained.
+
+| Object / field | Type and contract |
+|---|---|
+| Report `schema_version` / `command` | Integer `1` / `get-class` or `get-method` |
+| Report `selection` | `{class_at: string, method_at: string or null}`; canonical original locators per §6.3, with null method only for a class request |
+| Report `status` | `java_unit` or `mixed` for a class; `java`, `declaration_only`, `smali` or `unavailable` for a method |
+| Report `source` | Complete rendered UTF8 display string, including Mixed/failure markers; it is not automatically a Java compilation unit |
+| Report `methods` | Array of Method records; every selected original member occurs once, including Generated and Unavailable |
+| Report `diagnostics` | Array of Diagnostic records, including class and hard-error reasons retained for display |
+| Report `spans` | Array of Span records whose ranges refer to Report.source |
+| Method `at` / `status` | Canonical original method locator / one of the four method statuses above |
+| Method `emission` | `explicit`, `generated` or null; non-null only for Java, with Generated checked per §3.6 |
+| Method `language` | `java`, `smali`, `raw_excerpt` or `none`; declaration/Generated source is Java, and Unavailable never turns an excerpt into Smali |
+| Method `source` | Java declaration/body, code-free declaration, complete Smali, or available raw excerpt; null only for Generated owner syntax or Unavailable without an excerpt |
+| Method `source_range` | Half-open `[start,end]` in Report.source, or null when no source representation exists; Generated points to its owner's syntax and may share a range with other Generated members |
+| Method `spans` | Span array relative to this Method.source; empty when source is null |
+| Method `reason` | Diagnostic for Smali/Unavailable; null for Java/DeclarationOnly |
+| Diagnostic | `{code: string, kind: string, severity: string, method_at: string or null, code_unit: integer or null, phase: string or null, detail: string}`; kind is `malformed`, `unsupported`, `budget_exceeded`, `internal_invariant` or `cancelled`, severity follows §2.3, and a non-null code_unit requires method_at |
+| Span | `{range: [start,end], member_at: string or null, sites: [{method_at: string, code_unit: integer}], synthetic_reason: string or null}`; declaration spans can have no instruction sites |
+
+Offsets are non-negative integers in UTF8 **source bytes**, before JSON escaping;
+`0 <= start <= end <= source.len()`, with endpoints on UTF8 character boundaries.
+CodeUnit is a method-relative instruction coordinate, not a source offset. A
+Method.source_range indexes the top-level display; a Method.spans range indexes
+only that method's source. The application MUST relocate top-level spans after
+prefix/marker assembly and MUST NOT substitute an in-member range for it. A Mixed
+marker or unavailable reason is never a fabricated executable Java body. For an
+Explicit method, source_range identifies the source payload without a surrounding
+failure marker; slicing that range yields Method.source exactly. When no raw
+excerpt exists, an Unavailable method still has its identity/reason record, but
+source and source_range are null. Top-level diagnostic/marker spans are separate.
+
+Top-level status expresses source eligibility, not request success: a rendered
+Mixed with only Unsupported may exit0, while a retained Malformed/resource/BUG
+reason still forces a hard failure. A single-method selection has exactly one
+Method record; a Generated method that cannot stand alone follows the Smali rule,
+not a null successful standalone source. The serializer MUST preserve escaped
+UTF-16 values and charge the final JSON bytes under §7. Test assertions about
+files, behavior and raw integrity come from TASKS §4.3.5, not extra production
+JSON fields such as `rawExact` or `tempFilesRemaining`.
 
 ### 6.6 xref
 
@@ -620,14 +692,20 @@ extract MUST report an unsupported compression method, encryption and a bad rang
 
 By default Diana outputs the complete decoded `AndroidManifest.xml`; the original binary AXML bytes are obtained with extract. The original project's rule of selecting the last physical entry with that name is retained (based on directory order, not on worker completion order), so the manifest selection does not change because of unordered display. A missing manifest exits 3, a bad AXML or an exceeded budget exits 1; a bare DEX or an ordinary JAR without a manifest is an input error.
 
-text is XML; json is `{ "xml": "..." }` with no fake Java status. By default there is no automatic external tool; before invoking the patched vendored AXML reader, check its PATCHES and safety scope; a modification MUST be tested independently.
+text is XML; json is `{ "xml": "..." }` with no fake Java status. The application
+uses a reviewed native AXML reader through the checked contract of ALGORITHMS
+§14.4, with no automatic external tool. Focused reuse of the patched vendored
+reader requires review of its PATCHES, all reachable reads/allocations and depth
+handling; a patch list or chunk-skeleton check is not a safety certificate. Diana
+MUST NOT depend on the reader under ref-fork. Independently validate a decoder
+change through the public manifest Module within the agreed core test scope.
 
 ### 6.8 Help, errors and exit codes
 
 - `diana help`, `diana --help`, `diana help get-method` / `diana get-method --help` succeed with exit0.
 - exit0: a complete query/extract/manifest, or a get decompilation result without a hard error that was delivered completely; text/json follow the same rule, and a local Unsupported that yields Mixed/Smali/Unavailable does not by itself force failure.
-- exit1: request failures such as I/O, Malformed, budget, internal BUG, cancellation or an invalid selector; an existing decompilation Report that can be delivered completely is not cleared because of that, but the exit is still non-zero. When global damage prevents locating the object, when Cancelled leaves no Report or when render exceeds its limit, Diana MUST NOT fabricate a report or truncate the payload.
-- exit2: unknown command/flag, invalid selector/proto, missing input, missing `-o` for extract, or an inapplicable option combination.
+- exit1: request failures such as I/O, Malformed, budget, internal BUG, cancellation, unsupported input or a canonical locator whose indices disagree with its descriptor/name/proto; an existing decompilation Report that can be delivered completely is not cleared because of that, but the exit is still non-zero. When global damage prevents locating the object, when Cancelled leaves no Report or when render exceeds its limit, Diana MUST NOT fabricate a report or truncate the payload.
+- exit2: unknown command/flag, syntactically invalid selector/proto, missing input, missing `-o` for extract, or an inapplicable option combination.
 - exit3: no result for a unique object/entry/manifest. An empty match for a list/xref is a normal exit0.
 - exit4: the unique selection is ambiguous, for example a duplicate class/method/entry name, and Diana MUST reject taking the first item arbitrarily.
 
@@ -658,7 +736,31 @@ a lightweight query JSON MUST use only the explicit application limit. The appli
 diagnostics and spans. The application MUST check text/JSON against their own length separately and MUST NOT add the two representations together; actual work/
 allocation MUST still be charged to the same request, and Diana MUST NOT claim that the cumulative ledger is RSS.
 
-A query MUST use a bounded admission and output queue and MUST NOT wait for display order. The worker count is min(8, available_parallelism), and MUST be 1 when the CPU count cannot be obtained; decompilation MUST run sequentially on the calling thread. Native inflate is not preemptible, and cancellation is cooperative. See ALGORITHMS §14 for the algorithm.
+A query MUST use bounded admission and output queues and MUST NOT wait for display
+order. Without `--jobs`, the worker count is min(8, available_parallelism), or 1
+when the CPU count cannot be obtained. Explicit `--jobs N` selects N workers for
+independent-image scanning. N is positive and platform-representable; the
+application starts at most N workers and no more than the independent physical
+inputs available. Failure to create a needed worker is a resource failure, not
+silent clamping. A worker scans the 041 logical members of its admitted physical
+image under that image's lease; the pool is not recreated per member or method.
+Decompilation runs sequentially on the calling thread and has no `--jobs` option.
+
+Admission holds at most one input per worker, and each worker has at most one
+pending complete output row; it waits for that row to be consumed before queuing
+the next. The sink consumes whichever worker is ready. The weight is
+the actual retained input, decompression buffer and queued row/string capacity,
+charged before growth against explicitly configured request limits. A capacity
+estimate from a ZIP header is not permission to allocate unchecked. One row or
+image larger than a transport chunk is processed with checked growth, not rejected
+by a hidden default quota. Backpressure bounds outstanding rows, not the bytes
+of an arbitrarily large single row or a retained complete JSON result.
+
+Closing the consumer stops admission and wakes blocked workers; cancellation or
+a hard producer failure stops the request and releases pending owners. Completed
+streaming records may already be visible, but that prefix is not a success.
+Native inflate is not preemptible; incremental calls and queue waits cooperate
+with cancellation. See ALGORITHMS §14 for input and publication rules.
 
 ## 8. Java representation constraints
 
@@ -729,7 +831,7 @@ The capacity of unprinted OriginSpans counts as actual derived allocation; seria
 Actual work and allocation accumulated by a temporary/failed candidate is not refunded, but the engine MUST NOT thereby turn an unconfigured allowance into an implicit limit.
 
 The engine MUST return BudgetExceeded naming the actual field/bound when an explicit limit is hit, and MUST NOT change it to Malformed, MUST NOT truncate it into success
-and MUST NOT re-run normal/raw. Diana MUST always check the remaining format input, index width, checked arithmetic and platform-representable capacity; the allocator MUST use try_reserve for container growth and MUST report an actual allocation failure explicitly as Resource without fabricating a configured limit.
+and MUST NOT re-run normal/raw. Diana MUST always check the remaining format input, index width, checked arithmetic and platform-representable capacity; the allocator MUST use try_reserve for container growth and MUST report an actual allocation failure explicitly as BudgetExceeded without fabricating a configured limit.
 Cancellation, file integrity and bounded-queue backpressure do not depend on whether Limits is configured. An unlimited quota does not mean unlimited physical memory,
 and Diana MUST NOT claim a fixed time/RSS upper bound for every input; performance is recorded only from actual release runs.
 

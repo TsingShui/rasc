@@ -104,6 +104,47 @@ try_reserve. Offsets use `FileByte` and `CodeUnit` separately; a call site MUST 
   and do not claim complete ART file authentication. The fixture content lock and the ZIP
   extraction CRC are independent contracts and are not cancelled by this.
 
+#### Header and 041 section checks
+
+All offsets in the following table are bytes relative to the current header;
+stored section offsets address the physical container, not this table.
+
+| Header byte offset | Field / interpretation |
+|---|---|
+| `0x00 / 0x08 / 0x0c` | magic[8] / checksum u32 / signature[20] |
+| `0x20 / 0x24 / 0x28` | file_size / header_size / endian_tag, each u32 |
+| `0x2c / 0x30 / 0x34` | link_size in bytes / link_off / map_off |
+| `0x38 / 0x40 / 0x48` | string_ids / type_ids / proto_ids: u32 count followed by u32 offset |
+| `0x50 / 0x58 / 0x60` | field_ids / method_ids / class_defs: the same count/offset pair |
+| `0x68 / 0x6c` | data_size / data_off; unused as 041 data-region bounds |
+| `0x70 / 0x74` | 041-only container_size / header_offset |
+
+For 041, each non-final header step is four-byte aligned. Every counted section
+has both size/count and offset zero, or both non-zero. A non-empty section lies
+after the header that defines it and within the physical container. References
+reached transitively through shared tables obey that same lower bound for every
+logical member using them. The reader MUST check the complete item range, not
+only its first byte; a forward start with an end beyond container_size is invalid.
+
+The reader MUST apply the DEX format/constraints alignment per item type. Header,
+ID tables, class_defs, map_list, type_list, annotation sets/directories and
+code_item use four-byte alignment; byte-encoded strings, debug, annotations,
+class_data and encoded arrays do not acquire an invented four-byte restriction.
+Inside one member's map, types occur once, entries follow physical offset order,
+and actual item extents do not overlap. Variable item extents come from checked
+parsing, not the count times a guessed stride. The map's header entry describes
+this header with its version-specific size; ID entries agree with this member's
+header. A later header is not data that an earlier code/string item may swallow.
+
+Different logical members may share the same permitted data range; a global
+"all member ranges disjoint" check would reject legal sharing. Sharing bytes
+never shares an index namespace: refs inside a method are resolved only against
+its selected member's tables. The reader MUST NOT merge declarations by equal
+numeric index or descriptor. Unknown container versions are UnsupportedContainer;
+a recognized 041 with a broken chain, illegal range, alignment or conflicting
+map is Malformed. These checks follow the published DEX format and constraints,
+not the assumptions of a 035 parser with an overlaid header.
+
 Fixed table strides: string_id/type_id=4, proto_id=12, field_id/method_id=8, class_def=32.
 The reader first verifies map_list's `4+12*n`, type uniqueness, the offset order required by the
 specification, and consistency of the fixed tables with the header; the reader MAY read
@@ -155,8 +196,8 @@ concatenated little-endian.
 | 51l | 5 | A=a8,bits64=w1|w2<<16|w3<<32|w4<<48 |
 
 The opcode registry expands over the following closed ranges; one `OpcodeSpec` holds the format,
-version, ref kind, read/write slots, effect and Java lowering kind, and the decoder and raw
-printer read only this table:
+version, mnemonic, ref kind, operand shape, read/write slots, effect and Java lowering kind,
+and the decoder and raw printer read only this table:
 
 | opcode | format / meaning |
 |---|---|
@@ -199,6 +240,16 @@ Compute them with checked integers first; a payload MUST be 4-byte aligned, the 
 accepts only 1/2/4/8, and trailing padding of odd bytes is not an element. Switch keys MUST
 increase and be unique per the specification, and MUST NOT be reordered to repair them; every
 target is relative to the switch PC that references it.
+
+Each registered family has one lowering classification: scalar/move/conversion
+and comparison use §4; branches/switch/return use §6; heap/fill use §2.4 and §9;
+call/allocation use §9; throw/catch/monitor use §10–§11. nop remains a raw site.
+move-result/move-exception are consumed by the binding rules of §1.3/§2, not
+printed as independent Java assignments before their producer succeeds. Known
+newer raw-only families follow §2 and §8. A classification dispatches to those
+rules; it does not authorize lowering without their type/effect/binding checks.
+The implementation MUST NOT keep a second width/mnemonic table in the printer or
+scanner; Smali operand shapes are defined in §7.3.
 
 ### 1.3 Two-pass validation and CFG splitting
 
@@ -1205,6 +1256,74 @@ A raw failure MUST NOT retry normal, switch engines or widen configuration. Prod
 and MUST NOT spawn an assembler; the D061 round trip runs in a development tool, and an
 incomplete declaration causing Java rejection MUST NOT destroy the original raw member identity.
 
+### 7.3 Standard Smali syntax and literals
+
+The printer uses the standard Smali grammar identified in SOURCE_MAP §7 and the
+controlled assembler profile in TASKS §4.5. Tool versions are development locks,
+not production dependencies. Emit the following forms only from validated raw
+facts; absent metadata does not cause the printer to invent source/debug names.
+
+| Raw fact | Emitted form / rule |
+|---|---|
+| Class / hierarchy | `.class <flags> <descriptor>`, `.super <descriptor>`, one `.implements` per original interface; Object alone may have no super |
+| Source file | `.source "..."` for the actual value; debug set-file remains at its original CodeUnit, including the absent-file form |
+| Field | `.field <flags> <name>:<type> [= <encoded literal>]`; annotations close with `.end field`; values bind to the original field, never a sorted field position |
+| Method | `.method <flags> <name><proto>` through `.end method`; preserve constructor/synthetic/bridge/declared-synchronized flags separately from Java modifiers |
+| Register count | Exactly `.registers <registers_size>` for a method with code; no `.locals`, parameter aliases or invented register count |
+| Parameter metadata | `.param vN[, "name"]` for each explicit formal's first word, followed by its annotations and `.end param`; `N=registers_size-ins_size+(static?0:1)+preceding_formal_words`; implicit this has no parameter annotation/name record, and absent name is not an empty name |
+| Annotation | `.annotation <visibility> <type>` (`build`, `runtime` or `system`) and `.end annotation`; `name = literal`, arrays `{...}`, `.subannotation`/`.end subannotation`, `.enum <field-ref>` preserve nesting and encoded kinds |
+| Debug location | `.line <line>`, `.local vN[, <name-or-null>:<type>[, "signature"]]`, `.end local vN`, `.restart local vN`, `.prologue`, `.epilogue` at their original logical positions |
+| Typed catch / catchall | `.catch <type> {:start .. :end} :handler` / `.catchall {:start .. :end} :handler`; interval is half-open and priority remains original |
+| Packed switch | `.packed-switch <first-key>` with target labels in original key order and `.end packed-switch` |
+| Sparse switch | `.sparse-switch`, original signed `key -> :target` pairs, `.end sparse-switch` |
+| Array payload | `.array-data <width>` (1, 2, 4 or 8), exact-width integral element bits, `.end array-data`; odd-byte padding is not an extra element |
+| Method/field/type ref | Full `Lowner;->name<proto>`, `Lowner;->name:type`, or descriptor; proto includes the return type, and lookup never uses a display-name first match |
+| Method handle / type | `<handle-kind>@<full-ref>` / `<full-proto>`; handle kind is not inferred from the name |
+| Call site | `<site-name>("invoked-name", <proto>[, <encoded-args>])@<bootstrap-method-ref>`; unique site names retain distinct original call-site identities |
+
+Code labels use `:c_<CodeUnit-in-hex>` and payload labels use
+`:p_<CodeUnit-in-hex>` within each method; both are synthetic transport names.
+End-of-code labels are available for legal metadata interval endpoints, not for
+an invalid executable target. A comment `# cu:0x...` can show original positions;
+comments never replace OriginSpan evidence. The printer MUST retain every
+instruction and metadata landing point under §7.1, not require output byte
+addresses to remain identical after legal assembler re-encoding. Payload alignment
+inserted by the assembler is separately identified by V6; it never authorizes
+omitting an original nop, dead instruction or payload.
+
+Let R mean `vN`, L a code label, P a payload label, C the correctly typed ref, and
+K a literal. The same OpcodeSpec supplies the original mnemonic:
+
+| Instruction format | Smali operand shape |
+|---|---|
+| 10x / 11x | no operand / `R` |
+| 12x, 22x, 32x / 23x | `R, R` / `R, R, R` |
+| 11n, 21s, 21h, 31i, 51l | `R, K`; high16 uses the expanded original value, not its unshifted encoded word; Smali 2.5.2's const-wide/high16 parser requires a fixed-32 literal, so its expanded 64-bit word is supplied as an `L` literal under that grammar |
+| 10t, 20t, 30t / 21t / 22t | `L` / `R, L` / `R, R, L` |
+| 21c, 31c / 22c | `R, C` / `R, R, C` |
+| 22s, 22b / 31t | `R, R, K` / `R, P` |
+| 35c / 3rc | `{R, ...}, C` / `{vFirst .. vLast}, C`; zero words use `{}`, and wide words are not collapsed into one register |
+| 45cc / 4rcc | The respective list/range above, method ref, then the explicit proto ref |
+
+Instruction constants and array elements use original integer bits at the
+required width, with `L` for 64-bit values; an FP-looking bit pattern does not
+cause numeric conversion. Encoded metadata uses kind-preserving literals:
+byte/short/long suffixes `t/s/L`, quoted char, float/double `f/d`, boolean/null,
+string and typed refs. Finite FP metadata uses a spelling that parses back to
+the same bits; signed zero is explicit. A NaN spelling that cannot preserve the
+required payload or an assembler profile that loses a required encoded kind or
+value is UnsupportedRawSyntax, not permission to alter the projection.
+
+Smali strings and chars escape backslash, their quote and controls with
+`\\`, `\"`/`\'`, `\b`, `\t`, `\n`, `\f`, `\r`, or exactly four hex digits after
+`\u`. NUL uses `\u0000`, not a Java octal escape or `\0`; surrogate units use
+individual `\uXXXX` escapes without replacement. Literal backslash followed by
+`u` is escaped as a backslash, not interpreted as a Unicode escape by Diana.
+Descriptor/name quoting uses the grammar's backticks only when that original
+version/name permits it. It does not reuse string escaping or rename a member.
+Any valid raw fact that the selected syntax cannot represent follows §7.1's
+Unavailable/excerpt rule; the printer MUST NOT silently omit it.
+
 ## 8. Deterministic rules for representation selection
 
 Each method runs exactly one analysis chain and selects a result by the following conditions:
@@ -1573,6 +1692,32 @@ native Unicode general-category library whose version is locked by Cargo, MUST N
 Character or lossily rename everything outside ASCII, and reports unsupported source explicitly
 when the Unicode case is unsupported.
 
+#### Source package and type spelling
+
+For an ordinary class descriptor `Lpkg/path/Name;`, the package comes from the
+slash-separated prefix and the class name from the last segment. No slash means
+the unnamed package. Every package/name segment passes the identifier check
+above. `$` is an ordinary identifier character; splitting it into nested owners
+requires the complete ownership/template evidence of §12.3, not string splitting.
+The source file name and CLI dotted selector never determine the package.
+
+P8 fixes a source-name plan before sealing Java; P9 only emits it. The plan emits
+no imports or static imports. Primitive descriptors map to primitive keywords,
+arrays to the component spelling plus `[]`, and known reference types to their
+qualified source names. A named nested type uses its proven source owner chain;
+an unrelated top-level name containing `$` keeps `$`.
+
+For each type/static qualifier, P8 resolves the spelling in the actual package,
+lexical owner, inherited member/type and expression scope under §9.4. A fully
+qualified spelling is not automatically safe: its leading package identifier can
+be shadowed in an expression. P8 MAY use an in-scope owner/simple spelling only
+when resolution proves the same original type/member and dispatch. Otherwise it
+rejects the affected Java rather than renaming the package/member or inserting a
+helper. An unnamed-package type referenced from a named package is not guessed
+accessible. Implicit `java.lang` lookup does not override an original type with
+the same simple name. Synthetic locals avoid the identifiers the sealed plan
+needs; P9 MUST NOT change their names in a way that invalidates that binding evidence.
+
 ### 12.2 static/final and constructor chain
 
 - encoded_values are bound in the original static_fields order, and missing values follow the DEX
@@ -1738,7 +1883,7 @@ the limit.
 
 Every allocation first checks the platform-representable size, the minimum input record size and
 the applicable explicit quota, and then calls try_reserve; a real allocation failure is reported
-explicitly as Resource and MUST NOT be turned into format damage. Env, metadata, UTF16, AST, spans
+explicitly as BudgetExceeded and MUST NOT be turned into format damage. Env, metadata, UTF16, AST, spans
 and text all follow this rule. Traversal and release of untrusted depth use an explicit stack or
 arena and do not rely on host recursion or recursive Drop; max_nesting acts as a numeric threshold
 only when set explicitly.
@@ -1872,6 +2017,52 @@ The H02/H10 core file-safety tests continue through the public domain interfaces
 self-made directories; the dependencies, path wrappers and command parsing above get no separate
 mechanical or auxiliary tests. Original permissions/provenance, cross-platform not-run results and
 release cost are recorded honestly.
+
+### 14.4 Manifest decoding and AXML safety
+
+Selection uses DESIGN §6.7's original physical-entry rule and the same checked
+InputLease/inflate/CRC as extraction. ResChunk_header, ResStringPool and
+ResXMLTree field layouts follow the AOSP source identified in SOURCE_MAP §7. A bare DEX or a JAR-only input is an input
+error; a structurally usable APK/ZIP with no AndroidManifest.xml is no-result.
+The manifest Module decodes bytes only after entry integrity passes. It shares
+request cancellation and explicit allocation/work/output limits; no manifest
+size or nesting quota is invented by default.
+
+| Binary structure | Checked read and semantic rule |
+|---|---|
+| Document/chunk | Outer type `0x0003`; little-endian `type:u16, header_size:u16, size:u32`; `8 <= header_size <= size`, four-byte chunk alignment, checked end inside the entry, and positive advancement ending exactly at the document extent |
+| String pool `0x0001` | Header at least 28 bytes; checked string/style counts and offset arrays, stringsStart/stylesStart relative to this chunk; entries and terminators remain in their own data regions |
+| UTF8 / UTF16 pool entry | UTF8 stores UTF16-unit and byte lengths using one/two-byte lengths; UTF16 stores one/two-u16 lengths. Verify both actual length and terminator; this is AXML string encoding, not DEX MUTF8 |
+| Style span | Checked name index and UTF16 interval, terminated within style data; styles never justify reading past the pool or altering the XML text |
+| Resource map `0x0180` | Optional, before nodes; header and payload length checked, payload divisible by 4, entries associate resource IDs with valid string-pool positions |
+| XML node `0x0100..0x0104` | Header at least 16 bytes including line/comment; extensions start at header_size, and their complete fixed record fits before reading any reference |
+| Namespace start/end | Checked prefix/URI refs; balanced scope with matching ends. Namespace aliases are scoped, not global substitutions |
+| Start element | Checked namespace/name, extension at least 20 bytes; attributeStart is relative to the extension and at least 20, attributeSize at least 20, and the complete count*stride fits this chunk; id/class/style indices are 0 or 1..attributeCount |
+| Attribute / typed value | Checked namespace/name/rawValue refs and 8-byte Res_value size/type/data; a missing optional ref is `0xffffffff`, not pool index 0 |
+| End element / CDATA | Matching expanded element name on an explicit stack; checked text/typedData; no second root, unmatched close or character data outside the root |
+
+String refs are checked before conversion or lookup. Rendering preserves namespace
+meaning, attribute values and node order; it does not sort to make output stable.
+Raw string values are preferred when present; otherwise typed values use Android
+resource/attribute IDs, booleans, signed/hex integers, FP, packed dimension/fraction
+and color formatting from the reviewed reader. Unsupported typed values remain
+explicit raw-type/data text, not a guessed resource lookup. The decoder does not
+load resources, resolve a network namespace or invoke Android tools.
+
+The renderer escapes XML metacharacters and checks XML character/name legality;
+illegal characters are errors, not replacement characters. Plain UTF8 XML entries
+require an actual well-formed, single-root check; seeing a leading `<` does not
+prove validity. External entity/DTD expansion is unsupported and never accesses
+files or the network. Output is complete UTF8 XML or a classified error; line
+numbers, byte layout and quote style are not source-byte identity commitments.
+
+Parsing, rendering and release use explicit stacks/arenas and checked growth.
+A reused decoder MUST expose the required cancellation/allocation points and
+return errors for every reachable malformed read; a skeleton precheck,
+`catch_unwind` or the existing PATCHES cannot prove that contract. A known but
+unhandled legal chunk/profile is Unsupported; a broken size/ref/stack/string is
+Malformed; cancellation/resources retain their own kinds. Extraction remains the
+way to retrieve bytes that the XML presentation cannot express.
 
 ## 15. Single-use integer expression inlining
 

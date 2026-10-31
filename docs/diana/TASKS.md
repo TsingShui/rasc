@@ -1,7 +1,7 @@
 # Diana tasks and acceptance
 
 **Status: package scaffolds only; 39 B/T/H tasks are not yet accepted. The case
-specification draft-5 holds 86 required cases and 177 must-run invocation
+specification draft-6 holds 86 required cases and 177 must-run invocation
 scenarios and remains designed-not-built.**
 This page owns the workflow, preparation, task cards and verification. Read
 [DESIGN.md](DESIGN.md) for interfaces and data, [ALGORITHMS.md](ALGORITHMS.md) for
@@ -111,6 +111,24 @@ requires explicit user authorization of a bounded scope, or a separately approve
 change to the preparation gate. An author MUST NOT omit that work and then claim
 B04 passed, and MUST NOT treat one manual trial run as the original
 fault-falsification guarantee. This section's authorization boundary governs.
+The block does not prohibit B01 review, B02 fixture/preparer implementation or
+B03 independent core-input certification. Those activities do not authorize
+preparer/comparator self-tests or satisfy B04's missing falsification evidence.
+A documentation revision alone approves no case, dependency or executable gate.
+
+Development-entry evidence from [B01 review](batches/b01-spec-review.md): local
+source/JVM checks corroborate the reviewed expectations, but B01 is not approved.
+The remaining preparation sequence is concrete:
+
+| Gate | Required artifact before production implementation |
+|---|---|
+| B01 | Reviewed symbolic selectors, case-specific assertion mapping, all independent oracles/mutation obligations and the approved revision hash; no format-only approval |
+| B02 | Distributable self-made sources/recipes for every required invocation, actual tool/transitive/platform locks and a portable preparer |
+| B03 | Actual independent DEX/041/AXML/ZIP projections and source references, staged input certificates, and any scalar oracle needed before engine integration |
+| B04 | Comparator/runner using those certificates, plus rejection of every listed injected fault under explicit self-test authorization |
+
+B02 fixture/preparer work is possible without the separate self-test permission;
+B04 completion is not. Production T01/H01 still wait for all four accepted gates.
 
 ## B01 — Case and expected-value specification review, freeze v1
 
@@ -119,7 +137,8 @@ fault-falsification guarantee. This section's authorization boundary governs.
 option.
 
 **Files**: `docs/diana/e2e_cases.json`, TASKS §4, DESIGN §6, SOURCE_MAP §10;
-`tests/e2e/cases.json` and the manifest schema, all relative to the checkout.
+the `tests/e2e/` manifest schema and its derived execution view, all relative to the
+checkout. `docs/diana/e2e_cases.json` remains the only expected-value specification.
 
 **Input→output / Interface**: behavior recipes and fixed inputs → independent
 expected values, mutation killers and oracle type, with state moving from
@@ -232,7 +251,7 @@ platform catalogs, real-corpus downloads, private test paths.
 **Dependencies**: B02. **Phase**: input and baseline certification.
 
 **Files**: `tests/e2e/manifest.json`, the independent dexlib2 projection and
-helper, the source-reference Driver, and the
+helper, the source-reference Driver, the required tests-only scalar oracle, and the
 `.cache/e2e/preparation-report.json` generated report (no machine absolute path
 enters a golden).
 
@@ -251,11 +270,12 @@ manifest state becomes `inputs-certified`.
 2. For a source-origin core case, run the real reference Driver on an isolated
    JVM and check the specification's independent expected values. FP bits, UTF-16,
    locks and the fresh-process rule for init are strict.
-3. When handwritten smali has no Java source and therefore no JVM oracle, a pure
-   scalar case MAY use a tests-only independent interpreter that is cross-checked
-   against source-origin cases. Exception and monitor cases MUST NOT use an
-   interpreter that ignores effects; they either keep raw-integrity evidence or
-   keep an explicit declined status.
+3. When handwritten smali has no Java source and therefore no JVM oracle, prepare
+   its tests-only independent scalar interpreter here and cross-check it against
+   source-origin cases before certification. T05 reuses this prepared oracle;
+   B03 MUST NOT wait for a T05 artifact that itself depends on B04. Exception and
+   monitor cases MUST NOT use an interpreter that ignores effects; they either
+   keep raw-integrity evidence or keep an explicit declined status.
 4. The 041 builder for D065 needs both the published format constraint and an
    independent projection check; do not take a sample from a developer's personal
    device. If a legal construction cannot be proven, preparation is blocked; do
@@ -337,7 +357,7 @@ MUST NOT change expected values automatically. CLI black-box tests are not
 required; a tool invocation is not the CLI under test.
 
 **Tests**: The composite wrong results above prove that the harness rejects
-wrong output; a trivial `assert caseid == caseid` is not enough. Resource and
+wrong output; a trivial `assert caseid == caseid` is not enough. BudgetExceeded and
 run timeouts are bounded, and a reference Java compile failure MUST NOT be
 absorbed as engine "unsupported".
 
@@ -392,7 +412,10 @@ are all not yet established.
 ### Case format, revision basis and obligation mapping
 
 In schema 2 each invocation carries its own id, input and expected value, and a case
-carries `acceptanceGate`, `designRefs` and `inputRequirements`. The specification
+carries `acceptanceGate`, `designRefs`, `inputRequirements` and symbolic `targets`.
+draft-6 maps each used expected field through `assertionSources` and records a
+case-specific `mutationObservation`. These records are in the sole case
+specification, not an adapter inference from expected values. The specification
 MUST NOT pack several inputs into one any-error and MUST NOT count a case as passing
 when an invocation is missing. Resolve scope and the complete proto from the
 independent manifest; the adapter MUST NOT pick targets from expected values.
@@ -456,6 +479,13 @@ declaration and pool boundary checks are core semantics, not CLI arguments, gett
 or tool self-tests. A new specification or specification derivation does not replace
 B01 approval, B03 input and compiler-artifact certification, and does not lift the
 B04 tool-self-test authorization block.
+
+Preflight clarification of draft-5 preserves every case/invocation and every
+expected value. It makes D059's unknown-opcode mutation and D062/D063 target
+recipes concrete, replaces D041's private-SSA wording with original-input/source
+observations, and makes D079's two reads share one fresh JVM per invocation.
+The batch record identifies the reviewed bytes and source/JVM evidence. These
+clarifications are not B01 approval or B03 input certification.
 
 ### 4.1 Validation layers
 
@@ -615,9 +645,10 @@ directly produce:
 `behavior_roundtrip` MUST distinguish a `source-origin JVM case`, a `handwritten
 smali + scalar reference interpreter case` and an `ART case`. The last is not-run or
 fails as required when no applicable execution oracle exists; do not substitute
-source for "a simpler but different CFG". The scalar interpreter exists only as the
-T05 tests-only restricted pure-ops component with no heap, exception or monitor
-support, and its positives still need cross-checking against the JVM; it MUST NOT
+source for "a simpler but different CFG". B03 prepares the tests-only restricted
+pure-ops interpreter and T05 integrates it without rebuilding the oracle. It has
+no heap, exception or monitor support, and its positives need cross-checking
+against the JVM before input certification; it MUST NOT
 count as a complete DEX VM.
 
 The specification mirrors of D027/D073 are limited to the closed shape the JSON
@@ -684,6 +715,74 @@ holds the Dir, and a passing stress run MUST NOT replace it. When the platform d
 not support these primitives, preparation fails honestly; the test MUST NOT degrade
 to exists+rename or drop that required invocation.
 
+#### 4.3.5 Assertion projection and run-result contract
+
+B04 compares observations, not a mirror of the production CLI JSON. Its thin
+adapter records `(case_id, invocation_id, seam, spec_revision)`, original selected
+identities, `execution` (`completed`, `not_implemented`, `blocked`, `timeout` or
+`failed`), projected public method/class outcomes and typed diagnostics, and
+relative paths to actual artifacts/observations. Only `completed` with every
+required assertion satisfied passes; other states retain their reason and never
+count as successful skips. This result schema is tests-only and does not enlarge
+Engine::Report or the CLI command surface.
+
+| Expected assertion family | Independent actual source and comparison |
+|---|---|
+| `outcome`, Java/Smali inclusion, `hasBody`, `noJava`, `noFakeJavaUnit`, `noFallbackReport` | Public Report/RequestError and complete original-member set; Java capability requires the fixed validationScope, and resource/cancel/BUG cannot become Unsupported success |
+| `reason`, `unsupportedReason`, `errorKind`, `otherErrorKind`, `limit`, `targetItem` | Typed failure kind/code and configured failing item; snake_case projects public domain reasons, while named Unsupported reasons retain their specific code |
+| Returns, FP bits, string units, events, exception, heap, monitor and enum/annotation observations | Same isolated Driver and fixed entry/setup on baseline and recovered code; exact program order and type-directed bits/u16 comparison under §4.3.1 |
+| `rawExact` and declaration/dynamic/bridge/payload/handler/ref/string integrity | Independently decoded original fixture versus reassembled output projection; compare original opcode forms, register words, ordered targets/effects, metadata and encoded value kinds/bits, not output text |
+| Original members, Generated, final fields/proto, `orderedInvokeSites`, `declarationsPreserved`, `constantValueAbsent` | Original certified declaration/code projection plus actual compiled output/reflection where required; inspect all selected members, not only ones that compiled |
+| `sourceSpansExact`, `textAvailable`, `failedMethodHasNoJavaBody` | Real rendered UTF8 and original-key spans; bounds and exact member/raw slice extraction, with relocated Mixed prefixes; no private AST or language-getter substitute |
+| Defined methods, absent refs, referencing method/site count and `allCertifiedSites` | Public query's original-key multiset versus certified definitions or direct operand sites; independent row order ignored, duplicate/missing sites fail |
+| File/payload bytes, targets, temporary files, escaping/explicit-path and original-file safety | Actual filesystem handles and public extract results under §4.3.4; compare full bytes, final state and permitted observations, not a success flag or a snapshot of expected |
+
+Before B01 approval, associate every used expected field with one comparison
+above through the specification's assertionSources and its concrete case
+observation. The source group identifies the producer, not a boolean result;
+B02/B03 materialize the actual observation artifacts in the manifest. A field with
+no observation/mapping blocks preparation; do not ignore it, infer its actual
+value from expected/input, or add a production boolean to make it pass. Compound
+assertions require their whole predicate, for example all original members
+exactly once and a complete raw slice for each required raw member.
+
+The comparator first verifies the exact required invocation/seam set and input
+certificate, then source eligibility and hard-failure classification, then the
+case's independent observations. Results link by original identity; program
+traces stay ordered. Expected object fields are all mandatory; specified scalar
+and array values compare exactly under their encoding, while unasserted runtime
+metadata is not a text golden. Null, absence, zero and empty collections are
+not interchangeable. Within one invocation/seam, duplicate selected member or
+operand-site identities fail; the same member in another required invocation,
+Driver repeat or ordered call is not a duplicate analysis result.
+`mustNotInclude` checks the complete multiset; `observationsOnly` admits every
+actual observation only from its whitelist and does not invent a sampling count.
+Compact string/file patterns expand to full exact values under the JSON policy.
+
+`inputRequirements` remains case-authored semantic predicates, not a second
+production format. The manifest binds each predicate by its index and spec hash and distinguishes
+`input_certification` from `result_validation`. B03 certifies the original-input
+and reference predicates; B04 wires recovered-result predicates for real T/H
+execution. A predicate containing a recovered-source obligation does not require
+a nonexistent engine output before B03 can pass, and remains mandatory at its
+own validation stage. `mustRejectMutation`
+is a behavior obligation, not necessarily a byte edit: result mutations belong
+to B04's already-listed falsification, while an invalid-input recipe records
+its original hash, named item/field or opcode anchor, changed bytes and independent
+post-edit facts. A bare unchecked offset is not a mutation certificate.
+
+B03 owns preparation of the scalar oracle that T05 integrates, with only the
+pure families actually required
+by the handwritten normal-control cases: entry arguments/constants, word-correct
+moves, int/long arithmetic/bitwise/shifts/conversions, comparisons, branches,
+integer switch and return. Div/rem is admitted only with a non-zero divisor in
+the certified execution; it does not add an exception oracle. Its closed supported-op set and unsupported-op error
+are recorded with the interpreter; no heap/call/exception/monitor or native FP
+shortcut is accepted as a scalar oracle. It executes independently decoded raw
+instructions/registers, not Diana SSA/copies. Supported operations and branch/loop
+results are cross-checked against source-origin JVM cases before they certify a
+handwritten input. A missing operation or execution oracle blocks that evidence.
+
 ### 4.4 Capability family index (the execution truth is the JSON required set)
 
 **The execution specification is the required cases and invocations in
@@ -704,7 +803,7 @@ abstract declarations get their own count.
 | F01 TinyDex | Self-made small header/catalog/exact proto/abstract | Exact method key and raw ranges; M01/M02 out-of-range, LEB and count failures | T02; V0 |
 | F02 RawMethods | move/return/wide/range/branch formats | Complete standard raw smali; U01 keeps raw although Java does not support it; M03 unknown width MUST NOT fake smali | T03/T05; V0/V6 |
 | F03 Utf16Payload | NUL, quote, backslash-u, isolated surrogate, switch/fill, debug/encoded | u16/bits/payload target preserved; M04 truncated/overflow/metadata rejection | T04/T05; V0/V6 |
-| F04 HarnessSelfTest | Missing tool, wrong checksum, 0 selected, syntax or behavior failure | The harness itself MUST be red and contributes no Java result | T05; V7 |
+| F04 HarnessSelfTest | Missing tool, wrong checksum, 0 selected, syntax or behavior failure | The harness itself MUST be red and contributes no Java result; separate §3 authorization remains required | B02/B04, reused in T05; V7 |
 | F05 ScalarReturn | answer 7, param 41+1, int wrap MAX+1 | The target method returns correctly with correct locals; early runs may use method-in-known-context with the class honestly marked Mixed; M05 undefined/bad return/instruction/cancel rejection | T06; V0/V1/V2/V4/V5 |
 | F06 DiamondPhi | `choose` with two branches, nested, same target on different edges | One evaluation of the condition; M06 missing Phi/edge/no-dominance and M07 wrong-branch copy rejection | T07/T08; V1/V2/V4/V5 |
 | F07 CopyCycleLoop | a/b swap, 3-cycle, 0/1/N latch, critical edge | Simultaneous assignment and loop Phi; M07 naive sequence/temp/observed-default rejection | T08/T09; V1/V2/V5 |
@@ -732,6 +831,52 @@ reference interpreter, ART or the JVM actually proves. If the F17 shared handler
 lacks an ownership profile, it becomes a U03-style degraded case; its Java
 unavailability does not negate T18 and it is not listed as positive Java support for
 T18.
+
+#### Required-case producer links
+
+This table links the JSON problems to owning producers and algorithm sections;
+it is not another suite, progress counter or copy of expected values. Batch
+records name concrete D IDs/invocations before implementation; no selector is
+inferred from current support or a chapter-string hit count. Related cards share
+producer obligations rather than duplicating a case in the denominator.
+
+| D cases | Owning producers / supporting integration | Algorithm section |
+|---|---|---|
+| D001–D003 | T07/T08/T09 | §3, §5, §6 |
+| D004–D008 | T08/T09/T13/T14 | §5, §6 |
+| D009 | T06 | §4 |
+| D010–D017 | T10 | §4 |
+| D018–D023 | T11 | §9 |
+| D024–D028 | T15, T04 payload input | §2.4, §4, §9 |
+| D029–D035 | T16/T17/T18 | §3, §5, §10 |
+| D036–D040 | T19 | §11 |
+| D041–D043 | T12/T20 | §9.2–§9.3, §12 |
+| D044–D047 | T20 | §12.2 |
+| D048–D051 | T21/T22/T23 | §12.1, §12.3 |
+| D052–D054 | T04/T10, P9 literal printing | §1.1, §4.8 |
+| D055–D058 | T02/T03/T04/T07 input rejection | §1, §3 |
+| D059–D061 | T03/T04/T05, T21/T22 raw shell | §7–§8, §12 |
+| D062–D064 | T01/T05, H05 delivery | §8, §13; DESIGN §3.7/§7/§10.3 |
+| D065 | T04, H04 | §1.1, §14.2 |
+| D066–D067 | H03/H09 | §14.2 |
+| D068–D070 | H02/H10 | §14.3 |
+| D071–D072 | T10/T11 | §4.9, §5, §9 |
+| D073–D074 | T04/T15 | §2.4, §8 |
+| D075–D076 | T10/T21, T03/T04 raw | §4.8, §7, §12.4 |
+| D077–D078 | T11/T21 | §12.4–§12.6 |
+| D079–D080 | T11/T20 | §9.1, §12.2 |
+| D081–D082 | T19 | §6, §11 |
+| D083 | T14 | §6, §12.5 |
+| D084 | T21 | §9, §12.3 |
+| D085 | T03/T04/P9, H05 | §8.1; DESIGN §2.2/§6.5 |
+| D086 | T01/T03/T04 | §1, §7–§8, §13; DESIGN §3.7/§10.3 |
+
+T25 rolls up all engine obligations and H08 all product obligations according to
+JSON acceptanceGate; shared D065/D085 need both seams. D041 is a constructor
+problem, not a 041 container fixture. D065 already certifies multiple logical
+members and sharing; a header-chain or cross-container-range counterexample
+needs an independently reviewed appended case, not an unrecorded change of D065.
+AXML checks belong to H03's core manifest obligations, not an invented D-case pass.
 
 ### 4.5 Pinned tools and content locks
 
@@ -764,6 +909,35 @@ list only the two top-level POMs. The checked-in artifact manifest and source re
 the core suite let other developers re-verify without an external reference
 repository.
 
+#### Production dependency review
+
+Cargo.lock owns exact resolved Rust versions/features; this table does not
+pretend to certify an unused crate version. A dependency enters the owning card
+only after reviewing its real safe interface, reachable input-driven allocations,
+platform behavior and relevant unsafe internals. Active Diana crates still forbid
+unsafe; that lint does not prove transitive crates contain none.
+
+| Use / owner | Selection or review obligation |
+|---|---|
+| Capability-relative ordinary-file access, H02/H10 | `cap-std`; the owning Module MUST use safe open options and same-held-Dir link/rename/remove meeting ALGORITHMS §14.1/§14.3 on each claimed platform |
+| File identity / private temp ownership, H02/H10 | `same-file` / `tempfile`; the owning Module MUST use handle-based identity and keep temporary creation/publication relative to the held parent Dir |
+| Native deflate / CRC, H02/H03/H10 | Incremental pure-Rust inflate candidate, with `crc32fast` for actual payload CRC; review end-state, bounded caller output, input-driven scratch allocation and cancellation between calls before choosing crate/features |
+| Unicode category, T21/P8 | Native category data matching the Java8 compilation profile; review Unicode-version differences against the locked JDK's Java8 mode, not just a Cargo version or ASCII-only fallback |
+| JSON, H05 | Native serialization candidate such as `serde`/`serde_json`; ordinary Rust String serialization alone cannot preserve an isolated UTF16 surrogate, so review the application escaping and fallible/output accounting path |
+| AXML, H03 | Focused reviewed native reader under ALGORITHMS §14.4; the archived patched reader is evidence only and cannot be a Diana path dependency |
+
+The handwritten ZIP central-directory reader is the scheme in ALGORITHMS §14.1;
+production extraction writes an entry's decompressed payload, not a new ZIP.
+No ZIP writer is required by that interface. Tooling MAY generate self-made ZIPs
+without making that writer a production dependency.
+
+Record the selected version/features, safe calls, allocation/cancellation points,
+platform evidence and unresolved limitations in the owning batch. Existing names
+or this table are not dependency approval. If a candidate cannot enforce the
+contract, stop and review a focused alternative; do not add unsafe to Diana, a
+catch-panic wrapper or silent successful truncation. Dependency/tool self-tests
+remain separately unauthorized under §3.
+
 ### 4.6 Asset layout and generation discipline
 
 The fixed behavior specification lives only in `docs/diana/e2e_cases.json`; this
@@ -772,11 +946,11 @@ section maintains the preparation and asset contract. Actual B02 output:
 ```text
 tests/e2e/
   sources/<case-id>/        # self-made Java/smali/driver/dependencies; no machine paths
-  expected/<case-id>.json   # independent return/trace/status, not generated from engine output
+  expected/<case-id>.json   # derived, read-only view of the approved JSON expectations; never truth
   inputs/                  # small self-made DEX/ZIP/AXML/bad bytes; or a reviewed generation recipe
   manifest.json            # sources, recipe/toolchain lock, artifact hashes, fixed suite members
   toolchain.lock.json      # complete artifacts/hashes/transitive dependencies/main classes
-  cases.json               # generated from the reviewed design list, checked in as the executed version
+  cases.json               # derived execution view (ids, pointers, hashes) of the approved JSON
   runner/                  # thin adapter over the public interface; no private phase dependency
 ```
 
@@ -792,6 +966,57 @@ the recipe compares each field. A changed artifact hash needs an independent fix
 rebuild record; it MUST NOT be treated as "decompilation failed, regenerate a simpler
 DEX". Return and event expectations always come from the specification worked example
 or an independent baseline, never from copied Diana/dexdec/radguard printed text.
+
+#### Fixture manifest schema 1
+
+The manifest binds the approved case specification to original input assets; it
+is not a second expected-value database. B01's `tests/e2e/cases.json` is a derived
+execution view containing case/invocation IDs and JSON pointers to targets, input,
+expected and assertion-source records in the hashed specification. It contains
+no copied expected values, fabricated asset hashes or successful certificates. Top-level fields are `schema_version:1`,
+`spec:{revision,path,sha256}`, `toolchain_lock:{path,sha256}`, `assets[]` and
+`cases[]`. It records no hand-maintained case count. IDs/paths/hashes are strings,
+counts/indices are non-negative integers, and hashes are 64 hexadecimal digits.
+All listed fields are present; irrelevant collections are empty and only the
+explicit alternatives below use null. Paths are checkout-relative POSIX paths,
+with generated artifacts under `.cache/e2e/`; implementations resolve them
+independently of the working directory.
+
+| Record / fields | Binding contract |
+|---|---|
+| Asset `id`, `path`, `sha256`, `size` | Unique local name and exact bytes; checked-in source or generated output, never a machine path or placeholder hash |
+| Asset `source_paths`, `license`, `recipe` | Source-path array and license string; recipe object has tool/profile IDs, argument arrays and input/output asset IDs, or an explicit literal/byte-builder description. An original checked-in source has null recipe, not missing provenance |
+| Case `id` / `invocations[]` | Exact JSON case and invocation IDs; unknown, duplicate or missing required entries fail preparation |
+| Invocation `id`, `input_assets`, `expected_ref` | Asset IDs and JSON pointer into the hashed approved specification, not copied expected values |
+| Invocation `bindings[]` | `{role, selector, origin}`; bind each role named by the input, including implicit `case` when used, with a full class/method/field/string selector or explicit physical entry selection |
+| Binding `origin` | `{asset_id, entry_ordinal, logical_ordinal, header_offset}`; entry ordinal is 0 for bare DEX, and logical/header fields are null only for a non-DEX entry/error. No display label or request-local DexId |
+| Binding `selector` | Tagged `kind`: class has `class_def_idx,descriptor`; method adds `method_id_idx,name,proto`; field adds `field_id_idx,name,type`; string has `string_id_idx`; entry has `name,ordinal`; query/error binds the explicit request/input without inventing a member |
+| Invocation `request`, `catalog`, `driver` | Public seam/setup and explicit limits, declaration fact assets/completeness, Driver entry/args/isolation. Catalog/driver are null only when the seam uses neither; concrete setup refers to the hashed case invocation, not inferred external SDKs or production factories |
+| Invocation `checks[]` | `{requirement_index, stage, evidence_source, projection_path}` for each JSON inputRequirements obligation; stage is `input_certification` or `result_validation`, and one mixed predicate may need both. Original evidence references certified assets; recovered evidence names a public observation under §4.3.5, not a fabricated pre-engine output |
+| Invocation `assertions[]` | Expected JSON pointer, observation source and fixed comparison under §4.3.5; no cached actual boolean used as truth |
+| Invocation `certificate` | Artifact/projection/reference-evidence IDs, validationScope, actual tool/platform and certification result; missing evidence is explicit |
+
+B01 fixes the reviewed manifest shape, roles and complete symbolic selectors
+from the independent case recipes; B02 materializes actual asset hashes/table
+indices and B03 certifies them. A draft binding or schema does not claim
+`inputs-certified`; B01 approval does not require pretending B02 has already
+built the binary assets. For a malformed fixture whose target is not locatable,
+bind the exact input and request/error seam, not a fabricated MethodKey; the
+fault certificate explains that absence.
+
+Before an Engine request, resolve the binding against the independently certified
+original bytes, then adapt the same origin into this request's DexId/ClassKey/
+MethodKey. Check indices and descriptor/name/proto in both directions. The
+manifest MUST bind a method role without an explicit method selector to exactly
+one original method; a class with several methods is insufficient. Duplicate descriptors across assets
+or 041 views never use a first match. Full-unit-set and `through` bindings retain
+all specified roles/seams, with no duplicate denominator.
+
+The preparer MUST rebuild and certify 041 directly with original physical
+header_offset and shared-item extents under ALGORITHMS §1.1; an ordinary DEX
+rewritten or header-overlaid for a 035 decoder is not an independent 041
+projection. The lock binds hashes and semantic certificates, not private phase
+shapes, byte offsets guessed from output, or values refreshed from Diana.
 
 ### 4.7 Execution and failure determination
 
@@ -903,8 +1128,9 @@ trait or a macro.
 4. Do not write tests for private Pass call order and do not create empty algorithms
    for unimplemented phases. Verify through a real public request that resource
    exhaustion and cancellation stop scheduling, with trace as a location aid only.
-5. Fix the diagnostic fields: code, severity, method/site, phase/pass, kind and
-   bounded detail. Wall time MUST NOT enter a text golden.
+5. Implement the diagnostic contract of DESIGN §2.3: typed code/kind, severity,
+   original method/site, optional finite phase and charged detail. Wall time MUST
+   NOT enter a text golden; no pass registry or speculative code catalog is needed.
 
 **Invariants / limits**: Every state is exhaustible; a required typed transition
 MUST NOT be disabled by a recovery policy; no registry or PassId repetition test
@@ -953,7 +1179,7 @@ replace a complete name or descriptor.
 1. Implement `checked_range(offset, count, stride)` plus u16/u32/ULEB32/SLEB32, and
    enforce the byte and code-unit type distinction.
 2. Bound and align the header 035, little-endian, file_size, header size, map and ID
-   tables separately. An overrun is Resource and truncation is Malformed; an unknown
+   tables separately. An overrun is BudgetExceeded and truncation is Malformed; an unknown
    container or version is Unsupported.
 3. Check the Type/Proto/Field/Method/class_data indexes with `checked_add` on the
    accumulated delta; handle a duplicate class or ambiguous name by key and proto.
@@ -972,7 +1198,7 @@ malformation MUST NOT cost the other methods of the class their raw identity.
 **Tests**: F01 `TinyDex`: an empty class, an abstract method and an exact-proto
 overload; M01 header truncation, `offset * stride` overflow and map
 out-of-range; M02 method code delta overflow and wrong tries padding or
-`handler_off`; a small Resource limit. Rust builds the tiny DEX itself and
+`handler_off`; a small BudgetExceeded limit. Rust builds the tiny DEX itself and
 records the builder source; the test MUST NOT reference an unknown real sample.
 
 **Acceptance**: G0 plus `cargo test -p diana-decomp --test contracts t02_`.
@@ -1111,8 +1337,9 @@ DeclarationOnly and a raw method first, and never treat an empty AST as success.
 2. `MinimalJavaAst` supports a legal declaration and literal/return placeholders; a
    Validated or Verified value MUST NOT be publicly constructible, and P9 accepts
    verified input only.
-3. Read the manifest, D cases, expected values, `toolchain.lock.json` and input
-   certificates frozen by B01–B04. This card MUST NOT refill expected values or
+3. Read the manifest, D cases, expected values, `toolchain.lock.json`, the
+   B03-prepared scalar oracle and input certificates frozen by B01–B04. This card
+   MUST NOT refill expected values or
    generate a golden from engine output, and a different public interface changes only
    the thin adapter.
 4. Integrate the team-reproducible root test tool and driver, taken from the public
@@ -1333,7 +1560,7 @@ match across runs.
    pc assignment has no heap effect and no allocation, but the default-unreachable
    assertion MUST NOT depend on a guess about user input.
 5. Support an ordinary irreducible multiple-entry loop, where an extended budget affects
-   Resource only and not output semantics; a no-handler case MUST NOT fall back wrongly
+   BudgetExceeded only and not output semantics; a no-handler case MUST NOT fall back wrongly
    because natural structuring failed.
 
 **Invariants / limits**: Evaluate the condition once, copy the edge before
@@ -1345,8 +1572,8 @@ full string and then drop it.
 **Tests**: B(F07) swap loop with several iterations, 0 iterations, continue and
 break; F08 `DispatchGraph`: simple cycle, two-entry cycle, multiple exits and
 throw terminal; M08 missing edge, duplicated effect, reachable default and
-ineligible handler. A hand- made two-entry CFG uses the T05 tests-only scalar
-interpreter as an independent oracle and is compared against the actual
+ineligible handler. A hand-made two-entry CFG uses the B03-prepared tests-only scalar
+interpreter integrated by T05 as an independent oracle and is compared against the actual
 execution of recovered Java; this card introduces no fake source substitute for
 an original hand-made CFG that the JVM cannot generate directly, and exception
 or monitor cases do not use this simplified oracle.
@@ -2133,7 +2360,7 @@ every DEX is Java.
    accepted by H05/H08, and no MCP is designed.
 
 **Invariants / limits**: A hit on an explicit quota or an actual allocation
-failure is Resource, not Malformed; a directly confirmed target format overrun
+failure is BudgetExceeded, not Malformed; a directly confirmed target format overrun
 is Unsupported and is not rejected by an estimate. All Limits default to None,
 an explicit request quota covers several methods, and a small limit MUST NOT
 truncate into success. A fuzz case has a timeout, seed and range to avoid an
@@ -2459,7 +2686,7 @@ interrupt and backpressure.
 
 **Input→output / Interface**: caller stop or UserInterrupt → RunContext →
 pipeline checkpoints; per-request byte, work and output limits → the same
-RunContext; complete text or JSON, or an explicit Resource or Cancel error.
+RunContext; complete text or JSON, or an explicit BudgetExceeded or Cancel error.
 
 **Steps**:
 1. The cancellation callback MUST NOT introduce tokio into the engine; check it at every
@@ -2485,7 +2712,7 @@ RunContext; complete text or JSON, or an explicit Resource or Cancel error.
 
 **Invariants / limits**: Cancellation is cooperative and the non-preemptible
 libdeflate is explicit; by default input, inflate, JSON and engine have no
-numeric quota, and Resource is reported only on an explicit overrun or a real
+numeric quota, and BudgetExceeded is reported only on an explicit overrun or a real
 allocation failure; there is no new MCP semaphore or schema contract.
 
 **Tests**: Q06 verifies long-work cancellation, owner lifetime, normal/raw
@@ -2526,7 +2753,7 @@ deferred.
    separate `--method`/`--proto` pair, and `at` can be passed back.
 2. A complete Mixed or Smali display of a local default Unsupported may exit 0 exactly like
    JSON without becoming a JavaUnit; usage errors exit 2, a missing single object exits 3,
-   ambiguity exits 4 and an empty query set exits 0. Malformed, BUG, Resource, Cancel and I/O
+   ambiguity exits 4 and an empty query set exits 0. Malformed, BUG, BudgetExceeded, Cancel and I/O
    still fail, and an existing fully renderable result is kept with a nonzero exit. The old
    getclass, findrefs, skill, require-java, class-id, members and pagination flags are
    explicitly rejected.
