@@ -1,0 +1,365 @@
+use crate::input::{MethodInput, RawPrintable};
+use crate::pipeline::branch::{BlockId, Definition, EdgeId, Kind, Op, Sym, Terminal, VerifiedSsa};
+use crate::substrate::owned::{TextBuffer, copy_units, reserve};
+use crate::{EnvironmentId, MethodBudget, RequestError, VerifiedJavaMethod};
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub(crate) struct LocalId(pub u32);
+pub(crate) struct Local {
+    pub id: LocalId,
+    pub kind: Kind,
+    pub parameter: Option<u32>,
+}
+pub(crate) enum Expression {
+    Local(LocalId),
+    Constant(i32),
+}
+pub(crate) struct Assignment {
+    pub target: LocalId,
+    pub expression: Expression,
+}
+pub(crate) struct Diamond {
+    pub locals: Vec<Local>,
+    pub entry: Vec<Assignment>,
+    pub yes: Vec<Assignment>,
+    pub no: Vec<Assignment>,
+    pub condition: LocalId,
+    pub condition_kind: Kind,
+    pub opcode: u8,
+    pub returned: LocalId,
+}
+fn ix(id: u32) -> Result<usize, RequestError> {
+    usize::try_from(id).map_err(|_| RequestError::PlatformCapacity)
+}
+fn append<T>(
+    items: &mut Vec<T>,
+    item: T,
+    budget: &mut MethodBudget<'_, '_>,
+) -> Result<(), RequestError> {
+    reserve(items, 1, budget)?;
+    items.push(item);
+    Ok(())
+}
+fn edge(
+    ssa: &VerifiedSsa<'_>,
+    source: BlockId,
+    target: BlockId,
+    budget: &mut MethodBudget<'_, '_>,
+) -> Result<EdgeId, RequestError> {
+    let mut found = None;
+    for (index, edge) in ssa.edges.iter().enumerate() {
+        budget.charge_work(1)?;
+        if edge.source == source && edge.target == target {
+            if found.is_some() {
+                return Err(RequestError::InternalInvariant("diamond edge is ambiguous"));
+            }
+            found = Some(EdgeId(
+                u32::try_from(index).map_err(|_| RequestError::PlatformCapacity)?,
+            ));
+        }
+    }
+    found.ok_or(RequestError::InternalInvariant("diamond edge is missing"))
+}
+fn copies(
+    ssa: &VerifiedSsa<'_>,
+    incoming: Option<EdgeId>,
+    target: BlockId,
+    output: &mut Vec<Assignment>,
+    budget: &mut MethodBudget<'_, '_>,
+) -> Result<(), RequestError> {
+    let start = output.len();
+    for phi in &ssa.phis {
+        budget.charge_work(1)?;
+        if phi.block == target {
+            let mut sym = None;
+            for &(edge, value) in &phi.inputs {
+                budget.charge_work(1)?;
+                if edge == incoming {
+                    if sym.is_some() {
+                        return Err(RequestError::InternalInvariant(
+                            "verified Phi has a duplicate edge",
+                        ));
+                    }
+                    sym = Some(value);
+                }
+            }
+            let sym = sym.ok_or(RequestError::InternalInvariant(
+                "verified Phi lost its edge",
+            ))?;
+            let Sym::Value(source) = sym else {
+                return Err(RequestError::InternalInvariant(
+                    "verified diamond contains a bad Phi input",
+                ));
+            };
+            append(
+                output,
+                Assignment {
+                    target: LocalId(phi.result.0),
+                    expression: Expression::Local(LocalId(source.0)),
+                },
+                budget,
+            )?;
+        }
+    }
+    // This acyclic profile cannot need a copy cycle. Check that certificate,
+    // rather than silently serializing a general parallel assignment.
+    for assignment in &output[start..] {
+        if let Expression::Local(source) = assignment.expression {
+            for destination in &output[start..] {
+                budget.charge_work(1)?;
+                if source == destination.target {
+                    return Err(RequestError::InternalInvariant(
+                        "acyclic diamond has an overlapping edge copy",
+                    ));
+                }
+            }
+        }
+    }
+    Ok(())
+}
+fn operations(
+    ssa: &VerifiedSsa<'_>,
+    block: BlockId,
+    output: &mut Vec<Assignment>,
+    budget: &mut MethodBudget<'_, '_>,
+) -> Result<(), RequestError> {
+    for op in &ssa.bound[ix(block.0)?].ops {
+        budget.charge_work(1)?;
+        let expression = match op.op {
+            Op::Nop => continue,
+            Op::Constant(_, value) => Expression::Constant(value),
+            Op::Move(_, _) => Expression::Local(LocalId(
+                op.source
+                    .ok_or(RequestError::InternalInvariant(
+                        "verified move lost its source",
+                    ))?
+                    .0,
+            )),
+        };
+        append(
+            output,
+            Assignment {
+                target: LocalId(
+                    op.result
+                        .ok_or(RequestError::InternalInvariant(
+                            "verified operation lost its local",
+                        ))?
+                        .0,
+                ),
+                expression,
+            },
+            budget,
+        )?;
+    }
+    Ok(())
+}
+
+pub(crate) fn verify(
+    input: &MethodInput<'_, '_>,
+    ssa: VerifiedSsa<'_>,
+    environment: EnvironmentId,
+    budget: &mut MethodBudget<'_, '_>,
+) -> Result<Option<VerifiedJavaMethod>, RequestError> {
+    if ssa.blocks.len() != 4 {
+        return Ok(None);
+    }
+    let Terminal::Test {
+        register: _,
+        opcode,
+        yes,
+        no,
+    } = ssa.blocks[0].terminal
+    else {
+        return Ok(None);
+    };
+    if yes == no || yes == BlockId(0) || no == BlockId(0) {
+        return Ok(None);
+    }
+    let (Terminal::Jump(join), Terminal::Jump(other)) = (
+        ssa.blocks[ix(yes.0)?].terminal,
+        ssa.blocks[ix(no.0)?].terminal,
+    ) else {
+        return Ok(None);
+    };
+    if join != other
+        || join == yes
+        || join == no
+        || join == BlockId(0)
+        || !matches!(ssa.blocks[ix(join.0)?].terminal, Terminal::Return(_))
+    {
+        return Ok(None);
+    }
+    if ssa.edges.len() != 4 {
+        return Ok(None);
+    }
+    let RawPrintable::Method(raw) = input.raw() else {
+        return Err(RequestError::InternalInvariant(
+            "diamond lost its original method",
+        ));
+    };
+    if !std::ptr::eq(
+        raw.layout().original().instructions(),
+        ssa.raw.instructions(),
+    ) {
+        return Err(RequestError::InternalInvariant(
+            "diamond belongs to another raw scope",
+        ));
+    }
+    if raw.annotations().method_range().is_some() || raw.annotations().parameter_range().is_some() {
+        return Ok(None);
+    }
+    super::declarations::check_target(input, budget)?;
+    let flags = input.access_flags();
+    if flags & 8 == 0
+        || flags & !0x81f != 0
+        || (flags & 7).count_ones() > 1
+        || input.owner_access_flags() & 0x200 != 0
+    {
+        return Ok(None);
+    }
+    let name = copy_units(input.declaration().name, budget)?;
+    if !super::declarations::identifier(&name, budget)? {
+        return Ok(None);
+    }
+    let mut locals = Vec::new();
+    for (index, definition) in ssa.values.iter().enumerate() {
+        budget.charge_work(1)?;
+        let Some(kind) = ssa.kinds[index] else {
+            return Ok(None);
+        };
+        let parameter = match definition {
+            Definition::Parameter(index) => Some(*index),
+            _ => None,
+        };
+        append(
+            &mut locals,
+            Local {
+                id: LocalId(u32::try_from(index).map_err(|_| RequestError::PlatformCapacity)?),
+                kind,
+                parameter,
+            },
+            budget,
+        )?;
+    }
+    let condition = LocalId(
+        ssa.bound[0]
+            .terminal
+            .ok_or(RequestError::InternalInvariant(
+                "diamond has no bound condition",
+            ))?
+            .0,
+    );
+    let condition_kind = locals[ix(condition.0)?].kind;
+    if condition_kind == Kind::Boolean && !matches!(opcode, 0x38 | 0x39) {
+        return Ok(None);
+    }
+    let returned = LocalId(
+        ssa.bound[ix(join.0)?]
+            .terminal
+            .ok_or(RequestError::InternalInvariant(
+                "diamond has no bound return",
+            ))?
+            .0,
+    );
+    if locals[ix(returned.0)?].kind != Kind::Int {
+        return Ok(None);
+    }
+    let mut entry = Vec::new();
+    copies(&ssa, None, BlockId(0), &mut entry, budget)?;
+    operations(&ssa, BlockId(0), &mut entry, budget)?;
+    let mut yes_statements = Vec::new();
+    copies(
+        &ssa,
+        Some(edge(&ssa, BlockId(0), yes, budget)?),
+        yes,
+        &mut yes_statements,
+        budget,
+    )?;
+    operations(&ssa, yes, &mut yes_statements, budget)?;
+    copies(
+        &ssa,
+        Some(edge(&ssa, yes, join, budget)?),
+        join,
+        &mut yes_statements,
+        budget,
+    )?;
+    let mut no_statements = Vec::new();
+    copies(
+        &ssa,
+        Some(edge(&ssa, BlockId(0), no, budget)?),
+        no,
+        &mut no_statements,
+        budget,
+    )?;
+    operations(&ssa, no, &mut no_statements, budget)?;
+    copies(
+        &ssa,
+        Some(edge(&ssa, no, join, budget)?),
+        join,
+        &mut no_statements,
+        budget,
+    )?;
+    // Join operations are a sequence after both incoming copy plans. The first
+    // profile accepts a return-only join, not a skipped operation list.
+    for op in &ssa.bound[ix(join.0)?].ops {
+        budget.charge_work(1)?;
+        if !matches!(op.op, Op::Nop) {
+            return Ok(None);
+        }
+    }
+    let mut header = TextBuffer::new();
+    for (bit, text) in [
+        (1, "public "),
+        (2, "private "),
+        (4, "protected "),
+        (8, "static "),
+        (0x10, "final "),
+        (0x800, "strictfp "),
+    ] {
+        if flags & bit != 0 {
+            header.push(text, budget)?;
+        }
+    }
+    header.push("int ", budget)?;
+    for unit in name {
+        header.character(
+            char::from_u32(u32::from(unit)).ok_or(RequestError::InternalInvariant(
+                "checked diamond identifier is not scalar",
+            ))?,
+            budget,
+        )?;
+    }
+    header.push("(", budget)?;
+    for (index, kind) in ssa.parameters.iter().enumerate() {
+        budget.charge_work(1)?;
+        if index != 0 {
+            header.push(", ", budget)?;
+        }
+        header.push(
+            match kind {
+                Kind::Int => "int p",
+                Kind::Boolean => "boolean p",
+            },
+            budget,
+        )?;
+        header.unsigned(
+            u64::try_from(index).map_err(|_| RequestError::PlatformCapacity)?,
+            budget,
+        )?;
+    }
+    header.push(")", budget)?;
+    Ok(Some(VerifiedJavaMethod::diamond(
+        header.finish(),
+        Diamond {
+            locals,
+            entry,
+            yes: yes_statements,
+            no: no_statements,
+            condition,
+            condition_kind,
+            opcode,
+            returned,
+        },
+        environment,
+    )))
+}

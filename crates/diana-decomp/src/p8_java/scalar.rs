@@ -13,12 +13,29 @@ pub enum CompilationContract {
 /// input or analysis-arena borrows. Verification does not invoke a Java compiler.
 pub struct VerifiedJavaMethod {
     pub(crate) header: String,
-    pub(crate) definitions: Vec<Definition>,
-    pub(crate) locals: Vec<LocalId>,
-    pub(crate) returned: ValueId,
+    pub(crate) body: MethodBody,
     environment: EnvironmentId,
 }
+pub(crate) enum MethodBody {
+    Scalar {
+        definitions: Vec<Definition>,
+        locals: Vec<LocalId>,
+        returned: ValueId,
+    },
+    Diamond(super::branch::Diamond),
+}
 impl VerifiedJavaMethod {
+    pub(super) fn diamond(
+        header: String,
+        body: super::branch::Diamond,
+        environment: EnvironmentId,
+    ) -> Self {
+        Self {
+            header,
+            body: MethodBody::Diamond(body),
+            environment,
+        }
+    }
     pub fn environment(&self) -> EnvironmentId {
         self.environment
     }
@@ -165,9 +182,11 @@ pub(crate) fn verify(
     budget.checkpoint()?;
     Ok(Some(VerifiedJavaMethod {
         header: header.finish(),
-        definitions: plan.definitions,
-        locals: plan.locals,
-        returned: plan.returned,
+        body: MethodBody::Scalar {
+            definitions: plan.definitions,
+            locals: plan.locals,
+            returned: plan.returned,
+        },
         environment,
     }))
 }

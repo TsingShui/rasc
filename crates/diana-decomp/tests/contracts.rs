@@ -20,6 +20,8 @@ mod layout;
 mod operands;
 #[path = "input/reader.rs"]
 mod reader;
+#[path = "pipeline/ssa.rs"]
+mod ssa;
 #[path = "input/structure.rs"]
 mod structure;
 #[path = "input/values.rs"]

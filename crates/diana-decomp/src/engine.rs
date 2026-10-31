@@ -137,7 +137,7 @@ impl<'a> Engine<'a> {
     /// Retrieves one full-prototype method or all members of a class. A local
     /// method failure retains its classified reason and any original snapshot;
     /// cancellation and exhausted request resources stop the request. Java is
-    /// admitted for the closed static single-block int profile; other members
+    /// admitted for closed static int sequence/diamond profiles; other members
     /// retain original output, never a fabricated body.
     pub fn decompile(
         &self,
@@ -443,6 +443,24 @@ fn normal_member(
             facts,
             declaration,
             source,
+        });
+    }
+    if crate::p8_java::source_group_admitted(index, key, &facts, budget)?
+        && let Some(ssa) = crate::pipeline::branch::build(&input, budget)?
+    {
+        if let Some(declaration) =
+            crate::p8_java::branch::verify(&input, ssa, catalog.environment, budget)?
+        {
+            let source = crate::p9_emit::java(&declaration, budget)?;
+            return Ok(NormalMember::Java {
+                facts,
+                declaration,
+                source,
+            });
+        }
+        return Ok(NormalMember::Raw {
+            facts,
+            reason: OutputReason::BranchJavaUnsupported,
         });
     }
     let reason = if matches!(input.raw(), RawPrintable::Declaration(_)) {

@@ -19,6 +19,7 @@ pub struct ImageFact {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum OutputReason {
+    BranchJavaUnsupported,
     BindingEvidenceMissing {
         reference: crate::MethodId,
         pc: crate::CodeUnitOffset,
@@ -67,6 +68,9 @@ impl Diagnostic {
             DiagnosticCause::Original(issue) => issue_code(*issue),
             DiagnosticCause::Unsupported(OutputReason::BindingEvidenceMissing { .. }) => {
                 Code::BindingEvidenceMissing
+            }
+            DiagnosticCause::Unsupported(OutputReason::BranchJavaUnsupported) => {
+                Code::BranchJavaUnsupported
             }
             DiagnosticCause::Unsupported(OutputReason::JavaAnalysisUnavailable) => {
                 Code::JavaAnalysisUnavailable
