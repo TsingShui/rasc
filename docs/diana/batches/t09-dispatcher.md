@@ -58,3 +58,10 @@ Remaining T09 profile work includes switch transfer and throw/ref terminals.
 They retain their actual unsupported outcomes. T08's loop entry/latch and critical
 edge rollup now has actual dispatcher execution; general wide/FP legalization
 remains T10.
+
+Acceptance update after `9df7d96`: the ordinary dispatcher now also consumes the
+original switch tables, and D007/D083 pass their complete required invocation
+sets. T09's eligible narrow scalar CFG, loop/critical-edge behavior, independent
+case/copy correspondence and no-handler rejection obligations are accepted.
+Upstream type/ref/effect producers still gate broader inputs; their unsupported
+results are not counted as successful Java by this acceptance.
