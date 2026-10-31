@@ -107,6 +107,7 @@ pub(super) fn unique_target(
     name: &[u16],
     target: &[u16],
     is_static: bool,
+    same_class: bool,
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<bool, RequestError> {
     let Some(fixed) = parameters(target, budget)? else {
@@ -118,7 +119,7 @@ pub(super) fn unique_target(
         if !crate::p0_knowledge::same_units(&method.name, name, budget)? {
             continue;
         }
-        if method.access_flags & 1 == 0
+        if (method.access_flags & 1 == 0 && !same_class)
             || (method.access_flags & 8 != 0) != is_static
             || method.access_flags & (0x40 | 0x80) != 0
             || method.generic

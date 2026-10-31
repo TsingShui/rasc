@@ -5,6 +5,7 @@ use crate::{DeclarationCatalog, MethodBudget, MethodId, RequestError};
 
 #[derive(Clone, Copy)]
 pub(crate) enum ReceiverKind {
+    Direct,
     Virtual,
     Interface,
 }
@@ -46,7 +47,14 @@ pub(crate) fn resolve_receiver(
     if !plain(class, &caller, budget)?
         || class.access_flags & 1 == 0
         || (class.access_flags & 0x200 != 0) != matches!(kind, ReceiverKind::Interface)
-        || !super::overloads::unique_target(class, &name, &prototype, false, budget)?
+        || !super::overloads::unique_target(
+            class,
+            &name,
+            &prototype,
+            false,
+            matches!(kind, ReceiverKind::Direct),
+            budget,
+        )?
     {
         return Ok(None);
     }
@@ -65,6 +73,13 @@ pub(crate) fn resolve_receiver(
     let Some(selected) = selected else {
         return Ok(None);
     };
+    if matches!(kind, ReceiverKind::Direct)
+        && (!crate::p0_knowledge::same_units(&owner, &caller, budget)?
+            || selected.access_flags & 2 == 0
+            || selected.access_flags & 0x400 != 0)
+    {
+        return Ok(None);
+    }
     if !matches!(&selected.throws,Some(throws) if throws.is_empty()) {
         return Ok(None);
     }

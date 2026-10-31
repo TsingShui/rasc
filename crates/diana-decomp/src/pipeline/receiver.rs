@@ -114,7 +114,7 @@ pub(crate) fn plan<'a>(
                 }
                 aliases[ix(reg(0)?)?] = Alias::Parameter;
             }
-            0x6e | 0x72 | 0x74 | 0x78 => {
+            0x6e | 0x70 | 0x72 | 0x74 | 0x76 | 0x78 => {
                 if operands.registers().iter().count() != 1 {
                     return Ok(None);
                 }
@@ -135,7 +135,9 @@ pub(crate) fn plan<'a>(
                         "receiver call has wrong reference kind",
                     ));
                 };
-                let kind = if matches!(spec.opcode, 0x72 | 0x78) {
+                let kind = if matches!(spec.opcode, 0x70 | 0x76) {
+                    crate::p4_calls::ReceiverKind::Direct
+                } else if matches!(spec.opcode, 0x72 | 0x78) {
                     crate::p4_calls::ReceiverKind::Interface
                 } else {
                     crate::p4_calls::ReceiverKind::Virtual

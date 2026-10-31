@@ -73,6 +73,7 @@ impl VerifiedJavaMethod {
                 invoke: body.invoke,
                 result: Some(body.result),
                 kind: match body.contract.kind {
+                    crate::p4_calls::ReceiverKind::Direct => super::JavaInvokeKind::Direct,
                     crate::p4_calls::ReceiverKind::Virtual => super::JavaInvokeKind::Virtual,
                     crate::p4_calls::ReceiverKind::Interface => super::JavaInvokeKind::Interface,
                 },

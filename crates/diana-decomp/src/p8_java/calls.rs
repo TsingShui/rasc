@@ -7,6 +7,7 @@ use crate::{CodeUnitOffset, MethodBudget, MethodId, RequestError};
 /// Original invocation kind retained by verified source binding.
 #[derive(Clone, Copy, Debug)]
 pub enum JavaInvokeKind {
+    Direct,
     Static,
     Virtual,
     Interface,

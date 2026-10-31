@@ -164,7 +164,7 @@ pub(crate) fn resolve_static(
     let Some(target) = target else {
         return Ok(None);
     };
-    if !super::overloads::unique_target(target_class, &name, &prototype, true, budget)? {
+    if !super::overloads::unique_target(target_class, &name, &prototype, true, false, budget)? {
         return Ok(None);
     }
     if !crate::p0_knowledge::same_units(&target.prototype, &prototype, budget)?
