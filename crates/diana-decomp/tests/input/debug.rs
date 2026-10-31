@@ -1,4 +1,4 @@
-use super::fixture::{CodeRecipe, tiny, with_code};
+use super::fixture::{CodeRecipe, tiny, with_code, with_debug};
 use diana_decomp::input::ProgramIndex;
 use diana_decomp::{ClassDefId, FailureKind, Limits, MethodId, RunContext};
 use serde_json::Value;
@@ -230,34 +230,46 @@ fn t03_debug_source_owns_its_contents_after_the_index_and_input_are_gone() {
 #[test]
 fn t03_debug_cancellation_is_terminal_without_a_completed_source() {
     use std::cell::Cell;
-    let fixture = tiny("f", true, false);
-    let armed = Cell::new(false);
-    let calls = Cell::new(0);
-    let cancel = || {
-        if armed.get() {
-            calls.set(calls.get() + 1);
-            calls.get() >= 64
-        } else {
-            false
-        }
-    };
-    let mut control = RunContext::new(Limits::default(), &cancel);
-    let index = ProgramIndex::open(&fixture.bytes, &mut control).unwrap();
-    let mut fallback = control.method_budget().unwrap().into_fallback().unwrap();
-    armed.set(true);
-    assert_eq!(
-        index
-            .debug_method(ClassDefId(0), MethodId(0), &mut fallback)
-            .unwrap_err()
-            .kind(),
-        FailureKind::Cancelled
+    let mut program = vec![10, 1, 0];
+    program.extend([7; 8192]);
+    program.push(0);
+    let metadata = with_debug(
+        CodeRecipe {
+            instructions: &[0x0012, 0x000f],
+            registers_size: 2,
+            outs_size: 0,
+        },
+        &program,
     );
-    drop(fallback);
-    armed.set(false);
-    assert_eq!(
-        control.charge_work(0).unwrap_err().kind(),
-        FailureKind::Cancelled
-    );
+    for (fixture, cancel_after) in [(tiny("f", true, false), 64), (metadata, 2048)] {
+        let armed = Cell::new(false);
+        let calls = Cell::new(0);
+        let cancel = || {
+            if armed.get() {
+                calls.set(calls.get() + 1);
+                calls.get() >= cancel_after
+            } else {
+                false
+            }
+        };
+        let mut control = RunContext::new(Limits::default(), &cancel);
+        let index = ProgramIndex::open(&fixture.bytes, &mut control).unwrap();
+        let mut fallback = control.method_budget().unwrap().into_fallback().unwrap();
+        armed.set(true);
+        assert_eq!(
+            index
+                .debug_method(ClassDefId(0), MethodId(0), &mut fallback)
+                .unwrap_err()
+                .kind(),
+            FailureKind::Cancelled
+        );
+        drop(fallback);
+        armed.set(false);
+        assert_eq!(
+            control.charge_work(0).unwrap_err().kind(),
+            FailureKind::Cancelled
+        );
+    }
 }
 
 #[test]

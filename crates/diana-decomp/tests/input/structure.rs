@@ -225,11 +225,29 @@ fn t03_method_view_cannot_use_another_images_reference_namespace() {
 
 #[test]
 fn t01_real_method_normal_exhaustion_keeps_raw_work_independent() {
-    for raw_limit in [None, Some(0)] {
-        let fixture = code(&[0x0012, 0x000f], 1, 0);
+    let fixture = code(&[0x1071, 0, 0, 0x000a, 0x000f], 1, 1);
+    let mut control = RunContext::new(Limits::default(), &|| false);
+    let index = ProgramIndex::open(&fixture.bytes, &mut control).unwrap();
+    let original = raw(&index, &mut control);
+    let before = control.usage().work_steps;
+    {
+        let mut normal = control.method_budget().unwrap();
+        index.check_method_layout(&original, &mut normal).unwrap();
+    }
+    let work = control.usage().work_steps - before;
+    assert!(work > 0);
+    check(
+        &fixture,
+        Limits {
+            max_work_steps: Some(work),
+            ..Limits::default()
+        },
+    )
+    .unwrap();
+    for (normal_limit, raw_limit) in [(0, None), (0, Some(0)), (work - 1, None)] {
         let mut control = RunContext::new(
             Limits {
-                max_work_steps: Some(0),
+                max_work_steps: Some(normal_limit),
                 fallback_work_steps: raw_limit,
                 ..Limits::default()
             },
@@ -248,12 +266,12 @@ fn t01_real_method_normal_exhaustion_keeps_raw_work_independent() {
         let mut fallback = normal.into_fallback().unwrap();
         let mut seen = Vec::new();
         let result = original.visit_layouts(&mut fallback, |pc, _, _| {
-            seen.push(pc);
+            seen.push(pc.0);
             Ok(())
         });
         if raw_limit.is_none() {
             result.unwrap();
-            assert_eq!(seen, [CodeUnitOffset(0), CodeUnitOffset(1)]);
+            assert_eq!(seen, [0, 3, 4]);
         } else {
             assert_eq!(result.unwrap_err().kind(), FailureKind::BudgetExceeded);
             assert!(seen.is_empty());
@@ -320,34 +338,38 @@ fn t01_real_method_allocation_boundaries_and_failures_do_not_refund() {
 
 #[test]
 fn t01_method_cancellation_is_terminal_before_fallback() {
-    let fixture = code(&vec![0; 256], 1, 0);
-    let armed = Cell::new(false);
-    let checks = Cell::new(0);
-    let cancel = || {
-        if armed.get() {
-            checks.set(checks.get() + 1);
-            checks.get() >= 64
-        } else {
-            false
-        }
-    };
-    let mut control = RunContext::new(Limits::default(), &cancel);
-    let index = ProgramIndex::open(&fixture.bytes, &mut control).unwrap();
-    let original = raw(&index, &mut control);
-    let mut normal = control.method_budget().unwrap();
-    armed.set(true);
-    assert_eq!(
-        index
-            .check_method_layout(&original, &mut normal)
-            .unwrap_err()
-            .kind(),
-        FailureKind::Cancelled
-    );
-    armed.set(false);
-    assert_eq!(
-        normal.into_fallback().err().unwrap().kind(),
-        FailureKind::Cancelled
-    );
+    for fixture in [
+        code(&vec![0; 256], 1, 0),
+        code(&[0x1071, 0, 0, 0x000f], 1, 1),
+    ] {
+        let armed = Cell::new(false);
+        let checks = Cell::new(0);
+        let cancel = || {
+            if armed.get() {
+                checks.set(checks.get() + 1);
+                checks.get() >= 64
+            } else {
+                false
+            }
+        };
+        let mut control = RunContext::new(Limits::default(), &cancel);
+        let index = ProgramIndex::open(&fixture.bytes, &mut control).unwrap();
+        let original = raw(&index, &mut control);
+        let mut normal = control.method_budget().unwrap();
+        armed.set(true);
+        assert_eq!(
+            index
+                .check_method_layout(&original, &mut normal)
+                .unwrap_err()
+                .kind(),
+            FailureKind::Cancelled
+        );
+        armed.set(false);
+        assert_eq!(
+            normal.into_fallback().err().unwrap().kind(),
+            FailureKind::Cancelled
+        );
+    }
 }
 
 #[test]

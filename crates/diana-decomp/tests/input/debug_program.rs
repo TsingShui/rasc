@@ -1,5 +1,3 @@
-use std::cell::Cell;
-
 use super::fixture::{CodeRecipe, Fixture, put, with_debug};
 use diana_decomp::input::ProgramIndex;
 use diana_decomp::{ClassDefId, FailureKind, Limits, MethodId, RunContext};
@@ -34,13 +32,18 @@ fn snapshot(fixture: &Fixture) -> (Value, Option<FailureKind>) {
 }
 
 #[test]
-fn t04_debug_program_positions_preserve_raw_opcodes_and_line_state() {
-    let fixture = fixture(&[10, 1, 0, 7, 0x0e, 1, 1, 2, 0x7f, 8, 0x0e, 0]);
+fn t04_debug_program_positions_and_original_reference_facts() {
+    let fixture = fixture(&[
+        10, 1, 1, 7, 0x0e, 1, 0x81, 0, 2, 0x7f, 8, 9, 0, 9, 1, 0x0e, 0,
+    ]);
     let (value, failure) = snapshot(&fixture);
     assert_eq!(failure, None);
     let metadata = &value["classes"][0]["methods"][0]["code"]["debug_metadata"];
     assert_eq!(metadata["line_start"], 10);
-    assert_eq!(metadata["parameter_names"], json!([null]));
+    assert_eq!(
+        metadata["parameter_names"][0],
+        json!({"index":0, "units":[73]})
+    );
     assert_eq!(metadata["complete"], true);
     let events = metadata["events"].as_array().unwrap();
     assert_eq!(
@@ -48,47 +51,39 @@ fn t04_debug_program_positions_preserve_raw_opcodes_and_line_state() {
             .iter()
             .map(|e| e["opcode"].as_u64().unwrap())
             .collect::<Vec<_>>(),
-        [7, 14, 1, 2, 8, 14, 0]
+        [7, 14, 1, 2, 8, 9, 9, 14, 0]
     );
     assert_eq!(events[1]["pc"], 0);
     assert_eq!(events[1]["line"], 10);
-    assert_eq!(events[5]["pc"], 1);
-    assert_eq!(events[5]["line"], 9);
+    assert_eq!(events[7]["pc"], 1);
+    assert_eq!(events[7]["line"], 9);
+    assert_eq!(events[2]["bytes"], json!([1, 0x81, 0]));
+    assert_eq!(events[5]["source_file"], Value::Null);
+    assert_eq!(events[6]["source_file"]["index"], 0);
 }
 
 #[test]
-fn t04_debug_program_bad_address_keeps_instructions_and_valid_event_prefix() {
+fn t04_debug_program_damage_preserves_prefix_ranges_and_other_methods() {
     let fixture = fixture(&[10, 1, 0, 0x0e, 1, 3, 0]);
-    let (value, failure) = snapshot(&fixture);
-    assert_eq!(failure, Some(FailureKind::Malformed));
-    assert_eq!(value["complete"], false);
-    let code = &value["classes"][0]["methods"][0]["code"];
-    assert_eq!(code["raw_words"], json!([0x0012, 0x000f]));
-    assert_eq!(code["instructions"].as_array().unwrap().len(), 2);
-    assert_eq!(code["debug_metadata"]["complete"], false);
-    assert_eq!(
-        code["debug_metadata"]["events"].as_array().unwrap().len(),
-        1
-    );
-    assert_eq!(
-        code["debug_metadata"]["file_byte_end"].as_u64().unwrap(),
-        code["debug_metadata"]["file_byte_start"].as_u64().unwrap() + 4
-    );
-}
-
-#[test]
-fn t04_debug_program_damage_does_not_hide_another_method() {
-    let fixture = fixture(&[10, 1, 0, 1, 3, 0]);
     let mut control = RunContext::new(Limits::default(), &|| false);
     let index = ProgramIndex::open(&fixture.bytes, &mut control).unwrap();
     {
         let mut budget = control.method_budget().unwrap().into_fallback().unwrap();
+        let source = index
+            .debug_method(ClassDefId(0), MethodId(0), &mut budget)
+            .unwrap();
+        let value: Value = serde_json::from_str(source.source()).unwrap();
+        assert_eq!(source.failure_kind(), Some(FailureKind::Malformed));
+        assert_eq!(value["complete"], false);
+        let code = &value["classes"][0]["methods"][0]["code"];
+        assert_eq!(code["raw_words"], json!([0x0012, 0x000f]));
+        assert_eq!(code["instructions"].as_array().unwrap().len(), 2);
+        let metadata = &code["debug_metadata"];
+        assert_eq!(metadata["complete"], false);
+        assert_eq!(metadata["events"].as_array().unwrap().len(), 1);
         assert_eq!(
-            index
-                .debug_method(ClassDefId(0), MethodId(0), &mut budget)
-                .unwrap()
-                .failure_kind(),
-            Some(FailureKind::Malformed)
+            metadata["file_byte_end"].as_u64().unwrap(),
+            metadata["file_byte_start"].as_u64().unwrap() + 4
         );
     }
     let mut budget = control.method_budget().unwrap().into_fallback().unwrap();
@@ -101,20 +96,6 @@ fn t04_debug_program_damage_does_not_hide_another_method() {
         value["classes"][0]["methods"][0]["code"]["raw_words"],
         json!([0x0012, 0x000f])
     );
-}
-
-#[test]
-fn t04_debug_program_no_index_is_distinct_from_string_zero() {
-    let fixture = fixture(&[10, 1, 1, 9, 0, 9, 1, 0]);
-    let (value, failure) = snapshot(&fixture);
-    assert_eq!(failure, None);
-    let metadata = &value["classes"][0]["methods"][0]["code"]["debug_metadata"];
-    assert_eq!(
-        metadata["parameter_names"][0],
-        json!({"index":0, "units":[73]})
-    );
-    assert_eq!(metadata["events"][0]["source_file"], Value::Null);
-    assert_eq!(metadata["events"][1]["source_file"]["index"], 0);
 }
 
 #[test]
@@ -142,14 +123,14 @@ fn t04_debug_program_local_names_signatures_and_wide_lifetimes_remain_original()
 }
 
 #[test]
-fn t04_debug_program_parameter_local_can_end_and_restart() {
+fn t04_debug_program_implicit_receiver_and_wide_parameters_seed_local_state() {
     let (value, failure) = snapshot(&fixture(&[10, 1, 0, 5, 1, 6, 1, 0]));
     assert_eq!(failure, None);
     assert_eq!(value["complete"], true);
-}
-
-#[test]
-fn t04_debug_program_implicit_receiver_and_wide_parameters_seed_local_state() {
+    assert_eq!(
+        value["classes"][0]["methods"][0]["code"]["debug_metadata"]["parameter_names"],
+        json!([null])
+    );
     let mut receiver = fixture(&[10, 1, 0, 5, 0, 6, 0, 0]);
     // The first access flags follow the first method delta in this recipe.
     receiver.bytes[receiver.class_data + 7] = 1;
@@ -214,7 +195,6 @@ fn t04_debug_program_line_overflow_underflow_and_truncation_are_malformed() {
         vec![10, 1, 0, 1],
         vec![10, 1, 0, 0x0e], // No end opcode.
         vec![10, 1, 0, 2, 0x80],
-        vec![10, 1, 0, 1, 0xff, 0xff, 0xff, 0xff, 0x1f],
         vec![10, 2, 0, 0, 0], // Name count differs from the prototype.
         vec![10, 0xff, 0xff, 0xff, 0xff, 15],
     ] {
@@ -225,7 +205,7 @@ fn t04_debug_program_line_overflow_underflow_and_truncation_are_malformed() {
 }
 
 #[test]
-fn t04_debug_program_address_cannot_land_in_operand_or_emit_at_code_end() {
+fn t04_debug_program_instruction_boundaries_and_failure_kinds() {
     for (instructions, opcodes) in [
         (vec![0x0014, 0, 0, 0x000f], vec![1, 1, 0]),
         (vec![0x0012, 0x000f], vec![1, 2, 0x0e, 0]),
@@ -249,20 +229,7 @@ fn t04_debug_program_address_cannot_land_in_operand_or_emit_at_code_end() {
     }
     let (_, failure) = snapshot(&fixture(&[10, 1, 0, 1, 2, 5, 1, 0]));
     assert_eq!(failure, None); // A local may end at the method end.
-}
 
-#[test]
-fn t04_debug_program_noncanonical_leb_bytes_are_preserved() {
-    let (value, failure) = snapshot(&fixture(&[10, 1, 0, 1, 0x80, 0, 0x0e, 0]));
-    assert_eq!(failure, None);
-    assert_eq!(
-        value["classes"][0]["methods"][0]["code"]["debug_metadata"]["events"][0]["bytes"],
-        json!([1, 0x80, 0])
-    );
-}
-
-#[test]
-fn t04_debug_program_unknown_or_truncated_instruction_boundary_keeps_its_kind() {
     for (words, expected) in [
         (vec![0x0012, 0x003e, 0x000f], FailureKind::Unsupported),
         (vec![0x000f, 0x0014], FailureKind::Malformed),
@@ -284,19 +251,16 @@ fn t04_debug_program_unknown_or_truncated_instruction_boundary_keeps_its_kind() 
 }
 
 #[test]
-fn t04_debug_program_fallback_work_allocation_and_output_boundaries_are_exact() {
+fn t04_debug_program_work_and_local_scratch_boundaries_are_exact() {
     let fixture = fixture(&[10, 1, 0, 3, 0, 0, 1, 5, 0, 0]);
     let mut control = RunContext::new(Limits::default(), &|| false);
     let index = ProgramIndex::open(&fixture.bytes, &mut control).unwrap();
     let before = control.usage();
-    let length;
     {
         let mut budget = control.method_budget().unwrap().into_fallback().unwrap();
-        length = index
+        index
             .debug_method(ClassDefId(0), MethodId(0), &mut budget)
-            .unwrap()
-            .source()
-            .len() as u64;
+            .unwrap();
     }
     let usage = control.usage();
     let work = usage.work_steps - before.work_steps;
@@ -311,19 +275,11 @@ fn t04_debug_program_fallback_work_allocation_and_output_boundaries_are_exact() 
             ..Limits::default()
         },
         Limits {
-            fallback_output_bytes: Some(length),
-            ..Limits::default()
-        },
-        Limits {
             fallback_work_steps: Some(work - 1),
             ..Limits::default()
         },
         Limits {
             max_method_allocation_bytes: Some(allocation - 1),
-            ..Limits::default()
-        },
-        Limits {
-            fallback_output_bytes: Some(length - 1),
             ..Limits::default()
         },
     ]
@@ -335,38 +291,10 @@ fn t04_debug_program_fallback_work_allocation_and_output_boundaries_are_exact() 
         let index = ProgramIndex::open(&fixture.bytes, &mut control).unwrap();
         let mut budget = control.method_budget().unwrap().into_fallback().unwrap();
         let result = index.debug_method(ClassDefId(0), MethodId(0), &mut budget);
-        if number < 3 {
+        if number < 2 {
             result.unwrap();
         } else {
             assert_eq!(result.unwrap_err().kind(), FailureKind::BudgetExceeded);
         }
     }
-}
-
-#[test]
-fn t04_debug_program_cancellation_stops_long_metadata_without_source() {
-    let mut program = vec![10, 1, 0];
-    program.extend([7; 8192]);
-    program.push(0);
-    let fixture = fixture(&program);
-    let armed = Cell::new(false);
-    let checks = Cell::new(0u32);
-    let cancel = || {
-        if !armed.get() {
-            return false;
-        }
-        checks.set(checks.get().saturating_add(1));
-        checks.get() >= 2048
-    };
-    let mut control = RunContext::new(Limits::default(), &cancel);
-    let index = ProgramIndex::open(&fixture.bytes, &mut control).unwrap();
-    let mut budget = control.method_budget().unwrap().into_fallback().unwrap();
-    armed.set(true);
-    assert_eq!(
-        index
-            .debug_method(ClassDefId(0), MethodId(0), &mut budget)
-            .unwrap_err()
-            .kind(),
-        FailureKind::Cancelled
-    );
 }

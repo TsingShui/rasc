@@ -151,7 +151,9 @@ width. [Invoke structure](batches/t03-invoke-structure.md) validates 035 argumen
 word counts, wide word adjacency and move-result kinds using the normal method
 ledger. [Original debug programs](batches/t04-debug-program.md) retain parameters,
 line/PC changes and local-variable events, with classified local failures and
-partial byte ranges. T05 later connects the prepared runner to the real public library. Missing
+partial byte ranges. [Core test consolidation](batches/core-test-consolidation.md)
+groups the invoke/debug regression coverage and reuses resource/cancellation
+tests. T05 later connects the prepared runner to the real public library. Missing
 Engine entrypoints currently produce `not_implemented` for the complete suite.
 
 ## B01 — Case and expected-value specification review, freeze v1

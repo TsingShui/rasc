@@ -139,6 +139,16 @@ safety through public interfaces. Test tooling MAY support those core E2E cases,
 but testing the tooling itself requires separate explicit authorization. Basic
 CLI/help/getter/forwarding tests remain excluded as described above.
 
+Before adding a core test, contributors MUST identify its invariant or regression
+and inspect existing coverage through the relevant public interface. Contributors
+SHOULD extend an existing test with table-driven inputs when the inputs exercise
+the same contract and failure path. A separate test requires a distinct semantic
+obligation, failure path or regression. Contributors MUST NOT duplicate generic
+budget, cancellation, reference-bound or serialization checks unless a different
+producer or control path requires independent coverage. Test consolidation MUST
+preserve unique counterexamples, independent expectations and classified failures;
+reducing the number of test functions alone does not establish deduplication.
+
 Reference downloads do not require checksum verification. Keep source URLs and
 fixed revisions for attribution/lookup, preserve local changes, and never build
 or test reference projects as part of downloading. Keep PDF-origin papers/slides
