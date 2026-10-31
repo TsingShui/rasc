@@ -12,6 +12,22 @@ pub(crate) enum Binary {
     Add,
     Sub,
     Mul,
+    Div,
+    Rem,
+    And,
+    Or,
+    Xor,
+    Shl,
+    Shr,
+    Ushr,
+}
+#[derive(Clone, Copy)]
+pub(crate) enum Unary {
+    Neg,
+    Not,
+    Byte,
+    Char,
+    Short,
 }
 #[derive(Clone, Copy)]
 enum Operand {
@@ -21,6 +37,7 @@ enum Operand {
 enum Op {
     Constant(RegisterId, i32),
     Move(RegisterId, RegisterId),
+    Unary(RegisterId, Unary, RegisterId),
     Binary(RegisterId, Operand, Binary, Operand),
     Return(RegisterId),
 }
@@ -33,6 +50,7 @@ pub(crate) enum Expression {
     Parameter(u32),
     Constant(i32),
     Copy(ValueId),
+    Unary(Unary, ValueId),
     Binary(ValueId, Binary, ValueId),
 }
 pub(crate) struct Definition {
@@ -90,7 +108,7 @@ pub(crate) fn plan<'a>(
             Ok(())
         };
         match definition.expression {
-            Expression::Copy(id) => check(id)?,
+            Expression::Copy(id) | Expression::Unary(_, id) => check(id)?,
             Expression::Binary(a, _, b) => {
                 check(a)?;
                 check(b)?;
@@ -189,26 +207,45 @@ fn flow<'a>(
             let binary = |opcode| match opcode {
                 0x90 | 0xb0 | 0xd0 | 0xd8 => Binary::Add,
                 0x91 | 0xb1 | 0xd1 | 0xd9 => Binary::Sub,
-                _ => Binary::Mul,
+                0x92 | 0xb2 | 0xd2 | 0xda => Binary::Mul,
+                0x93 | 0xb3 | 0xd3 | 0xdb => Binary::Div,
+                0x94 | 0xb4 | 0xd4 | 0xdc => Binary::Rem,
+                0x95 | 0xb5 | 0xd5 | 0xdd => Binary::And,
+                0x96 | 0xb6 | 0xd6 | 0xde => Binary::Or,
+                0x97 | 0xb7 | 0xd7 | 0xdf => Binary::Xor,
+                0x98 | 0xb8 | 0xe0 => Binary::Shl,
+                0x99 | 0xb9 | 0xe1 => Binary::Shr,
+                _ => Binary::Ushr,
             };
             let op = match spec.opcode {
                 0 => None,
                 1..=3 => Some(Op::Move(reg(0)?, reg(1)?)),
                 0x12..=0x15 => Some(Op::Constant(reg(0)?, literal()?)),
                 0xf => Some(Op::Return(reg(0)?)),
-                0x90..=0x92 => Some(Op::Binary(
+                0x7b | 0x7c | 0x8d..=0x8f => Some(Op::Unary(
+                    reg(0)?,
+                    match spec.opcode {
+                        0x7b => Unary::Neg,
+                        0x7c => Unary::Not,
+                        0x8d => Unary::Byte,
+                        0x8e => Unary::Char,
+                        _ => Unary::Short,
+                    },
+                    reg(1)?,
+                )),
+                0x90..=0x9a => Some(Op::Binary(
                     reg(0)?,
                     Operand::Register(reg(1)?),
                     binary(spec.opcode),
                     Operand::Register(reg(2)?),
                 )),
-                0xb0..=0xb2 => Some(Op::Binary(
+                0xb0..=0xba => Some(Op::Binary(
                     reg(0)?,
                     Operand::Register(reg(0)?),
                     binary(spec.opcode),
                     Operand::Register(reg(1)?),
                 )),
-                0xd0..=0xd2 | 0xd8..=0xda => {
+                0xd0..=0xe2 => {
                     let a = Operand::Register(reg(1)?);
                     let b = Operand::Literal(literal()?);
                     let (a, b) = if matches!(spec.opcode, 0xd1 | 0xd9) {
@@ -307,6 +344,9 @@ fn bind<'a>(
         let (destination, expression) = match *op {
             Op::Constant(reg, value) => (reg, Expression::Constant(value)),
             Op::Move(reg, source) => (reg, Expression::Copy(read(&slots, source, pc)?)),
+            Op::Unary(reg, kind, source) => {
+                (reg, Expression::Unary(kind, read(&slots, source, pc)?))
+            }
             Op::Binary(reg, a, kind, b) => {
                 let mut value = |operand| -> Result<ValueId, RequestError> {
                     match operand {

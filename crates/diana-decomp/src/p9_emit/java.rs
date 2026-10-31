@@ -57,6 +57,19 @@ fn scalar(
                 output.unsigned(u64::from(parameter), budget)?;
             }
             Expression::Constant(value) => output.arguments(format_args!("{value}"), budget)?,
+            Expression::Unary(kind, id) => {
+                output.push(
+                    match kind {
+                        crate::pipeline::scalar::Unary::Neg => "-",
+                        crate::pipeline::scalar::Unary::Not => "~",
+                        crate::pipeline::scalar::Unary::Byte => "(byte) ",
+                        crate::pipeline::scalar::Unary::Char => "(char) ",
+                        crate::pipeline::scalar::Unary::Short => "(short) ",
+                    },
+                    budget,
+                )?;
+                local(id, output, budget)?;
+            }
             Expression::Copy(id) => local(id, output, budget)?,
             Expression::Binary(a, kind, b) => {
                 local(a, output, budget)?;
@@ -65,6 +78,14 @@ fn scalar(
                         Binary::Add => " + ",
                         Binary::Sub => " - ",
                         Binary::Mul => " * ",
+                        Binary::Div => " / ",
+                        Binary::Rem => " % ",
+                        Binary::And => " & ",
+                        Binary::Or => " | ",
+                        Binary::Xor => " ^ ",
+                        Binary::Shl => " << ",
+                        Binary::Shr => " >> ",
+                        Binary::Ushr => " >>> ",
                     },
                     budget,
                 )?;
