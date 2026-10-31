@@ -22,6 +22,10 @@ ready; it does not require an integration test to complete before the artifact t
 consumes it. A partial result MUST NOT mark a whole card done, and an empty file or
 an empty pass is not an artifact.
 
+Batch records, cards and specification edits MUST follow `WRITING.md`, which owns
+normative keyword strength, sentence roles, terminology and document ownership.
+Changing wording MUST NOT change requirement strength or expected values.
+
 Each batch has one publicly observable goal: confirm the fixed cases and input
 certification → expose a real failure → make the smallest change in the owning
 module → cover positive, negative, resource and already-accepted regression →
@@ -2582,7 +2586,7 @@ sequences to match; this card creates no tag and uploads no release.
    test run, and no new adapter is designed for MCP.
 3. ref-fork is neither a production dependency nor a gate; it keeps its original source, tests,
    license and history, and the existence of the current reference directory MUST NOT make it a
-   second release product or a legacy dependency that must be tested.
+   second release product or a legacy dependency requiring a test run.
 4. Verify that the active workspace contains Diana only, that packages stay `publish=false`, and
    that no archived release script or CI wiring exists; a reference-project build result MUST NOT
    replace product acceptance.

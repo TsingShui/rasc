@@ -34,7 +34,9 @@ B01–B04 have not passed. TASKS describes the authorization block on tool
 self-tests; production feature work cannot begin early.
 
 For implementation, read DESIGN, then the relevant section of ALGORITHMS, then
-the current TASKS card. Consult SOURCE_MAP when checking evidence. The application
+the current TASKS card. Consult SOURCE_MAP when checking evidence. Every authored
+Diana document MUST follow [WRITING.md](WRITING.md); read it before editing any
+document in this directory or an AGENTS/README file. The application
 is only `apps/diana/`; the engine is only `crates/diana-decomp/`. The reference
 fork is read-only and is not automatically built or tested. GUI and Web remain
 README-only placeholders; MCP is deferred. See the root [AGENTS.md](../../AGENTS.md)

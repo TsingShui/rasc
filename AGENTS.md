@@ -30,10 +30,10 @@ Use source ideas only through explicit review and focused extraction/reimplement
 
 ## Development workflow
 
-Diana is a decompiler: default class/method retrieval must expose available
+Diana is a decompiler: default class/method retrieval MUST expose available
 code, not require an entirely verified Java unit before showing anything.
 Keep partial Java, raw Smali and unavailable reasons explicit; a local failure
-must not discard other members. Text/JSON are presentations of the same result,
+MUST NOT discard other members. Text/JSON are presentations of the same result,
 not capability gates. Preserve hard errors and strict Java/JavaUnit acceptance;
 a readable Mixed result is not permission to count required Java as passed.
 
@@ -42,10 +42,16 @@ tooling, registry/trace infrastructure and their documentation minimal; do not
 expand them into frameworks or lengthy designs. Fallback is a simple classified
 error/raw-output path, not a separate recovery subsystem or retry pipeline.
 
-Technical documents specify one implementation contract: supported/rejected
-inputs, algorithms, invariants and failure behavior. Do not use first/final-version
-qualifiers, temporary support promises, speculative roadmaps or implementation-
-unrelated narration. Keep actual progress in README/TASKS, not the technical spec.
+Every authored Diana document, including this file and the package README/AGENTS
+files, MUST follow `docs/diana/WRITING.md`. Read it before editing documentation.
+WRITING owns normative keyword strength, sentence roles, terminology, numbers,
+document ownership and the rules against duplicated narration and speculative
+roadmaps; those rules are not restated here. A style edit MUST NOT change
+requirement strength or technical meaning.
+
+Technical documents specify one implementation contract: supported/rejected inputs,
+algorithms, invariants and failure behavior. Progress and execution status live in
+README/TASKS, not in a technical specification.
 
 Maintain only docs/diana/{README,DESIGN,ALGORITHMS,TASKS,SOURCE_MAP,WRITING}.md plus
 e2e_cases.json, the single case/input/expected specification. Do not restore
@@ -85,7 +91,7 @@ Existing legacy tests remain in the reference but are not Diana acceptance.
 
 Use Rust 1.93 or newer, as declared by the active package manifests. Build from
 the repository root. Root `Cargo.lock` covers only Diana; the reference lockfile
-is independent and must not be updated by active work.
+is independent and MUST NOT be updated by active work.
 
 ```sh
 cargo fmt --all -- --check
@@ -118,7 +124,7 @@ supply authorization for writing those tests; ask before implementing them.
 
 The previously agreed tests of Diana core behavior remain in scope: native
 DEX/decompiler semantics, input/query/extraction correctness and resource/file
-safety through public interfaces. Test tooling may support those core E2E cases,
+safety through public interfaces. Test tooling MAY support those core E2E cases,
 but testing the tooling itself requires separate explicit authorization. Basic
 CLI/help/getter/forwarding tests remain excluded as described above.
 
@@ -133,7 +139,7 @@ separate core E2E fixture/toolchain integrity requirements.
 ## Engineering constraints
 
 - Treat APK/DEX input as untrusted. Check lengths/offsets/counts before slicing or
-  allocation; malformed input must not panic/hang or allocate without bounds.
+  allocation; malformed input MUST NOT panic/hang or allocate without bounds.
 - Production stays native Rust without external runtime/process dependencies.
   Active crates forbid unsafe code. File/ZIP ownership belongs to the application;
   the engine will borrow input bytes and declaration facts.
@@ -157,7 +163,7 @@ separate core E2E fixture/toolchain integrity requirements.
 Do not commit private/unauthorized APKs, real-corpus identifiers or identity-revealing
 mappings. Keep local corpus/cache under untracked `.cache/`. Consult
 `tools/audit/desensitize_words.txt` and run
-`python3 tools/audit/desensitize_check.py --range HEAD`. Relocation must not leak
+`python3 tools/audit/desensitize_check.py --range HEAD`. Relocation MUST NOT leak
 previously ignored artifacts or reintroduce sensitive words from legacy notes.
 Prefer small self-made fixtures with documented source/license/recipe.
 

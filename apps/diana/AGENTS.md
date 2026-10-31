@@ -1,8 +1,10 @@
 # Working on the Diana application
 
-Repository-wide AGENTS.md applies. This directory is the Diana application root,
-inside the root Diana-only virtual workspace. See ../../docs/diana/DESIGN.md §1 for the
-current layout and the interpretation of older design paths.
+Repository-wide AGENTS.md applies, including the rule that every authored Diana
+document MUST follow ../../docs/diana/WRITING.md. This directory is the Diana
+application root, inside the root Diana-only virtual workspace. See
+../../docs/diana/DESIGN.md §1 for the current layout and the interpretation of
+older design paths.
 
 - The current package is only a scaffold. Implement no CLI/query/input behavior
   before B01–B04 E2E preparation is independently accepted. Structure-first does
