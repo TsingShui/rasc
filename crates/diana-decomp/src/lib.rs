@@ -1,13 +1,13 @@
 //! Native DEX analysis with caller-owned input and request-scoped resource control.
 
 mod engine;
+mod p0_knowledge;
+pub use p0_knowledge::{DeclarationCatalog, ExternalMethodSignature};
 #[path = "p1_input/mod.rs"]
 pub mod input;
 mod p8_java;
 mod p9_emit;
-pub use engine::{
-    DeclarationCatalog, DexImage, Engine, MethodSelector, Options, RecoveryPolicy, Request,
-};
+pub use engine::{DexImage, Engine, MethodSelector, Options, RecoveryPolicy, Request};
 pub use p8_java::JavaMethodDecl;
 pub use p9_emit::render;
 pub use pipeline::request::{JavaTargetItem, RequestError};

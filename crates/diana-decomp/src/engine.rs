@@ -3,8 +3,8 @@ use crate::input::{DexContainer, InputError, InputProblem, ProgramIndex, RawPrin
 use crate::substrate::owned::{copy_proto, copy_units, reserve};
 use crate::substrate::report::*;
 use crate::{
-    ByteOffset, ClassKey, DebugSourceKind, DiagnosticId, EnvironmentId, FailureKind, MethodBudget,
-    MethodKey, RequestError, RunContext,
+    ByteOffset, ClassKey, CodeUnitOffset, DebugSourceKind, DeclarationCatalog, DiagnosticId,
+    FailureKind, MethodBudget, MethodKey, RequestError, RunContext,
 };
 
 /// Original caller-owned bytes and one logical header selection. The caller
@@ -25,17 +25,6 @@ pub enum RecoveryPolicy {
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Options {
     pub recovery: RecoveryPolicy,
-}
-
-/// An explicitly empty external-fact snapshot. No type or call binding is
-/// inferred from this value. The environment identifies the caller's snapshot.
-pub struct DeclarationCatalog {
-    environment: EnvironmentId,
-}
-impl DeclarationCatalog {
-    pub fn empty(environment: EnvironmentId) -> Self {
-        Self { environment }
-    }
 }
 
 pub struct MethodSelector {
@@ -270,7 +259,7 @@ impl<'a> Engine<'a> {
     ) -> Result<MethodOutput, RequestError> {
         let candidate = {
             let mut budget = control.method_budget()?;
-            let normal = normal_member(index, key, &mut budget);
+            let normal = normal_member(index, key, &self.catalog, &mut budget);
             let (facts, cause) = match normal {
                 Ok(NormalMember::Declaration { facts, declaration }) => {
                     return Ok(MethodOutput::DeclarationOnly { facts, declaration });
@@ -297,10 +286,6 @@ impl<'a> Engine<'a> {
         };
         let (facts, cause, source) = candidate;
         let normal_kind = cause.kind();
-        let target_limit = matches!(
-            &cause,
-            DiagnosticCause::Request(RequestError::JavaTargetLimit { .. })
-        );
         let mut reason = add_diagnostic(
             diagnostics,
             Diagnostic {
@@ -329,7 +314,7 @@ impl<'a> Engine<'a> {
                     diagnostics.values[reason.0].cause.kind(),
                     FailureKind::Malformed | FailureKind::InternalInvariant
                 );
-                if source.kind() == DebugSourceKind::WordExcerpt || hard || target_limit {
+                if source.kind() == DebugSourceKind::WordExcerpt || hard {
                     Ok(MethodOutput::Unavailable {
                         facts,
                         key,
@@ -383,6 +368,7 @@ enum NormalMember {
 fn normal_member(
     index: &ProgramIndex<'_>,
     key: MethodKey,
+    catalog: &DeclarationCatalog,
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<NormalMember, RequestError> {
     let input = index.method_input(key.class.class_def, key.method, budget)?;
@@ -394,6 +380,41 @@ fn normal_member(
     };
     if let Some(declaration) = crate::p8_java::declaration(&input, budget)? {
         return Ok(NormalMember::Declaration { facts, declaration });
+    }
+    if let RawPrintable::Method(raw) = input.raw() {
+        let original = raw.layout().original();
+        let mut pc = CodeUnitOffset(0);
+        while pc.0 < original.code_units().0 {
+            budget.charge_work(1)?;
+            let layout =
+                crate::raw::instruction_layout(original.instructions(), pc, index.header.version)
+                    .map_err(crate::input::MethodError::Decode)?;
+            if raw.layout().is_reachable(pc)
+                && let crate::raw::LayoutKind::Instruction(spec) = layout.kind()
+                && matches!(spec.opcode, 0x6e..=0x72 | 0x74..=0x78)
+                && let Some(reference) = layout.references()[0]
+                && let crate::raw::OperandReference::Method(id) = reference.target
+                && !index.method_has_definition(id, budget)?
+            {
+                let method = index.method_reference(id, budget)?;
+                if !catalog.contains_signature(
+                    method.owner,
+                    method.declaration.name,
+                    &method.declaration.prototype,
+                    budget,
+                )? {
+                    return Ok(NormalMember::Raw {
+                        facts,
+                        reason: OutputReason::BindingEvidenceMissing { reference: id, pc },
+                    });
+                }
+            }
+            pc = pc
+                .checked_advance(layout.width())
+                .ok_or(RequestError::InternalInvariant(
+                    "checked call evidence extent overflowed",
+                ))?;
+        }
     }
     let reason = if matches!(input.raw(), RawPrintable::Declaration(_)) {
         OutputReason::JavaDeclarationUnsupported

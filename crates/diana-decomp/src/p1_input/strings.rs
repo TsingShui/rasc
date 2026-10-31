@@ -44,6 +44,14 @@ impl<'a> DexString<'a> {
     }
 
     pub fn matches(&self, units: &[u16], control: &mut RunContext<'_>) -> Result<bool, InputError> {
+        self.matches_with(units, control)
+    }
+
+    pub(crate) fn matches_with(
+        &self,
+        units: &[u16],
+        control: &mut impl InputControl,
+    ) -> Result<bool, InputError> {
         control.checkpoint()?;
         if u64::from(self.utf16_len.0) != units.len() as u64 {
             return Ok(false);

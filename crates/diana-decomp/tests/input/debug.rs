@@ -147,7 +147,7 @@ fn t03_debug_bad_reference_does_not_erase_known_instruction_facts() {
     let instructions = &value["classes"][0]["methods"][0]["code"]["instructions"];
     assert_eq!(instructions.as_array().unwrap().len(), 3);
     assert_eq!(instructions[0]["reference"]["unavailable"], "malformed");
-    assert_eq!(instructions[2]["opcode"], "RETURN");
+    assert_eq!(instructions[2]["opcode"], "return");
 }
 
 #[test]
@@ -168,7 +168,7 @@ fn t03_debug_invalid_hierarchy_keeps_method_and_other_context_facts() {
     assert_eq!(value["classes"][0]["fields"][0]["initial"], Value::Null);
     assert_eq!(
         value["classes"][0]["methods"][0]["code"]["instructions"][0]["opcode"],
-        "RETURN"
+        "return"
     );
 }
 

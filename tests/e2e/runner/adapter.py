@@ -1,9 +1,14 @@
-"""Tests-only public-library adapter boundary. T05 supplies the real binding.
+"""Translate the public Engine development example into existing E2E artifacts.
 
-No fabricated Engine, CLI subprocess or private-phase inspection is used when the
-library entrypoints are absent. Every selected invocation/seam is still reported.
+The process is a development caller of the Rust library, not the product CLI.
+Unimplemented request capabilities remain explicit records in the required set.
 """
 from __future__ import annotations
+import copy
+import json
+import os
+import tempfile
+from pathlib import Path
 
 
 def required_runs(spec, case_ids=None):
@@ -19,6 +24,191 @@ def required_runs(spec, case_ids=None):
     if selected is not None and selected != {c['id'] for c,_,_ in runs}:
         raise ValueError('unknown/unrequired selected case')
     return runs
+
+
+def run_public(root, cache, spec, manifest, case_ids=None):
+    from e2e import PreparationError, relative, run, save
+    from .evaluate import compare_suite
+    from .compare import Mismatch
+    runs = required_runs(spec, case_ids)
+    assets = {a['id']:a for a in manifest['assets']}
+    certified = {(c['id'],i['id']):i for c in manifest['cases'] for i in c['invocations']}
+    base = cache/'engine'
+    base.mkdir(parents=True,exist_ok=True)
+    output = Path(tempfile.mkdtemp(prefix='run-',dir=base))
+    run(['cargo','build','-p','diana-decomp','--release','--example','inspect_class','--locked'], root, output/'build.log', timeout=180)
+    executable = root/'target/release/examples'/('inspect_class.exe' if os.name=='nt' else 'inspect_class')
+    revision=run(['git','rev-parse','HEAD'],root,output/'revision.log').strip()
+    dirty=bool(run(['git','status','--porcelain','--untracked-files=no','--','crates/diana-decomp','tests/e2e/runner/adapter.py','tools/e2e.py'],root,output/'working-tree.log').strip())
+    records = []
+    for case, invocation, seam in runs:
+        record = {'schema_version':1,'spec_revision':spec['specRevision'],'case_id':case['id'],
+                  'invocation_id':invocation['id'],'seam':seam,'producer':'diana-public-library',
+                  'execution':'not_implemented','artifacts':{},'engine_revision':{'commit':revision,'working_tree_dirty':dirty}}
+        cert = certified[(case['id'],invocation['id'])]
+        work = output/case['id']/invocation['id']/seam
+        try:
+            if seam not in {'decompile-method','decompile-class','decompile-and-render'}:
+                record['reason'] = 'the public Engine adapter does not implement this seam'
+            elif len(cert['bindings']) != 1:
+                record['reason'] = 'multi-target public requests are not implemented'
+            elif invocation['input'].get('limits') or invocation['input'].get('cancellation'):
+                record['reason'] = 'the development entry does not accept request-control overrides yet'
+            else:
+                binding = cert['bindings'][0]
+                selector, origin = binding['selector'], binding['origin']
+                asset = assets[origin['asset_id']]
+                if not asset['path'].endswith('.dex'):
+                    record['reason'] = 'the application input boundary is not implemented'
+                elif selector['kind'] not in {'class','method'}:
+                    record['reason'] = 'the requested selector is not implemented'
+                else:
+                    path = root/asset['path']
+                    if not path.is_file() or path.stat().st_size != asset['size']:
+                        raise PreparationError('missing/changed certified input')
+                    argv = [executable,path,str(origin['header_offset']),str(selector['class_def_idx'])]
+                    if selector['kind']=='method':argv.extend([selector['name'],selector['proto']])
+                    catalog_path=work/'method-signatures.json'
+                    save(catalog_path,_catalog(root,assets,cert['catalog']['asset_id']))
+                    argv.extend(['--catalog',catalog_path])
+                    public_path=work/'public.json'
+                    relative(public_path)
+                    public_path.unlink(missing_ok=True)
+                    argv.extend(['--output',public_path])
+                    run(argv,root,work/'library.log')
+                    from e2e import load
+                    actual=load(public_path)
+                    groups = _artifacts(actual, cert)
+                    context = groups.pop('declaration_source',None)
+                    if context is not None:
+                        if case['validationScope']!='method-in-known-context':raise ValueError('declaration fragment has no accepted compilation context')
+                        source_path=work/'context'/Path(selector['descriptor'][1:-1]+'.java')
+                        source_path.parent.mkdir(parents=True,exist_ok=True)
+                        prefix=('package '+context['package']+';\n') if context['package'] else ''
+                        source_path.write_text(prefix+'public '+('abstract ' if context['abstract'] else '')+'class '+context['name']+' {\n'+context['source']+'\n}\n',encoding='utf-8')
+                        groups['java_input']={'sources':[{'path':relative(source_path)}]}
+                    for group,value in groups.items():
+                        path = work/('source.txt' if group=='text' else group+'.json')
+                        if group=='text':path.write_bytes(value)
+                        else:save(path,value)
+                        record['artifacts'][group]={'path':relative(path)}
+                    record['execution']='completed'
+                    record['catalog']={'asset_id':cert['catalog']['asset_id'],'applied':'partial external signatures'}
+        except (PreparationError,OSError,ValueError,KeyError,TypeError,IndexError) as error:
+            record['execution']='failed';record['reason']=str(error)
+        records.append(record)
+        save(work/'record.json',record)
+    save(output/'records.json',records)
+    results=[]
+    for case,invocation,seam in runs:
+        record=next(r for r in records if (r['case_id'],r['invocation_id'],r['seam'])==(case['id'],invocation['id'],seam))
+        case_spec=copy.deepcopy(case);case_spec['seam']=seam
+        case_spec['invocations']=[copy.deepcopy(invocation)]
+        case_spec['invocations'][0]['input']['through']=[seam]
+        local_spec={**spec,'cases':[case_spec]}
+        verdict={'case_id':case['id'],'invocation_id':invocation['id'],'seam':seam,'execution':'failed'}
+        try:
+            compare_suite(root,local_spec,manifest,[record])
+            verdict['execution']='passed'
+        except (Mismatch,PreparationError,OSError,ValueError,KeyError,TypeError,IndexError) as error:
+            verdict['reason']=str(error)
+        results.append(verdict)
+        print(case['id'],invocation['id'],seam,verdict['execution'],verdict.get('reason',''),flush=True)
+    selected_cases={c['id'] for c,_,_ in runs}
+    passed={cid for cid in selected_cases if all(r['execution']=='passed' for r in results if r['case_id']==cid)}
+    all_runs=required_runs(spec)
+    report={'execution':'passed' if len(passed)==len(selected_cases) else 'failed',
+            'spec_revision':spec['specRevision'],'engine_revision':{'commit':revision,'working_tree_dirty':dirty},
+            'profile':'native-public-library; certified partial external signatures; default limits; recovery disabled',
+            'full_required_set':case_ids is None,'selected_cases':len(selected_cases),
+            'selected_invocations':len({(c['id'],i['id']) for c,i,_ in runs}),'selected_seams':len(runs),
+            'passed_cases':len(passed),'passed_seams':sum(r['execution']=='passed' for r in results),
+            'required_cases':len({c['id'] for c,_,_ in all_runs}),
+            'required_invocations':len({(c['id'],i['id']) for c,i,_ in all_runs}),
+            'required_seams':len(all_runs),'results':results}
+    save(output/'report.json',report)
+    save(base/'latest.json',{'report':relative(output/'report.json')})
+    print('report',relative(output/'report.json'),flush=True)
+    return report
+
+
+def _catalog(root, assets, identity):
+    from e2e import PreparationError, load
+    by_path={a['path']:a for a in assets.values()}
+    def checked(asset):
+        path=root/asset['path']
+        if not path.resolve().is_relative_to(root.resolve()) or not path.is_file() or path.stat().st_size!=asset['size']:
+            raise PreparationError('missing/changed declaration evidence')
+        return load(path)
+    catalog=checked(assets[identity])
+    declarations=[value['declaration'] for value in checked(assets[catalog['jdk_declarations']]).values()]
+    declarations.extend(catalog['source_classfiles'].values())
+    for path in catalog['explicit_facts']:
+        for entry in checked(by_path[path])['entries']:
+            if entry.get('declared') is True:declarations.append(entry)
+    methods=[]
+    def units(text):
+        data=text.encode('utf-16-le',errors='surrogatepass')
+        return [int.from_bytes(data[i:i+2],'little') for i in range(0,len(data),2)]
+    for declaration in declarations:
+        for method in declaration['methods']:
+            methods.append({'owner':units(declaration['descriptor']),'name':units(method['name']),'prototype':units(method['proto'])})
+    return {'environment_id':0,'methods':methods}
+
+
+def _units(value):
+    return b''.join(int(unit).to_bytes(2,'little') for unit in value).decode('utf-16-le')
+
+
+def _artifacts(actual, cert):
+    binding=cert['bindings'][0];selector=binding['selector'];origin=binding['origin']
+    if actual['schema']!='diana.inspect/1' or actual['header_offset']!=origin['header_offset'] or actual['class_def_idx']!=selector['class_def_idx']:
+        raise ValueError('public result has a different logical/class identity')
+    owner=_units(actual['descriptor_units'])
+    if owner!=selector['descriptor']:raise ValueError('public result has a different owner')
+    members=[];identities={}
+    for member in actual['members']:
+        source=member['source'];language=member['language']
+        if not isinstance(source,str):raise ValueError('public member has no source slice')
+        if member['name_units'] is not None:
+            name,proto=_units(member['name_units']),_units(member['proto_units'])
+        else:
+            decoded=json.loads(source)
+            if language=='original_excerpt':name,proto=decoded['name'],decoded['proto']
+            elif language=='dex_debug':
+                declaration=decoded['classes'][0]['methods'][0];name,proto=declaration['name'],declaration['proto']
+            else:raise ValueError('unavailable member has no original declaration identity')
+        mid=member['method_id_idx']
+        if mid in identities:raise ValueError('duplicate original method')
+        identities[mid]=(name,proto)
+        members.append({'owner':owner,'name':name,'proto':proto,'method_id_idx':mid,
+                        'language':language,'source':source,'status':member['status']})
+    if selector['kind']=='method':
+        if identities!={selector['method_id_idx']:(selector['name'],selector['proto'])}:
+            raise ValueError('public result differs from the certified method selection')
+        selected=actual['members'][0]
+        status=selected['status'];outcome={'declaration_only':'declaration-only','debug':'debug','unavailable':'unavailable'}[status]
+        reason=selected['reason']
+        diagnostics=[] if reason is None else [actual['diagnostics'][reason]]
+    else:
+        status=actual['status'];outcome=status;diagnostics=actual['diagnostics']
+    text=actual['text'].encode('utf-8')
+    spans=[];excerpts=[]
+    for span in actual['spans']:
+        name,proto=identities[span['method_id_idx']]
+        value={**span,'owner':owner,'method':name+proto,
+               'failure':next(m for m in actual['members'] if m['method_id_idx']==span['method_id_idx'])['reason'] is not None}
+        spans.append(value)
+        if span['language']=='original_excerpt':excerpts.append(value)
+        submitted=next(m for m in members if m['method_id_idx']==span['method_id_idx'])['source'].encode('utf-8')
+        if text[span['start']:span['end']]!=submitted:raise ValueError('public member source differs from its rendered slice')
+    public={'outcome':outcome,'status':status,'selected':cert['bindings'],'members':members,'diagnostics':diagnostics}
+    groups={'outcome':public,'text':text,'rendered':{'spans':spans,'raw_excerpt_ranges':excerpts}}
+    if outcome=='declaration-only':
+        name=owner[1:-1].split('/')[-1];package=owner[1:-1].rsplit('/',1)[0].replace('/','.') if '/' in owner else ''
+        if any(not part.isidentifier() for part in (package.split('.') if package else [])+[name]):raise ValueError('unsupported known Java context name')
+        groups['declaration_source']={'name':name,'package':package,'source':actual['members'][0]['source'],'abstract':bool(actual['access_flags']&0x400)}
+    return groups
 
 
 def run_unimplemented(spec):

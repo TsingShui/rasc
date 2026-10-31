@@ -18,6 +18,7 @@ pub(crate) fn declaration(
     input: &MethodInput<'_, '_>,
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<Option<JavaMethodDecl>, RequestError> {
+    check_target(input, budget)?;
     let RawPrintable::Declaration(raw) = input.raw() else {
         return Ok(None);
     };
@@ -43,25 +44,10 @@ pub(crate) fn declaration(
     {
         return Ok(None);
     }
-    let words = input
-        .declaration()
-        .prototype
-        .parameter_words
-        .0
-        .checked_add(u64::from(flags & 8 == 0))
-        .ok_or(RequestError::PlatformCapacity)?;
-    target_limit(JavaTargetItem::ParameterWords, words, 255)?;
     let name = copy_units(input.declaration().name, budget)?;
     if !identifier(&name, budget)? {
         return Ok(None);
     }
-    target_limit(
-        JavaTargetItem::MethodName,
-        u64::try_from(name.len()).map_err(|_| RequestError::PlatformCapacity)?,
-        65535,
-    )?;
-    let mut descriptor_length =
-        2u64 + u64::from(input.declaration().prototype.return_type.utf16_len().0);
     let mut output = TextBuffer::new();
     for (bit, word) in [
         (1, "public "),
@@ -104,9 +90,6 @@ pub(crate) fn declaration(
                 output.push(", ", budget)?;
             }
             supported &= primitive_type(name, &mut output, budget)?;
-            descriptor_length = descriptor_length
-                .checked_add(u64::from(name.utf16_len().0))
-                .ok_or(RequestError::PlatformCapacity)?;
             output.push(" p", budget)?;
             output.unsigned(parameter, budget)?;
             parameter = parameter
@@ -118,12 +101,64 @@ pub(crate) fn declaration(
     if !supported {
         return Ok(None);
     }
-    target_limit(JavaTargetItem::MethodDescriptor, descriptor_length, 65535)?;
     output.push(");", budget)?;
     budget.checkpoint()?;
     Ok(Some(JavaMethodDecl {
         source: output.finish(),
     }))
+}
+
+fn check_target(
+    input: &MethodInput<'_, '_>,
+    budget: &mut impl InputControl,
+) -> Result<(), RequestError> {
+    // Descriptor-defined limits apply before choosing Java recovery or a raw
+    // result; they do not depend on an estimated generated body size.
+    let words = input
+        .declaration()
+        .prototype
+        .parameter_words
+        .0
+        .checked_add(u64::from(input.access_flags() & 8 == 0))
+        .ok_or(RequestError::PlatformCapacity)?;
+    target_limit(JavaTargetItem::ParameterWords, words, 255)?;
+    target_limit(
+        JavaTargetItem::MethodName,
+        mutf8_length(input.declaration().name, budget)?,
+        65535,
+    )?;
+    let mut length = 2u64
+        .checked_add(mutf8_length(
+            input.declaration().prototype.return_type,
+            budget,
+        )?)
+        .ok_or(RequestError::PlatformCapacity)?;
+    input.declaration().prototype.visit_parameter_types(
+        budget,
+        |name, budget| -> Result<(), RequestError> {
+            length = length
+                .checked_add(mutf8_length(name, budget)?)
+                .ok_or(RequestError::PlatformCapacity)?;
+            Ok(())
+        },
+    )?;
+    target_limit(JavaTargetItem::MethodDescriptor, length, 65535)
+}
+
+fn mutf8_length(name: DexString<'_>, budget: &mut impl InputControl) -> Result<u64, RequestError> {
+    let mut units = name.reader()?;
+    let mut length = 0u64;
+    while let Some(unit) = units.next(budget)? {
+        let bytes = match unit {
+            1..=0x7f => 1,
+            0..=0x7ff => 2,
+            _ => 3,
+        };
+        length = length
+            .checked_add(bytes)
+            .ok_or(RequestError::PlatformCapacity)?;
+    }
+    Ok(length)
 }
 
 fn target_limit(item: JavaTargetItem, actual: u64, maximum: u64) -> Result<(), RequestError> {

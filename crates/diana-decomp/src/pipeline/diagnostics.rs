@@ -28,6 +28,7 @@ pub enum DiagnosticCode {
     PlatformCapacity,
     MethodNotDefined,
     MetadataUnavailable,
+    BindingEvidenceMissing,
     JavaAnalysisUnavailable,
     JavaDeclarationUnsupported,
     ClassAssemblyUnavailable,

@@ -353,9 +353,10 @@ def main():
     if sys.version_info < (3, 11):
         raise PreparationError('Python 3.11 or newer is required')
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('command', choices=['fetch-tools','prepare','verify-inputs','verify-harness'])
+    parser.add_argument('command', choices=['fetch-tools','prepare','verify-inputs','verify-harness','run'])
     parser.add_argument('--cache', type=Path, default=ROOT / '.cache/e2e')
     parser.add_argument('--jobs', type=int, default=4)
+    parser.add_argument('--case', action='append', dest='case_ids', help='run every invocation of the selected fixed case; repeatable')
     args = parser.parse_args()
     cache = args.cache.resolve()
     relative(cache)
@@ -366,6 +367,11 @@ def main():
         tools.fetch()
     elif args.command == 'prepare':
         prepare(tools, cache, args.jobs)
+    elif args.command == 'run':
+        tools.verify()
+        from runner.adapter import run_public
+        report = run_public(ROOT,cache,load(SPEC),load(SUITE/'manifest.json'),args.case_ids)
+        return 0 if report['execution']=='passed' else 1
     else:
         tools.verify()
         from runner.certify import verify_inputs

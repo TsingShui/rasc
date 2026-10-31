@@ -356,6 +356,49 @@ impl<'a> ProgramIndex<'a> {
         Ok(self.type_descriptor(id, control)?.0)
     }
 
+    pub(crate) fn method_has_definition(
+        &self,
+        method_id: MethodId,
+        control: &mut impl InputControl,
+    ) -> Result<bool, InputError> {
+        let mut method = self.table(TableKey::Method(method_id), control)?;
+        let owner = TypeId(u32::from(method.read_u16_with(control)?));
+        let mut found = false;
+        let mut owner_found = false;
+        for index in 0..self.header.class_defs.count {
+            let mut definition = self.table(TableKey::Class(ClassDefId(index)), control)?;
+            if TypeId(definition.read_u32_with(control)?) != owner {
+                continue;
+            }
+            if owner_found {
+                return Err(malformed(
+                    InputProblem::InvalidClassData,
+                    self.header.class_defs.offset_byte,
+                ));
+            }
+            owner_found = true;
+            self.class_with(ClassDefId(index), control)?
+                .visit_members_with(
+                    control,
+                    MemberSelection::Header(method_id),
+                    |entry, _| -> Result<(), InputError> {
+                        if let MemberEntry::MethodHeader {
+                            method_idx,
+                            declaration,
+                        } = entry
+                        {
+                            declaration?;
+                            if method_idx == method_id {
+                                found = true;
+                            }
+                        }
+                        Ok(())
+                    },
+                )?;
+        }
+        Ok(found)
+    }
+
     pub(crate) fn resolve_method(
         &self,
         class_id: ClassDefId,
@@ -589,6 +632,14 @@ impl<'a> Prototype<'_, 'a> {
         descriptor: &[u16],
         control: &mut RunContext<'_>,
     ) -> Result<bool, InputError> {
+        self.matches_with(descriptor, control)
+    }
+
+    pub(crate) fn matches_with(
+        &self,
+        descriptor: &[u16],
+        control: &mut impl InputControl,
+    ) -> Result<bool, InputError> {
         control.checkpoint()?;
         if descriptor.first() != Some(&u16::from(b'(')) {
             return Ok(false);
@@ -633,12 +684,17 @@ pub(crate) struct FieldEntry<'a> {
 pub(crate) enum MemberSelection {
     AllMethods,
     Method(MethodId),
+    Header(MethodId),
     Fields,
 }
 
 pub(crate) enum MemberEntry<'i, 'a> {
     Field(FieldEntry<'a>),
     Method(MethodEntry<'i, 'a>),
+    MethodHeader {
+        method_idx: MethodId,
+        declaration: Result<MethodDeclaration<'i, 'a>, InputError>,
+    },
 }
 
 pub struct MethodEntry<'i, 'a> {
@@ -662,6 +718,9 @@ impl<'i, 'a> ClassView<'i, 'a> {
             |entry, control| match entry {
                 MemberEntry::Method(method) => visit(method, control),
                 MemberEntry::Field(_) => Ok(()),
+                MemberEntry::MethodHeader { .. } => Err(InputError::InternalInvariant(
+                    "header-only selection reached code visitation",
+                )),
             },
         )
     }
@@ -754,7 +813,10 @@ impl<'i, 'a> ClassView<'i, 'a> {
                     }
                     match member {
                         EncodedMember::Field => {
-                            if matches!(selection, MemberSelection::Method(_)) {
+                            if matches!(
+                                selection,
+                                MemberSelection::Method(_) | MemberSelection::Header(_)
+                            ) {
                                 continue;
                             }
                             let declaration = local(self.index.validate_field(
@@ -780,7 +842,8 @@ impl<'i, 'a> ClassView<'i, 'a> {
                             )?;
                         }
                         EncodedMember::Method { code_offset } => {
-                            if let MemberSelection::Method(selected) = selection
+                            if let MemberSelection::Method(selected)
+                            | MemberSelection::Header(selected) = selection
                                 && selected != MethodId(index)
                             {
                                 continue;
@@ -790,6 +853,16 @@ impl<'i, 'a> ClassView<'i, 'a> {
                                 self.type_idx,
                                 control,
                             ))?;
+                            if matches!(selection, MemberSelection::Header(_)) {
+                                visit(
+                                    MemberEntry::MethodHeader {
+                                        method_idx: MethodId(index),
+                                        declaration,
+                                    },
+                                    control,
+                                )?;
+                                continue;
+                            }
                             let words = declaration.as_ref().ok().map(|declaration| {
                                 RegisterWordCount(
                                     declaration.prototype.parameter_words.0

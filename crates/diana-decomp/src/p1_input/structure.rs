@@ -95,6 +95,10 @@ pub struct CheckedMethodLayout<'a> {
 }
 
 impl<'a> CheckedMethodLayout<'a> {
+    pub(crate) fn is_reachable(&self, pc: CodeUnitOffset) -> bool {
+        self.boundaries.flags(pc) & 8 != 0
+    }
+
     pub fn original(&self) -> &RawMethodView<'a> {
         &self.original
     }

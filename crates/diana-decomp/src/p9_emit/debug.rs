@@ -720,17 +720,7 @@ fn write_item(
         LayoutKind::SparseSwitch { .. } => "sparse-switch-payload",
         LayoutKind::ArrayData { .. } => "array-payload",
     };
-    for byte in mnemonic.bytes() {
-        budget.charge_work(1)?;
-        output.character(
-            if matches!(byte, b'-' | b'/') {
-                '_'
-            } else {
-                char::from(byte.to_ascii_uppercase())
-            },
-            budget,
-        )?;
-    }
+    output.push(mnemonic, budget)?;
     output.push("\",\"registers\":[", budget)?;
     match item {
         RawCodeItem::Instruction(instruction) => {
