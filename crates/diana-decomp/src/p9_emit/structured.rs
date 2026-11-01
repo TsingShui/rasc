@@ -74,6 +74,36 @@ fn guard_edge(
         ))
     }
 }
+fn diamond_edge(
+    storage: &Dispatcher,
+    edge: &crate::p8_java::dispatcher::Edge,
+    arm: Option<&crate::p7_regions::Arm>,
+    join: BlockId,
+    output: &mut TextBuffer,
+    budget: &mut MethodBudget<'_, '_>,
+) -> Result<(), RequestError> {
+    budget.charge_work(1)?;
+    super::java::assignments(&edge.copies, output, budget)?;
+    if let Some(arm) = arm {
+        if edge.target != arm.block {
+            return Err(RequestError::InternalInvariant("diamond changed arm entry"));
+        }
+        let block = case(storage, arm.block)?;
+        super::dispatcher::statements(block, output, budget)?;
+        let Transfer::Jump(exit) = &block.transfer else {
+            return Err(RequestError::InternalInvariant("diamond arm lost jump"));
+        };
+        if exit.id != arm.exit || exit.target != join {
+            return Err(RequestError::InternalInvariant("diamond changed arm exit"));
+        }
+        super::java::assignments(&exit.copies, output, budget)?;
+    } else if edge.target != join {
+        return Err(RequestError::InternalInvariant(
+            "empty diamond arm changed join",
+        ));
+    }
+    Ok(())
+}
 pub(super) fn write(
     body: &StructuredLoop,
     output: &mut TextBuffer,
@@ -126,7 +156,7 @@ pub(super) fn write(
         output.push("break;\n", budget)?;
     }
     output.push("}\n", budget)?;
-    let mut guards = region.guards.iter();
+    let mut branches = region.branches.iter();
     for (at, &id) in region.body.iter().enumerate() {
         budget.charge_work(1)?;
         let block = case(storage, id)?;
@@ -145,10 +175,29 @@ pub(super) fn write(
                 }
             }
             Transfer::Branch { yes, no, .. } => {
-                let Some(guard) = guards.next().filter(|guard| guard.block == id) else {
+                let Some(branch) = branches.next().filter(|branch| branch.block() == id) else {
                     return Err(RequestError::InternalInvariant(
                         "natural branch lost exit guard",
                     ));
+                };
+                let guard = match branch {
+                    crate::p7_regions::BodyBranch::Exit(guard) => guard,
+                    crate::p7_regions::BodyBranch::Diamond(diamond) => {
+                        if diamond.join != next
+                            || diamond.yes_entry != yes.id
+                            || diamond.no_entry != no.id
+                        {
+                            return Err(RequestError::InternalInvariant(
+                                "diamond changed join or entry edges",
+                            ));
+                        }
+                        super::dispatcher::open_if(&block.transfer, output, budget)?;
+                        diamond_edge(storage, yes, diamond.yes.as_ref(), next, output, budget)?;
+                        output.push("} else {\n", budget)?;
+                        diamond_edge(storage, no, diamond.no.as_ref(), next, output, budget)?;
+                        output.push("}\n", budget)?;
+                        continue;
+                    }
                 };
                 let stub = match guard.stub {
                     Some(id) => Some(case(storage, id)?),
@@ -183,7 +232,7 @@ pub(super) fn write(
             }
         }
     }
-    if guards.next().is_some() {
+    if branches.next().is_some() {
         return Err(RequestError::InternalInvariant(
             "natural loop has extra exit guards",
         ));

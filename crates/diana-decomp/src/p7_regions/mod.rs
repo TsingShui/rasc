@@ -1,3 +1,5 @@
+mod branch;
+pub(crate) use branch::{Arm, BodyBranch};
 mod graph;
 mod normal;
 mod verify;

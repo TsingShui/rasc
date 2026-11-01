@@ -1,15 +1,11 @@
+use super::branch::{BodyBranch, Guard};
 use super::graph::{dominators, graph, index, push};
 use crate::p8_java::dispatcher::{Dispatcher, Transfer};
 use crate::pipeline::branch::{BlockId, EdgeId};
 use crate::substrate::owned::reserve;
 use crate::{MethodBudget, RequestError};
-pub(crate) struct Guard {
-    pub block: BlockId,
-    pub exit: EdgeId,
-    pub stub: Option<BlockId>,
-}
 pub(super) struct Candidate {
-    pub guards: Vec<Guard>,
+    pub branches: Vec<BodyBranch>,
     pub prelude: Vec<BlockId>,
     pub header: BlockId,
     pub body: Vec<BlockId>,
@@ -92,7 +88,7 @@ pub(super) fn plan(
             used.push(value);
         }
         let mut body = Vec::new();
-        let mut guards = Vec::new();
+        let mut branches = Vec::new();
         let mut current = enter.target;
         let mut latch = None;
         let mut fits = true;
@@ -112,6 +108,38 @@ pub(super) fn plan(
                     let (exit, continuation, stub) = match (yes_exit, no_exit) {
                         (Some(stub), None) => (yes, no, stub),
                         (None, Some(stub)) => (no, yes, stub),
+                        (None, None) => {
+                            let Some(diamond) =
+                                super::branch::diamond(storage, current, yes, no, budget)?
+                            else {
+                                fits = false;
+                                break;
+                            };
+                            if diamond.join == header
+                                || diamond.join == leave.target
+                                || used[index(diamond.join)?]
+                                || !post.dominates(diamond.join, current, budget)?
+                            {
+                                fits = false;
+                                break;
+                            }
+                            for arm in [&diamond.yes, &diamond.no].into_iter().flatten() {
+                                budget.charge_work(1)?;
+                                if used[index(arm.block)?]
+                                    || !dom.dominates(header, arm.block, budget)?
+                                {
+                                    fits = false;
+                                    break;
+                                }
+                                used[index(arm.block)?] = true;
+                            }
+                            if !fits {
+                                break;
+                            }
+                            current = diamond.join;
+                            push(&mut branches, BodyBranch::Diamond(diamond), budget)?;
+                            continue;
+                        }
                         _ => {
                             fits = false;
                             break;
@@ -125,12 +153,12 @@ pub(super) fn plan(
                         used[index(stub)?] = true;
                     }
                     push(
-                        &mut guards,
-                        Guard {
+                        &mut branches,
+                        BodyBranch::Exit(Guard {
                             block: current,
                             exit: exit.id,
                             stub,
-                        },
+                        }),
                         budget,
                     )?;
                     continuation
@@ -181,7 +209,7 @@ pub(super) fn plan(
             continue;
         }
         return Ok(Some(Candidate {
-            guards,
+            branches,
             prelude,
             header,
             body,

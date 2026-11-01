@@ -6,7 +6,7 @@ use crate::substrate::owned::reserve;
 use crate::{MethodBudget, RequestError};
 pub(crate) struct NaturalLoop {
     _sealed: (),
-    pub guards: Vec<super::normal::Guard>,
+    pub branches: Vec<super::BodyBranch>,
     pub prelude: Vec<BlockId>,
     pub header: BlockId,
     pub body: Vec<BlockId>,
@@ -41,7 +41,6 @@ pub(super) fn verify(
         .chain(std::iter::once(&plan.header))
         .chain(plan.body.iter())
         .chain(plan.tail.iter())
-        .chain(plan.guards.iter().filter_map(|guard| guard.stub.as_ref()))
     {
         budget.charge_work(1)?;
         let Some(visited) = seen.get_mut(index(*block)?) else {
@@ -51,6 +50,18 @@ pub(super) fn verify(
             return bad();
         }
         *visited = true;
+    }
+    for branch in &plan.branches {
+        for block in branch.leaves().into_iter().flatten() {
+            budget.charge_work(1)?;
+            let Some(visited) = seen.get_mut(index(block)?) else {
+                return bad();
+            };
+            if *visited || storage.cases[index(block)?].key != block {
+                return bad();
+            }
+            *visited = true;
+        }
     }
     for &visited in &seen {
         budget.charge_work(1)?;
@@ -81,19 +92,51 @@ pub(super) fn verify(
     {
         return bad();
     }
-    let mut guards = plan.guards.iter();
+    let mut branches = plan.branches.iter();
     for (at, &node) in plan.body.iter().enumerate() {
         budget.charge_work(1)?;
         let target = plan.body.get(at + 1).copied().unwrap_or(plan.header);
         let edge = match &storage.cases[index(node)?].transfer {
             Transfer::Jump(edge) => edge,
             Transfer::Branch { yes, no, .. } => {
-                let Some(guard) = guards.next() else {
+                let Some(branch) = branches.next() else {
                     return bad();
                 };
-                if guard.block != node {
+                if branch.block() != node {
                     return bad();
                 }
+                let guard = match branch {
+                    super::BodyBranch::Exit(guard) => guard,
+                    super::BodyBranch::Diamond(diamond) => {
+                        if diamond.join != target
+                            || diamond.join == plan.header
+                            || diamond.yes_entry != yes.id
+                            || diamond.no_entry != no.id
+                        {
+                            return bad();
+                        }
+                        for (edge, arm) in [(yes, &diamond.yes), (no, &diamond.no)] {
+                            budget.charge_work(1)?;
+                            match arm {
+                                Some(arm) => {
+                                    if edge.target != arm.block {
+                                        return bad();
+                                    }
+                                    if !matches!(&storage.cases[index(arm.block)?].transfer,Transfer::Jump(exit) if exit.target==target&&exit.id==arm.exit)
+                                    {
+                                        return bad();
+                                    }
+                                }
+                                None => {
+                                    if edge.target != target {
+                                        return bad();
+                                    }
+                                }
+                            }
+                        }
+                        continue;
+                    }
+                };
                 let (exit, continuation) = if guard.exit == yes.id {
                     (yes, no)
                 } else if guard.exit == no.id {
@@ -119,7 +162,7 @@ pub(super) fn verify(
             return bad();
         }
     }
-    if guards.next().is_some() {
+    if branches.next().is_some() {
         return bad();
     }
     for (at, &node) in plan.tail.iter().enumerate() {
@@ -143,7 +186,7 @@ pub(super) fn verify(
     }
     Ok(NaturalLoop {
         _sealed: (),
-        guards: plan.guards,
+        branches: plan.branches,
         prelude: plan.prelude,
         header: plan.header,
         body: plan.body,
