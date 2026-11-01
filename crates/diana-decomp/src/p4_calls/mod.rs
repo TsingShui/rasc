@@ -1,5 +1,6 @@
 pub(crate) mod allocation;
 mod contracts;
+pub(crate) mod normal;
 pub(crate) use contracts::qualifier_available;
 mod reference_types;
 pub(crate) use reference_types::{source_subtype, source_type};

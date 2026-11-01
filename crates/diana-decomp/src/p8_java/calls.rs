@@ -198,6 +198,37 @@ pub(super) fn identifier_text(
 ) -> Result<Option<String>, RequestError> {
     text(units, budget)
 }
+pub(super) fn validate_bindings(
+    input: &crate::input::MethodInput<'_, '_>,
+    catalog: &crate::DeclarationCatalog,
+    ssa: &TypedBody<'_>,
+    budget: &mut MethodBudget<'_, '_>,
+) -> Result<bool, RequestError> {
+    for (index, site) in ssa.ssa.calls.iter().enumerate() {
+        budget.charge_work(1)?;
+        let id = CallId(u32::try_from(index).map_err(|_| RequestError::PlatformCapacity)?);
+        let contract = ssa.contract(id)?;
+        let bound = ssa.ssa.call(id)?;
+        if bound.inputs.len() != contract.formals.len() {
+            return Err(RequestError::InternalInvariant(
+                "call constraints changed original word arity",
+            ));
+        }
+        for (&value, &formal) in bound.inputs.iter().zip(&contract.formals) {
+            budget.charge_work(1)?;
+            if argument(ssa, LocalId(value.0), formal)?.is_none() {
+                return Ok(false);
+            }
+        }
+        if !crate::p4_calls::normal::binding_available(input, catalog, contract, budget)? {
+            return Err(RequestError::BindingEvidenceMissing {
+                reference: site.reference,
+                pc: site.pc,
+            });
+        }
+    }
+    Ok(true)
+}
 fn plan(
     ssa: &TypedBody<'_>,
     id: CallId,
@@ -211,7 +242,8 @@ fn plan(
             "owned call lost original site",
         ))?;
     let bound = ssa.ssa.call(id)?;
-    let owner = &site.contract.owner;
+    let contract = ssa.contract(id)?;
+    let owner = &contract.owner;
     if owner.len() < 3 || owner.first() != Some(&76) || owner.last() != Some(&59) {
         return Ok(None);
     }
@@ -229,14 +261,14 @@ fn plan(
         }
         qualifier.push(&segment, budget)?;
     }
-    let Some(method) = text(&site.contract.name, budget)? else {
+    let Some(method) = text(&contract.name, budget)? else {
         return Ok(None);
     };
-    if bound.inputs.len() != site.contract.formals.len() {
+    if bound.inputs.len() != contract.formals.len() {
         return Err(RequestError::InternalInvariant("owned call changed arity"));
     }
     let mut arguments = Vec::new();
-    for (&value, &formal) in bound.inputs.iter().zip(&site.contract.formals) {
+    for (&value, &formal) in bound.inputs.iter().zip(&contract.formals) {
         budget.charge_work(1)?;
         let Some(view) = argument(ssa, LocalId(value.0), formal)? else {
             return Ok(None);
@@ -245,10 +277,10 @@ fn plan(
     }
     Ok(Some(StaticCall {
         _sealed: (),
-        reference: site.contract.reference,
-        original_owner: copy(&site.contract.owner, budget)?,
-        original_name: copy(&site.contract.name, budget)?,
-        prototype: copy(&site.contract.prototype, budget)?,
+        reference: contract.reference,
+        original_owner: copy(&contract.owner, budget)?,
+        original_name: copy(&contract.name, budget)?,
+        prototype: copy(&contract.prototype, budget)?,
         invoke: site.pc,
         result_site: site.result_pc,
         qualifier: qualifier.finish(),

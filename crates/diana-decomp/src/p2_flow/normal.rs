@@ -82,8 +82,16 @@ pub(crate) struct Operation {
     pub pc: CodeUnitOffset,
     pub kind: Op,
 }
+#[derive(Clone, Copy)]
+pub(crate) enum InvokeResult {
+    Void,
+    Word(DeclarationType),
+    Reference(Option<DeclarationType>),
+    Wide,
+}
 pub(crate) struct CallSite {
-    pub contract: crate::p4_calls::StaticContract,
+    pub reference: crate::MethodId,
+    pub result: InvokeResult,
     pub registers: Vec<RegisterId>,
     pub pc: CodeUnitOffset,
     pub result_pc: Option<CodeUnitOffset>,
@@ -302,7 +310,6 @@ fn block_at(
 
 pub(crate) fn decode<'a>(
     input: &MethodInput<'_, 'a>,
-    catalog: &crate::DeclarationCatalog,
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<Option<FlowBody<'a>>, RequestError> {
     let RawPrintable::Method(checked) = input.raw() else {
@@ -585,20 +592,64 @@ pub(crate) fn decode<'a>(
                             "checked invoke has wrong reference kind",
                         ));
                     };
-                    let Some(contract) =
-                        crate::p4_calls::resolve_static(input, catalog, reference, budget)?
-                    else {
-                        return Err(RequestError::BindingEvidenceMissing { reference, pc });
+                    let method = input.method_reference(reference, budget)?;
+                    let mut one_word = true;
+                    method.declaration.prototype.visit_parameter_types(
+                        budget,
+                        |descriptor, budget| {
+                            let mut units = descriptor.reader()?;
+                            if matches!(units.next(budget)?, Some(74 | 68)) {
+                                one_word = false;
+                            }
+                            Ok::<(), RequestError>(())
+                        },
+                    )?;
+                    if !one_word {
+                        return Ok(None);
+                    }
+                    let descriptor = method.declaration.prototype.return_type;
+                    let mut units = descriptor.reader()?;
+                    let result = match units.next(budget)? {
+                        Some(86) => InvokeResult::Void,
+                        Some(73) => InvokeResult::Word(DeclarationType::Int),
+                        Some(90) => InvokeResult::Word(DeclarationType::Boolean),
+                        Some(66) => InvokeResult::Word(DeclarationType::Narrow(
+                            crate::p5_types::Narrow::Byte,
+                        )),
+                        Some(83) => InvokeResult::Word(DeclarationType::Narrow(
+                            crate::p5_types::Narrow::Short,
+                        )),
+                        Some(67) => InvokeResult::Word(DeclarationType::Narrow(
+                            crate::p5_types::Narrow::Char,
+                        )),
+                        Some(70) => InvokeResult::Word(DeclarationType::Float),
+                        Some(74 | 68) => InvokeResult::Wide,
+                        Some(76 | 91) => {
+                            let kind = if descriptor.matches_with(
+                                crate::p5_types::BuiltinReference::Object.descriptor(),
+                                budget,
+                            )? {
+                                Some(DeclarationType::Object)
+                            } else if descriptor.matches_with(
+                                crate::p5_types::BuiltinReference::String.descriptor(),
+                                budget,
+                            )? {
+                                Some(DeclarationType::String)
+                            } else {
+                                None
+                            };
+                            InvokeResult::Reference(kind)
+                        }
+                        _ => {
+                            return Err(RequestError::InternalInvariant(
+                                "checked invoke lost return descriptor",
+                            ));
+                        }
                     };
                     let mut registers = Vec::new();
                     for register in operands.registers().iter() {
                         budget.charge_work(1)?;
                         push(&mut registers, register, budget)?;
-                    }
-                    if registers.len() != contract.formals.len() {
-                        return Err(RequestError::InternalInvariant(
-                            "checked invoke differs from contract words",
-                        ));
                     }
                     let mut destination = None;
                     let mut result_pc = None;
@@ -608,16 +659,17 @@ pub(crate) fn decode<'a>(
                                 .map_err(crate::input::MethodError::Decode)?;
                         if matches!(result_layout.kind(),LayoutKind::Instruction(spec) if matches!(spec.opcode,0x0a|0x0c))
                         {
-                            let valid = match contract.result {
-                                crate::p4_calls::StaticResult::Int
-                                | crate::p4_calls::StaticResult::Boolean => {
-                                    matches!(result_layout.kind(),LayoutKind::Instruction(spec) if spec.opcode==0x0a)
+                            let valid = match result {
+                                InvokeResult::Word(_) => {
+                                    matches!(result_layout.kind(), LayoutKind::Instruction(spec) if spec.opcode == 0x0a)
                                 }
-                                crate::p4_calls::StaticResult::Reference(_) => {
-                                    matches!(result_layout.kind(),LayoutKind::Instruction(spec) if spec.opcode==0x0c)
+                                InvokeResult::Reference(Some(_)) => {
+                                    matches!(result_layout.kind(), LayoutKind::Instruction(spec) if spec.opcode == 0x0c)
                                 }
-                                crate::p4_calls::StaticResult::Void => false,
-                                crate::p4_calls::StaticResult::Nominal => return Ok(None),
+                                InvokeResult::Reference(None) | InvokeResult::Wide => {
+                                    return Ok(None);
+                                }
+                                InvokeResult::Void => false,
                             };
                             if !valid {
                                 return Err(RequestError::InternalInvariant(
@@ -645,7 +697,8 @@ pub(crate) fn decode<'a>(
                     push(
                         &mut calls,
                         CallSite {
-                            contract,
+                            reference,
+                            result,
                             registers,
                             pc,
                             result_pc,

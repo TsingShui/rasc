@@ -136,7 +136,7 @@ pub(crate) fn qualifier_available(
             && clear_scope(catalog, &caller, prefix, budget)?,
     )
 }
-pub(crate) fn resolve_static(
+pub(super) fn collect_static(
     input: &MethodInput<'_, '_>,
     catalog: &DeclarationCatalog,
     id: MethodId,
@@ -180,14 +180,11 @@ pub(crate) fn resolve_static(
     let Some(target) = target else {
         return Ok(None);
     };
-    if !super::overloads::unique_target(target_class, &name, &prototype, true, false, budget)? {
-        return Ok(None);
-    }
     if !crate::p0_knowledge::same_units(&target.prototype, &prototype, budget)?
         || target.access_flags & 9 != 9
         || target.access_flags & (0x40 | 0x80) != 0
         || target.generic
-        || !super::throws::compatible(input, catalog, target.throws.as_deref(), budget)?
+        || target.throws.is_none()
     {
         return Ok(None);
     }
@@ -370,4 +367,37 @@ pub(crate) fn resolve_static(
         result,
         declared_throws: super::throws::retain(target.throws.as_deref(), budget)?,
     }))
+}
+
+pub(super) fn binding_available(
+    input: &MethodInput<'_, '_>,
+    catalog: &DeclarationCatalog,
+    contract: &StaticContract,
+    budget: &mut MethodBudget<'_, '_>,
+) -> Result<bool, RequestError> {
+    let Some(class) = catalog.class(&contract.owner, budget)? else {
+        return Ok(false);
+    };
+    Ok(super::overloads::unique_target(
+        class,
+        &contract.name,
+        &contract.prototype,
+        true,
+        false,
+        budget,
+    )? && super::throws::compatible(input, catalog, Some(&contract.declared_throws), budget)?)
+}
+pub(crate) fn resolve_static(
+    input: &MethodInput<'_, '_>,
+    catalog: &DeclarationCatalog,
+    id: MethodId,
+    budget: &mut MethodBudget<'_, '_>,
+) -> Result<Option<StaticContract>, RequestError> {
+    let Some(contract) = collect_static(input, catalog, id, budget)? else {
+        return Ok(None);
+    };
+    if !binding_available(input, catalog, &contract, budget)? {
+        return Ok(None);
+    }
+    Ok(Some(contract))
 }

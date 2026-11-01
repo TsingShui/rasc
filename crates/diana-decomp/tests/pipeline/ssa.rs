@@ -299,3 +299,59 @@ fn array_control_flow_uses_shared_definitions_and_rejects_invalid_element_and_in
         }
     }
 }
+
+#[test]
+fn call_definition_errors_precede_missing_declarations_without_guessing_a_binding() {
+    use super::fixture::{CodeRecipe, with_code};
+    for register in [0u16, 1] {
+        let words = [0x1071, 0, register, 0x000a, 0x000f];
+        let mut fixture = with_code(CodeRecipe {
+            instructions: &words,
+            registers_size: 2,
+            outs_size: 1,
+        });
+        let reference = u16::try_from(fixture.primary_method_idx).unwrap();
+        let offset = fixture.code[0] + 18;
+        fixture.bytes[offset..offset + 2].copy_from_slice(&reference.to_le_bytes());
+        let mut control = RunContext::new(Limits::default(), &|| false);
+        let engine = Engine::open(
+            vec![DexImage {
+                bytes: &fixture.bytes,
+                header_offset: ByteOffset(0),
+                origin: ImageOrigin { input: InputId(0) },
+            }],
+            Options::default(),
+            DeclarationCatalog::empty(EnvironmentId(0)),
+            &mut control,
+        )
+        .unwrap();
+        let report = engine
+            .decompile(
+                Request {
+                    class: ClassKey {
+                        dex: DexId(0),
+                        class_def: ClassDefId(0),
+                    },
+                    method: Some(MethodSelector {
+                        name: "f".encode_utf16().collect(),
+                        prototype: "(I)I".encode_utf16().collect(),
+                    }),
+                },
+                &mut control,
+            )
+            .unwrap();
+        let ClassOutput::Mixed { members, .. } = report.class();
+        let reason = match &members[0] {
+            MethodOutput::Unavailable { reason, .. } | MethodOutput::Debug { reason, .. } => reason,
+            _ => panic!("missing call evidence produced trusted Java"),
+        };
+        let diagnostic = &report.diagnostics()[reason.0];
+        if register == 0 {
+            assert_eq!(diagnostic.cause.kind(), FailureKind::Malformed);
+            assert_eq!(diagnostic.code(), DiagnosticCode::UndefinedRegister);
+        } else {
+            assert_eq!(diagnostic.cause.kind(), FailureKind::Unsupported);
+            assert_eq!(diagnostic.code(), DiagnosticCode::BindingEvidenceMissing);
+        }
+    }
+}

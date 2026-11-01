@@ -12,11 +12,12 @@ pub(crate) fn build<'a>(
     catalog: &DeclarationCatalog,
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<Option<crate::p6_variables::normal::StorageBody<'a>>, RequestError> {
-    let Some(flow) = crate::p2_flow::normal::decode(input, catalog, budget)? else {
+    let Some(flow) = crate::p2_flow::normal::decode(input, budget)? else {
         return Ok(None);
     };
     let ssa = crate::p3_ssa::normal::build(flow, budget)?;
-    let Some(typed) = crate::p5_types::normal::solve(ssa, budget)? else {
+    let resolved = crate::p4_calls::normal::collect(input, catalog, ssa, budget)?;
+    let Some(typed) = crate::p5_types::normal::solve(resolved, budget)? else {
         return Ok(None);
     };
     crate::p6_variables::normal::allocate(typed, budget)

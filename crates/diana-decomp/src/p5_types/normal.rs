@@ -33,6 +33,15 @@ pub(crate) struct TypedBody<'a> {
     pub integral_bits: Vec<u8>,
     pub ranges: Vec<Option<crate::p5_types::IntRange>>,
     pub arrays: Vec<Option<ArrayEvidence>>,
+    pub bindings: Vec<crate::p4_calls::normal::CallEvidence>,
+}
+impl TypedBody<'_> {
+    pub(crate) fn contract(
+        &self,
+        id: crate::p2_flow::normal::CallId,
+    ) -> Result<&crate::p4_calls::StaticContract, RequestError> {
+        crate::p4_calls::normal::contract(&self.ssa, &self.bindings, id)
+    }
 }
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub(crate) enum ArrayConversion {
@@ -75,9 +84,11 @@ fn merge_range(
     }
 }
 pub(crate) fn solve<'a>(
-    ssa: SsaBody<'a>,
+    resolved: crate::p4_calls::normal::ResolvedBody<'a>,
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<Option<TypedBody<'a>>, RequestError> {
+    let ssa = resolved.ssa;
+    let bindings = resolved.calls;
     let mut integral_bits = Vec::new();
     let mut ranges = Vec::new();
     let mut kinds = Vec::new();
@@ -114,28 +125,24 @@ pub(crate) fn solve<'a>(
                 | Op::Compare(_, _, _, _) => {
                     (7, Some(crate::p5_types::IntRange::ALL), Some(Kind::Int))
                 }
-                Op::Call(call, _) => match ssa.calls[ix(call.0)?].contract.result {
-                    crate::p4_calls::StaticResult::Int => {
-                        (7, Some(crate::p5_types::IntRange::ALL), Some(Kind::Int))
-                    }
-                    crate::p4_calls::StaticResult::Boolean => (
-                        3,
-                        Some(crate::p5_types::IntRange::BOOLEAN),
-                        Some(Kind::Boolean),
-                    ),
-                    crate::p4_calls::StaticResult::Reference(
-                        crate::p5_types::BuiltinReference::Object,
-                    ) => (0, None, Some(Kind::Object)),
-                    crate::p4_calls::StaticResult::Reference(
-                        crate::p5_types::BuiltinReference::String,
-                    ) => (0, None, Some(Kind::String)),
-                    crate::p4_calls::StaticResult::Nominal
-                    | crate::p4_calls::StaticResult::Void => {
-                        return Err(RequestError::InternalInvariant(
-                            "unsupported call acquired a normal value definition",
-                        ));
-                    }
-                },
+                Op::Call(call, _) => {
+                    let declaration = match ssa.calls[ix(call.0)?].result {
+                        crate::p2_flow::normal::InvokeResult::Word(kind)
+                        | crate::p2_flow::normal::InvokeResult::Reference(Some(kind)) => kind,
+                        _ => {
+                            return Err(RequestError::InternalInvariant(
+                                "unsupported raw call result entered normal typing",
+                            ));
+                        }
+                    };
+                    let kind = declaration.kind();
+                    let bits = match kind {
+                        Kind::Int => 7,
+                        Kind::Boolean => 3,
+                        _ => 0,
+                    };
+                    (bits, declaration.range(), Some(kind))
+                }
                 Op::ArrayLoad(_, _, _, crate::p2_flow::normal::ArrayElement::Object) => {
                     (0, None, Some(Kind::Object))
                 }
@@ -239,6 +246,7 @@ pub(crate) fn solve<'a>(
         integral_bits,
         ranges,
         arrays,
+        bindings,
     }))
 }
 fn solve_arrays(

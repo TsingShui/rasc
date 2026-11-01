@@ -213,11 +213,15 @@ pub(super) fn operations(
 
 pub(crate) fn verify(
     input: &MethodInput<'_, '_>,
+    catalog: &crate::DeclarationCatalog,
     storage: StorageBody<'_>,
     environment: EnvironmentId,
     representation: crate::RepresentationPolicy,
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<Option<VerifiedJavaMethod>, RequestError> {
+    if !super::calls::validate_bindings(input, catalog, &storage.typed, budget)? {
+        return Ok(None);
+    }
     if matches!(
         representation,
         crate::RepresentationPolicy::StructuredThenDispatch

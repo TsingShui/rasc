@@ -57,7 +57,7 @@ fn static_call(
             "call certificate has foreign site",
         ))?;
     let bound = ssa.ssa.call(id)?;
-    let contract = &site.contract;
+    let contract = ssa.contract(id)?;
     if actual.reference != contract.reference
         || actual.original_owner != contract.owner
         || actual.original_name != contract.name

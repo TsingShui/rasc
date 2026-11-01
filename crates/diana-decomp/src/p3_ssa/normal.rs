@@ -592,7 +592,7 @@ fn verify_call(
     let original = instruction_layout(ssa.raw.instructions(), pc, ssa.raw.version())
         .map_err(crate::input::MethodError::Decode)?;
     if !matches!(original.kind(),LayoutKind::Instruction(spec) if matches!(spec.opcode,0x71|0x77))
-        || !matches!(original.references()[0],Some(reference) if reference.target==crate::raw::OperandReference::Method(site.contract.reference))
+        || !matches!(original.references()[0],Some(reference) if reference.target==crate::raw::OperandReference::Method(site.reference))
     {
         return Err(RequestError::InternalInvariant(
             "call changed its original invoke or method reference",
@@ -626,13 +626,11 @@ fn verify_call(
         let operands =
             crate::input::operands::instruction_operands(ssa.raw.instructions(), result_pc, result)
                 .map_err(crate::input::MethodError::Decode)?;
-        let expected = match site.contract.result {
-            crate::p4_calls::StaticResult::Int | crate::p4_calls::StaticResult::Boolean => {
-                Some(0x0a)
-            }
-            crate::p4_calls::StaticResult::Reference(_)
-            | crate::p4_calls::StaticResult::Nominal => Some(0x0c),
-            crate::p4_calls::StaticResult::Void => None,
+        let expected = match site.result {
+            crate::p2_flow::normal::InvokeResult::Word(_) => Some(0x0a),
+            crate::p2_flow::normal::InvokeResult::Reference(_) => Some(0x0c),
+            crate::p2_flow::normal::InvokeResult::Wide => Some(0x0b),
+            crate::p2_flow::normal::InvokeResult::Void => None,
         };
         if !matches!(result.kind(),LayoutKind::Instruction(spec) if Some(spec.opcode)==expected)
             || operands.registers().iter().next() != destination

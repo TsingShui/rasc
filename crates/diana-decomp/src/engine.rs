@@ -419,6 +419,27 @@ fn normal_member(
     if let Some(declaration) = crate::p8_java::declaration(&input, budget)? {
         return Ok(NormalMember::Declaration { facts, declaration });
     }
+    let mut shared_reason = None;
+    if crate::p8_java::source_group_admitted(index, key, &facts, budget)?
+        && let Some(ssa) = crate::pipeline::branch::build(&input, catalog, budget)?
+    {
+        if let Some(declaration) = crate::p8_java::branch::verify(
+            &input,
+            catalog,
+            ssa,
+            catalog.environment,
+            representation,
+            budget,
+        )? {
+            let source = crate::p9_emit::java(&declaration, budget)?;
+            return Ok(NormalMember::Java {
+                facts,
+                declaration,
+                source,
+            });
+        }
+        shared_reason = Some(OutputReason::BranchJavaUnsupported);
+    }
     if let RawPrintable::Method(raw) = input.raw() {
         let original = raw.layout().original();
         let mut pc = CodeUnitOffset(0);
@@ -514,28 +535,6 @@ fn normal_member(
         });
     }
     if crate::p8_java::source_group_admitted(index, key, &facts, budget)?
-        && let Some(ssa) = crate::pipeline::branch::build(&input, catalog, budget)?
-    {
-        if let Some(declaration) = crate::p8_java::branch::verify(
-            &input,
-            ssa,
-            catalog.environment,
-            representation,
-            budget,
-        )? {
-            let source = crate::p9_emit::java(&declaration, budget)?;
-            return Ok(NormalMember::Java {
-                facts,
-                declaration,
-                source,
-            });
-        }
-        return Ok(NormalMember::Raw {
-            facts,
-            reason: OutputReason::BranchJavaUnsupported,
-        });
-    }
-    if crate::p8_java::source_group_admitted(index, key, &facts, budget)?
         && let Some(plan) = crate::pipeline::heap_access::build(&input, catalog, budget)?
         && let Some(declaration) =
             crate::p8_java::heap_access::verify(&input, plan, catalog, catalog.environment, budget)?
@@ -595,7 +594,9 @@ fn normal_member(
             source,
         });
     }
-    let reason = if matches!(input.raw(), RawPrintable::Declaration(_)) {
+    let reason = if let Some(reason) = shared_reason {
+        reason
+    } else if matches!(input.raw(), RawPrintable::Declaration(_)) {
         OutputReason::JavaDeclarationUnsupported
     } else {
         OutputReason::JavaAnalysisUnavailable
