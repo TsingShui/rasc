@@ -30,7 +30,6 @@ pub(crate) struct StaticContract {
     pub name: Vec<u16>,
     pub prototype: Vec<u16>,
     pub formals: Vec<CallFormal>,
-    pub result: StaticResult,
     pub declared_throws: Vec<Vec<u16>>,
 }
 fn package(descriptor: &[u16]) -> &[u16] {
@@ -331,7 +330,6 @@ pub(super) fn collect_static(
         name,
         prototype,
         formals,
-        result,
         declared_throws: super::throws::retain(target.throws.as_deref(), budget)?,
     }))
 }
@@ -397,18 +395,4 @@ pub(super) fn binding_available(
         false,
         budget,
     )? && super::throws::compatible(input, catalog, Some(&contract.declared_throws), budget)?)
-}
-pub(crate) fn resolve_static(
-    input: &MethodInput<'_, '_>,
-    catalog: &DeclarationCatalog,
-    id: MethodId,
-    budget: &mut MethodBudget<'_, '_>,
-) -> Result<Option<StaticContract>, RequestError> {
-    let Some(contract) = collect_static(input, catalog, id, budget)? else {
-        return Ok(None);
-    };
-    if !binding_available(input, catalog, &contract, budget)? {
-        return Ok(None);
-    }
-    Ok(Some(contract))
 }

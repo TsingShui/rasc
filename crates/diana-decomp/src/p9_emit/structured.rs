@@ -1,5 +1,5 @@
 use crate::p8_java::dispatcher::{Case, Dispatcher, Transfer};
-use crate::p8_java::structured::StructuredLoop;
+use crate::p8_java::structured::StructuredBody;
 use crate::pipeline::branch::BlockId;
 use crate::substrate::owned::TextBuffer;
 use crate::{MethodBudget, RequestError};
@@ -105,13 +105,48 @@ fn diamond_edge(
     Ok(())
 }
 pub(super) fn write(
-    body: &StructuredLoop,
+    body: &StructuredBody,
     type_names: &crate::p8_java::types::TypeNames,
     output: &mut TextBuffer,
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<(), RequestError> {
     let storage = &body.storage;
-    let region = &body.region;
+    match &body.region {
+        crate::p7_regions::Region::Loop(region) => {
+            write_loop(storage, region, type_names, output, budget)
+        }
+        crate::p7_regions::Region::Diamond(region) => {
+            super::dispatcher::locals(storage, type_names, output, budget)?;
+            let header = case(storage, region.block)?;
+            super::dispatcher::statements(header, output, budget)?;
+            let Transfer::Branch { yes, no, .. } = &header.transfer else {
+                return Err(RequestError::InternalInvariant(
+                    "diamond header lost condition",
+                ));
+            };
+            super::dispatcher::open_if(&header.transfer, output, budget)?;
+            diamond_edge(
+                storage,
+                yes,
+                region.yes.as_ref(),
+                region.join,
+                output,
+                budget,
+            )?;
+            output.push("} else {\n", budget)?;
+            diamond_edge(storage, no, region.no.as_ref(), region.join, output, budget)?;
+            output.push("}\n", budget)?;
+            trace(storage, &[region.join], output, budget)
+        }
+    }
+}
+fn write_loop(
+    storage: &Dispatcher,
+    region: &crate::p7_regions::NaturalLoop,
+    type_names: &crate::p8_java::types::TypeNames,
+    output: &mut TextBuffer,
+    budget: &mut MethodBudget<'_, '_>,
+) -> Result<(), RequestError> {
     let header = case(storage, region.header)?;
     let Transfer::Branch { yes, no, .. } = &header.transfer else {
         return Err(RequestError::InternalInvariant(

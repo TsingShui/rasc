@@ -1,5 +1,5 @@
+use super::flow::{Edge, Flow, Transfer};
 use super::graph::index;
-use crate::p8_java::dispatcher::{Dispatcher, Edge, Transfer};
 use crate::pipeline::branch::{BlockId, EdgeId};
 use crate::{MethodBudget, RequestError};
 pub(crate) struct Guard {
@@ -40,14 +40,14 @@ impl BodyBranch {
         }
     }
 }
-fn jump(storage: &Dispatcher, target: BlockId) -> Result<Option<&Edge>, RequestError> {
+fn jump(storage: &Flow, target: BlockId) -> Result<Option<&Edge>, RequestError> {
     Ok(match &storage.cases[index(target)?].transfer {
         Transfer::Jump(edge) => Some(edge),
         _ => None,
     })
 }
 pub(super) fn diamond(
-    storage: &Dispatcher,
+    storage: &Flow,
     block: BlockId,
     yes: &Edge,
     no: &Edge,

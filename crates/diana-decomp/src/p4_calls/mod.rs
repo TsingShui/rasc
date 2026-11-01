@@ -10,7 +10,6 @@ mod receivers;
 pub(crate) use receivers::{ReceiverContract, ReceiverKind, resolve_receiver};
 pub(crate) mod field_facts;
 mod fields;
-pub(crate) use fields::{FieldUse, InstanceIntAccess, bind_instance_int};
 mod overloads;
-pub(crate) use contracts::{CallFormal, StaticContract, StaticResult, resolve_static};
+pub(crate) use contracts::{CallFormal, StaticContract};
 pub(crate) use fields::check_external_static_read;

@@ -1,12 +1,11 @@
-use crate::p8_java::dispatcher::Edge;
 use crate::{MethodBudget, RequestError};
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub(crate) enum SwitchForm {
     Cases,
     Comparisons,
 }
-pub(crate) fn choose(
-    cases: &[(i32, Edge)],
+pub(crate) fn choose<T>(
+    cases: &[(i32, T)],
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<SwitchForm, RequestError> {
     let mut bounds = None;

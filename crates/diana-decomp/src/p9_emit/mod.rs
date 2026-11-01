@@ -7,7 +7,6 @@ mod debug_program;
 mod dispatcher;
 mod error;
 mod field_ops;
-mod heap_access;
 mod java;
 mod json;
 mod literals;

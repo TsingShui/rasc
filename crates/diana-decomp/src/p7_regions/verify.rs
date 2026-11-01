@@ -1,6 +1,6 @@
+use super::flow::{Flow, Transfer};
 use super::graph::index;
 use super::normal::Candidate;
-use crate::p8_java::dispatcher::{Dispatcher, Transfer};
 use crate::pipeline::branch::{BlockId, EdgeId};
 use crate::substrate::owned::reserve;
 use crate::{MethodBudget, RequestError};
@@ -22,7 +22,7 @@ fn bad<T>() -> Result<T, RequestError> {
     ))
 }
 pub(super) fn verify(
-    storage: &Dispatcher,
+    storage: &Flow,
     plan: Candidate,
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<NaturalLoop, RequestError> {
@@ -175,10 +175,7 @@ pub(super) fn verify(
                 }
             }
             None => {
-                if !matches!(
-                    storage.cases[index(node)?].transfer,
-                    Transfer::Return(_) | Transfer::ReturnVoid
-                ) {
+                if !matches!(storage.cases[index(node)?].transfer, Transfer::Return) {
                     return bad();
                 }
             }

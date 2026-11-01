@@ -1,4 +1,4 @@
-use crate::p8_java::dispatcher::{Dispatcher, Transfer};
+use super::flow::{Flow, Transfer};
 use crate::pipeline::branch::BlockId;
 use crate::substrate::owned::reserve;
 use crate::{MethodBudget, RequestError};
@@ -20,7 +20,7 @@ pub(super) struct Graph {
     pub returned: BlockId,
 }
 pub(super) fn graph(
-    body: &Dispatcher,
+    body: &Flow,
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<Option<Graph>, RequestError> {
     let n = body.cases.len();
@@ -48,13 +48,13 @@ pub(super) fn graph(
                 push(&mut successors[at], yes.target, budget)?;
                 push(&mut successors[at], no.target, budget)?;
             }
-            Transfer::Return(_) | Transfer::ReturnVoid => {
+            Transfer::Return => {
                 if returned.is_some() {
                     return Ok(None);
                 }
                 returned = Some(case.key);
             }
-            Transfer::Switch { .. } => return Ok(None),
+            Transfer::Switch => return Ok(None),
         }
     }
     let Some(returned) = returned else {

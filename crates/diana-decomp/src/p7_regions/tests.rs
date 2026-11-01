@@ -51,6 +51,38 @@ fn t13_region_certificate_rejects_lost_leaves_edges_wrong_scope_and_duplicates()
     let MethodBody::Dispatcher(storage) = &declaration.body else {
         panic!("dispatch mode must retain the normal storage body");
     };
+    let flow = super::flow::Flow {
+        cases: storage
+            .cases
+            .iter()
+            .map(|case| {
+                let edge = |edge: &crate::p8_java::dispatcher::Edge| super::flow::Edge {
+                    id: edge.id,
+                    target: edge.target,
+                };
+                let transfer = match &case.transfer {
+                    crate::p8_java::dispatcher::Transfer::Jump(e) => {
+                        super::flow::Transfer::Jump(edge(e))
+                    }
+                    crate::p8_java::dispatcher::Transfer::Branch { yes, no, .. } => {
+                        super::flow::Transfer::Branch {
+                            yes: edge(yes),
+                            no: edge(no),
+                        }
+                    }
+                    crate::p8_java::dispatcher::Transfer::Return(_) => {
+                        super::flow::Transfer::Return
+                    }
+                    _ => panic!("transfer outside the existing loop counterexample"),
+                };
+                super::flow::Case {
+                    key: case.key,
+                    transfer,
+                }
+            })
+            .collect(),
+    };
+    let storage = &flow;
     enum Fault {
         LostLeaf,
         LostEdge,

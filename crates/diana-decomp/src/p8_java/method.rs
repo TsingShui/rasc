@@ -16,27 +16,13 @@ pub struct VerifiedJavaMethod {
     pub(crate) type_names: super::types::TypeNames,
 }
 pub(crate) enum MethodBody {
-    HeapAccess(super::heap_access::Body),
-    Structured(super::structured::StructuredLoop),
-    Diamond(super::branch::Diamond),
+    Structured(super::structured::StructuredBody),
     Dispatcher(super::dispatcher::Dispatcher),
 }
 impl VerifiedJavaMethod {
-    pub(super) fn heap_access(
-        header: String,
-        body: super::heap_access::Body,
-        environment: EnvironmentId,
-    ) -> Self {
-        Self {
-            header,
-            body: MethodBody::HeapAccess(body),
-            environment,
-            type_names: super::types::TypeNames::default(),
-        }
-    }
     pub(super) fn structured(
         header: String,
-        body: super::structured::StructuredLoop,
+        body: super::structured::StructuredBody,
         environment: EnvironmentId,
     ) -> Self {
         Self {
@@ -52,7 +38,6 @@ impl VerifiedJavaMethod {
         let cases = match &self.body {
             MethodBody::Dispatcher(body) => Some(body.cases.as_slice()),
             MethodBody::Structured(body) => Some(body.storage.cases.as_slice()),
-            _ => None,
         };
         let statics = cases
             .into_iter()
@@ -104,7 +89,6 @@ impl VerifiedJavaMethod {
         let entry = match &self.body {
             MethodBody::Dispatcher(body) => body.prologue.first(),
             MethodBody::Structured(body) => body.storage.prologue.first(),
-            _ => None,
         };
         let constructor = entry.map(|entry| super::JavaCallSite {
             reference: entry.contract.reference,
@@ -117,28 +101,7 @@ impl VerifiedJavaMethod {
             result: None,
             kind: super::JavaInvokeKind::Direct,
         });
-        let arrays = match &self.body {
-            MethodBody::HeapAccess(body) => Some(body.statements.as_slice()),
-            _ => None,
-        };
-        let array_calls = arrays
-            .into_iter()
-            .flatten()
-            .filter_map(|statement| match statement {
-                super::heap_access::Statement::Call { call, .. } => Some(super::JavaCallSite {
-                    reference: call.reference,
-                    receiver: None,
-                    allocation: None,
-                    owner: &call.original_owner,
-                    name: &call.original_name,
-                    prototype: &call.prototype,
-                    invoke: call.invoke,
-                    result: call.result_site,
-                    kind: super::JavaInvokeKind::Static,
-                }),
-                _ => None,
-            });
-        statics.chain(array_calls).chain(constructor)
+        statics.chain(constructor)
     }
     pub(super) fn dispatcher(
         header: String,
@@ -148,18 +111,6 @@ impl VerifiedJavaMethod {
         Self {
             header,
             body: MethodBody::Dispatcher(body),
-            environment,
-            type_names: super::types::TypeNames::default(),
-        }
-    }
-    pub(super) fn diamond(
-        header: String,
-        body: super::branch::Diamond,
-        environment: EnvironmentId,
-    ) -> Self {
-        Self {
-            header,
-            body: MethodBody::Diamond(body),
             environment,
             type_names: super::types::TypeNames::default(),
         }

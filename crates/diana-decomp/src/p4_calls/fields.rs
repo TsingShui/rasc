@@ -3,37 +3,9 @@ use crate::{
     CodeUnitOffset, DeclarationCatalog, FieldId, JavaConstantKind, MethodBudget, RequestError,
 };
 
-pub(crate) use super::field_facts::{FieldUse, IntFieldAccess as InstanceIntAccess};
-pub(crate) fn bind_instance_int(
-    input: &MethodInput<'_, '_>,
-    catalog: &DeclarationCatalog,
-    reference: FieldId,
-    receiver: &[u16],
-    usage: FieldUse,
-    pc: CodeUnitOffset,
-    budget: &mut MethodBudget<'_, '_>,
-) -> Result<InstanceIntAccess, RequestError> {
-    if !input
-        .field_reference(reference, budget)?
-        .owner
-        .matches_with(receiver, budget)?
-    {
-        return Err(RequestError::FieldBindingEvidenceMissing { reference, pc });
-    }
-    super::field_facts::collect_int_field(
-        input,
-        catalog,
-        reference,
-        super::field_facts::FieldStorage::Instance,
-        usage,
-        pc,
-        budget,
-    )
-}
 pub(crate) struct InstanceIntWrite {
     _sealed: (),
     pub reference: FieldId,
-    pub owner: Vec<u16>,
     pub name: Vec<u16>,
 }
 pub(crate) fn bind_own_int_write(
@@ -92,7 +64,6 @@ pub(crate) fn bind_own_int_write(
     Ok(InstanceIntWrite {
         _sealed: (),
         reference,
-        owner: crate::substrate::owned::copy_units(original.owner, budget)?,
         name: crate::substrate::owned::copy_units(original.declaration.name, budget)?,
     })
 }

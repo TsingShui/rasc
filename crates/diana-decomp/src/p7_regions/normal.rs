@@ -1,6 +1,6 @@
 use super::branch::{BodyBranch, Guard};
+use super::flow::{Flow, Transfer};
 use super::graph::{dominators, graph, index, push};
-use crate::p8_java::dispatcher::{Dispatcher, Transfer};
 use crate::pipeline::branch::{BlockId, EdgeId};
 use crate::substrate::owned::reserve;
 use crate::{MethodBudget, RequestError};
@@ -16,7 +16,7 @@ pub(super) struct Candidate {
     pub latch: EdgeId,
 }
 fn exit_stub(
-    storage: &Dispatcher,
+    storage: &Flow,
     target: BlockId,
     exit: BlockId,
     budget: &mut MethodBudget<'_, '_>,
@@ -96,7 +96,7 @@ fn loop_kernel(
     Ok(count == expected)
 }
 pub(super) fn plan(
-    storage: &Dispatcher,
+    storage: &Flow,
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<Option<Candidate>, RequestError> {
     let Some(graph) = graph(storage, budget)? else {
@@ -256,7 +256,7 @@ pub(super) fn plan(
             push(&mut tail, current, budget)?;
             match &storage.cases[index(current)?].transfer {
                 Transfer::Jump(edge) => current = edge.target,
-                Transfer::Return(_) | Transfer::ReturnVoid => break,
+                Transfer::Return => break,
                 _ => {
                     fits = false;
                     break;

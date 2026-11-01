@@ -86,13 +86,13 @@ fn edge(
 
 pub(super) fn verify(
     input: &MethodInput<'_, '_>,
-    storage: &StorageBody<'_>,
+    plan: crate::p7_regions::PlannedBody<'_>,
     type_names: &super::types::TypeNames,
     calls: &mut super::calls::SourceCalls,
     environment: EnvironmentId,
-    representation: crate::RepresentationPolicy,
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<Option<VerifiedJavaMethod>, RequestError> {
+    let storage = &plan.storage;
     let ssa = &storage.typed;
     let RawPrintable::Method(raw) = input.raw() else {
         return Err(RequestError::InternalInvariant(
@@ -201,6 +201,10 @@ pub(super) fn verify(
                     Transfer::ReturnVoid
                 }
                 Terminal::Switch { table, .. } => {
+                    let form = *plan
+                        .switches
+                        .get(ix(table.0)?)
+                        .ok_or(RequestError::InternalInvariant("switch lost P7 policy"))?;
                     let table = ssa.ssa.switches.get(ix(table.0)?).ok_or(
                         RequestError::InternalInvariant("switch has a foreign payload table"),
                     )?;
@@ -244,7 +248,7 @@ pub(super) fn verify(
                         budget,
                     )?;
                     Transfer::Switch {
-                        form: crate::p7_regions::switch_form(&cases, budget)?,
+                        form,
                         value,
                         cases,
                         default,
@@ -402,14 +406,10 @@ pub(super) fn verify(
         cases,
     };
     super::dispatcher_verify::verify(storage, &body, budget)?;
-    if matches!(
-        representation,
-        crate::RepresentationPolicy::StructuredThenDispatch
-    ) && let Some(region) = crate::p7_regions::build(&body, budget)?
-    {
+    if let crate::p7_regions::Shape::Structured(region) = plan.shape {
         return Ok(Some(VerifiedJavaMethod::structured(
             header.finish(),
-            super::structured::StructuredLoop {
+            super::structured::StructuredBody {
                 storage: body,
                 region,
             },

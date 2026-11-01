@@ -1,6 +1,5 @@
 use crate::p8_java::MethodBody;
-use crate::p8_java::branch::{Assignment, Diamond, Expression as BranchExpression, LocalId};
-use crate::pipeline::branch::Kind;
+use crate::p8_java::branch::{Assignment, Expression as BranchExpression, LocalId};
 use crate::substrate::owned::TextBuffer;
 use crate::{MethodBudget, RequestError, VerifiedJavaMethod};
 
@@ -12,11 +11,9 @@ pub(crate) fn java(
     output.push(&method.header, budget)?;
     output.push(" {\n", budget)?;
     match &method.body {
-        MethodBody::HeapAccess(body) => super::heap_access::write(body, &mut output, budget)?,
         MethodBody::Structured(body) => {
             super::structured::write(body, &method.type_names, &mut output, budget)?
         }
-        MethodBody::Diamond(body) => diamond(body, &method.type_names, &mut output, budget)?,
         MethodBody::Dispatcher(body) => {
             super::dispatcher::write(body, &method.type_names, &mut output, budget)?
         }
@@ -161,84 +158,4 @@ pub(super) fn assignments(
         output.push(";\n", budget)?;
     }
     Ok(())
-}
-fn diamond(
-    body: &Diamond,
-    type_names: &crate::p8_java::types::TypeNames,
-    output: &mut TextBuffer,
-    budget: &mut MethodBudget<'_, '_>,
-) -> Result<(), RequestError> {
-    for declaration in &body.locals {
-        budget.charge_work(1)?;
-        output.push(type_names.name(declaration.kind, budget)?, budget)?;
-        output.push(" ", budget)?;
-        local(declaration.id, output, budget)?;
-        if let crate::p6_variables::normal::Initializer::Parameter(parameter) =
-            declaration.initializer
-        {
-            match parameter {
-                crate::p6_variables::normal::Parameter::This => output.push(" = this", budget)?,
-                crate::p6_variables::normal::Parameter::Explicit(index) => {
-                    output.push(" = p", budget)?;
-                    output.unsigned(u64::from(index), budget)?;
-                }
-            }
-        }
-        output.push(";\n", budget)?;
-    }
-    assignments(&body.entry, output, budget)?;
-    output.push("if (", budget)?;
-    match body.condition_kind {
-        Kind::Float | Kind::Long | Kind::Double => {
-            return Err(RequestError::InternalInvariant(
-                "unlowered FP branch entered verified Java",
-            ));
-        }
-        Kind::Boolean => {
-            if body.opcode == 0x38 {
-                output.push("!", budget)?;
-            }
-            local(body.condition, output, budget)?;
-        }
-        Kind::Object
-        | Kind::String
-        | Kind::PrimitiveArray(_)
-        | Kind::ObjectArray
-        | Kind::Nominal(_) => {
-            local(body.condition, output, budget)?;
-            output.push(
-                if body.opcode == 0x38 {
-                    " == null"
-                } else {
-                    " != null"
-                },
-                budget,
-            )?;
-        }
-        Kind::Int => {
-            local(body.condition, output, budget)?;
-            output.push(
-                match body.opcode {
-                    0x38 => " == 0",
-                    0x39 => " != 0",
-                    0x3a => " < 0",
-                    0x3b => " >= 0",
-                    0x3c => " > 0",
-                    0x3d => " <= 0",
-                    _ => {
-                        return Err(RequestError::InternalInvariant(
-                            "verified diamond comparison is invalid",
-                        ));
-                    }
-                },
-                budget,
-            )?;
-        }
-    }
-    output.push(") {\n", budget)?;
-    assignments(&body.yes, output, budget)?;
-    output.push("} else {\n", budget)?;
-    assignments(&body.no, output, budget)?;
-    output.push("}\n", budget)?;
-    returned(body.returned, output, budget)
 }

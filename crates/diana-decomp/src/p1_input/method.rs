@@ -217,13 +217,6 @@ impl<'i, 'a> MethodInput<'i, 'a> {
     ) -> Result<Option<super::catalog::LocalMethod<'a>>, InputError> {
         self.index.local_method(id, budget)
     }
-    pub(crate) fn declaration_field_flags(
-        &self,
-        id: crate::FieldId,
-        budget: &mut MethodBudget<'_, '_>,
-    ) -> Result<Option<u32>, InputError> {
-        self.index.local_field_flags(id, budget)
-    }
     pub(crate) fn field_reference(
         &self,
         id: crate::FieldId,

@@ -1,5 +1,6 @@
 pub(crate) mod array_ops;
 pub(crate) mod branch;
+pub(crate) use branch::verify as verify_method;
 pub(crate) mod calls;
 pub(crate) mod cast_ops;
 pub(crate) mod constructor_entry;
@@ -8,7 +9,6 @@ pub(crate) mod dispatcher;
 mod dispatcher_verify;
 pub(crate) mod field_ops;
 pub(crate) mod fresh_fill;
-pub(crate) mod heap_access;
 mod method;
 pub(crate) mod object_allocation;
 mod receiver_ops;

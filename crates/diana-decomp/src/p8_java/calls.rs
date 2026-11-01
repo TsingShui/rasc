@@ -123,43 +123,6 @@ fn text(units: &[u16], budget: &mut MethodBudget<'_, '_>) -> Result<Option<Strin
     }
     Ok(Some(output.finish()))
 }
-pub(super) fn empty_static(
-    contract: crate::p4_calls::StaticContract,
-    invoke: CodeUnitOffset,
-    result_site: Option<CodeUnitOffset>,
-    budget: &mut MethodBudget<'_, '_>,
-) -> Result<Option<StaticCall>, RequestError> {
-    if !contract.formals.is_empty()
-        || !contract.declared_throws.is_empty()
-        || !matches!(
-            contract.result,
-            crate::p4_calls::StaticResult::Int | crate::p4_calls::StaticResult::Void
-        )
-        || contract.result == crate::p4_calls::StaticResult::Void && result_site.is_some()
-    {
-        return Err(RequestError::InternalInvariant(
-            "empty static call lost its checked signature",
-        ));
-    }
-    let Some(qualifier) = type_name(&contract.owner, budget)? else {
-        return Ok(None);
-    };
-    let Some(method) = identifier_text(&contract.name, budget)? else {
-        return Ok(None);
-    };
-    Ok(Some(StaticCall {
-        _sealed: (),
-        reference: contract.reference,
-        original_owner: contract.owner,
-        original_name: contract.name,
-        prototype: contract.prototype,
-        invoke,
-        result_site,
-        qualifier,
-        method,
-        arguments: Vec::new(),
-    }))
-}
 pub(super) fn type_name(
     owner: &[u16],
     budget: &mut MethodBudget<'_, '_>,

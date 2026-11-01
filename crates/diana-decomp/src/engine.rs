@@ -3,8 +3,8 @@ use crate::input::{DexContainer, InputError, InputProblem, ProgramIndex, RawPrin
 use crate::substrate::owned::{copy_proto, copy_units, reserve};
 use crate::substrate::report::*;
 use crate::{
-    ByteOffset, ClassKey, CodeUnitOffset, DebugSourceKind, DeclarationCatalog, DiagnosticId,
-    FailureKind, MethodBudget, MethodKey, RequestError, RunContext,
+    ByteOffset, ClassKey, DebugSourceKind, DeclarationCatalog, DiagnosticId, FailureKind,
+    MethodBudget, MethodKey, RequestError, RunContext,
 };
 
 /// Original caller-owned bytes and one logical header selection. The caller
@@ -419,18 +419,22 @@ fn normal_member(
     if let Some(declaration) = crate::p8_java::declaration(&input, budget)? {
         return Ok(NormalMember::Declaration { facts, declaration });
     }
-    let mut shared_reason = None;
-    if crate::p8_java::source_group_admitted(index, key, &facts, budget)?
-        && let Some(ssa) = crate::pipeline::branch::build(&input, catalog, budget)?
-    {
-        if let Some(declaration) = crate::p8_java::branch::verify(
-            &input,
-            catalog,
-            ssa,
-            catalog.environment,
-            representation,
-            budget,
-        )? {
+    let mut reason = if matches!(input.raw(), RawPrintable::Declaration(_)) {
+        OutputReason::JavaDeclarationUnsupported
+    } else {
+        OutputReason::JavaAnalysisUnavailable
+    };
+    if let Some(storage) = crate::pipeline::branch::build(&input, catalog, budget)? {
+        let planned = crate::p7_regions::build(storage, representation, budget)?;
+        if crate::p8_java::source_group_admitted(index, key, &facts, budget)?
+            && let Some(declaration) = crate::p8_java::verify_method(
+                &input,
+                catalog,
+                planned,
+                catalog.environment,
+                budget,
+            )?
+        {
             let source = crate::p9_emit::java(&declaration, budget)?;
             return Ok(NormalMember::Java {
                 facts,
@@ -438,85 +442,10 @@ fn normal_member(
                 source,
             });
         }
-        shared_reason = Some(OutputReason::BranchJavaUnsupported);
+        reason = OutputReason::BranchJavaUnsupported;
     }
-    if let RawPrintable::Method(raw) = input.raw() {
-        let original = raw.layout().original();
-        let mut pc = CodeUnitOffset(0);
-        let mut missing_call = None;
-        let mut has_fill = false;
-        while pc.0 < original.code_units().0 {
-            budget.charge_work(1)?;
-            let layout =
-                crate::raw::instruction_layout(original.instructions(), pc, index.header.version)
-                    .map_err(crate::input::MethodError::Decode)?;
-            if raw.layout().is_reachable(pc)
-                && let crate::raw::LayoutKind::Instruction(spec) = layout.kind()
-                && matches!(spec.opcode, 0x6e..=0x72 | 0x74..=0x78)
-                && let Some(reference) = layout.references()[0]
-                && let crate::raw::OperandReference::Method(id) = reference.target
-                && !index.method_has_definition(id, budget)?
-            {
-                let method = index.method_reference(id, budget)?;
-                if !catalog.contains_signature(
-                    method.owner,
-                    method.declaration.name,
-                    &method.declaration.prototype,
-                    budget,
-                )? && missing_call.is_none()
-                {
-                    missing_call = Some((id, pc));
-                }
-            }
-            if raw.layout().is_reachable(pc)
-                && matches!(layout.kind(),crate::raw::LayoutKind::Instruction(spec) if spec.opcode==0x26)
-            {
-                has_fill = true;
-            }
-            if raw.layout().is_reachable(pc)
-                && let crate::raw::LayoutKind::Instruction(spec) = layout.kind()
-                && matches!(spec.opcode, 0x60..=0x66)
-                && let Some(reference) = layout.references()[0]
-                && let crate::raw::OperandReference::Field(id) = reference.target
-                && !index.field_owner_defined(id, budget)?
-            {
-                crate::p4_calls::check_external_static_read(&input, catalog, id, pc, budget)?;
-            }
-            pc = pc
-                .checked_advance(layout.width())
-                .ok_or(RequestError::InternalInvariant(
-                    "checked call evidence extent overflowed",
-                ))?;
-        }
-        if has_fill {
-            crate::pipeline::fill_shape::check(&input, budget)?;
-        }
-        if let Some((reference, pc)) = missing_call {
-            return Ok(NormalMember::Raw {
-                facts,
-                reason: OutputReason::BindingEvidenceMissing { reference, pc },
-            });
-        }
-    }
-    if crate::p8_java::source_group_admitted(index, key, &facts, budget)?
-        && let Some(plan) = crate::pipeline::heap_access::build(&input, catalog, budget)?
-        && let Some(declaration) =
-            crate::p8_java::heap_access::verify(&input, plan, catalog, catalog.environment, budget)?
-    {
-        let source = crate::p9_emit::java(&declaration, budget)?;
-        return Ok(NormalMember::Java {
-            facts,
-            declaration,
-            source,
-        });
-    }
-    let reason = if let Some(reason) = shared_reason {
-        reason
-    } else if matches!(input.raw(), RawPrintable::Declaration(_)) {
-        OutputReason::JavaDeclarationUnsupported
-    } else {
-        OutputReason::JavaAnalysisUnavailable
-    };
+    let reason =
+        crate::pipeline::diagnostics::unsupported_method(&input, index, catalog, reason, budget)?;
     Ok(NormalMember::Raw { facts, reason })
 }
 
