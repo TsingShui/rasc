@@ -426,7 +426,8 @@ fn normal_member(
     };
     if let Some(storage) = crate::pipeline::branch::build(&input, catalog, budget)? {
         let planned = crate::p7_regions::build(storage, representation, budget)?;
-        if crate::p8_java::source_group_admitted(index, key, &facts, budget)?
+        let group_admitted = crate::p8_java::source_group_admitted(index, key, &facts, budget)?;
+        if group_admitted
             && let Some(declaration) = crate::p8_java::verify_method(
                 &input,
                 catalog,
@@ -442,7 +443,9 @@ fn normal_member(
                 source,
             });
         }
-        reason = OutputReason::BranchJavaUnsupported;
+        if group_admitted {
+            reason = OutputReason::BranchJavaUnsupported;
+        }
     }
     let reason =
         crate::pipeline::diagnostics::unsupported_method(&input, index, catalog, reason, budget)?;
