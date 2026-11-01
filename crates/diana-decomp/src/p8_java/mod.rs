@@ -2,6 +2,7 @@ mod allocation_verify;
 pub(crate) mod branch;
 pub(crate) mod call_chain;
 pub(crate) mod calls;
+pub(crate) mod casts;
 pub(crate) mod constructor;
 mod declarations;
 pub(crate) mod dispatcher;

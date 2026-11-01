@@ -500,6 +500,18 @@ fn normal_member(
         });
     }
     if crate::p8_java::source_group_admitted(index, key, &facts, budget)?
+        && let Some(plan) = crate::pipeline::casts::build(&input, budget)?
+        && let Some(declaration) =
+            crate::p8_java::casts::verify(&input, plan, catalog, catalog.environment, budget)?
+    {
+        let source = crate::p9_emit::java(&declaration, budget)?;
+        return Ok(NormalMember::Java {
+            facts,
+            declaration,
+            source,
+        });
+    }
+    if crate::p8_java::source_group_admitted(index, key, &facts, budget)?
         && let Some(plan) = crate::pipeline::call_chain::build(&input, catalog, budget)?
         && let Some(declaration) =
             crate::p8_java::call_chain::verify(&input, plan, catalog, catalog.environment, budget)?

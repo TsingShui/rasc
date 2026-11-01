@@ -1,5 +1,6 @@
 pub(crate) mod branch;
 pub(crate) mod call_chain;
+pub(crate) mod casts;
 pub(crate) mod constructor;
 pub(crate) mod control;
 pub(crate) mod diagnostics;

@@ -17,6 +17,7 @@ pub struct VerifiedJavaMethod {
     environment: EnvironmentId,
 }
 pub(crate) enum MethodBody {
+    Casts(super::casts::CastBody),
     Structured(super::structured::StructuredLoop),
     Constructor(super::constructor::ConstructorBody),
     CallChain(super::call_chain::Body),
@@ -31,6 +32,17 @@ pub(crate) enum MethodBody {
     Dispatcher(super::dispatcher::Dispatcher),
 }
 impl VerifiedJavaMethod {
+    pub(super) fn casts(
+        header: String,
+        body: super::casts::CastBody,
+        environment: EnvironmentId,
+    ) -> Self {
+        Self {
+            header,
+            body: MethodBody::Casts(body),
+            environment,
+        }
+    }
     pub(super) fn structured(
         header: String,
         body: super::structured::StructuredLoop,
