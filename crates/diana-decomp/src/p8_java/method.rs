@@ -138,37 +138,59 @@ pub(crate) fn source_group_admitted(
             "checked method has no parameter terminator",
         ))?;
     let mut admitted = true;
-    index
-        .class_with(key.class.class_def, budget)?
-        .visit_members_with(
-            budget,
-            MemberSelection::AllHeaders,
-            |entry, budget| -> Result<(), RequestError> {
-                if let MemberEntry::MethodHeader {
-                    method_idx,
-                    declaration,
-                    ..
-                } = entry
-                {
-                    let declaration = declaration?;
-                    if method_idx != key.method
-                        && declaration.name.matches_with(&facts.name, budget)?
-                    {
-                        let prototype =
-                            crate::substrate::owned::copy_proto(&declaration.prototype, budget)?;
-                        let end = prototype
-                            .iter()
-                            .position(|&unit| unit == u16::from(b')'))
-                            .ok_or(RequestError::InternalInvariant(
-                                "checked sibling has no parameter terminator",
-                            ))?;
-                        if facts.prototype[..=close] == prototype[..=end] {
-                            admitted = false;
+    let class = index.class_with(key.class.class_def, budget)?;
+    class.visit_members_with(
+        budget,
+        MemberSelection::AllHeaders,
+        |entry, budget| -> Result<(), RequestError> {
+            if let MemberEntry::MethodHeader {
+                method_idx,
+                declaration,
+                ..
+            } = entry
+            {
+                if method_idx == key.method {
+                    return Ok(());
+                }
+                let declaration = match declaration {
+                    Ok(declaration) => declaration,
+                    Err(error) => {
+                        if !matches!(
+                            error.kind(),
+                            crate::FailureKind::Malformed | crate::FailureKind::Unsupported
+                        ) {
+                            return Err(error.into());
                         }
+                        // Prototype damage leaves a collision obligation only
+                        // when the independently checked source name matches.
+                        match index.method_name(method_idx, class.type_idx, budget) {
+                            Ok(name) => {
+                                if name.matches_with(&facts.name, budget)? {
+                                    admitted = false;
+                                }
+                            }
+                            Err(error) if error.kind() == crate::FailureKind::Malformed => {}
+                            Err(error) => return Err(error.into()),
+                        }
+                        return Ok(());
+                    }
+                };
+                if declaration.name.matches_with(&facts.name, budget)? {
+                    let prototype =
+                        crate::substrate::owned::copy_proto(&declaration.prototype, budget)?;
+                    let end = prototype
+                        .iter()
+                        .position(|&unit| unit == u16::from(b')'))
+                        .ok_or(RequestError::InternalInvariant(
+                            "checked sibling has no parameter terminator",
+                        ))?;
+                    if facts.prototype[..=close] == prototype[..=end] {
+                        admitted = false;
                     }
                 }
-                Ok(())
-            },
-        )?;
+            }
+            Ok(())
+        },
+    )?;
     Ok(admitted)
 }

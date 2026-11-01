@@ -307,6 +307,27 @@ impl<'a> ProgramIndex<'a> {
         owner: TypeId,
         control: &mut impl InputControl,
     ) -> Result<MethodDeclaration<'_, 'a>, InputError> {
+        let (name, proto_idx) = self.method_header(method_idx, owner, control)?;
+        let prototype = self.prototype(proto_idx, control)?;
+        Ok(MethodDeclaration { name, prototype })
+    }
+
+    pub(crate) fn method_name(
+        &self,
+        method_idx: MethodId,
+        owner: TypeId,
+        control: &mut impl InputControl,
+    ) -> Result<DexString<'a>, InputError> {
+        let (name, _) = self.method_header(method_idx, owner, control)?;
+        Ok(name)
+    }
+
+    fn method_header(
+        &self,
+        method_idx: MethodId,
+        owner: TypeId,
+        control: &mut impl InputControl,
+    ) -> Result<(DexString<'a>, ProtoId), InputError> {
         let mut record = self.table(TableKey::Method(method_idx), control)?;
         if TypeId(u32::from(record.read_u16_with(control)?)) != owner {
             return Err(malformed(
@@ -317,8 +338,7 @@ impl<'a> ProgramIndex<'a> {
         let proto_idx = ProtoId(u32::from(record.read_u16_with(control)?));
         let name = self.string_with(StringId(record.read_u32_with(control)?), control)?;
         name.validate_name(control)?;
-        let prototype = self.prototype(proto_idx, control)?;
-        Ok(MethodDeclaration { name, prototype })
+        Ok((name, proto_idx))
     }
 
     pub(super) fn validate_field(
@@ -510,6 +530,9 @@ impl<'a> ProgramIndex<'a> {
     ) -> Result<MethodId, InputError> {
         let class = self.class_with(class_id, control)?;
         let mut found = None;
+        // A malformed candidate cannot match a complete selector. Keep its
+        // error if no independently valid declaration matches the request.
+        let mut local_error = None;
         for index in 0..self.header.method_ids.count {
             control.charge_work(1)?;
             let id = MethodId(index);
@@ -519,11 +542,23 @@ impl<'a> ProgramIndex<'a> {
             }
             record.read_u16_with(control)?;
             let actual_name =
-                self.string_with(StringId(record.read_u32_with(control)?), control)?;
+                match local(self.string_with(StringId(record.read_u32_with(control)?), control))? {
+                    Ok(name) => name,
+                    Err(error) => {
+                        local_error.get_or_insert(error);
+                        continue;
+                    }
+                };
             if !actual_name.matches(name, control)? {
                 continue;
             }
-            let declaration = self.method_declaration(id, class.type_idx, control)?;
+            let declaration = match local(self.method_declaration(id, class.type_idx, control))? {
+                Ok(declaration) => declaration,
+                Err(error) => {
+                    local_error.get_or_insert(error);
+                    continue;
+                }
+            };
             if declaration.prototype.matches(prototype, control)? {
                 if found.is_some() {
                     return Err(malformed(
@@ -535,10 +570,12 @@ impl<'a> ProgramIndex<'a> {
             }
         }
         found.ok_or_else(|| {
-            malformed(
-                InputProblem::InvalidReference,
-                self.header.method_ids.offset_byte,
-            )
+            local_error.unwrap_or_else(|| {
+                malformed(
+                    InputProblem::InvalidReference,
+                    self.header.method_ids.offset_byte,
+                )
+            })
         })
     }
 

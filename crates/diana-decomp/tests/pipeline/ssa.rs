@@ -348,6 +348,161 @@ use diana_decomp::{
 };
 
 #[test]
+fn t02_engine_isolates_sibling_declaration_damage_without_ignoring_name_collisions() {
+    use super::fixture::{put, tiny};
+    #[derive(Clone, Copy)]
+    enum Damage {
+        None,
+        Name,
+        OtherPrototype,
+        SameNamePrototype,
+        Collision,
+    }
+    for damage in [
+        Damage::None,
+        Damage::Name,
+        Damage::OtherPrototype,
+        Damage::SameNamePrototype,
+        Damage::Collision,
+    ] {
+        let mut fixture = tiny("f", false, false);
+        let sibling = match damage {
+            Damage::None => None,
+            Damage::Name | Damage::OtherPrototype => Some(2u32),
+            Damage::SameNamePrototype | Damage::Collision => Some(1),
+        };
+        if let Some(sibling) = sibling {
+            let record = fixture.method_ids + usize::try_from(sibling).unwrap() * 8;
+            match damage {
+                Damage::Name => put(&mut fixture.bytes, record + 4, u32::MAX),
+                Damage::OtherPrototype | Damage::SameNamePrototype => {
+                    fixture.bytes[record + 2..record + 4].copy_from_slice(&u16::MAX.to_le_bytes());
+                }
+                Damage::Collision => {
+                    fixture.bytes[record + 2..record + 4].copy_from_slice(&0u16.to_le_bytes());
+                }
+                Damage::None => unreachable!(),
+            }
+        }
+        let mut control = RunContext::new(Limits::default(), &|| false);
+        let engine = Engine::open(
+            vec![DexImage {
+                bytes: &fixture.bytes,
+                header_offset: ByteOffset(0),
+                origin: ImageOrigin { input: InputId(0) },
+            }],
+            Options::default(),
+            DeclarationCatalog::empty(EnvironmentId(0)),
+            &mut control,
+        )
+        .unwrap();
+        for whole_class in [false, true] {
+            let result = engine.decompile(
+                Request {
+                    class: ClassKey {
+                        dex: DexId(0),
+                        class_def: ClassDefId(0),
+                    },
+                    method: (!whole_class).then(|| MethodSelector {
+                        name: "f".encode_utf16().collect(),
+                        prototype: "(I)I".encode_utf16().collect(),
+                    }),
+                },
+                &mut control,
+            );
+            if !whole_class && matches!(damage, Damage::Collision) {
+                assert_eq!(result.err().unwrap().kind(), FailureKind::Malformed);
+                continue;
+            }
+            let report = result.unwrap();
+            let ClassOutput::Mixed { members, .. } = report.class();
+            let target = members
+                .iter()
+                .find(|member| member.key().method.0 == fixture.primary_method_idx)
+                .unwrap();
+            if matches!(damage, Damage::SameNamePrototype | Damage::Collision) {
+                let MethodOutput::Debug { source, reason, .. } = target else {
+                    panic!("unproved source signature became Java or a hard failure");
+                };
+                assert_eq!(
+                    report.diagnostics()[reason.0].cause.kind(),
+                    FailureKind::Unsupported
+                );
+                assert_eq!(
+                    report.diagnostics()[reason.0].code(),
+                    DiagnosticCode::JavaAnalysisUnavailable
+                );
+                let raw: serde_json::Value = serde_json::from_str(source.source()).unwrap();
+                assert_eq!(raw["complete"], true);
+                assert_eq!(
+                    raw["classes"][0]["methods"][0]["code"]["raw_words"],
+                    serde_json::json!([15])
+                );
+            } else {
+                let MethodOutput::Java { source, facts, .. } = target else {
+                    panic!("sibling declaration damage hid an independent Java method");
+                };
+                let rendered = diana_decomp::render(&report, &mut control).unwrap();
+                let span = rendered
+                    .spans
+                    .iter()
+                    .find(|span| span.method == facts.key)
+                    .unwrap();
+                assert_eq!(&rendered.source[span.start.0..span.end.0], source);
+                assert!(
+                    !report
+                        .diagnostics()
+                        .iter()
+                        .any(|diagnostic| diagnostic.method == Some(facts.key))
+                );
+            }
+            if whole_class && let Some(sibling) = sibling {
+                let damaged = members
+                    .iter()
+                    .find(|member| member.key().method.0 == sibling)
+                    .unwrap();
+                let MethodOutput::Unavailable { reason, key, .. } = damaged else {
+                    panic!("damaged sibling lost its classified failure");
+                };
+                let diagnostic = &report.diagnostics()[reason.0];
+                assert_eq!(diagnostic.method, Some(*key));
+                assert_eq!(diagnostic.cause.kind(), FailureKind::Malformed);
+            }
+        }
+        let damaged_selector = match damage {
+            Damage::Name | Damage::OtherPrototype => Some(("g", "()V")),
+            Damage::SameNamePrototype => Some(("f", "(J)I")),
+            Damage::None | Damage::Collision => None,
+        };
+        if let Some((name, prototype)) = damaged_selector {
+            let error = engine
+                .decompile(
+                    Request {
+                        class: ClassKey {
+                            dex: DexId(0),
+                            class_def: ClassDefId(0),
+                        },
+                        method: Some(MethodSelector {
+                            name: name.encode_utf16().collect(),
+                            prototype: prototype.encode_utf16().collect(),
+                        }),
+                    },
+                    &mut control,
+                )
+                .err()
+                .unwrap();
+            assert!(matches!(
+                error,
+                diana_decomp::RequestError::Input(diana_decomp::input::InputError::Malformed {
+                    code: diana_decomp::input::InputProblem::InvalidReference,
+                    ..
+                })
+            ));
+        }
+    }
+}
+
+#[test]
 fn t07_branch_inputs_preserve_edge_identity_and_reject_undefined_joins() {
     enum Expected {
         Original,

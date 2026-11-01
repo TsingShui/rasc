@@ -138,6 +138,8 @@ classified control errors. [Checked reader/header tests](batches/t02-reader-head
 exercise public input, malformed cases and request resource/cancellation behavior.
 [Declaration-index tests](batches/t02-declaration-index.md) cover complete
 signatures, MUTF-8, local failures and checked code/handler ranges.
+[Member declaration isolation](batches/member-declaration-isolation.md) verifies
+sibling damage through Engine selection and Java source admission.
 [Typed boundaries](batches/t02-typed-boundaries.md) record the approved input API
 migration. [Instruction layout](batches/t03-instruction-layout.md) checks shared
 opcode/version/operand and payload envelopes. [Method structure](batches/t03-method-structure.md)
