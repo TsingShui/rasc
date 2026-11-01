@@ -144,8 +144,9 @@ pub(super) fn verify(
         .ok_or(RequestError::InternalInvariant(
             "constructor certificate lost site",
         ))?;
-    let Some(crate::p4_calls::normal::CallEvidence::Constructor(original)) =
-        typed.bindings.get(index)
+    let Some(crate::p4_calls::normal::CallEvidence::Constructor {
+        facts: original, ..
+    }) = typed.bindings.get(index)
     else {
         return Ok(false);
     };

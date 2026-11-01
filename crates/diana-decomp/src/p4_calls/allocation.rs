@@ -11,7 +11,7 @@ pub(crate) struct ConstructorContract {
     pub arity: usize,
     pub declared_throws: Vec<Vec<u16>>,
 }
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Eq, PartialEq)]
 pub(crate) enum ConstructorUse {
     Allocation,
     Super,
@@ -139,6 +139,19 @@ pub(crate) fn resolve(
         arity,
         declared_throws: super::throws::retain(target.throws.as_deref(), budget)?,
     })
+}
+
+impl ConstructorContract {
+    pub(super) fn retain(&self, budget: &mut MethodBudget<'_, '_>) -> Result<Self, RequestError> {
+        Ok(Self {
+            _sealed: (),
+            reference: self.reference,
+            owner: super::receivers::retain(&self.owner, budget)?,
+            prototype: super::receivers::retain(&self.prototype, budget)?,
+            arity: self.arity,
+            declared_throws: super::throws::retain(Some(&self.declared_throws), budget)?,
+        })
+    }
 }
 
 fn unavailable<T>(pc: CodeUnitOffset) -> Result<T, RequestError> {

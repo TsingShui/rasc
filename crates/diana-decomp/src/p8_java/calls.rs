@@ -181,9 +181,10 @@ pub(super) fn validate_bindings(
     ssa: &TypedBody<'_>,
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<Option<SourceCalls>, RequestError> {
-    let Some(throws) = crate::p4_calls::source_throws(input, catalog, budget)? else {
+    let Some(throws) = &ssa.source_throws else {
         return Ok(None);
     };
+    let throws = throws.retained(budget)?;
     let mut receivers = Vec::new();
     let mut constructors = Vec::new();
     for (index, site) in ssa.ssa.calls.iter().enumerate() {
@@ -254,23 +255,14 @@ pub(super) fn validate_bindings(
             }
             let owner =
                 crate::substrate::owned::copy_units(input.type_name(object, budget)?, budget)?;
-            let contract = crate::p4_calls::allocation::resolve(
-                input,
-                catalog,
-                &invocation,
-                &owner,
-                use_kind,
-                budget,
-            )?;
-            if matches!(use_kind, crate::p4_calls::allocation::ConstructorUse::This) {
-                crate::p4_calls::allocation::prove_this_chain(
-                    input,
-                    catalog,
-                    site.reference,
-                    site.pc,
-                    budget,
-                )?;
-            }
+            let Some(crate::p4_calls::normal::CallEvidence::Constructor { declarations, .. }) =
+                ssa.bindings.get(index)
+            else {
+                return Err(RequestError::InternalInvariant(
+                    "constructor lost P4 declaration product",
+                ));
+            };
+            let contract = declarations.bind(site.reference, site.pc, &owner, use_kind, budget)?;
             if !throws.covers_at(
                 input,
                 catalog,
@@ -313,38 +305,26 @@ pub(super) fn validate_bindings(
                         "super receiver lost this origin",
                     ));
                 }
-                let kind = match site.kind {
-                    crate::p2_flow::normal::InvokeKind::Direct => {
-                        crate::p4_calls::ReceiverKind::Direct
-                    }
-                    crate::p2_flow::normal::InvokeKind::Super => {
-                        crate::p4_calls::ReceiverKind::Super
-                    }
-                    crate::p2_flow::normal::InvokeKind::Virtual => {
-                        crate::p4_calls::ReceiverKind::Virtual
-                    }
-                    crate::p2_flow::normal::InvokeKind::Interface => {
-                        crate::p4_calls::ReceiverKind::Interface
-                    }
-                    crate::p2_flow::normal::InvokeKind::Static => {
-                        return Err(RequestError::InternalInvariant(
-                            "static call acquired receiver",
-                        ));
-                    }
+                let Some(crate::p4_calls::normal::CallEvidence::Receiver { declaration, .. }) =
+                    ssa.bindings.get(index)
+                else {
+                    return Err(RequestError::InternalInvariant(
+                        "receiver lost P4 declaration product",
+                    ));
                 };
-                let contract = crate::p4_calls::resolve_receiver(
-                    input,
-                    catalog,
-                    &invocation,
-                    kind,
-                    &descriptor,
-                    false,
-                    budget,
-                )?
-                .ok_or(RequestError::BindingEvidenceMissing {
-                    reference: site.reference,
-                    pc: site.pc,
-                })?;
+                let declaration =
+                    declaration
+                        .as_ref()
+                        .ok_or(RequestError::BindingEvidenceMissing {
+                            reference: site.reference,
+                            pc: site.pc,
+                        })?;
+                let contract = declaration
+                    .bind_source(input, catalog, &descriptor, budget)?
+                    .ok_or(RequestError::BindingEvidenceMissing {
+                        reference: site.reference,
+                        pc: site.pc,
+                    })?;
                 if !throws.covers_at(
                     input,
                     catalog,

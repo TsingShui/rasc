@@ -13,8 +13,14 @@ pub(crate) struct ReceiverFacts {
     pub formals: Option<Vec<super::CallFormal>>,
 }
 pub(crate) enum CallEvidence {
-    Constructor(ReceiverFacts),
-    Receiver(ReceiverFacts),
+    Constructor {
+        facts: ReceiverFacts,
+        declarations: super::constructor_evidence::ConstructorDeclarations,
+    },
+    Receiver {
+        facts: ReceiverFacts,
+        declaration: Option<super::ReceiverDeclaration>,
+    },
     Declaration(StaticContract),
     Missing {
         formals: Option<Vec<super::CallFormal>>,
@@ -24,7 +30,9 @@ impl CallEvidence {
     pub(crate) fn formals(&self) -> Option<&[super::CallFormal]> {
         match self {
             Self::Declaration(contract) => Some(&contract.formals),
-            Self::Receiver(facts) | Self::Constructor(facts) => facts.formals.as_deref(),
+            Self::Receiver { facts, .. } | Self::Constructor { facts, .. } => {
+                facts.formals.as_deref()
+            }
             Self::Missing { formals } => formals.as_deref(),
         }
     }
@@ -35,6 +43,7 @@ pub(crate) struct ResolvedBody<'a> {
     pub calls: Vec<CallEvidence>,
     pub exceptions: Vec<super::exceptions::ExceptionBinding>,
     pub fields: Vec<Option<FieldEvidence>>,
+    pub source_throws: Option<SourceThrows>,
 }
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub(crate) enum FieldScope {
@@ -59,6 +68,7 @@ pub(crate) fn collect<'a>(
     ssa: SsaBody<'a>,
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<ResolvedBody<'a>, RequestError> {
+    let source_throws = super::throws::source_throws(input, catalog, budget)?;
     let mut calls = Vec::new();
     for call in &ssa.calls {
         budget.charge_work(1)?;
@@ -73,10 +83,33 @@ pub(crate) fn collect<'a>(
                 )?,
                 formals: super::contracts::original_formals(input, call.reference, budget)?,
             };
+            let invocation = super::throws::Invocation {
+                reference: call.reference,
+                pc: call.pc,
+                protection: Some(&ssa.protection),
+            };
             if call.target == crate::p2_flow::normal::CallTarget::Constructor {
-                CallEvidence::Constructor(facts)
+                let declarations =
+                    super::constructor_evidence::collect(input, catalog, &invocation, budget)?;
+                CallEvidence::Constructor {
+                    facts,
+                    declarations,
+                }
             } else {
-                CallEvidence::Receiver(facts)
+                let kind = match call.kind {
+                    crate::p2_flow::normal::InvokeKind::Direct => super::ReceiverKind::Direct,
+                    crate::p2_flow::normal::InvokeKind::Super => super::ReceiverKind::Super,
+                    crate::p2_flow::normal::InvokeKind::Virtual => super::ReceiverKind::Virtual,
+                    crate::p2_flow::normal::InvokeKind::Interface => super::ReceiverKind::Interface,
+                    crate::p2_flow::normal::InvokeKind::Static => {
+                        return Err(RequestError::InternalInvariant(
+                            "static call entered receiver collection",
+                        ));
+                    }
+                };
+                let declaration =
+                    super::receivers::collect_receiver(input, catalog, &invocation, kind, budget)?;
+                CallEvidence::Receiver { facts, declaration }
             }
         } else {
             match super::contracts::collect_static(input, catalog, call.reference, budget)? {
@@ -154,6 +187,7 @@ pub(crate) fn collect<'a>(
     let exceptions = super::exceptions::collect(input, catalog, &ssa, budget)?;
     Ok(ResolvedBody {
         _sealed: (),
+        source_throws,
         exceptions,
         ssa,
         calls,
@@ -177,7 +211,7 @@ pub(crate) fn contract<'a>(
     let index = usize::try_from(id.0).map_err(|_| RequestError::PlatformCapacity)?;
     match calls.get(index) {
         Some(CallEvidence::Declaration(contract)) => Ok(contract),
-        Some(CallEvidence::Receiver(_) | CallEvidence::Constructor(_)) => Err(
+        Some(CallEvidence::Receiver { .. } | CallEvidence::Constructor { .. }) => Err(
             RequestError::InternalInvariant("receiver call requested static contract"),
         ),
         Some(CallEvidence::Missing { .. }) => {

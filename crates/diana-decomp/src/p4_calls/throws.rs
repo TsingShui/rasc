@@ -240,6 +240,12 @@ pub(crate) fn compatible(
     }
 }
 impl SourceThrows {
+    pub(crate) fn retained(&self, budget: &mut MethodBudget<'_, '_>) -> Result<Self, RequestError> {
+        Ok(Self {
+            _sealed: (),
+            descriptors: retain(Some(&self.descriptors), budget)?,
+        })
+    }
     pub(crate) fn covers_at(
         &self,
         input: &MethodInput<'_, '_>,

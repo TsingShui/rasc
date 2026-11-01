@@ -4,6 +4,7 @@ pub(crate) use branch::verify as verify_method;
 pub(crate) mod calls;
 pub(crate) mod cast_ops;
 pub(crate) mod class_unit;
+pub(crate) mod conditions;
 pub(crate) mod constructor_entry;
 mod declarations;
 pub(crate) mod field_declarations;

@@ -18,7 +18,7 @@ pub(super) fn verify(
             "receiver has foreign call identity",
         ))?;
     let bound = typed.ssa.call(id)?;
-    let Some(CallEvidence::Receiver(facts)) = typed.bindings.get(index) else {
+    let Some(CallEvidence::Receiver { facts, .. }) = typed.bindings.get(index) else {
         return Ok(false);
     };
     let expected = match site.kind {

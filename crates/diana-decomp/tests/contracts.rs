@@ -2,6 +2,8 @@
 mod annotations;
 #[path = "input/catalog.rs"]
 mod catalog;
+#[path = "pipeline/conditions.rs"]
+mod conditions;
 #[path = "input/container.rs"]
 mod container;
 #[path = "input/debug.rs"]
@@ -22,6 +24,8 @@ mod layout;
 mod operands;
 #[path = "input/reader.rs"]
 mod reader;
+#[path = "pipeline/reservations.rs"]
+mod reservations;
 #[path = "pipeline/ssa.rs"]
 mod ssa;
 #[path = "input/structure.rs"]

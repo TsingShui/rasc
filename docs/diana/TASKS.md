@@ -2146,7 +2146,9 @@ original field results, explicit/implicit default preparation, checked source
 superclasses and ordinary-chain Java initializer bodies. D041/D042/D044/D046/D047
 pass full-unit source-JVM acceptance; D043 remains passed. Final path-count and
 delegation proofs, non-default preparation emission and D079 joint recovery
-remain pending. FinalAssignmentUnproved preserves the field identity and final
+remain pending. The [phase-boundary repair](batches/phase-boundary-repair.md)
+collects receiver/constructor declarations in P4 and seals source conditions in
+P8 before further initialization work. FinalAssignmentUnproved preserves the field identity and final
 modifier in the original facts; D045/D079 are not accepted.
 
 **Dependencies**: T19, T15. **Phase**: P1/P4/P8. **References**: DX-08/09

@@ -87,8 +87,9 @@ pub(super) fn verify(
                 "constructor certificate lost chain",
             ))?;
     let index = usize::try_from(chain.call.0).map_err(|_| RequestError::PlatformCapacity)?;
-    let Some(crate::p4_calls::normal::CallEvidence::Constructor(original)) =
-        storage.typed.bindings.get(index)
+    let Some(crate::p4_calls::normal::CallEvidence::Constructor {
+        facts: original, ..
+    }) = storage.typed.bindings.get(index)
     else {
         return Ok(false);
     };

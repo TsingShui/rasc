@@ -27,10 +27,7 @@ pub(crate) enum Transfer {
     Return(super::branch::ValueUse),
     Jump(Edge),
     Branch {
-        left: LocalId,
-        right: Option<LocalId>,
-        kind: Kind,
-        opcode: u8,
+        condition: super::conditions::Condition,
         yes: Edge,
         no: Edge,
     },
@@ -352,51 +349,19 @@ pub(super) fn verify(
                     }
                     Transfer::Jump(edge(storage, outgoing[0], key, target, budget)?)
                 }
-                Terminal::Test {
-                    opcode, yes, no, ..
-                } => {
+                Terminal::Test { yes, no, .. } => {
                     if outgoing.len() != 2 {
                         return Err(RequestError::InternalInvariant(
                             "branch edge coverage is not exact",
                         ));
                     }
-                    let left = LocalId(
-                        bound
-                            .terminal
-                            .ok_or(RequestError::InternalInvariant(
-                                "dispatcher condition lost its value",
-                            ))?
-                            .0,
-                    );
-                    let right = bound.other.map(|id| LocalId(id.0));
-                    let kind = locals[ix(left.0)?].kind;
-                    if kind == Kind::Float {
+                    let Some(condition) =
+                        super::conditions::lower(ssa, bound, block.terminal, budget)?
+                    else {
                         return Ok(None);
-                    }
-                    if let Some(right) = right
-                        && locals[ix(right.0)?].kind != kind
-                    {
-                        return Ok(None);
-                    }
-                    if matches!(
-                        kind,
-                        Kind::Boolean
-                            | Kind::Object
-                            | Kind::String
-                            | Kind::PrimitiveArray(_)
-                            | Kind::ObjectArray
-                            | Kind::Nominal(_)
-                            | Kind::ReferenceArray(_)
-                            | Kind::ProjectedNominal(_)
-                    ) && !matches!(opcode, 0x32 | 0x33 | 0x38 | 0x39)
-                    {
-                        return Ok(None);
-                    }
+                    };
                     Transfer::Branch {
-                        left,
-                        right,
-                        kind,
-                        opcode,
+                        condition,
                         yes: edge(storage, outgoing[0], key, yes, budget)?,
                         no: edge(storage, outgoing[1], key, no, budget)?,
                     }

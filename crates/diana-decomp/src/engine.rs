@@ -328,56 +328,83 @@ impl<'a> Engine<'a> {
         diagnostics: &mut DiagnosticLog,
         control: &mut RunContext<'_>,
     ) -> Result<MethodOutput, RequestError> {
-        let candidate = {
-            let mut budget = control.method_budget()?;
-            let normal = normal_member(index, key, &self.catalog, self.representation, &mut budget);
-            let (facts, cause) = match normal {
-                Ok(NormalMember::Java {
-                    facts,
-                    declaration,
-                    source,
-                }) => {
-                    return Ok(match crate::VerifiedJavaInitializer::seal(declaration) {
-                        crate::p8_java::initializers::JavaMember::Initializer(declaration) => {
-                            MethodOutput::JavaInitializer {
-                                facts,
-                                declaration,
-                                source,
+        let candidate = match control.method_budget() {
+            Err(error) => Err(error),
+            Ok(mut budget) => {
+                let normal =
+                    normal_member(index, key, &self.catalog, self.representation, &mut budget);
+                let (facts, cause) = match normal {
+                    Ok(NormalMember::Java {
+                        facts,
+                        declaration,
+                        source,
+                    }) => {
+                        return Ok(match crate::VerifiedJavaInitializer::seal(declaration) {
+                            crate::p8_java::initializers::JavaMember::Initializer(declaration) => {
+                                MethodOutput::JavaInitializer {
+                                    facts,
+                                    declaration,
+                                    source,
+                                }
                             }
-                        }
-                        crate::p8_java::initializers::JavaMember::Method(declaration) => {
-                            MethodOutput::Java {
-                                facts,
-                                declaration,
-                                source,
+                            crate::p8_java::initializers::JavaMember::Method(declaration) => {
+                                MethodOutput::Java {
+                                    facts,
+                                    declaration,
+                                    source,
+                                }
                             }
-                        }
-                    });
-                }
-                Ok(NormalMember::Declaration { facts, declaration }) => {
-                    return Ok(MethodOutput::DeclarationOnly { facts, declaration });
-                }
-                Ok(NormalMember::Raw { facts, reason }) => {
-                    (Some(facts), DiagnosticCause::Unsupported(reason))
-                }
-                Err(error) => {
-                    if error.kind() == FailureKind::Cancelled {
-                        return Err(error);
+                        });
                     }
-                    (None, DiagnosticCause::Request(error))
+                    Ok(NormalMember::Declaration { facts, declaration }) => {
+                        return Ok(MethodOutput::DeclarationOnly { facts, declaration });
+                    }
+                    Ok(NormalMember::Raw { facts, reason }) => {
+                        (Some(facts), DiagnosticCause::Unsupported(reason))
+                    }
+                    Err(error) => {
+                        if error.kind() == FailureKind::Cancelled {
+                            return Err(error);
+                        }
+                        (None, DiagnosticCause::Request(error))
+                    }
+                };
+                match self.options.recovery {
+                    RecoveryPolicy::Disabled => {}
                 }
-            };
-            match self.options.recovery {
-                RecoveryPolicy::Disabled => {}
+                let mut fallback = budget.into_fallback()?;
+                let source =
+                    match index.debug_method(key.class.class_def, key.method, &mut fallback) {
+                        Err(error) if error.kind() == FailureKind::Cancelled => {
+                            return Err(error.into());
+                        }
+                        other => other,
+                    };
+                Ok((facts, cause, source))
             }
-            let mut fallback = budget.into_fallback()?;
-            let source = match index.debug_method(key.class.class_def, key.method, &mut fallback) {
-                Err(error) if error.kind() == FailureKind::Cancelled => return Err(error.into()),
-                other => other,
-            };
-            (facts, cause, source)
         };
-        let (facts, cause, source) = candidate;
+        let (facts, cause, source) = match candidate {
+            Ok(candidate) => candidate,
+            Err(error) => {
+                if error.kind() == FailureKind::Cancelled {
+                    return Err(error.into());
+                }
+                let reason = add_diagnostic(
+                    diagnostics,
+                    Diagnostic {
+                        method: Some(key),
+                        cause: DiagnosticCause::Request(error.into()),
+                    },
+                    control,
+                )?;
+                return Ok(MethodOutput::Unavailable {
+                    facts: None,
+                    key,
+                    reason,
+                    excerpt: None,
+                });
+            }
+        };
         let normal_kind = cause.kind();
         let mut reason = add_diagnostic(
             diagnostics,

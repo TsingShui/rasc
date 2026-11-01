@@ -272,62 +272,42 @@ pub(super) fn open_if(
     output: &mut TextBuffer,
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<(), RequestError> {
-    let Transfer::Branch {
-        left,
-        right,
-        kind,
-        opcode,
-        ..
-    } = transfer
-    else {
+    use crate::p8_java::conditions::{Comparison, Expression, Right};
+    let Transfer::Branch { condition, .. } = transfer else {
         return Err(RequestError::InternalInvariant(
-            "structured condition lost original branch",
+            "structured condition lost source expression",
         ));
     };
     output.push("if (", budget)?;
-    if *kind == Kind::Boolean && right.is_none() {
-        if *opcode == 0x38 {
-            output.push("!", budget)?;
+    match condition.expression() {
+        Expression::Boolean { value, negated } => {
+            if negated {
+                output.push("!", budget)?;
+            }
+            local(value, output, budget)?;
         }
-        local(*left, output, budget)?;
-    } else {
-        local(*left, output, budget)?;
-        output.push(
-            match opcode {
-                0x32 | 0x38 => " == ",
-                0x33 | 0x39 => " != ",
-                0x34 | 0x3a => " < ",
-                0x35 | 0x3b => " >= ",
-                0x36 | 0x3c => " > ",
-                0x37 | 0x3d => " <= ",
-                _ => {
-                    return Err(RequestError::InternalInvariant(
-                        "verified dispatcher comparison is invalid",
-                    ));
-                }
-            },
-            budget,
-        )?;
-        if let Some(right) = right {
-            local(*right, output, budget)?;
-        } else {
+        Expression::Compare {
+            left,
+            operator,
+            right,
+        } => {
+            local(left, output, budget)?;
             output.push(
-                if matches!(
-                    kind,
-                    Kind::Object
-                        | Kind::String
-                        | Kind::PrimitiveArray(_)
-                        | Kind::ObjectArray
-                        | Kind::Nominal(_)
-                        | Kind::ReferenceArray(_)
-                        | Kind::ProjectedNominal(_)
-                ) {
-                    "null"
-                } else {
-                    "0"
+                match operator {
+                    Comparison::Equal => " == ",
+                    Comparison::NotEqual => " != ",
+                    Comparison::Less => " < ",
+                    Comparison::GreaterEqual => " >= ",
+                    Comparison::Greater => " > ",
+                    Comparison::LessEqual => " <= ",
                 },
                 budget,
             )?;
+            match right {
+                Right::Local(value) => local(value, output, budget)?,
+                Right::Null => output.push("null", budget)?,
+                Right::Zero => output.push("0", budget)?,
+            }
         }
     }
     output.push(") {\n", budget)?;

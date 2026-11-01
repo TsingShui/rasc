@@ -945,28 +945,23 @@ pub(super) fn verify(
                 edge(ssa, body, actual, outgoing[0], &types, budget)?;
             }
             (
-                Transfer::Branch {
-                    left,
-                    right,
-                    kind,
-                    opcode,
-                    yes,
-                    no,
-                },
+                Transfer::Branch { condition, yes, no },
                 Terminal::Test {
-                    opcode: original,
                     yes: original_yes,
                     no: original_no,
                     ..
                 },
             ) => {
                 if outgoing.len() != 2
-                    || *opcode != original
                     || yes.target != original_yes
                     || no.target != original_no
-                    || ssa.ssa.bound[index].terminal.map(|id| id.0) != Some(left.0)
-                    || ssa.ssa.bound[index].other.map(|id| id.0) != right.map(|id| id.0)
-                    || ssa.kinds[ix(left.0)?] != Some(*kind)
+                    || !super::conditions::verify(
+                        ssa,
+                        &ssa.ssa.bound[index],
+                        block.terminal,
+                        condition,
+                        budget,
+                    )?
                 {
                     return Err(RequestError::InternalInvariant(
                         "dispatcher changed branch evaluation or edge identity",

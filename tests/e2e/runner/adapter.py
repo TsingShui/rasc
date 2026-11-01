@@ -39,7 +39,7 @@ def run_public(root, cache, spec, manifest, case_ids=None,representation=None):
     run(['cargo','build','-p','diana-decomp','--release','--example','inspect_class','--locked'], root, output/'build.log', timeout=180)
     executable = root/'target/release/examples'/('inspect_class.exe' if os.name=='nt' else 'inspect_class')
     revision=run(['git','rev-parse','HEAD'],root,output/'revision.log').strip()
-    dirty=bool(run(['git','status','--porcelain','--untracked-files=no','--','crates/diana-decomp','tests/e2e/runner/adapter.py','tools/e2e.py'],root,output/'working-tree.log').strip())
+    dirty=bool(run(['git','status','--porcelain','--untracked-files=no','--','Cargo.toml','Cargo.lock','apps/diana','crates/diana-decomp','tests/e2e','docs/diana/e2e_cases.json','tools/e2e.py'],root,output/'working-tree.log').strip())
     records = []
     for case, invocation, seam in runs:
         record = {'schema_version':1,'spec_revision':spec['specRevision'],'case_id':case['id'],

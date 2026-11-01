@@ -10,6 +10,10 @@ pub(crate) enum ReceiverKind {
     Virtual,
     Interface,
 }
+pub(crate) struct ReceiverDeclaration {
+    target: ReceiverContract,
+}
+
 pub(crate) struct ReceiverContract {
     _sealed: (),
     pub reference: MethodId,
@@ -20,15 +24,13 @@ pub(crate) struct ReceiverContract {
     pub arity: usize,
     pub declared_throws: Vec<Vec<u16>>,
 }
-pub(crate) fn resolve_receiver(
+pub(crate) fn collect_receiver(
     input: &MethodInput<'_, '_>,
     catalog: &DeclarationCatalog,
     invocation: &super::throws::Invocation<'_>,
     kind: ReceiverKind,
-    parameter: &[u16],
-    requires_java_namespace: bool,
     budget: &mut MethodBudget<'_, '_>,
-) -> Result<Option<ReceiverContract>, RequestError> {
+) -> Result<Option<ReceiverDeclaration>, RequestError> {
     let reference = invocation.reference;
     let method = input.method_reference(reference, budget)?;
     let Some(formals) = super::contracts::original_formals(input, reference, budget)? else {
@@ -36,11 +38,6 @@ pub(crate) fn resolve_receiver(
     };
     let arity = formals.len();
     let owner = copy_units(method.owner, budget)?;
-    if !matches!(kind, ReceiverKind::Super)
-        && !super::reference_types::source_subtype(input, catalog, parameter, &owner, budget)?
-    {
-        return Ok(None);
-    }
     let name = copy_units(method.declaration.name, budget)?;
     let prototype = copy_proto(&method.declaration.prototype, budget)?;
     let caller = copy_units(input.owner(), budget)?;
@@ -48,9 +45,6 @@ pub(crate) fn resolve_receiver(
         return Ok(None);
     }
     let Some(class) = catalog.class(&owner, budget)? else {
-        return Ok(None);
-    };
-    let Some(source) = catalog.class(parameter, budget)? else {
         return Ok(None);
     };
     if !super::contracts::directory(class, &caller, budget)?
@@ -63,11 +57,7 @@ pub(crate) fn resolve_receiver(
             &name,
             &prototype,
             super::overloads::Scope::Receiver {
-                source: if matches!(kind, ReceiverKind::Super) {
-                    class
-                } else {
-                    source
-                },
+                source: class,
                 direct: matches!(kind, ReceiverKind::Direct),
             },
             budget,
@@ -97,7 +87,6 @@ pub(crate) fn resolve_receiver(
         if class.access_flags & 0x10 != 0
             || selected.access_flags & (0x400 | 0x10) != 0
             || caller_class.access_flags & 0x200 != 0
-            || !crate::p0_knowledge::same_units(parameter, &caller, budget)?
         {
             return Ok(None);
         }
@@ -158,20 +147,89 @@ pub(crate) fn resolve_receiver(
     {
         return Ok(None);
     }
-    if requires_java_namespace
-        && (input.qualifier_shadowed(&[106, 97, 118, 97], budget)?
-            || !clear_scope(catalog, &caller, &[106, 97, 118, 97], budget)?)
-    {
-        return Ok(None);
-    }
-    Ok(Some(ReceiverContract {
-        _sealed: (),
-        reference,
-        owner,
-        name,
-        prototype,
-        kind,
-        arity,
-        declared_throws: super::throws::retain(selected.throws.as_deref(), budget)?,
+    Ok(Some(ReceiverDeclaration {
+        target: ReceiverContract {
+            _sealed: (),
+            reference,
+            owner,
+            name,
+            prototype,
+            kind,
+            arity,
+            declared_throws: super::throws::retain(selected.throws.as_deref(), budget)?,
+        },
     }))
+}
+impl ReceiverDeclaration {
+    pub(crate) fn bind_source(
+        &self,
+        input: &MethodInput<'_, '_>,
+        catalog: &DeclarationCatalog,
+        parameter: &[u16],
+        budget: &mut MethodBudget<'_, '_>,
+    ) -> Result<Option<ReceiverContract>, RequestError> {
+        let target = &self.target;
+        let caller = copy_units(input.owner(), budget)?;
+        if target.kind == ReceiverKind::Super {
+            if !crate::p0_knowledge::same_units(parameter, &caller, budget)? {
+                return Ok(None);
+            }
+        } else if !super::reference_types::source_subtype(
+            input,
+            catalog,
+            parameter,
+            &target.owner,
+            budget,
+        )? {
+            return Ok(None);
+        }
+        let Some(class) = catalog.class(&target.owner, budget)? else {
+            return Ok(None);
+        };
+        let Some(source) = catalog.class(parameter, budget)? else {
+            return Ok(None);
+        };
+        // P4 has checked the referenced declaration group. The final static
+        // receiver type can introduce hiding/overloads, so P8 discharges this
+        // source-binding obligation only after P5 chooses that type.
+        if !super::overloads::unique_target(
+            catalog,
+            class,
+            &caller,
+            &target.name,
+            &target.prototype,
+            super::overloads::Scope::Receiver {
+                source: if target.kind == ReceiverKind::Super {
+                    class
+                } else {
+                    source
+                },
+                direct: target.kind == ReceiverKind::Direct,
+            },
+            budget,
+        )? {
+            return Ok(None);
+        }
+        Ok(Some(ReceiverContract {
+            _sealed: (),
+            reference: target.reference,
+            owner: retain(&target.owner, budget)?,
+            name: retain(&target.name, budget)?,
+            prototype: retain(&target.prototype, budget)?,
+            kind: target.kind,
+            arity: target.arity,
+            declared_throws: super::throws::retain(Some(&target.declared_throws), budget)?,
+        }))
+    }
+}
+pub(super) fn retain(
+    units: &[u16],
+    budget: &mut MethodBudget<'_, '_>,
+) -> Result<Vec<u16>, RequestError> {
+    let mut result = Vec::new();
+    for &unit in units {
+        budget.charge_work(1)?;
+        crate::substrate::owned::push(&mut result, unit, budget)?;
+    }
+    Ok(result)
 }

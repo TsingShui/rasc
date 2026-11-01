@@ -47,6 +47,7 @@ pub(crate) struct TypedBody<'a> {
     pub ranges: Vec<Option<crate::p5_types::IntRange>>,
     pub arrays: Vec<Option<ArrayEvidence>>,
     pub bindings: Vec<crate::p4_calls::normal::CallEvidence>,
+    pub source_throws: Option<crate::p4_calls::normal::SourceThrows>,
     pub exceptions: Vec<crate::p4_calls::exceptions::ExceptionBinding>,
     pub call_uses: Vec<crate::p5_types::calls::CallUses>,
     pub cast_uses: Vec<Option<crate::p5_types::calls::TypedUse>>,
@@ -143,6 +144,7 @@ pub(crate) fn solve<'a>(
 ) -> Result<Option<TypedBody<'a>>, RequestError> {
     let ssa = resolved.ssa;
     let bindings = resolved.calls;
+    let source_throws = resolved.source_throws;
     let exceptions = resolved.exceptions;
     let field_declarations = resolved.fields;
     let array_components = super::array_components::collect(input, &ssa, budget)?;
@@ -511,6 +513,25 @@ pub(crate) fn solve<'a>(
     else {
         return Ok(None);
     };
+    for (index, block) in ssa.blocks.iter().enumerate() {
+        budget.charge_work(1)?;
+        if let crate::p2_flow::normal::Terminal::Test { opcode, .. } = block.terminal
+            && matches!(opcode, 0x34..=0x37 | 0x3a..=0x3d)
+        {
+            let value = ssa.bound[index]
+                .terminal
+                .ok_or(RequestError::InternalInvariant(
+                    "typed condition lost operand",
+                ))?;
+            if kinds[ix(value.0)?].is_some_and(super::reference_roots::reference) {
+                return Err(crate::input::MethodError::Malformed {
+                    pc: block.terminal_pc,
+                    problem: crate::input::MethodProblem::InvalidTypeOperand,
+                }
+                .into());
+            }
+        }
+    }
     let roots = super::reference_roots::solve(&ssa, &kinds, budget)?;
     for op in &ssa.operations {
         budget.charge_work(1)?;
@@ -528,6 +549,7 @@ pub(crate) fn solve<'a>(
         }
     }
     let mut typed = TypedBody {
+        source_throws,
         roots,
         _sealed: (),
         ssa,

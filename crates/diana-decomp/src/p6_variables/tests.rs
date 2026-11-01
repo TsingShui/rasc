@@ -168,24 +168,31 @@ fn t09_two_entry_dispatcher_preserves_edges_and_never_reads_da_defaults() {
                 }
                 Transfer::Return(value) => return read(&values, value.value()),
                 Transfer::Jump(edge) => edge,
-                Transfer::Branch {
-                    left,
-                    right,
-                    opcode,
-                    yes,
-                    no,
-                    ..
-                } => {
-                    let left = read(&values, *left);
-                    let right = right.map_or(0, |id| read(&values, id));
-                    let taken = match opcode {
-                        0x32 | 0x38 => left == right,
-                        0x33 | 0x39 => left != right,
-                        0x34 | 0x3a => left < right,
-                        0x35 | 0x3b => left >= right,
-                        0x36 | 0x3c => left > right,
-                        0x37 | 0x3d => left <= right,
-                        _ => panic!("unexpected comparison"),
+                Transfer::Branch { condition, yes, no } => {
+                    use crate::p8_java::conditions::{Comparison, Expression, Right};
+                    let Expression::Compare {
+                        left,
+                        operator,
+                        right,
+                    } = condition.expression()
+                    else {
+                        panic!("non-int condition outside int cycle interpretation");
+                    };
+                    let left = read(&values, left);
+                    let right = match right {
+                        Right::Local(id) => read(&values, id),
+                        Right::Zero => 0,
+                        Right::Null => {
+                            panic!("reference condition outside int cycle interpretation")
+                        }
+                    };
+                    let taken = match operator {
+                        Comparison::Equal => left == right,
+                        Comparison::NotEqual => left != right,
+                        Comparison::Less => left < right,
+                        Comparison::GreaterEqual => left >= right,
+                        Comparison::Greater => left > right,
+                        Comparison::LessEqual => left <= right,
                     };
                     if taken { yes } else { no }
                 }
