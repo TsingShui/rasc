@@ -63,20 +63,28 @@ pub(crate) enum Arithmetic {
     Mul,
     And,
 }
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Eq, PartialEq)]
 pub(crate) enum Operand {
     Register(RegisterId),
     Literal(i32),
 }
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Eq, PartialEq)]
 pub(crate) struct CallId(pub u32);
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct OpId(pub u32);
+#[derive(Clone, Copy)]
+pub(crate) struct Operation {
+    pub id: OpId,
+    pub pc: CodeUnitOffset,
+    pub kind: Op,
+}
 pub(crate) struct CallSite {
     pub contract: crate::p4_calls::StaticContract,
     pub registers: Vec<RegisterId>,
     pub pc: CodeUnitOffset,
     pub result_pc: Option<CodeUnitOffset>,
 }
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Eq, PartialEq)]
 pub(crate) enum Op {
     Call(CallId, Option<RegisterId>),
     Compare(
@@ -116,7 +124,7 @@ pub(crate) enum Terminal {
 pub(crate) struct Block {
     pub pc: CodeUnitOffset,
     pub terminal_pc: CodeUnitOffset,
-    pub ops: Vec<(CodeUnitOffset, Op)>,
+    pub ops: Vec<Operation>,
     pub terminal: Terminal,
 }
 pub(crate) struct Edge {
@@ -185,18 +193,43 @@ pub(crate) fn destination(op: Op) -> Option<RegisterId> {
         Op::Nop => None,
     }
 }
-pub(crate) fn use_register(op: Op) -> Option<RegisterId> {
-    match op {
-        Op::Move(_, r) | Op::Binary(_, r, _, _) | Op::Compare(_, r, _, _) => Some(r),
-        _ => None,
+pub(crate) enum Reads<'a> {
+    Call(std::slice::Iter<'a, RegisterId>),
+    Local(std::array::IntoIter<Option<RegisterId>, 3>),
+}
+impl Iterator for Reads<'_> {
+    type Item = RegisterId;
+    fn next(&mut self) -> Option<RegisterId> {
+        match self {
+            Self::Call(registers) => registers.next().copied(),
+            Self::Local(registers) => {
+                for register in registers {
+                    if register.is_some() {
+                        return register;
+                    }
+                }
+                None
+            }
+        }
     }
 }
-pub(crate) fn other_register(op: Op) -> Option<RegisterId> {
-    match op {
-        Op::Binary(_, _, _, Operand::Register(register)) | Op::Compare(_, _, _, register) => {
-            Some(register)
-        }
-        _ => None,
+impl Op {
+    pub(crate) fn reads(self, calls: &[CallSite]) -> Result<Reads<'_>, RequestError> {
+        let registers = match self {
+            Self::Call(id, _) => {
+                let call = calls.get(ix(id.0)?).ok_or(RequestError::InternalInvariant(
+                    "operation has a foreign call identity",
+                ))?;
+                return Ok(Reads::Call(call.registers.iter()));
+            }
+            Self::Compare(_, left, _, right) => [Some(left), Some(right), None],
+            Self::Binary(_, left, _, Operand::Register(right)) => [Some(left), Some(right), None],
+            Self::Binary(_, left, _, Operand::Literal(_)) | Self::Move(_, left) => {
+                [Some(left), None, None]
+            }
+            Self::Constant(_, _) | Self::Nop => [None, None, None],
+        };
+        Ok(Reads::Local(registers.into_iter()))
     }
 }
 pub(crate) fn terminal_other(terminal: Terminal) -> Option<RegisterId> {
@@ -620,6 +653,7 @@ pub(crate) fn decode<'a>(
     let mut switches = Vec::new();
     let mut current = Vec::new();
     let mut start = CodeUnitOffset(0);
+    let mut next_operation = 0u32;
     for (position, &(pc, instruction)) in instructions.iter().enumerate() {
         budget.charge_work(1)?;
         if current.is_empty() {
@@ -653,7 +687,11 @@ pub(crate) fn decode<'a>(
                 Some(Terminal::Switch { register, table })
             }
             Decoded::Op(op) => {
-                push(&mut current, (pc, op), budget)?;
+                let id = OpId(next_operation);
+                next_operation = next_operation
+                    .checked_add(1)
+                    .ok_or(RequestError::PlatformCapacity)?;
+                push(&mut current, Operation { id, pc, kind: op }, budget)?;
                 if let Some(next) = next {
                     if contains_pc(&pcs, next, budget)? {
                         Some(Terminal::Jump(block_at(&pcs, next, budget)?))

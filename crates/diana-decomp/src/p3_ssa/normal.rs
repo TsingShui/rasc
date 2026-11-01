@@ -1,8 +1,7 @@
 use crate::input::RawMethodView;
 use crate::p2_flow::normal::{
-    Arithmetic, Block, BlockId, CallId, CallSite, DeclarationType, Edge, EdgeId, FlowBody, Op,
-    Operand, ResultType, Switch, destination, other_register, terminal_other, terminal_register,
-    use_register,
+    Block, BlockId, CallId, CallSite, DeclarationType, Edge, EdgeId, FlowBody, Op, OpId,
+    ResultType, Switch, destination, terminal_other, terminal_register,
 };
 use crate::raw::{LayoutKind, instruction_layout};
 use crate::substrate::owned::push;
@@ -16,21 +15,9 @@ pub(crate) enum Sym {
     Bad,
 }
 #[derive(Clone, Copy, Eq, PartialEq)]
-pub(crate) enum BoundOperand {
-    Value(ValueId),
-    Literal(i32),
-}
-pub(crate) struct BoundCall {
-    pub arguments: Vec<ValueId>,
-}
-#[derive(Clone, Copy)]
 pub(crate) enum Definition {
-    CallResult(CallId),
-    Compare(ValueId, crate::pipeline::scalar::Compare, ValueId),
     Parameter(u32),
-    Constant(i32),
-    Move(ValueId),
-    Binary(ValueId, Arithmetic, BoundOperand),
+    OpResult(OpId),
     Phi,
 }
 pub(crate) struct Phi {
@@ -40,14 +27,24 @@ pub(crate) struct Phi {
     pub inputs: Vec<(Option<EdgeId>, Sym)>,
 }
 pub(crate) struct BoundOp {
+    pub id: OpId,
     pub pc: CodeUnitOffset,
     pub op: Op,
+    pub inputs: Vec<ValueId>,
     pub result: Option<ValueId>,
-    pub source: Option<ValueId>,
-    pub other: Option<BoundOperand>,
+}
+impl BoundOp {
+    pub(crate) fn input(&self, index: usize) -> Result<ValueId, RequestError> {
+        self.inputs
+            .get(index)
+            .copied()
+            .ok_or(RequestError::InternalInvariant(
+                "bound operation lost an input",
+            ))
+    }
 }
 pub(crate) struct BoundBlock {
-    pub ops: Vec<BoundOp>,
+    pub ops: Vec<OpId>,
     pub terminal: Option<ValueId>,
     pub other: Option<ValueId>,
 }
@@ -55,7 +52,8 @@ pub(crate) struct SsaBody<'a> {
     _sealed: (),
     pub switches: Vec<Switch>,
     pub calls: Vec<CallSite>,
-    pub bound_calls: Vec<Option<BoundCall>>,
+    call_ops: Vec<OpId>,
+    pub operations: Vec<BoundOp>,
     pub result: ResultType,
     pub raw: RawMethodView<'a>,
     pub parameters: Vec<DeclarationType>,
@@ -64,6 +62,34 @@ pub(crate) struct SsaBody<'a> {
     pub values: Vec<Definition>,
     pub phis: Vec<Phi>,
     pub bound: Vec<BoundBlock>,
+}
+impl SsaBody<'_> {
+    pub(crate) fn operation(&self, id: OpId) -> Result<&BoundOp, RequestError> {
+        self.operations
+            .get(ix(id.0)?)
+            .ok_or(RequestError::InternalInvariant(
+                "foreign operation identity",
+            ))
+    }
+    pub(crate) fn call(&self, id: CallId) -> Result<&BoundOp, RequestError> {
+        let op = self
+            .call_ops
+            .get(ix(id.0)?)
+            .ok_or(RequestError::InternalInvariant("foreign call identity"))?;
+        self.operation(*op)
+    }
+    pub(crate) fn is_zero(&self, id: ValueId) -> Result<bool, RequestError> {
+        let definition = self
+            .values
+            .get(ix(id.0)?)
+            .ok_or(RequestError::InternalInvariant(
+                "foreign constant definition",
+            ))?;
+        match definition {
+            Definition::OpResult(op) => Ok(matches!(self.operation(*op)?.op, Op::Constant(_, 0))),
+            Definition::Parameter(_) | Definition::Phi => Ok(false),
+        }
+    }
 }
 fn ix(value: u32) -> Result<usize, RequestError> {
     usize::try_from(value).map_err(|_| RequestError::PlatformCapacity)
@@ -122,6 +148,7 @@ pub(crate) fn build<'a>(
 ) -> Result<SsaBody<'a>, RequestError> {
     let mut live = Vec::new();
     for _ in &flow.blocks {
+        budget.charge_work(1)?;
         push(&mut live, Vec::new(), budget)?;
     }
     loop {
@@ -134,19 +161,24 @@ pub(crate) fn build<'a>(
                 budget.charge_work(1)?;
                 if ix(edge.source.0)? == index {
                     for &register in &live[ix(edge.target.0)?] {
+                        budget.charge_work(1)?;
                         add_register(&mut needed, register, budget)?;
                     }
                 }
             }
-            if let Some(register) = terminal_register(block.terminal) {
-                add_register(&mut needed, register, budget)?;
-            }
-            if let Some(register) = terminal_other(block.terminal) {
-                add_register(&mut needed, register, budget)?;
-            }
-            for &(_, op) in block.ops.iter().rev() {
+            for register in [
+                terminal_register(block.terminal),
+                terminal_other(block.terminal),
+            ]
+            .into_iter()
+            .flatten()
+            {
                 budget.charge_work(1)?;
-                if let Some(destination) = destination(op) {
+                add_register(&mut needed, register, budget)?;
+            }
+            for operation in block.ops.iter().rev() {
+                budget.charge_work(1)?;
+                if let Some(destination) = destination(operation.kind) {
                     let mut position = 0;
                     while position < needed.len() {
                         budget.charge_work(1)?;
@@ -157,20 +189,13 @@ pub(crate) fn build<'a>(
                         }
                     }
                 }
-                if let Op::Call(call, _) = op {
-                    for &register in &flow.calls[ix(call.0)?].registers {
-                        budget.charge_work(1)?;
-                        add_register(&mut needed, register, budget)?;
-                    }
-                }
-                if let Some(register) = use_register(op) {
-                    add_register(&mut needed, register, budget)?;
-                }
-                if let Some(register) = other_register(op) {
+                for register in operation.kind.reads(&flow.calls)? {
+                    budget.charge_work(1)?;
                     add_register(&mut needed, register, budget)?;
                 }
             }
             for register in needed {
+                budget.charge_work(1)?;
                 changed |= add_register(&mut live[index], register, budget)?;
             }
         }
@@ -184,29 +209,23 @@ pub(crate) fn build<'a>(
         .checked_sub(
             u32::try_from(flow.parameters.len()).map_err(|_| RequestError::PlatformCapacity)?,
         )
-        .ok_or(RequestError::InternalInvariant(
-            "branch parameter frame underflow",
-        ))?;
+        .ok_or(RequestError::InternalInvariant("parameter frame underflow"))?;
     for index in 0..flow.parameters.len() {
+        budget.charge_work(1)?;
         let number = u32::try_from(index).map_err(|_| RequestError::PlatformCapacity)?;
         let id = ValueId(u32::try_from(values.len()).map_err(|_| RequestError::PlatformCapacity)?);
         push(&mut values, Definition::Parameter(number), budget)?;
-        push(
-            &mut seeds,
-            (
-                RegisterId(
-                    first
-                        .checked_add(number)
-                        .ok_or(RequestError::PlatformCapacity)?,
-                ),
-                Sym::Value(id),
-            ),
-            budget,
-        )?;
+        let register = RegisterId(
+            first
+                .checked_add(number)
+                .ok_or(RequestError::PlatformCapacity)?,
+        );
+        push(&mut seeds, (register, Sym::Value(id)), budget)?;
     }
     let mut phis = Vec::new();
     for (index, registers) in live.iter().enumerate() {
         for &register in registers {
+            budget.charge_work(1)?;
             let result =
                 ValueId(u32::try_from(values.len()).map_err(|_| RequestError::PlatformCapacity)?);
             push(&mut values, Definition::Phi, budget)?;
@@ -225,9 +244,11 @@ pub(crate) fn build<'a>(
         }
     }
     let mut bound = Vec::new();
-    let mut bound_calls = Vec::new();
+    let mut operations = Vec::new();
+    let mut call_ops = Vec::new();
     for _ in &flow.calls {
-        push(&mut bound_calls, None, budget)?;
+        budget.charge_work(1)?;
+        push(&mut call_ops, None, budget)?;
     }
     let mut outgoing = Vec::new();
     for (index, block) in flow.blocks.iter().enumerate() {
@@ -241,133 +262,52 @@ pub(crate) fn build<'a>(
             }
         }
         let mut ops = Vec::new();
-        for &(pc, op) in &block.ops {
+        for operation in &block.ops {
             budget.charge_work(1)?;
-            let source = if let Some(register) = use_register(op) {
-                Some(value(lookup(&env, register, budget)?, register, pc)?)
-            } else {
-                None
-            };
-            let other = match op {
-                Op::Compare(_, _, _, register)
-                | Op::Binary(_, _, _, Operand::Register(register)) => Some(BoundOperand::Value(
-                    value(lookup(&env, register, budget)?, register, pc)?,
-                )),
-                Op::Binary(_, _, _, Operand::Literal(literal)) => {
-                    Some(BoundOperand::Literal(literal))
-                }
-                _ => None,
-            };
-            let result = match op {
-                Op::Call(call, destination) => {
-                    let site = &flow.calls[ix(call.0)?];
-                    let mut arguments = Vec::new();
-                    for &register in &site.registers {
-                        budget.charge_work(1)?;
-                        push(
-                            &mut arguments,
-                            value(lookup(&env, register, budget)?, register, pc)?,
-                            budget,
-                        )?;
-                    }
-                    if bound_calls[ix(call.0)?].is_some() {
-                        return Err(RequestError::InternalInvariant("call was bound twice"));
-                    }
-                    bound_calls[ix(call.0)?] = Some(BoundCall { arguments });
-                    if destination.is_some() {
-                        let result = ValueId(
-                            u32::try_from(values.len())
-                                .map_err(|_| RequestError::PlatformCapacity)?,
-                        );
-                        push(&mut values, Definition::CallResult(call), budget)?;
-                        Some(result)
-                    } else {
-                        None
-                    }
-                }
-                Op::Compare(_, _, compare, _) => {
-                    let id = ValueId(
-                        u32::try_from(values.len()).map_err(|_| RequestError::PlatformCapacity)?,
-                    );
-                    let Some(BoundOperand::Value(right)) = other else {
-                        return Err(RequestError::InternalInvariant("cmp lost its right value"));
-                    };
-                    push(
-                        &mut values,
-                        Definition::Compare(
-                            source.ok_or(RequestError::InternalInvariant(
-                                "cmp lost its left value",
-                            ))?,
-                            compare,
-                            right,
-                        ),
-                        budget,
-                    )?;
-                    Some(id)
-                }
-                Op::Binary(_, _, arithmetic, _) => {
-                    let id = ValueId(
-                        u32::try_from(values.len()).map_err(|_| RequestError::PlatformCapacity)?,
-                    );
-                    push(
-                        &mut values,
-                        Definition::Binary(
-                            source.ok_or(RequestError::InternalInvariant(
-                                "arithmetic left use absent",
-                            ))?,
-                            arithmetic,
-                            other.ok_or(RequestError::InternalInvariant(
-                                "arithmetic right use absent",
-                            ))?,
-                        ),
-                        budget,
-                    )?;
-                    Some(id)
-                }
-                Op::Nop => None,
-                Op::Constant(_, constant) => {
-                    let id = ValueId(
-                        u32::try_from(values.len()).map_err(|_| RequestError::PlatformCapacity)?,
-                    );
-                    push(&mut values, Definition::Constant(constant), budget)?;
-                    Some(id)
-                }
-                Op::Move(_, _) => {
-                    let id = ValueId(
-                        u32::try_from(values.len()).map_err(|_| RequestError::PlatformCapacity)?,
-                    );
-                    push(
-                        &mut values,
-                        Definition::Move(
-                            source
-                                .ok_or(RequestError::InternalInvariant("move lost its source"))?,
-                        ),
-                        budget,
-                    )?;
-                    Some(id)
-                }
-            };
-            if let Some(register) = destination(op) {
-                write(
-                    &mut env,
-                    register,
-                    Sym::Value(result.ok_or(RequestError::InternalInvariant(
-                        "write lost its fixed definition",
-                    ))?),
+            if ix(operation.id.0)? != operations.len() {
+                return Err(RequestError::InternalInvariant(
+                    "flow operation identity changed",
+                ));
+            }
+            let mut inputs = Vec::new();
+            for register in operation.kind.reads(&flow.calls)? {
+                budget.charge_work(1)?;
+                push(
+                    &mut inputs,
+                    value(lookup(&env, register, budget)?, register, operation.pc)?,
                     budget,
                 )?;
             }
+            let result = if let Some(register) = destination(operation.kind) {
+                let id = ValueId(
+                    u32::try_from(values.len()).map_err(|_| RequestError::PlatformCapacity)?,
+                );
+                push(&mut values, Definition::OpResult(operation.id), budget)?;
+                write(&mut env, register, Sym::Value(id), budget)?;
+                Some(id)
+            } else {
+                None
+            };
+            if let Op::Call(call, _) = operation.kind {
+                let recorded = call_ops
+                    .get_mut(ix(call.0)?)
+                    .ok_or(RequestError::InternalInvariant("foreign flow call"))?;
+                if recorded.replace(operation.id).is_some() {
+                    return Err(RequestError::InternalInvariant("call was bound twice"));
+                }
+            }
             push(
-                &mut ops,
+                &mut operations,
                 BoundOp {
-                    pc,
-                    op,
+                    id: operation.id,
+                    pc: operation.pc,
+                    op: operation.kind,
+                    inputs,
                     result,
-                    source,
-                    other,
                 },
                 budget,
             )?;
+            push(&mut ops, operation.id, budget)?;
         }
         let terminal = if let Some(register) = terminal_register(block.terminal) {
             Some(value(
@@ -401,6 +341,7 @@ pub(crate) fn build<'a>(
             budget.charge_work(1)?;
             if edge.source == block_id {
                 for &register in &live[ix(edge.target.0)?] {
+                    budget.charge_work(1)?;
                     let mut present = false;
                     for &(slot, _) in &snapshot {
                         budget.charge_work(1)?;
@@ -422,6 +363,7 @@ pub(crate) fn build<'a>(
         push(&mut outgoing, snapshot, budget)?;
     }
     for phi in &mut phis {
+        budget.charge_work(1)?;
         if phi.block == BlockId(0) {
             push(
                 &mut phi.inputs,
@@ -445,11 +387,21 @@ pub(crate) fn build<'a>(
             }
         }
     }
+    let mut connected_calls = Vec::new();
+    for operation in call_ops {
+        budget.charge_work(1)?;
+        push(
+            &mut connected_calls,
+            operation.ok_or(RequestError::InternalInvariant("unconnected call"))?,
+            budget,
+        )?;
+    }
     let ssa = SsaBody {
         _sealed: (),
         switches: flow.switches,
         calls: flow.calls,
-        bound_calls,
+        call_ops: connected_calls,
+        operations,
         result: flow.result,
         raw: flow.raw,
         parameters: flow.parameters,
@@ -459,307 +411,243 @@ pub(crate) fn build<'a>(
         phis,
         bound,
     };
-    verify(ssa, &seeds, budget)
+    verify(&ssa, &seeds, budget)?;
+    Ok(ssa)
 }
-
-fn verify<'a>(
-    ssa: SsaBody<'a>,
+fn verify(
+    ssa: &SsaBody<'_>,
     seeds: &[(RegisterId, Sym)],
     budget: &mut MethodBudget<'_, '_>,
-) -> Result<SsaBody<'a>, RequestError> {
+) -> Result<(), RequestError> {
+    let mut operation_count = 0usize;
     for (index, block) in ssa.blocks.iter().enumerate() {
         budget.charge_work(1)?;
         if block.pc.0 > block.terminal_pc.0 || block.terminal_pc.0 >= ssa.raw.code_units().0 {
-            return Err(RequestError::InternalInvariant(
-                "SSA block has an invalid original extent",
-            ));
+            return Err(RequestError::InternalInvariant("invalid SSA block extent"));
         }
         let block_id = BlockId(u32::try_from(index).map_err(|_| RequestError::PlatformCapacity)?);
         let mut env = Vec::new();
         for phi in &ssa.phis {
-            if phi.block == block_id {
-                let mut expected = usize::from(index == 0);
-                for edge in &ssa.edges {
-                    budget.charge_work(1)?;
-                    if edge.target == block_id {
-                        expected = expected
-                            .checked_add(1)
-                            .ok_or(RequestError::PlatformCapacity)?;
+            budget.charge_work(1)?;
+            if phi.block != block_id {
+                continue;
+            }
+            let mut expected = usize::from(index == 0);
+            for edge in &ssa.edges {
+                budget.charge_work(1)?;
+                if edge.target == block_id {
+                    expected = expected
+                        .checked_add(1)
+                        .ok_or(RequestError::PlatformCapacity)?;
+                }
+            }
+            if phi.inputs.len() != expected {
+                return Err(RequestError::InternalInvariant("incomplete Phi input set"));
+            }
+            write(&mut env, phi.register, Sym::Value(phi.result), budget)?;
+            let mut seed_count = 0usize;
+            for &(edge, sym) in &phi.inputs {
+                budget.charge_work(1)?;
+                if edge.is_none() {
+                    seed_count = seed_count
+                        .checked_add(1)
+                        .ok_or(RequestError::PlatformCapacity)?;
+                    if index != 0 || sym != lookup(seeds, phi.register, budget)? {
+                        return Err(RequestError::InternalInvariant("foreign EntrySeed"));
                     }
                 }
-                if phi.inputs.len() != expected {
-                    return Err(RequestError::InternalInvariant(
-                        "Phi input set is incomplete",
-                    ));
-                }
-                write(&mut env, phi.register, Sym::Value(phi.result), budget)?;
-                let mut seed_count = 0usize;
-                for (edge, _) in &phi.inputs {
-                    budget.charge_work(1)?;
-                    if edge.is_none() {
-                        seed_count = seed_count
-                            .checked_add(1)
-                            .ok_or(RequestError::PlatformCapacity)?;
-                    }
-                }
-                if index == 0 && seed_count != 1 {
-                    return Err(RequestError::InternalInvariant("entry Phi lost EntrySeed"));
-                }
-                for &(edge, sym) in &phi.inputs {
-                    budget.charge_work(1)?;
-                    if edge.is_none() && (index != 0 || sym != lookup(seeds, phi.register, budget)?)
-                    {
-                        return Err(RequestError::InternalInvariant(
-                            "entry Phi uses a non-parameter seed",
-                        ));
-                    }
-                }
+            }
+            if seed_count != usize::from(index == 0) {
+                return Err(RequestError::InternalInvariant("entry Phi lost EntrySeed"));
             }
         }
         if ssa.bound[index].ops.len() != block.ops.len() {
             return Err(RequestError::InternalInvariant(
-                "SSA changed the original operation count",
+                "SSA changed operation coverage",
             ));
         }
-        for ((pc, op), bound) in block.ops.iter().zip(&ssa.bound[index].ops) {
+        for (original, &id) in block.ops.iter().zip(&ssa.bound[index].ops) {
             budget.charge_work(1)?;
-            if *pc != bound.pc {
-                return Err(RequestError::InternalInvariant(
-                    "SSA operation has a foreign site",
-                ));
-            }
-            if let Some(register) = use_register(*op)
-                && bound.source != Some(value(lookup(&env, register, budget)?, register, *pc)?)
+            let op = ssa.operation(id)?;
+            if original.id != id
+                || op.id != id
+                || ix(id.0)? != operation_count
+                || original.pc != op.pc
+                || original.kind != op.op
             {
                 return Err(RequestError::InternalInvariant(
-                    "SSA use is not the latest local definition",
+                    "SSA changed operation identity or site",
                 ));
             }
-            let expected_other = match *op {
-                Op::Compare(_, _, _, register)
-                | Op::Binary(_, _, _, Operand::Register(register)) => Some(BoundOperand::Value(
-                    value(lookup(&env, register, budget)?, register, *pc)?,
-                )),
-                Op::Binary(_, _, _, Operand::Literal(literal)) => {
-                    Some(BoundOperand::Literal(literal))
+            operation_count = operation_count
+                .checked_add(1)
+                .ok_or(RequestError::PlatformCapacity)?;
+            let mut inputs = op.inputs.iter();
+            for register in original.kind.reads(&ssa.calls)? {
+                budget.charge_work(1)?;
+                if inputs.next().copied()
+                    != Some(value(lookup(&env, register, budget)?, register, op.pc)?)
+                {
+                    return Err(RequestError::InternalInvariant(
+                        "SSA input is not the latest definition",
+                    ));
                 }
-                _ => None,
-            };
-            if bound.other != expected_other {
+            }
+            if inputs.next().is_some() {
                 return Err(RequestError::InternalInvariant(
-                    "SSA changed the arithmetic right use",
+                    "SSA added operation inputs",
                 ));
             }
-            match *op {
-                Op::Call(call, destination) => {
-                    let site = ssa
-                        .calls
-                        .get(ix(call.0)?)
-                        .ok_or(RequestError::InternalInvariant("call has foreign identity"))?;
-                    let original =
-                        instruction_layout(ssa.raw.instructions(), *pc, ssa.raw.version())
-                            .map_err(crate::input::MethodError::Decode)?;
-                    if !matches!(original.kind(),LayoutKind::Instruction(spec) if matches!(spec.opcode,0x71|0x77))
-                        || !matches!(original.references()[0],Some(reference) if reference.target==crate::raw::OperandReference::Method(site.contract.reference))
-                    {
-                        return Err(RequestError::InternalInvariant(
-                            "call changed its original invoke or method reference",
-                        ));
-                    }
-                    let original_operands = crate::input::operands::instruction_operands(
-                        ssa.raw.instructions(),
-                        *pc,
-                        original,
-                    )
-                    .map_err(crate::input::MethodError::Decode)?;
-                    let mut original_registers = original_operands.registers().iter();
-                    for &register in &site.registers {
-                        budget.charge_work(1)?;
-                        if original_registers.next() != Some(register) {
-                            return Err(RequestError::InternalInvariant(
-                                "call changed original argument word order",
-                            ));
-                        }
-                    }
-                    if original_registers.next().is_some() {
-                        return Err(RequestError::InternalInvariant(
-                            "call dropped original argument words",
-                        ));
-                    }
-                    if let Some(result_pc) = site.result_pc {
-                        if pc.checked_advance(original.width()) != Some(result_pc) {
-                            return Err(RequestError::InternalInvariant(
-                                "call result is not adjacent",
-                            ));
-                        }
-                        let result = instruction_layout(
-                            ssa.raw.instructions(),
-                            result_pc,
-                            ssa.raw.version(),
-                        )
-                        .map_err(crate::input::MethodError::Decode)?;
-                        let operands = crate::input::operands::instruction_operands(
-                            ssa.raw.instructions(),
-                            result_pc,
-                            result,
-                        )
-                        .map_err(crate::input::MethodError::Decode)?;
-                        let expected = match site.contract.result {
-                            crate::p4_calls::StaticResult::Int
-                            | crate::p4_calls::StaticResult::Boolean => Some(0x0a),
-                            crate::p4_calls::StaticResult::Reference(_)
-                            | crate::p4_calls::StaticResult::Nominal => Some(0x0c),
-                            crate::p4_calls::StaticResult::Void => None,
-                        };
-                        if !matches!(result.kind(),LayoutKind::Instruction(spec) if Some(spec.opcode)==expected)
-                            || operands.registers().iter().next() != destination
-                        {
-                            return Err(RequestError::InternalInvariant(
-                                "call changed move-result kind or target",
-                            ));
-                        }
-                    }
-                    let arguments = ssa
-                        .bound_calls
-                        .get(ix(call.0)?)
-                        .and_then(Option::as_ref)
-                        .ok_or(RequestError::InternalInvariant("call lost bound arguments"))?;
-                    if site.pc != *pc
-                        || site.registers.len() != arguments.arguments.len()
-                        || destination.is_some() != bound.result.is_some()
-                        || destination.is_some() != site.result_pc.is_some()
-                    {
-                        return Err(RequestError::InternalInvariant(
-                            "call atom changed its original/result sites",
-                        ));
-                    }
-                    for (&register, &argument) in site.registers.iter().zip(&arguments.arguments) {
-                        budget.charge_work(1)?;
-                        if value(lookup(&env, register, budget)?, register, *pc)? != argument {
-                            return Err(RequestError::InternalInvariant(
-                                "call changed argument words or order",
-                            ));
-                        }
-                    }
-                    if let Some(result) = bound.result
-                        && !matches!(ssa.values.get(ix(result.0)?),Some(Definition::CallResult(original)) if original.0==call.0)
-                    {
-                        return Err(RequestError::InternalInvariant(
-                            "call acquired a foreign result definition",
-                        ));
-                    }
+            if let Op::Call(call, destination) = original.kind {
+                if ssa.call(call)?.id != id {
+                    return Err(RequestError::InternalInvariant(
+                        "call changed operation identity",
+                    ));
                 }
-                Op::Compare(_, _, compare, _) => {
-                    if !matches!(bound.result.and_then(|id|ssa.values.get(usize::try_from(id.0).ok()?)),Some(Definition::Compare(left,kind,right)) if Some(*left)==bound.source&&*kind==compare&&Some(BoundOperand::Value(*right))==bound.other)
-                    {
-                        return Err(RequestError::InternalInvariant(
-                            "SSA cmp changed original operands or NaN bias",
-                        ));
-                    }
-                }
-                Op::Binary(_, _, arithmetic, _) => {
-                    if !matches!(bound.result.and_then(|id|ssa.values.get(usize::try_from(id.0).ok()?)),Some(Definition::Binary(left,kind,right)) if Some(*left)==bound.source && *kind==arithmetic && Some(*right)==bound.other)
-                    {
-                        return Err(RequestError::InternalInvariant(
-                            "SSA changed an arithmetic definition",
-                        ));
-                    }
-                }
-                Op::Constant(_, literal) => {
-                    if !matches!(bound.result.and_then(|id|ssa.values.get(usize::try_from(id.0).ok()?)),Some(Definition::Constant(actual)) if *actual==literal)
-                    {
-                        return Err(RequestError::InternalInvariant(
-                            "SSA changed the original constant",
-                        ));
-                    }
-                }
-                Op::Move(_, _) => {
-                    if !matches!(bound.result.and_then(|id|ssa.values.get(usize::try_from(id.0).ok()?)),Some(Definition::Move(actual)) if Some(*actual)==bound.source)
-                    {
-                        return Err(RequestError::InternalInvariant(
-                            "SSA move result uses a different definition",
-                        ));
-                    }
-                }
-                Op::Nop => {
-                    if bound.result.is_some() || bound.source.is_some() {
-                        return Err(RequestError::InternalInvariant(
-                            "NOP acquired a definition or use",
-                        ));
-                    }
-                }
+                verify_call(ssa, op.pc, call, destination, budget)?;
             }
-            if let Some(register) = destination(*op) {
-                write(
-                    &mut env,
-                    register,
-                    Sym::Value(bound.result.ok_or(RequestError::InternalInvariant(
-                        "SSA write has no fixed result",
-                    ))?),
-                    budget,
-                )?;
+            match (destination(original.kind), op.result) {
+                (Some(register), Some(result)) => {
+                    if ssa.values.get(ix(result.0)?) != Some(&Definition::OpResult(id)) {
+                        return Err(RequestError::InternalInvariant(
+                            "operation changed result definition",
+                        ));
+                    }
+                    write(&mut env, register, Sym::Value(result), budget)?;
+                }
+                (None, None) => {}
+                _ => {
+                    return Err(RequestError::InternalInvariant(
+                        "operation changed result availability",
+                    ));
+                }
             }
         }
-        if let Some(register) = terminal_register(block.terminal)
-            && ssa.bound[index].terminal
-                != Some(value(
+        for (register, actual) in [
+            (terminal_register(block.terminal), ssa.bound[index].terminal),
+            (terminal_other(block.terminal), ssa.bound[index].other),
+        ] {
+            budget.charge_work(1)?;
+            let expected = if let Some(register) = register {
+                Some(value(
                     lookup(&env, register, budget)?,
                     register,
                     block.terminal_pc,
                 )?)
-        {
-            return Err(RequestError::InternalInvariant(
-                "SSA terminal does not read the latest definition",
-            ));
-        }
-        let expected_other = if let Some(register) = terminal_other(block.terminal) {
-            Some(value(
-                lookup(&env, register, budget)?,
-                register,
-                block.terminal_pc,
-            )?)
-        } else {
-            None
-        };
-        if ssa.bound[index].other != expected_other {
-            return Err(RequestError::InternalInvariant(
-                "SSA changed the comparison right use",
-            ));
+            } else {
+                None
+            };
+            if actual != expected {
+                return Err(RequestError::InternalInvariant(
+                    "terminal changed its bound use",
+                ));
+            }
         }
         for (edge_index, edge) in ssa.edges.iter().enumerate() {
             budget.charge_work(1)?;
-            if edge.source == block_id {
-                let id = Some(EdgeId(
-                    u32::try_from(edge_index).map_err(|_| RequestError::PlatformCapacity)?,
-                ));
-                for phi in &ssa.phis {
-                    if phi.block == edge.target {
-                        let mut supplied = None;
-                        for &(incoming, sym) in &phi.inputs {
-                            budget.charge_work(1)?;
-                            if incoming == id {
-                                if supplied.is_some() {
-                                    return Err(RequestError::InternalInvariant(
-                                        "edge has duplicate Phi inputs",
-                                    ));
-                                }
-                                supplied = Some(sym);
-                            }
-                        }
-                        let supplied = supplied
-                            .ok_or(RequestError::InternalInvariant("edge has no Phi input"))?;
-                        if supplied != lookup(&env, phi.register, budget)? {
-                            return Err(RequestError::InternalInvariant(
-                                "Phi edge is not the post-commit environment",
-                            ));
-                        }
+            if edge.source != block_id {
+                continue;
+            }
+            let id = Some(EdgeId(
+                u32::try_from(edge_index).map_err(|_| RequestError::PlatformCapacity)?,
+            ));
+            for phi in &ssa.phis {
+                budget.charge_work(1)?;
+                if phi.block != edge.target {
+                    continue;
+                }
+                let mut supplied = None;
+                for &(incoming, sym) in &phi.inputs {
+                    budget.charge_work(1)?;
+                    if incoming == id && supplied.replace(sym).is_some() {
+                        return Err(RequestError::InternalInvariant("duplicate Phi edge"));
                     }
+                }
+                if supplied != Some(lookup(&env, phi.register, budget)?) {
+                    return Err(RequestError::InternalInvariant(
+                        "Phi edge is not the post-commit environment",
+                    ));
                 }
             }
         }
     }
-    verify_availability(&ssa, budget)?;
-    Ok(ssa)
+    if operation_count != ssa.operations.len() {
+        return Err(RequestError::InternalInvariant(
+            "SSA retained foreign operations",
+        ));
+    }
+    verify_availability(ssa, budget)
+}
+fn verify_call(
+    ssa: &SsaBody<'_>,
+    pc: CodeUnitOffset,
+    call: CallId,
+    destination: Option<RegisterId>,
+    budget: &mut MethodBudget<'_, '_>,
+) -> Result<(), RequestError> {
+    let site = ssa
+        .calls
+        .get(ix(call.0)?)
+        .ok_or(RequestError::InternalInvariant("call has foreign identity"))?;
+    let original = instruction_layout(ssa.raw.instructions(), pc, ssa.raw.version())
+        .map_err(crate::input::MethodError::Decode)?;
+    if !matches!(original.kind(),LayoutKind::Instruction(spec) if matches!(spec.opcode,0x71|0x77))
+        || !matches!(original.references()[0],Some(reference) if reference.target==crate::raw::OperandReference::Method(site.contract.reference))
+    {
+        return Err(RequestError::InternalInvariant(
+            "call changed its original invoke or method reference",
+        ));
+    }
+    let original_operands =
+        crate::input::operands::instruction_operands(ssa.raw.instructions(), pc, original)
+            .map_err(crate::input::MethodError::Decode)?;
+    let mut original_registers = original_operands.registers().iter();
+    for &register in &site.registers {
+        budget.charge_work(1)?;
+        if original_registers.next() != Some(register) {
+            return Err(RequestError::InternalInvariant(
+                "call changed original argument word order",
+            ));
+        }
+    }
+    if original_registers.next().is_some() {
+        return Err(RequestError::InternalInvariant(
+            "call dropped original argument words",
+        ));
+    }
+    if let Some(result_pc) = site.result_pc {
+        if pc.checked_advance(original.width()) != Some(result_pc) {
+            return Err(RequestError::InternalInvariant(
+                "call result is not adjacent",
+            ));
+        }
+        let result = instruction_layout(ssa.raw.instructions(), result_pc, ssa.raw.version())
+            .map_err(crate::input::MethodError::Decode)?;
+        let operands =
+            crate::input::operands::instruction_operands(ssa.raw.instructions(), result_pc, result)
+                .map_err(crate::input::MethodError::Decode)?;
+        let expected = match site.contract.result {
+            crate::p4_calls::StaticResult::Int | crate::p4_calls::StaticResult::Boolean => {
+                Some(0x0a)
+            }
+            crate::p4_calls::StaticResult::Reference(_)
+            | crate::p4_calls::StaticResult::Nominal => Some(0x0c),
+            crate::p4_calls::StaticResult::Void => None,
+        };
+        if !matches!(result.kind(),LayoutKind::Instruction(spec) if Some(spec.opcode)==expected)
+            || operands.registers().iter().next() != destination
+        {
+            return Err(RequestError::InternalInvariant(
+                "call changed move-result kind or target",
+            ));
+        }
+    }
+    if site.pc != pc || destination.is_some() != site.result_pc.is_some() {
+        return Err(RequestError::InternalInvariant(
+            "call changed original/result sites",
+        ));
+    }
+    Ok(())
 }
 fn verify_availability(
     ssa: &SsaBody<'_>,
@@ -778,22 +666,16 @@ fn verify_availability(
     }
     loop {
         let mut changed = false;
-        for (index, definition) in ssa.values.iter().enumerate() {
+        for op in &ssa.operations {
             budget.charge_work(1)?;
-            let sources = match *definition {
-                Definition::Move(source) => [Some(source), None],
-                Definition::Compare(left, _, right) => [Some(left), Some(right)],
-                Definition::Binary(left, _, BoundOperand::Value(right)) => {
-                    [Some(left), Some(right)]
-                }
-                Definition::Binary(left, _, BoundOperand::Literal(_)) => [Some(left), None],
-                _ => [None, None],
-            };
-            for source in sources.into_iter().flatten() {
-                budget.charge_work(1)?;
-                if bad[ix(source.0)?] && !bad[index] {
-                    bad[index] = true;
-                    changed = true;
+            if let Some(result) = op.result {
+                let index = ix(result.0)?;
+                for source in &op.inputs {
+                    budget.charge_work(1)?;
+                    if bad[ix(source.0)?] && !bad[index] {
+                        bad[index] = true;
+                        changed = true;
+                    }
                 }
             }
         }
@@ -828,29 +710,15 @@ fn verify_availability(
             Ok(())
         }
     };
+    for op in &ssa.operations {
+        budget.charge_work(1)?;
+        for (register, &source) in op.op.reads(&ssa.calls)?.zip(&op.inputs) {
+            budget.charge_work(1)?;
+            available(source, register, op.pc)?;
+        }
+    }
     for (index, block) in ssa.blocks.iter().enumerate() {
         budget.charge_work(1)?;
-        for op in &ssa.bound[index].ops {
-            budget.charge_work(1)?;
-            if let Some(source) = op.source {
-                available(
-                    source,
-                    use_register(op.op).ok_or(RequestError::InternalInvariant(
-                        "bound source has no original register",
-                    ))?,
-                    op.pc,
-                )?;
-            }
-            if let Some(BoundOperand::Value(source)) = op.other {
-                available(
-                    source,
-                    other_register(op.op).ok_or(RequestError::InternalInvariant(
-                        "bound right source has no original register",
-                    ))?,
-                    op.pc,
-                )?;
-            }
-        }
         for (register, source) in [
             (terminal_register(block.terminal), ssa.bound[index].terminal),
             (terminal_other(block.terminal), ssa.bound[index].other),
@@ -859,18 +727,6 @@ fn verify_availability(
             if let (Some(register), Some(source)) = (register, source) {
                 available(source, register, block.terminal_pc)?;
             }
-        }
-    }
-    for (index, site) in ssa.calls.iter().enumerate() {
-        budget.charge_work(1)?;
-        let call = ssa.bound_calls[index]
-            .as_ref()
-            .ok_or(RequestError::InternalInvariant(
-                "reachable call has no argument binding",
-            ))?;
-        for (&register, &argument) in site.registers.iter().zip(&call.arguments) {
-            budget.charge_work(1)?;
-            available(argument, register, site.pc)?;
         }
     }
     Ok(())

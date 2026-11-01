@@ -238,39 +238,17 @@ pub(super) fn copies(
 pub(super) fn operation(
     op: &crate::pipeline::branch::BoundOp,
 ) -> Result<Option<Assignment>, RequestError> {
+    use crate::p2_flow::normal::Operand;
     let expression = match op.op {
         Op::Compare(_, _, compare, _) => {
-            let Some(crate::pipeline::branch::BoundOperand::Value(right)) = op.other else {
-                return Err(RequestError::InternalInvariant(
-                    "owned cmp lost right operand",
-                ));
-            };
-            Expression::Compare(
-                LocalId(
-                    op.source
-                        .ok_or(RequestError::InternalInvariant(
-                            "owned cmp lost left operand",
-                        ))?
-                        .0,
-                ),
-                compare,
-                LocalId(right.0),
-            )
+            Expression::Compare(LocalId(op.input(0)?.0), compare, LocalId(op.input(1)?.0))
         }
-        Op::Binary(_, _, kind, _) => Expression::Binary(
-            LocalId(
-                op.source
-                    .ok_or(RequestError::InternalInvariant(
-                        "verified arithmetic left local absent",
-                    ))?
-                    .0,
-            ),
+        Op::Binary(_, _, kind, right) => Expression::Binary(
+            LocalId(op.input(0)?.0),
             kind,
-            match op.other.ok_or(RequestError::InternalInvariant(
-                "verified arithmetic right local absent",
-            ))? {
-                crate::pipeline::branch::BoundOperand::Value(id) => Right::Local(LocalId(id.0)),
-                crate::pipeline::branch::BoundOperand::Literal(value) => Right::Literal(value),
+            match right {
+                Operand::Register(_) => Right::Local(LocalId(op.input(1)?.0)),
+                Operand::Literal(value) => Right::Literal(value),
             },
         ),
         Op::Nop => return Ok(None),
@@ -280,15 +258,8 @@ pub(super) fn operation(
             ));
         }
         Op::Constant(_, value) => Expression::Constant(value),
-        Op::Move(_, _) => Expression::Local(LocalId(
-            op.source
-                .ok_or(RequestError::InternalInvariant(
-                    "verified move lost its source",
-                ))?
-                .0,
-        )),
+        Op::Move(_, _) => Expression::Local(LocalId(op.input(0)?.0)),
     };
-
     Ok(Some(Assignment {
         target: LocalId(
             op.result
@@ -306,8 +277,9 @@ pub(super) fn operations(
     output: &mut Vec<Assignment>,
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<(), RequestError> {
-    for op in &ssa.ssa.bound[ix(block.0)?].ops {
+    for &id in &ssa.ssa.bound[ix(block.0)?].ops {
         budget.charge_work(1)?;
+        let op = ssa.ssa.operation(id)?;
         if let Some(statement) = operation(op)? {
             append(output, statement, budget)?;
         }
@@ -343,9 +315,9 @@ fn verify_diamond(
     }
     for block in &ssa.ssa.blocks {
         budget.charge_work(1)?;
-        for &(_, op) in &block.ops {
+        for op in &block.ops {
             budget.charge_work(1)?;
-            if op.effects().observable() {
+            if op.kind.effects().observable() {
                 return Ok(None);
             }
         }
@@ -501,9 +473,9 @@ fn verify_diamond(
     )?;
     // Join operations are a sequence after both incoming copy plans. The first
     // profile accepts a return-only join, not a skipped operation list.
-    for op in &ssa.ssa.bound[ix(join.0)?].ops {
+    for &id in &ssa.ssa.bound[ix(join.0)?].ops {
         budget.charge_work(1)?;
-        if !matches!(op.op, Op::Nop) {
+        if !matches!(ssa.ssa.operation(id)?.op, Op::Nop) {
             return Ok(None);
         }
     }

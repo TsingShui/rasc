@@ -4,7 +4,7 @@ use crate::{DeclarationCatalog, MethodBudget, RequestError};
 pub(crate) use crate::p2_flow::normal::{
     Arithmetic, BlockId, CallId, DeclarationType, EdgeId, Op, ResultType, Terminal,
 };
-pub(crate) use crate::p3_ssa::normal::{BoundOp, BoundOperand, Definition, Sym, ValueId};
+pub(crate) use crate::p3_ssa::normal::{BoundOp, Definition, Sym, ValueId};
 pub(crate) use crate::p5_types::normal::{Kind, TypedBody};
 
 pub(crate) fn build<'a>(

@@ -1,9 +1,7 @@
 use super::branch::{Assignment, Expression, LocalId, Right};
 use super::dispatcher::{Dispatcher, Edge, Transfer};
 use crate::p6_variables::{Copy, CopyPlan, LocalType, LocalTypeId, Temporary};
-use crate::pipeline::branch::{
-    BlockId, BoundOperand, Definition, EdgeId, Kind, Op, Sym, Terminal, TypedBody,
-};
+use crate::pipeline::branch::{BlockId, Definition, EdgeId, Kind, Op, Sym, Terminal, TypedBody};
 use crate::substrate::owned::reserve;
 use crate::{MethodBudget, RequestError};
 fn ix(id: u32) -> Result<usize, RequestError> {
@@ -30,30 +28,26 @@ fn ty(kind: Kind) -> Result<LocalType, RequestError> {
         1,
     )
 }
-fn same_expression(
-    actual: &Expression,
-    op: Op,
-    left: Option<crate::pipeline::branch::ValueId>,
-    right: Option<BoundOperand>,
-) -> bool {
-    match (actual, op) {
+fn same_expression(actual: &Expression, bound: &crate::pipeline::branch::BoundOp) -> bool {
+    use crate::p2_flow::normal::Operand;
+    let left = bound.inputs.first();
+    let right = bound.inputs.get(1);
+    match (actual, bound.op) {
         (Expression::Compare(a, compare, b), Op::Compare(_, _, original, _)) => {
             left.is_some_and(|value| value.0 == a.0)
                 && *compare == original
-                && matches!(right,Some(BoundOperand::Value(value)) if value.0==b.0)
+                && right.is_some_and(|value| value.0 == b.0)
         }
         (Expression::Constant(actual), Op::Constant(_, original)) => *actual == original,
         (Expression::Local(actual), Op::Move(_, _)) => left.is_some_and(|id| actual.0 == id.0),
-        (Expression::Binary(actual, kind, rhs), Op::Binary(_, _, original, _)) => {
+        (Expression::Binary(actual, kind, rhs), Op::Binary(_, _, original, operand)) => {
             left.is_some_and(|id| actual.0 == id.0)
                 && *kind == original
-                && match (rhs, right) {
-                    (Right::Local(actual), Some(BoundOperand::Value(original))) => {
-                        actual.0 == original.0
+                && match (rhs, operand) {
+                    (Right::Local(actual), Operand::Register(_)) => {
+                        right.is_some_and(|id| actual.0 == id.0)
                     }
-                    (Right::Literal(actual), Some(BoundOperand::Literal(original))) => {
-                        *actual == original
-                    }
+                    (Right::Literal(actual), Operand::Literal(original)) => *actual == original,
                     _ => false,
                 }
         }
@@ -73,11 +67,7 @@ fn static_call(
         .ok_or(RequestError::InternalInvariant(
             "call certificate has foreign site",
         ))?;
-    let bound = ssa.ssa.bound_calls[ix(id.0)?]
-        .as_ref()
-        .ok_or(RequestError::InternalInvariant(
-            "call certificate lost argument bindings",
-        ))?;
+    let bound = ssa.ssa.call(id)?;
     let contract = &site.contract;
     if actual.reference != contract.reference
         || actual.original_owner != contract.owner
@@ -85,7 +75,7 @@ fn static_call(
         || actual.prototype != contract.prototype
         || actual.invoke != site.pc
         || actual.result_site != site.result_pc
-        || actual.arguments.len() != bound.arguments.len()
+        || actual.arguments.len() != bound.inputs.len()
         || actual.arguments.len() != contract.formals.len()
     {
         return Ok(false);
@@ -119,7 +109,7 @@ fn static_call(
     for ((&view, &value), &formal) in actual
         .arguments
         .iter()
-        .zip(&bound.arguments)
+        .zip(&bound.inputs)
         .zip(&contract.formals)
     {
         budget.charge_work(1)?;
@@ -129,7 +119,7 @@ fn static_call(
         }
         let valid = match (view, formal, ssa.kinds[at]) {
             (ValueUse::Null { kind, .. }, CallFormal::Reference(expected), _) => {
-                kind == expected && matches!(ssa.ssa.values[at], Definition::Constant(0))
+                kind == expected && ssa.ssa.is_zero(value)?
             }
             (
                 ValueUse::Direct(_),
@@ -339,8 +329,9 @@ pub(super) fn verify(
         }
         seen[index] = true;
         let mut statement = 0usize;
-        for bound in &ssa.ssa.bound[index].ops {
+        for &id in &ssa.ssa.bound[index].ops {
             budget.charge_work(1)?;
+            let bound = ssa.ssa.operation(id)?;
             if matches!(bound.op, Op::Nop) {
                 continue;
             }
@@ -353,7 +344,7 @@ pub(super) fn verify(
             let matches = match actual {
                 super::calls::Statement::Assignment(actual) => {
                     bound.result.map(|id| id.0) == Some(actual.target.0)
-                        && same_expression(&actual.expression, bound.op, bound.source, bound.other)
+                        && same_expression(&actual.expression, bound)
                 }
                 super::calls::Statement::StaticCall { target, call } => {
                     if let Op::Call(id, _) = bound.op {

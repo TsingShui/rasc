@@ -126,10 +126,7 @@ pub(super) fn argument(
     let index = ix(value.0)?;
     if let CallFormal::Reference(kind) = formal {
         return Ok(
-            if matches!(
-                ssa.ssa.values[index],
-                crate::pipeline::branch::Definition::Constant(0)
-            ) {
+            if ssa.ssa.is_zero(crate::pipeline::branch::ValueId(value.0))? {
                 Some(ValueUse::Null { value, kind })
             } else {
                 match (ssa.kinds[index], kind) {
@@ -212,9 +209,7 @@ fn plan(
         .ok_or(RequestError::InternalInvariant(
             "owned call lost original site",
         ))?;
-    let bound = ssa.ssa.bound_calls[ix(id.0)?]
-        .as_ref()
-        .ok_or(RequestError::InternalInvariant("owned call lost arguments"))?;
+    let bound = ssa.ssa.call(id)?;
     let owner = &site.contract.owner;
     if owner.len() < 3 || owner.first() != Some(&76) || owner.last() != Some(&59) {
         return Ok(None);
@@ -236,11 +231,11 @@ fn plan(
     let Some(method) = text(&site.contract.name, budget)? else {
         return Ok(None);
     };
-    if bound.arguments.len() != site.contract.formals.len() {
+    if bound.inputs.len() != site.contract.formals.len() {
         return Err(RequestError::InternalInvariant("owned call changed arity"));
     }
     let mut arguments = Vec::new();
-    for (&value, &formal) in bound.arguments.iter().zip(&site.contract.formals) {
+    for (&value, &formal) in bound.inputs.iter().zip(&site.contract.formals) {
         budget.charge_work(1)?;
         let Some(view) = argument(ssa, LocalId(value.0), formal)? else {
             return Ok(None);
@@ -266,8 +261,9 @@ pub(super) fn operations(
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<Option<Vec<Statement>>, RequestError> {
     let mut output = Vec::new();
-    for op in &ssa.ssa.bound[ix(block.0)?].ops {
+    for &id in &ssa.ssa.bound[ix(block.0)?].ops {
         budget.charge_work(1)?;
+        let op = ssa.ssa.operation(id)?;
         if let Op::Call(id, _) = op.op {
             let Some(call) = plan(ssa, id, budget)? else {
                 return Ok(None);
