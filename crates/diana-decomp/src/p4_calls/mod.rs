@@ -8,7 +8,9 @@ pub(crate) use throws::{compatible as compatible_throws, source_throws};
 mod receivers;
 pub(crate) use receivers::{ReceiverContract, ReceiverKind, resolve_receiver};
 mod fields;
-pub(crate) use fields::{InstanceIntWrite, bind_own_int_write};
+pub(crate) use fields::{
+    FieldUse, InstanceIntAccess, InstanceIntWrite, bind_instance_int, bind_own_int_write,
+};
 mod overloads;
 pub(crate) use contracts::{CallFormal, StaticContract, StaticResult, resolve_static};
 pub(crate) use fields::check_external_static_read;

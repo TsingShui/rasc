@@ -1,5 +1,4 @@
 mod annotations;
-mod array_access;
 mod call_chain;
 mod casts;
 mod comparison;
@@ -9,6 +8,7 @@ mod debug_program;
 mod dispatcher;
 mod error;
 mod fresh_array;
+mod heap_access;
 mod java;
 mod json;
 mod literals;

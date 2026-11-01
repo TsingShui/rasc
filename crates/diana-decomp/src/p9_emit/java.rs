@@ -13,7 +13,7 @@ pub(crate) fn java(
     output.push(&method.header, budget)?;
     output.push(" {\n", budget)?;
     match &method.body {
-        MethodBody::ArrayAccess(body) => super::array_access::write(body, &mut output, budget)?,
+        MethodBody::HeapAccess(body) => super::heap_access::write(body, &mut output, budget)?,
         MethodBody::FreshArray(body) => super::fresh_array::write(body, &mut output, budget)?,
         MethodBody::ZeroFill(body) => super::zero_fill::write(body, &mut output, budget)?,
         MethodBody::Casts(body) => super::casts::write(body, &mut output, budget)?,

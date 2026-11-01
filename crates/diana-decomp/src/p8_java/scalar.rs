@@ -17,7 +17,7 @@ pub struct VerifiedJavaMethod {
     environment: EnvironmentId,
 }
 pub(crate) enum MethodBody {
-    ArrayAccess(super::array_access::Body),
+    HeapAccess(super::heap_access::Body),
     FreshArray(super::fresh_array::FreshArrayBody),
     ZeroFill(super::zero_fill::ZeroFillBody),
     Casts(super::casts::CastBody),
@@ -35,14 +35,14 @@ pub(crate) enum MethodBody {
     Dispatcher(super::dispatcher::Dispatcher),
 }
 impl VerifiedJavaMethod {
-    pub(super) fn array_access(
+    pub(super) fn heap_access(
         header: String,
-        body: super::array_access::Body,
+        body: super::heap_access::Body,
         environment: EnvironmentId,
     ) -> Self {
         Self {
             header,
-            body: MethodBody::ArrayAccess(body),
+            body: MethodBody::HeapAccess(body),
             environment,
         }
     }
@@ -252,14 +252,14 @@ impl VerifiedJavaMethod {
             _ => None,
         };
         let arrays = match &self.body {
-            MethodBody::ArrayAccess(body) => Some(body.statements.as_slice()),
+            MethodBody::HeapAccess(body) => Some(body.statements.as_slice()),
             _ => None,
         };
         let array_calls = arrays
             .into_iter()
             .flatten()
             .filter_map(|statement| match statement {
-                super::array_access::Statement::Call { call, .. } => Some(super::JavaCallSite {
+                super::heap_access::Statement::Call { call, .. } => Some(super::JavaCallSite {
                     reference: call.reference,
                     receiver: None,
                     allocation: None,

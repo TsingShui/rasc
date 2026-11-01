@@ -1,5 +1,4 @@
 mod allocation_verify;
-pub(crate) mod array_access;
 pub(crate) mod branch;
 pub(crate) mod call_chain;
 pub(crate) mod calls;
@@ -9,6 +8,7 @@ mod declarations;
 pub(crate) mod dispatcher;
 mod dispatcher_verify;
 pub(crate) mod fresh_array;
+pub(crate) mod heap_access;
 pub(crate) mod receiver;
 mod receiver_verify;
 mod scalar;

@@ -28,6 +28,7 @@ pub use cursor::{Cursor, checked_range};
 pub use error::{InputError, InputProblem, UnsupportedInput};
 use error::{count_usize, file_length, file_offset, malformed};
 pub use header::{DexHeader, TableSection, read_header};
+pub(crate) use method::ReferencedFieldMetadata;
 pub use method::{
     CheckedAnnotations, MethodInput, RawPrintable, ValidatedRawDeclaration, ValidatedRawMethod,
 };

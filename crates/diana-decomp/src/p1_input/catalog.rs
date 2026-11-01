@@ -361,15 +361,31 @@ impl<'a> ProgramIndex<'a> {
         id: crate::FieldId,
         control: &mut impl InputControl,
     ) -> Result<bool, InputError> {
+        Ok(self.field_owner_class(id, control)?.is_some())
+    }
+    pub(crate) fn field_owner_class(
+        &self,
+        id: FieldId,
+        control: &mut impl InputControl,
+    ) -> Result<Option<ClassDefId>, InputError> {
         let mut field = self.table(TableKey::Field(id), control)?;
         let owner = TypeId(u32::from(field.read_u16_with(control)?));
+        let mut found = None;
         for index in 0..self.header.class_defs.count {
-            let mut class = self.table(TableKey::Class(ClassDefId(index)), control)?;
+            control.charge_work(1)?;
+            let id = ClassDefId(index);
+            let mut class = self.table(TableKey::Class(id), control)?;
             if TypeId(class.read_u32_with(control)?) == owner {
-                return Ok(true);
+                if found.is_some() {
+                    return Err(malformed(
+                        InputProblem::InvalidClassData,
+                        self.header.class_defs.offset_byte,
+                    ));
+                }
+                found = Some(id);
             }
         }
-        Ok(false)
+        Ok(found)
     }
     pub(crate) fn method_has_definition(
         &self,

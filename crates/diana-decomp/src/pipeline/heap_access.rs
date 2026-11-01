@@ -9,10 +9,11 @@ pub(crate) enum Kind {
     String,
     IntArray,
     ObjectArray,
+    Nominal,
 }
 impl Kind {
-    pub(crate) fn descriptor(self) -> &'static [u16] {
-        match self {
+    pub(crate) fn descriptor(self) -> Option<&'static [u16]> {
+        Some(match self {
             Self::Int => &[73],
             Self::Object => crate::p5_types::BuiltinReference::Object.descriptor(),
             Self::String => crate::p5_types::BuiltinReference::String.descriptor(),
@@ -20,16 +21,18 @@ impl Kind {
             Self::ObjectArray => &[
                 91, 76, 106, 97, 118, 97, 47, 108, 97, 110, 103, 47, 79, 98, 106, 101, 99, 116, 59,
             ],
-        }
+            Self::Nominal => return None,
+        })
     }
-    pub(crate) fn spelling(self) -> &'static str {
-        match self {
+    pub(crate) fn spelling(self) -> Option<&'static str> {
+        Some(match self {
             Self::Int => "int",
             Self::Object => "java.lang.Object",
             Self::String => "java.lang.String",
             Self::IntArray => "int[]",
             Self::ObjectArray => "java.lang.Object[]",
-        }
+            Self::Nominal => return None,
+        })
     }
     pub(crate) fn reference(self) -> bool {
         self != Self::Int
@@ -50,6 +53,24 @@ impl ElementUse {
     }
 }
 pub(crate) enum Operation {
+    FieldLoad {
+        pc: CodeUnitOffset,
+        binding: crate::p4_calls::InstanceIntAccess,
+        receiver: ValueId,
+        result: ValueId,
+    },
+    FieldStore {
+        pc: CodeUnitOffset,
+        binding: crate::p4_calls::InstanceIntAccess,
+        receiver: ValueId,
+        value: ValueId,
+    },
+    AddLiteral {
+        pc: CodeUnitOffset,
+        source: ValueId,
+        result: ValueId,
+        literal: i32,
+    },
     Constant {
         pc: CodeUnitOffset,
         value: ValueId,
@@ -87,6 +108,7 @@ pub(crate) struct AccessPlan<'a> {
     _sealed: (),
     pub raw: RawMethodView<'a>,
     pub parameters: Vec<Kind>,
+    pub nominal: Option<Vec<u16>>,
     pub types: Vec<Kind>,
     pub zero: Vec<bool>,
     pub operations: Vec<Operation>,
@@ -151,6 +173,7 @@ pub(crate) fn build<'a>(
         return Ok(None);
     }
     let mut parameters = Vec::new();
+    let mut nominal: Option<Vec<u16>> = None;
     let mut supported = true;
     input
         .declaration()
@@ -163,19 +186,34 @@ pub(crate) fn build<'a>(
                 Kind::IntArray,
                 Kind::ObjectArray,
             ] {
-                if name.matches_with(kind.descriptor(), budget)? {
+                if let Some(descriptor) = kind.descriptor()
+                    && name.matches_with(descriptor, budget)?
+                {
                     push(&mut parameters, kind, budget)?;
                     return Ok::<(), RequestError>(());
                 }
             }
-            supported = false;
+            let mut reader = name.reader()?;
+            if reader.next(budget)? == Some(76) {
+                if let Some(previous) = &nominal {
+                    if !name.matches_with(previous, budget)? {
+                        supported = false;
+                        return Ok(());
+                    }
+                } else {
+                    nominal = Some(crate::substrate::owned::copy_units(name, budget)?);
+                }
+                push(&mut parameters, Kind::Nominal, budget)?;
+            } else {
+                supported = false;
+            }
             Ok(())
         })?;
     if !supported
         || parameters.len() != usize::from(raw.ins_size())
         || !parameters
             .iter()
-            .any(|kind| matches!(kind, Kind::IntArray | Kind::ObjectArray))
+            .any(|kind| matches!(kind, Kind::IntArray | Kind::ObjectArray | Kind::Nominal))
     {
         return Ok(None);
     }
@@ -321,6 +359,105 @@ pub(crate) fn build<'a>(
                     budget,
                 )?;
             }
+            0x52..=0x5f => {
+                let receiver = read(reg(1)?)?;
+                if types[index(receiver)?] != Kind::Nominal {
+                    return Ok(None);
+                }
+                let Some(reference) = layout.references()[0] else {
+                    return Err(RequestError::InternalInvariant(
+                        "field access lost reference",
+                    ));
+                };
+                let OperandReference::Field(reference) = reference.target else {
+                    return Err(RequestError::InternalInvariant(
+                        "field access changed reference domain",
+                    ));
+                };
+                let original = input.field_reference(reference, budget)?;
+                if !original
+                    .declaration
+                    .field_type
+                    .matches_with(&[73], budget)?
+                {
+                    return Ok(None);
+                }
+                let usage = match spec.opcode {
+                    0x52 => crate::p4_calls::FieldUse::Read,
+                    0x59 => crate::p4_calls::FieldUse::Write,
+                    _ => {
+                        return Err(crate::input::MethodError::Malformed {
+                            pc,
+                            problem: crate::input::MethodProblem::InvalidFieldKind,
+                        }
+                        .into());
+                    }
+                };
+                let descriptor = nominal.as_deref().ok_or(RequestError::InternalInvariant(
+                    "nominal receiver lost descriptor",
+                ))?;
+                let value = if usage == crate::p4_calls::FieldUse::Write {
+                    let value = read(reg(0)?)?;
+                    if types[index(value)?] != Kind::Int {
+                        return Err(bad_type(pc));
+                    }
+                    Some(value)
+                } else {
+                    None
+                };
+                let binding = crate::p4_calls::bind_instance_int(
+                    input, catalog, reference, descriptor, usage, pc, budget,
+                )?;
+                accessed = true;
+                if let Some(value) = value {
+                    push(
+                        &mut operations,
+                        Operation::FieldStore {
+                            pc,
+                            binding,
+                            receiver,
+                            value,
+                        },
+                        budget,
+                    )?;
+                } else {
+                    let result = define(&mut types, &mut zero, Kind::Int, false, budget)?;
+                    slots[slot(reg(0)?)?] = Some(result);
+                    push(
+                        &mut operations,
+                        Operation::FieldLoad {
+                            pc,
+                            binding,
+                            receiver,
+                            result,
+                        },
+                        budget,
+                    )?;
+                }
+            }
+            0xd0 | 0xd8 => {
+                let source = read(reg(1)?)?;
+                if types[index(source)?] != Kind::Int {
+                    return Err(bad_type(pc));
+                }
+                let literal = match operands.literal() {
+                    Some(RawLiteral::Signed8(v)) => i32::from(v),
+                    Some(RawLiteral::Signed16(v)) => i32::from(v),
+                    _ => return Err(RequestError::InternalInvariant("heap add lost literal")),
+                };
+                let result = define(&mut types, &mut zero, Kind::Int, false, budget)?;
+                slots[slot(reg(0)?)?] = Some(result);
+                push(
+                    &mut operations,
+                    Operation::AddLiteral {
+                        pc,
+                        source,
+                        result,
+                        literal,
+                    },
+                    budget,
+                )?;
+            }
             0x44..=0x51 => {
                 let array = read(reg(1)?)?;
                 let index_value = read(reg(2)?)?;
@@ -418,6 +555,7 @@ pub(crate) fn build<'a>(
                     _sealed: (),
                     raw,
                     parameters,
+                    nominal,
                     types,
                     zero,
                     operations,

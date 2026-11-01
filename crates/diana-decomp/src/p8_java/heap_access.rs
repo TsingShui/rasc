@@ -1,5 +1,5 @@
 use crate::input::{MethodInput, RawPrintable};
-use crate::pipeline::array_access::{
+use crate::pipeline::heap_access::{
     AccessPlan, ElementUse, Kind, Operation, Return, ValueId, index,
 };
 use crate::raw::{LayoutKind, OperandReference, RawLiteral, instruction_layout};
@@ -9,6 +9,23 @@ use crate::{
     VerifiedJavaMethod,
 };
 pub(crate) enum Statement {
+    FieldLoad {
+        binding: crate::p4_calls::InstanceIntAccess,
+        name: String,
+        receiver: ValueId,
+        result: ValueId,
+    },
+    FieldStore {
+        binding: crate::p4_calls::InstanceIntAccess,
+        name: String,
+        receiver: ValueId,
+        value: ValueId,
+    },
+    AddLiteral {
+        source: ValueId,
+        result: ValueId,
+        literal: i32,
+    },
     Constant {
         value: ValueId,
         literal: i32,
@@ -34,13 +51,14 @@ pub(crate) enum Statement {
 }
 pub(crate) struct Body {
     pub parameter_count: usize,
+    pub nominal_source: Option<String>,
     pub types: Vec<Kind>,
     pub statements: Vec<Statement>,
     pub returned: Return,
 }
 fn bad<T>() -> Result<T, RequestError> {
     Err(RequestError::InternalInvariant(
-        "array access definitions/order/types differ from original code",
+        "heap access definitions/order/types differ from original code",
     ))
 }
 fn definition(
@@ -85,7 +103,16 @@ fn replay(
                 valid = false;
                 return Ok::<(), RequestError>(());
             };
-            valid &= name.matches_with(kind.descriptor(), budget)?;
+            let descriptor = match kind.descriptor() {
+                Some(descriptor) => descriptor,
+                None => plan
+                    .nominal
+                    .as_deref()
+                    .ok_or(RequestError::InternalInvariant(
+                        "nominal parameter lost descriptor",
+                    ))?,
+            };
+            valid &= name.matches_with(descriptor, budget)?;
             count = count.checked_add(1).ok_or(RequestError::PlatformCapacity)?;
             Ok(())
         })?;
@@ -246,6 +273,103 @@ fn replay(
                         .checked_advance(following.width())
                         .ok_or(RequestError::PlatformCapacity)?;
                 }
+                cursor = cursor
+                    .checked_add(1)
+                    .ok_or(RequestError::PlatformCapacity)?;
+            }
+            0x52 | 0x59 => {
+                let receiver = read(reg(1)?)?;
+                if plan.types[index(receiver)?] != Kind::Nominal {
+                    return bad();
+                }
+                let (binding, result, value, origin, recorded) = match plan.operations.get(cursor) {
+                    Some(Operation::FieldLoad {
+                        pc,
+                        binding,
+                        receiver,
+                        result,
+                    }) if spec.opcode == 0x52 => (binding, Some(*result), None, *pc, *receiver),
+                    Some(Operation::FieldStore {
+                        pc,
+                        binding,
+                        receiver,
+                        value,
+                    }) if spec.opcode == 0x59 => (binding, None, Some(*value), *pc, *receiver),
+                    _ => return bad(),
+                };
+                if origin != pc
+                    || recorded != receiver
+                    || !matches!(layout.references()[0],Some(reference) if reference.target==OperandReference::Field(binding.reference))
+                {
+                    return bad();
+                }
+                let original = input.field_reference(binding.reference, budget)?;
+                let Some(descriptor) = plan.nominal.as_deref() else {
+                    return bad();
+                };
+                if !original.owner.matches_with(descriptor, budget)?
+                    || !original.owner.matches_with(&binding.owner, budget)?
+                    || !original
+                        .declaration
+                        .name
+                        .matches_with(&binding.name, budget)?
+                    || !original
+                        .declaration
+                        .field_type
+                        .matches_with(&[73], budget)?
+                    || binding.flags & 8 != 0
+                {
+                    return bad();
+                }
+                if let Some(flags) = input.declaration_field_flags(binding.reference, budget)?
+                    && flags != binding.flags
+                {
+                    return bad();
+                }
+                if let Some(result) = result {
+                    if binding.usage != crate::p4_calls::FieldUse::Read {
+                        return bad();
+                    }
+                    definition(plan, result, Kind::Int, false, &mut next_value)?;
+                    slots[slot(reg(0)?)?] = Some(result);
+                } else if let Some(value) = value
+                    && (binding.usage != crate::p4_calls::FieldUse::Write
+                        || binding.flags & 16 != 0
+                        || read(reg(0)?)? != value
+                        || plan.types[index(value)?] != Kind::Int)
+                {
+                    return bad();
+                }
+                accessed = true;
+                cursor = cursor
+                    .checked_add(1)
+                    .ok_or(RequestError::PlatformCapacity)?;
+            }
+            0xd0 | 0xd8 => {
+                let source = read(reg(1)?)?;
+                let Some(Operation::AddLiteral {
+                    pc: origin,
+                    source: s,
+                    result,
+                    literal,
+                }) = plan.operations.get(cursor)
+                else {
+                    return bad();
+                };
+                let original = match operands.literal() {
+                    Some(RawLiteral::Signed8(v)) => i32::from(v),
+                    Some(RawLiteral::Signed16(v)) => i32::from(v),
+                    _ => return bad(),
+                };
+                if *origin != pc
+                    || *s != source
+                    || *literal != original
+                    || plan.types[index(source)?] != Kind::Int
+                {
+                    return bad();
+                }
+                definition(plan, *result, Kind::Int, false, &mut next_value)?;
+                slots[slot(reg(0)?)?] = Some(*result);
                 cursor = cursor
                     .checked_add(1)
                     .ok_or(RequestError::PlatformCapacity)?;
@@ -416,6 +540,17 @@ pub(crate) fn verify(
     {
         return Ok(None);
     }
+    let nominal_source = if let Some(descriptor) = plan.nominal.as_deref() {
+        if !crate::p4_calls::source_type(input, catalog, descriptor, budget)? {
+            return Ok(None);
+        }
+        let Some(name) = super::calls::type_name(descriptor, budget)? else {
+            return Ok(None);
+        };
+        Some(name)
+    } else {
+        None
+    };
     let name = copy_units(input.declaration().name, budget)?;
     let Some(name) = super::calls::identifier_text(&name, budget)? else {
         return Ok(None);
@@ -447,7 +582,10 @@ pub(crate) fn verify(
         if i != 0 {
             header.push(", ", budget)?;
         }
-        header.push(kind.spelling(), budget)?;
+        let spelling = kind.spelling().or(nominal_source.as_deref()).ok_or(
+            RequestError::InternalInvariant("nominal source parameter lost spelling"),
+        )?;
+        header.push(spelling, budget)?;
         header.push(" p", budget)?;
         header.unsigned(
             u64::try_from(i).map_err(|_| RequestError::PlatformCapacity)?,
@@ -459,6 +597,48 @@ pub(crate) fn verify(
     for op in plan.operations {
         budget.charge_work(1)?;
         let statement = match op {
+            Operation::FieldLoad {
+                binding,
+                receiver,
+                result,
+                ..
+            } => {
+                let Some(name) = super::calls::identifier_text(&binding.name, budget)? else {
+                    return Ok(None);
+                };
+                Statement::FieldLoad {
+                    binding,
+                    name,
+                    receiver,
+                    result,
+                }
+            }
+            Operation::FieldStore {
+                binding,
+                receiver,
+                value,
+                ..
+            } => {
+                let Some(name) = super::calls::identifier_text(&binding.name, budget)? else {
+                    return Ok(None);
+                };
+                Statement::FieldStore {
+                    binding,
+                    name,
+                    receiver,
+                    value,
+                }
+            }
+            Operation::AddLiteral {
+                source,
+                result,
+                literal,
+                ..
+            } => Statement::AddLiteral {
+                source,
+                result,
+                literal,
+            },
             Operation::Constant { value, literal, .. } => Statement::Constant { value, literal },
             Operation::Load {
                 array,
@@ -500,10 +680,11 @@ pub(crate) fn verify(
         reserve(&mut statements, 1, budget)?;
         statements.push(statement);
     }
-    Ok(Some(VerifiedJavaMethod::array_access(
+    Ok(Some(VerifiedJavaMethod::heap_access(
         header.finish(),
         Body {
             parameter_count: plan.parameters.len(),
+            nominal_source,
             types: plan.types,
             statements,
             returned: plan.returned,

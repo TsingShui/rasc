@@ -1,5 +1,5 @@
-use crate::p8_java::array_access::{Body, Statement};
-use crate::pipeline::array_access::{ElementUse, Return, ValueId, index};
+use crate::p8_java::heap_access::{Body, Statement};
+use crate::pipeline::heap_access::{ElementUse, Return, ValueId, index};
 use crate::substrate::owned::TextBuffer;
 use crate::{MethodBudget, RequestError};
 fn value(
@@ -28,9 +28,12 @@ fn declare(
         .types
         .get(index(id)?)
         .ok_or(RequestError::InternalInvariant(
-            "array statement lost typed definition",
+            "heap statement lost typed definition",
         ))?;
-    output.push(kind.spelling(), budget)?;
+    let spelling = kind.spelling().or(body.nominal_source.as_deref()).ok_or(
+        RequestError::InternalInvariant("heap definition lost nominal type"),
+    )?;
+    output.push(spelling, budget)?;
     output.push(" ", budget)?;
     value(id, body, output, budget)?;
     output.push(" = ", budget)
@@ -43,6 +46,45 @@ pub(super) fn write(
     for statement in &body.statements {
         budget.charge_work(1)?;
         match statement {
+            Statement::FieldLoad {
+                binding,
+                name,
+                receiver,
+                result,
+            } => {
+                if binding.usage != crate::p4_calls::FieldUse::Read {
+                    return Err(RequestError::InternalInvariant("field read changed use"));
+                }
+                declare(*result, body, output, budget)?;
+                value(*receiver, body, output, budget)?;
+                output.push(".", budget)?;
+                output.push(name, budget)?;
+            }
+            Statement::FieldStore {
+                binding,
+                name,
+                receiver,
+                value: stored,
+            } => {
+                if binding.usage != crate::p4_calls::FieldUse::Write {
+                    return Err(RequestError::InternalInvariant("field write changed use"));
+                }
+                value(*receiver, body, output, budget)?;
+                output.push(".", budget)?;
+                output.push(name, budget)?;
+                output.push(" = ", budget)?;
+                value(*stored, body, output, budget)?;
+            }
+            Statement::AddLiteral {
+                source,
+                result,
+                literal,
+            } => {
+                declare(*result, body, output, budget)?;
+                value(*source, body, output, budget)?;
+                output.push(" + ", budget)?;
+                output.arguments(format_args!("{literal}"), budget)?;
+            }
             Statement::Constant { value: id, literal } => {
                 declare(*id, body, output, budget)?;
                 output.arguments(format_args!("{literal}"), budget)?;
