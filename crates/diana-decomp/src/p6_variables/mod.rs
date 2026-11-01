@@ -4,6 +4,7 @@ mod copies;
 pub(crate) mod empty_fill;
 pub(crate) mod fresh_fill;
 pub(crate) mod normal;
+pub(crate) mod object_allocation;
 
 pub(crate) use copies::{
     Copy, CopyPlan, LocalId, LocalType, LocalTypeId, Temporary, Width, plan, verify,

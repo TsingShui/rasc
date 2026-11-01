@@ -65,11 +65,17 @@ pub(crate) enum Parameter {
     Explicit(u32),
     This,
 }
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum Initializer {
+    Default,
+    Parameter(Parameter),
+    Deferred(crate::p5_types::initialization::InitializationId),
+}
 #[derive(Clone, Copy)]
 pub(crate) struct Local {
     pub id: LocalId,
     pub kind: Kind,
-    pub parameter: Option<Parameter>,
+    pub initializer: Initializer,
 }
 pub(crate) struct StorageBody<'a> {
     _sealed: (),
@@ -77,6 +83,7 @@ pub(crate) struct StorageBody<'a> {
     pub locals: Vec<Local>,
     pub empty_fills: Vec<super::empty_fill::LengthOnly>,
     pub fresh_fills: Vec<super::fresh_fill::FreshArray>,
+    pub object_allocations: Vec<super::object_allocation::DeferredAllocation>,
     entry: CopyPlan,
     normal: Vec<CopyPlan>,
 }
@@ -176,7 +183,7 @@ fn plan_edge(
             Local {
                 id: temporary.local,
                 kind: kind(temporary.kind)?,
-                parameter: None,
+                initializer: Initializer::Default,
             },
             budget,
         )?;
@@ -212,10 +219,22 @@ pub(crate) fn allocate<'a>(
             Local {
                 id: LocalId(u32::try_from(index).map_err(|_| RequestError::PlatformCapacity)?),
                 kind,
-                parameter,
+                initializer: if let Some(parameter) = parameter {
+                    Initializer::Parameter(parameter)
+                } else if let Some(Some(id)) = typed.initializations.deferred.get(index) {
+                    Initializer::Deferred(*id)
+                } else {
+                    Initializer::Default
+                },
             },
             budget,
         )?;
+    }
+    let mut object_allocations = Vec::new();
+    for plan in &typed.initializations.plans {
+        budget.charge_work(1)?;
+        let proof = super::object_allocation::prove(&typed, plan, budget)?;
+        push(&mut object_allocations, proof, budget)?;
     }
     let mut fresh_fills = Vec::new();
     for op in &typed.ssa.operations {
@@ -250,7 +269,7 @@ pub(crate) fn allocate<'a>(
             Local {
                 id: result,
                 kind: Kind::Int,
-                parameter: None,
+                initializer: Initializer::Default,
             },
             budget,
         )?;
@@ -270,6 +289,7 @@ pub(crate) fn allocate<'a>(
         locals,
         empty_fills,
         fresh_fills,
+        object_allocations,
         entry,
         normal,
     }))

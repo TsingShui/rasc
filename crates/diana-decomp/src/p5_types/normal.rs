@@ -38,6 +38,7 @@ pub(crate) struct TypedBody<'a> {
     pub bindings: Vec<crate::p4_calls::normal::CallEvidence>,
     pub call_uses: Vec<crate::p5_types::calls::CallUses>,
     pub cast_uses: Vec<crate::p5_types::calls::TypedUse>,
+    pub initializations: super::initialization::Initializations,
     pub empty_fills: Vec<PrimitiveFillUse>,
     pub array_lengths: Vec<crate::p5_types::calls::TypedUse>,
     pub fresh_fills: Vec<PrimitiveFillUse>,
@@ -133,6 +134,18 @@ pub(crate) fn solve<'a>(
                 (bits, declaration.range(), Some(kind))
             }
             Definition::OpResult(id) => match ssa.operation(id)?.op {
+                Op::NewInstance(_, id) => (
+                    0,
+                    None,
+                    Some(Kind::Nominal(
+                        ssa.object_creations
+                            .get(ix(id.0)?)
+                            .ok_or(RequestError::InternalInvariant(
+                                "object allocation lost type",
+                            ))?
+                            .reference,
+                    )),
+                ),
                 Op::NewArray(_, _, id) => (
                     0,
                     None,
@@ -203,7 +216,8 @@ pub(crate) fn solve<'a>(
                 | Op::ArrayStore(..)
                 | Op::FieldStore(..)
                 | Op::EmptyFill(..)
-                | Op::FreshFill(..) => {
+                | Op::FreshFill(..)
+                | Op::Initialize(..) => {
                     return Err(RequestError::InternalInvariant(
                         "NOP acquired a normal value definition",
                     ));
@@ -295,6 +309,7 @@ pub(crate) fn solve<'a>(
     let Some(arrays) = solve_arrays(&ssa, &kinds, &integral_bits, budget)? else {
         return Ok(None);
     };
+    let initializations = super::initialization::solve(&ssa, budget)?;
     let Some(array_uses) = solve_new_arrays(&ssa, &kinds, budget)? else {
         return Ok(None);
     };
@@ -322,6 +337,7 @@ pub(crate) fn solve<'a>(
         bindings,
         call_uses,
         cast_uses,
+        initializations,
         empty_fills,
         array_lengths: array_uses.lengths,
         fresh_fills: array_uses.fills,

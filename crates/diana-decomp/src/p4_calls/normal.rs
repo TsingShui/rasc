@@ -13,6 +13,7 @@ pub(crate) struct ReceiverFacts {
     pub formals: Option<Vec<super::CallFormal>>,
 }
 pub(crate) enum CallEvidence {
+    Constructor(ReceiverFacts),
     Receiver(ReceiverFacts),
     Declaration(StaticContract),
     Missing {
@@ -23,7 +24,7 @@ impl CallEvidence {
     pub(crate) fn formals(&self) -> Option<&[super::CallFormal]> {
         match self {
             Self::Declaration(contract) => Some(&contract.formals),
-            Self::Receiver(facts) => facts.formals.as_deref(),
+            Self::Receiver(facts) | Self::Constructor(facts) => facts.formals.as_deref(),
             Self::Missing { formals } => formals.as_deref(),
         }
     }
@@ -55,7 +56,7 @@ pub(crate) fn collect<'a>(
         budget.charge_work(1)?;
         let evidence = if call.kind != crate::p2_flow::normal::InvokeKind::Static {
             let original = input.method_reference(call.reference, budget)?;
-            CallEvidence::Receiver(ReceiverFacts {
+            let facts = ReceiverFacts {
                 owner: crate::substrate::owned::copy_units(original.owner, budget)?,
                 name: crate::substrate::owned::copy_units(original.declaration.name, budget)?,
                 prototype: crate::substrate::owned::copy_proto(
@@ -63,7 +64,12 @@ pub(crate) fn collect<'a>(
                     budget,
                 )?,
                 formals: super::contracts::original_formals(input, call.reference, budget)?,
-            })
+            };
+            if call.target == crate::p2_flow::normal::CallTarget::Constructor {
+                CallEvidence::Constructor(facts)
+            } else {
+                CallEvidence::Receiver(facts)
+            }
         } else {
             match super::contracts::collect_static(input, catalog, call.reference, budget)? {
                 Some(contract) => CallEvidence::Declaration(contract),
@@ -137,9 +143,9 @@ pub(crate) fn contract<'a>(
     let index = usize::try_from(id.0).map_err(|_| RequestError::PlatformCapacity)?;
     match calls.get(index) {
         Some(CallEvidence::Declaration(contract)) => Ok(contract),
-        Some(CallEvidence::Receiver(_)) => Err(RequestError::InternalInvariant(
-            "receiver call requested static contract",
-        )),
+        Some(CallEvidence::Receiver(_) | CallEvidence::Constructor(_)) => Err(
+            RequestError::InternalInvariant("receiver call requested static contract"),
+        ),
         Some(CallEvidence::Missing { .. }) => {
             let site = ssa.calls.get(index).ok_or(RequestError::InternalInvariant(
                 "missing evidence lost call identity",

@@ -161,7 +161,9 @@ pub(super) fn operation(
             },
         ),
         Op::Nop => return Ok(None),
-        Op::NewArray(..)
+        Op::NewInstance(..)
+        | Op::Initialize(..)
+        | Op::NewArray(..)
         | Op::FreshFill(..)
         | Op::EmptyFill(..)
         | Op::Cast(..)

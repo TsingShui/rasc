@@ -305,7 +305,14 @@ pub(super) fn verify(
                 }),
                 _ => None,
             };
-            if local.parameter != parameter {
+            let initializer = if let Some(parameter) = parameter {
+                crate::p6_variables::normal::Initializer::Parameter(parameter)
+            } else if let Some(Some(id)) = ssa.initializations.deferred.get(index) {
+                crate::p6_variables::normal::Initializer::Deferred(*id)
+            } else {
+                crate::p6_variables::normal::Initializer::Default
+            };
+            if local.initializer != initializer {
                 return Err(RequestError::InternalInvariant(
                     "dispatcher fabricated an entry definition",
                 ));
@@ -313,13 +320,16 @@ pub(super) fn verify(
             push(&mut types, ty(local.kind)?, budget)?;
         } else if index < base_count {
             let proof = &storage.empty_fills[index - ssa.ssa.values.len()];
-            if proof.result != local.id || local.kind != Kind::Int || local.parameter.is_some() {
+            if proof.result != local.id
+                || local.kind != Kind::Int
+                || local.initializer != crate::p6_variables::normal::Initializer::Default
+            {
                 return Err(RequestError::InternalInvariant(
                     "LengthOnly changed storage",
                 ));
             }
             push(&mut types, ty(local.kind)?, budget)?;
-        } else if local.parameter.is_some() {
+        } else if local.initializer != crate::p6_variables::normal::Initializer::Default {
             return Err(RequestError::InternalInvariant(
                 "copy temporary became a parameter",
             ));
@@ -362,6 +372,12 @@ pub(super) fn verify(
                     "dispatcher omitted an original operation",
                 ))?;
             let matches = match actual {
+                super::calls::Statement::Deferred(id) => {
+                    super::object_allocation::verify_deferred(storage, bound, *id, budget)?
+                }
+                super::calls::Statement::Initialize(actual) => {
+                    super::object_allocation::verify(storage, bound, actual, budget)?
+                }
                 super::calls::Statement::NewArray(actual) => {
                     super::fresh_fill::verify_allocation(ssa, bound, actual, budget)?
                 }

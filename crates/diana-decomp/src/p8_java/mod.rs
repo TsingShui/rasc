@@ -13,6 +13,7 @@ pub(crate) mod field_ops;
 pub(crate) mod fresh_array;
 pub(crate) mod fresh_fill;
 pub(crate) mod heap_access;
+pub(crate) mod object_allocation;
 pub(crate) mod receiver;
 mod receiver_ops;
 mod receiver_verify;

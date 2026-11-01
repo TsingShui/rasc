@@ -355,7 +355,9 @@ fn diamond(
         output.push(type_names.name(declaration.kind, budget)?, budget)?;
         output.push(" ", budget)?;
         local(declaration.id, output, budget)?;
-        if let Some(parameter) = declaration.parameter {
+        if let crate::p6_variables::normal::Initializer::Parameter(parameter) =
+            declaration.initializer
+        {
             match parameter {
                 crate::p6_variables::normal::Parameter::This => output.push(" = this", budget)?,
                 crate::p6_variables::normal::Parameter::Explicit(index) => {

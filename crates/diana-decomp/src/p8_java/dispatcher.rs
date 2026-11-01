@@ -149,9 +149,7 @@ pub(super) fn verify(
                 )?;
             }
         }
-        let Some(statements) =
-            super::calls::operations(storage, key, &mut calls.receivers, budget)?
-        else {
+        let Some(statements) = super::calls::operations(storage, key, calls, budget)? else {
             return Ok(None);
         };
         let bound = &ssa.ssa.bound[index];

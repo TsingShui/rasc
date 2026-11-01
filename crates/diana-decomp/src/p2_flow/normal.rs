@@ -102,7 +102,14 @@ impl InvokeKind {
         }
     }
 }
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub(crate) enum CallTarget {
+    Method,
+    Constructor,
+}
 pub(crate) struct CallSite {
+    pub target: CallTarget,
+    pub owner: crate::TypeId,
     pub kind: InvokeKind,
     pub reference: crate::MethodId,
     pub result: InvokeResult,
@@ -118,6 +125,11 @@ pub(crate) struct CastId(pub u32);
 pub(crate) struct EmptyFillId(pub u32);
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub(crate) struct ArrayCreationId(pub u32);
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub(crate) struct ObjectCreationId(pub u32);
+pub(crate) struct ObjectCreation {
+    pub reference: crate::TypeId,
+}
 pub(crate) struct ArrayCreation {
     pub reference: crate::TypeId,
     pub component: crate::p5_types::PrimitiveArray,
@@ -148,6 +160,8 @@ pub(crate) enum ArrayElement {
 }
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub(crate) enum Op {
+    NewInstance(RegisterId, ObjectCreationId),
+    Initialize(CallId),
     NewArray(RegisterId, RegisterId, ArrayCreationId),
     FreshFill(RegisterId, FreshFillId),
     EmptyFill(RegisterId, EmptyFillId),
@@ -218,7 +232,7 @@ impl Effects {
 }
 impl Op {
     pub(crate) fn effects(self) -> Effects {
-        let conservative = matches!(self, Self::Call(_, _));
+        let conservative = matches!(self, Self::Call(_, _) | Self::Initialize(_));
         Effects {
             heap_read: conservative || matches!(self, Self::ArrayLoad(..) | Self::FieldLoad(..)),
             heap_write: conservative
@@ -226,13 +240,15 @@ impl Op {
                     self,
                     Self::ArrayStore(..)
                         | Self::FieldStore(..)
+                        | Self::NewInstance(..)
                         | Self::NewArray(..)
                         | Self::FreshFill(..)
                 ),
             may_throw: conservative
                 || matches!(
                     self,
-                    Self::NewArray(..)
+                    Self::NewInstance(..)
+                        | Self::NewArray(..)
                         | Self::FreshFill(..)
                         | Self::EmptyFill(..)
                         | Self::Cast(..)
@@ -244,7 +260,7 @@ impl Op {
                         | Self::FieldStore(..)
                 ),
             call: conservative,
-            class_init: conservative,
+            class_init: conservative || matches!(self, Self::NewInstance(..)),
         }
     }
 }
@@ -277,6 +293,7 @@ impl MethodFrame {
     }
 }
 pub(crate) struct FlowBody<'a> {
+    pub object_creations: Vec<ObjectCreation>,
     pub array_creations: Vec<ArrayCreation>,
     pub fresh_fills: Vec<FreshFillSite>,
     pub empty_fills: Vec<EmptyFillSite>,
@@ -298,7 +315,8 @@ fn ix(value: u32) -> Result<usize, RequestError> {
 pub(crate) fn destination(op: Op) -> Option<RegisterId> {
     match op {
         Op::Call(_, destination) => destination,
-        Op::NewArray(r, _, _)
+        Op::NewInstance(r, _)
+        | Op::NewArray(r, _, _)
         | Op::Cast(r, _)
         | Op::String(r, _)
         | Op::Constant(r, _)
@@ -312,7 +330,8 @@ pub(crate) fn destination(op: Op) -> Option<RegisterId> {
         | Op::ArrayStore(..)
         | Op::FieldStore(..)
         | Op::EmptyFill(..)
-        | Op::FreshFill(..) => None,
+        | Op::FreshFill(..)
+        | Op::Initialize(..) => None,
     }
 }
 pub(crate) enum Reads<'a> {
@@ -338,7 +357,7 @@ impl Iterator for Reads<'_> {
 impl Op {
     pub(crate) fn reads(self, calls: &[CallSite]) -> Result<Reads<'_>, RequestError> {
         let registers = match self {
-            Self::Call(id, _) => {
+            Self::Call(id, _) | Self::Initialize(id) => {
                 let call = calls.get(ix(id.0)?).ok_or(RequestError::InternalInvariant(
                     "operation has a foreign call identity",
                 ))?;
@@ -358,7 +377,9 @@ impl Op {
             Self::Binary(_, left, _, Operand::Literal(_)) | Self::Move(_, left) => {
                 [Some(left), None, None]
             }
-            Self::String(..) | Self::Constant(_, _) | Self::Nop => [None, None, None],
+            Self::NewInstance(..) | Self::String(..) | Self::Constant(_, _) | Self::Nop => {
+                [None, None, None]
+            }
         };
         Ok(Reads::Local(registers.into_iter()))
     }
@@ -559,6 +580,7 @@ pub(crate) fn decode<'a>(
     let mut casts = Vec::new();
     let mut empty_fills = Vec::new();
     let mut array_creations = Vec::new();
+    let mut object_creations = Vec::new();
     let mut fresh_fills = Vec::new();
     let mut raw_switches: Vec<(Vec<(i32, CodeUnitOffset)>, CodeUnitOffset)> = Vec::new();
     let mut leaders = Vec::new();
@@ -671,6 +693,22 @@ pub(crate) fn decode<'a>(
                     } else {
                         Decoded::Op(Op::FieldStore(reg(1)?, reg(0)?, id))
                     }
+                }
+                0x22 => {
+                    let Some(reference) = layout.references()[0] else {
+                        return Err(RequestError::InternalInvariant("new-instance lost type"));
+                    };
+                    let crate::raw::OperandReference::Type(reference) = reference.target else {
+                        return Err(RequestError::InternalInvariant(
+                            "new-instance changed reference domain",
+                        ));
+                    };
+                    let id = ObjectCreationId(
+                        u32::try_from(object_creations.len())
+                            .map_err(|_| RequestError::PlatformCapacity)?,
+                    );
+                    push(&mut object_creations, ObjectCreation { reference }, budget)?;
+                    Decoded::Op(Op::NewInstance(reg(0)?, id))
                 }
                 0x23 => {
                     let Some(reference) = layout.references()[0] else {
@@ -881,6 +919,10 @@ pub(crate) fn decode<'a>(
                         ));
                     };
                     let method = input.method_reference(reference, budget)?;
+                    let constructor = method
+                        .declaration
+                        .name
+                        .matches_with(&[60, 105, 110, 105, 116, 62], budget)?;
                     let mut one_word = true;
                     method.declaration.prototype.visit_parameter_types(
                         budget,
@@ -992,6 +1034,12 @@ pub(crate) fn decode<'a>(
                     push(
                         &mut calls,
                         CallSite {
+                            target: if constructor {
+                                CallTarget::Constructor
+                            } else {
+                                CallTarget::Method
+                            },
+                            owner: method.owner_type,
                             kind: InvokeKind::from_opcode(spec.opcode)
                                 .ok_or(RequestError::InternalInvariant("invoke lost its kind"))?,
                             reference,
@@ -1002,7 +1050,11 @@ pub(crate) fn decode<'a>(
                         },
                         budget,
                     )?;
-                    Decoded::Op(Op::Call(call, destination))
+                    if constructor {
+                        Decoded::Op(Op::Initialize(call))
+                    } else {
+                        Decoded::Op(Op::Call(call, destination))
+                    }
                 }
                 0x28..=0x2a => {
                     let to = target()?;
@@ -1158,6 +1210,7 @@ pub(crate) fn decode<'a>(
         }
     }
     Ok(Some(FlowBody {
+        object_creations,
         array_creations,
         fresh_fills,
         empty_fills,

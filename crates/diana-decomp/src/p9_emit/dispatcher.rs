@@ -25,7 +25,9 @@ pub(super) fn locals(
         output.push(type_names.name(declaration.kind, budget)?, budget)?;
         output.push(" ", budget)?;
         local(declaration.id, output, budget)?;
-        if let Some(parameter) = declaration.parameter {
+        if let crate::p6_variables::normal::Initializer::Parameter(parameter) =
+            declaration.initializer
+        {
             match parameter {
                 crate::p6_variables::normal::Parameter::This => output.push(" = this", budget)?,
                 crate::p6_variables::normal::Parameter::Explicit(index) => {
@@ -33,7 +35,7 @@ pub(super) fn locals(
                     output.unsigned(u64::from(index), budget)?;
                 }
             }
-        } else {
+        } else if declaration.initializer == crate::p6_variables::normal::Initializer::Default {
             // The SSA/edge definition certificate establishes assignment before
             // every original read; these DA-only values are never observed.
             output.push(
@@ -64,6 +66,30 @@ pub(super) fn statements(
     for statement in &case.statements {
         budget.charge_work(1)?;
         match statement {
+            crate::p8_java::calls::Statement::Deferred(_) => {}
+            crate::p8_java::calls::Statement::Initialize(init) => {
+                local(init.root, output, budget)?;
+                output.push(" = new ", budget)?;
+                output.push(&init.source_type, budget)?;
+                output.push("(", budget)?;
+                for (index, &argument) in init.arguments.iter().enumerate() {
+                    budget.charge_work(1)?;
+                    if index != 0 {
+                        output.push(", ", budget)?;
+                    }
+                    super::java::value_use(argument, output, budget)?;
+                }
+                output.push(");\n", budget)?;
+                for &alias in &init.aliases {
+                    budget.charge_work(1)?;
+                    if alias != init.root {
+                        local(alias, output, budget)?;
+                        output.push(" = ", budget)?;
+                        local(init.root, output, budget)?;
+                        output.push(";\n", budget)?;
+                    }
+                }
+            }
             crate::p8_java::calls::Statement::NewArray(array) => {
                 local(array.result, output, budget)?;
                 output.push(" = new ", budget)?;

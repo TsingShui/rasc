@@ -58,6 +58,8 @@ pub(crate) struct ReceiverCall {
     pub arguments: Vec<ValueUse>,
 }
 pub(crate) enum Statement {
+    Deferred(crate::p5_types::initialization::InitializationId),
+    Initialize(super::object_allocation::Initialization),
     NewArray(super::fresh_fill::Allocation),
     FreshFill(super::fresh_fill::Fill),
     EmptyFill {
@@ -188,6 +190,7 @@ pub(super) fn identifier_text(
 }
 pub(super) struct SourceCalls {
     pub receivers: Vec<Option<crate::p4_calls::ReceiverContract>>,
+    pub constructors: Vec<Option<crate::p4_calls::allocation::ConstructorContract>>,
     pub throws: crate::p4_calls::normal::SourceThrows,
 }
 pub(super) fn validate_bindings(
@@ -200,6 +203,7 @@ pub(super) fn validate_bindings(
         return Ok(None);
     };
     let mut receivers = Vec::new();
+    let mut constructors = Vec::new();
     for (index, site) in ssa.ssa.calls.iter().enumerate() {
         budget.charge_work(1)?;
         let id = CallId(u32::try_from(index).map_err(|_| RequestError::PlatformCapacity)?);
@@ -210,6 +214,50 @@ pub(super) fn validate_bindings(
             .ok_or(RequestError::InternalInvariant(
                 "call lost final use conversions",
             ))?;
+        if site.target == crate::p2_flow::normal::CallTarget::Constructor {
+            let initialization = ssa
+                .initializations
+                .calls
+                .get(index)
+                .and_then(|id| *id)
+                .ok_or(RequestError::InternalInvariant(
+                    "constructor lost initialization state",
+                ))?;
+            let plan = ssa.initializations.plans.get(ix(initialization.0)?).ok_or(
+                RequestError::InternalInvariant("constructor lost allocation plan"),
+            )?;
+            let receiver = uses
+                .receiver
+                .as_ref()
+                .ok_or(RequestError::InternalInvariant(
+                    "constructor lost receiver use",
+                ))?;
+            if receiver.identity != crate::p5_types::calls::ReceiverIdentity::Uninitialized
+                || bound.input(0)? != receiver.value
+            {
+                return Err(RequestError::InternalInvariant(
+                    "constructor receiver became readable before init",
+                ));
+            }
+            let owner =
+                crate::substrate::owned::copy_units(input.type_name(plan.object, budget)?, budget)?;
+            let contract = crate::p4_calls::allocation::resolve(
+                input,
+                catalog,
+                site.reference,
+                &owner,
+                crate::p4_calls::allocation::ConstructorUse::Allocation,
+                site.pc,
+                budget,
+            )?;
+            if uses.arguments(site.reference, site.pc)?.len() != contract.int_arity {
+                return Err(RequestError::InternalInvariant("constructor changed arity"));
+            }
+            push(&mut constructors, Some(contract), budget)?;
+            push(&mut receivers, None, budget)?;
+            continue;
+        }
+        push(&mut constructors, None, budget)?;
         let (receiver, arguments) = match &uses.receiver {
             Some(receiver) => {
                 if site.kind == crate::p2_flow::normal::InvokeKind::Static
@@ -300,7 +348,11 @@ pub(super) fn validate_bindings(
         }
         push(&mut receivers, receiver, budget)?;
     }
-    Ok(Some(SourceCalls { receivers, throws }))
+    Ok(Some(SourceCalls {
+        receivers,
+        constructors,
+        throws,
+    }))
 }
 fn plan(
     ssa: &TypedBody<'_>,
@@ -369,7 +421,7 @@ fn plan(
 pub(super) fn operations(
     storage: &crate::p6_variables::normal::StorageBody<'_>,
     block: crate::pipeline::branch::BlockId,
-    receivers: &mut [Option<crate::p4_calls::ReceiverContract>],
+    bindings: &mut SourceCalls,
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<Option<Vec<Statement>>, RequestError> {
     let ssa = &storage.typed;
@@ -377,7 +429,25 @@ pub(super) fn operations(
     for &id in &ssa.ssa.bound[ix(block.0)?].ops {
         budget.charge_work(1)?;
         let op = ssa.ssa.operation(id)?;
-        if matches!(op.op, Op::NewArray(..)) {
+        if let Op::Initialize(call) = op.op {
+            let contract = bindings
+                .constructors
+                .get_mut(ix(call.0)?)
+                .and_then(Option::take)
+                .ok_or(RequestError::InternalInvariant(
+                    "constructor lost source binding",
+                ))?;
+            let Some(initialization) =
+                super::object_allocation::lower(storage, op, contract, budget)?
+            else {
+                return Ok(None);
+            };
+            push(&mut output, Statement::Initialize(initialization), budget)?;
+        } else if let Some(result) = op.result
+            && let Some(Some(id)) = ssa.initializations.deferred.get(ix(result.0)?)
+        {
+            push(&mut output, Statement::Deferred(*id), budget)?;
+        } else if matches!(op.op, Op::NewArray(..)) {
             push(
                 &mut output,
                 Statement::NewArray(super::fresh_fill::allocate(ssa, op)?),
@@ -452,7 +522,8 @@ pub(super) fn operations(
             )?;
         } else if let Op::Call(id, _) = op.op {
             let index = ix(id.0)?;
-            if let Some(contract) = receivers
+            if let Some(contract) = bindings
+                .receivers
                 .get_mut(index)
                 .ok_or(RequestError::InternalInvariant("call lost binding slot"))?
                 .take()

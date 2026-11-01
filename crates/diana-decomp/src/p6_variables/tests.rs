@@ -100,7 +100,9 @@ fn t09_two_entry_dispatcher_preserves_edges_and_never_reads_da_defaults() {
     fn execute(body: &Dispatcher, argument: i32) -> i32 {
         let mut values = vec![None; body.locals.len()];
         for local in &body.locals {
-            if let Some(parameter) = local.parameter {
+            if let crate::p6_variables::normal::Initializer::Parameter(parameter) =
+                local.initializer
+            {
                 assert_eq!(
                     parameter,
                     crate::p6_variables::normal::Parameter::Explicit(0)
@@ -122,6 +124,8 @@ fn t09_two_entry_dispatcher_preserves_edges_and_never_reads_da_defaults() {
                         assign(std::slice::from_ref(statement), &mut values)
                     }
                     crate::p8_java::calls::Statement::StaticCall { .. }
+                    | crate::p8_java::calls::Statement::Deferred(_)
+                    | crate::p8_java::calls::Statement::Initialize(_)
                     | crate::p8_java::calls::Statement::NewArray(_)
                     | crate::p8_java::calls::Statement::FreshFill(_)
                     | crate::p8_java::calls::Statement::EmptyFill { .. }

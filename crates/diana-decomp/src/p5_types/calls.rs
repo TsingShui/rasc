@@ -17,6 +17,7 @@ pub(crate) struct CallUses {
 }
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub(crate) enum ReceiverIdentity {
+    Uninitialized,
     Reference,
     ImplicitThis,
 }
@@ -119,7 +120,9 @@ pub(crate) fn solve(
             };
             (
                 Some(TypedReceiver {
-                    identity: if site.kind == crate::p2_flow::normal::InvokeKind::Super {
+                    identity: if site.target == crate::p2_flow::normal::CallTarget::Constructor {
+                        ReceiverIdentity::Uninitialized
+                    } else if site.kind == crate::p2_flow::normal::InvokeKind::Super {
                         if !is_this(ssa, value, budget)? {
                             return Ok(None);
                         }

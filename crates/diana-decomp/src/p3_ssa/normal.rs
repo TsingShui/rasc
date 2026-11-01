@@ -49,6 +49,7 @@ pub(crate) struct BoundBlock {
     pub other: Option<ValueId>,
 }
 pub(crate) struct SsaBody<'a> {
+    pub object_creations: Vec<crate::p2_flow::normal::ObjectCreation>,
     pub array_creations: Vec<crate::p2_flow::normal::ArrayCreation>,
     pub fresh_fills: Vec<crate::p2_flow::normal::FreshFillSite>,
     pub empty_fills: Vec<crate::p2_flow::normal::EmptyFillSite>,
@@ -294,7 +295,7 @@ pub(crate) fn build<'a>(
             } else {
                 None
             };
-            if let Op::Call(call, _) = operation.kind {
+            if let Op::Call(call, _) | Op::Initialize(call) = operation.kind {
                 let recorded = call_ops
                     .get_mut(ix(call.0)?)
                     .ok_or(RequestError::InternalInvariant("foreign flow call"))?;
@@ -410,6 +411,7 @@ pub(crate) fn build<'a>(
         operations,
         result: flow.result,
         raw: flow.raw,
+        object_creations: flow.object_creations,
         array_creations: flow.array_creations,
         fresh_fills: flow.fresh_fills,
         empty_fills: flow.empty_fills,
@@ -517,6 +519,13 @@ fn verify(
                     ));
                 }
                 verify_call(ssa, op.pc, call, destination, budget)?;
+            } else if let Op::Initialize(call) = original.kind {
+                if ssa.call(call)?.id != id {
+                    return Err(RequestError::InternalInvariant(
+                        "init changed operation identity",
+                    ));
+                }
+                verify_call(ssa, op.pc, call, None, budget)?;
             }
             match (destination(original.kind), op.result) {
                 (Some(register), Some(result)) => {
