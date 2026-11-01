@@ -1,8 +1,9 @@
 # Working on the Diana engine
 
 Repository-wide AGENTS.md applies, including the rule that every authored Diana
-document MUST follow ../../docs/diana/WRITING.md. This is the independent internal
-engine package, with request resource control and cancellation but no public Engine.
+document MUST follow ../../docs/diana/WRITING.md. This package is the independent
+native engine library. Every engine capability MUST follow the repository-wide
+[architecture guardrails](../../AGENTS.md#architecture-guardrails).
 Read ../../docs/diana/DESIGN.md, ../../docs/diana/ALGORITHMS.md and
 ../../docs/diana/TASKS.md before work.
 

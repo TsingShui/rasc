@@ -11,12 +11,12 @@ is the repository-wide guide; package-local AGENTS.md files refine its scope.
   No manifests, implementation, dependencies or CI; not workspace members. Do
   not initialize/design their frameworks, browser UI or WASM bindings until
   separately requested.
-- `crates/diana-decomp/`: independent native engine scaffold.
+- `crates/diana-decomp/`: independent native engine and public library.
 - `docs/diana/`: core design/algorithms/tasks, sources and revisioned E2E specifications.
 - `tools/audit/`: sensitive-input audit tooling.
 - `tools/fetch_references.py`: explicit reference downloads to ignored
   `.cache/references/`; no checksum checks, reference builds/tests or CI hooks.
-- `tests/e2e/`: planned shared self-made sources/inputs/oracles; not created yet.
+- `tests/e2e/`: shared self-made sources, inputs, independent oracles and core E2E runners.
 - `ref-fork/rasc/`: archived rasc source, dexdec, rusty-dex, patched vendor,
   old tests, skill/docs and release tooling. Separate workspace/lockfile, excluded
   from every root Cargo gate. Do not build, test, lint, format or release it
@@ -67,17 +67,57 @@ the implementation strategy; TASKS is the single workflow/acceptance source.
 T/H dependencies require the named producer artifact to be ready; final task
 completion still requires its fixed acceptance evidence, never empty scaffolds.
 
-## Current state and test-first gate
+## Architecture guardrails
 
-The engine implements request work/allocation accounting, method normal/raw
-reservations, cancellation, checked DEX 035 parsing and borrowed declaration/code
-range views with method-local failures. Input boundaries use typed coordinates
-and IDs; the shared instruction-layout helper checks format and range facts.
-Engine/CLI commands and decompilation compute phases remain unimplemented. B01–B04 preparation is accepted for the executed profile in
-`docs/diana/TASKS.md` §3. The prepared runner reports the absent engine as
-not-implemented, not passing. H01/T01 remain unaccepted. Keep the full B01–B04
-requirements for any new or revised preparation evidence; structure-only work
-never substitutes for input/reference certification or comparator falsification.
+Before changing an engine capability, contributors MUST read
+[DESIGN §4](docs/diana/DESIGN.md#4-phases-products-and-actual-order) and the owning
+[ALGORITHMS](docs/diana/ALGORITHMS.md) sections. The batch record MUST identify the owning phase,
+actual producer/consumer, invariant and existing independent evidence. When an
+implementation would contradict those contracts, contributors MUST stop the
+affected change and request a decision rather than weaken the design or add a
+bypass.
+
+- Contributors MUST extend the shared ordinary-method chain: P2 CFG/effects →
+  P3 SSA → P4 declaration constraints/evidence → P5 types/use conversions →
+  P6 storage/copies → P7 regions → P8 Java verification. P9 MUST render existing
+  products and original facts without further analysis.
+- Contributors MUST put calls, fields, arrays, casts, allocation and fill into
+  common operation, definition/use and effect products. Initialization and
+  FreshArray proofs MUST consume those products in their owning phases, not
+  maintain another complete method register/alias tracker.
+- Contributors MUST NOT select recovery paths by hard-coded class/test names or
+  whole-method instruction templates. Specification-defined opcode/format checks, local
+  proofs, P7 region patterns and Generated-member rules remain in their owning
+  phases.
+- Contributors MUST NOT organize `engine.rs` as successive whole-method
+  builders/verifiers that emit on the first match. Ordinary methods MUST use one
+  analysis chain and one classified read-only raw exit; fallback MUST NOT retry
+  analysis or reconstruct values.
+- Contributors MUST keep P4 constraints/binding obligations distinct from P5
+  typed uses and final P8 source binding. P7 MUST read P6 storage before Java
+  lowering, not derive its graph from a P8 AST. P9 MUST NOT select types, bindings
+  or recovery semantics.
+- Natural structure and dispatcher MUST consume the same checked operations,
+  storage and CopyPlans. Contributors MUST NOT give either representation a
+  separate capability implementation.
+- Reviewers MUST reject parallel recovery implementations with their own
+  complete-method decoding, SSA/type analysis or register/alias tracking.
+  Operation-specific helpers and phase-owned proofs do not authorize another
+  method entry path. Independent replay remains a verifier obligation.
+- A migration MUST preserve available members, original identities, classified
+  failures, raw completeness, effect order and resource/cancellation behavior.
+  Contributors MUST remove replaced paths before reporting the migration
+  complete. Passing behavior cases alone does not establish architecture
+  compliance.
+
+## Preparation and acceptance gates
+
+Contributors MUST retain the full B01–B04 requirements in
+`docs/diana/TASKS.md` §3 for new or revised preparation evidence. Structure-only
+work never substitutes for input/reference certification or comparator
+falsification. Contributors MUST check current capability and acceptance against
+active code and recorded evidence, not infer them from scaffold version markers
+or historical completion labels.
 
 Tests cross public libraries/modules for complex semantic, raw-integrity, malformed
 input and resource/file-safety behavior. Do not add CLI black-box/help/version/
@@ -139,6 +179,11 @@ safety through public interfaces. Test tooling MAY support those core E2E cases,
 but contributors MUST NOT test the tooling itself. Basic
 CLI/help/getter/forwarding tests remain excluded as described above.
 
+Contributors MUST NOT introduce algorithmically complex test or validation code
+for a capability change. Reuse existing fixtures, Drivers and independent
+expectations; prefer small fixed counterexamples over new interpreters, solvers,
+Cartesian-product generators or comparison frameworks.
+
 Before adding a core test, contributors MUST identify its invariant or regression
 and inspect existing coverage through the relevant public interface. Contributors
 SHOULD extend an existing test with table-driven inputs when the inputs exercise
@@ -148,6 +193,17 @@ budget, cancellation, reference-bound or serialization checks unless a different
 producer or control path requires independent coverage. Test consolidation MUST
 preserve unique counterexamples, independent expectations and classified failures;
 reducing the number of test functions alone does not establish deduplication.
+
+Regression review MUST check affected original member identities, Java
+availability and classified failures, not only whole-case totals. Contributors
+MUST distinguish unverified drafts from the accepted baseline and obtain operator
+approval before withdrawing or committing unrelated uncommitted work.
+
+Contributors SHOULD run relevant existing core cases for coherent changes and
+the full required set at integration/final-acceptance boundaries. Cross-cutting
+changes or observed regressions can require another full run; editing another
+file alone is not a reason to repeat it. These scheduling choices MUST NOT turn
+unexecuted required evidence into a pass.
 
 Reference downloads do not require checksum verification. Keep source URLs and
 fixed revisions for attribution/lookup, preserve local changes, and never build
