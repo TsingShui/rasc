@@ -3,6 +3,7 @@ pub(crate) mod array_ops;
 pub(crate) mod branch;
 pub(crate) mod call_chain;
 pub(crate) mod calls;
+pub(crate) mod cast_ops;
 pub(crate) mod casts;
 pub(crate) mod constructor;
 mod declarations;

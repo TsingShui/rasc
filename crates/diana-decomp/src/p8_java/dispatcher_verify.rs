@@ -347,6 +347,9 @@ pub(super) fn verify(
                     "dispatcher omitted an original operation",
                 ))?;
             let matches = match actual {
+                super::calls::Statement::Cast(actual) => {
+                    super::cast_ops::verify(ssa, bound, actual, budget)?
+                }
                 super::calls::Statement::String {
                     target,
                     reference,

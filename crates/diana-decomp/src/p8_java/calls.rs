@@ -58,6 +58,7 @@ pub(crate) struct ReceiverCall {
     pub arguments: Vec<ValueUse>,
 }
 pub(crate) enum Statement {
+    Cast(super::cast_ops::Statement),
     String {
         target: LocalId,
         reference: crate::StringId,
@@ -367,7 +368,13 @@ pub(super) fn operations(
     for &id in &ssa.ssa.bound[ix(block.0)?].ops {
         budget.charge_work(1)?;
         let op = ssa.ssa.operation(id)?;
-        if let Op::String(_, literal) = op.op {
+        if matches!(op.op, Op::Cast(..)) {
+            push(
+                &mut output,
+                Statement::Cast(super::cast_ops::lower(ssa, op)?),
+                budget,
+            )?;
+        } else if let Op::String(_, literal) = op.op {
             let original =
                 ssa.ssa
                     .strings

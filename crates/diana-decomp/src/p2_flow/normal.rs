@@ -112,6 +112,12 @@ pub(crate) struct CallSite {
 }
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub(crate) struct StringLiteralId(pub u32);
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub(crate) struct CastId(pub u32);
+pub(crate) struct CastSite {
+    pub reference: crate::TypeId,
+    pub kind: crate::p5_types::BuiltinReference,
+}
 pub(crate) struct StringLiteral<'a> {
     pub reference: crate::StringId,
     pub value: crate::input::DexString<'a>,
@@ -123,6 +129,7 @@ pub(crate) enum ArrayElement {
 }
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub(crate) enum Op {
+    Cast(RegisterId, CastId),
     String(RegisterId, StringLiteralId),
     FieldLoad(RegisterId, RegisterId, crate::FieldId),
     FieldStore(RegisterId, RegisterId, crate::FieldId),
@@ -196,7 +203,8 @@ impl Op {
             may_throw: conservative
                 || matches!(
                     self,
-                    Self::String(..)
+                    Self::Cast(..)
+                        | Self::String(..)
                         | Self::ArrayLength(..)
                         | Self::ArrayLoad(..)
                         | Self::ArrayStore(..)
@@ -237,6 +245,7 @@ impl MethodFrame {
     }
 }
 pub(crate) struct FlowBody<'a> {
+    pub casts: Vec<CastSite>,
     pub strings: Vec<StringLiteral<'a>>,
     pub frame: MethodFrame,
     _sealed: (),
@@ -254,7 +263,8 @@ fn ix(value: u32) -> Result<usize, RequestError> {
 pub(crate) fn destination(op: Op) -> Option<RegisterId> {
     match op {
         Op::Call(_, destination) => destination,
-        Op::String(r, _)
+        Op::Cast(r, _)
+        | Op::String(r, _)
         | Op::Constant(r, _)
         | Op::Move(r, _)
         | Op::Binary(r, _, _, _)
@@ -294,6 +304,7 @@ impl Op {
                 ))?;
                 return Ok(Reads::Call(call.registers.iter()));
             }
+            Self::Cast(register, _) => [Some(register), None, None],
             Self::FieldLoad(_, receiver, _) => [Some(receiver), None, None],
             Self::FieldStore(receiver, value, _) => [Some(receiver), Some(value), None],
             Self::ArrayLength(_, array) => [Some(array), None, None],
@@ -497,6 +508,7 @@ pub(crate) fn decode<'a>(
     let mut instructions = Vec::new();
     let mut calls = Vec::new();
     let mut strings = Vec::new();
+    let mut casts = Vec::new();
     let mut raw_switches: Vec<(Vec<(i32, CodeUnitOffset)>, CodeUnitOffset)> = Vec::new();
     let mut leaders = Vec::new();
     push(&mut leaders, CodeUnitOffset(0), budget)?;
@@ -608,6 +620,35 @@ pub(crate) fn decode<'a>(
                     } else {
                         Decoded::Op(Op::FieldStore(reg(1)?, reg(0)?, id))
                     }
+                }
+                0x1f => {
+                    let Some(reference) = layout.references()[0] else {
+                        return Err(RequestError::InternalInvariant("cast lost target"));
+                    };
+                    let crate::raw::OperandReference::Type(reference) = reference.target else {
+                        return Err(RequestError::InternalInvariant(
+                            "cast changed reference domain",
+                        ));
+                    };
+                    let descriptor = input.type_name(reference, budget)?;
+                    let mut target = None;
+                    for kind in [
+                        crate::p5_types::BuiltinReference::Object,
+                        crate::p5_types::BuiltinReference::String,
+                    ] {
+                        if descriptor.matches_with(kind.descriptor(), budget)? {
+                            target = Some(kind);
+                            break;
+                        }
+                    }
+                    let Some(kind) = target else {
+                        return Ok(None);
+                    };
+                    let id = CastId(
+                        u32::try_from(casts.len()).map_err(|_| RequestError::PlatformCapacity)?,
+                    );
+                    push(&mut casts, CastSite { reference, kind }, budget)?;
+                    Decoded::Op(Op::Cast(reg(0)?, id))
                 }
                 0x1a | 0x1b => {
                     let Some(reference) = layout.references()[0] else {
@@ -987,6 +1028,7 @@ pub(crate) fn decode<'a>(
         }
     }
     Ok(Some(FlowBody {
+        casts,
         strings,
         frame,
         _sealed: (),

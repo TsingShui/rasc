@@ -155,7 +155,8 @@ pub(super) fn operation(
             },
         ),
         Op::Nop => return Ok(None),
-        Op::String(..)
+        Op::Cast(..)
+        | Op::String(..)
         | Op::Call(_, _)
         | Op::ArrayLength(..)
         | Op::ArrayLoad(..)
@@ -204,6 +205,9 @@ pub(crate) fn verify(
     representation: crate::RepresentationPolicy,
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<Option<VerifiedJavaMethod>, RequestError> {
+    if !super::cast_ops::validate(input, catalog, &storage.typed, budget)? {
+        return Ok(None);
+    }
     let Some(mut calls) = super::calls::validate_bindings(input, catalog, &storage.typed, budget)?
     else {
         return Ok(None);

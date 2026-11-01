@@ -37,6 +37,7 @@ pub(crate) struct TypedBody<'a> {
     pub arrays: Vec<Option<ArrayEvidence>>,
     pub bindings: Vec<crate::p4_calls::normal::CallEvidence>,
     pub call_uses: Vec<crate::p5_types::calls::CallUses>,
+    pub cast_uses: Vec<crate::p5_types::calls::TypedUse>,
     pub field_declarations: Vec<Option<crate::p4_calls::normal::FieldEvidence>>,
     pub field_uses: Vec<Option<FieldUse>>,
 }
@@ -123,6 +124,21 @@ pub(crate) fn solve<'a>(
                 (bits, declaration.range(), Some(kind))
             }
             Definition::OpResult(id) => match ssa.operation(id)?.op {
+                Op::Cast(_, id) => (
+                    0,
+                    None,
+                    Some(
+                        match ssa
+                            .casts
+                            .get(ix(id.0)?)
+                            .ok_or(RequestError::InternalInvariant("cast lost target type"))?
+                            .kind
+                        {
+                            crate::p5_types::BuiltinReference::Object => Kind::Object,
+                            crate::p5_types::BuiltinReference::String => Kind::String,
+                        },
+                    ),
+                ),
                 Op::String(..) => (0, None, Some(Kind::String)),
                 Op::Constant(_, value) => (
                     match value {
@@ -254,6 +270,9 @@ pub(crate) fn solve<'a>(
     let Some(arrays) = solve_arrays(&ssa, &kinds, &integral_bits, budget)? else {
         return Ok(None);
     };
+    let Some(cast_uses) = solve_casts(&ssa, &kinds, budget)? else {
+        return Ok(None);
+    };
     let Some(field_uses) = solve_fields(&ssa, &field_declarations, &kinds, budget)? else {
         return Ok(None);
     };
@@ -271,6 +290,7 @@ pub(crate) fn solve<'a>(
         arrays,
         bindings,
         call_uses,
+        cast_uses,
         field_declarations,
         field_uses,
     }))
@@ -409,6 +429,50 @@ fn solve_fields(
             FieldUse::Write(conversion)
         };
         push(&mut uses, Some(usage), budget)?;
+    }
+    Ok(Some(uses))
+}
+
+fn solve_casts(
+    ssa: &SsaBody<'_>,
+    kinds: &[Option<Kind>],
+    budget: &mut MethodBudget<'_, '_>,
+) -> Result<Option<Vec<crate::p5_types::calls::TypedUse>>, RequestError> {
+    let mut uses = Vec::new();
+    for op in &ssa.operations {
+        budget.charge_work(1)?;
+        let Op::Cast(_, id) = op.op else {
+            continue;
+        };
+        if ix(id.0)? != uses.len() {
+            return Err(RequestError::InternalInvariant(
+                "cast use changed arena identity",
+            ));
+        }
+        let value = op.input(0)?;
+        let conversion = if ssa.is_zero(value)? {
+            UseConversion::Null(crate::p5_types::BuiltinReference::Object)
+        } else {
+            match kinds[ix(value.0)?] {
+                Some(Kind::Object | Kind::String) => UseConversion::Identity,
+                Some(Kind::Nominal(_) | Kind::IntArray | Kind::ObjectArray) => {
+                    UseConversion::UpcastObject
+                }
+                None => return Ok(None),
+                _ => {
+                    return Err(crate::input::MethodError::Malformed {
+                        pc: op.pc,
+                        problem: crate::input::MethodProblem::InvalidTypeOperand,
+                    }
+                    .into());
+                }
+            }
+        };
+        push(
+            &mut uses,
+            crate::p5_types::calls::TypedUse { value, conversion },
+            budget,
+        )?;
     }
     Ok(Some(uses))
 }

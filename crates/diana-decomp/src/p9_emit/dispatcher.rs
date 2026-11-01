@@ -64,6 +64,14 @@ pub(super) fn statements(
     for statement in &case.statements {
         budget.charge_work(1)?;
         match statement {
+            crate::p8_java::calls::Statement::Cast(cast) => {
+                local(cast.target, output, budget)?;
+                output.push(" = (", budget)?;
+                output.push(cast.kind.spelling(), budget)?;
+                output.push(") ", budget)?;
+                super::java::value_use(cast.source, output, budget)?;
+                output.push(";\n", budget)?;
+            }
             crate::p8_java::calls::Statement::String { target, units, .. } => {
                 local(*target, output, budget)?;
                 output.push(" = ", budget)?;
