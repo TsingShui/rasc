@@ -8,6 +8,7 @@ mod throws;
 pub(crate) use throws::{compatible as compatible_throws, source_throws};
 mod receivers;
 pub(crate) use receivers::{ReceiverContract, ReceiverKind, resolve_receiver};
+pub(crate) mod field_facts;
 mod fields;
 pub(crate) use fields::{
     FieldUse, InstanceIntAccess, InstanceIntWrite, bind_instance_int, bind_own_int_write,

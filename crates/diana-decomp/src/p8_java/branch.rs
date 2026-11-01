@@ -155,7 +155,12 @@ pub(super) fn operation(
             },
         ),
         Op::Nop => return Ok(None),
-        Op::Call(_, _) | Op::ArrayLength(..) | Op::ArrayLoad(..) | Op::ArrayStore(..) => {
+        Op::Call(_, _)
+        | Op::ArrayLength(..)
+        | Op::ArrayLoad(..)
+        | Op::ArrayStore(..)
+        | Op::FieldLoad(..)
+        | Op::FieldStore(..) => {
             return Err(RequestError::InternalInvariant(
                 "call entered pure assignment lowering",
             ));

@@ -37,6 +37,7 @@ pub(crate) struct StaticCall {
     pub arguments: Vec<ValueUse>,
 }
 pub(crate) enum Statement {
+    Field(super::field_ops::Statement),
     Array(super::array_ops::Statement),
     Assignment(Assignment),
     StaticCall {
@@ -264,7 +265,12 @@ pub(super) fn operations(
     for &id in &ssa.ssa.bound[ix(block.0)?].ops {
         budget.charge_work(1)?;
         let op = ssa.ssa.operation(id)?;
-        if matches!(
+        if matches!(op.op, Op::FieldLoad(..) | Op::FieldStore(..)) {
+            let Some(statement) = super::field_ops::lower(ssa, op, budget)? else {
+                return Ok(None);
+            };
+            push(&mut output, Statement::Field(statement), budget)?;
+        } else if matches!(
             op.op,
             Op::ArrayLength(..) | Op::ArrayLoad(..) | Op::ArrayStore(..)
         ) {

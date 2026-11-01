@@ -96,6 +96,8 @@ pub(crate) enum ArrayElement {
 }
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub(crate) enum Op {
+    FieldLoad(RegisterId, RegisterId, crate::FieldId),
+    FieldStore(RegisterId, RegisterId, crate::FieldId),
     ArrayLength(RegisterId, RegisterId),
     ArrayLoad(RegisterId, RegisterId, RegisterId, ArrayElement),
     ArrayStore(RegisterId, RegisterId, RegisterId, ArrayElement),
@@ -161,12 +163,16 @@ impl Op {
     pub(crate) fn effects(self) -> Effects {
         let conservative = matches!(self, Self::Call(_, _));
         Effects {
-            heap_read: conservative || matches!(self, Self::ArrayLoad(..)),
-            heap_write: conservative || matches!(self, Self::ArrayStore(..)),
+            heap_read: conservative || matches!(self, Self::ArrayLoad(..) | Self::FieldLoad(..)),
+            heap_write: conservative || matches!(self, Self::ArrayStore(..) | Self::FieldStore(..)),
             may_throw: conservative
                 || matches!(
                     self,
-                    Self::ArrayLength(..) | Self::ArrayLoad(..) | Self::ArrayStore(..)
+                    Self::ArrayLength(..)
+                        | Self::ArrayLoad(..)
+                        | Self::ArrayStore(..)
+                        | Self::FieldLoad(..)
+                        | Self::FieldStore(..)
                 ),
             call: conservative,
             class_init: conservative,
@@ -209,8 +215,9 @@ pub(crate) fn destination(op: Op) -> Option<RegisterId> {
         | Op::Binary(r, _, _, _)
         | Op::Compare(r, _, _, _)
         | Op::ArrayLength(r, _)
-        | Op::ArrayLoad(r, _, _, _) => Some(r),
-        Op::Nop | Op::ArrayStore(..) => None,
+        | Op::ArrayLoad(r, _, _, _)
+        | Op::FieldLoad(r, _, _) => Some(r),
+        Op::Nop | Op::ArrayStore(..) | Op::FieldStore(..) => None,
     }
 }
 pub(crate) enum Reads<'a> {
@@ -242,6 +249,8 @@ impl Op {
                 ))?;
                 return Ok(Reads::Call(call.registers.iter()));
             }
+            Self::FieldLoad(_, receiver, _) => [Some(receiver), None, None],
+            Self::FieldStore(receiver, value, _) => [Some(receiver), Some(value), None],
             Self::ArrayLength(_, array) => [Some(array), None, None],
             Self::ArrayLoad(_, array, index, _) => [Some(array), Some(index), None],
             Self::ArrayStore(array, index, value, _) => [Some(array), Some(index), Some(value)],
@@ -516,6 +525,31 @@ pub(crate) fn decode<'a>(
                         ),
                     };
                     Decoded::Op(Op::Binary(reg(0)?, left, arithmetic, right))
+                }
+                0x52 | 0x59 => {
+                    let Some(reference) = layout.references()[0] else {
+                        return Err(RequestError::InternalInvariant(
+                            "field operation lost reference",
+                        ));
+                    };
+                    let crate::raw::OperandReference::Field(id) = reference.target else {
+                        return Err(RequestError::InternalInvariant(
+                            "field operation changed reference domain",
+                        ));
+                    };
+                    if !input
+                        .field_reference(id, budget)?
+                        .declaration
+                        .field_type
+                        .matches_with(&[73], budget)?
+                    {
+                        return Ok(None);
+                    }
+                    if spec.opcode == 0x52 {
+                        Decoded::Op(Op::FieldLoad(reg(0)?, reg(1)?, id))
+                    } else {
+                        Decoded::Op(Op::FieldStore(reg(1)?, reg(0)?, id))
+                    }
                 }
                 0x21 => Decoded::Op(Op::ArrayLength(reg(0)?, reg(1)?)),
                 0x44 | 0x46 => Decoded::Op(Op::ArrayLoad(

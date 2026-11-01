@@ -1,5 +1,13 @@
 use super::structure::code;
 
+#[derive(serde::Deserialize)]
+struct PipelineFacts {
+    environment_id: u64,
+    methods: Vec<diana_decomp::ExternalMethodSignature>,
+    classes: Vec<diana_decomp::ExternalClassDeclaration>,
+    fields: Vec<diana_decomp::ExternalFieldEvidence>,
+}
+
 #[test]
 fn t09_ordinary_dispatcher_rejects_even_an_unthrowing_protected_method() {
     let mut fixture = super::fixture::tiny("f", true, false);
@@ -358,13 +366,6 @@ fn call_definition_errors_precede_missing_declarations_without_guessing_a_bindin
 
 #[test]
 fn nominal_types_keep_distinct_identities_and_owned_names_without_guessing_missing_declarations() {
-    #[derive(serde::Deserialize)]
-    struct Facts {
-        environment_id: u64,
-        methods: Vec<diana_decomp::ExternalMethodSignature>,
-        classes: Vec<diana_decomp::ExternalClassDeclaration>,
-        fields: Vec<diana_decomp::ExternalFieldEvidence>,
-    }
     let inputs = [
         ("pick", "(Lfixtures/Box;Lfixtures/Box;I)Lfixtures/Box;"),
         ("tags", "(Lfixtures/Box;Lfixtures/Token;I)I"),
@@ -384,7 +385,7 @@ fn nominal_types_keep_distinct_identities_and_owned_names_without_guessing_missi
         for missing in [false, true] {
             for (name, prototype) in inputs {
                 let bytes = include_bytes!("../fixtures/shared-nominal/classes.dex").to_vec();
-                let mut facts: Facts =
+                let mut facts: PipelineFacts =
                     serde_json::from_str(include_str!("../fixtures/shared-nominal/catalog.json"))
                         .unwrap();
                 if missing {
@@ -446,6 +447,94 @@ fn nominal_types_keep_distinct_identities_and_owned_names_without_guessing_missi
                 }
                 let rendered = diana_decomp::render(&report, &mut control).unwrap();
                 assert!(!rendered.source.is_empty());
+            }
+        }
+    }
+}
+
+#[test]
+fn field_call_array_composition_preserves_native_volatile_declaration_evidence() {
+    enum Evidence {
+        Complete,
+        Missing,
+        NonVolatile,
+    }
+    for policy in [
+        diana_decomp::RepresentationPolicy::StructuredThenDispatch,
+        diana_decomp::RepresentationPolicy::DispatchOnly,
+    ] {
+        for evidence in [Evidence::Complete, Evidence::Missing, Evidence::NonVolatile] {
+            for (name, prototype) in [
+                ("combine", "(Lfixtures/Box;[II)I"),
+                ("repeat", "(Lfixtures/Box;[II)I"),
+                ("unused", "(Lfixtures/Box;[I)V"),
+            ] {
+                let bytes = include_bytes!("../fixtures/shared-fields/classes.dex");
+                let mut facts: PipelineFacts =
+                    serde_json::from_str(include_str!("../fixtures/shared-fields/catalog.json"))
+                        .unwrap();
+                match evidence {
+                    Evidence::Complete => {}
+                    Evidence::Missing => facts.fields.clear(),
+                    Evidence::NonVolatile => {
+                        for field in &mut facts.fields {
+                            field.access_flags &= !0x40;
+                        }
+                    }
+                }
+                let catalog = DeclarationCatalog::with_declarations(
+                    EnvironmentId(facts.environment_id),
+                    facts.methods,
+                    facts.classes,
+                )
+                .with_field_evidence(facts.fields);
+                let mut control = RunContext::new(Limits::default(), &|| false);
+                let engine = Engine::open(
+                    vec![DexImage {
+                        bytes,
+                        header_offset: ByteOffset(0),
+                        origin: ImageOrigin { input: InputId(0) },
+                    }],
+                    Options::default(),
+                    catalog,
+                    &mut control,
+                )
+                .unwrap()
+                .with_representation(policy);
+                let report = engine
+                    .decompile(
+                        Request {
+                            class: ClassKey {
+                                dex: DexId(0),
+                                class_def: ClassDefId(1),
+                            },
+                            method: Some(MethodSelector {
+                                name: name.encode_utf16().collect(),
+                                prototype: prototype.encode_utf16().collect(),
+                            }),
+                        },
+                        &mut control,
+                    )
+                    .unwrap();
+                let ClassOutput::Mixed { members, .. } = report.class();
+                match evidence {
+                    Evidence::Complete => assert!(
+                        matches!(&members[0], MethodOutput::Java { .. }),
+                        "shared field composition failed for {name}"
+                    ),
+                    Evidence::Missing | Evidence::NonVolatile => {
+                        let reason = match &members[0] {
+                            MethodOutput::Debug { reason, .. }
+                            | MethodOutput::Unavailable { reason, .. } => reason,
+                            _ => {
+                                panic!("missing or contradicted field facts produced trusted Java")
+                            }
+                        };
+                        let diagnostic = &report.diagnostics()[reason.0];
+                        assert_eq!(diagnostic.cause.kind(), FailureKind::Unsupported);
+                        assert_eq!(diagnostic.code(), DiagnosticCode::BindingEvidenceMissing);
+                    }
+                }
             }
         }
     }

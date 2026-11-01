@@ -37,6 +37,12 @@ pub(crate) struct TypedBody<'a> {
     pub arrays: Vec<Option<ArrayEvidence>>,
     pub bindings: Vec<crate::p4_calls::normal::CallEvidence>,
     pub call_uses: Vec<crate::p5_types::calls::CallUses>,
+    pub field_declarations: Vec<Option<crate::p4_calls::normal::FieldEvidence>>,
+    pub field_uses: Vec<Option<FieldUse>>,
+}
+pub(crate) enum FieldUse {
+    Read,
+    Write(UseConversion),
 }
 impl TypedBody<'_> {
     pub(crate) fn contract(
@@ -94,6 +100,7 @@ pub(crate) fn solve<'a>(
 ) -> Result<Option<TypedBody<'a>>, RequestError> {
     let ssa = resolved.ssa;
     let bindings = resolved.calls;
+    let field_declarations = resolved.fields;
     let mut integral_bits = Vec::new();
     let mut ranges = Vec::new();
     let mut kinds = Vec::new();
@@ -125,7 +132,8 @@ pub(crate) fn solve<'a>(
                     Some(crate::p5_types::IntRange::literal(value)),
                     Some(Kind::Int),
                 ),
-                Op::ArrayLength(..)
+                Op::FieldLoad(..)
+                | Op::ArrayLength(..)
                 | Op::ArrayLoad(_, _, _, crate::p2_flow::normal::ArrayElement::Int)
                 | Op::Binary(_, _, _, _)
                 | Op::Compare(_, _, _, _) => {
@@ -153,7 +161,7 @@ pub(crate) fn solve<'a>(
                     (0, None, Some(Kind::Object))
                 }
                 Op::Move(_, _) => (0, None, None),
-                Op::Nop | Op::ArrayStore(..) => {
+                Op::Nop | Op::ArrayStore(..) | Op::FieldStore(..) => {
                     return Err(RequestError::InternalInvariant(
                         "NOP acquired a normal value definition",
                     ));
@@ -245,6 +253,9 @@ pub(crate) fn solve<'a>(
     let Some(arrays) = solve_arrays(&ssa, &kinds, &integral_bits, budget)? else {
         return Ok(None);
     };
+    let Some(field_uses) = solve_fields(&ssa, &field_declarations, &kinds, budget)? else {
+        return Ok(None);
+    };
     let Some(call_uses) =
         super::calls::solve(&ssa, &bindings, &kinds, &integral_bits, &ranges, budget)?
     else {
@@ -259,6 +270,8 @@ pub(crate) fn solve<'a>(
         arrays,
         bindings,
         call_uses,
+        field_declarations,
+        field_uses,
     }))
 }
 fn solve_arrays(
@@ -345,4 +358,56 @@ fn solve_arrays(
         )?;
     }
     Ok(Some(result))
+}
+
+fn solve_fields(
+    ssa: &SsaBody<'_>,
+    declarations: &[Option<crate::p4_calls::normal::FieldEvidence>],
+    kinds: &[Option<Kind>],
+    budget: &mut MethodBudget<'_, '_>,
+) -> Result<Option<Vec<Option<FieldUse>>>, RequestError> {
+    let mut uses = Vec::new();
+    for op in &ssa.operations {
+        budget.charge_work(1)?;
+        let reference = match op.op {
+            Op::FieldLoad(_, _, id) | Op::FieldStore(_, _, id) => id,
+            _ => {
+                push(&mut uses, None, budget)?;
+                continue;
+            }
+        };
+        let evidence = declarations
+            .get(ix(op.id.0)?)
+            .and_then(Option::as_ref)
+            .ok_or(RequestError::InternalInvariant(
+                "field operation lost original constraints",
+            ))?;
+        if evidence.reference != reference {
+            return Err(RequestError::InternalInvariant(
+                "field constraints changed reference",
+            ));
+        }
+        if kinds[ix(op.input(0)?.0)?] != Some(Kind::Nominal(evidence.owner)) {
+            return Ok(None);
+        }
+        let usage = if matches!(op.op, Op::FieldLoad(..)) {
+            FieldUse::Read
+        } else {
+            let conversion = match kinds[ix(op.input(1)?.0)?] {
+                Some(Kind::Int) => UseConversion::Identity,
+                Some(Kind::Boolean) => UseConversion::BooleanWord,
+                None => return Ok(None),
+                _ => {
+                    return Err(crate::input::MethodError::Malformed {
+                        pc: op.pc,
+                        problem: crate::input::MethodProblem::InvalidFieldKind,
+                    }
+                    .into());
+                }
+            };
+            FieldUse::Write(conversion)
+        };
+        push(&mut uses, Some(usage), budget)?;
+    }
+    Ok(Some(uses))
 }

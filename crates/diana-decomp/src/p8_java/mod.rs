@@ -8,6 +8,7 @@ pub(crate) mod constructor;
 mod declarations;
 pub(crate) mod dispatcher;
 mod dispatcher_verify;
+pub(crate) mod field_ops;
 pub(crate) mod fresh_array;
 pub(crate) mod heap_access;
 pub(crate) mod receiver;

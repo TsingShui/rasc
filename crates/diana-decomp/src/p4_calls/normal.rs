@@ -23,6 +23,17 @@ pub(crate) struct ResolvedBody<'a> {
     _sealed: (),
     pub ssa: SsaBody<'a>,
     pub calls: Vec<CallEvidence>,
+    pub fields: Vec<Option<FieldEvidence>>,
+}
+pub(crate) struct FieldEvidence {
+    pub reference: crate::FieldId,
+    pub owner: crate::TypeId,
+    pub declaration: FieldDeclaration,
+}
+pub(crate) enum FieldDeclaration {
+    Known(super::field_facts::IntFieldAccess),
+    Missing,
+    Constant,
 }
 pub(crate) fn collect<'a>(
     input: &MethodInput<'_, '_>,
@@ -42,10 +53,51 @@ pub(crate) fn collect<'a>(
             };
         push(&mut calls, evidence, budget)?;
     }
+    let mut fields = Vec::new();
+    for op in &ssa.operations {
+        budget.charge_work(1)?;
+        let (reference, usage) = match op.op {
+            crate::p2_flow::normal::Op::FieldLoad(_, _, id) => {
+                (id, super::field_facts::FieldUse::Read)
+            }
+            crate::p2_flow::normal::Op::FieldStore(_, _, id) => {
+                (id, super::field_facts::FieldUse::Write)
+            }
+            _ => {
+                push(&mut fields, None, budget)?;
+                continue;
+            }
+        };
+        let original = input.field_reference(reference, budget)?;
+        let declaration = match super::field_facts::collect_int_field(
+            input,
+            catalog,
+            reference,
+            super::field_facts::FieldStorage::Instance,
+            usage,
+            op.pc,
+            budget,
+        ) {
+            Ok(facts) => FieldDeclaration::Known(facts),
+            Err(RequestError::FieldBindingEvidenceMissing { .. }) => FieldDeclaration::Missing,
+            Err(RequestError::JavaConstantFieldRead { .. }) => FieldDeclaration::Constant,
+            Err(error) => return Err(error),
+        };
+        push(
+            &mut fields,
+            Some(FieldEvidence {
+                reference,
+                owner: original.owner_type,
+                declaration,
+            }),
+            budget,
+        )?;
+    }
     Ok(ResolvedBody {
         _sealed: (),
         ssa,
         calls,
+        fields,
     })
 }
 pub(crate) fn binding_available(

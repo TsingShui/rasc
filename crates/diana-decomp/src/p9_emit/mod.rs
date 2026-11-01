@@ -8,6 +8,7 @@ mod debug;
 mod debug_program;
 mod dispatcher;
 mod error;
+mod field_ops;
 mod fresh_array;
 mod heap_access;
 mod java;

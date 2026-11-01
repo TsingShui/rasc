@@ -663,6 +663,7 @@ impl<'a> ProgramIndex<'a> {
             ));
         }
         Ok(FieldReference {
+            owner_type: owner_idx,
             owner,
             declaration: self.validate_field(id, owner_idx, control)?,
         })
@@ -688,6 +689,7 @@ pub(crate) struct MethodReference<'i, 'a> {
 }
 
 pub(crate) struct FieldReference<'a> {
+    pub owner_type: TypeId,
     pub owner: DexString<'a>,
     pub declaration: FieldDeclaration<'a>,
 }

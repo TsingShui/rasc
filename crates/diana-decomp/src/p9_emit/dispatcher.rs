@@ -59,6 +59,9 @@ pub(super) fn statements(
     for statement in &case.statements {
         budget.charge_work(1)?;
         match statement {
+            crate::p8_java::calls::Statement::Field(statement) => {
+                super::field_ops::write(statement, output, budget)?
+            }
             crate::p8_java::calls::Statement::Array(statement) => {
                 super::array_ops::write(statement, output, budget)?
             }
