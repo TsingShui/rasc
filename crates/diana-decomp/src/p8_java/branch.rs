@@ -45,13 +45,18 @@ pub(super) fn returned(
             },
         );
     }
+    if ssa.kinds[index] == Some(result.kind()) && matches!(result.kind(), Kind::Nominal(_)) {
+        return Ok(Some(ValueUse::Direct(value)));
+    }
     Ok(match (ssa.kinds[index], result.kind()) {
         (Some(Kind::Int), Kind::Int)
         | (Some(Kind::Boolean), Kind::Boolean)
         | (Some(Kind::Object), Kind::Object)
         | (Some(Kind::String), Kind::String) => Some(ValueUse::Direct(value)),
         (Some(Kind::Boolean), Kind::Int) => Some(ValueUse::BooleanWord(value)),
-        (Some(Kind::String), Kind::Object) => Some(ValueUse::UpcastObject(value)),
+        (Some(Kind::String | Kind::Nominal(_)), Kind::Object) => {
+            Some(ValueUse::UpcastObject(value))
+        }
         (Some(Kind::Int), Kind::Boolean)
             if ssa.integral_bits[index] != 0 && ssa.integral_bits[index] & 4 == 0 =>
         {
@@ -196,19 +201,36 @@ pub(crate) fn verify(
     if !super::calls::validate_bindings(input, catalog, &storage.typed, budget)? {
         return Ok(None);
     }
+    let Some(type_names) = super::types::resolve(input, catalog, &storage, budget)? else {
+        return Ok(None);
+    };
     if matches!(
         representation,
         crate::RepresentationPolicy::StructuredThenDispatch
-    ) && let Some(method) = verify_diamond(input, &storage, environment, budget)?
+    ) && let Some(mut method) =
+        verify_diamond(input, &storage, &type_names, environment, budget)?
     {
+        method.type_names = type_names;
         return Ok(Some(method));
     }
-    super::dispatcher::verify(input, &storage, environment, representation, budget)
+    let method = super::dispatcher::verify(
+        input,
+        &storage,
+        &type_names,
+        environment,
+        representation,
+        budget,
+    )?;
+    Ok(method.map(|mut method| {
+        method.type_names = type_names;
+        method
+    }))
 }
 
 fn verify_diamond(
     input: &MethodInput<'_, '_>,
     storage: &StorageBody<'_>,
+    type_names: &super::types::TypeNames,
     environment: EnvironmentId,
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<Option<VerifiedJavaMethod>, RequestError> {
@@ -302,7 +324,12 @@ fn verify_diamond(
     }
     if matches!(
         condition_kind,
-        Kind::Boolean | Kind::Object | Kind::String | Kind::IntArray | Kind::ObjectArray
+        Kind::Boolean
+            | Kind::Object
+            | Kind::String
+            | Kind::IntArray
+            | Kind::ObjectArray
+            | Kind::Nominal(_)
     ) && !matches!(opcode, 0x38 | 0x39)
     {
         return Ok(None);
@@ -374,7 +401,7 @@ fn verify_diamond(
             header.push(text, budget)?;
         }
     }
-    header.push(ssa.ssa.result.spelling(), budget)?;
+    header.push(type_names.result(ssa.ssa.result, budget)?, budget)?;
     header.push(" ", budget)?;
     for unit in name {
         header.character(
@@ -390,7 +417,7 @@ fn verify_diamond(
         if index != 0 {
             header.push(", ", budget)?;
         }
-        header.push(kind.spelling(), budget)?;
+        header.push(type_names.declaration(*kind, budget)?, budget)?;
         header.push(" p", budget)?;
         header.unsigned(
             u64::try_from(index).map_err(|_| RequestError::PlatformCapacity)?,

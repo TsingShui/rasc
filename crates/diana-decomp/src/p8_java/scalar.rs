@@ -9,12 +9,14 @@ pub enum CompilationContract {
     Java8,
 }
 
-/// An owned, explicit scalar-method AST admitted by the P8 verifier. It contains no
-/// input or analysis-arena borrows. Verification does not invoke a Java compiler.
+/// An owned method AST admitted by the P8 verifier, including validated source
+/// type names. It contains no input or analysis-arena borrows. Verification does
+/// not invoke a Java compiler.
 pub struct VerifiedJavaMethod {
     pub(crate) header: String,
     pub(crate) body: MethodBody,
     environment: EnvironmentId,
+    pub(crate) type_names: super::types::TypeNames,
 }
 pub(crate) enum MethodBody {
     HeapAccess(super::heap_access::Body),
@@ -44,6 +46,7 @@ impl VerifiedJavaMethod {
             header,
             body: MethodBody::HeapAccess(body),
             environment,
+            type_names: super::types::TypeNames::default(),
         }
     }
     pub(super) fn fresh_array(
@@ -55,6 +58,7 @@ impl VerifiedJavaMethod {
             header,
             body: MethodBody::FreshArray(body),
             environment,
+            type_names: super::types::TypeNames::default(),
         }
     }
     pub(super) fn zero_fill(
@@ -66,6 +70,7 @@ impl VerifiedJavaMethod {
             header,
             body: MethodBody::ZeroFill(body),
             environment,
+            type_names: super::types::TypeNames::default(),
         }
     }
     pub(super) fn casts(
@@ -77,6 +82,7 @@ impl VerifiedJavaMethod {
             header,
             body: MethodBody::Casts(body),
             environment,
+            type_names: super::types::TypeNames::default(),
         }
     }
     pub(super) fn structured(
@@ -88,6 +94,7 @@ impl VerifiedJavaMethod {
             header,
             body: MethodBody::Structured(body),
             environment,
+            type_names: super::types::TypeNames::default(),
         }
     }
     pub(super) fn constructor(
@@ -99,6 +106,7 @@ impl VerifiedJavaMethod {
             header,
             body: MethodBody::Constructor(body),
             environment,
+            type_names: super::types::TypeNames::default(),
         }
     }
     pub(super) fn call_chain(
@@ -110,6 +118,7 @@ impl VerifiedJavaMethod {
             header,
             body: MethodBody::CallChain(body),
             environment,
+            type_names: super::types::TypeNames::default(),
         }
     }
     pub(super) fn receiver(
@@ -121,6 +130,7 @@ impl VerifiedJavaMethod {
             header,
             body: MethodBody::Receiver(body),
             environment,
+            type_names: super::types::TypeNames::default(),
         }
     }
     /// Iterates already verified original call identities without allocation.
@@ -288,6 +298,7 @@ impl VerifiedJavaMethod {
             header,
             body: MethodBody::Dispatcher(body),
             environment,
+            type_names: super::types::TypeNames::default(),
         }
     }
     pub(super) fn diamond(
@@ -299,6 +310,7 @@ impl VerifiedJavaMethod {
             header,
             body: MethodBody::Diamond(body),
             environment,
+            type_names: super::types::TypeNames::default(),
         }
     }
     pub fn environment(&self) -> EnvironmentId {
@@ -463,5 +475,6 @@ pub(crate) fn verify(
             typing: plan.typing,
         },
         environment,
+        type_names: super::types::TypeNames::default(),
     }))
 }

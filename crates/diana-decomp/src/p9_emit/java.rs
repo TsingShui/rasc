@@ -17,7 +17,9 @@ pub(crate) fn java(
         MethodBody::FreshArray(body) => super::fresh_array::write(body, &mut output, budget)?,
         MethodBody::ZeroFill(body) => super::zero_fill::write(body, &mut output, budget)?,
         MethodBody::Casts(body) => super::casts::write(body, &mut output, budget)?,
-        MethodBody::Structured(body) => super::structured::write(body, &mut output, budget)?,
+        MethodBody::Structured(body) => {
+            super::structured::write(body, &method.type_names, &mut output, budget)?
+        }
         MethodBody::Constructor(body) => super::constructor::write(body, &mut output, budget)?,
         MethodBody::CallChain(body) => super::call_chain::write(body, &mut output, budget)?,
         MethodBody::Receiver(body) => {
@@ -55,8 +57,10 @@ pub(crate) fn java(
             returned,
             typing,
         } => scalar(definitions, locals, *returned, typing, &mut output, budget)?,
-        MethodBody::Diamond(body) => diamond(body, &mut output, budget)?,
-        MethodBody::Dispatcher(body) => super::dispatcher::write(body, &mut output, budget)?,
+        MethodBody::Diamond(body) => diamond(body, &method.type_names, &mut output, budget)?,
+        MethodBody::Dispatcher(body) => {
+            super::dispatcher::write(body, &method.type_names, &mut output, budget)?
+        }
     }
     output.push("}\n", budget)?;
     budget.checkpoint()?;
@@ -342,23 +346,14 @@ pub(super) fn assignments(
 }
 fn diamond(
     body: &Diamond,
+    type_names: &crate::p8_java::types::TypeNames,
     output: &mut TextBuffer,
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<(), RequestError> {
     for declaration in &body.locals {
         budget.charge_work(1)?;
-        output.push(
-            match declaration.kind {
-                Kind::Int => "int ",
-                Kind::Boolean => "boolean ",
-                Kind::Object => "java.lang.Object ",
-                Kind::String => "java.lang.String ",
-                Kind::Float => "float ",
-                Kind::IntArray => "int[] ",
-                Kind::ObjectArray => "java.lang.Object[] ",
-            },
-            budget,
-        )?;
+        output.push(type_names.name(declaration.kind, budget)?, budget)?;
+        output.push(" ", budget)?;
         local(declaration.id, output, budget)?;
         if let Some(parameter) = declaration.parameter {
             output.push(" = p", budget)?;
@@ -380,7 +375,7 @@ fn diamond(
             }
             local(body.condition, output, budget)?;
         }
-        Kind::Object | Kind::String | Kind::IntArray | Kind::ObjectArray => {
+        Kind::Object | Kind::String | Kind::IntArray | Kind::ObjectArray | Kind::Nominal(_) => {
             local(body.condition, output, budget)?;
             output.push(
                 if body.opcode == 0x38 {

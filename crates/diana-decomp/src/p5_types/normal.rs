@@ -12,10 +12,11 @@ pub(crate) enum Kind {
     Float,
     IntArray,
     ObjectArray,
+    Nominal(crate::TypeId),
 }
 impl Kind {
-    pub(crate) fn spelling(self) -> &'static str {
-        match self {
+    pub(crate) fn builtin_spelling(self) -> Option<&'static str> {
+        Some(match self {
             Self::Int => "int",
             Self::Boolean => "boolean",
             Self::Object => "java.lang.Object",
@@ -23,7 +24,8 @@ impl Kind {
             Self::Float => "float",
             Self::IntArray => "int[]",
             Self::ObjectArray => "java.lang.Object[]",
-        }
+            Self::Nominal(_) => return None,
+        })
     }
 }
 pub(crate) struct TypedBody<'a> {
@@ -108,7 +110,8 @@ pub(crate) fn solve<'a>(
                     | Kind::String
                     | Kind::Float
                     | Kind::IntArray
-                    | Kind::ObjectArray => 0,
+                    | Kind::ObjectArray
+                    | Kind::Nominal(_) => 0,
                 };
                 (bits, declaration.range(), Some(kind))
             }
@@ -313,7 +316,12 @@ fn solve_arrays(
                             (ArrayElement::Int, Some(Kind::Boolean)) => UseConversion::BooleanWord,
                             (
                                 ArrayElement::Object,
-                                Some(Kind::String | Kind::IntArray | Kind::ObjectArray),
+                                Some(
+                                    Kind::String
+                                    | Kind::IntArray
+                                    | Kind::ObjectArray
+                                    | Kind::Nominal(_),
+                                ),
                             ) => UseConversion::UpcastObject,
                             (ArrayElement::Object, Some(Kind::Int)) if bits[at] == 1 => {
                                 UseConversion::Null(crate::p5_types::BuiltinReference::Object)

@@ -16,23 +16,14 @@ fn edge(
 }
 pub(super) fn locals(
     body: &Dispatcher,
+    type_names: &crate::p8_java::types::TypeNames,
     output: &mut TextBuffer,
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<(), RequestError> {
     for declaration in &body.locals {
         budget.charge_work(1)?;
-        output.push(
-            match declaration.kind {
-                Kind::Int => "int ",
-                Kind::Boolean => "boolean ",
-                Kind::Object => "java.lang.Object ",
-                Kind::String => "java.lang.String ",
-                Kind::Float => "float ",
-                Kind::IntArray => "int[] ",
-                Kind::ObjectArray => "java.lang.Object[] ",
-            },
-            budget,
-        )?;
+        output.push(type_names.name(declaration.kind, budget)?, budget)?;
+        output.push(" ", budget)?;
         local(declaration.id, output, budget)?;
         if let Some(parameter) = declaration.parameter {
             output.push(" = p", budget)?;
@@ -44,7 +35,11 @@ pub(super) fn locals(
                 match declaration.kind {
                     Kind::Int => " = 0",
                     Kind::Boolean => " = false",
-                    Kind::Object | Kind::String | Kind::IntArray | Kind::ObjectArray => " = null",
+                    Kind::Object
+                    | Kind::String
+                    | Kind::IntArray
+                    | Kind::ObjectArray
+                    | Kind::Nominal(_) => " = null",
                     Kind::Float => " = 0.0f",
                 },
                 budget,
@@ -140,7 +135,11 @@ pub(super) fn open_if(
             output.push(
                 if matches!(
                     kind,
-                    Kind::Object | Kind::String | Kind::IntArray | Kind::ObjectArray
+                    Kind::Object
+                        | Kind::String
+                        | Kind::IntArray
+                        | Kind::ObjectArray
+                        | Kind::Nominal(_)
                 ) {
                     "null"
                 } else {
@@ -156,10 +155,11 @@ pub(super) fn open_if(
 
 pub(super) fn write(
     body: &Dispatcher,
+    type_names: &crate::p8_java::types::TypeNames,
     output: &mut TextBuffer,
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<(), RequestError> {
-    locals(body, output, budget)?;
+    locals(body, type_names, output, budget)?;
     output.push("int pc = 0;\nwhile (true) {\nswitch (pc) {\n", budget)?;
     for case in &body.cases {
         budget.charge_work(1)?;

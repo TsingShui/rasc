@@ -123,7 +123,7 @@ fn static_call(
             | (
                 ValueUse::UpcastObject(_),
                 CallFormal::Reference(crate::p5_types::BuiltinReference::Object),
-                Some(Kind::String),
+                Some(Kind::String | Kind::IntArray | Kind::ObjectArray | Kind::Nominal(_)),
             ) => true,
             (ValueUse::Direct(_), CallFormal::Int, Some(Kind::Int))
             | (ValueUse::Direct(_), CallFormal::Boolean, Some(Kind::Boolean))
@@ -445,7 +445,10 @@ pub(super) fn verify(
                             ValueUse::Null { .. } => false,
                             ValueUse::UpcastObject(_) => {
                                 matches!(result, crate::pipeline::branch::DeclarationType::Object)
-                                    && ssa.kinds[at] == Some(Kind::String)
+                                    && matches!(
+                                        ssa.kinds[at],
+                                        Some(Kind::String | Kind::Nominal(_))
+                                    )
                             }
                             ValueUse::Direct(_) => {
                                 matches!(
@@ -454,6 +457,7 @@ pub(super) fn verify(
                                         | crate::pipeline::branch::DeclarationType::Boolean
                                         | crate::pipeline::branch::DeclarationType::Object
                                         | crate::pipeline::branch::DeclarationType::String
+                                        | crate::pipeline::branch::DeclarationType::Nominal(_)
                                 ) && ssa.kinds[at] == Some(result.kind())
                             }
                             ValueUse::Narrow { kind, .. } => {

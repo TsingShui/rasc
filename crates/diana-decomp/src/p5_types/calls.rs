@@ -30,7 +30,10 @@ fn conversion(
             match (kinds[index], kind) {
                 (Some(Kind::Object), BuiltinReference::Object)
                 | (Some(Kind::String), BuiltinReference::String) => Some(UseConversion::Identity),
-                (Some(Kind::String), BuiltinReference::Object) => Some(UseConversion::UpcastObject),
+                (
+                    Some(Kind::String | Kind::IntArray | Kind::ObjectArray | Kind::Nominal(_)),
+                    BuiltinReference::Object,
+                ) => Some(UseConversion::UpcastObject),
                 _ => None,
             }
         });

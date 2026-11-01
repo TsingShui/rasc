@@ -106,6 +106,7 @@ fn diamond_edge(
 }
 pub(super) fn write(
     body: &StructuredLoop,
+    type_names: &crate::p8_java::types::TypeNames,
     output: &mut TextBuffer,
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<(), RequestError> {
@@ -141,7 +142,7 @@ pub(super) fn write(
             "natural loop changed latch",
         ));
     }
-    super::dispatcher::locals(storage, output, budget)?;
+    super::dispatcher::locals(storage, type_names, output, budget)?;
     trace(storage, &region.prelude, output, budget)?;
     output.push("loop0: while (true) {\n", budget)?;
     super::dispatcher::statements(header, output, budget)?;

@@ -87,6 +87,14 @@ pub struct MethodInput<'i, 'a> {
 }
 
 impl<'i, 'a> MethodInput<'i, 'a> {
+    pub(crate) fn type_descriptor(
+        &self,
+        id: crate::TypeId,
+        budget: &mut MethodBudget<'_, '_>,
+    ) -> Result<DexString<'a>, crate::RequestError> {
+        Ok(self.index.type_descriptor(id, budget)?.0)
+    }
+
     pub(crate) fn throws_metadata(
         &self,
         budget: &mut MethodBudget<'_, '_>,

@@ -256,8 +256,8 @@ impl<'a> ProgramIndex<'a> {
     ) -> Result<Prototype<'_, 'a>, InputError> {
         let mut record = self.table(TableKey::Proto(proto_idx), control)?;
         let shorty = self.string_with(StringId(record.read_u32_with(control)?), control)?;
-        let (return_type, return_shape) =
-            self.type_descriptor(TypeId(record.read_u32_with(control)?), control)?;
+        let return_type_idx = TypeId(record.read_u32_with(control)?);
+        let (return_type, return_shape) = self.type_descriptor(return_type_idx, control)?;
         let parameters_offset = file_offset(
             record.read_u32_with(control)?,
             ByteOffset(record.position_byte().0 - 4),
@@ -295,6 +295,7 @@ impl<'a> ProgramIndex<'a> {
             index: self,
             shorty,
             return_type,
+            return_type_idx,
             parameters,
             parameter_words,
         })
@@ -709,24 +710,31 @@ pub struct Prototype<'i, 'a> {
     index: &'i ProgramIndex<'a>,
     pub shorty: DexString<'a>,
     pub return_type: DexString<'a>,
+    pub(crate) return_type_idx: TypeId,
     pub(super) parameters: &'a [u8],
     pub parameter_words: RegisterWordCount,
 }
 
 impl<'a> Prototype<'_, 'a> {
+    pub(crate) fn visit_parameter_type_ids<C: InputControl, E: From<InputError>>(
+        &self,
+        control: &mut C,
+        mut visit: impl FnMut(TypeId, DexString<'a>, &mut C) -> Result<(), E>,
+    ) -> Result<(), E> {
+        control.checkpoint().map_err(InputError::from)?;
+        for word in self.parameters.as_chunks::<2>().0 {
+            let id = TypeId(u32::from(u16::from_le_bytes(*word)));
+            let (name, _) = self.index.type_descriptor(id, control)?;
+            visit(id, name, control)?;
+        }
+        Ok(())
+    }
     pub(crate) fn visit_parameter_types<C: InputControl, E: From<InputError>>(
         &self,
         control: &mut C,
         mut visit: impl FnMut(DexString<'a>, &mut C) -> Result<(), E>,
     ) -> Result<(), E> {
-        control.checkpoint().map_err(InputError::from)?;
-        for word in self.parameters.as_chunks::<2>().0 {
-            let (name, _) = self
-                .index
-                .type_descriptor(TypeId(u32::from(u16::from_le_bytes(*word))), control)?;
-            visit(name, control)?;
-        }
-        Ok(())
+        self.visit_parameter_type_ids(control, |_, name, control| visit(name, control))
     }
 
     /// Compares a complete DEX descriptor, including the return type.

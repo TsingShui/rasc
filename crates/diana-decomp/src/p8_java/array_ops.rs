@@ -73,7 +73,7 @@ fn valid_view(
         (
             ValueUse::UpcastObject(_),
             Kind::Object,
-            Some(Kind::String | Kind::IntArray | Kind::ObjectArray),
+            Some(Kind::String | Kind::IntArray | Kind::ObjectArray | Kind::Nominal(_)),
         ) => true,
         (
             ValueUse::Null {

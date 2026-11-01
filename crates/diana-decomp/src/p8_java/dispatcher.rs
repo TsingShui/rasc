@@ -86,6 +86,7 @@ fn edge(
 pub(crate) fn verify(
     input: &MethodInput<'_, '_>,
     storage: &StorageBody<'_>,
+    type_names: &super::types::TypeNames,
     environment: EnvironmentId,
     representation: crate::RepresentationPolicy,
     budget: &mut MethodBudget<'_, '_>,
@@ -273,6 +274,7 @@ pub(crate) fn verify(
                             | Kind::String
                             | Kind::IntArray
                             | Kind::ObjectArray
+                            | Kind::Nominal(_)
                     ) && !matches!(opcode, 0x32 | 0x33 | 0x38 | 0x39)
                     {
                         return Ok(None);
@@ -317,7 +319,7 @@ pub(crate) fn verify(
             header.push(text, budget)?;
         }
     }
-    header.push(ssa.ssa.result.spelling(), budget)?;
+    header.push(type_names.result(ssa.ssa.result, budget)?, budget)?;
     header.push(" ", budget)?;
     for unit in name {
         header.character(
@@ -333,7 +335,7 @@ pub(crate) fn verify(
         if index != 0 {
             header.push(", ", budget)?;
         }
-        header.push(kind.spelling(), budget)?;
+        header.push(type_names.declaration(*kind, budget)?, budget)?;
         header.push(" p", budget)?;
         header.unsigned(
             u64::try_from(index).map_err(|_| RequestError::PlatformCapacity)?,

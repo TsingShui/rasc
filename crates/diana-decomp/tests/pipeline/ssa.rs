@@ -355,3 +355,98 @@ fn call_definition_errors_precede_missing_declarations_without_guessing_a_bindin
         }
     }
 }
+
+#[test]
+fn nominal_types_keep_distinct_identities_and_owned_names_without_guessing_missing_declarations() {
+    #[derive(serde::Deserialize)]
+    struct Facts {
+        environment_id: u64,
+        methods: Vec<diana_decomp::ExternalMethodSignature>,
+        classes: Vec<diana_decomp::ExternalClassDeclaration>,
+        fields: Vec<diana_decomp::ExternalFieldEvidence>,
+    }
+    let inputs = [
+        ("pick", "(Lfixtures/Box;Lfixtures/Box;I)Lfixtures/Box;"),
+        ("tags", "(Lfixtures/Box;Lfixtures/Token;I)I"),
+        (
+            "storeBoth",
+            "([Ljava/lang/Object;Lfixtures/Box;Lfixtures/Token;)I",
+        ),
+        (
+            "repeat",
+            "([Ljava/lang/Object;Lfixtures/Box;Lfixtures/Token;I)I",
+        ),
+    ];
+    for policy in [
+        diana_decomp::RepresentationPolicy::StructuredThenDispatch,
+        diana_decomp::RepresentationPolicy::DispatchOnly,
+    ] {
+        for missing in [false, true] {
+            for (name, prototype) in inputs {
+                let bytes = include_bytes!("../fixtures/shared-nominal/classes.dex").to_vec();
+                let mut facts: Facts =
+                    serde_json::from_str(include_str!("../fixtures/shared-nominal/catalog.json"))
+                        .unwrap();
+                if missing {
+                    let omitted: Vec<u16> = "Lfixtures/Token;".encode_utf16().collect();
+                    facts.classes.retain(|class| class.descriptor != omitted);
+                }
+                let catalog = DeclarationCatalog::with_declarations(
+                    EnvironmentId(facts.environment_id),
+                    facts.methods,
+                    facts.classes,
+                )
+                .with_field_evidence(facts.fields);
+                let mut control = RunContext::new(Limits::default(), &|| false);
+                let engine = Engine::open(
+                    vec![DexImage {
+                        bytes: &bytes,
+                        header_offset: ByteOffset(0),
+                        origin: ImageOrigin { input: InputId(0) },
+                    }],
+                    Options::default(),
+                    catalog,
+                    &mut control,
+                )
+                .unwrap()
+                .with_representation(policy);
+                let report = engine
+                    .decompile(
+                        Request {
+                            class: ClassKey {
+                                dex: DexId(0),
+                                class_def: ClassDefId(1),
+                            },
+                            method: Some(MethodSelector {
+                                name: name.encode_utf16().collect(),
+                                prototype: prototype.encode_utf16().collect(),
+                            }),
+                        },
+                        &mut control,
+                    )
+                    .unwrap();
+                drop(engine);
+                drop(bytes);
+                let ClassOutput::Mixed { members, .. } = report.class();
+                if missing && name != "pick" {
+                    let reason = match &members[0] {
+                        MethodOutput::Debug { reason, .. }
+                        | MethodOutput::Unavailable { reason, .. } => reason,
+                        _ => panic!("missing named type became trusted Java for {name}"),
+                    };
+                    assert_eq!(
+                        report.diagnostics()[reason.0].cause.kind(),
+                        FailureKind::Unsupported
+                    );
+                } else {
+                    assert!(
+                        matches!(&members[0], MethodOutput::Java { .. }),
+                        "nominal composition failed for {name}"
+                    );
+                }
+                let rendered = diana_decomp::render(&report, &mut control).unwrap();
+                assert!(!rendered.source.is_empty());
+            }
+        }
+    }
+}

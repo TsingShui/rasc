@@ -7,6 +7,8 @@ use crate::p5_types::normal::Kind;
 use crate::p5_types::normal::TypedBody;
 use crate::substrate::owned::push;
 
+// Widening the original u32 type ID keeps nominal identities disjoint from
+// builtin identities without restricting the input type pool.
 pub(crate) fn local_type(kind: Kind) -> Result<LocalType, RequestError> {
     LocalType::new(
         LocalTypeId(match kind {
@@ -17,6 +19,7 @@ pub(crate) fn local_type(kind: Kind) -> Result<LocalType, RequestError> {
             Kind::String => 4,
             Kind::IntArray => 5,
             Kind::ObjectArray => 6,
+            Kind::Nominal(id) => u64::from(id.0) + 7,
         }),
         1,
     )
@@ -30,6 +33,9 @@ pub(crate) fn kind(local_type: LocalType) -> Result<Kind, RequestError> {
         (4, Width::One) => Ok(Kind::String),
         (5, Width::One) => Ok(Kind::IntArray),
         (6, Width::One) => Ok(Kind::ObjectArray),
+        (identity, Width::One) if identity >= 7 => Ok(Kind::Nominal(crate::TypeId(
+            u32::try_from(identity - 7).map_err(|_| RequestError::PlatformCapacity)?,
+        ))),
         _ => Err(RequestError::InternalInvariant(
             "foreign normal storage type",
         )),

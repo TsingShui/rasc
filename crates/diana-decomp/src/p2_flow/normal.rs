@@ -17,6 +17,7 @@ pub(crate) enum DeclarationType {
     Float,
     IntArray,
     ObjectArray,
+    Nominal(crate::TypeId),
     Narrow(crate::p5_types::Narrow),
 }
 impl DeclarationType {
@@ -29,12 +30,7 @@ impl DeclarationType {
             Self::Float => Kind::Float,
             Self::IntArray => Kind::IntArray,
             Self::ObjectArray => Kind::ObjectArray,
-        }
-    }
-    pub(crate) fn spelling(self) -> &'static str {
-        match self {
-            Self::Narrow(kind) => kind.spelling(),
-            _ => self.kind().spelling(),
+            Self::Nominal(id) => Kind::Nominal(id),
         }
     }
     pub(crate) fn range(self) -> Option<crate::p5_types::IntRange> {
@@ -43,7 +39,12 @@ impl DeclarationType {
             Self::Int => Some(IntRange::ALL),
             Self::Boolean => Some(IntRange::BOOLEAN),
             Self::Narrow(kind) => Some(kind.range()),
-            Self::Object | Self::String | Self::Float | Self::IntArray | Self::ObjectArray => None,
+            Self::Object
+            | Self::String
+            | Self::Float
+            | Self::IntArray
+            | Self::ObjectArray
+            | Self::Nominal(_) => None,
         }
     }
 }
@@ -51,14 +52,6 @@ impl DeclarationType {
 pub(crate) enum ResultType {
     Void,
     Value(DeclarationType),
-}
-impl ResultType {
-    pub(crate) fn spelling(self) -> &'static str {
-        match self {
-            Self::Void => "void",
-            Self::Value(value) => value.spelling(),
-        }
-    }
 }
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub(crate) enum Arithmetic {
@@ -374,15 +367,19 @@ pub(crate) fn decode<'a>(
             )? {
                 DeclarationType::Object
             } else {
-                return Ok(None);
+                let mut units = input.declaration().prototype.return_type.reader()?;
+                if units.next(budget)? != Some(76) {
+                    return Ok(None);
+                }
+                DeclarationType::Nominal(input.declaration().prototype.return_type_idx)
             },
         )
     };
     let mut parameters = Vec::new();
     let mut supported = true;
-    input.declaration().prototype.visit_parameter_types(
+    input.declaration().prototype.visit_parameter_type_ids(
         budget,
-        |name, budget| -> Result<(), RequestError> {
+        |id, name, budget| -> Result<(), RequestError> {
             let kind = if name.matches_with(&[73], budget)? {
                 DeclarationType::Int
             } else if name.matches_with(&[90], budget)? {
@@ -418,8 +415,12 @@ pub(crate) fn decode<'a>(
             )? {
                 DeclarationType::String
             } else {
-                supported = false;
-                return Ok(());
+                let mut units = name.reader()?;
+                if units.next(budget)? != Some(76) {
+                    supported = false;
+                    return Ok(());
+                }
+                DeclarationType::Nominal(id)
             };
             push(&mut parameters, kind, budget)
         },
@@ -636,7 +637,14 @@ pub(crate) fn decode<'a>(
                             )? {
                                 Some(DeclarationType::String)
                             } else {
-                                None
+                                let mut units = descriptor.reader()?;
+                                if units.next(budget)? == Some(76) {
+                                    Some(DeclarationType::Nominal(
+                                        method.declaration.prototype.return_type_idx,
+                                    ))
+                                } else {
+                                    None
+                                }
                             };
                             InvokeResult::Reference(kind)
                         }
