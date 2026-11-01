@@ -12,9 +12,10 @@ public class Driver {
             if (op.equals("combine")) result = "value=" + fixtures.Case.combine(b,a,index);
             else if (op.equals("repeat")) result = "value=" + fixtures.Case.repeat(b,a,index);
             else if (op.startsWith("invoke")) {
-                fixtures.Reader receiver = op.equals("invoke-null") ? null : op.equals("invoke-child") ? new Alternate() : new fixtures.Reader();
+                fixtures.Reader receiver = op.equals("invoke-null") ? null : op.equals("invoke-child") ? new Alternate() : op.equals("invoke-super") ? new fixtures.SpecialReader() : new fixtures.Reader();
                 result = "value=" + fixtures.Case.invoke(receiver,b,a,index);
             }
+            else if (op.equals("direct")) result = "value=" + new fixtures.Reader().direct(index);
             else { fixtures.Case.unused(b,a); result = "normal"; }
         } catch (Throwable e) { result = e.getClass().getName(); }
         System.out.println(op+":"+nullBox+":"+shape+":"+index+":"+failing+":"+result+":n="+(b==null?"null":b.n)+":a="+java.util.Arrays.toString(a)+":calls="+fixtures.Dep.calls+":events="+fixtures.Dep.events);
@@ -33,5 +34,7 @@ public class Driver {
         observe("invoke-base",false,"empty",0,false);
         observe("invoke-base",false,"values",0,true);
         observe("invoke-base",false,"values",1,false);
+        observe("invoke-super",false,"values",1,false);
+        observe("direct",false,"values",1,false);
     }
 }

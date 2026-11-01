@@ -15,7 +15,13 @@ pub(crate) struct CallUses {
     pub arguments: Vec<TypedUse>,
     pub receiver: Option<TypedReceiver>,
 }
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub(crate) enum ReceiverIdentity {
+    Reference,
+    ImplicitThis,
+}
 pub(crate) struct TypedReceiver {
+    pub identity: ReceiverIdentity,
     pub value: ValueId,
     pub original_type: crate::TypeId,
 }
@@ -103,6 +109,14 @@ pub(crate) fn solve(
             };
             (
                 Some(TypedReceiver {
+                    identity: if site.kind == crate::p2_flow::normal::InvokeKind::Super {
+                        if !is_this(ssa, value, budget)? {
+                            return Ok(None);
+                        }
+                        ReceiverIdentity::ImplicitThis
+                    } else {
+                        ReceiverIdentity::Reference
+                    },
                     value,
                     original_type,
                 }),
@@ -139,4 +153,68 @@ pub(crate) fn solve(
         )?;
     }
     Ok(Some(uses))
+}
+
+fn is_this(
+    ssa: &SsaBody<'_>,
+    root: ValueId,
+    budget: &mut MethodBudget<'_, '_>,
+) -> Result<bool, RequestError> {
+    if !matches!(ssa.frame, crate::p2_flow::normal::MethodFrame::Instance(_)) {
+        return Ok(false);
+    }
+    let mut seen = Vec::new();
+    for _ in &ssa.values {
+        budget.charge_work(1)?;
+        push(&mut seen, false, budget)?;
+    }
+    let mut phi_indices = Vec::new();
+    for _ in &ssa.values {
+        budget.charge_work(1)?;
+        push(&mut phi_indices, None, budget)?;
+    }
+    for (index, phi) in ssa.phis.iter().enumerate() {
+        budget.charge_work(1)?;
+        let result = usize::try_from(phi.result.0).map_err(|_| RequestError::PlatformCapacity)?;
+        if phi_indices[result].replace(index).is_some() {
+            return Err(RequestError::InternalInvariant(
+                "this origin has duplicate Phi",
+            ));
+        }
+    }
+    let mut pending = Vec::new();
+    push(&mut pending, root, budget)?;
+    let mut anchored = false;
+    while let Some(value) = pending.pop() {
+        budget.charge_work(1)?;
+        let index = usize::try_from(value.0).map_err(|_| RequestError::PlatformCapacity)?;
+        if seen[index] {
+            continue;
+        }
+        seen[index] = true;
+        match ssa.values[index] {
+            crate::p3_ssa::normal::Definition::Parameter(0) => anchored = true,
+            crate::p3_ssa::normal::Definition::OpResult(id) => {
+                let op = ssa.operation(id)?;
+                if !matches!(op.op, crate::p2_flow::normal::Op::Move(..)) {
+                    return Ok(false);
+                }
+                push(&mut pending, op.input(0)?, budget)?;
+            }
+            crate::p3_ssa::normal::Definition::Phi => {
+                let phi_index = phi_indices[index]
+                    .ok_or(RequestError::InternalInvariant("this origin lost Phi"))?;
+                for &(_, source) in &ssa.phis[phi_index].inputs {
+                    budget.charge_work(1)?;
+                    let crate::p3_ssa::normal::Sym::Value(source) = source else {
+                        return Ok(false);
+                    };
+                    push(&mut pending, source, budget)?;
+                }
+            }
+            _ => return Ok(false),
+        }
+    }
+    // An alias cycle alone is not evidence of this; require the entry anchor.
+    Ok(anchored)
 }

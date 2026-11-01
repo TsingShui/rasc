@@ -120,7 +120,7 @@ pub(crate) fn verify(
     }
     super::declarations::check_target(input, budget)?;
     let flags = input.access_flags();
-    if flags & 8 == 0
+    if (flags & 8 != 0) != matches!(ssa.ssa.frame, crate::p2_flow::normal::MethodFrame::Static)
         || flags & !0x81f != 0
         || (flags & 7).count_ones() > 1
         || input.owner_access_flags() & 0x200 != 0
@@ -331,7 +331,13 @@ pub(crate) fn verify(
         )?;
     }
     header.push("(", budget)?;
-    for (index, kind) in ssa.ssa.parameters.iter().enumerate() {
+    for (index, kind) in ssa
+        .ssa
+        .parameters
+        .iter()
+        .skip(ssa.ssa.frame.implicit_words())
+        .enumerate()
+    {
         budget.charge_work(1)?;
         if index != 0 {
             header.push(", ", budget)?;

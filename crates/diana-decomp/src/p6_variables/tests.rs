@@ -101,7 +101,10 @@ fn t09_two_entry_dispatcher_preserves_edges_and_never_reads_da_defaults() {
         let mut values = vec![None; body.locals.len()];
         for local in &body.locals {
             if let Some(parameter) = local.parameter {
-                assert_eq!(parameter, 0);
+                assert_eq!(
+                    parameter,
+                    crate::p6_variables::normal::Parameter::Explicit(0)
+                );
                 values[usize::try_from(local.id.0).unwrap()] = Some(argument);
             }
         }

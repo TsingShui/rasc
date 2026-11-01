@@ -454,6 +454,7 @@ fn nominal_types_keep_distinct_identities_and_owned_names_without_guessing_missi
 
 #[test]
 fn field_call_array_composition_preserves_native_volatile_declaration_evidence() {
+    #[derive(Clone, Copy)]
     enum Evidence {
         Complete,
         Missing,
@@ -463,13 +464,21 @@ fn field_call_array_composition_preserves_native_volatile_declaration_evidence()
         diana_decomp::RepresentationPolicy::StructuredThenDispatch,
         diana_decomp::RepresentationPolicy::DispatchOnly,
     ] {
-        for evidence in [Evidence::Complete, Evidence::Missing, Evidence::NonVolatile] {
-            for (name, prototype) in [
-                ("combine", "(Lfixtures/Box;[II)I"),
-                ("repeat", "(Lfixtures/Box;[II)I"),
-                ("unused", "(Lfixtures/Box;[I)V"),
-                ("invoke", "(Lfixtures/Reader;Lfixtures/Box;[II)I"),
-            ] {
+        let field_evidence = &[Evidence::Complete, Evidence::Missing, Evidence::NonVolatile][..];
+        for (class_id, name, prototype, evidence_cases) in [
+            (1, "combine", "(Lfixtures/Box;[II)I", field_evidence),
+            (1, "repeat", "(Lfixtures/Box;[II)I", field_evidence),
+            (1, "unused", "(Lfixtures/Box;[I)V", field_evidence),
+            (
+                1,
+                "invoke",
+                "(Lfixtures/Reader;Lfixtures/Box;[II)I",
+                field_evidence,
+            ),
+            (4, "direct", "(I)I", &[Evidence::Complete][..]),
+            (5, "value", "(I)I", &[Evidence::Complete][..]),
+        ] {
+            for &evidence in evidence_cases {
                 let bytes = include_bytes!("../fixtures/shared-fields/classes.dex");
                 let mut facts: PipelineFacts =
                     serde_json::from_str(include_str!("../fixtures/shared-fields/catalog.json"))
@@ -507,7 +516,7 @@ fn field_call_array_composition_preserves_native_volatile_declaration_evidence()
                         Request {
                             class: ClassKey {
                                 dex: DexId(0),
-                                class_def: ClassDefId(1),
+                                class_def: ClassDefId(class_id),
                             },
                             method: Some(MethodSelector {
                                 name: name.encode_utf16().collect(),

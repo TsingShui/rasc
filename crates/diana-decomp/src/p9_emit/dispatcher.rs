@@ -26,8 +26,13 @@ pub(super) fn locals(
         output.push(" ", budget)?;
         local(declaration.id, output, budget)?;
         if let Some(parameter) = declaration.parameter {
-            output.push(" = p", budget)?;
-            output.unsigned(u64::from(parameter), budget)?;
+            match parameter {
+                crate::p6_variables::normal::Parameter::This => output.push(" = this", budget)?,
+                crate::p6_variables::normal::Parameter::Explicit(index) => {
+                    output.push(" = p", budget)?;
+                    output.unsigned(u64::from(index), budget)?;
+                }
+            }
         } else {
             // The SSA/edge definition certificate establishes assignment before
             // every original read; these DA-only values are never observed.
@@ -64,7 +69,14 @@ pub(super) fn statements(
                     local(*target, output, budget)?;
                     output.push(" = ", budget)?;
                 }
-                local(call.receiver, output, budget)?;
+                match call.receiver {
+                    crate::p8_java::calls::CallReceiver::Super(_) => {
+                        output.push("super", budget)?
+                    }
+                    crate::p8_java::calls::CallReceiver::Value(value) => {
+                        local(value, output, budget)?
+                    }
+                }
                 output.push(".", budget)?;
                 output.push(&call.method, budget)?;
                 output.push("(", budget)?;

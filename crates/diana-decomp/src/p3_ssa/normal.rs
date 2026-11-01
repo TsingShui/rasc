@@ -49,6 +49,7 @@ pub(crate) struct BoundBlock {
     pub other: Option<ValueId>,
 }
 pub(crate) struct SsaBody<'a> {
+    pub frame: crate::p2_flow::normal::MethodFrame,
     _sealed: (),
     pub switches: Vec<Switch>,
     pub calls: Vec<CallSite>,
@@ -405,6 +406,7 @@ pub(crate) fn build<'a>(
         result: flow.result,
         raw: flow.raw,
         parameters: flow.parameters,
+        frame: flow.frame,
         blocks: flow.blocks,
         edges: flow.edges,
         values,

@@ -279,7 +279,23 @@ pub(super) fn verify(
                 ));
             }
             let parameter = match ssa.ssa.values[index] {
-                Definition::Parameter(parameter) => Some(parameter),
+                Definition::Parameter(parameter) => Some(match ssa.ssa.frame {
+                    crate::p2_flow::normal::MethodFrame::Static => {
+                        crate::p6_variables::normal::Parameter::Explicit(parameter)
+                    }
+                    crate::p2_flow::normal::MethodFrame::Instance(_) if parameter == 0 => {
+                        crate::p6_variables::normal::Parameter::This
+                    }
+                    crate::p2_flow::normal::MethodFrame::Instance(_) => {
+                        crate::p6_variables::normal::Parameter::Explicit(
+                            parameter
+                                .checked_sub(1)
+                                .ok_or(RequestError::InternalInvariant(
+                                    "source receiver frame underflow",
+                                ))?,
+                        )
+                    }
+                }),
                 _ => None,
             };
             if local.parameter != parameter {

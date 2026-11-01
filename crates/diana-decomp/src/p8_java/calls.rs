@@ -36,9 +36,21 @@ pub(crate) struct StaticCall {
     pub method: String,
     pub arguments: Vec<ValueUse>,
 }
+#[derive(Clone, Copy)]
+pub(crate) enum CallReceiver {
+    Value(LocalId),
+    Super(LocalId),
+}
+impl CallReceiver {
+    pub(crate) fn value(self) -> LocalId {
+        match self {
+            Self::Value(value) | Self::Super(value) => value,
+        }
+    }
+}
 pub(crate) struct ReceiverCall {
     pub contract: crate::p4_calls::ReceiverContract,
-    pub receiver: LocalId,
+    pub receiver: CallReceiver,
     pub original_receiver: crate::RegisterId,
     pub invoke: CodeUnitOffset,
     pub result_site: Option<CodeUnitOffset>,
@@ -195,7 +207,20 @@ pub(super) fn validate_bindings(
                     input.type_descriptor(receiver.original_type, budget)?,
                     budget,
                 )?;
+                if site.kind == crate::p2_flow::normal::InvokeKind::Super
+                    && receiver.identity != crate::p5_types::calls::ReceiverIdentity::ImplicitThis
+                {
+                    return Err(RequestError::InternalInvariant(
+                        "super receiver lost this origin",
+                    ));
+                }
                 let kind = match site.kind {
+                    crate::p2_flow::normal::InvokeKind::Direct => {
+                        crate::p4_calls::ReceiverKind::Direct
+                    }
+                    crate::p2_flow::normal::InvokeKind::Super => {
+                        crate::p4_calls::ReceiverKind::Super
+                    }
                     crate::p2_flow::normal::InvokeKind::Virtual => {
                         crate::p4_calls::ReceiverKind::Virtual
                     }
@@ -378,8 +403,15 @@ pub(super) fn operations(
                     Statement::ReceiverCall {
                         target: op.result.map(|value| LocalId(value.0)),
                         call: ReceiverCall {
+                            receiver: if matches!(
+                                contract.kind,
+                                crate::p4_calls::ReceiverKind::Super
+                            ) {
+                                CallReceiver::Super(LocalId(receiver.0))
+                            } else {
+                                CallReceiver::Value(LocalId(receiver.0))
+                            },
                             contract,
-                            receiver: LocalId(receiver.0),
                             original_receiver,
                             invoke: site.pc,
                             result_site: site.result_pc,

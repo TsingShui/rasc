@@ -356,8 +356,13 @@ fn diamond(
         output.push(" ", budget)?;
         local(declaration.id, output, budget)?;
         if let Some(parameter) = declaration.parameter {
-            output.push(" = p", budget)?;
-            output.unsigned(u64::from(parameter), budget)?;
+            match parameter {
+                crate::p6_variables::normal::Parameter::This => output.push(" = this", budget)?,
+                crate::p6_variables::normal::Parameter::Explicit(index) => {
+                    output.push(" = p", budget)?;
+                    output.unsigned(u64::from(index), budget)?;
+                }
+            }
         }
         output.push(";\n", budget)?;
     }

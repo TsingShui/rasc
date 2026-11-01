@@ -42,11 +42,16 @@ pub(crate) fn kind(local_type: LocalType) -> Result<Kind, RequestError> {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum Parameter {
+    Explicit(u32),
+    This,
+}
 #[derive(Clone, Copy)]
 pub(crate) struct Local {
     pub id: LocalId,
     pub kind: Kind,
-    pub parameter: Option<u32>,
+    pub parameter: Option<Parameter>,
 }
 pub(crate) struct StorageBody<'a> {
     _sealed: (),
@@ -169,7 +174,17 @@ pub(crate) fn allocate<'a>(
             return Ok(None);
         };
         let parameter = match definition {
-            Definition::Parameter(parameter) => Some(*parameter),
+            Definition::Parameter(parameter) => Some(match typed.ssa.frame {
+                crate::p2_flow::normal::MethodFrame::Static => Parameter::Explicit(*parameter),
+                crate::p2_flow::normal::MethodFrame::Instance(_) if *parameter == 0 => {
+                    Parameter::This
+                }
+                crate::p2_flow::normal::MethodFrame::Instance(_) => {
+                    Parameter::Explicit(parameter.checked_sub(1).ok_or(
+                        RequestError::InternalInvariant("implicit receiver frame underflow"),
+                    )?)
+                }
+            }),
             _ => None,
         };
         push(

@@ -643,6 +643,7 @@ impl<'a> ProgramIndex<'a> {
             ));
         }
         Ok(MethodReference {
+            owner_type: owner_idx,
             owner,
             declaration: self.method_declaration(id, owner_idx, control)?,
         })
@@ -684,6 +685,7 @@ pub(crate) struct LocalMethod<'a> {
     pub plain_scope: bool,
 }
 pub(crate) struct MethodReference<'i, 'a> {
+    pub owner_type: TypeId,
     pub owner: DexString<'a>,
     pub declaration: MethodDeclaration<'i, 'a>,
 }

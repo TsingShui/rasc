@@ -84,6 +84,8 @@ pub(crate) enum InvokeResult {
 }
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub(crate) enum InvokeKind {
+    Direct,
+    Super,
     Static,
     Virtual,
     Interface,
@@ -92,6 +94,8 @@ impl InvokeKind {
     pub(crate) fn from_opcode(opcode: u8) -> Option<Self> {
         match opcode {
             0x71 | 0x77 => Some(Self::Static),
+            0x70 | 0x76 => Some(Self::Direct),
+            0x6f | 0x75 => Some(Self::Super),
             0x6e | 0x74 => Some(Self::Virtual),
             0x72 | 0x78 => Some(Self::Interface),
             _ => None,
@@ -211,7 +215,21 @@ enum Decoded {
         CodeUnitOffset,
     ),
 }
+#[derive(Clone, Copy)]
+pub(crate) enum MethodFrame {
+    Static,
+    Instance(crate::TypeId),
+}
+impl MethodFrame {
+    pub(crate) fn implicit_words(self) -> usize {
+        match self {
+            Self::Static => 0,
+            Self::Instance(_) => 1,
+        }
+    }
+}
 pub(crate) struct FlowBody<'a> {
+    pub frame: MethodFrame,
     _sealed: (),
     pub calls: Vec<CallSite>,
     pub result: ResultType,
@@ -335,7 +353,7 @@ pub(crate) fn decode<'a>(
         return Ok(None);
     };
     let raw = checked.layout().original().clone();
-    if input.access_flags() & 8 == 0 || !raw.try_byte_range().as_range().is_empty() {
+    if input.access_flags() & 0x10000 != 0 || !raw.try_byte_range().as_range().is_empty() {
         return Ok(None);
     }
     let result = if input
@@ -401,7 +419,19 @@ pub(crate) fn decode<'a>(
             },
         )
     };
+    let frame = if input.access_flags() & 8 != 0 {
+        MethodFrame::Static
+    } else {
+        MethodFrame::Instance(
+            input
+                .method_reference(input.method_id(), budget)?
+                .owner_type,
+        )
+    };
     let mut parameters = Vec::new();
+    if let MethodFrame::Instance(owner) = frame {
+        push(&mut parameters, DeclarationType::Nominal(owner), budget)?;
+    }
     let mut supported = true;
     input.declaration().prototype.visit_parameter_type_ids(
         budget,
@@ -633,7 +663,7 @@ pub(crate) fn decode<'a>(
                     },
                     reg(2)?,
                 )),
-                0x71 | 0x77 | 0x6e | 0x74 | 0x72 | 0x78 => {
+                0x6e..=0x72 | 0x74..=0x78 => {
                     let Some(reference) = layout.references()[0] else {
                         return Err(RequestError::InternalInvariant(
                             "checked invoke has no reference",
@@ -922,6 +952,7 @@ pub(crate) fn decode<'a>(
         }
     }
     Ok(Some(FlowBody {
+        frame,
         _sealed: (),
         calls,
         result,

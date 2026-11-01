@@ -22,6 +22,8 @@ pub(super) fn verify(
         return Ok(false);
     };
     let expected = match site.kind {
+        InvokeKind::Direct => crate::p4_calls::ReceiverKind::Direct,
+        InvokeKind::Super => crate::p4_calls::ReceiverKind::Super,
         InvokeKind::Virtual => crate::p4_calls::ReceiverKind::Virtual,
         InvokeKind::Interface => crate::p4_calls::ReceiverKind::Interface,
         InvokeKind::Static => return Ok(false),
@@ -33,6 +35,11 @@ pub(super) fn verify(
     else {
         return Ok(false);
     };
+    if site.kind == InvokeKind::Super
+        && receiver.identity != crate::p5_types::calls::ReceiverIdentity::ImplicitThis
+    {
+        return Ok(false);
+    }
     if actual.contract.kind != expected
         || actual.contract.reference != site.reference
         || actual.contract.owner != facts.owner
@@ -40,7 +47,9 @@ pub(super) fn verify(
         || actual.contract.prototype != facts.prototype
         || actual.invoke != site.pc
         || actual.result_site != site.result_pc
-        || actual.receiver.0 != receiver.value.0
+        || actual.receiver.value().0 != receiver.value.0
+        || matches!(actual.receiver, super::calls::CallReceiver::Super(_))
+            != (expected == crate::p4_calls::ReceiverKind::Super)
         || bound.inputs.first() != Some(&receiver.value)
         || site.registers.first() != Some(&actual.original_receiver)
         || typed.kinds
