@@ -1,6 +1,6 @@
 use super::branch::{Assignment, LocalId, ValueUse};
 use crate::p4_calls::CallFormal;
-use crate::pipeline::branch::{CallId, Kind, Op, VerifiedSsa};
+use crate::pipeline::branch::{CallId, Kind, Op, TypedBody};
 use crate::substrate::owned::{TextBuffer, reserve};
 use crate::{CodeUnitOffset, MethodBudget, MethodId, RequestError};
 
@@ -119,7 +119,7 @@ pub(super) fn empty_static(
     }))
 }
 pub(super) fn argument(
-    ssa: &VerifiedSsa<'_>,
+    ssa: &TypedBody<'_>,
     value: LocalId,
     formal: CallFormal,
 ) -> Result<Option<ValueUse>, RequestError> {
@@ -127,7 +127,7 @@ pub(super) fn argument(
     if let CallFormal::Reference(kind) = formal {
         return Ok(
             if matches!(
-                ssa.values[index],
+                ssa.ssa.values[index],
                 crate::pipeline::branch::Definition::Constant(0)
             ) {
                 Some(ValueUse::Null { value, kind })
@@ -201,17 +201,18 @@ pub(super) fn identifier_text(
     text(units, budget)
 }
 fn plan(
-    ssa: &VerifiedSsa<'_>,
+    ssa: &TypedBody<'_>,
     id: CallId,
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<Option<StaticCall>, RequestError> {
     let site = ssa
+        .ssa
         .calls
         .get(ix(id.0)?)
         .ok_or(RequestError::InternalInvariant(
             "owned call lost original site",
         ))?;
-    let bound = ssa.bound_calls[ix(id.0)?]
+    let bound = ssa.ssa.bound_calls[ix(id.0)?]
         .as_ref()
         .ok_or(RequestError::InternalInvariant("owned call lost arguments"))?;
     let owner = &site.contract.owner;
@@ -260,12 +261,12 @@ fn plan(
     }))
 }
 pub(super) fn operations(
-    ssa: &VerifiedSsa<'_>,
+    ssa: &TypedBody<'_>,
     block: crate::pipeline::branch::BlockId,
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<Option<Vec<Statement>>, RequestError> {
     let mut output = Vec::new();
-    for op in &ssa.bound[ix(block.0)?].ops {
+    for op in &ssa.ssa.bound[ix(block.0)?].ops {
         budget.charge_work(1)?;
         if let Op::Call(id, _) = op.op {
             let Some(call) = plan(ssa, id, budget)? else {

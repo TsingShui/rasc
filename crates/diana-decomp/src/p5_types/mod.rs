@@ -1,5 +1,6 @@
 mod arrays;
 mod integral;
+pub(crate) mod normal;
 pub(crate) use arrays::{ArrayElement, PrimitiveArray};
 mod references;
 pub(crate) use references::BuiltinReference;

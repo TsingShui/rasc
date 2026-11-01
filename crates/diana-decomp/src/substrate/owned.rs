@@ -46,6 +46,16 @@ pub(crate) fn reserve<T>(
     Ok(())
 }
 
+pub(crate) fn push<T>(
+    values: &mut Vec<T>,
+    value: T,
+    control: &mut impl InputControl,
+) -> Result<(), RequestError> {
+    reserve(values, 1, control)?;
+    values.push(value);
+    Ok(())
+}
+
 pub(crate) fn copy_units(
     value: DexString<'_>,
     control: &mut impl InputControl,

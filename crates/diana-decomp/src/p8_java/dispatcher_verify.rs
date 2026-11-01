@@ -2,7 +2,7 @@ use super::branch::{Assignment, Expression, LocalId, Right};
 use super::dispatcher::{Dispatcher, Edge, Transfer};
 use crate::p6_variables::{Copy, CopyPlan, LocalType, LocalTypeId, Temporary};
 use crate::pipeline::branch::{
-    BlockId, BoundOperand, Definition, EdgeId, Kind, Op, Sym, Terminal, VerifiedSsa,
+    BlockId, BoundOperand, Definition, EdgeId, Kind, Op, Sym, Terminal, TypedBody,
 };
 use crate::substrate::owned::reserve;
 use crate::{MethodBudget, RequestError};
@@ -61,18 +61,19 @@ fn same_expression(
     }
 }
 fn static_call(
-    ssa: &VerifiedSsa<'_>,
+    ssa: &TypedBody<'_>,
     id: crate::pipeline::branch::CallId,
     actual: &super::calls::StaticCall,
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<bool, RequestError> {
     let site = ssa
+        .ssa
         .calls
         .get(ix(id.0)?)
         .ok_or(RequestError::InternalInvariant(
             "call certificate has foreign site",
         ))?;
-    let bound = ssa.bound_calls[ix(id.0)?]
+    let bound = ssa.ssa.bound_calls[ix(id.0)?]
         .as_ref()
         .ok_or(RequestError::InternalInvariant(
             "call certificate lost argument bindings",
@@ -128,7 +129,7 @@ fn static_call(
         }
         let valid = match (view, formal, ssa.kinds[at]) {
             (ValueUse::Null { kind, .. }, CallFormal::Reference(expected), _) => {
-                kind == expected && matches!(ssa.values[at], Definition::Constant(0))
+                kind == expected && matches!(ssa.ssa.values[at], Definition::Constant(0))
             }
             (
                 ValueUse::Direct(_),
@@ -171,7 +172,7 @@ fn static_call(
     Ok(true)
 }
 fn copies(
-    ssa: &VerifiedSsa<'_>,
+    ssa: &TypedBody<'_>,
     body: &Dispatcher,
     incoming: Option<EdgeId>,
     target: BlockId,
@@ -180,7 +181,7 @@ fn copies(
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<(), RequestError> {
     let mut parallel = Vec::new();
-    for phi in &ssa.phis {
+    for phi in &ssa.ssa.phis {
         budget.charge_work(1)?;
         if phi.block == target {
             let mut source = None;
@@ -244,7 +245,7 @@ fn copies(
     crate::p6_variables::verify(&parallel, types, &plan, budget)
 }
 fn edge(
-    ssa: &VerifiedSsa<'_>,
+    ssa: &TypedBody<'_>,
     body: &Dispatcher,
     actual: &Edge,
     id: EdgeId,
@@ -252,6 +253,7 @@ fn edge(
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<(), RequestError> {
     let original = ssa
+        .ssa
         .edges
         .get(ix(id.0)?)
         .ok_or(RequestError::InternalInvariant(
@@ -274,11 +276,11 @@ fn edge(
 }
 
 pub(super) fn verify(
-    ssa: &VerifiedSsa<'_>,
+    ssa: &TypedBody<'_>,
     body: &Dispatcher,
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<(), RequestError> {
-    if body.locals.len() < ssa.values.len() || body.cases.len() != ssa.blocks.len() {
+    if body.locals.len() < ssa.ssa.values.len() || body.cases.len() != ssa.ssa.blocks.len() {
         return Err(RequestError::InternalInvariant(
             "dispatcher lost locals or block coverage",
         ));
@@ -291,13 +293,13 @@ pub(super) fn verify(
                 "dispatcher local identity was reused",
             ));
         }
-        if index < ssa.values.len() {
+        if index < ssa.ssa.values.len() {
             if ssa.kinds[index] != Some(local.kind) {
                 return Err(RequestError::InternalInvariant(
                     "dispatcher changed a solved value type",
                 ));
             }
-            let parameter = match ssa.values[index] {
+            let parameter = match ssa.ssa.values[index] {
                 Definition::Parameter(parameter) => Some(parameter),
                 _ => None,
             };
@@ -315,8 +317,8 @@ pub(super) fn verify(
     }
     copies(ssa, body, None, BlockId(0), &body.entry, &types, budget)?;
     let mut seen = Vec::new();
-    reserve(&mut seen, ssa.blocks.len(), budget)?;
-    for _ in &ssa.blocks {
+    reserve(&mut seen, ssa.ssa.blocks.len(), budget)?;
+    for _ in &ssa.ssa.blocks {
         budget.charge_work(1)?;
         seen.push(false);
     }
@@ -324,6 +326,7 @@ pub(super) fn verify(
         budget.charge_work(1)?;
         let index = ix(case.key.0)?;
         let block = ssa
+            .ssa
             .blocks
             .get(index)
             .ok_or(RequestError::InternalInvariant(
@@ -336,7 +339,7 @@ pub(super) fn verify(
         }
         seen[index] = true;
         let mut statement = 0usize;
-        for bound in &ssa.bound[index].ops {
+        for bound in &ssa.ssa.bound[index].ops {
             budget.charge_work(1)?;
             if matches!(bound.op, Op::Nop) {
                 continue;
@@ -376,7 +379,7 @@ pub(super) fn verify(
             ));
         }
         let mut outgoing = Vec::new();
-        for (id, original) in ssa.edges.iter().enumerate() {
+        for (id, original) in ssa.ssa.edges.iter().enumerate() {
             budget.charge_work(1)?;
             if original.source == case.key {
                 push(
@@ -389,8 +392,8 @@ pub(super) fn verify(
         match (&case.transfer, block.terminal) {
             (Transfer::ReturnVoid, Terminal::ReturnVoid) => {
                 if !outgoing.is_empty()
-                    || !matches!(ssa.result, crate::pipeline::branch::ResultType::Void)
-                    || ssa.bound[index].terminal.is_some()
+                    || !matches!(ssa.ssa.result, crate::pipeline::branch::ResultType::Void)
+                    || ssa.ssa.bound[index].terminal.is_some()
                 {
                     return Err(RequestError::InternalInvariant(
                         "void return certificate acquired a value or successor",
@@ -407,7 +410,8 @@ pub(super) fn verify(
                 Terminal::Switch { table, .. },
             ) => {
                 let original =
-                    ssa.switches
+                    ssa.ssa
+                        .switches
                         .get(ix(table.0)?)
                         .ok_or(RequestError::InternalInvariant(
                             "switch certificate has a foreign table",
@@ -423,7 +427,7 @@ pub(super) fn verify(
                             .len()
                             .checked_add(1)
                             .ok_or(RequestError::PlatformCapacity)?
-                    || ssa.bound[index].terminal.map(|id| id.0) != Some(value.0)
+                    || ssa.ssa.bound[index].terminal.map(|id| id.0) != Some(value.0)
                     || default.target != original.default
                 {
                     return Err(RequestError::InternalInvariant(
@@ -444,13 +448,13 @@ pub(super) fn verify(
                 edge(ssa, body, default, outgoing[cases.len()], &types, budget)?;
             }
             (Transfer::Return(actual), Terminal::Return(_)) => {
-                let crate::pipeline::branch::ResultType::Value(result) = ssa.result else {
+                let crate::pipeline::branch::ResultType::Value(result) = ssa.ssa.result else {
                     return Err(RequestError::InternalInvariant(
                         "value return certificate has void descriptor",
                     ));
                 };
                 if !outgoing.is_empty()
-                    || ssa.bound[index].terminal.map(|id| id.0) != Some(actual.value().0)
+                    || ssa.ssa.bound[index].terminal.map(|id| id.0) != Some(actual.value().0)
                     || {
                         let at = ix(actual.value().0)?;
                         use super::branch::ValueUse;
@@ -528,8 +532,8 @@ pub(super) fn verify(
                     || *opcode != original
                     || yes.target != original_yes
                     || no.target != original_no
-                    || ssa.bound[index].terminal.map(|id| id.0) != Some(left.0)
-                    || ssa.bound[index].other.map(|id| id.0) != right.map(|id| id.0)
+                    || ssa.ssa.bound[index].terminal.map(|id| id.0) != Some(left.0)
+                    || ssa.ssa.bound[index].other.map(|id| id.0) != right.map(|id| id.0)
                     || ssa.kinds[ix(left.0)?] != Some(*kind)
                 {
                     return Err(RequestError::InternalInvariant(

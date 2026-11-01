@@ -1,5 +1,5 @@
 use crate::input::{MethodInput, RawPrintable};
-use crate::pipeline::branch::{BlockId, Definition, EdgeId, Kind, Op, Sym, Terminal, VerifiedSsa};
+use crate::pipeline::branch::{BlockId, Definition, EdgeId, Kind, Op, Sym, Terminal, TypedBody};
 use crate::substrate::owned::{TextBuffer, copy_units, reserve};
 use crate::{EnvironmentId, MethodBudget, RequestError, VerifiedJavaMethod};
 
@@ -51,12 +51,12 @@ impl ValueUse {
     }
 }
 pub(super) fn returned(
-    ssa: &VerifiedSsa<'_>,
+    ssa: &TypedBody<'_>,
     value: LocalId,
 ) -> Result<Option<ValueUse>, RequestError> {
     let index = ix(value.0)?;
     use crate::pipeline::branch::{DeclarationType, ResultType};
-    let ResultType::Value(result) = ssa.result else {
+    let ResultType::Value(result) = ssa.ssa.result else {
         return Ok(None);
     };
     if let DeclarationType::Narrow(kind) = result {
@@ -112,13 +112,13 @@ fn append<T>(
     Ok(())
 }
 fn edge(
-    ssa: &VerifiedSsa<'_>,
+    ssa: &TypedBody<'_>,
     source: BlockId,
     target: BlockId,
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<EdgeId, RequestError> {
     let mut found = None;
-    for (index, edge) in ssa.edges.iter().enumerate() {
+    for (index, edge) in ssa.ssa.edges.iter().enumerate() {
         budget.charge_work(1)?;
         if edge.source == source && edge.target == target {
             if found.is_some() {
@@ -132,7 +132,7 @@ fn edge(
     found.ok_or(RequestError::InternalInvariant("diamond edge is missing"))
 }
 pub(super) fn copies(
-    ssa: &VerifiedSsa<'_>,
+    ssa: &TypedBody<'_>,
     incoming: Option<EdgeId>,
     target: BlockId,
     output: &mut Vec<Assignment>,
@@ -141,7 +141,7 @@ pub(super) fn copies(
 ) -> Result<(), RequestError> {
     use crate::p6_variables::{Copy, LocalType, LocalTypeId, Width};
     let mut parallel = Vec::new();
-    for phi in &ssa.phis {
+    for phi in &ssa.ssa.phis {
         budget.charge_work(1)?;
         if phi.block == target {
             let mut sym = None;
@@ -301,12 +301,12 @@ pub(super) fn operation(
     }))
 }
 pub(super) fn operations(
-    ssa: &VerifiedSsa<'_>,
+    ssa: &TypedBody<'_>,
     block: BlockId,
     output: &mut Vec<Assignment>,
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<(), RequestError> {
-    for op in &ssa.bound[ix(block.0)?].ops {
+    for op in &ssa.ssa.bound[ix(block.0)?].ops {
         budget.charge_work(1)?;
         if let Some(statement) = operation(op)? {
             append(output, statement, budget)?;
@@ -317,7 +317,7 @@ pub(super) fn operations(
 
 pub(crate) fn verify(
     input: &MethodInput<'_, '_>,
-    ssa: VerifiedSsa<'_>,
+    ssa: TypedBody<'_>,
     environment: EnvironmentId,
     representation: crate::RepresentationPolicy,
     budget: &mut MethodBudget<'_, '_>,
@@ -334,12 +334,21 @@ pub(crate) fn verify(
 
 fn verify_diamond(
     input: &MethodInput<'_, '_>,
-    ssa: &VerifiedSsa<'_>,
+    ssa: &TypedBody<'_>,
     environment: EnvironmentId,
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<Option<VerifiedJavaMethod>, RequestError> {
-    if !ssa.calls.is_empty() || ssa.blocks.len() != 4 {
+    if ssa.ssa.blocks.len() != 4 {
         return Ok(None);
+    }
+    for block in &ssa.ssa.blocks {
+        budget.charge_work(1)?;
+        for &(_, op) in &block.ops {
+            budget.charge_work(1)?;
+            if op.effects().observable() {
+                return Ok(None);
+            }
+        }
     }
     let Terminal::Test {
         register: _,
@@ -347,7 +356,7 @@ fn verify_diamond(
         opcode,
         yes,
         no,
-    } = ssa.blocks[0].terminal
+    } = ssa.ssa.blocks[0].terminal
     else {
         return Ok(None);
     };
@@ -358,8 +367,8 @@ fn verify_diamond(
         return Ok(None);
     }
     let (Terminal::Jump(join), Terminal::Jump(other)) = (
-        ssa.blocks[ix(yes.0)?].terminal,
-        ssa.blocks[ix(no.0)?].terminal,
+        ssa.ssa.blocks[ix(yes.0)?].terminal,
+        ssa.ssa.blocks[ix(no.0)?].terminal,
     ) else {
         return Ok(None);
     };
@@ -367,11 +376,11 @@ fn verify_diamond(
         || join == yes
         || join == no
         || join == BlockId(0)
-        || !matches!(ssa.blocks[ix(join.0)?].terminal, Terminal::Return(_))
+        || !matches!(ssa.ssa.blocks[ix(join.0)?].terminal, Terminal::Return(_))
     {
         return Ok(None);
     }
-    if ssa.edges.len() != 4 {
+    if ssa.ssa.edges.len() != 4 {
         return Ok(None);
     }
     let RawPrintable::Method(raw) = input.raw() else {
@@ -381,7 +390,7 @@ fn verify_diamond(
     };
     if !std::ptr::eq(
         raw.layout().original().instructions(),
-        ssa.raw.instructions(),
+        ssa.ssa.raw.instructions(),
     ) {
         return Err(RequestError::InternalInvariant(
             "diamond belongs to another raw scope",
@@ -404,7 +413,7 @@ fn verify_diamond(
         return Ok(None);
     }
     let mut locals = Vec::new();
-    for (index, definition) in ssa.values.iter().enumerate() {
+    for (index, definition) in ssa.ssa.values.iter().enumerate() {
         budget.charge_work(1)?;
         let Some(kind) = ssa.kinds[index] else {
             return Ok(None);
@@ -424,7 +433,7 @@ fn verify_diamond(
         )?;
     }
     let condition = LocalId(
-        ssa.bound[0]
+        ssa.ssa.bound[0]
             .terminal
             .ok_or(RequestError::InternalInvariant(
                 "diamond has no bound condition",
@@ -441,7 +450,7 @@ fn verify_diamond(
         return Ok(None);
     }
     let returned = LocalId(
-        ssa.bound[ix(join.0)?]
+        ssa.ssa.bound[ix(join.0)?]
             .terminal
             .ok_or(RequestError::InternalInvariant(
                 "diamond has no bound return",
@@ -492,7 +501,7 @@ fn verify_diamond(
     )?;
     // Join operations are a sequence after both incoming copy plans. The first
     // profile accepts a return-only join, not a skipped operation list.
-    for op in &ssa.bound[ix(join.0)?].ops {
+    for op in &ssa.ssa.bound[ix(join.0)?].ops {
         budget.charge_work(1)?;
         if !matches!(op.op, Op::Nop) {
             return Ok(None);
@@ -511,7 +520,7 @@ fn verify_diamond(
             header.push(text, budget)?;
         }
     }
-    header.push(ssa.result.spelling(), budget)?;
+    header.push(ssa.ssa.result.spelling(), budget)?;
     header.push(" ", budget)?;
     for unit in name {
         header.character(
@@ -522,7 +531,7 @@ fn verify_diamond(
         )?;
     }
     header.push("(", budget)?;
-    for (index, kind) in ssa.parameters.iter().enumerate() {
+    for (index, kind) in ssa.ssa.parameters.iter().enumerate() {
         budget.charge_work(1)?;
         if index != 0 {
             header.push(", ", budget)?;

@@ -1,6 +1,6 @@
 use super::branch::{Assignment, Local, LocalId, copies};
 use crate::input::{MethodInput, RawPrintable};
-use crate::pipeline::branch::{BlockId, Definition, EdgeId, Kind, Terminal, VerifiedSsa};
+use crate::pipeline::branch::{BlockId, Definition, EdgeId, Kind, Terminal, TypedBody};
 use crate::substrate::owned::{TextBuffer, copy_units, reserve};
 use crate::{EnvironmentId, MethodBudget, RequestError, VerifiedJavaMethod};
 
@@ -51,7 +51,7 @@ fn push<T>(
     Ok(())
 }
 fn edge(
-    ssa: &VerifiedSsa<'_>,
+    ssa: &TypedBody<'_>,
     id: EdgeId,
     source: BlockId,
     target: BlockId,
@@ -59,12 +59,16 @@ fn edge(
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<Edge, RequestError> {
     let original = ssa
+        .ssa
         .edges
         .get(ix(id.0)?)
         .ok_or(RequestError::InternalInvariant(
             "dispatcher edge is missing",
         ))?;
-    if original.source != source || original.target != target || ix(target.0)? >= ssa.blocks.len() {
+    if original.source != source
+        || original.target != target
+        || ix(target.0)? >= ssa.ssa.blocks.len()
+    {
         return Err(RequestError::InternalInvariant(
             "dispatcher edge differs from the original CFG",
         ));
@@ -80,7 +84,7 @@ fn edge(
 
 pub(crate) fn verify(
     input: &MethodInput<'_, '_>,
-    ssa: &VerifiedSsa<'_>,
+    ssa: &TypedBody<'_>,
     environment: EnvironmentId,
     representation: crate::RepresentationPolicy,
     budget: &mut MethodBudget<'_, '_>,
@@ -101,7 +105,7 @@ pub(crate) fn verify(
     }
     if !std::ptr::eq(
         raw.layout().original().instructions(),
-        ssa.raw.instructions(),
+        ssa.ssa.raw.instructions(),
     ) {
         return Err(RequestError::InternalInvariant(
             "dispatcher belongs to another method",
@@ -124,7 +128,7 @@ pub(crate) fn verify(
         return Ok(None);
     }
     let mut locals = Vec::new();
-    for (index, definition) in ssa.values.iter().enumerate() {
+    for (index, definition) in ssa.ssa.values.iter().enumerate() {
         budget.charge_work(1)?;
         let Some(kind) = ssa.kinds[index] else {
             return Ok(None);
@@ -145,11 +149,11 @@ pub(crate) fn verify(
     let mut entry = Vec::new();
     copies(ssa, None, BlockId(0), &mut entry, &mut locals, budget)?;
     let mut cases = Vec::new();
-    for (index, block) in ssa.blocks.iter().enumerate() {
+    for (index, block) in ssa.ssa.blocks.iter().enumerate() {
         budget.charge_work(1)?;
         let key = BlockId(u32::try_from(index).map_err(|_| RequestError::PlatformCapacity)?);
         let mut outgoing = Vec::new();
-        for (index, original) in ssa.edges.iter().enumerate() {
+        for (index, original) in ssa.ssa.edges.iter().enumerate() {
             budget.charge_work(1)?;
             if original.source == key {
                 push(
@@ -162,140 +166,138 @@ pub(crate) fn verify(
         let Some(statements) = super::calls::operations(ssa, key, budget)? else {
             return Ok(None);
         };
-        let bound = &ssa.bound[index];
-        let transfer = match block.terminal {
-            Terminal::ReturnVoid => {
-                if !outgoing.is_empty()
-                    || !matches!(ssa.result, crate::pipeline::branch::ResultType::Void)
-                {
-                    return Err(RequestError::InternalInvariant(
-                        "void exit changed its original contract",
-                    ));
+        let bound = &ssa.ssa.bound[index];
+        let transfer =
+            match block.terminal {
+                Terminal::ReturnVoid => {
+                    if !outgoing.is_empty()
+                        || !matches!(ssa.ssa.result, crate::pipeline::branch::ResultType::Void)
+                    {
+                        return Err(RequestError::InternalInvariant(
+                            "void exit changed its original contract",
+                        ));
+                    }
+                    Transfer::ReturnVoid
                 }
-                Transfer::ReturnVoid
-            }
-            Terminal::Switch { table, .. } => {
-                let table =
-                    ssa.switches
-                        .get(ix(table.0)?)
-                        .ok_or(RequestError::InternalInvariant(
-                            "switch has a foreign payload table",
-                        ))?;
-                if outgoing.len()
-                    != table
-                        .cases
-                        .len()
-                        .checked_add(1)
-                        .ok_or(RequestError::PlatformCapacity)?
-                {
-                    return Err(RequestError::InternalInvariant(
-                        "switch edge coverage is not exact",
-                    ));
-                }
-                let value = LocalId(
-                    bound
-                        .terminal
-                        .ok_or(RequestError::InternalInvariant("switch lost its selector"))?
-                        .0,
-                );
-                if locals[ix(value.0)?].kind != Kind::Int {
-                    return Ok(None);
-                }
-                let mut cases = Vec::new();
-                for (index, &(case_key, target)) in table.cases.iter().enumerate() {
-                    budget.charge_work(1)?;
-                    push(
-                        &mut cases,
-                        (
-                            case_key,
-                            edge(ssa, outgoing[index], key, target, &mut locals, budget)?,
-                        ),
+                Terminal::Switch { table, .. } => {
+                    let table = ssa.ssa.switches.get(ix(table.0)?).ok_or(
+                        RequestError::InternalInvariant("switch has a foreign payload table"),
+                    )?;
+                    if outgoing.len()
+                        != table
+                            .cases
+                            .len()
+                            .checked_add(1)
+                            .ok_or(RequestError::PlatformCapacity)?
+                    {
+                        return Err(RequestError::InternalInvariant(
+                            "switch edge coverage is not exact",
+                        ));
+                    }
+                    let value = LocalId(
+                        bound
+                            .terminal
+                            .ok_or(RequestError::InternalInvariant("switch lost its selector"))?
+                            .0,
+                    );
+                    if locals[ix(value.0)?].kind != Kind::Int {
+                        return Ok(None);
+                    }
+                    let mut cases = Vec::new();
+                    for (index, &(case_key, target)) in table.cases.iter().enumerate() {
+                        budget.charge_work(1)?;
+                        push(
+                            &mut cases,
+                            (
+                                case_key,
+                                edge(ssa, outgoing[index], key, target, &mut locals, budget)?,
+                            ),
+                            budget,
+                        )?;
+                    }
+                    let default = edge(
+                        ssa,
+                        outgoing[table.cases.len()],
+                        key,
+                        table.default,
+                        &mut locals,
                         budget,
                     )?;
+                    Transfer::Switch {
+                        form: crate::p7_regions::switch_form(&cases, budget)?,
+                        value,
+                        cases,
+                        default,
+                    }
                 }
-                let default = edge(
-                    ssa,
-                    outgoing[table.cases.len()],
-                    key,
-                    table.default,
-                    &mut locals,
-                    budget,
-                )?;
-                Transfer::Switch {
-                    form: crate::p7_regions::switch_form(&cases, budget)?,
-                    value,
-                    cases,
-                    default,
+                Terminal::Return(_) => {
+                    if !outgoing.is_empty() {
+                        return Err(RequestError::InternalInvariant(
+                            "return has an outgoing dispatcher edge",
+                        ));
+                    }
+                    let value = LocalId(
+                        bound
+                            .terminal
+                            .ok_or(RequestError::InternalInvariant(
+                                "dispatcher return lost its value",
+                            ))?
+                            .0,
+                    );
+                    let Some(value) = super::branch::returned(ssa, value)? else {
+                        return Ok(None);
+                    };
+                    Transfer::Return(value)
                 }
-            }
-            Terminal::Return(_) => {
-                if !outgoing.is_empty() {
-                    return Err(RequestError::InternalInvariant(
-                        "return has an outgoing dispatcher edge",
-                    ));
+                Terminal::Jump(target) => {
+                    if outgoing.len() != 1 {
+                        return Err(RequestError::InternalInvariant(
+                            "jump edge coverage is not exact",
+                        ));
+                    }
+                    Transfer::Jump(edge(ssa, outgoing[0], key, target, &mut locals, budget)?)
                 }
-                let value = LocalId(
-                    bound
-                        .terminal
-                        .ok_or(RequestError::InternalInvariant(
-                            "dispatcher return lost its value",
-                        ))?
-                        .0,
-                );
-                let Some(value) = super::branch::returned(ssa, value)? else {
-                    return Ok(None);
-                };
-                Transfer::Return(value)
-            }
-            Terminal::Jump(target) => {
-                if outgoing.len() != 1 {
-                    return Err(RequestError::InternalInvariant(
-                        "jump edge coverage is not exact",
-                    ));
+                Terminal::Test {
+                    opcode, yes, no, ..
+                } => {
+                    if outgoing.len() != 2 {
+                        return Err(RequestError::InternalInvariant(
+                            "branch edge coverage is not exact",
+                        ));
+                    }
+                    let left = LocalId(
+                        bound
+                            .terminal
+                            .ok_or(RequestError::InternalInvariant(
+                                "dispatcher condition lost its value",
+                            ))?
+                            .0,
+                    );
+                    let right = bound.other.map(|id| LocalId(id.0));
+                    let kind = locals[ix(left.0)?].kind;
+                    if kind == Kind::Float {
+                        return Ok(None);
+                    }
+                    if let Some(right) = right
+                        && locals[ix(right.0)?].kind != kind
+                    {
+                        return Ok(None);
+                    }
+                    if matches!(kind, Kind::Boolean | Kind::Object | Kind::String)
+                        && !matches!(opcode, 0x32 | 0x33 | 0x38 | 0x39)
+                    {
+                        return Ok(None);
+                    }
+                    Transfer::Branch {
+                        left,
+                        right,
+                        kind,
+                        opcode,
+                        yes: edge(ssa, outgoing[0], key, yes, &mut locals, budget)?,
+                        no: edge(ssa, outgoing[1], key, no, &mut locals, budget)?,
+                    }
                 }
-                Transfer::Jump(edge(ssa, outgoing[0], key, target, &mut locals, budget)?)
-            }
-            Terminal::Test {
-                opcode, yes, no, ..
-            } => {
-                if outgoing.len() != 2 {
-                    return Err(RequestError::InternalInvariant(
-                        "branch edge coverage is not exact",
-                    ));
-                }
-                let left = LocalId(
-                    bound
-                        .terminal
-                        .ok_or(RequestError::InternalInvariant(
-                            "dispatcher condition lost its value",
-                        ))?
-                        .0,
-                );
-                let right = bound.other.map(|id| LocalId(id.0));
-                let kind = locals[ix(left.0)?].kind;
-                if kind == Kind::Float {
-                    return Ok(None);
-                }
-                if let Some(right) = right
-                    && locals[ix(right.0)?].kind != kind
-                {
-                    return Ok(None);
-                }
-                if matches!(kind, Kind::Boolean | Kind::Object | Kind::String)
-                    && !matches!(opcode, 0x32 | 0x33 | 0x38 | 0x39)
-                {
-                    return Ok(None);
-                }
-                Transfer::Branch {
-                    left,
-                    right,
-                    kind,
-                    opcode,
-                    yes: edge(ssa, outgoing[0], key, yes, &mut locals, budget)?,
-                    no: edge(ssa, outgoing[1], key, no, &mut locals, budget)?,
-                }
-            }
-        };
+            };
         push(
             &mut cases,
             Case {
@@ -326,7 +328,7 @@ pub(crate) fn verify(
             header.push(text, budget)?;
         }
     }
-    header.push(ssa.result.spelling(), budget)?;
+    header.push(ssa.ssa.result.spelling(), budget)?;
     header.push(" ", budget)?;
     for unit in name {
         header.character(
@@ -337,7 +339,7 @@ pub(crate) fn verify(
         )?;
     }
     header.push("(", budget)?;
-    for (index, kind) in ssa.parameters.iter().enumerate() {
+    for (index, kind) in ssa.ssa.parameters.iter().enumerate() {
         budget.charge_work(1)?;
         if index != 0 {
             header.push(", ", budget)?;

@@ -8,6 +8,8 @@ pub use p0_knowledge::{
 };
 #[path = "p1_input/mod.rs"]
 pub mod input;
+mod p2_flow;
+mod p3_ssa;
 mod p4_calls;
 mod p5_types;
 mod p6_variables;
