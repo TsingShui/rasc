@@ -41,6 +41,7 @@ pub enum DiagnosticCode {
     UndefinedRegister,
     DefinitionAvailabilityUnproved,
     InvalidWideRead,
+    MonitorScopeUnproved,
     InternalInvariant,
 }
 

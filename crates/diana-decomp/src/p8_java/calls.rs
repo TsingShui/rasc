@@ -58,6 +58,16 @@ pub(crate) struct ReceiverCall {
     pub arguments: Vec<ValueUse>,
 }
 pub(crate) enum Statement {
+    Monitor {
+        operation: crate::p2_flow::normal::OpId,
+        kind: crate::p2_flow::normal::MonitorKind,
+        lock: ValueUse,
+    },
+    Class {
+        target: LocalId,
+        reference: crate::TypeId,
+        source: String,
+    },
     Snapshot(crate::p6_variables::exceptional::Snapshot),
     ExceptionBind {
         handler: crate::p2_flow::normal::BlockId,
@@ -112,7 +122,10 @@ fn copy(units: &[u16], budget: &mut MethodBudget<'_, '_>) -> Result<Vec<u16>, Re
     }
     Ok(out)
 }
-fn text(units: &[u16], budget: &mut MethodBudget<'_, '_>) -> Result<Option<String>, RequestError> {
+fn text(
+    units: &[u16],
+    budget: &mut impl crate::pipeline::control::InputControl,
+) -> Result<Option<String>, RequestError> {
     if !super::declarations::identifier(units, budget)? {
         return Ok(None);
     }
@@ -130,7 +143,7 @@ fn text(units: &[u16], budget: &mut MethodBudget<'_, '_>) -> Result<Option<Strin
 }
 pub(super) fn type_name(
     owner: &[u16],
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut impl crate::pipeline::control::InputControl,
 ) -> Result<Option<String>, RequestError> {
     if owner.len() < 3 || owner.first() != Some(&76) || owner.last() != Some(&59) {
         return Ok(None);
@@ -470,6 +483,32 @@ pub(super) fn operations(
         budget.charge_work(1)?;
         let op = ssa.ssa.operation(id)?;
         super::exceptional::snapshots(placements, block, op.pc, &mut output, budget)?;
+        if matches!(op.op, Op::Monitor(..)) {
+            push(&mut output, super::monitor_ops::lower(ssa, id, op)?, budget)?;
+            continue;
+        }
+        if let Op::Class(_, reference) = op.op {
+            let mut source = TextBuffer::new();
+            source.push(
+                names.name(crate::p5_types::normal::Kind::Nominal(reference), budget)?,
+                budget,
+            )?;
+            let target = LocalId(
+                op.result
+                    .ok_or(RequestError::InternalInvariant("class literal lost result"))?
+                    .0,
+            );
+            push(
+                &mut output,
+                Statement::Class {
+                    target,
+                    reference,
+                    source: source.finish(),
+                },
+                budget,
+            )?;
+            continue;
+        }
         if let Op::Exception(_) = op.op {
             let target = LocalId(
                 op.result
@@ -572,7 +611,7 @@ pub(super) fn operations(
                         "string lost original value",
                     ))?;
             let units = crate::substrate::owned::copy_units(original.value, budget)?;
-            super::declarations::check_string_literal(&units, budget)?;
+            super::declarations::check_constant_utf8(&units, budget)?;
             let target = LocalId(
                 op.result
                     .ok_or(RequestError::InternalInvariant("string lost result"))?

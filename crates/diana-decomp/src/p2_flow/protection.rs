@@ -56,15 +56,27 @@ fn normal_ingress(
     }
     Ok(true)
 }
+pub(crate) fn selection_pc(op: Op, pc: CodeUnitOffset) -> Result<CodeUnitOffset, RequestError> {
+    if matches!(op, Op::Monitor(super::normal::MonitorKind::Exit, _)) {
+        pc.checked_advance(crate::CodeUnitCount(1))
+            .ok_or(RequestError::PlatformCapacity)
+    } else {
+        Ok(pc)
+    }
+}
+struct Site {
+    instruction: CodeUnitOffset,
+    selection: CodeUnitOffset,
+}
 fn append_site(
     protection: &CheckedProtection,
     blocks: &[Block],
     source: BlockId,
-    pc: CodeUnitOffset,
+    site: Site,
     result: &mut Vec<ExceptionEdge>,
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<(), RequestError> {
-    let Some(chain) = protection.at(pc, budget)? else {
+    let Some(chain) = protection.at(site.selection, budget)? else {
         return Ok(());
     };
     for (rank, clause) in chain.iter().enumerate() {
@@ -86,7 +98,7 @@ fn append_site(
                 target: target.ok_or(RequestError::InternalInvariant(
                     "reachable handler lost its block",
                 ))?,
-                pc,
+                pc: site.instruction,
                 rank: CatchRank(u32::try_from(rank).map_err(|_| RequestError::PlatformCapacity)?),
                 kind: clause.kind,
             },
@@ -110,7 +122,17 @@ pub(super) fn build(
         for op in &block.ops {
             budget.charge_work(1)?;
             if op.kind.effects().may_throw {
-                append_site(protection, blocks, source, op.pc, &mut result, budget)?;
+                append_site(
+                    protection,
+                    blocks,
+                    source,
+                    Site {
+                        instruction: op.pc,
+                        selection: selection_pc(op.kind, op.pc)?,
+                    },
+                    &mut result,
+                    budget,
+                )?;
             }
         }
         if matches!(block.terminal, Terminal::Throw(_)) {
@@ -118,7 +140,10 @@ pub(super) fn build(
                 protection,
                 blocks,
                 source,
-                block.terminal_pc,
+                Site {
+                    instruction: block.terminal_pc,
+                    selection: block.terminal_pc,
+                },
                 &mut result,
                 budget,
             )?;
@@ -130,12 +155,12 @@ fn check_site(
     protection: &CheckedProtection,
     blocks: &[Block],
     source: BlockId,
-    pc: CodeUnitOffset,
+    site: Site,
     edges: &[ExceptionEdge],
     cursor: &mut usize,
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<(), RequestError> {
-    let Some(chain) = protection.at(pc, budget)? else {
+    let Some(chain) = protection.at(site.selection, budget)? else {
         return Ok(());
     };
     for (rank, clause) in chain.iter().enumerate() {
@@ -147,7 +172,7 @@ fn check_site(
             .get(ix(edge.target.0)?)
             .ok_or(RequestError::InternalInvariant("foreign handler block"))?;
         if edge.source != source
-            || edge.pc != pc
+            || edge.pc != site.instruction
             || edge.rank.0 != u32::try_from(rank).map_err(|_| RequestError::PlatformCapacity)?
             || edge.kind != clause.kind
             || target.pc != clause.target
@@ -240,7 +265,9 @@ pub(crate) fn verify(
             if !spec.may_throw() {
                 continue;
             }
-            if protection.at(op.pc, budget)?.is_some()
+            if protection
+                .at(selection_pc(op.kind, op.pc)?, budget)?
+                .is_some()
                 && (block.ops.last().map(|last| last.id) != Some(op.id)
                     || block.terminal_pc != op.pc
                     || !matches!(block.terminal, Terminal::Jump(_)))
@@ -251,7 +278,10 @@ pub(crate) fn verify(
                 protection,
                 blocks,
                 source,
-                op.pc,
+                Site {
+                    instruction: op.pc,
+                    selection: selection_pc(op.kind, op.pc)?,
+                },
                 edges,
                 &mut cursor,
                 budget,
@@ -281,7 +311,10 @@ pub(crate) fn verify(
                 protection,
                 blocks,
                 source,
-                block.terminal_pc,
+                Site {
+                    instruction: block.terminal_pc,
+                    selection: block.terminal_pc,
+                },
                 edges,
                 &mut cursor,
                 budget,

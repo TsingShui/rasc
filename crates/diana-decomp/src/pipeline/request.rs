@@ -37,6 +37,8 @@ pub enum RequestError {
         register: crate::RegisterId,
         pc: crate::CodeUnitOffset,
     },
+    #[error("monitor scope unproved at {pc:?}")]
+    MonitorScopeUnproved { pc: crate::CodeUnitOffset },
     #[error("partial or invalid wide register {register:?} read at {pc:?}")]
     InvalidWideRead {
         register: crate::RegisterId,
@@ -85,6 +87,7 @@ impl RequestError {
                 FailureKind::Malformed
             }
             Self::DefinitionAvailabilityUnproved { .. }
+            | Self::MonitorScopeUnproved { .. }
             | Self::ArrayFillShape { .. }
             | Self::JavaTargetLimit { .. }
             | Self::InitializationUnavailable { .. }

@@ -72,7 +72,7 @@ fn t10_literal_views_share_bits_without_reinterpreting_nonliteral_storage() {
                 &mut control,
             )
             .unwrap();
-        let ClassOutput::Mixed { members, .. } = report.class();
+        let members = report.class().members();
         match expected {
             None => {
                 let MethodOutput::Debug { source, reason, .. } = &members[0] else {

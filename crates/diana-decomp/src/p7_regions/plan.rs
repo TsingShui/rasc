@@ -92,7 +92,12 @@ pub(crate) fn build<'a>(
             budget,
         )?;
     }
-    let shape = if !storage.typed.ssa.raw.try_byte_range().as_range().is_empty() {
+    let mut has_monitors = false;
+    for op in &storage.typed.ssa.operations {
+        budget.charge_work(1)?;
+        has_monitors |= matches!(op.op, Op::Monitor(..));
+    }
+    let shape = if has_monitors || !storage.typed.ssa.raw.try_byte_range().as_range().is_empty() {
         Shape::Protected(super::protection::build(&storage, budget)?)
     } else if matches!(policy, RepresentationPolicy::DispatchOnly) {
         Shape::Dispatcher

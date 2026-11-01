@@ -14,6 +14,37 @@ pub fn render(
     let mut output = TextBuffer::report(control);
     let mut spans = Vec::new();
     match &report.class {
+        ClassOutput::JavaUnit {
+            declaration,
+            members,
+            ..
+        } => {
+            output.push(&declaration.header, control)?;
+            for member in members {
+                control.checkpoint()?;
+                let source = match member {
+                    MethodOutput::Java { source, .. } => source.as_str(),
+                    MethodOutput::DeclarationOnly { declaration, .. } => declaration.source(),
+                    _ => {
+                        return Err(RequestError::InternalInvariant(
+                            "JavaUnit contains an unverified member",
+                        ));
+                    }
+                };
+                let start = SourceByteOffset(output.len());
+                output.push(source, control)?;
+                let end = SourceByteOffset(output.len());
+                reserve(&mut spans, 1, control)?;
+                spans.push(OriginSpan {
+                    method: member.key(),
+                    start,
+                    end,
+                    language: SourceLanguage::Java,
+                });
+                output.push("\n", control)?;
+            }
+            output.push("}\n", control)?;
+        }
         ClassOutput::Mixed {
             descriptor,
             shell,

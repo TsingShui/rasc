@@ -1,9 +1,9 @@
 use crate::p8_java::MethodBody;
 use crate::test_fixture as fixture;
 use crate::{
-    ByteOffset, ClassDefId, ClassKey, ClassOutput, DeclarationCatalog, DexId, DexImage, Engine,
-    EnvironmentId, ImageOrigin, InputId, Limits, MethodOutput, MethodSelector, Options,
-    RepresentationPolicy, Request, RequestError, RunContext,
+    ByteOffset, ClassDefId, ClassKey, DeclarationCatalog, DexId, DexImage, Engine, EnvironmentId,
+    ImageOrigin, InputId, Limits, MethodOutput, MethodSelector, Options, RepresentationPolicy,
+    Request, RequestError, RunContext,
 };
 
 #[test]
@@ -44,7 +44,7 @@ fn t13_region_certificate_rejects_lost_leaves_edges_wrong_scope_and_duplicates()
             &mut control,
         )
         .unwrap();
-    let ClassOutput::Mixed { members, .. } = report.class();
+    let members = report.class().members();
     let MethodOutput::Java { declaration, .. } = &members[0] else {
         panic!("ordinary int loop must remain Java");
     };

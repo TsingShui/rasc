@@ -8,6 +8,7 @@ enum Work<'a> {
     Node(NodeId),
     Text(&'static str),
     Edge(&'a crate::p8_java::dispatcher::Edge),
+    Leave(&'a crate::p8_java::dispatcher::Edge),
     Catch(&'a Catch),
 }
 fn block(body: &ProtectedBody, id: crate::p2_flow::normal::BlockId) -> Result<&Case, RequestError> {
@@ -32,6 +33,10 @@ pub(super) fn write(
         match work {
             Work::Text(text) => output.push(text, budget)?,
             Work::Edge(edge) => super::java::assignments(&edge.copies, output, budget)?,
+            Work::Leave(edge) => {
+                super::java::assignments(&edge.copies, output, budget)?;
+                output.push("break;\n", budget)?;
+            }
             Work::Catch(catch) => {
                 output.push(" catch (", budget)?;
                 for (index, clause) in catch.clauses.iter().enumerate() {
@@ -62,6 +67,66 @@ pub(super) fn write(
             Work::Node(id) => match &body.region.nodes
                 [usize::try_from(id.0).map_err(|_| RequestError::PlatformCapacity)?]
             {
+                Node::Synchronized {
+                    enter, body: inner, ..
+                } => {
+                    let case = block(body, *enter)?;
+                    super::dispatcher::statements(case, output, budget)?;
+                    let mut lock = None;
+                    for statement in &case.statements {
+                        budget.charge_work(1)?;
+                        if let crate::p8_java::calls::Statement::Monitor {
+                            kind: crate::p2_flow::normal::MonitorKind::Enter,
+                            lock: value,
+                            ..
+                        } = statement
+                        {
+                            lock = Some(*value);
+                        }
+                    }
+                    let lock = lock.ok_or(RequestError::InternalInvariant(
+                        "synchronized AST lost lock expression",
+                    ))?;
+                    output.push("synchronized (", budget)?;
+                    super::java::value_use(lock, output, budget)?;
+                    output.push(") {\n", budget)?;
+                    let Transfer::Jump(edge) = &case.transfer else {
+                        return Err(RequestError::InternalInvariant(
+                            "synchronized AST lost ingress",
+                        ));
+                    };
+                    super::java::assignments(&edge.copies, output, budget)?;
+                    push(&mut todo, Work::Text("}\n"), budget)?;
+                    push(&mut todo, Work::Node(*inner), budget)?;
+                }
+                Node::Loop {
+                    header,
+                    body: inner,
+                    body_yes,
+                    ..
+                } => {
+                    let case = block(body, *header)?;
+                    let Transfer::Branch { yes, no, .. } = &case.transfer else {
+                        return Err(RequestError::InternalInvariant(
+                            "protected loop lost condition",
+                        ));
+                    };
+                    output.push("while (true) {\n", budget)?;
+                    super::dispatcher::statements(case, output, budget)?;
+                    super::dispatcher::open_if(&case.transfer, output, budget)?;
+                    push(&mut todo, Work::Text("}\n}\n"), budget)?;
+                    if *body_yes {
+                        push(&mut todo, Work::Leave(no), budget)?;
+                        push(&mut todo, Work::Text("} else {\n"), budget)?;
+                        push(&mut todo, Work::Node(*inner), budget)?;
+                        push(&mut todo, Work::Edge(yes), budget)?;
+                    } else {
+                        push(&mut todo, Work::Node(*inner), budget)?;
+                        push(&mut todo, Work::Edge(no), budget)?;
+                        push(&mut todo, Work::Text("} else {\n"), budget)?;
+                        push(&mut todo, Work::Leave(yes), budget)?;
+                    }
+                }
                 Node::Sequence(children) => {
                     for &child in children.iter().rev() {
                         budget.charge_work(1)?;

@@ -1,4 +1,5 @@
 pub(crate) mod allocation;
+pub(crate) mod class_scope;
 mod contracts;
 pub(crate) mod exceptions;
 pub(crate) mod normal;

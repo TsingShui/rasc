@@ -70,6 +70,7 @@ fn copy<T: Copy>(values: &[T], budget: &mut MethodBudget<'_, '_>) -> Result<Vec<
 // transfers as ordinary branches. Cyclic graphs retain their original Debug.
 fn postdominators(
     storage: &StorageBody<'_>,
+    loops: &[super::protected_loops::Loop],
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<Option<Vec<usize>>, RequestError> {
     let ssa = &storage.typed.ssa;
@@ -82,8 +83,17 @@ fn postdominators(
         push(&mut degree, 0usize, budget)?;
         push(&mut rank, 0usize, budget)?;
     }
-    for edge in &ssa.edges {
+    for (index, edge) in ssa.edges.iter().enumerate() {
         budget.charge_work(1)?;
+        if super::protected_loops::cut(
+            loops,
+            crate::p2_flow::normal::EdgeId(
+                u32::try_from(index).map_err(|_| RequestError::PlatformCapacity)?,
+            ),
+            budget,
+        )? {
+            continue;
+        }
         degree[ix(edge.target.0)?] = degree[ix(edge.target.0)?]
             .checked_add(1)
             .ok_or(RequestError::PlatformCapacity)?;
@@ -99,8 +109,17 @@ fn postdominators(
         budget.charge_work(1)?;
         let source = queue[head];
         head += 1;
-        for edge in &ssa.edges {
+        for (index, edge) in ssa.edges.iter().enumerate() {
             budget.charge_work(1)?;
+            if super::protected_loops::cut(
+                loops,
+                crate::p2_flow::normal::EdgeId(
+                    u32::try_from(index).map_err(|_| RequestError::PlatformCapacity)?,
+                ),
+                budget,
+            )? {
+                continue;
+            }
             if ix(edge.source.0)? != source {
                 continue;
             }
@@ -131,8 +150,17 @@ fn postdominators(
     for &source in queue.iter().rev() {
         budget.charge_work(1)?;
         let mut join = None;
-        for edge in &ssa.edges {
+        for (index, edge) in ssa.edges.iter().enumerate() {
             budget.charge_work(1)?;
+            if super::protected_loops::cut(
+                loops,
+                crate::p2_flow::normal::EdgeId(
+                    u32::try_from(index).map_err(|_| RequestError::PlatformCapacity)?,
+                ),
+                budget,
+            )? {
+                continue;
+            }
             if ix(edge.source.0)? != source {
                 continue;
             }
@@ -156,6 +184,17 @@ fn postdominators(
     Ok(Some(post))
 }
 enum Work {
+    Monitor {
+        prefix: Vec<NodeId>,
+        scope: super::monitors::ScopeId,
+        enter: BlockId,
+    },
+    Loop {
+        prefix: Vec<NodeId>,
+        header: BlockId,
+        body_yes: bool,
+        follow: BlockId,
+    },
     Trace {
         start: Option<BlockId>,
         stop: Option<BlockId>,
@@ -165,9 +204,15 @@ enum Work {
         block: BlockId,
     },
 }
+#[allow(
+    clippy::too_many_arguments,
+    reason = "normal reduction consumes checked monitor and loop products"
+)]
 fn trace(
     storage: &StorageBody<'_>,
     post: &[usize],
+    monitors: Option<&super::monitors::Monitors>,
+    loops: &[super::protected_loops::Loop],
     nodes: &mut Vec<Node>,
     start: BlockId,
     stop: Option<BlockId>,
@@ -203,6 +248,94 @@ fn trace(
                     };
                     if std::mem::replace(&mut seen[ix(block.0)?], true) {
                         return Ok(None);
+                    }
+                    if let Some(monitors) = monitors {
+                        let mut found = None;
+                        for (index, scope) in monitors.scopes.iter().enumerate() {
+                            budget.charge_work(1)?;
+                            if scope.block == block {
+                                found = Some(index);
+                                break;
+                            }
+                        }
+                        if let Some(index) = found {
+                            let scope = &monitors.scopes[index];
+                            let Terminal::Jump(start) = ssa.blocks[ix(block.0)?].terminal else {
+                                return Ok(None);
+                            };
+                            push(
+                                &mut todo,
+                                Work::Monitor {
+                                    prefix: std::mem::take(&mut prefix),
+                                    scope: super::monitors::ScopeId(
+                                        u32::try_from(index)
+                                            .map_err(|_| RequestError::PlatformCapacity)?,
+                                    ),
+                                    enter: block,
+                                },
+                                budget,
+                            )?;
+                            push(
+                                &mut todo,
+                                Work::Trace {
+                                    start: Some(scope.follow),
+                                    stop,
+                                },
+                                budget,
+                            )?;
+                            push(
+                                &mut todo,
+                                Work::Trace {
+                                    start: Some(start),
+                                    stop: Some(scope.follow),
+                                },
+                                budget,
+                            )?;
+                            branch = true;
+                            break;
+                        }
+                    }
+                    let mut region = None;
+                    for candidate in loops {
+                        budget.charge_work(1)?;
+                        if candidate.header == block {
+                            region = Some(candidate);
+                            break;
+                        }
+                    }
+                    if let Some(region) = region {
+                        let Terminal::Test { yes, no, .. } = ssa.blocks[ix(block.0)?].terminal
+                        else {
+                            return Ok(None);
+                        };
+                        push(
+                            &mut todo,
+                            Work::Loop {
+                                prefix: std::mem::take(&mut prefix),
+                                header: block,
+                                body_yes: region.body_yes,
+                                follow: region.follow,
+                            },
+                            budget,
+                        )?;
+                        push(
+                            &mut todo,
+                            Work::Trace {
+                                start: Some(region.follow),
+                                stop,
+                            },
+                            budget,
+                        )?;
+                        push(
+                            &mut todo,
+                            Work::Trace {
+                                start: Some(if region.body_yes { yes } else { no }),
+                                stop: Some(block),
+                            },
+                            budget,
+                        )?;
+                        branch = true;
+                        break;
                     }
                     match ssa.blocks[ix(block.0)?].terminal {
                         Terminal::Jump(target) => {
@@ -261,6 +394,50 @@ fn trace(
                     push(&mut results, id, budget)?;
                 }
             }
+            Work::Monitor {
+                mut prefix,
+                scope,
+                enter,
+            } => {
+                let tail = results
+                    .pop()
+                    .ok_or(RequestError::InternalInvariant("monitor lost follow"))?;
+                let body = results
+                    .pop()
+                    .ok_or(RequestError::InternalInvariant("monitor lost body"))?;
+                let node = add(nodes, Node::Synchronized { scope, enter, body }, budget)?;
+                push(&mut prefix, node, budget)?;
+                push(&mut prefix, tail, budget)?;
+                let node = add(nodes, Node::Sequence(prefix), budget)?;
+                push(&mut results, node, budget)?;
+            }
+            Work::Loop {
+                mut prefix,
+                header,
+                body_yes,
+                follow,
+            } => {
+                let tail = results
+                    .pop()
+                    .ok_or(RequestError::InternalInvariant("loop lost follow"))?;
+                let body = results
+                    .pop()
+                    .ok_or(RequestError::InternalInvariant("loop lost body"))?;
+                let node = add(
+                    nodes,
+                    Node::Loop {
+                        header,
+                        body,
+                        body_yes,
+                        follow,
+                    },
+                    budget,
+                )?;
+                push(&mut prefix, node, budget)?;
+                push(&mut prefix, tail, budget)?;
+                let node = add(nodes, Node::Sequence(prefix), budget)?;
+                push(&mut results, node, budget)?;
+            }
             Work::Join { mut prefix, block } => {
                 let tail = results
                     .pop()
@@ -286,13 +463,27 @@ fn trace(
 }
 fn forest(
     storage: &StorageBody<'_>,
+    monitors: Option<&super::monitors::Monitors>,
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<Option<Forest>, RequestError> {
-    let Some(post) = postdominators(storage, budget)? else {
+    let Some(loops) = super::protected_loops::collect(storage, budget)? else {
+        return Ok(None);
+    };
+    let Some(post) = postdominators(storage, &loops, budget)? else {
         return Ok(None);
     };
     let mut nodes = Vec::new();
-    let Some(main) = trace(storage, &post, &mut nodes, BlockId(0), None, budget)? else {
+    let Some(main) = trace(
+        storage,
+        &post,
+        monitors,
+        &loops,
+        &mut nodes,
+        BlockId(0),
+        None,
+        budget,
+    )?
+    else {
         return Ok(None);
     };
     let ordinary = blocks(&nodes, &[main], budget)?;
@@ -303,6 +494,12 @@ fn forest(
     let mut owned = ordinary;
     for binding in &storage.typed.exceptions {
         budget.charge_work(1)?;
+        if consumed_handler(monitors, binding.handler, budget)? {
+            push(&mut roots, None, budget)?;
+            push(&mut handlers, binding.handler, budget)?;
+            push(&mut follows, None, budget)?;
+            continue;
+        }
         let mut stop = ix(binding.handler.0)?;
         while stop != storage.typed.ssa.blocks.len() {
             budget.charge_work(1)?;
@@ -322,7 +519,17 @@ fn forest(
                 u32::try_from(stop).map_err(|_| RequestError::PlatformCapacity)?,
             ))
         };
-        let Some(root) = trace(storage, &post, &mut nodes, binding.handler, stop, budget)? else {
+        let Some(root) = trace(
+            storage,
+            &post,
+            monitors,
+            &loops,
+            &mut nodes,
+            binding.handler,
+            stop,
+            budget,
+        )?
+        else {
             return Ok(None);
         };
         for block in blocks(&nodes, &[root], budget)? {
@@ -346,6 +553,7 @@ fn forest(
 fn groups(
     storage: &StorageBody<'_>,
     forest: &Forest,
+    monitors: Option<&super::monitors::Monitors>,
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<Option<Vec<Group>>, RequestError> {
     let ssa = &storage.typed.ssa;
@@ -422,7 +630,16 @@ fn groups(
                 return Ok(None);
             }
         }
-        for (start, end) in [(0, split), (split, chain.len())] {
+        let mut cut = chain.len();
+        for (index, clause) in chain.iter().enumerate() {
+            budget.charge_work(1)?;
+            if consumed_handler(monitors, clause.handler, budget)? {
+                cut = index;
+                break;
+            }
+        }
+        let split = split.min(cut);
+        for (start, end) in [(0, split), (split, cut)] {
             if start == end {
                 continue;
             }
@@ -464,6 +681,7 @@ fn groups(
 }
 fn candidate(
     storage: &StorageBody<'_>,
+    monitors: Option<&super::monitors::Monitors>,
     forest: &Forest,
     group: &Group,
     selected: &[NodeId],
@@ -530,6 +748,27 @@ fn candidate(
         budget.charge_work(1)?;
         let mut block = None;
         match &forest.nodes[ix(id.0)?] {
+            Node::Synchronized { scope, enter, body } => {
+                let Some(monitors) = monitors else {
+                    return Ok(false);
+                };
+                let cleanup = monitors.cleanup(monitors.scope(*scope)?.cleanup)?;
+                let mut nested = Vec::new();
+                push(
+                    &mut nested,
+                    Clause {
+                        kind: crate::input::protection::CatchType::All,
+                        handler: cleanup.handler,
+                    },
+                    budget,
+                )?;
+                push(&mut todo, (*body, nested), budget)?;
+                block = Some(*enter);
+            }
+            Node::Loop { header, body, .. } => {
+                block = Some(*header);
+                push(&mut todo, (*body, copy(&context, budget)?), budget)?;
+            }
             Node::Block(value) => block = Some(*value),
             Node::If {
                 block: value,
@@ -557,6 +796,11 @@ fn candidate(
                 }
                 for &clause in &context {
                     budget.charge_work(1)?;
+                    if nested.last().is_some_and(|clause: &Clause| {
+                        clause.kind == crate::input::protection::CatchType::All
+                    }) {
+                        break;
+                    }
                     push(&mut nested, clause, budget)?;
                 }
                 push(&mut todo, (*body, nested), budget)?;
@@ -567,7 +811,17 @@ fn candidate(
             for pc in original
                 .ops
                 .iter()
-                .map(|op| op.kind.effects().may_throw.then_some(op.pc))
+                .map(|op| {
+                    (op.kind.effects().may_throw
+                        && !matches!(
+                            op.kind,
+                            crate::p2_flow::normal::Op::Monitor(
+                                crate::p2_flow::normal::MonitorKind::Exit,
+                                _
+                            )
+                        ))
+                    .then_some(op.pc)
+                })
                 .chain(std::iter::once(
                     matches!(original.terminal, Terminal::Throw(_)).then_some(original.terminal_pc),
                 ))
@@ -576,10 +830,13 @@ fn candidate(
                 let Some(pc) = pc else {
                     continue;
                 };
-                let mut expected = copy(&context, budget)?;
-                for &clause in group.clauses.iter().chain(&group.ambient) {
+                let mut expected = Vec::new();
+                for &clause in context.iter().chain(&group.clauses).chain(&group.ambient) {
                     budget.charge_work(1)?;
                     push(&mut expected, clause, budget)?;
+                    if clause.kind == crate::input::protection::CatchType::All {
+                        break;
+                    }
                 }
                 let mut actual = Vec::new();
                 for edge in &storage.typed.ssa.exception_edges {
@@ -605,6 +862,7 @@ fn candidate(
 }
 fn reduce(
     storage: &StorageBody<'_>,
+    monitors: Option<&super::monitors::Monitors>,
     forest: &mut Forest,
     group: &Group,
     budget: &mut MethodBudget<'_, '_>,
@@ -623,6 +881,7 @@ fn reduce(
                     budget.charge_work(1)?;
                     if candidate(
                         storage,
+                        monitors,
                         forest,
                         group,
                         &children[start..start + length],
@@ -644,7 +903,7 @@ fn reduce(
                 push(&mut todo, child, budget)?;
             }
         } else {
-            if candidate(storage, forest, group, &[id], budget)? {
+            if candidate(storage, monitors, forest, group, &[id], budget)? {
                 chosen = Some((id, None));
                 break;
             }
@@ -654,6 +913,9 @@ fn reduce(
                     push(&mut todo, *no, budget)?;
                 }
                 // An outer try owns an already-reduced inner try as a whole.
+                Node::Synchronized { body, .. } | Node::Loop { body, .. } => {
+                    push(&mut todo, *body, budget)?
+                }
                 Node::Try { .. } | Node::Block(_) => {}
                 Node::Sequence(_) => unreachable!(),
             }
@@ -725,23 +987,39 @@ fn reduce(
     }
     Ok(true)
 }
+fn consumed_handler(
+    monitors: Option<&super::monitors::Monitors>,
+    handler: BlockId,
+    budget: &mut MethodBudget<'_, '_>,
+) -> Result<bool, RequestError> {
+    if let Some(monitors) = monitors {
+        for scope in &monitors.scopes {
+            budget.charge_work(1)?;
+            if monitors.cleanup(scope.cleanup)?.handler == handler {
+                return Ok(true);
+            }
+        }
+    }
+    Ok(false)
+}
 pub(super) fn build(
     storage: &StorageBody<'_>,
+    monitors: Option<&super::monitors::Monitors>,
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<Option<(Vec<Node>, NodeId)>, RequestError> {
-    let Some(mut forest) = forest(storage, budget)? else {
+    let Some(mut forest) = forest(storage, monitors, budget)? else {
         return Ok(None);
     };
-    let Some(groups) = groups(storage, &forest, budget)? else {
+    let Some(groups) = groups(storage, &forest, monitors, budget)? else {
         return Ok(None);
     };
-    if groups.is_empty() {
+    if groups.is_empty() && monitors.is_none() {
         return Ok(None);
     }
     for inner in [true, false] {
         for group in &groups {
             budget.charge_work(1)?;
-            if group.inner == inner && !reduce(storage, &mut forest, group, budget)? {
+            if group.inner == inner && !reduce(storage, monitors, &mut forest, group, budget)? {
                 return Ok(None);
             }
         }

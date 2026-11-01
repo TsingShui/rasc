@@ -319,6 +319,8 @@ impl ArrayElement {
 }
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub(crate) enum Op {
+    Monitor(MonitorKind, RegisterId),
+    Class(RegisterId, crate::TypeId),
     Exception(RegisterId),
     ConstantWide(RegisterId, i64),
     MoveWide(RegisterId, RegisterId),
@@ -354,6 +356,16 @@ pub(crate) enum Op {
     Constant(RegisterId, i32),
     Move(RegisterId, RegisterId),
     Nop,
+}
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub(crate) enum MonitorKind {
+    Enter,
+    Exit,
+}
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub(crate) enum MethodMonitor {
+    DeclaringClass,
+    This,
 }
 #[derive(Clone, Copy)]
 pub(crate) struct SwitchId(pub u32);
@@ -391,6 +403,7 @@ pub(crate) struct Edge {
 }
 #[derive(Clone, Copy)]
 pub(crate) struct Effects {
+    pub monitor: bool,
     pub heap_read: bool,
     pub heap_write: bool,
     pub may_throw: bool,
@@ -399,7 +412,12 @@ pub(crate) struct Effects {
 }
 impl Effects {
     pub(crate) fn observable(self) -> bool {
-        self.heap_read || self.heap_write || self.may_throw || self.call || self.class_init
+        self.monitor
+            || self.heap_read
+            || self.heap_write
+            || self.may_throw
+            || self.call
+            || self.class_init
     }
 }
 impl Op {
@@ -461,6 +479,7 @@ impl Op {
         let conservative = matches!(self, Self::Call(_, _) | Self::Initialize(_));
         let static_access = matches!(self, Self::StaticLoad(..) | Self::StaticStore(..));
         Effects {
+            monitor: matches!(self, Self::Monitor(..)),
             heap_read: conservative
                 || static_access
                 || matches!(self, Self::ArrayLoad(..) | Self::FieldLoad(..)),
@@ -483,7 +502,9 @@ impl Op {
                 )
                 || matches!(
                     self,
-                    Self::NewInstance(..)
+                    Self::Monitor(..)
+                        | Self::Class(..)
+                        | Self::NewInstance(..)
                         | Self::FilledArray(..)
                         | Self::NewArray(..)
                         | Self::FreshFill(..)
@@ -543,6 +564,7 @@ pub(crate) struct FlowBody<'a> {
     pub casts: Vec<CastSite>,
     pub strings: Vec<StringLiteral<'a>>,
     pub frame: MethodFrame,
+    pub method_monitor: Option<MethodMonitor>,
     _sealed: (),
     pub calls: Vec<CallSite>,
     pub result: ResultType,
@@ -564,7 +586,8 @@ pub(crate) fn destination(op: Op) -> Option<RegisterId> {
             FilledResult::Discarded => None,
             FilledResult::Stored { register, .. } => Some(register),
         },
-        Op::Exception(r)
+        Op::Class(r, _)
+        | Op::Exception(r)
         | Op::ConstantWide(r, _)
         | Op::MoveWide(r, _)
         | Op::LongBinary(r, _, _, _)
@@ -585,7 +608,8 @@ pub(crate) fn destination(op: Op) -> Option<RegisterId> {
         | Op::ArrayLoad(r, _, _, _)
         | Op::FieldLoad(r, _, _, _)
         | Op::StaticLoad(r, _, _) => Some(r),
-        Op::Nop
+        Op::Monitor(..)
+        | Op::Nop
         | Op::ArrayStore(..)
         | Op::FieldStore(..)
         | Op::StaticStore(..)
@@ -638,6 +662,7 @@ impl Op {
             Self::MoveWide(_, source)
             | Self::Unary(_, _, source)
             | Self::ReverseSubtract(_, _, source) => [Some(source), None, None],
+            Self::Monitor(_, lock) => [Some(lock), None, None],
             Self::NewArray(_, length, _) => [Some(length), None, None],
             Self::FreshFill(register, _) => [Some(register), None, None],
             Self::EmptyFill(register, _) => [Some(register), None, None],
@@ -658,7 +683,8 @@ impl Op {
             Self::Binary(_, left, _, Operand::Literal(_)) | Self::Move(_, left) => {
                 [Some(left), None, None]
             }
-            Self::Exception(_)
+            Self::Class(..)
+            | Self::Exception(_)
             | Self::ConstantWide(_, _)
             | Self::NewInstance(..)
             | Self::String(..)
@@ -1016,6 +1042,27 @@ pub(crate) fn decode<'a>(
             let decoded = match spec.opcode {
                 0 => Decoded::Op(Op::Nop),
                 0x0d => Decoded::Op(Op::Exception(reg(0)?)),
+                0x1c => {
+                    let Some(reference) = layout.references()[0] else {
+                        return Err(RequestError::InternalInvariant(
+                            "class literal lost reference",
+                        ));
+                    };
+                    let crate::raw::OperandReference::Type(id) = reference.target else {
+                        return Err(RequestError::InternalInvariant(
+                            "class literal changed reference kind",
+                        ));
+                    };
+                    Decoded::Op(Op::Class(reg(0)?, id))
+                }
+                0x1d | 0x1e => Decoded::Op(Op::Monitor(
+                    if spec.opcode == 0x1d {
+                        MonitorKind::Enter
+                    } else {
+                        MonitorKind::Exit
+                    },
+                    reg(0)?,
+                )),
                 0x27 => Decoded::Throw(reg(0)?),
                 4..=6 => Decoded::Op(Op::MoveWide(reg(0)?, reg(1)?)),
                 0x16..=0x19 => Decoded::Op(Op::ConstantWide(
@@ -1692,11 +1739,13 @@ pub(crate) fn decode<'a>(
                 }
                 _ => return Ok(None),
             };
-            if let Decoded::Op(op) = decoded
-                && op.effects().may_throw
-                && protection.at(pc, budget)?.is_some()
-            {
-                push(&mut leaders, next, budget)?;
+            if let Decoded::Op(op) = decoded {
+                if matches!(op, Op::Monitor(..)) {
+                    push(&mut leaders, pc, budget)?;
+                    push(&mut leaders, next, budget)?;
+                } else if op.effects().may_throw && protection.at(pc, budget)?.is_some() {
+                    push(&mut leaders, next, budget)?;
+                }
             }
             push(&mut instructions, (pc, decoded), budget)?;
         }
@@ -1843,6 +1892,13 @@ pub(crate) fn decode<'a>(
         casts,
         strings,
         frame,
+        method_monitor: if input.access_flags() & 0x20 == 0 {
+            None
+        } else if input.access_flags() & 8 != 0 {
+            Some(MethodMonitor::DeclaringClass)
+        } else {
+            Some(MethodMonitor::This)
+        },
         _sealed: (),
         calls,
         result,

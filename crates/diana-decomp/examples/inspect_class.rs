@@ -166,7 +166,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     };
     let members: Vec<Value> = match report.class() {
-        ClassOutput::Mixed { members, .. } => members.iter().map(|member| {
+        ClassOutput::Mixed { members, .. } | ClassOutput::JavaUnit { members, .. } => members.iter().map(|member| {
             let key = member.key();
             let (status, facts, reason) = match member {
                 MethodOutput::Java { facts, .. } => ("java",Some(facts),None),
@@ -190,12 +190,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             })
         })
         .collect();
-    let ClassOutput::Mixed {
-        descriptor,
-        access_flags,
-        ..
-    } = report.class();
-    let value = json!({"schema":"diana.inspect/1","status":"mixed","header_offset":report.image().header_offset.0,"class_def_idx":class_def.0,"descriptor_units":descriptor,"access_flags":access_flags,"members":members,"diagnostics":diagnostics,"text":rendered.source,"spans":spans});
+    let (status, descriptor, access_flags) = match report.class() {
+        ClassOutput::Mixed {
+            descriptor,
+            access_flags,
+            ..
+        } => ("mixed", descriptor, access_flags),
+        ClassOutput::JavaUnit {
+            descriptor,
+            access_flags,
+            ..
+        } => ("java_unit", descriptor, access_flags),
+    };
+    let value = json!({"schema":"diana.inspect/1","status":status,"header_offset":report.image().header_offset.0,"class_def_idx":class_def.0,"descriptor_units":descriptor,"access_flags":access_flags,"members":members,"diagnostics":diagnostics,"text":rendered.source,"spans":spans});
     write_value(value, output)
 }
 

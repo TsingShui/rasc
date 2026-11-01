@@ -8,76 +8,24 @@ pub(super) fn exception_root(
     value: crate::p3_ssa::normal::ValueId,
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<Option<crate::p2_flow::normal::BlockId>, RequestError> {
-    use crate::p3_ssa::normal::{Definition, Sym};
-    let mut todo = Vec::new();
-    let mut seen = Vec::new();
-    let mut root = None;
-    push(&mut todo, value, budget)?;
-    while let Some(value) = todo.pop() {
+    use crate::p3_ssa::normal::Definition;
+    use crate::p5_types::reference_roots::Root;
+    budget.charge_work(1)?;
+    let Some(Root::Definition(root)) = typed.roots.one(value)? else {
+        return Ok(None);
+    };
+    let Definition::ExceptionAt(id) =
+        typed.ssa.values[usize::try_from(root.0).map_err(|_| RequestError::PlatformCapacity)?]
+    else {
+        return Ok(None);
+    };
+    for binding in &typed.exceptions {
         budget.charge_work(1)?;
-        let mut visited = false;
-        for &old in &seen {
-            budget.charge_work(1)?;
-            if old == value {
-                visited = true;
-                break;
-            }
-        }
-        if visited {
-            continue;
-        }
-        push(&mut seen, value, budget)?;
-        match typed.ssa.values
-            [usize::try_from(value.0).map_err(|_| RequestError::PlatformCapacity)?]
-        {
-            Definition::ExceptionAt(id) => {
-                let mut binding = None;
-                for candidate in &typed.exceptions {
-                    budget.charge_work(1)?;
-                    if candidate.operation == id {
-                        binding = Some(candidate);
-                        break;
-                    }
-                }
-                let Some(binding) = binding else {
-                    return Ok(None);
-                };
-                if root.is_some_and(|old| old != binding.handler) {
-                    return Ok(None);
-                }
-                root = Some(binding.handler);
-            }
-            Definition::OpResult(id) => {
-                let op = typed.ssa.operation(id)?;
-                if !matches!(op.op, crate::p2_flow::normal::Op::Move(..)) {
-                    return Ok(None);
-                }
-                push(&mut todo, op.input(0)?, budget)?;
-            }
-            Definition::Phi => {
-                let mut phi = None;
-                for candidate in &typed.ssa.phis {
-                    budget.charge_work(1)?;
-                    if candidate.result == value {
-                        phi = Some(candidate);
-                        break;
-                    }
-                }
-                let Some(phi) = phi else {
-                    return Ok(None);
-                };
-                for &(_, source) in &phi.inputs {
-                    budget.charge_work(1)?;
-                    let Sym::Value(source) = source else {
-                        return Ok(None);
-                    };
-                    push(&mut todo, source, budget)?;
-                }
-            }
-            Definition::Parameter(_) => return Ok(None),
+        if binding.operation == id {
+            return Ok(Some(binding.handler));
         }
     }
-    Ok(root)
+    Ok(None)
 }
 
 pub(super) fn snapshots(
@@ -167,7 +115,18 @@ pub(super) fn obligations<'a>(
             Placement::BeforeThrow(snapshot) => {
                 let edge = &storage.typed.ssa.exception_edges[usize::try_from(snapshot.edge.0)
                     .map_err(|_| RequestError::PlatformCapacity)?];
-                let Some(chain) = storage.typed.ssa.protection.at(snapshot.before, budget)? else {
+                let mut selection = snapshot.before;
+                for op in &storage.typed.ssa.blocks
+                    [usize::try_from(edge.source.0).map_err(|_| RequestError::PlatformCapacity)?]
+                .ops
+                {
+                    budget.charge_work(1)?;
+                    if op.pc == snapshot.before {
+                        selection = crate::p2_flow::protection::selection_pc(op.kind, op.pc)?;
+                        break;
+                    }
+                }
+                let Some(chain) = storage.typed.ssa.protection.at(selection, budget)? else {
                     return Err(RequestError::InternalInvariant(
                         "snapshot left its protection domain",
                     ));

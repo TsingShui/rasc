@@ -178,7 +178,7 @@ fn t15_derived_array_components_preserve_store_checks_and_copy_cycles() {
                     &mut control,
                 )
                 .unwrap();
-            let ClassOutput::Mixed { members, .. } = report.class();
+            let members = report.class().members();
             if let Some((kind, code)) = failure {
                 let reason = match &members[0] {
                     MethodOutput::Debug { reason, .. }
@@ -235,7 +235,7 @@ fn t16_t17_t18_exception_availability_keeps_failure_kind_and_other_original_memb
                 &mut control,
             )
             .unwrap();
-        let ClassOutput::Mixed { members, .. } = report.class();
+        let members = report.class().members();
         assert_eq!(members.len(), 9);
         for (method, kind, code) in [
             (
@@ -362,7 +362,7 @@ fn t18_checked_catch_reachability_and_shared_tail_preserve_public_admission() {
                 &mut control,
             )
             .unwrap();
-        let ClassOutput::Mixed { members, .. } = report.class();
+        let members = report.class().members();
         if java {
             assert!(matches!(&members[0], MethodOutput::Java { .. }), "{name}");
         } else {
@@ -425,7 +425,7 @@ fn t09_ordinary_dispatcher_rejects_even_an_unthrowing_protected_method() {
             &mut control,
         )
         .unwrap();
-    let diana_decomp::ClassOutput::Mixed { members, .. } = report.class();
+    let members = report.class().members();
     let diana_decomp::MethodOutput::Debug { source, reason, .. } = &members[0] else {
         panic!("protected method entered the no-handler profile")
     };
@@ -443,9 +443,9 @@ fn t09_ordinary_dispatcher_rejects_even_an_unthrowing_protected_method() {
     );
 }
 use diana_decomp::{
-    ByteOffset, ClassDefId, ClassKey, ClassOutput, DeclarationCatalog, DexId, DexImage,
-    DiagnosticCode, Engine, EnvironmentId, FailureKind, ImageOrigin, InputId, Limits, MethodOutput,
-    MethodSelector, Options, Request, RunContext,
+    ByteOffset, ClassDefId, ClassKey, DeclarationCatalog, DexId, DexImage, DiagnosticCode, Engine,
+    EnvironmentId, FailureKind, ImageOrigin, InputId, Limits, MethodOutput, MethodSelector,
+    Options, Request, RunContext,
 };
 
 #[test]
@@ -499,7 +499,7 @@ fn t12_constructor_arguments_keep_typed_allocation_and_chain_views() {
                 &mut control,
             )
             .unwrap();
-        let ClassOutput::Mixed { members, .. } = report.class();
+        let members = report.class().members();
         assert!(!members.is_empty());
         assert!(
             members
@@ -560,7 +560,7 @@ fn t12_constructor_arguments_keep_typed_allocation_and_chain_views() {
             &mut control,
         )
         .unwrap();
-    let ClassOutput::Mixed { members, .. } = report.class();
+    let members = report.class().members();
     let MethodOutput::Debug { source, reason, .. } = &members[0] else {
         panic!("unknown constructor throws became Java");
     };
@@ -609,7 +609,7 @@ fn t11_primitive_call_types_share_static_and_receiver_binding() {
                 &mut control,
             )
             .unwrap();
-        let ClassOutput::Mixed { members, .. } = report.class();
+        let members = report.class().members();
         for name in [
             "longCall",
             "floatCall",
@@ -693,7 +693,7 @@ fn t09_ordinary_throw_preserves_operands_and_requires_checked_exception_evidence
                 &mut control,
             )
             .unwrap();
-        let ClassOutput::Mixed { members, .. } = report.class();
+        let members = report.class().members();
         for name in ["nil", "unchecked", "branch", "checked"] {
             let units: Vec<u16> = name.encode_utf16().collect();
             let member = members
@@ -752,7 +752,7 @@ fn t09_ordinary_throw_preserves_operands_and_requires_checked_exception_evidence
             &mut control,
         )
         .unwrap();
-    let ClassOutput::Mixed { members, .. } = report.class();
+    let members = report.class().members();
     assert!(matches!(members[0], MethodOutput::Java { .. }));
 }
 
@@ -824,7 +824,7 @@ fn t02_engine_isolates_sibling_declaration_damage_without_ignoring_name_collisio
                 continue;
             }
             let report = result.unwrap();
-            let ClassOutput::Mixed { members, .. } = report.class();
+            let members = report.class().members();
             let target = members
                 .iter()
                 .find(|member| member.key().method.0 == fixture.primary_method_idx)
@@ -991,7 +991,7 @@ fn t07_branch_inputs_preserve_edge_identity_and_reject_undefined_joins() {
                 &mut control,
             )
             .unwrap();
-        let ClassOutput::Mixed { members, .. } = report.class();
+        let members = report.class().members();
         assert_eq!(members.len(), 1);
         match expected {
             Expected::Original => {
@@ -1131,7 +1131,7 @@ fn array_control_flow_uses_shared_definitions_and_rejects_invalid_element_and_in
                     &mut control,
                 )
                 .unwrap();
-            let ClassOutput::Mixed { members, .. } = report.class();
+            let members = report.class().members();
             match expected {
                 Expected::Java => assert!(
                     matches!(&members[0], MethodOutput::Java { .. }),
@@ -1187,7 +1187,7 @@ fn call_definition_errors_precede_missing_declarations_without_guessing_a_bindin
                 &mut control,
             )
             .unwrap();
-        let ClassOutput::Mixed { members, .. } = report.class();
+        let members = report.class().members();
         let reason = match &members[0] {
             MethodOutput::Debug { reason, .. } | MethodOutput::Unavailable { reason, .. } => reason,
             _ => panic!("unchecked wide call became Java"),
@@ -1248,7 +1248,7 @@ fn call_definition_errors_precede_missing_declarations_without_guessing_a_bindin
                 &mut control,
             )
             .unwrap();
-        let ClassOutput::Mixed { members, .. } = report.class();
+        let members = report.class().members();
         let reason = match &members[0] {
             MethodOutput::Unavailable { reason, .. } | MethodOutput::Debug { reason, .. } => reason,
             _ => panic!("missing call evidence produced trusted Java"),
@@ -1328,7 +1328,7 @@ fn nominal_types_keep_distinct_identities_and_owned_names_without_guessing_missi
                     .unwrap();
                 drop(engine);
                 drop(bytes);
-                let ClassOutput::Mixed { members, .. } = report.class();
+                let members = report.class().members();
                 if missing && name != "pick" {
                     let reason = match &members[0] {
                         MethodOutput::Debug { reason, .. }
@@ -1476,7 +1476,7 @@ fn static_fields_require_init_preserving_bindings_and_constantness() {
                         &mut control,
                     )
                     .unwrap();
-                let ClassOutput::Mixed { members, .. } = report.class();
+                let members = report.class().members();
                 match expected {
                     None => assert!(
                         matches!(&members[0], MethodOutput::Java { .. }),
@@ -1671,7 +1671,7 @@ fn heap_widths_descriptors_and_store_views_are_checked() {
                 &mut control,
             )
             .unwrap();
-        let ClassOutput::Mixed { members, .. } = report.class();
+        let members = report.class().members();
         match expected {
             Java => assert!(
                 matches!(&members[0], MethodOutput::Java { .. }),
@@ -1999,7 +1999,7 @@ fn field_call_array_composition_preserves_native_volatile_declaration_evidence()
                         &mut control,
                     )
                     .unwrap();
-                let ClassOutput::Mixed { members, .. } = report.class();
+                let members = report.class().members();
                 match evidence {
                     Evidence::Complete | Evidence::UnknownConstantness => assert!(
                         matches!(&members[0], MethodOutput::Java { .. }),

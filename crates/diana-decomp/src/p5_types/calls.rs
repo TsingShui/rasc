@@ -59,6 +59,7 @@ fn conversion(
                 (
                     Some(
                         Kind::String
+                        | Kind::Class
                         | Kind::PrimitiveArray(_)
                         | Kind::ObjectArray
                         | Kind::Nominal(_)

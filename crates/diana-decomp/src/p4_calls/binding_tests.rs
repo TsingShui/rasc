@@ -1,7 +1,7 @@
 use crate::{
-    ByteOffset, ClassDefId, ClassKey, ClassOutput, DeclarationCatalog, DexId, DexImage, Engine,
-    EnvironmentId, FailureKind, ImageOrigin, InputId, Limits, MethodId, MethodOutput,
-    MethodSelector, Options, Request, RunContext,
+    ByteOffset, ClassDefId, ClassKey, DeclarationCatalog, DexId, DexImage, Engine, EnvironmentId,
+    FailureKind, ImageOrigin, InputId, Limits, MethodId, MethodOutput, MethodSelector, Options,
+    Request, RunContext,
 };
 
 #[derive(serde::Deserialize)]
@@ -163,7 +163,7 @@ fn t12_covariant_constructor_and_receiver_binding_rejects_unproved_directories()
                 &mut control,
             )
             .unwrap();
-        let ClassOutput::Mixed { members, .. } = report.class();
+        let members = report.class().members();
         assert_eq!(members[0].key().method, MethodId(1));
         if matches!(
             evidence,

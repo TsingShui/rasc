@@ -90,6 +90,12 @@ def run_public(root, cache, spec, manifest, case_ids=None,representation=None):
                     calls=invocation['input'].get('calls',[]) if case['validationScope']=='method-in-known-context' else []
                     requested=list(dict.fromkeys(call['method'] for call in calls))
                     groups = _artifacts(actual, cert,requested)
+                    unit_source = groups.pop('java_unit_source',None)
+                    if unit_source is not None:
+                        source_path=work/'unit'/Path(selector['descriptor'][1:-1]+'.java')
+                        source_path.parent.mkdir(parents=True,exist_ok=True)
+                        source_path.write_text(unit_source,encoding='utf-8')
+                        groups['java_input']={'sources':[{'path':relative(source_path)}]}
                     executable_sources = groups.pop('method_sources',None)
                     if executable_sources is not None:
                         if case['validationScope']!='method-in-known-context':raise ValueError('method fragment is not a complete JavaUnit')
@@ -198,7 +204,18 @@ def _catalog(root, assets, identity,field_kind=None):
             raise PreparationError('missing/changed declaration evidence')
         return load(path)
     catalog=checked(assets[identity])
-    api_declarations=[value['declaration'] for value in checked(assets[catalog['jdk_declarations']]).values()]
+    from . import classfile
+    api_declarations=[]
+    for value in checked(assets[catalog['jdk_declarations']]).values():
+        declaration=value['declaration']
+        if 'enclosing_scope' not in declaration:
+            asset=by_path[value['path']];path=root/asset['path']
+            if not path.resolve().is_relative_to(root.resolve()) or not path.is_file() or path.stat().st_size!=asset['size']:
+                raise PreparationError('missing/changed enclosing-name evidence')
+            projected=classfile.project(path)
+            if projected['descriptor']!=declaration['descriptor']:raise PreparationError('enclosing-name evidence changed owner')
+            declaration={**declaration,'enclosing_scope':projected['enclosing_scope']}
+        api_declarations.append(declaration)
     declarations=list(api_declarations)
     source_declarations=list(catalog['source_classfiles'].values())
     declarations.extend(source_declarations)
@@ -215,6 +232,8 @@ def _catalog(root, assets, identity,field_kind=None):
         for method in declaration['methods']:
             methods.append({'owner':units(declaration['descriptor']),'name':units(method['name']),'prototype':units(method['proto'])})
     classes=[]
+    # API coverage cannot establish a caller's own lexical scope. For an API
+    # owner, unrelated InnerClasses entries do not change its enclosing name.
     for declaration,coverage in [(declaration,'exported_api') for declaration in api_declarations]+[(declaration,'all_declarations') for declaration in source_declarations]:
         attributes=declaration['attributes']
         classes.append({'descriptor':units(declaration['descriptor']),'access_flags':declaration['flags'],'parent':None if declaration['parent'] is None else units(declaration['parent']),
@@ -222,7 +241,7 @@ def _catalog(root, assets, identity,field_kind=None):
                         'methods':[{'name':units(method['name']),'prototype':units(method['proto']),'access_flags':method['flags'],'throws':None if method.get('throws') is None else [units(name) for name in method['throws']],'generic':'Signature' in method['attributes']} for method in declaration['methods']],
                         'field_names':[units(field['name']) for field in declaration['fields']],
                         'coverage':coverage,
-                        'generic':'Signature' in attributes,'enclosing_scope':any(attribute in attributes for attribute in ('InnerClasses','EnclosingMethod','NestHost','NestMembers'))})
+                        'generic':'Signature' in attributes,'enclosing_scope':(declaration.get('enclosing_scope',True) if coverage=='exported_api' else any(attribute in attributes for attribute in ('InnerClasses','EnclosingMethod','NestHost','NestMembers')))})
     fields={}
     for declaration,coverage in [(declaration,'exported_api') for declaration in api_declarations]+[(declaration,'all_declarations') for declaration in source_declarations]:
         for field in declaration['fields']:
@@ -294,7 +313,7 @@ def _artifacts(actual, cert,requested=()):
         reason=selected['reason']
         diagnostics=[] if reason is None else [actual['diagnostics'][reason]]
     else:
-        status=actual['status'];outcome=status;diagnostics=actual['diagnostics']
+        status=actual['status'];outcome='java' if status=='java_unit' else status;diagnostics=actual['diagnostics']
     scoped=None
     if requested:
         scoped=[member for method in requested for member in members if member['name']+member['proto']==method]
@@ -322,7 +341,9 @@ def _artifacts(actual, cert,requested=()):
     groups={'outcome':public,'text':text}
     if outcome!='error':groups['rendered']={'spans':spans,'raw_excerpt_ranges':excerpts}
     if requested:public['context_report']={'status':actual['status'],'diagnostics':actual['diagnostics'],'members':members};public['requested_methods']=requested;public['members']=scoped
-    if outcome=='java':groups['method_sources']=[{'name':member['name'],'proto':member['proto'],'source':member['source']} for member in (scoped if scoped is not None else members)]
+    if outcome=='java':
+        if status=='java_unit':groups['java_unit_source']=actual['text']
+        else:groups['method_sources']=[{'name':member['name'],'proto':member['proto'],'source':member['source']} for member in (scoped if scoped is not None else members)]
     if outcome=='declaration-only':
         name=owner[1:-1].split('/')[-1];package=owner[1:-1].rsplit('/',1)[0].replace('/','.') if '/' in owner else ''
         if any(not part.isidentifier() for part in (package.split('.') if package else [])+[name]):raise ValueError('unsupported known Java context name')

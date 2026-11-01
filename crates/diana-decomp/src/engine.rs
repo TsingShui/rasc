@@ -172,14 +172,7 @@ impl<'a> Engine<'a> {
             values: Vec::new(),
             primary: None,
         };
-        let shell = add_diagnostic(
-            &mut diagnostics,
-            Diagnostic {
-                method: None,
-                cause: DiagnosticCause::Unsupported(OutputReason::ClassAssemblyUnavailable),
-            },
-            control,
-        )?;
+        let whole_class = request.method.is_none();
         let mut members = Vec::new();
         let result = (|| -> Result<(), RequestError> {
             match request.method {
@@ -249,14 +242,60 @@ impl<'a> Engine<'a> {
         if let Err(error) = result {
             return Err(diagnostics.preserve(error));
         }
-        Ok(Report {
-            class: ClassOutput::Mixed {
+        let mut shell_cause = DiagnosticCause::Unsupported(OutputReason::ClassAssemblyUnavailable);
+        let unit = if whole_class {
+            match crate::p8_java::class_unit::verify(
+                &image.index,
+                request.class,
+                &self.catalog,
+                &members,
+                self.catalog.environment,
+                control,
+            ) {
+                Ok(unit) => unit,
+                Err(error)
+                    if matches!(
+                        error.kind(),
+                        FailureKind::Cancelled | FailureKind::BudgetExceeded
+                    ) =>
+                {
+                    return Err(diagnostics.preserve(error));
+                }
+                Err(error) => {
+                    shell_cause = DiagnosticCause::Request(error);
+                    None
+                }
+            }
+        } else {
+            None
+        };
+        let class = if let Some(declaration) = unit {
+            ClassOutput::JavaUnit {
+                key: request.class,
+                descriptor,
+                access_flags,
+                declaration,
+                members,
+            }
+        } else {
+            let shell = add_diagnostic(
+                &mut diagnostics,
+                Diagnostic {
+                    method: None,
+                    cause: shell_cause,
+                },
+                control,
+            )?;
+            ClassOutput::Mixed {
                 key: request.class,
                 descriptor,
                 access_flags,
                 shell: DeclarationOutput::Unavailable(shell),
                 members,
-            },
+            }
+        };
+        Ok(Report {
+            class,
             diagnostics: diagnostics.values,
             stats: control.usage(),
             image: ImageFact {

@@ -11,6 +11,7 @@ pub(crate) enum Kind {
     Boolean,
     Object,
     Throwable,
+    Class,
     String,
     Float,
     PrimitiveArray(super::PrimitiveArray),
@@ -26,6 +27,7 @@ impl Kind {
             Self::Boolean => "boolean",
             Self::Object => "java.lang.Object",
             Self::Throwable => "java.lang.Throwable",
+            Self::Class => "java.lang.Class",
             Self::String => "java.lang.String",
             Self::Float => "float",
             Self::Long => "long",
@@ -39,6 +41,7 @@ impl Kind {
 pub(crate) struct TypedBody<'a> {
     _sealed: (),
     pub ssa: SsaBody<'a>,
+    pub roots: super::reference_roots::ReferenceRoots,
     pub kinds: Vec<Option<Kind>>,
     pub integral_bits: Vec<u8>,
     pub ranges: Vec<Option<crate::p5_types::IntRange>>,
@@ -158,6 +161,7 @@ pub(crate) fn solve<'a>(
                     Kind::Object
                     | Kind::String
                     | Kind::Throwable
+                    | Kind::Class
                     | Kind::Float
                     | Kind::Long
                     | Kind::Double
@@ -234,6 +238,7 @@ pub(crate) fn solve<'a>(
                     (0, None, Some(ssa.filled_arrays[ix(id.0)?].component.kind()))
                 }
                 Op::String(..) => (0, None, Some(Kind::String)),
+                Op::Class(..) => (0, None, Some(Kind::Class)),
                 Op::Constant(_, value) => (
                     match value {
                         0 => 1,
@@ -309,7 +314,8 @@ pub(crate) fn solve<'a>(
                 }
                 Op::Move(_, _) | Op::MoveWide(_, _) => (0, None, None),
                 Op::Exception(_) => return Ok(None),
-                Op::Nop
+                Op::Monitor(..)
+                | Op::Nop
                 | Op::ArrayStore(..)
                 | Op::FieldStore(..)
                 | Op::StaticStore(..)
@@ -505,7 +511,24 @@ pub(crate) fn solve<'a>(
     else {
         return Ok(None);
     };
+    let roots = super::reference_roots::solve(&ssa, &kinds, budget)?;
+    for op in &ssa.operations {
+        budget.charge_work(1)?;
+        if matches!(op.op, Op::Monitor(..)) {
+            let value = op.input(0)?;
+            if !kinds[ix(value.0)?].is_some_and(super::reference_roots::reference)
+                && roots.one(value)? != Some(super::reference_roots::Root::Null)
+            {
+                return Err(crate::input::MethodError::Malformed {
+                    pc: op.pc,
+                    problem: crate::input::MethodProblem::InvalidTypeOperand,
+                }
+                .into());
+            }
+        }
+    }
     let mut typed = TypedBody {
+        roots,
         _sealed: (),
         ssa,
         kinds,

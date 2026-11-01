@@ -127,7 +127,9 @@ pub(super) fn operation(
                 "handler entered ordinary Java lowering",
             ));
         }
-        Op::NewInstance(..)
+        Op::Monitor(..)
+        | Op::Class(..)
+        | Op::NewInstance(..)
         | Op::Initialize(..)
         | Op::NewArray(..)
         | Op::FilledArray(..)

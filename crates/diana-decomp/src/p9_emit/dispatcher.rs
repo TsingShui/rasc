@@ -63,6 +63,7 @@ pub(super) fn locals(
                     Kind::Boolean => " = false",
                     Kind::Object
                     | Kind::Throwable
+                    | Kind::Class
                     | Kind::String
                     | Kind::PrimitiveArray(_)
                     | Kind::ObjectArray
@@ -101,6 +102,13 @@ pub(super) fn statements(
                 output.push(" = caught", budget)?;
                 output.unsigned(u64::from(handler.0), budget)?;
                 output.push(";\n", budget)?;
+            }
+            crate::p8_java::calls::Statement::Monitor { .. } => {}
+            crate::p8_java::calls::Statement::Class { target, source, .. } => {
+                local(*target, output, budget)?;
+                output.push(" = ", budget)?;
+                output.push(source, budget)?;
+                output.push(".class;\n", budget)?;
             }
             crate::p8_java::calls::Statement::Deferred(_)
             | crate::p8_java::calls::Statement::ConstructorChain(_) => {}

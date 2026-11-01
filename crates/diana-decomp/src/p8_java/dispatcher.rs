@@ -133,6 +133,18 @@ pub(super) fn verify(
     }
     super::declarations::check_target(input, budget)?;
     let flags = input.access_flags();
+    let expected_monitor = if flags & 0x20 == 0 {
+        None
+    } else if flags & 8 != 0 {
+        Some(crate::p2_flow::normal::MethodMonitor::DeclaringClass)
+    } else {
+        Some(crate::p2_flow::normal::MethodMonitor::This)
+    };
+    if ssa.ssa.method_monitor != expected_monitor {
+        return Err(RequestError::InternalInvariant(
+            "method monitor changed original flags",
+        ));
+    }
     let constructor = matches!(
         ssa.ssa.frame,
         crate::p2_flow::normal::MethodFrame::Constructor(_)
@@ -144,7 +156,7 @@ pub(super) fn verify(
                 || flags & 0x10000 == 0
                 || input.owner_access_flags() & 0x6200 != 0
         } else {
-            flags & !0x81f != 0
+            flags & !0x2083f != 0
         }
         || (flags & 7).count_ones() > 1
         || input.owner_access_flags() & 0x200 != 0
@@ -400,6 +412,7 @@ pub(super) fn verify(
         (4, "protected "),
         (8, "static "),
         (0x10, "final "),
+        (0x20, "synchronized "),
         (0x800, "strictfp "),
     ] {
         if flags & bit != 0 {
@@ -458,7 +471,7 @@ pub(super) fn verify(
             header.finish(),
             super::protected::ProtectedBody {
                 storage: body,
-                region,
+                region: super::protected::SourceRegion::from_checked(region),
                 names: catch_names,
             },
             environment,

@@ -66,7 +66,7 @@ fn t09_two_entry_dispatcher_preserves_edges_and_never_reads_da_defaults() {
     use crate::p8_java::dispatcher::{Dispatcher, Transfer};
     use crate::pipeline::branch::Arithmetic;
     use crate::{
-        ByteOffset, ClassDefId, ClassKey, ClassOutput, DeclarationCatalog, DexId, DexImage, Engine,
+        ByteOffset, ClassDefId, ClassKey, DeclarationCatalog, DexId, DexImage, Engine,
         EnvironmentId, ImageOrigin, InputId, MethodOutput, MethodSelector, Options, Request,
     };
     fn read(values: &[Option<i32>], id: LocalId) -> i32 {
@@ -127,7 +127,9 @@ fn t09_two_entry_dispatcher_preserves_edges_and_never_reads_da_defaults() {
                     crate::p8_java::calls::Statement::Assignment(statement) => {
                         assign(std::slice::from_ref(statement), &mut values)
                     }
-                    crate::p8_java::calls::Statement::Snapshot(_)
+                    crate::p8_java::calls::Statement::Monitor { .. }
+                    | crate::p8_java::calls::Statement::Class { .. }
+                    | crate::p8_java::calls::Statement::Snapshot(_)
                     | crate::p8_java::calls::Statement::ExceptionBind { .. }
                     | crate::p8_java::calls::Statement::StaticCall { .. }
                     | crate::p8_java::calls::Statement::ConstructorChain(_)
@@ -228,7 +230,7 @@ fn t09_two_entry_dispatcher_preserves_edges_and_never_reads_da_defaults() {
             &mut control,
         )
         .unwrap();
-    let ClassOutput::Mixed { members, .. } = report.class();
+    let members = report.class().members();
     let MethodOutput::Java { declaration, .. } = &members[0] else {
         panic!("ordinary two-entry cycle was rejected")
     };

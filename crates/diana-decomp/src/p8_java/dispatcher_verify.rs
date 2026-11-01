@@ -165,6 +165,7 @@ pub(super) fn call_argument(
             CallFormal::Reference(crate::p5_types::BuiltinReference::Object),
             Some(
                 Kind::String
+                | Kind::Class
                 | Kind::PrimitiveArray(_)
                 | Kind::ObjectArray
                 | Kind::Nominal(_)
@@ -532,6 +533,40 @@ pub(super) fn verify(
                     "dispatcher omitted an original operation",
                 ))?;
             let matches = match actual {
+                super::calls::Statement::Monitor { .. } => {
+                    super::monitor_ops::verify(ssa, id, bound, actual, budget)?
+                }
+                super::calls::Statement::Class {
+                    target,
+                    reference,
+                    source,
+                } => {
+                    if let Op::Class(destination, original) = bound.op {
+                        let layout = crate::raw::instruction_layout(
+                            ssa.ssa.raw.instructions(),
+                            bound.pc,
+                            ssa.ssa.raw.version(),
+                        )
+                        .map_err(crate::input::MethodError::Decode)?;
+                        let operands = crate::input::operands::instruction_operands(
+                            ssa.ssa.raw.instructions(),
+                            bound.pc,
+                            layout,
+                        )
+                        .map_err(crate::input::MethodError::Decode)?;
+                        let mut registers = operands.registers().iter();
+                        *reference == original
+                            && bound.result.map(|id| id.0) == Some(target.0)
+                            && ssa.kinds[ix(target.0)?] == Some(Kind::Class)
+                            && registers.next() == Some(destination)
+                            && registers.next().is_none()
+                            && matches!(layout.kind(), crate::raw::LayoutKind::Instruction(spec) if spec.opcode == 0x1c)
+                            && matches!(layout.references()[0], Some(original) if original.target == crate::raw::OperandReference::Type(*reference))
+                            && names.name(Kind::Nominal(*reference), budget)? == source
+                    } else {
+                        false
+                    }
+                }
                 super::calls::Statement::Snapshot(_) => false,
                 super::calls::Statement::ExceptionBind { handler, target } => {
                     matches!(bound.op, Op::Exception(_))

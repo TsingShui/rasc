@@ -127,7 +127,14 @@ def project(path):
             target.append(member)
     attrs = attributes()
     if reader.cursor != len(reader.data): raise ValueError('extra classfile data')
+    enclosing_scope = 'EnclosingMethod' in attrs or 'NestHost' in attrs
+    if 'InnerClasses' in attrs:
+        inner = Reader(attrs['InnerClasses'])
+        for _ in range(inner.u2()):
+            own, outer, name, access = inner.u2(), inner.u2(), inner.u2(), inner.u2()
+            enclosing_scope |= own == this
+        if inner.cursor != len(inner.data): raise ValueError('invalid InnerClasses attribute')
     return {'producer':'independent-JVMS-classfile-reader','descriptor':'L'+class_name(this)+';','flags':flags,
             'parent':None if not parent else 'L'+class_name(parent)+';','interfaces':interfaces,'major':major,'minor':minor,
             'constant_pool_count':count,'utf8_lengths':[p['mutf8_bytes'] for p in pool if p and p['tag']==1],
-            'fields':fields,'methods':methods,'attributes':list(attrs)}
+            'fields':fields,'methods':methods,'attributes':list(attrs),'enclosing_scope':enclosing_scope}

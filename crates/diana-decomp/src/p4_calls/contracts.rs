@@ -173,7 +173,7 @@ pub(super) fn collect_static(
     if !input.plain_owner_scope(caller_class.parent.as_deref(), budget)? {
         return Ok(None);
     }
-    if !plain(target_class, &caller, budget)?
+    if !directory(target_class, &caller, budget)?
         || target_class.access_flags & 1 == 0
         || target_class.access_flags & 0x200 != 0
     {
@@ -220,6 +220,15 @@ pub(super) fn collect_static(
             return Ok(None);
         }
     }
+    let Some(hierarchy) = super::hierarchy::collect(catalog, target_class, budget)? else {
+        return Ok(None);
+    };
+    for class in hierarchy.declarations() {
+        budget.charge_work(1)?;
+        if !member_directory(class, &caller, budget)? {
+            return Ok(None);
+        }
+    }
     let mut current = &owner[..];
     let mut seen: Vec<&[u16]> = Vec::new();
     loop {
@@ -234,7 +243,7 @@ pub(super) fn collect_static(
         let Some(class) = catalog.class(current, budget)? else {
             return Ok(None);
         };
-        if !plain(class, &caller, budget)? {
+        if !directory(class, &caller, budget)? {
             return Ok(None);
         }
         if !crate::p0_knowledge::same_units(current, &owner, budget)? {

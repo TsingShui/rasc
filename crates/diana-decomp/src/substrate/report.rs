@@ -162,6 +162,7 @@ fn request_code(error: &crate::RequestError) -> crate::DiagnosticCode {
         RequestError::UndefinedRegister { .. } => Code::UndefinedRegister,
         RequestError::DefinitionAvailabilityUnproved { .. } => Code::DefinitionAvailabilityUnproved,
         RequestError::InvalidWideRead { .. } => Code::InvalidWideRead,
+        RequestError::MonitorScopeUnproved { .. } => Code::MonitorScopeUnproved,
         RequestError::JavaTargetLimit { .. } => Code::JavaTargetLimit,
         RequestError::BindingEvidenceMissing { .. }
         | RequestError::FieldBindingEvidenceMissing { .. } => Code::BindingEvidenceMissing,
@@ -217,6 +218,13 @@ pub enum DeclarationOutput {
 }
 
 pub enum ClassOutput {
+    JavaUnit {
+        key: ClassKey,
+        descriptor: Vec<u16>,
+        access_flags: u32,
+        declaration: crate::VerifiedJavaUnit,
+        members: Vec<MethodOutput>,
+    },
     Mixed {
         key: ClassKey,
         descriptor: Vec<u16>,
@@ -224,6 +232,16 @@ pub enum ClassOutput {
         shell: DeclarationOutput,
         members: Vec<MethodOutput>,
     },
+}
+
+impl ClassOutput {
+    /// Includes available Java and retained original code in Mixed results;
+    /// class qualification does not filter member availability.
+    pub fn members(&self) -> &[MethodOutput] {
+        match self {
+            Self::JavaUnit { members, .. } | Self::Mixed { members, .. } => members,
+        }
+    }
 }
 
 /// Owns presentation facts and original sources, never a borrowed input or

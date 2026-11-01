@@ -15,6 +15,7 @@ pub(crate) fn local_type(kind: Kind) -> Result<LocalType, RequestError> {
             Kind::Boolean => 1,
             Kind::Object => 2,
             Kind::Throwable => (3u128 << 64) + 16,
+            Kind::Class => (4u128 << 64) + 16,
             Kind::Float => 3,
             Kind::String => 4,
             Kind::Long => 14,

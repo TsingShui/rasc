@@ -34,7 +34,7 @@ pub(crate) fn declaration(
     {
         return Ok(None);
     }
-    let allowed = 0x1 | 0x2 | 0x4 | 0x8 | 0x10 | 0x20 | 0x100 | 0x400 | 0x800;
+    let allowed = 0x1 | 0x2 | 0x4 | 0x8 | 0x10 | 0x20 | 0x100 | 0x400 | 0x800 | 0x20000;
     let access = flags & 7;
     if flags & !allowed != 0
         || native == abstract_method
@@ -145,9 +145,9 @@ pub(super) fn check_target(
     target_limit(JavaTargetItem::MethodDescriptor, length, 65535)
 }
 
-pub(super) fn check_string_literal(
+pub(super) fn check_constant_utf8(
     units: &[u16],
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut impl InputControl,
 ) -> Result<(), RequestError> {
     let mut length = 0u64;
     for &unit in units {

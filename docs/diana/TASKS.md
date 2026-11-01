@@ -2030,8 +2030,9 @@ layer, same-site snapshots/ingress and precise catch-parameter rethrow. D029,
 D030, D031, D032 and D035 pass source-JVM E2E; D034 remains passed. The
 [T12/T11 binding repair](batches/t12-inherited-constructor-binding.md) also makes
 D033 pass, so the fixed D029–D035 source-JVM group passes. Shared unassigned
-handler tails retain classified Debug. The implemented protection profile
-remains acyclic with one nested layer.
+handler tails retain classified Debug. The accepted T18 group covers acyclic
+protection with one nested layer; T19 adds checked monitor loops through the
+same protection forest.
 
 **Dependencies**: T17, T13. **Phase**: P7/P8. **References**: DX-07, KU-07.
 
@@ -2080,6 +2081,15 @@ not affect the real trace.
 paths, a label goto across a try, swallowing an exception so that javac passes.
 
 ## T19 — Monitor scope certificate and synchronized
+
+**Progress**: [Monitor batch](batches/t19-monitor-scopes.md) implements finite
+reference roots, acquisition-layer stacks, all-exit/freshness replay, canonical
+release cleanup and synchronized source through the ordinary chain. D036–D040
+and D082 pass their fixed source-JVM invocations; D081 passes classified
+raw-integrity acceptance. D040 produces a verified JavaUnit. Supplemental public
+core cases cover implicit method locks, declared-only flags and U04 failures;
+native mutation cases reject changed locks, releases, cleanup, scopes and loop
+edges. The batch records full gates and original-member regression evidence.
 
 **Dependencies**: T18, T12. **Phase**: P2/P7/P8. **References**: DX-07
 (synchronization).

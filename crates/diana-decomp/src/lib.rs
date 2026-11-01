@@ -25,6 +25,7 @@ pub use engine::{
 };
 pub use p8_java::{
     CompilationContract, JavaCallSite, JavaInvokeKind, JavaMethodDecl, VerifiedJavaMethod,
+    VerifiedJavaUnit,
 };
 pub use p9_emit::render;
 pub use pipeline::request::{JavaTargetItem, RequestError};

@@ -86,6 +86,12 @@ impl TypeNames {
             return Ok(false);
         }
         let base = &descriptor[dimensions..];
+        let constant_name = if dimensions == 0 && descriptor.first() == Some(&76) {
+            &descriptor[1..descriptor.len() - 1]
+        } else {
+            &descriptor
+        };
+        super::declarations::check_constant_utf8(constant_name, budget)?;
         let primitive = match base {
             [90] => Some("boolean"),
             [66] => Some("byte"),
@@ -95,15 +101,12 @@ impl TypeNames {
             [70] => Some("float"),
             [74] => Some("long"),
             [68] => Some("double"),
+            [86] => Some("void"),
             _ => None,
         };
         let mut source = TextBuffer::new();
         if let Some(base) = primitive {
-            if dimensions == 0 {
-                return Err(RequestError::InternalInvariant(
-                    "reference type became scalar",
-                ));
-            }
+            // Class literals name scalar types without introducing scalar reference values.
             source.push(base, budget)?;
         } else {
             let builtin = if base == crate::p5_types::BuiltinReference::Object.descriptor() {
@@ -162,6 +165,11 @@ pub(crate) fn resolve(
     }
     for op in &storage.typed.ssa.operations {
         budget.charge_work(1)?;
+        if let crate::p2_flow::normal::Op::Class(_, reference) = op.op
+            && !names.include(input, catalog, Kind::Nominal(reference), budget)?
+        {
+            return Ok(None);
+        }
         if let crate::p2_flow::normal::Op::InstanceOf(_, _, _, kind) = op.op
             && !names.include(input, catalog, kind.kind(), budget)?
         {

@@ -1,4 +1,4 @@
-use crate::{EnvironmentId, MethodBudget, RequestError};
+use crate::{EnvironmentId, RequestError};
 
 /// Fixed source target used by native method verification and external V4 checks.
 #[derive(Clone, Copy, Debug)]
@@ -142,7 +142,7 @@ pub(crate) fn source_group_admitted(
     index: &crate::input::ProgramIndex<'_>,
     key: crate::MethodKey,
     facts: &crate::MethodFacts,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut impl crate::pipeline::control::InputControl,
 ) -> Result<bool, RequestError> {
     use crate::input::catalog::{MemberEntry, MemberSelection};
     let close = facts

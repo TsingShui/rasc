@@ -624,7 +624,13 @@ impl<'a> Checker<'_, 'a> {
                 self.enqueue(next, &mut pending)?;
             }
             if spec.may_throw {
-                self.enqueue_handlers(pc, &mut pending, budget)?;
+                // monitor-exit selects a handler after its advanced PC.
+                let selection = if spec.opcode == 0x1e {
+                    advance(pc, layout)?
+                } else {
+                    pc
+                };
+                self.enqueue_handlers(selection, &mut pending, budget)?;
             }
         }
         Ok(())
