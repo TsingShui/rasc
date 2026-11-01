@@ -166,6 +166,35 @@ pub(super) fn validate_bindings(
     let Some(throws) = crate::p4_calls::source_throws(input, catalog, budget)? else {
         return Ok(None);
     };
+    for (index, block) in ssa.ssa.blocks.iter().enumerate() {
+        budget.charge_work(1)?;
+        if !matches!(block.terminal, crate::p2_flow::normal::Terminal::Throw(_)) {
+            continue;
+        }
+        let value = ssa.ssa.bound[index]
+            .terminal
+            .ok_or(RequestError::InternalInvariant(
+                "throw lost binding operand",
+            ))?;
+        match ssa.thrown_uses.get(index).and_then(|usage| *usage) {
+            Some(crate::p5_types::normal::UseConversion::NullAssignment)
+                if ssa.ssa.is_zero(value)? => {}
+            Some(crate::p5_types::normal::UseConversion::Identity) => {
+                let Some(crate::p5_types::normal::Kind::Nominal(id)) = ssa.kinds[ix(value.0)?]
+                else {
+                    return Ok(None);
+                };
+                let descriptor = crate::substrate::owned::copy_units(
+                    input.type_descriptor(id, budget)?,
+                    budget,
+                )?;
+                if !throws.covers_exception(catalog, &descriptor, budget)? {
+                    return Ok(None);
+                }
+            }
+            _ => return Ok(None),
+        }
+    }
     let mut receivers = Vec::new();
     let mut constructors = Vec::new();
     for (index, site) in ssa.ssa.calls.iter().enumerate() {

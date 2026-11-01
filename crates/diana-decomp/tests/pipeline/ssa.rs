@@ -348,6 +348,106 @@ use diana_decomp::{
 };
 
 #[test]
+fn t09_ordinary_throw_preserves_operands_and_requires_checked_exception_evidence() {
+    for complete in [true, false] {
+        let mut facts: PipelineFacts =
+            serde_json::from_str(include_str!("../fixtures/ordinary-throw/catalog.json")).unwrap();
+        if !complete {
+            let throwable: Vec<u16> = "Ljava/lang/Throwable;".encode_utf16().collect();
+            facts.classes.retain(|class| class.descriptor != throwable);
+        }
+        let mut control = RunContext::new(Limits::default(), &|| false);
+        let engine = Engine::open(
+            vec![DexImage {
+                bytes: include_bytes!("../fixtures/ordinary-throw/classes.dex"),
+                header_offset: ByteOffset(0),
+                origin: ImageOrigin { input: InputId(0) },
+            }],
+            Options::default(),
+            DeclarationCatalog::with_declarations(
+                EnvironmentId(facts.environment_id),
+                facts.methods,
+                facts.classes,
+            ),
+            &mut control,
+        )
+        .unwrap();
+        let report = engine
+            .decompile(
+                Request {
+                    class: ClassKey {
+                        dex: DexId(0),
+                        class_def: ClassDefId(0),
+                    },
+                    method: None,
+                },
+                &mut control,
+            )
+            .unwrap();
+        let ClassOutput::Mixed { members, .. } = report.class();
+        for name in ["nil", "unchecked", "branch", "checked"] {
+            let units: Vec<u16> = name.encode_utf16().collect();
+            let member = members
+                .iter()
+                .find(|member| match member {
+                    MethodOutput::Java { facts, .. } => facts.name == units,
+                    MethodOutput::Debug {
+                        facts: Some(facts), ..
+                    } => facts.name == units,
+                    _ => false,
+                })
+                .unwrap();
+            if complete || name == "nil" {
+                assert!(
+                    matches!(member, MethodOutput::Java { .. }),
+                    "throw unavailable: {name}"
+                );
+            } else {
+                let MethodOutput::Debug { reason, source, .. } = member else {
+                    panic!("unknown throw hierarchy became Java");
+                };
+                assert_eq!(
+                    report.diagnostics()[reason.0].cause.kind(),
+                    FailureKind::Unsupported
+                );
+                let raw: serde_json::Value = serde_json::from_str(source.source()).unwrap();
+                assert_eq!(raw["complete"], true);
+            }
+        }
+    }
+    let fixture = code(&[0x0012, 0x0027], 1, 0);
+    let mut control = RunContext::new(Limits::default(), &|| false);
+    let engine = Engine::open(
+        vec![DexImage {
+            bytes: &fixture.bytes,
+            header_offset: ByteOffset(0),
+            origin: ImageOrigin { input: InputId(0) },
+        }],
+        Options::default(),
+        DeclarationCatalog::empty(EnvironmentId(0)),
+        &mut control,
+    )
+    .unwrap();
+    let report = engine
+        .decompile(
+            Request {
+                class: ClassKey {
+                    dex: DexId(0),
+                    class_def: ClassDefId(0),
+                },
+                method: Some(MethodSelector {
+                    name: "f".encode_utf16().collect(),
+                    prototype: "(I)I".encode_utf16().collect(),
+                }),
+            },
+            &mut control,
+        )
+        .unwrap();
+    let ClassOutput::Mixed { members, .. } = report.class();
+    assert!(matches!(members[0], MethodOutput::Java { .. }));
+}
+
+#[test]
 fn t02_engine_isolates_sibling_declaration_damage_without_ignoring_name_collisions() {
     use super::fixture::{put, tiny};
     #[derive(Clone, Copy)]

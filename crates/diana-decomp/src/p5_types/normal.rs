@@ -46,6 +46,7 @@ pub(crate) struct TypedBody<'a> {
     pub cast_uses: Vec<Option<crate::p5_types::calls::TypedUse>>,
     pub numeric_uses: Vec<Option<super::numeric::NumericUses>>,
     pub returned_uses: Vec<Option<UseConversion>>,
+    pub thrown_uses: Vec<Option<UseConversion>>,
     pub initializations: super::initialization::Initializations,
     pub empty_fills: Vec<PrimitiveFillUse>,
     pub array_lengths: Vec<crate::p5_types::calls::TypedUse>,
@@ -491,6 +492,7 @@ pub(crate) fn solve<'a>(
         cast_uses,
         numeric_uses,
         returned_uses: Vec::new(),
+        thrown_uses: Vec::new(),
         initializations,
         empty_fills,
         array_lengths: array_uses.lengths,
@@ -505,6 +507,21 @@ pub(crate) fn solve<'a>(
     }
     for (index, block) in typed.ssa.blocks.iter().enumerate() {
         budget.charge_work(1)?;
+        let thrown = if matches!(block.terminal, crate::p2_flow::normal::Terminal::Throw(_)) {
+            let value = typed.ssa.bound[index]
+                .terminal
+                .ok_or(RequestError::InternalInvariant("typed throw lost value"))?;
+            Some(if typed.ssa.is_zero(value)? {
+                UseConversion::NullAssignment
+            } else if matches!(typed.kinds[ix(value.0)?], Some(Kind::Nominal(_))) {
+                UseConversion::Identity
+            } else {
+                return Ok(None);
+            })
+        } else {
+            None
+        };
+        push(&mut typed.thrown_uses, thrown, budget)?;
         if matches!(block.terminal, crate::p2_flow::normal::Terminal::Return(_)) {
             let value = typed.ssa.bound[index]
                 .terminal

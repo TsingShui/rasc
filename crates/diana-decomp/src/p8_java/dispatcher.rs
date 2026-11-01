@@ -12,6 +12,7 @@ pub(crate) struct Edge {
 }
 pub(crate) enum Transfer {
     ReturnVoid,
+    Throw(super::branch::ValueUse),
     Switch {
         form: crate::p7_regions::SwitchForm,
         value: LocalId,
@@ -191,7 +192,22 @@ pub(super) fn verify(
         let bound = &ssa.ssa.bound[index];
         let transfer =
             match block.terminal {
-                Terminal::Throw(_) => return Ok(None),
+                Terminal::Throw(_) => {
+                    if !outgoing.is_empty() {
+                        return Err(RequestError::InternalInvariant(
+                            "throw acquired a normal edge",
+                        ));
+                    }
+                    let value = bound
+                        .terminal
+                        .ok_or(RequestError::InternalInvariant("throw lost operand"))?;
+                    let conversion = ssa
+                        .thrown_uses
+                        .get(index)
+                        .and_then(|usage| *usage)
+                        .ok_or(RequestError::InternalInvariant("throw lost typed use"))?;
+                    Transfer::Throw(super::values::lower(LocalId(value.0), conversion))
+                }
                 Terminal::ReturnVoid => {
                     if !outgoing.is_empty()
                         || !matches!(ssa.ssa.result, crate::pipeline::branch::ResultType::Void)

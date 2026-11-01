@@ -620,6 +620,28 @@ pub(super) fn verify(
             }
         }
         match (&case.transfer, block.terminal) {
+            (Transfer::Throw(actual), Terminal::Throw(_)) => {
+                let value =
+                    ssa.ssa.bound[index]
+                        .terminal
+                        .ok_or(RequestError::InternalInvariant(
+                            "throw certificate lost operand",
+                        ))?;
+                if !outgoing.is_empty()
+                    || actual.value().0 != value.0
+                    || !match actual {
+                        super::branch::ValueUse::NullAssignment(_) => ssa.ssa.is_zero(value)?,
+                        super::branch::ValueUse::Direct(_) => {
+                            matches!(ssa.kinds[ix(value.0)?], Some(Kind::Nominal(_)))
+                        }
+                        _ => false,
+                    }
+                {
+                    return Err(RequestError::InternalInvariant(
+                        "throw changed operand or normal successors",
+                    ));
+                }
+            }
             (Transfer::ReturnVoid, Terminal::ReturnVoid) => {
                 if !outgoing.is_empty()
                     || !matches!(ssa.ssa.result, crate::pipeline::branch::ResultType::Void)

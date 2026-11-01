@@ -337,6 +337,11 @@ pub(super) fn write(
         statements(case, output, budget)?;
         match &case.transfer {
             Transfer::ReturnVoid => output.push("return;\n", budget)?,
+            Transfer::Throw(value) => {
+                output.push("throw ", budget)?;
+                super::java::value_use(*value, output, budget)?;
+                output.push(";\n", budget)?;
+            }
             Transfer::Switch {
                 form,
                 value,

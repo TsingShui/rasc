@@ -66,7 +66,7 @@ impl Flow {
                         no: outgoing[1],
                     }
                 }
-                Terminal::Return(_) | Terminal::ReturnVoid => {
+                Terminal::Return(_) | Terminal::ReturnVoid | Terminal::Throw(_) => {
                     if !outgoing.is_empty() {
                         return Err(RequestError::InternalInvariant(
                             "region return has successors",
@@ -75,11 +75,6 @@ impl Flow {
                     Transfer::Return
                 }
                 Terminal::Switch { .. } => Transfer::Switch,
-                Terminal::Throw(_) => {
-                    return Err(RequestError::InternalInvariant(
-                        "untyped throw entered region lowering",
-                    ));
-                }
             };
             push(&mut cases, Case { key, transfer }, budget)?;
         }
