@@ -30,6 +30,71 @@ fn exit_stub(
         _ => None,
     })
 }
+fn loop_kernel(
+    graph: &super::graph::Graph,
+    dom: &super::graph::Dominators,
+    header: BlockId,
+    body: &[BlockId],
+    branches: &[BodyBranch],
+    budget: &mut MethodBudget<'_, '_>,
+) -> Result<bool, RequestError> {
+    let Some(&latch) = body.last() else {
+        return Ok(false);
+    };
+    let mut members = Vec::new();
+    reserve(&mut members, graph.predecessors.len(), budget)?;
+    for _ in &graph.predecessors {
+        budget.charge_work(1)?;
+        members.push(false);
+    }
+    members[index(header)?] = true;
+    let mut count = 1usize;
+    let mut stack = Vec::new();
+    push(&mut stack, latch, budget)?;
+    // The closure stops at the header: preheader predecessors are not loop members.
+    while let Some(node) = stack.pop() {
+        budget.charge_work(1)?;
+        if members[index(node)?] {
+            continue;
+        }
+        if !dom.dominates(header, node, budget)? {
+            return Ok(false);
+        }
+        members[index(node)?] = true;
+        count = count.checked_add(1).ok_or(RequestError::PlatformCapacity)?;
+        for &predecessor in &graph.predecessors[index(node)?] {
+            budget.charge_work(1)?;
+            if !members[index(predecessor)?] {
+                push(&mut stack, predecessor, budget)?;
+            }
+        }
+    }
+    let mut expected = 1usize;
+    for &node in body {
+        budget.charge_work(1)?;
+        if !members[index(node)?] {
+            return Ok(false);
+        }
+        expected = expected
+            .checked_add(1)
+            .ok_or(RequestError::PlatformCapacity)?;
+    }
+    for branch in branches {
+        budget.charge_work(1)?;
+        if let BodyBranch::Diamond(_) = branch {
+            for node in branch.leaves().into_iter().flatten() {
+                budget.charge_work(1)?;
+                if !members[index(node)?] {
+                    return Ok(false);
+                }
+                expected = expected
+                    .checked_add(1)
+                    .ok_or(RequestError::PlatformCapacity)?;
+            }
+        }
+    }
+    Ok(count == expected)
+}
 pub(super) fn plan(
     storage: &Dispatcher,
     budget: &mut MethodBudget<'_, '_>,
@@ -206,6 +271,9 @@ pub(super) fn plan(
             fits &= visited;
         }
         if !fits {
+            continue;
+        }
+        if !loop_kernel(&graph, &dom, header, &body, &branches, budget)? {
             continue;
         }
         return Ok(Some(Candidate {

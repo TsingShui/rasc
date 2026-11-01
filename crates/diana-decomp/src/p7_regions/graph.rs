@@ -177,29 +177,43 @@ pub(super) fn dominators(
         positions[index(node)?] = position;
     }
     parents[index(root)?] = Some(root);
-    loop {
-        let mut changed = false;
-        for &node in order.iter().skip(1) {
+    let mut queued = Vec::new();
+    let mut work = Vec::new();
+    reserve(&mut queued, n, budget)?;
+    reserve(&mut work, n, budget)?;
+    for _ in 0..n {
+        budget.charge_work(1)?;
+        queued.push(false);
+    }
+    for &node in order.iter().skip(1).rev() {
+        budget.charge_work(1)?;
+        queued[index(node)?] = true;
+        work.push(node);
+    }
+    while let Some(node) = work.pop() {
+        budget.charge_work(1)?;
+        queued[index(node)?] = false;
+        let mut candidate = None;
+        for &predecessor in &predecessors[index(node)?] {
             budget.charge_work(1)?;
-            let mut candidate = None;
-            for &predecessor in &predecessors[index(node)?] {
-                budget.charge_work(1)?;
-                if parents[index(predecessor)?].is_some() {
-                    candidate = Some(match candidate {
-                        None => predecessor,
-                        Some(previous) => {
-                            intersect(previous, predecessor, &parents, &positions, budget)?
-                        }
-                    });
-                }
-            }
-            if candidate != parents[index(node)?] {
-                parents[index(node)?] = candidate;
-                changed = true;
+            if parents[index(predecessor)?].is_some() {
+                candidate = Some(match candidate {
+                    None => predecessor,
+                    Some(previous) => {
+                        intersect(previous, predecessor, &parents, &positions, budget)?
+                    }
+                });
             }
         }
-        if !changed {
-            break;
+        if candidate != parents[index(node)?] {
+            parents[index(node)?] = candidate;
+            for &successor in &successors[index(node)?] {
+                budget.charge_work(1)?;
+                if successor != root && !queued[index(successor)?] {
+                    push(&mut work, successor, budget)?;
+                    queued[index(successor)?] = true;
+                }
+            }
         }
     }
     Ok(Some(Dominators { parents }))

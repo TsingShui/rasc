@@ -2,6 +2,8 @@ mod branch;
 pub(crate) use branch::{Arm, BodyBranch};
 mod graph;
 mod normal;
+#[cfg(test)]
+mod tests;
 mod verify;
 pub(crate) use verify::NaturalLoop;
 pub(crate) fn build(
