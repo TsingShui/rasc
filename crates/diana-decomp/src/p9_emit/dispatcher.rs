@@ -136,7 +136,7 @@ pub(super) fn statements(
                         budget,
                     )?;
                     output.push("] = ", budget)?;
-                    super::fresh_array::element(element, output, budget)?;
+                    super::array_literals::element(element, output, budget)?;
                     output.push(";\n", budget)?;
                 }
             }

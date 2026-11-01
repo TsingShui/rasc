@@ -1,5 +1,4 @@
 pub(crate) mod allocation;
-pub(crate) mod arrays;
 pub(crate) mod constructor_entry;
 mod copies;
 pub(crate) mod empty_fill;

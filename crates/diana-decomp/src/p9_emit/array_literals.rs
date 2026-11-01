@@ -1,17 +1,7 @@
 use crate::p5_types::{ArrayElement, PrimitiveArray};
-use crate::p8_java::fresh_array::FreshArrayBody;
-use crate::pipeline::fresh_array::{ConstantId, Step};
 use crate::pipeline::scalar::{Expression, ScalarType};
 use crate::substrate::owned::TextBuffer;
 use crate::{MethodBudget, RequestError};
-fn value(
-    id: ConstantId,
-    output: &mut TextBuffer,
-    budget: &mut MethodBudget<'_, '_>,
-) -> Result<(), RequestError> {
-    output.push("v", budget)?;
-    output.unsigned(u64::from(id.0), budget)
-}
 pub(super) fn element(
     element: &ArrayElement,
     output: &mut TextBuffer,
@@ -85,53 +75,4 @@ pub(super) fn element(
             budget,
         ),
     }
-}
-pub(super) fn write(
-    body: &FreshArrayBody,
-    output: &mut TextBuffer,
-    budget: &mut MethodBudget<'_, '_>,
-) -> Result<(), RequestError> {
-    let proof = &body.proof;
-    if proof.allocation.id.0.0 >= proof.fill.pc.0 || proof.fill.pc.0 >= proof.returned.0 {
-        return Err(RequestError::InternalInvariant(
-            "fresh array effect positions changed",
-        ));
-    }
-    for step in &proof.steps {
-        budget.charge_work(1)?;
-        match step {
-            Step::Constant {
-                value: id, literal, ..
-            } => {
-                output.push("int ", budget)?;
-                value(*id, output, budget)?;
-                output.push(" = ", budget)?;
-                output.arguments(format_args!("{literal}"), budget)?;
-                output.push(";\n", budget)?;
-            }
-            Step::Allocate => {
-                output.push(proof.allocation.kind.spelling(), budget)?;
-                output.push(" array0 = new ", budget)?;
-                output.push(proof.allocation.kind.component_spelling(), budget)?;
-                output.push("[", budget)?;
-                value(proof.allocation.length, output, budget)?;
-                output.push("];\n", budget)?;
-            }
-            Step::Fill => {
-                output.push("int unusedLength = array0.length;\n", budget)?;
-                for (i, literal) in body.elements.iter().enumerate() {
-                    budget.charge_work(1)?;
-                    output.push("array0[", budget)?;
-                    output.unsigned(
-                        u64::try_from(i).map_err(|_| RequestError::PlatformCapacity)?,
-                        budget,
-                    )?;
-                    output.push("] = ", budget)?;
-                    element(literal, output, budget)?;
-                    output.push(";\n", budget)?;
-                }
-            }
-        }
-    }
-    output.push("return array0;\n", budget)
 }

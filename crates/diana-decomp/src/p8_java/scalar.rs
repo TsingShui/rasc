@@ -20,9 +20,6 @@ pub struct VerifiedJavaMethod {
 }
 pub(crate) enum MethodBody {
     HeapAccess(super::heap_access::Body),
-    FreshArray(super::fresh_array::FreshArrayBody),
-    ZeroFill(super::zero_fill::ZeroFillBody),
-    Casts(super::casts::CastBody),
     Structured(super::structured::StructuredLoop),
     Constructor(super::constructor::ConstructorBody),
     CallChain(super::call_chain::Body),
@@ -45,42 +42,6 @@ impl VerifiedJavaMethod {
         Self {
             header,
             body: MethodBody::HeapAccess(body),
-            environment,
-            type_names: super::types::TypeNames::default(),
-        }
-    }
-    pub(super) fn fresh_array(
-        header: String,
-        body: super::fresh_array::FreshArrayBody,
-        environment: EnvironmentId,
-    ) -> Self {
-        Self {
-            header,
-            body: MethodBody::FreshArray(body),
-            environment,
-            type_names: super::types::TypeNames::default(),
-        }
-    }
-    pub(super) fn zero_fill(
-        header: String,
-        body: super::zero_fill::ZeroFillBody,
-        environment: EnvironmentId,
-    ) -> Self {
-        Self {
-            header,
-            body: MethodBody::ZeroFill(body),
-            environment,
-            type_names: super::types::TypeNames::default(),
-        }
-    }
-    pub(super) fn casts(
-        header: String,
-        body: super::casts::CastBody,
-        environment: EnvironmentId,
-    ) -> Self {
-        Self {
-            header,
-            body: MethodBody::Casts(body),
             environment,
             type_names: super::types::TypeNames::default(),
         }
