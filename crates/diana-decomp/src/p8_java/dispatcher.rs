@@ -35,6 +35,7 @@ pub(crate) struct Case {
     pub transfer: Transfer,
 }
 pub(crate) struct Dispatcher {
+    pub prologue: Vec<super::constructor_entry::Prologue>,
     pub locals: Vec<Local>,
     pub entry: Vec<Assignment>,
     pub cases: Vec<Case>,
@@ -120,16 +121,50 @@ pub(super) fn verify(
     }
     super::declarations::check_target(input, budget)?;
     let flags = input.access_flags();
-    if (flags & 8 != 0) != matches!(ssa.ssa.frame, crate::p2_flow::normal::MethodFrame::Static)
-        || flags & !0x81f != 0
+    let constructor = matches!(
+        ssa.ssa.frame,
+        crate::p2_flow::normal::MethodFrame::Constructor(_)
+    );
+    if (!constructor
+        && (flags & 8 != 0) != matches!(ssa.ssa.frame, crate::p2_flow::normal::MethodFrame::Static))
+        || if constructor {
+            flags & !0x10007 != 0
+                || flags & 0x10000 == 0
+                || input.owner_access_flags() & 0x6200 != 0
+        } else {
+            flags & !0x81f != 0
+        }
         || (flags & 7).count_ones() > 1
         || input.owner_access_flags() & 0x200 != 0
     {
         return Ok(None);
     }
-    let name = copy_units(input.declaration().name, budget)?;
+    let name = if constructor {
+        let owner = copy_units(input.owner(), budget)?;
+        if owner.len() < 3 {
+            return Err(RequestError::InternalInvariant(
+                "constructor lost owner descriptor",
+            ));
+        }
+        let start = owner
+            .iter()
+            .rposition(|&unit| unit == 47)
+            .map_or(1, |index| index + 1);
+        let mut name = Vec::new();
+        for &unit in &owner[start..owner.len() - 1] {
+            budget.charge_work(1)?;
+            crate::substrate::owned::push(&mut name, unit, budget)?;
+        }
+        name
+    } else {
+        copy_units(input.declaration().name, budget)?
+    };
     if !super::declarations::identifier(&name, budget)? {
         return Ok(None);
+    }
+    let mut prologue = Vec::new();
+    if let Some(entry) = super::constructor_entry::lower(storage, calls, budget)? {
+        push(&mut prologue, entry, budget)?;
     }
     let locals = super::branch::local_declarations(storage, budget)?;
     let mut entry = Vec::new();
@@ -320,8 +355,10 @@ pub(super) fn verify(
             header.push(text, budget)?;
         }
     }
-    header.push(type_names.result(ssa.ssa.result, budget)?, budget)?;
-    header.push(" ", budget)?;
+    if !constructor {
+        header.push(type_names.result(ssa.ssa.result, budget)?, budget)?;
+        header.push(" ", budget)?;
+    }
     for unit in name {
         header.character(
             char::from_u32(u32::from(unit)).ok_or(RequestError::InternalInvariant(
@@ -359,6 +396,7 @@ pub(super) fn verify(
         header.push(&name, budget)?;
     }
     let body = Dispatcher {
+        prologue,
         locals,
         entry,
         cases,

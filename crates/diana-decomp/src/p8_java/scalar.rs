@@ -276,6 +276,11 @@ impl VerifiedJavaMethod {
                 },
             }
         });
+        let entry = match &self.body {
+            MethodBody::Dispatcher(body) => body.prologue.first(),
+            MethodBody::Structured(body) => body.storage.prologue.first(),
+            _ => None,
+        };
         let constructor = match &self.body {
             MethodBody::Constructor(body) => Some(super::JavaCallSite {
                 reference: body.chain.reference,
@@ -288,7 +293,17 @@ impl VerifiedJavaMethod {
                 result: None,
                 kind: super::JavaInvokeKind::Direct,
             }),
-            _ => None,
+            _ => entry.map(|entry| super::JavaCallSite {
+                reference: entry.contract.reference,
+                receiver: Some(entry.receiver),
+                allocation: None,
+                owner: &entry.contract.owner,
+                name: &[60, 105, 110, 105, 116, 62],
+                prototype: &entry.contract.prototype,
+                invoke: entry.pc,
+                result: None,
+                kind: super::JavaInvokeKind::Direct,
+            }),
         };
         let arrays = match &self.body {
             MethodBody::HeapAccess(body) => Some(body.statements.as_slice()),

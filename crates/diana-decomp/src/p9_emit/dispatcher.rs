@@ -20,12 +20,39 @@ pub(super) fn locals(
     output: &mut TextBuffer,
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<(), RequestError> {
+    if let Some(entry) = body.prologue.first() {
+        output.push(
+            match entry.kind {
+                crate::p5_types::initialization::ChainKind::This => "this(",
+                crate::p5_types::initialization::ChainKind::Super => "super(",
+            },
+            budget,
+        )?;
+        for (index, argument) in entry.arguments.iter().enumerate() {
+            budget.charge_work(1)?;
+            if index != 0 {
+                output.push(", ", budget)?;
+            }
+            match argument {
+                crate::p5_types::initialization::ChainArgument::Parameter(index) => {
+                    output.push("p", budget)?;
+                    output.unsigned(u64::from(*index), budget)?;
+                }
+                crate::p5_types::initialization::ChainArgument::Literal(value) => {
+                    output.arguments(format_args!("{value}"), budget)?
+                }
+            }
+        }
+        output.push(");\n", budget)?;
+    }
     for declaration in &body.locals {
         budget.charge_work(1)?;
         output.push(type_names.name(declaration.kind, budget)?, budget)?;
         output.push(" ", budget)?;
         local(declaration.id, output, budget)?;
-        if let crate::p6_variables::normal::Initializer::Parameter(parameter) =
+        if declaration.initializer == crate::p6_variables::normal::Initializer::ThisAfterChain {
+            output.push(" = this", budget)?;
+        } else if let crate::p6_variables::normal::Initializer::Parameter(parameter) =
             declaration.initializer
         {
             match parameter {
@@ -66,7 +93,8 @@ pub(super) fn statements(
     for statement in &case.statements {
         budget.charge_work(1)?;
         match statement {
-            crate::p8_java::calls::Statement::Deferred(_) => {}
+            crate::p8_java::calls::Statement::Deferred(_)
+            | crate::p8_java::calls::Statement::ConstructorChain(_) => {}
             crate::p8_java::calls::Statement::Initialize(init) => {
                 local(init.root, output, budget)?;
                 output.push(" = new ", budget)?;

@@ -72,7 +72,10 @@ pub(crate) fn lower(
                     .0,
             ),
         },
-        (Op::FieldStore(..), TypedFieldUse::Write(conversion)) => Statement::Store {
+        (
+            Op::FieldStore(..),
+            TypedFieldUse::Write(conversion) | TypedFieldUse::WriteThis(conversion),
+        ) => Statement::Store {
             receiver,
             name,
             reference: declaration.reference,

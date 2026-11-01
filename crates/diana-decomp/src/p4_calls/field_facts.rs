@@ -100,3 +100,30 @@ pub(crate) fn collect_int_field(
         flags: evidence.access_flags,
     })
 }
+
+pub(crate) fn collect_own_write(
+    input: &MethodInput<'_, '_>,
+    catalog: &DeclarationCatalog,
+    reference: FieldId,
+    pc: CodeUnitOffset,
+    budget: &mut MethodBudget<'_, '_>,
+) -> Result<IntFieldAccess, RequestError> {
+    let original = input.field_reference(reference, budget)?;
+    let write = super::fields::bind_own_int_write(input, catalog, reference, pc, budget)?;
+    let native =
+        input
+            .own_field_metadata(reference, budget)?
+            .ok_or(RequestError::InternalInvariant(
+                "own field lost native declaration",
+            ))?;
+    Ok(IntFieldAccess {
+        _sealed: (),
+        storage: FieldStorage::Instance,
+        reference,
+        owner_type: original.owner_type,
+        owner: write.owner,
+        name: write.name,
+        usage: FieldUse::Write,
+        flags: native.access_flags,
+    })
+}

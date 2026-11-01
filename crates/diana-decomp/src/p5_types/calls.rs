@@ -180,12 +180,16 @@ pub(crate) fn solve(
     Ok(Some(uses))
 }
 
-fn is_this(
+pub(super) fn is_this(
     ssa: &SsaBody<'_>,
     root: ValueId,
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<bool, RequestError> {
-    if !matches!(ssa.frame, crate::p2_flow::normal::MethodFrame::Instance(_)) {
+    if !matches!(
+        ssa.frame,
+        crate::p2_flow::normal::MethodFrame::Instance(_)
+            | crate::p2_flow::normal::MethodFrame::Constructor(_)
+    ) {
         return Ok(false);
     }
     let mut seen = Vec::new();

@@ -6,6 +6,7 @@ pub(crate) mod calls;
 pub(crate) mod cast_ops;
 pub(crate) mod casts;
 pub(crate) mod constructor;
+pub(crate) mod constructor_entry;
 mod declarations;
 pub(crate) mod dispatcher;
 mod dispatcher_verify;

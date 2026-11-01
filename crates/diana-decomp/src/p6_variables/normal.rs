@@ -68,6 +68,7 @@ pub(crate) enum Parameter {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum Initializer {
     Default,
+    ThisAfterChain,
     Parameter(Parameter),
     Deferred(crate::p5_types::initialization::InitializationId),
 }
@@ -84,6 +85,7 @@ pub(crate) struct StorageBody<'a> {
     pub empty_fills: Vec<super::empty_fill::LengthOnly>,
     pub fresh_fills: Vec<super::fresh_fill::FreshArray>,
     pub object_allocations: Vec<super::object_allocation::DeferredAllocation>,
+    pub constructor_entry: Option<super::constructor_entry::ConstructorEntry>,
     entry: CopyPlan,
     normal: Vec<CopyPlan>,
 }
@@ -203,10 +205,14 @@ pub(crate) fn allocate<'a>(
         let parameter = match definition {
             Definition::Parameter(parameter) => Some(match typed.ssa.frame {
                 crate::p2_flow::normal::MethodFrame::Static => Parameter::Explicit(*parameter),
-                crate::p2_flow::normal::MethodFrame::Instance(_) if *parameter == 0 => {
+                crate::p2_flow::normal::MethodFrame::Instance(_)
+                | crate::p2_flow::normal::MethodFrame::Constructor(_)
+                    if *parameter == 0 =>
+                {
                     Parameter::This
                 }
-                crate::p2_flow::normal::MethodFrame::Instance(_) => {
+                crate::p2_flow::normal::MethodFrame::Instance(_)
+                | crate::p2_flow::normal::MethodFrame::Constructor(_) => {
                     Parameter::Explicit(parameter.checked_sub(1).ok_or(
                         RequestError::InternalInvariant("implicit receiver frame underflow"),
                     )?)
@@ -219,7 +225,12 @@ pub(crate) fn allocate<'a>(
             Local {
                 id: LocalId(u32::try_from(index).map_err(|_| RequestError::PlatformCapacity)?),
                 kind,
-                initializer: if let Some(parameter) = parameter {
+                initializer: if typed.initializations.deferred.get(index)
+                    == Some(&Some(
+                        crate::p5_types::initialization::InitializationId::This,
+                    )) {
+                    Initializer::ThisAfterChain
+                } else if let Some(parameter) = parameter {
                     Initializer::Parameter(parameter)
                 } else if let Some(Some(id)) = typed.initializations.deferred.get(index) {
                     Initializer::Deferred(*id)
@@ -230,6 +241,7 @@ pub(crate) fn allocate<'a>(
             budget,
         )?;
     }
+    let constructor_entry = super::constructor_entry::prove(&typed, budget)?;
     let mut object_allocations = Vec::new();
     for plan in &typed.initializations.plans {
         budget.charge_work(1)?;
@@ -290,6 +302,7 @@ pub(crate) fn allocate<'a>(
         empty_fills,
         fresh_fills,
         object_allocations,
+        constructor_entry,
         entry,
         normal,
     }))

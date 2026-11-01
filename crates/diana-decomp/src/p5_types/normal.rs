@@ -54,6 +54,7 @@ pub(crate) struct PrimitiveFillUse {
 pub(crate) enum FieldUse {
     Read,
     Write(UseConversion),
+    WriteThis(UseConversion),
 }
 impl TypedBody<'_> {
     pub(crate) fn contract(
@@ -309,7 +310,7 @@ pub(crate) fn solve<'a>(
     let Some(arrays) = solve_arrays(&ssa, &kinds, &integral_bits, budget)? else {
         return Ok(None);
     };
-    let initializations = super::initialization::solve(&ssa, budget)?;
+    let initializations = super::initialization::solve(&ssa, &kinds, budget)?;
     let Some(array_uses) = solve_new_arrays(&ssa, &kinds, budget)? else {
         return Ok(None);
     };
@@ -481,7 +482,17 @@ fn solve_fields(
                     .into());
                 }
             };
-            FieldUse::Write(conversion)
+            if evidence.scope == crate::p4_calls::normal::FieldScope::ConstructorThis {
+                if !super::calls::is_this(ssa, op.input(0)?, budget)? {
+                    return Err(RequestError::FieldBindingEvidenceMissing {
+                        reference,
+                        pc: op.pc,
+                    });
+                }
+                FieldUse::WriteThis(conversion)
+            } else {
+                FieldUse::Write(conversion)
+            }
         };
         push(&mut uses, Some(usage), budget)?;
     }

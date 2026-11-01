@@ -124,6 +124,7 @@ fn t09_two_entry_dispatcher_preserves_edges_and_never_reads_da_defaults() {
                         assign(std::slice::from_ref(statement), &mut values)
                     }
                     crate::p8_java::calls::Statement::StaticCall { .. }
+                    | crate::p8_java::calls::Statement::ConstructorChain(_)
                     | crate::p8_java::calls::Statement::Deferred(_)
                     | crate::p8_java::calls::Statement::Initialize(_)
                     | crate::p8_java::calls::Statement::NewArray(_)

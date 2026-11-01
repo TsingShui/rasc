@@ -283,12 +283,13 @@ enum Decoded {
 pub(crate) enum MethodFrame {
     Static,
     Instance(crate::TypeId),
+    Constructor(crate::TypeId),
 }
 impl MethodFrame {
     pub(crate) fn implicit_words(self) -> usize {
         match self {
             Self::Static => 0,
-            Self::Instance(_) => 1,
+            Self::Instance(_) | Self::Constructor(_) => 1,
         }
     }
 }
@@ -438,7 +439,7 @@ pub(crate) fn decode<'a>(
         return Ok(None);
     };
     let raw = checked.layout().original().clone();
-    if input.access_flags() & 0x10000 != 0 || !raw.try_byte_range().as_range().is_empty() {
+    if input.access_flags() & 0x10008 == 0x10008 || !raw.try_byte_range().as_range().is_empty() {
         return Ok(None);
     }
     let result = if input
@@ -512,14 +513,17 @@ pub(crate) fn decode<'a>(
     let frame = if input.access_flags() & 8 != 0 {
         MethodFrame::Static
     } else {
-        MethodFrame::Instance(
-            input
-                .method_reference(input.method_id(), budget)?
-                .owner_type,
-        )
+        let owner = input
+            .method_reference(input.method_id(), budget)?
+            .owner_type;
+        if input.access_flags() & 0x10000 != 0 {
+            MethodFrame::Constructor(owner)
+        } else {
+            MethodFrame::Instance(owner)
+        }
     };
     let mut parameters = Vec::new();
-    if let MethodFrame::Instance(owner) = frame {
+    if let MethodFrame::Instance(owner) | MethodFrame::Constructor(owner) = frame {
         push(&mut parameters, DeclarationType::Nominal(owner), budget)?;
     }
     let mut supported = true;

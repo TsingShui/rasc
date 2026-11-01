@@ -44,7 +44,7 @@ pub(super) fn lower(
     let proof =
         storage
             .object_allocations
-            .get(ix(id.0)?)
+            .get(id.index()?)
             .ok_or(RequestError::InternalInvariant(
                 "init lost deferred storage",
             ))?;
@@ -92,10 +92,24 @@ pub(super) fn verify_deferred(
 ) -> Result<bool, RequestError> {
     budget.charge_work(1)?;
     let typed = &storage.typed;
+    if id == InitializationId::This {
+        let chain = typed
+            .initializations
+            .chain
+            .as_ref()
+            .ok_or(RequestError::InternalInvariant("deferred this lost entry"))?;
+        let Some(result) = op.result else {
+            return Ok(false);
+        };
+        return Ok(matches!(op.op, Op::Move(..))
+            && typed.initializations.deferred.get(ix(result.0)?) == Some(&Some(id))
+            && typed.initializations.deferred.get(ix(op.input(0)?.0)?) == Some(&Some(id))
+            && op.pc.0 < typed.ssa.operation(chain.init)?.pc.0);
+    }
     let proof =
         storage
             .object_allocations
-            .get(ix(id.0)?)
+            .get(id.index()?)
             .ok_or(RequestError::InternalInvariant(
                 "deferred node lost storage proof",
             ))?;
@@ -147,7 +161,7 @@ pub(super) fn verify(
     let proof =
         storage
             .object_allocations
-            .get(ix(id.0)?)
+            .get(id.index()?)
             .ok_or(RequestError::InternalInvariant(
                 "constructor certificate lost storage",
             ))?;

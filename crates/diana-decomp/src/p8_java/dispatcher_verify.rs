@@ -260,6 +260,13 @@ pub(super) fn verify(
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<(), RequestError> {
     let ssa = &storage.typed;
+    if body.prologue.len() > 1
+        || !super::constructor_entry::verify(storage, body.prologue.first(), budget)?
+    {
+        return Err(RequestError::InternalInvariant(
+            "constructor first-statement certificate changed",
+        ));
+    }
     let base_count = ssa
         .ssa
         .values
@@ -290,10 +297,14 @@ pub(super) fn verify(
                     crate::p2_flow::normal::MethodFrame::Static => {
                         crate::p6_variables::normal::Parameter::Explicit(parameter)
                     }
-                    crate::p2_flow::normal::MethodFrame::Instance(_) if parameter == 0 => {
+                    crate::p2_flow::normal::MethodFrame::Instance(_)
+                    | crate::p2_flow::normal::MethodFrame::Constructor(_)
+                        if parameter == 0 =>
+                    {
                         crate::p6_variables::normal::Parameter::This
                     }
-                    crate::p2_flow::normal::MethodFrame::Instance(_) => {
+                    crate::p2_flow::normal::MethodFrame::Instance(_)
+                    | crate::p2_flow::normal::MethodFrame::Constructor(_) => {
                         crate::p6_variables::normal::Parameter::Explicit(
                             parameter
                                 .checked_sub(1)
@@ -305,7 +316,12 @@ pub(super) fn verify(
                 }),
                 _ => None,
             };
-            let initializer = if let Some(parameter) = parameter {
+            let initializer = if ssa.initializations.deferred.get(index)
+                == Some(&Some(
+                    crate::p5_types::initialization::InitializationId::This,
+                )) {
+                crate::p6_variables::normal::Initializer::ThisAfterChain
+            } else if let Some(parameter) = parameter {
                 crate::p6_variables::normal::Initializer::Parameter(parameter)
             } else if let Some(Some(id)) = ssa.initializations.deferred.get(index) {
                 crate::p6_variables::normal::Initializer::Deferred(*id)
@@ -372,6 +388,18 @@ pub(super) fn verify(
                     "dispatcher omitted an original operation",
                 ))?;
             let matches = match actual {
+                super::calls::Statement::ConstructorChain(reference) => {
+                    if let Op::Initialize(call) = bound.op {
+                        body.prologue.first().is_some_and(|entry| {
+                            entry.pc == bound.pc && entry.contract.reference == *reference
+                        }) && ssa.initializations.calls.get(ix(call.0)?)
+                            == Some(&Some(
+                                crate::p5_types::initialization::InitializationId::This,
+                            ))
+                    } else {
+                        false
+                    }
+                }
                 super::calls::Statement::Deferred(id) => {
                     super::object_allocation::verify_deferred(storage, bound, *id, budget)?
                 }

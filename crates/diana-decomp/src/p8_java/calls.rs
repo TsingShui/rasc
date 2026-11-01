@@ -60,6 +60,7 @@ pub(crate) struct ReceiverCall {
 pub(crate) enum Statement {
     Deferred(crate::p5_types::initialization::InitializationId),
     Initialize(super::object_allocation::Initialization),
+    ConstructorChain(crate::MethodId),
     NewArray(super::fresh_fill::Allocation),
     FreshFill(super::fresh_fill::Fill),
     EmptyFill {
@@ -223,9 +224,35 @@ pub(super) fn validate_bindings(
                 .ok_or(RequestError::InternalInvariant(
                     "constructor lost initialization state",
                 ))?;
-            let plan = ssa.initializations.plans.get(ix(initialization.0)?).ok_or(
-                RequestError::InternalInvariant("constructor lost allocation plan"),
-            )?;
+            let (object, use_kind) = match initialization {
+                crate::p5_types::initialization::InitializationId::Allocation(_) => {
+                    let plan = ssa
+                        .initializations
+                        .plans
+                        .get(initialization.index()?)
+                        .ok_or(RequestError::InternalInvariant(
+                            "constructor lost allocation plan",
+                        ))?;
+                    (
+                        plan.object,
+                        crate::p4_calls::allocation::ConstructorUse::Allocation,
+                    )
+                }
+                crate::p5_types::initialization::InitializationId::This => {
+                    let chain = ssa.initializations.chain.as_ref().ok_or(
+                        RequestError::InternalInvariant("constructor lost UninitThis plan"),
+                    )?;
+                    let use_kind = match chain.kind {
+                        crate::p5_types::initialization::ChainKind::This => {
+                            crate::p4_calls::allocation::ConstructorUse::This
+                        }
+                        crate::p5_types::initialization::ChainKind::Super => {
+                            crate::p4_calls::allocation::ConstructorUse::Super
+                        }
+                    };
+                    (site.owner, use_kind)
+                }
+            };
             let receiver = uses
                 .receiver
                 .as_ref()
@@ -240,16 +267,25 @@ pub(super) fn validate_bindings(
                 ));
             }
             let owner =
-                crate::substrate::owned::copy_units(input.type_name(plan.object, budget)?, budget)?;
+                crate::substrate::owned::copy_units(input.type_name(object, budget)?, budget)?;
             let contract = crate::p4_calls::allocation::resolve(
                 input,
                 catalog,
                 site.reference,
                 &owner,
-                crate::p4_calls::allocation::ConstructorUse::Allocation,
+                use_kind,
                 site.pc,
                 budget,
             )?;
+            if matches!(use_kind, crate::p4_calls::allocation::ConstructorUse::This) {
+                crate::p4_calls::allocation::prove_this_chain(
+                    input,
+                    catalog,
+                    site.reference,
+                    site.pc,
+                    budget,
+                )?;
+            }
             if uses.arguments(site.reference, site.pc)?.len() != contract.int_arity {
                 return Err(RequestError::InternalInvariant("constructor changed arity"));
             }
@@ -430,6 +466,18 @@ pub(super) fn operations(
         budget.charge_work(1)?;
         let op = ssa.ssa.operation(id)?;
         if let Op::Initialize(call) = op.op {
+            if ssa.initializations.calls.get(ix(call.0)?)
+                == Some(&Some(
+                    crate::p5_types::initialization::InitializationId::This,
+                ))
+            {
+                push(
+                    &mut output,
+                    Statement::ConstructorChain(ssa.ssa.calls[ix(call.0)?].reference),
+                    budget,
+                )?;
+                continue;
+            }
             let contract = bindings
                 .constructors
                 .get_mut(ix(call.0)?)

@@ -1,10 +1,44 @@
+mod chain;
 use crate::p2_flow::normal::{CallId, CallTarget, Op, OpId};
 use crate::p3_ssa::normal::{SsaBody, ValueId};
 use crate::substrate::owned::push;
 use crate::{MethodBudget, RequestError, TypeId};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) struct InitializationId(pub u32);
+pub(crate) enum InitializationId {
+    Allocation(u32),
+    This,
+}
+impl InitializationId {
+    pub(crate) fn index(self) -> Result<usize, RequestError> {
+        match self {
+            Self::Allocation(index) => {
+                usize::try_from(index).map_err(|_| RequestError::PlatformCapacity)
+            }
+            Self::This => Err(RequestError::InternalInvariant(
+                "UninitThis requested heap allocation index",
+            )),
+        }
+    }
+}
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub(crate) enum ChainKind {
+    This,
+    Super,
+}
+#[derive(Clone, Copy)]
+pub(crate) enum ChainArgument {
+    Parameter(u32),
+    Literal(i32),
+}
+pub(crate) struct ChainInitialization {
+    _sealed: (),
+    pub init: OpId,
+    pub call: CallId,
+    pub kind: ChainKind,
+    pub aliases: Vec<UninitAlias>,
+    pub arguments: Vec<ChainArgument>,
+}
 #[derive(Clone, Copy)]
 pub(crate) struct UninitAlias(ValueId);
 impl UninitAlias {
@@ -23,6 +57,7 @@ pub(crate) struct Initialization {
 pub(crate) struct Initializations {
     _sealed: (),
     pub plans: Vec<Initialization>,
+    pub chain: Option<ChainInitialization>,
     pub deferred: Vec<Option<InitializationId>>,
     pub calls: Vec<Option<InitializationId>>,
 }
@@ -31,9 +66,15 @@ fn ix(value: u32) -> Result<usize, RequestError> {
 }
 pub(super) fn solve(
     ssa: &SsaBody<'_>,
+    kinds: &[Option<super::normal::Kind>],
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<Initializations, RequestError> {
-    if ssa.object_creations.is_empty() {
+    if ssa.object_creations.is_empty()
+        && !matches!(
+            ssa.frame,
+            crate::p2_flow::normal::MethodFrame::Constructor(_)
+        )
+    {
         for site in &ssa.calls {
             budget.charge_work(1)?;
             if site.target == CallTarget::Constructor {
@@ -43,6 +84,7 @@ pub(super) fn solve(
         return Ok(Initializations {
             _sealed: (),
             plans: Vec::new(),
+            chain: None,
             deferred: Vec::new(),
             calls: Vec::new(),
         });
@@ -57,6 +99,7 @@ pub(super) fn solve(
         budget.charge_work(1)?;
         push(&mut calls, None, budget)?;
     }
+    let chain = chain::solve(ssa, kinds, &mut deferred, &mut calls, budget)?;
     let mut plans = Vec::new();
     for allocation in &ssa.operations {
         budget.charge_work(1)?;
@@ -69,7 +112,7 @@ pub(super) fn solve(
             .ok_or(RequestError::InternalInvariant("new-instance lost type"))?
             .reference;
         let unavailable = |pc| RequestError::InitializationUnavailable { pc };
-        let id = InitializationId(
+        let id = InitializationId::Allocation(
             u32::try_from(plans.len()).map_err(|_| RequestError::PlatformCapacity)?,
         );
         let root = allocation.result.ok_or(RequestError::InternalInvariant(
@@ -165,6 +208,7 @@ pub(super) fn solve(
     Ok(Initializations {
         _sealed: (),
         plans,
+        chain,
         deferred,
         calls,
     })

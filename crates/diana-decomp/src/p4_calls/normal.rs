@@ -35,7 +35,13 @@ pub(crate) struct ResolvedBody<'a> {
     pub calls: Vec<CallEvidence>,
     pub fields: Vec<Option<FieldEvidence>>,
 }
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub(crate) enum FieldScope {
+    Instance,
+    ConstructorThis,
+}
 pub(crate) struct FieldEvidence {
+    pub scope: FieldScope,
     pub reference: crate::FieldId,
     pub owner: crate::TypeId,
     pub declaration: FieldDeclaration,
@@ -96,15 +102,27 @@ pub(crate) fn collect<'a>(
             }
         };
         let original = input.field_reference(reference, budget)?;
-        let declaration = match super::field_facts::collect_int_field(
-            input,
-            catalog,
-            reference,
-            super::field_facts::FieldStorage::Instance,
-            usage,
-            op.pc,
-            budget,
-        ) {
+        let scope = if input.access_flags() & 0x10000 != 0
+            && usage == super::field_facts::FieldUse::Write
+        {
+            FieldScope::ConstructorThis
+        } else {
+            FieldScope::Instance
+        };
+        let result = if scope == FieldScope::ConstructorThis {
+            super::field_facts::collect_own_write(input, catalog, reference, op.pc, budget)
+        } else {
+            super::field_facts::collect_int_field(
+                input,
+                catalog,
+                reference,
+                super::field_facts::FieldStorage::Instance,
+                usage,
+                op.pc,
+                budget,
+            )
+        };
+        let declaration = match result {
             Ok(facts) => FieldDeclaration::Known(facts),
             Err(RequestError::FieldBindingEvidenceMissing { .. }) => FieldDeclaration::Missing,
             Err(RequestError::JavaConstantFieldRead { .. }) => FieldDeclaration::Constant,
@@ -113,6 +131,7 @@ pub(crate) fn collect<'a>(
         push(
             &mut fields,
             Some(FieldEvidence {
+                scope,
                 reference,
                 owner: original.owner_type,
                 declaration,
