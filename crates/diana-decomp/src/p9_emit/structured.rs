@@ -61,11 +61,11 @@ fn guard_edge(
             ));
         }
         super::java::assignments(&tail.copies, output, budget)?;
-        output.push("break;\n", budget)
+        output.push("break loop0;\n", budget)
     } else if edge.target == exit {
-        output.push("break;\n", budget)
+        output.push("break loop0;\n", budget)
     } else if edge.target == header {
-        output.push("continue;\n", budget)
+        output.push("continue loop0;\n", budget)
     } else if edge.target == next {
         Ok(())
     } else {
@@ -143,17 +143,17 @@ pub(super) fn write(
     }
     super::dispatcher::locals(storage, output, budget)?;
     trace(storage, &region.prelude, output, budget)?;
-    output.push("while (true) {\n", budget)?;
+    output.push("loop0: while (true) {\n", budget)?;
     super::dispatcher::statements(header, output, budget)?;
     super::dispatcher::open_if(&header.transfer, output, budget)?;
     super::java::assignments(&yes.copies, output, budget)?;
     if !region.body_yes {
-        output.push("break;\n", budget)?;
+        output.push("break loop0;\n", budget)?;
     }
     output.push("} else {\n", budget)?;
     super::java::assignments(&no.copies, output, budget)?;
     if region.body_yes {
-        output.push("break;\n", budget)?;
+        output.push("break loop0;\n", budget)?;
     }
     output.push("}\n", budget)?;
     let mut branches = region.branches.iter();
@@ -171,7 +171,7 @@ pub(super) fn write(
                 }
                 super::java::assignments(&edge.copies, output, budget)?;
                 if next == region.header {
-                    output.push("continue;\n", budget)?;
+                    output.push("continue loop0;\n", budget)?;
                 }
             }
             Transfer::Branch { yes, no, .. } => {

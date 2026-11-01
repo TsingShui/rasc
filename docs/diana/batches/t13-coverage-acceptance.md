@@ -41,3 +41,34 @@ pending on that actual producer obligation. Next action: add the exact boolean
 call-result contract and typed storage through the existing T11 binding chain,
 then rerun both adapters. The last complete mandatory report is still
 run-9kw1nuw6; no complete-set acceptance is claimed by this batch.
+
+## T13 acceptance
+
+The committed exact Boolean result artifact `406076e` discharges D006 without
+weakening source types or moving effects. The natural-loop writer now uses a
+labelled while and explicitly names that lexical scope for every break/continue,
+as required by ALGORITHMS §6.2. Copies still precede each named transfer.
+
+Final `run-nxu3v2bb` (StructuredThenDispatch) and `run-yrju3pcn` (DispatchOnly)
+each pass all eight selected fixed cases / 20 invocations after that renderer
+change. This includes the D001 diamond, D002/D003 zero/several-iteration copy
+cycles, D004 shared continue latch, D005 nested named exit, D006 actual-branch
+boolean effects, D007 switch behavior and D008 exit copies. Natural simple-loop
+ASTs and the legal unmatched-graph dispatcher remain distinct owned products.
+The native M11 regression proves classified rejection of the four invalid
+certificate forms; the existing irreducible and protected-method core cases pass.
+
+Final fmt, strict all-target/all-feature Clippy, locked release and all 118
+cargo-nextest tests pass with zero skips. The complete mandatory report
+`run-nscdi4n9` immediately before the label-only change records 43 whole cases /
+98 seams and no lost pass, retaining 86 cases / 177 invocations / 181 seams.
+The full-set command exits 1 for real remaining obligations; it is not a claim
+of EngineCoreRC or whole-class acceptance. The label-only change reruns the full
+T13-related fixed set in both modes, not the complete mandatory set.
+
+T13 is accepted for the executed native/macOS-arm64 JVM profile: required
+behavioral observations, source correspondence, M11 rejection and resource/safety
+gates are recorded across the natural-loop, guarded-exit, body-diamond and this
+batch. Supplemental effect/failure observations remain supplemental rather than
+extra fixed passes. ART/other-platform execution is not recorded as a pass.
+Next action: start T14 from the accepted normal-storage/coverage producers.
