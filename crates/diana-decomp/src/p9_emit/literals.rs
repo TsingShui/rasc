@@ -65,7 +65,7 @@ pub(super) fn string(
     }
     output.push("\"", budget)
 }
-fn fp(
+pub(super) fn fp(
     bits: u64,
     double: bool,
     output: &mut TextBuffer,

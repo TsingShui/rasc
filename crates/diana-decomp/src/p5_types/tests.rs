@@ -1,5 +1,7 @@
+use crate::p2_flow::normal::Arithmetic;
 use crate::p8_java::MethodBody;
-use crate::pipeline::scalar::{Binary, Expression, ScalarType, Unary};
+use crate::p8_java::branch::{Expression, Right, ValueUse};
+use crate::pipeline::scalar::{ScalarType, Unary};
 use crate::test_fixture as fixture;
 use crate::*;
 
@@ -8,32 +10,13 @@ enum Number {
     Int(i32),
     Float(f32),
 }
-fn read(
-    view: super::Conversion,
-    definitions: &[crate::pipeline::scalar::Definition],
-    values: &[Option<Number>],
-) -> Number {
+fn read(view: ValueUse, values: &[Option<Number>]) -> Number {
     match view {
-        super::Conversion::BooleanToInt(_) | super::Conversion::Proven01ToBoolean(_) => {
-            panic!("unexpected boolean conversion in numeric example")
-        }
-        super::Conversion::Identity(value) => {
+        ValueUse::Direct(value) => {
             values[usize::try_from(value.0).unwrap()].expect("read of an unmaterialized value")
         }
-        super::Conversion::LiteralView { value, kind } => {
-            let Expression::Constant(bits) =
-                definitions[usize::try_from(value.0).unwrap()].expression
-            else {
-                panic!("unexpected wide literal")
-            };
-            match kind {
-                ScalarType::Int => Number::Int(bits),
-                ScalarType::Float => {
-                    Number::Float(f32::from_bits(u32::from_le_bytes(bits.to_le_bytes())))
-                }
-                _ => panic!("unexpected literal view"),
-            }
-        }
+        ValueUse::FloatLiteral { bits, .. } => Number::Float(f32::from_bits(bits)),
+        _ => panic!("unexpected view in the worked numeric example"),
     }
 }
 
@@ -72,7 +55,8 @@ fn t10_literal_views_share_bits_without_reinterpreting_nonliteral_storage() {
             DeclarationCatalog::empty(EnvironmentId(0)),
             &mut control,
         )
-        .unwrap();
+        .unwrap()
+        .with_representation(RepresentationPolicy::DispatchOnly);
         let report = engine
             .decompile(
                 Request {
@@ -104,53 +88,62 @@ fn t10_literal_views_share_bits_without_reinterpreting_nonliteral_storage() {
                 let MethodOutput::Java { declaration, .. } = &members[0] else {
                     panic!("pure literal views were incorrectly unified")
                 };
-                let MethodBody::Scalar {
-                    definitions,
-                    typing,
-                    ..
-                } = &declaration.body
-                else {
-                    panic!("linear input changed its graph")
+                let MethodBody::Dispatcher(body) = &declaration.body else {
+                    panic!("literal views bypassed shared storage");
                 };
-                let mut values = vec![None; definitions.len()];
-                for (index, definition) in definitions.iter().enumerate() {
-                    let views = &typing.uses[index];
-                    let value = match definition.expression {
-                        Expression::Parameter(_) => Number::Int(7),
-                        Expression::Constant(_) => continue,
-                        Expression::Binary(_, Binary::Add, _) => match (
-                            read(views.left.unwrap(), definitions, &values),
-                            read(views.right.unwrap(), definitions, &values),
-                        ) {
-                            (Number::Int(a), Number::Int(b)) => Number::Int(a.wrapping_add(b)),
-                            (Number::Float(a), Number::Float(b)) => Number::Float(a + b),
-                            _ => panic!("incompatible operand families"),
-                        },
+                assert_eq!(body.cases.len(), 1);
+                let case = &body.cases[0];
+                let mut values = vec![None; body.locals.len()];
+                for local in &body.locals {
+                    if matches!(
+                        local.initializer,
+                        crate::p6_variables::normal::Initializer::Parameter(_)
+                    ) {
+                        values[usize::try_from(local.id.0).unwrap()] = Some(Number::Int(7));
+                    }
+                }
+                for assignment in body
+                    .entry
+                    .iter()
+                    .chain(case.statements.iter().map(|statement| {
+                        let crate::p8_java::calls::Statement::Assignment(assignment) = statement
+                        else {
+                            panic!("effect outside the worked pure example");
+                        };
+                        assignment
+                    }))
+                {
+                    let value = match assignment.expression {
+                        Expression::Local(view) => read(view, &values),
+                        Expression::Constant(value) => Number::Int(value),
+                        Expression::Binary(left, Arithmetic::Add, Right::Local(right)) => {
+                            match (read(left, &values), read(right, &values)) {
+                                (Number::Int(a), Number::Int(b)) => Number::Int(a.wrapping_add(b)),
+                                (Number::Float(a), Number::Float(b)) => Number::Float(a + b),
+                                _ => panic!("incompatible operand families"),
+                            }
+                        }
                         Expression::Unary(
                             Unary::Convert {
                                 from: ScalarType::Float,
                                 to: ScalarType::Int,
                             },
-                            _,
+                            source,
                         ) => {
-                            let Number::Float(value) =
-                                read(views.left.unwrap(), definitions, &values)
-                            else {
-                                panic!("conversion lost its float input")
+                            let Number::Float(value) = read(source, &values) else {
+                                panic!("conversion lost its float input");
                             };
                             assert_eq!(value, 2.0);
                             Number::Int(2)
                         }
-                        _ => {
-                            panic!("unexpected operation in the independent scalar interpretation")
-                        }
+                        _ => panic!("operation outside the worked numeric example"),
                     };
-                    values[index] = Some(value);
+                    values[usize::try_from(assignment.target.0).unwrap()] = Some(value);
                 }
-                assert_eq!(
-                    read(typing.returned, definitions, &values),
-                    Number::Int(expected)
-                );
+                let crate::p8_java::dispatcher::Transfer::Return(returned) = case.transfer else {
+                    panic!("worked example lost return");
+                };
+                assert_eq!(read(returned, &values), Number::Int(expected));
             }
         }
     }

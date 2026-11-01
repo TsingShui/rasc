@@ -38,7 +38,8 @@ pub(crate) struct TypedBody<'a> {
     pub bindings: Vec<crate::p4_calls::normal::CallEvidence>,
     pub call_uses: Vec<crate::p5_types::calls::CallUses>,
     pub cast_uses: Vec<crate::p5_types::calls::TypedUse>,
-    pub integer_uses: Vec<Option<IntegerUses>>,
+    pub numeric_uses: Vec<Option<super::numeric::NumericUses>>,
+    pub returned_uses: Vec<Option<UseConversion>>,
     pub initializations: super::initialization::Initializations,
     pub empty_fills: Vec<PrimitiveFillUse>,
     pub array_lengths: Vec<crate::p5_types::calls::TypedUse>,
@@ -51,9 +52,6 @@ pub(crate) struct PrimitiveFillUse {
     _sealed: (),
     pub array: crate::p3_ssa::normal::ValueId,
     pub component: super::PrimitiveArray,
-}
-pub(crate) struct IntegerUses {
-    pub uses: Vec<crate::p5_types::calls::TypedUse>,
 }
 pub(crate) enum FieldUse {
     Read,
@@ -71,6 +69,7 @@ impl TypedBody<'_> {
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub(crate) enum UseConversion {
     Identity,
+    FloatLiteral(u32),
     BooleanWord,
     Boolean01,
     Null(crate::p5_types::BuiltinReference),
@@ -139,6 +138,12 @@ pub(crate) fn solve<'a>(
                 (bits, declaration.range(), Some(kind))
             }
             Definition::OpResult(id) => match ssa.operation(id)?.op {
+                Op::FloatBinary(..) => (0, None, Some(Kind::Float)),
+                Op::Unary(_, unary, _)
+                    if unary.signature().1 == crate::pipeline::scalar::ScalarType::Float =>
+                {
+                    (0, None, Some(Kind::Float))
+                }
                 Op::Unary(_, unary, _) => (
                     7,
                     Some(match unary {
@@ -253,49 +258,37 @@ pub(crate) fn solve<'a>(
         push(&mut ranges, range, budget)?;
         push(&mut kinds, kind, budget)?;
     }
+    let numeric_valid = super::numeric::constrain(&ssa, &mut kinds, budget)?;
     let mut type_conflict = false;
     loop {
         let mut changed = false;
         for op in &ssa.operations {
             budget.charge_work(1)?;
-            match op.op {
-                Op::Compare(_, _, _, _)
-                | Op::Binary(_, _, _, _)
-                | Op::Unary(..)
-                | Op::ReverseSubtract(..) => {
-                    let expected = if matches!(op.op, Op::Compare(_, _, _, _)) {
-                        Kind::Float
-                    } else {
-                        Kind::Int
-                    };
-                    for input in &op.inputs {
-                        budget.charge_work(1)?;
-                        if kinds[ix(input.0)?].is_some_and(|kind| {
-                            kind != expected && !(expected == Kind::Int && kind == Kind::Boolean)
-                        }) {
-                            type_conflict = true;
-                        }
-                    }
+            if let Op::Move(_, _) = op.op {
+                let index = ix(op
+                    .result
+                    .ok_or(RequestError::InternalInvariant("move lost its result"))?
+                    .0)?;
+                let source = ix(op.input(0)?.0)?;
+                let source_range = if kinds[index] == Some(Kind::Float) {
+                    None
+                } else {
+                    ranges[source]
+                };
+                changed |= merge_range(&mut ranges[index], source_range);
+                let merged = if kinds[index] == Some(Kind::Float) {
+                    0
+                } else {
+                    integral_bits[index] | integral_bits[source]
+                };
+                if merged != integral_bits[index] {
+                    integral_bits[index] = merged;
+                    changed = true;
                 }
-                Op::Move(_, _) => {
-                    let index = ix(op
-                        .result
-                        .ok_or(RequestError::InternalInvariant("move lost its result"))?
-                        .0)?;
-                    let source = ix(op.input(0)?.0)?;
-                    let source_range = ranges[source];
-                    changed |= merge_range(&mut ranges[index], source_range);
-                    let merged = integral_bits[index] | integral_bits[source];
-                    if merged != integral_bits[index] {
-                        integral_bits[index] = merged;
-                        changed = true;
-                    }
-                    if kinds[index].is_none() && kinds[source].is_some() {
-                        kinds[index] = kinds[source];
-                        changed = true;
-                    }
+                if kinds[index].is_none() && kinds[source].is_some() {
+                    kinds[index] = kinds[source];
+                    changed = true;
                 }
-                _ => {}
             }
         }
         for op in &ssa.operations {
@@ -391,7 +384,10 @@ pub(crate) fn solve<'a>(
     let Some(arrays) = solve_arrays(&ssa, &kinds, &integral_bits, budget)? else {
         return Ok(None);
     };
-    let Some(integer_uses) = solve_integer_uses(&ssa, &kinds, budget)? else {
+    if !numeric_valid {
+        return Ok(None);
+    }
+    let Some(numeric_uses) = super::numeric::solve(&ssa, &kinds, budget)? else {
         return Ok(None);
     };
     let initializations = super::initialization::solve(&ssa, &kinds, budget)?;
@@ -412,7 +408,7 @@ pub(crate) fn solve<'a>(
     else {
         return Ok(None);
     };
-    Ok(Some(TypedBody {
+    let mut typed = TypedBody {
         _sealed: (),
         ssa,
         kinds,
@@ -422,14 +418,32 @@ pub(crate) fn solve<'a>(
         bindings,
         call_uses,
         cast_uses,
-        integer_uses,
+        numeric_uses,
+        returned_uses: Vec::new(),
         initializations,
         empty_fills,
         array_lengths: array_uses.lengths,
         fresh_fills: array_uses.fills,
         field_declarations,
         field_uses,
-    }))
+    };
+    for _ in &typed.ssa.values {
+        budget.charge_work(1)?;
+        push(&mut typed.returned_uses, None, budget)?;
+    }
+    for (index, block) in typed.ssa.blocks.iter().enumerate() {
+        budget.charge_work(1)?;
+        if matches!(block.terminal, crate::p2_flow::normal::Terminal::Return(_)) {
+            let value = typed.ssa.bound[index]
+                .terminal
+                .ok_or(RequestError::InternalInvariant("typed return lost value"))?;
+            let Some(conversion) = return_use(&typed, value)? else {
+                return Ok(None);
+            };
+            typed.returned_uses[ix(value.0)?] = Some(conversion);
+        }
+    }
+    Ok(Some(typed))
 }
 fn solve_arrays(
     ssa: &SsaBody<'_>,
@@ -756,36 +770,56 @@ fn solve_new_arrays(
     Ok(Some(ArrayUses { lengths, fills }))
 }
 
-fn solve_integer_uses(
-    ssa: &SsaBody<'_>,
-    kinds: &[Option<Kind>],
-    budget: &mut MethodBudget<'_, '_>,
-) -> Result<Option<Vec<Option<IntegerUses>>>, RequestError> {
-    let mut result = Vec::new();
-    for op in &ssa.operations {
-        budget.charge_work(1)?;
-        if !matches!(
-            op.op,
-            Op::Binary(..) | Op::Unary(..) | Op::ReverseSubtract(..)
-        ) {
-            push(&mut result, None, budget)?;
-            continue;
+fn return_use(
+    typed: &TypedBody<'_>,
+    value: crate::p3_ssa::normal::ValueId,
+) -> Result<Option<UseConversion>, RequestError> {
+    use crate::p2_flow::normal::{DeclarationType, ResultType};
+    let index = ix(value.0)?;
+    let ResultType::Value(result) = typed.ssa.result else {
+        return Ok(None);
+    };
+    if let DeclarationType::Narrow(kind) = result {
+        let mut range = typed.ranges[index];
+        if typed.integral_bits[index] != 0 && typed.integral_bits[index] & 4 == 0 {
+            range = range.and_then(super::IntRange::known01);
         }
-        let mut uses = Vec::new();
-        for &value in &op.inputs {
-            budget.charge_work(1)?;
-            let conversion = match kinds[ix(value.0)?] {
-                Some(Kind::Int) => UseConversion::Identity,
-                Some(Kind::Boolean) => UseConversion::BooleanWord,
-                _ => return Ok(None),
-            };
-            push(
-                &mut uses,
-                crate::p5_types::calls::TypedUse { value, conversion },
-                budget,
-            )?;
-        }
-        push(&mut result, Some(IntegerUses { uses }), budget)?;
+        return Ok(
+            if typed.kinds[index] == Some(Kind::Int)
+                && range.is_some_and(|range| range.within(kind.range()))
+            {
+                Some(UseConversion::Narrow(kind))
+            } else {
+                None
+            },
+        );
     }
-    Ok(Some(result))
+    if result.kind() == Kind::Float {
+        return super::numeric::view(&typed.ssa, &typed.kinds, value, Kind::Float);
+    }
+    if typed.kinds[index] == Some(result.kind())
+        && matches!(
+            result.kind(),
+            Kind::Nominal(_) | Kind::PrimitiveArray(_) | Kind::ObjectArray
+        )
+    {
+        return Ok(Some(UseConversion::Identity));
+    }
+    Ok(match (typed.kinds[index], result.kind()) {
+        (Some(Kind::Int), Kind::Int)
+        | (Some(Kind::Boolean), Kind::Boolean)
+        | (Some(Kind::Object), Kind::Object)
+        | (Some(Kind::String), Kind::String) => Some(UseConversion::Identity),
+        (Some(Kind::Boolean), Kind::Int) => Some(UseConversion::BooleanWord),
+        (
+            Some(Kind::String | Kind::Nominal(_) | Kind::PrimitiveArray(_) | Kind::ObjectArray),
+            Kind::Object,
+        ) => Some(UseConversion::UpcastObject),
+        (Some(Kind::Int), Kind::Boolean)
+            if typed.integral_bits[index] != 0 && typed.integral_bits[index] & 4 == 0 =>
+        {
+            Some(UseConversion::Boolean01)
+        }
+        _ => None,
+    })
 }

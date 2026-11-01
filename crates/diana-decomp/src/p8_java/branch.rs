@@ -13,9 +13,9 @@ pub(crate) enum Right {
 pub(crate) enum Expression {
     Unary(crate::pipeline::scalar::Unary, ValueUse),
     ReverseSubtract(i32, ValueUse),
-    Compare(LocalId, crate::pipeline::scalar::Compare, LocalId),
+    Compare(ValueUse, crate::pipeline::scalar::Compare, ValueUse),
     Binary(ValueUse, crate::pipeline::branch::Arithmetic, Right),
-    Local(LocalId),
+    Local(ValueUse),
     Constant(i32),
 }
 pub(crate) struct Assignment {
@@ -27,52 +27,15 @@ pub(super) fn returned(
     ssa: &TypedBody<'_>,
     value: LocalId,
 ) -> Result<Option<ValueUse>, RequestError> {
-    let index = ix(value.0)?;
-    use crate::pipeline::branch::{DeclarationType, ResultType};
-    let ResultType::Value(result) = ssa.ssa.result else {
-        return Ok(None);
-    };
-    if let DeclarationType::Narrow(kind) = result {
-        let mut range = ssa.ranges[index];
-        if ssa.integral_bits[index] != 0 && ssa.integral_bits[index] & 4 == 0 {
-            range = range.and_then(crate::p5_types::IntRange::known01);
-        }
-        return Ok(
-            if ssa.kinds[index] == Some(Kind::Int)
-                && range.is_some_and(|range| range.within(kind.range()))
-            {
-                Some(ValueUse::Narrow { value, kind })
-            } else {
-                None
-            },
-        );
-    }
-    if ssa.kinds[index] == Some(result.kind())
-        && matches!(
-            result.kind(),
-            Kind::Nominal(_) | Kind::PrimitiveArray(_) | Kind::ObjectArray
-        )
-    {
-        return Ok(Some(ValueUse::Direct(value)));
-    }
-    Ok(match (ssa.kinds[index], result.kind()) {
-        (Some(Kind::Int), Kind::Int)
-        | (Some(Kind::Boolean), Kind::Boolean)
-        | (Some(Kind::Object), Kind::Object)
-        | (Some(Kind::String), Kind::String) => Some(ValueUse::Direct(value)),
-        (Some(Kind::Boolean), Kind::Int) => Some(ValueUse::BooleanWord(value)),
-        (
-            Some(Kind::String | Kind::Nominal(_) | Kind::PrimitiveArray(_) | Kind::ObjectArray),
-            Kind::Object,
-        ) => Some(ValueUse::UpcastObject(value)),
-        (Some(Kind::Int), Kind::Boolean)
-            if ssa.integral_bits[index] != 0 && ssa.integral_bits[index] & 4 == 0 =>
-        {
-            Some(ValueUse::Boolean01(value))
-        }
-        _ => None,
-    })
+    let conversion = ssa
+        .returned_uses
+        .get(ix(value.0)?)
+        .ok_or(RequestError::InternalInvariant(
+            "return use has foreign value",
+        ))?;
+    Ok(conversion.map(|conversion| super::values::lower(value, conversion)))
 }
+
 pub(crate) struct Diamond {
     pub locals: Vec<Local>,
     pub entry: Vec<Assignment>,
@@ -139,7 +102,7 @@ pub(super) fn copies(
             output,
             Assignment {
                 target: copy.target,
-                expression: Expression::Local(copy.source),
+                expression: Expression::Local(ValueUse::Direct(copy.source)),
             },
             budget,
         )?;
@@ -151,18 +114,18 @@ pub(super) fn operation(
     op: &crate::pipeline::branch::BoundOp,
 ) -> Result<Option<Assignment>, RequestError> {
     use crate::p2_flow::normal::Operand;
-    let integer = |index: usize| -> Result<ValueUse, RequestError> {
+    let numeric = |index: usize| -> Result<ValueUse, RequestError> {
         let usage = typed
-            .integer_uses
+            .numeric_uses
             .get(ix(op.id.0)?)
             .and_then(Option::as_ref)
             .and_then(|uses| uses.uses.get(index))
             .ok_or(RequestError::InternalInvariant(
-                "integer operation lost typed use",
+                "numeric operation lost typed use",
             ))?;
         if usage.value != op.input(index)? {
             return Err(RequestError::InternalInvariant(
-                "integer use changed original input",
+                "numeric use changed original input",
             ));
         }
         Ok(super::values::lower(
@@ -171,16 +134,17 @@ pub(super) fn operation(
         ))
     };
     let expression = match op.op {
-        Op::Unary(_, unary, _) => Expression::Unary(unary, integer(0)?),
-        Op::ReverseSubtract(_, literal, _) => Expression::ReverseSubtract(literal, integer(0)?),
-        Op::Compare(_, _, compare, _) => {
-            Expression::Compare(LocalId(op.input(0)?.0), compare, LocalId(op.input(1)?.0))
+        Op::Unary(_, unary, _) => Expression::Unary(unary, numeric(0)?),
+        Op::ReverseSubtract(_, literal, _) => Expression::ReverseSubtract(literal, numeric(0)?),
+        Op::Compare(_, _, compare, _) => Expression::Compare(numeric(0)?, compare, numeric(1)?),
+        Op::FloatBinary(_, _, kind, _) => {
+            Expression::Binary(numeric(0)?, kind, Right::Local(numeric(1)?))
         }
         Op::Binary(_, _, kind, right) => Expression::Binary(
-            integer(0)?,
+            numeric(0)?,
             kind,
             match right {
-                Operand::Register(_) => Right::Local(integer(1)?),
+                Operand::Register(_) => Right::Local(numeric(1)?),
                 Operand::Literal(value) => Right::Literal(value),
             },
         ),
@@ -203,7 +167,11 @@ pub(super) fn operation(
             ));
         }
         Op::Constant(_, value) => Expression::Constant(value),
-        Op::Move(_, _) => Expression::Local(LocalId(op.input(0)?.0)),
+        Op::Move(_, _) => Expression::Local(if typed.numeric_uses[ix(op.id.0)?].is_some() {
+            numeric(0)?
+        } else {
+            ValueUse::Direct(LocalId(op.input(0)?.0))
+        }),
     };
     Ok(Some(Assignment {
         target: LocalId(

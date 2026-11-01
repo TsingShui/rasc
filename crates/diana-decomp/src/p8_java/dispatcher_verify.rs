@@ -17,10 +17,11 @@ fn push<T>(
     Ok(())
 }
 use crate::p6_variables::normal::local_type as ty;
-fn int_view(
+fn numeric_view(
     typed: &TypedBody<'_>,
     actual: super::branch::ValueUse,
     source: Option<&crate::p3_ssa::normal::ValueId>,
+    expected: Kind,
 ) -> Result<bool, RequestError> {
     let Some(source) = source else {
         return Ok(false);
@@ -28,11 +29,25 @@ fn int_view(
     if actual.value().0 != source.0 {
         return Ok(false);
     }
-    Ok(matches!(
-        (actual, typed.kinds[ix(source.0)?]),
-        (super::branch::ValueUse::Direct(_), Some(Kind::Int))
-            | (super::branch::ValueUse::BooleanWord(_), Some(Kind::Boolean))
-    ))
+    use super::branch::ValueUse;
+    Ok(match actual {
+        ValueUse::Direct(_) => typed.kinds[ix(source.0)?] == Some(expected),
+        ValueUse::BooleanWord(_) => {
+            expected == Kind::Int && typed.kinds[ix(source.0)?] == Some(Kind::Boolean)
+        }
+        ValueUse::FloatLiteral { bits, .. } => {
+            if expected != Kind::Float
+                || bits & 0x7f80_0000 == 0x7f80_0000 && bits & 0x007f_ffff != 0
+            {
+                return Ok(false);
+            }
+            let Definition::OpResult(id) = typed.ssa.values[ix(source.0)?] else {
+                return Ok(false);
+            };
+            matches!(typed.ssa.operation(id)?.op, Op::Constant(_,original) if u32::from_le_bytes(original.to_le_bytes()) == bits)
+        }
+        _ => false,
+    })
 }
 fn same_expression(
     typed: &TypedBody<'_>,
@@ -44,26 +59,50 @@ fn same_expression(
     let right = bound.inputs.get(1);
     Ok(match (actual, bound.op) {
         (Expression::Unary(actual, source), Op::Unary(_, original, _)) => {
-            *actual == original && int_view(typed, *source, left)?
+            *actual == original
+                && numeric_view(
+                    typed,
+                    *source,
+                    left,
+                    if original.signature().0 == crate::pipeline::scalar::ScalarType::Float {
+                        Kind::Float
+                    } else {
+                        Kind::Int
+                    },
+                )?
         }
         (Expression::ReverseSubtract(actual, source), Op::ReverseSubtract(_, original, _)) => {
-            *actual == original && int_view(typed, *source, left)?
+            *actual == original && numeric_view(typed, *source, left, Kind::Int)?
         }
         (Expression::Compare(a, compare, b), Op::Compare(_, _, original, _)) => {
-            left.is_some_and(|value| value.0 == a.0)
+            numeric_view(typed, *a, left, Kind::Float)?
                 && *compare == original
-                && right.is_some_and(|value| value.0 == b.0)
+                && numeric_view(typed, *b, right, Kind::Float)?
         }
         (Expression::Constant(actual), Op::Constant(_, original)) => *actual == original,
         (Expression::Local(actual), Op::Move(_, _)) => {
-            left.is_some_and(|value| value.0 == actual.0)
+            if typed.numeric_uses[ix(bound.id.0)?].is_some() {
+                numeric_view(typed, *actual, left, Kind::Float)?
+            } else {
+                left.is_some_and(|value| {
+                    *actual == super::branch::ValueUse::Direct(LocalId(value.0))
+                })
+            }
+        }
+        (
+            Expression::Binary(actual, kind, Right::Local(rhs)),
+            Op::FloatBinary(_, _, original, _),
+        ) => {
+            numeric_view(typed, *actual, left, Kind::Float)?
+                && *kind == original
+                && numeric_view(typed, *rhs, right, Kind::Float)?
         }
         (Expression::Binary(actual, kind, rhs), Op::Binary(_, _, original, operand)) => {
-            int_view(typed, *actual, left)?
+            numeric_view(typed, *actual, left, Kind::Int)?
                 && *kind == original
                 && match (rhs, operand) {
                     (Right::Local(actual), Operand::Register(_)) => {
-                        int_view(typed, *actual, right)?
+                        numeric_view(typed, *actual, right, Kind::Int)?
                     }
                     (Right::Literal(actual), Operand::Literal(original)) => *actual == original,
                     _ => false,
@@ -236,7 +275,8 @@ fn copies(
     }
     for statement in actual {
         budget.charge_work(1)?;
-        let Expression::Local(source) = statement.expression else {
+        let Expression::Local(super::branch::ValueUse::Direct(source)) = statement.expression
+        else {
             return Err(RequestError::InternalInvariant(
                 "edge copy evaluates a non-local expression",
             ));
@@ -621,6 +661,12 @@ pub(super) fn verify(
                         use super::branch::ValueUse;
                         !match actual {
                             ValueUse::Null { .. } => false,
+                            ValueUse::FloatLiteral { .. } => numeric_view(
+                                ssa,
+                                *actual,
+                                ssa.ssa.bound[index].terminal.as_ref(),
+                                result.kind(),
+                            )?,
                             ValueUse::UpcastObject(_) => {
                                 matches!(result, crate::pipeline::branch::DeclarationType::Object)
                                     && matches!(
@@ -637,6 +683,7 @@ pub(super) fn verify(
                                 matches!(
                                     result,
                                     crate::pipeline::branch::DeclarationType::Int
+                                        | crate::pipeline::branch::DeclarationType::Float
                                         | crate::pipeline::branch::DeclarationType::Boolean
                                         | crate::pipeline::branch::DeclarationType::Object
                                         | crate::pipeline::branch::DeclarationType::String

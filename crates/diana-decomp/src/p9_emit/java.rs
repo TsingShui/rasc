@@ -261,6 +261,9 @@ pub(super) fn value_use(
 ) -> Result<(), RequestError> {
     use crate::p8_java::branch::ValueUse;
     match value {
+        ValueUse::FloatLiteral { bits, .. } => {
+            super::literals::fp(u64::from(bits), false, output, budget)?
+        }
         ValueUse::Null { kind, .. } => {
             output.push("(", budget)?;
             output.push(kind.spelling(), budget)?;
@@ -311,20 +314,31 @@ pub(super) fn assignments(
             BranchExpression::Unary(unary, source) => {
                 output.push(
                     match unary {
-                        crate::pipeline::scalar::Unary::Neg => "-",
+                        crate::pipeline::scalar::Unary::Neg
+                        | crate::pipeline::scalar::Unary::NegFloat => "-",
                         crate::pipeline::scalar::Unary::Not => "~",
                         crate::pipeline::scalar::Unary::Byte => "(byte) ",
                         crate::pipeline::scalar::Unary::Char => "(char) ",
                         crate::pipeline::scalar::Unary::Short => "(short) ",
+                        crate::pipeline::scalar::Unary::Convert {
+                            from: crate::pipeline::scalar::ScalarType::Float,
+                            to: crate::pipeline::scalar::ScalarType::Int,
+                        } => "(int) ",
+                        crate::pipeline::scalar::Unary::Convert {
+                            from: crate::pipeline::scalar::ScalarType::Int,
+                            to: crate::pipeline::scalar::ScalarType::Float,
+                        } => "(float) ",
                         _ => {
                             return Err(RequestError::InternalInvariant(
-                                "non-int unary entered int AST",
+                                "non-word unary entered word AST",
                             ));
                         }
                     },
                     budget,
                 )?;
+                output.push("(", budget)?;
                 value_use(source, output, budget)?;
+                output.push(")", budget)?;
             }
             BranchExpression::ReverseSubtract(literal, source) => {
                 output.arguments(format_args!("{literal} - "), budget)?;
@@ -332,7 +346,7 @@ pub(super) fn assignments(
             }
             BranchExpression::Compare(a, compare, b) => super::comparison::write(
                 compare,
-                |right, output, budget| local(if right { b } else { a }, output, budget),
+                |right, output, budget| value_use(if right { b } else { a }, output, budget),
                 output,
                 budget,
             )?,
@@ -361,7 +375,7 @@ pub(super) fn assignments(
                     }
                 }
             }
-            BranchExpression::Local(id) => local(id, output, budget)?,
+            BranchExpression::Local(view) => value_use(view, output, budget)?,
             BranchExpression::Constant(value) => {
                 output.arguments(format_args!("{value}"), budget)?
             }

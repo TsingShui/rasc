@@ -80,7 +80,7 @@ fn t09_two_entry_dispatcher_preserves_edges_and_never_reads_da_defaults() {
                 | Expression::Compare(_, _, _) => {
                     panic!("operation outside the existing int-cycle interpretation")
                 }
-                Expression::Local(id) => read(values, id),
+                Expression::Local(view) => read(values, view.value()),
                 Expression::Constant(value) => value,
                 Expression::Binary(left, kind, ref right) => {
                     let left = read(values, left.value());

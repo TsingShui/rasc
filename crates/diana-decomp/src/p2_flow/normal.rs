@@ -167,6 +167,7 @@ pub(crate) enum ArrayElement {
 }
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub(crate) enum Op {
+    FloatBinary(RegisterId, RegisterId, Arithmetic, RegisterId),
     Unary(RegisterId, crate::pipeline::scalar::Unary, RegisterId),
     ReverseSubtract(RegisterId, i32, RegisterId),
     NewInstance(RegisterId, ObjectCreationId),
@@ -337,6 +338,7 @@ pub(crate) fn destination(op: Op) -> Option<RegisterId> {
         | Op::String(r, _)
         | Op::Constant(r, _)
         | Op::Move(r, _)
+        | Op::FloatBinary(r, _, _, _)
         | Op::Binary(r, _, _, _)
         | Op::Compare(r, _, _, _)
         | Op::ArrayLength(r, _)
@@ -391,7 +393,9 @@ impl Op {
             Self::ArrayLength(_, array) => [Some(array), None, None],
             Self::ArrayLoad(_, array, index, _) => [Some(array), Some(index), None],
             Self::ArrayStore(array, index, value, _) => [Some(array), Some(index), Some(value)],
-            Self::Compare(_, left, _, right) => [Some(left), Some(right), None],
+            Self::FloatBinary(_, left, _, right) | Self::Compare(_, left, _, right) => {
+                [Some(left), Some(right), None]
+            }
             Self::Binary(_, left, _, Operand::Register(right)) => [Some(left), Some(right), None],
             Self::Binary(_, left, _, Operand::Literal(_)) | Self::Move(_, left) => {
                 [Some(left), None, None]
@@ -483,6 +487,13 @@ pub(crate) fn decode<'a>(
                 .matches_with(&[90], budget)?
             {
                 DeclarationType::Boolean
+            } else if input
+                .declaration()
+                .prototype
+                .return_type
+                .matches_with(&[70], budget)?
+            {
+                DeclarationType::Float
             } else if input
                 .declaration()
                 .prototype
@@ -657,15 +668,39 @@ pub(crate) fn decode<'a>(
                         _ => return Err(RequestError::InternalInvariant("scalar constant absent")),
                     },
                 )),
-                0x7b | 0x7c | 0x8d..=0x8f => {
+                0x7b | 0x7c | 0x7f | 0x82 | 0x87 | 0x8d..=0x8f => {
                     let unary = match spec.opcode {
                         0x7b => crate::pipeline::scalar::Unary::Neg,
                         0x7c => crate::pipeline::scalar::Unary::Not,
+                        0x7f => crate::pipeline::scalar::Unary::NegFloat,
+                        0x82 => crate::pipeline::scalar::Unary::Convert {
+                            from: crate::pipeline::scalar::ScalarType::Int,
+                            to: crate::pipeline::scalar::ScalarType::Float,
+                        },
+                        0x87 => crate::pipeline::scalar::Unary::Convert {
+                            from: crate::pipeline::scalar::ScalarType::Float,
+                            to: crate::pipeline::scalar::ScalarType::Int,
+                        },
                         0x8d => crate::pipeline::scalar::Unary::Byte,
                         0x8e => crate::pipeline::scalar::Unary::Char,
                         _ => crate::pipeline::scalar::Unary::Short,
                     };
                     Decoded::Op(Op::Unary(reg(0)?, unary, reg(1)?))
+                }
+                0xa6..=0xaa | 0xc6..=0xca => {
+                    let arithmetic = match spec.opcode {
+                        0xa6 | 0xc6 => Arithmetic::Add,
+                        0xa7 | 0xc7 => Arithmetic::Sub,
+                        0xa8 | 0xc8 => Arithmetic::Mul,
+                        0xa9 | 0xc9 => Arithmetic::Div,
+                        _ => Arithmetic::Rem,
+                    };
+                    let (left, right) = if spec.opcode < 0xc0 {
+                        (reg(1)?, reg(2)?)
+                    } else {
+                        (reg(0)?, reg(1)?)
+                    };
+                    Decoded::Op(Op::FloatBinary(reg(0)?, left, arithmetic, right))
                 }
                 0x90..=0x9a | 0xb0..=0xba | 0xd0..=0xe2 => {
                     let arithmetic = match spec.opcode {
