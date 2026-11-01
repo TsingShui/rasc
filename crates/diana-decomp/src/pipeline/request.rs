@@ -30,6 +30,13 @@ pub enum RequestError {
         register: crate::RegisterId,
         pc: crate::CodeUnitOffset,
     },
+    /// Conservative exception ingress prevents proving an otherwise grounded value.
+    /// This preserves uncertainty rather than declaring a definite invalid read.
+    #[error("definition availability unproved for register {register:?} at {pc:?}")]
+    DefinitionAvailabilityUnproved {
+        register: crate::RegisterId,
+        pc: crate::CodeUnitOffset,
+    },
     #[error("partial or invalid wide register {register:?} read at {pc:?}")]
     InvalidWideRead {
         register: crate::RegisterId,
@@ -77,7 +84,8 @@ impl RequestError {
             Self::UnknownDex | Self::UndefinedRegister { .. } | Self::InvalidWideRead { .. } => {
                 FailureKind::Malformed
             }
-            Self::ArrayFillShape { .. }
+            Self::DefinitionAvailabilityUnproved { .. }
+            | Self::ArrayFillShape { .. }
             | Self::JavaTargetLimit { .. }
             | Self::InitializationUnavailable { .. }
             | Self::BindingEvidenceMissing { .. }

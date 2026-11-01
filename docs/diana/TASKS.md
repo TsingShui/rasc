@@ -4,7 +4,9 @@
 control, method normal/raw reservations and cancellation are implemented;
 T02 typed reader, declaration-index and code-range tests pass. T03 instruction
 layout, whole-method structure and 035 invoke prototype/result tests pass.
-T04 original debug-program and encoded-value snapshot tests pass; no T/H task or engine E2E case is accepted. The frozen draft-7 specification holds 86 required cases and 177 must-run invocation scenarios.**
+T04 original debug-program and encoded-value snapshot tests pass. T15 and T16
+remain pending; the current heap contract review records remaining array-
+construction obligations. EngineCoreRC is not accepted. The frozen draft-7 specification holds 86 required cases and 177 must-run invocation scenarios.**
 This page owns the workflow, preparation, task cards and verification. Read
 [DESIGN.md](DESIGN.md) for interfaces and data, [ALGORITHMS.md](ALGORITHMS.md) for
 algorithms, and [SOURCE_MAP.md](SOURCE_MAP.md) for sources.
@@ -1838,6 +1840,26 @@ switches, automatic restart of branch cascades.
 
 ## T15 — Fields, arrays, explicit check-cast and visible effects
 
+**Progress**: [Shared static int fields](batches/t15-shared-static-fields.md)
+adds ordered `sget/sput` with declaration, constantness and qualifier checks.
+D044's `get` member recovers Java; its required whole-class result still fails.
+[Numeric fields](batches/t15-numeric-fields.md) and
+[array components](batches/t15-array-components.md) add float/wide access,
+descriptor-first load typing and original word-pair checks.
+[Boolean/narrow heap access](batches/t15-narrow-heap.md) adds original truncating
+stores and checked boolean views. [Reference fields](batches/t15-reference-fields.md)
+adds exact/null/Object-widening assignment views and field-produced array types.
+[Nominal type checks](batches/t15-nominal-type-checks.md) adds original casts and
+instanceof. [T15 contract review](batches/t15-acceptance.md) records the executed
+native evidence and fixed cases. [Object[] allocation](batches/t15-reference-array-allocation.md)
+closes Object[] new-array admission. [Filled arrays](batches/t15-filled-arrays.md)
+adds argument/result binding and unused-result storage. [Derived array types](batches/t15-derived-array-types.md)
+adds bounded component identities, multidimensional copies and reference store
+views. The task-scoped T15 profile is verified by 125 core tests, the twenty
+required heap rows and independent JVM Drivers in both representation policies.
+The supplemental float-filled oracle correction is operator-approved and retains
+that original member as classified raw output.
+
 **Dependencies**: T12. **Phase**: P2/P4/P5/P8. **References**: DX-06/08, RG-06.
 
 **Files**: `src/p2_flow/{decode,effects}.rs`, `src/p4_calls/members.rs`,
@@ -1883,10 +1905,17 @@ B(F15).
 **Completion**: Every supported heap op has a throw and effect negative, and the
 original member span is located correctly.
 
-**Not in scope**: A heap alias optimizer, static final constant propagation,
-generic field type projection, removal of an unused throwing expression.
-
 ## T16 — Ordered exception graph and SSA environment per throwing site
+
+**Progress**: [Throw-state batch](batches/t16-throw-state.md) adds checked
+protection products, ordered exception edges, pre-write SSA inputs and handler
+ExceptionAt definitions. The same-register and pure-result-boundary regression
+passes, including verifier rejection of reordered ranks and normal-result
+substitution. Ordered typed/catch-all and shared handlers, a handler throw under
+outer protection, wide old state and resource/cancellation cases pass. The
+operator-approved availability diagnostic distinguishes unproved exceptional
+ingress from definite malformed reads. T16's graph/SSA contract is verified;
+protected Java remains the T18 obligation.
 
 **Dependencies**: T15, T07. **Phase**: P1/P2/P3. **References**: DX-03/07.
 
@@ -1924,13 +1953,10 @@ normal new result, a reordered catch rank, an illegal move-exception target, a
 try in the middle of an instruction. Tests check the environment, not source
 text alone.
 
-**Acceptance**: G0 plus `cargo test -p diana-decomp --test contracts t16_`.
+**Acceptance**: G0 plus `cargo nextest run -p diana-decomp --all-features --locked --test contracts t16_`.
 **Completion**: The exception site and old-state chain certificates are
 complete; while Java protected capability is absent the card does not pass as
 that Java feature, and T18 MUST add B.
-
-**Not in scope**: finally merging, converting every catch-all to finally, a
-general monitor, a dispatcher across a try.
 
 ## T17 — Handler Phi shadow snapshots and exception ingress copies
 

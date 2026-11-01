@@ -1,4 +1,4 @@
-use super::normal::{Definition, SsaBody, Sym, ValueId, lookup, value};
+use super::normal::{Definition, Incoming, SsaBody, Sym, ValueId, lookup, value};
 use crate::p2_flow::normal::{ValueWidth, terminal_register};
 use crate::substrate::owned::push;
 use crate::{CodeUnitOffset, MethodBudget, RegisterId, RequestError};
@@ -38,6 +38,7 @@ pub(super) fn analyze(
     ssa: &SsaBody<'_>,
     seeds: &[(RegisterId, Sym)],
     outgoing: &[Vec<(RegisterId, Sym)>],
+    exceptional: &[Vec<(RegisterId, Sym)>],
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<WidthFacts, RequestError> {
     let mut widths = Vec::new();
@@ -47,6 +48,7 @@ pub(super) fn analyze(
             Definition::Parameter(index) => Fact::Known(ssa.parameters[ix(index)?].width()),
             Definition::OpResult(id) => Fact::Known(ssa.operation(id)?.op.result_width()),
             Definition::Phi => Fact::Unknown,
+            Definition::ExceptionAt(_) => Fact::Known(ValueWidth::One),
         };
         push(&mut widths, fact, budget)?;
     }
@@ -94,10 +96,10 @@ pub(super) fn analyze(
         }
         for &(edge, source) in &phi.inputs {
             budget.charge_work(1)?;
-            let env = if let Some(edge) = edge {
-                outgoing[ix(ssa.edges[ix(edge.0)?].source.0)?].as_slice()
-            } else {
-                seeds
+            let env = match edge {
+                Incoming::Normal(edge) => outgoing[ix(ssa.edges[ix(edge.0)?].source.0)?].as_slice(),
+                Incoming::Exceptional(edge) => exceptional[ix(edge.0)?].as_slice(),
+                Incoming::EntrySeed => seeds,
             };
             if let Sym::Value(source) = source
                 && lookup(env, high(phi.register)?, budget)? != Sym::High(source)

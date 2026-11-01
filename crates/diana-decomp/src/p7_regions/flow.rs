@@ -75,6 +75,11 @@ impl Flow {
                     Transfer::Return
                 }
                 Terminal::Switch { .. } => Transfer::Switch,
+                Terminal::Throw(_) => {
+                    return Err(RequestError::InternalInvariant(
+                        "untyped throw entered region lowering",
+                    ));
+                }
             };
             push(&mut cases, Case { key, transfer }, budget)?;
         }

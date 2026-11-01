@@ -17,7 +17,7 @@ fn push<T>(
     Ok(())
 }
 use crate::p6_variables::normal::local_type as ty;
-fn numeric_view(
+pub(super) fn numeric_view(
     typed: &TypedBody<'_>,
     actual: super::branch::ValueUse,
     source: Option<&crate::p3_ssa::normal::ValueId>,
@@ -206,7 +206,14 @@ fn static_call(
             | (
                 ValueUse::UpcastObject(_),
                 CallFormal::Reference(crate::p5_types::BuiltinReference::Object),
-                Some(Kind::String | Kind::PrimitiveArray(_) | Kind::ObjectArray | Kind::Nominal(_)),
+                Some(
+                    Kind::String
+                    | Kind::PrimitiveArray(_)
+                    | Kind::ObjectArray
+                    | Kind::Nominal(_)
+                    | Kind::ReferenceArray(_)
+                    | Kind::ProjectedNominal(_),
+                ),
             ) => true,
             (ValueUse::Direct(_), CallFormal::Int, Some(Kind::Int))
             | (ValueUse::Direct(_), CallFormal::Boolean, Some(Kind::Boolean))
@@ -249,7 +256,12 @@ fn copies(
             let mut source = None;
             for &(edge, sym) in &phi.inputs {
                 budget.charge_work(1)?;
-                if edge == incoming {
+                if edge
+                    == incoming.map_or(
+                        crate::p3_ssa::normal::Incoming::EntrySeed,
+                        crate::p3_ssa::normal::Incoming::Normal,
+                    )
+                {
                     if source.is_some() {
                         return Err(RequestError::InternalInvariant(
                             "definition certificate has duplicate incoming edges",
@@ -339,8 +351,10 @@ fn edge(
 }
 
 pub(super) fn verify(
+    input: &crate::input::MethodInput<'_, '_>,
     storage: &crate::p6_variables::normal::StorageBody<'_>,
     body: &Dispatcher,
+    names: &super::types::TypeNames,
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<(), RequestError> {
     let ssa = &storage.typed;
@@ -490,9 +504,9 @@ pub(super) fn verify(
                 super::calls::Statement::Initialize(actual) => {
                     super::object_allocation::verify(storage, bound, actual, budget)?
                 }
-                super::calls::Statement::NewArray(actual) => {
-                    super::fresh_fill::verify_allocation(ssa, bound, actual, budget)?
-                }
+                super::calls::Statement::NewArray(actual) => super::fresh_fill::verify_allocation(
+                    input, storage, bound, actual, names, budget,
+                )?,
                 super::calls::Statement::FreshFill(actual) => {
                     super::fresh_fill::verify_fill(storage, bound, actual, budget)?
                 }
@@ -515,8 +529,8 @@ pub(super) fn verify(
                         false
                     }
                 }
-                super::calls::Statement::Cast(actual) => {
-                    super::cast_ops::verify(ssa, bound, actual, budget)?
+                super::calls::Statement::TypeCheck(actual) => {
+                    super::cast_ops::verify(ssa, bound, actual, names, budget)?
                 }
                 super::calls::Statement::String {
                     target,
@@ -565,7 +579,7 @@ pub(super) fn verify(
                     super::field_ops::verify(ssa, bound, actual, budget)?
                 }
                 super::calls::Statement::Array(actual) => {
-                    super::array_ops::verify(ssa, bound, actual, budget)?
+                    super::array_ops::verify(input, ssa, bound, actual, budget)?
                 }
                 super::calls::Statement::Assignment(actual) => {
                     bound.result.map(|id| id.0) == Some(actual.target.0)
@@ -675,6 +689,7 @@ pub(super) fn verify(
                         let at = ix(actual.value().0)?;
                         use super::branch::ValueUse;
                         !match actual {
+                            ValueUse::NullAssignment(_) | ValueUse::ObjectArrayView(_) => false,
                             ValueUse::Null { kind, .. } => {
                                 let declared = match result {
                                     crate::pipeline::branch::DeclarationType::Object => {
@@ -704,6 +719,8 @@ pub(super) fn verify(
                                         Some(
                                             Kind::String
                                                 | Kind::Nominal(_)
+                                                | Kind::ReferenceArray(_)
+                                                | Kind::ProjectedNominal(_)
                                                 | Kind::PrimitiveArray(_)
                                                 | Kind::ObjectArray
                                         )
@@ -720,6 +737,12 @@ pub(super) fn verify(
                                         | crate::pipeline::branch::DeclarationType::Object
                                         | crate::pipeline::branch::DeclarationType::String
                                         | crate::pipeline::branch::DeclarationType::Nominal(_)
+                                        | crate::pipeline::branch::DeclarationType::ReferenceArray(
+                                            _
+                                        )
+                                        | crate::pipeline::branch::DeclarationType::ProjectedNominal(
+                                            _
+                                        )
                                         | crate::pipeline::branch::DeclarationType::PrimitiveArray(
                                             _
                                         )

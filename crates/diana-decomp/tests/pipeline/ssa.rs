@@ -9,6 +9,285 @@ struct PipelineFacts {
 }
 
 #[test]
+fn t15_derived_array_components_preserve_store_checks_and_copy_cycles() {
+    enum Context {
+        Complete,
+        MissingComponent,
+        ShadowedJava,
+        ReturnCollision,
+    }
+    use Context::{Complete, MissingComponent, ReturnCollision, ShadowedJava};
+    for policy in [
+        diana_decomp::RepresentationPolicy::default(),
+        diana_decomp::RepresentationPolicy::DispatchOnly,
+    ] {
+        for (name, prototype, context, failure) in [
+            ("callRows", "(I)I", Complete, None),
+            (
+                "callRows",
+                "(I)I",
+                ReturnCollision,
+                Some((
+                    FailureKind::Unsupported,
+                    DiagnosticCode::BindingEvidenceMissing,
+                )),
+            ),
+            ("callFloat", "()F", Complete, None),
+            ("negativeZero", "()[F", Complete, None),
+            (
+                "castLeaf",
+                "(Ljava/lang/Object;)Ljava/lang/Object;",
+                Complete,
+                None,
+            ),
+            ("unusedCast", "(Ljava/lang/Object;)V", Complete, None),
+            ("isDetached", "(Ljava/lang/Object;)Z", Complete, None),
+            (
+                "swap",
+                "([[[Lfixtures/Detached;[[[Lfixtures/Detached;I)Ljava/lang/Object;",
+                Complete,
+                None,
+            ),
+            ("newDetached", "(I)[[[Lfixtures/Detached;", Complete, None),
+            ("nested", "([[III)I", Complete, None),
+            ("matrixStore", "([[ILjava/lang/Object;)V", Complete, None),
+            (
+                "stringsGet",
+                "([Ljava/lang/String;I)Ljava/lang/String;",
+                Complete,
+                None,
+            ),
+            (
+                "stringsStore",
+                "([Ljava/lang/String;Ljava/lang/Object;)V",
+                Complete,
+                None,
+            ),
+            (
+                "filledTypedStrings",
+                "(Ljava/lang/String;Ljava/lang/String;)[Ljava/lang/String;",
+                Complete,
+                None,
+            ),
+            (
+                "filledStrings",
+                "(Ljava/lang/Object;Ljava/lang/Object;)[Ljava/lang/String;",
+                Complete,
+                Some((
+                    FailureKind::Unsupported,
+                    DiagnosticCode::JavaAnalysisUnavailable,
+                )),
+            ),
+            (
+                "badWide",
+                "([[I)J",
+                Complete,
+                Some((
+                    FailureKind::Malformed,
+                    DiagnosticCode::MethodMalformed(
+                        diana_decomp::input::MethodProblem::InvalidArrayAccessType,
+                    ),
+                )),
+            ),
+            (
+                "newDetached",
+                "(I)[[[Lfixtures/Detached;",
+                MissingComponent,
+                Some((
+                    FailureKind::Unsupported,
+                    DiagnosticCode::BranchJavaUnsupported,
+                )),
+            ),
+            (
+                "matrixStore",
+                "([[ILjava/lang/Object;)V",
+                ShadowedJava,
+                Some((
+                    FailureKind::Unsupported,
+                    DiagnosticCode::BranchJavaUnsupported,
+                )),
+            ),
+        ] {
+            let mut facts: PipelineFacts =
+                serde_json::from_str(include_str!("../fixtures/numeric-fields/catalog.json"))
+                    .unwrap();
+            match context {
+                Complete => {}
+                ReturnCollision => {
+                    let owner: Vec<u16> = "Lfixtures/Projection;".encode_utf16().collect();
+                    facts
+                        .classes
+                        .iter_mut()
+                        .find(|class| class.descriptor == owner)
+                        .unwrap()
+                        .methods
+                        .push(diana_decomp::ExternalMethodDeclaration {
+                            name: "newDetached".encode_utf16().collect(),
+                            prototype: "(I)Ljava/lang/Object;".encode_utf16().collect(),
+                            access_flags: 9,
+                            throws: Some(Vec::new()),
+                            generic: false,
+                        });
+                }
+                MissingComponent => {
+                    let target: Vec<u16> = "Lfixtures/Detached;".encode_utf16().collect();
+                    facts.classes.retain(|class| class.descriptor != target);
+                }
+                ShadowedJava => {
+                    let caller: Vec<u16> = "Lfixtures/Projection;".encode_utf16().collect();
+                    facts
+                        .classes
+                        .iter_mut()
+                        .find(|class| class.descriptor == caller)
+                        .unwrap()
+                        .field_names
+                        .push("java".encode_utf16().collect());
+                }
+            }
+            let catalog = DeclarationCatalog::with_declarations(
+                EnvironmentId(facts.environment_id),
+                facts.methods,
+                facts.classes,
+            )
+            .with_field_evidence(facts.fields);
+            let mut control = RunContext::new(Limits::default(), &|| false);
+            let engine = Engine::open(
+                vec![DexImage {
+                    bytes: include_bytes!("../fixtures/numeric-fields/projected.dex"),
+                    header_offset: ByteOffset(0),
+                    origin: ImageOrigin { input: InputId(0) },
+                }],
+                Options::default(),
+                catalog,
+                &mut control,
+            )
+            .unwrap()
+            .with_representation(policy);
+            let report = engine
+                .decompile(
+                    Request {
+                        class: ClassKey {
+                            dex: DexId(0),
+                            class_def: ClassDefId(0),
+                        },
+                        method: Some(MethodSelector {
+                            name: name.encode_utf16().collect(),
+                            prototype: prototype.encode_utf16().collect(),
+                        }),
+                    },
+                    &mut control,
+                )
+                .unwrap();
+            let ClassOutput::Mixed { members, .. } = report.class();
+            if let Some((kind, code)) = failure {
+                let reason = match &members[0] {
+                    MethodOutput::Debug { reason, .. }
+                    | MethodOutput::Unavailable { reason, .. } => reason,
+                    _ => panic!("unproved array became Java: {name}"),
+                };
+                assert_eq!(report.diagnostics()[reason.0].cause.kind(), kind, "{name}");
+                assert_eq!(report.diagnostics()[reason.0].code(), code, "{name}");
+            } else {
+                assert!(
+                    matches!(&members[0], MethodOutput::Java { .. }),
+                    "derived array failed: {name}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn t16_exception_availability_keeps_failure_kind_and_other_original_members() {
+    let facts: PipelineFacts =
+        serde_json::from_str(include_str!("../fixtures/throw-state/catalog.json")).unwrap();
+    let mut control = RunContext::new(Limits::default(), &|| false);
+    let engine = Engine::open(
+        vec![DexImage {
+            bytes: include_bytes!("../fixtures/throw-state/classes.dex"),
+            header_offset: ByteOffset(0),
+            origin: ImageOrigin { input: InputId(0) },
+        }],
+        Options::default(),
+        DeclarationCatalog::with_declarations(
+            EnvironmentId(facts.environment_id),
+            facts.methods,
+            facts.classes,
+        ),
+        &mut control,
+    )
+    .unwrap();
+    let report = engine
+        .decompile(
+            Request {
+                class: ClassKey {
+                    dex: DexId(0),
+                    class_def: ClassDefId(0),
+                },
+                method: None,
+            },
+            &mut control,
+        )
+        .unwrap();
+    let ClassOutput::Mixed { members, .. } = report.class();
+    assert_eq!(members.len(), 9);
+    for (method, kind, code) in [
+        (
+            1,
+            FailureKind::Unsupported,
+            DiagnosticCode::JavaAnalysisUnavailable,
+        ),
+        (
+            2,
+            FailureKind::Unsupported,
+            DiagnosticCode::JavaAnalysisUnavailable,
+        ),
+        (
+            3,
+            FailureKind::Unsupported,
+            DiagnosticCode::DefinitionAvailabilityUnproved,
+        ),
+        (
+            4,
+            FailureKind::Unsupported,
+            DiagnosticCode::JavaAnalysisUnavailable,
+        ),
+        (5, FailureKind::Malformed, DiagnosticCode::UndefinedRegister),
+        (
+            6,
+            FailureKind::Unsupported,
+            DiagnosticCode::JavaAnalysisUnavailable,
+        ),
+        (
+            7,
+            FailureKind::Unsupported,
+            DiagnosticCode::JavaAnalysisUnavailable,
+        ),
+        (
+            8,
+            FailureKind::Unsupported,
+            DiagnosticCode::JavaAnalysisUnavailable,
+        ),
+        (
+            9,
+            FailureKind::Unsupported,
+            DiagnosticCode::JavaAnalysisUnavailable,
+        ),
+    ] {
+        let member = members
+            .iter()
+            .find(|member| member.key().method == diana_decomp::MethodId(method))
+            .unwrap();
+        let reason = match member {
+            MethodOutput::Debug { reason, .. } | MethodOutput::Unavailable { reason, .. } => reason,
+            _ => panic!("unverified protected method became Java"),
+        };
+        assert_eq!(report.diagnostics()[reason.0].cause.kind(), kind);
+        assert_eq!(report.diagnostics()[reason.0].code(), code);
+    }
+}
+
+#[test]
 fn t09_ordinary_dispatcher_rejects_even_an_unthrowing_protected_method() {
     let mut fixture = super::fixture::tiny("f", true, false);
     let instructions = fixture.code[0] + 16;
@@ -453,36 +732,591 @@ fn nominal_types_keep_distinct_identities_and_owned_names_without_guessing_missi
 }
 
 #[test]
+fn static_fields_require_init_preserving_bindings_and_constantness() {
+    #[derive(Clone, Copy)]
+    enum Evidence {
+        Complete,
+        Missing,
+        NonVolatile,
+        Constant,
+        UnknownConstantness,
+        Shadowed,
+    }
+    for policy in [
+        diana_decomp::RepresentationPolicy::StructuredThenDispatch,
+        diana_decomp::RepresentationPolicy::DispatchOnly,
+    ] {
+        for (name, evidence_cases) in [
+            (
+                "read",
+                &[
+                    Evidence::Complete,
+                    Evidence::Missing,
+                    Evidence::NonVolatile,
+                    Evidence::Shadowed,
+                ][..],
+            ),
+            (
+                "write",
+                &[Evidence::Complete, Evidence::Missing, Evidence::NonVolatile][..],
+            ),
+            ("unused", &[Evidence::Complete][..]),
+            (
+                "readFinal",
+                &[
+                    Evidence::Complete,
+                    Evidence::Constant,
+                    Evidence::UnknownConstantness,
+                ][..],
+            ),
+            (
+                "unusedFinal",
+                &[
+                    Evidence::Complete,
+                    Evidence::Constant,
+                    Evidence::UnknownConstantness,
+                ][..],
+            ),
+        ] {
+            for &evidence in evidence_cases {
+                let mut facts: PipelineFacts =
+                    serde_json::from_str(include_str!("../fixtures/static-fields/catalog.json"))
+                        .unwrap();
+                let expected = match evidence {
+                    Evidence::Complete => None,
+                    Evidence::Missing => {
+                        facts.fields.clear();
+                        Some(DiagnosticCode::BindingEvidenceMissing)
+                    }
+                    Evidence::NonVolatile => {
+                        for field in &mut facts.fields {
+                            field.access_flags &= !0x40;
+                        }
+                        Some(DiagnosticCode::BindingEvidenceMissing)
+                    }
+                    Evidence::Constant | Evidence::UnknownConstantness => {
+                        for field in &mut facts.fields {
+                            if field.name == [78] {
+                                field.constant_kind = if matches!(evidence, Evidence::Constant) {
+                                    diana_decomp::JavaConstantKind::Constant
+                                } else {
+                                    diana_decomp::JavaConstantKind::Unknown
+                                };
+                            }
+                        }
+                        Some(if matches!(evidence, Evidence::Constant) {
+                            DiagnosticCode::JavaConstantFieldRead
+                        } else {
+                            DiagnosticCode::BindingEvidenceMissing
+                        })
+                    }
+                    Evidence::Shadowed => {
+                        let caller: Vec<u16> = "Lfixtures/Reader;".encode_utf16().collect();
+                        let class = facts
+                            .classes
+                            .iter_mut()
+                            .find(|class| class.descriptor == caller)
+                            .unwrap();
+                        class.field_names.push("fixtures".encode_utf16().collect());
+                        Some(DiagnosticCode::BindingEvidenceMissing)
+                    }
+                };
+                let catalog = DeclarationCatalog::with_declarations(
+                    EnvironmentId(facts.environment_id),
+                    facts.methods,
+                    facts.classes,
+                )
+                .with_field_evidence(facts.fields);
+                let mut control = RunContext::new(Limits::default(), &|| false);
+                let engine = Engine::open(
+                    vec![DexImage {
+                        bytes: include_bytes!("../fixtures/static-fields/classes.dex"),
+                        header_offset: ByteOffset(0),
+                        origin: ImageOrigin { input: InputId(0) },
+                    }],
+                    Options::default(),
+                    catalog,
+                    &mut control,
+                )
+                .unwrap()
+                .with_representation(policy);
+                let report = engine
+                    .decompile(
+                        Request {
+                            class: ClassKey {
+                                dex: DexId(0),
+                                class_def: ClassDefId(3),
+                            },
+                            method: Some(MethodSelector {
+                                name: name.encode_utf16().collect(),
+                                prototype: "()I".encode_utf16().collect(),
+                            }),
+                        },
+                        &mut control,
+                    )
+                    .unwrap();
+                let ClassOutput::Mixed { members, .. } = report.class();
+                match expected {
+                    None => assert!(
+                        matches!(&members[0], MethodOutput::Java { .. }),
+                        "static field failed for {name}"
+                    ),
+                    Some(code) => {
+                        let reason = match &members[0] {
+                            MethodOutput::Debug { reason, .. }
+                            | MethodOutput::Unavailable { reason, .. } => reason,
+                            _ => panic!("unproved static access produced trusted Java"),
+                        };
+                        let diagnostic = &report.diagnostics()[reason.0];
+                        assert_eq!(diagnostic.cause.kind(), FailureKind::Unsupported);
+                        assert_eq!(diagnostic.code(), code);
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn heap_widths_descriptors_and_store_views_are_checked() {
+    enum Expected {
+        Java,
+        Rejected(FailureKind, DiagnosticCode),
+    }
+    use Expected::{Java, Rejected};
+    for (name, prototype, expected) in [
+        (
+            "filledObjects",
+            "(Ljava/lang/Object;Ljava/lang/Object;)[Ljava/lang/Object;",
+            Java,
+        ),
+        ("filledInts", "(II)[I", Java),
+        (
+            "filledFloats",
+            "(FF)[F",
+            Rejected(
+                FailureKind::Unsupported,
+                DiagnosticCode::JavaAnalysisUnavailable,
+            ),
+        ),
+        ("filledRange", "(IIIIII)[I", Java),
+        ("filledUnused", "(II)V", Java),
+        ("filledReuse", "(II)[I", Java),
+        ("filledZero", "()[Ljava/lang/Object;", Java),
+        (
+            "filledWrongResult",
+            "()V",
+            Rejected(
+                FailureKind::Malformed,
+                DiagnosticCode::MethodMalformed(
+                    diana_decomp::input::MethodProblem::InvalidResultKind,
+                ),
+            ),
+        ),
+        (
+            "objectPayload",
+            "()V",
+            Rejected(
+                FailureKind::Malformed,
+                DiagnosticCode::MethodMalformed(
+                    diana_decomp::input::MethodProblem::InvalidArrayPayloadType,
+                ),
+            ),
+        ),
+        ("castUnrelated", "(Ljava/lang/String;)Lfixtures/Box;", Java),
+        ("testUnrelated", "(Ljava/lang/String;)Z", Java),
+        (
+            "primitiveCast",
+            "(I)V",
+            Rejected(
+                FailureKind::Malformed,
+                DiagnosticCode::MethodMalformed(
+                    diana_decomp::input::MethodProblem::InvalidTypeOperand,
+                ),
+            ),
+        ),
+        (
+            "badTarget",
+            "(Ljava/lang/Object;)V",
+            Rejected(
+                FailureKind::Malformed,
+                DiagnosticCode::MethodMalformed(
+                    diana_decomp::input::MethodProblem::InvalidTypeOperand,
+                ),
+            ),
+        ),
+        (
+            "badInstanceTarget",
+            "(Ljava/lang/Object;)Z",
+            Rejected(
+                FailureKind::Malformed,
+                DiagnosticCode::MethodMalformed(
+                    diana_decomp::input::MethodProblem::InvalidTypeOperand,
+                ),
+            ),
+        ),
+        ("peerExact", "(Lfixtures/Box;Lfixtures/Box;)V", Java),
+        (
+            "peerMissingProof",
+            "(Lfixtures/Box;Ljava/lang/Object;)V",
+            Rejected(
+                FailureKind::Unsupported,
+                DiagnosticCode::JavaAnalysisUnavailable,
+            ),
+        ),
+        ("storeByte", "([BI)I", Java),
+        ("booleanProof", "([ZI)Z", Java),
+        (
+            "booleanUnknown",
+            "([ZI)V",
+            Rejected(
+                FailureKind::Unsupported,
+                DiagnosticCode::JavaAnalysisUnavailable,
+            ),
+        ),
+        (
+            "arrayOverwrittenLoad",
+            "([J)J",
+            Rejected(FailureKind::Malformed, DiagnosticCode::InvalidWideRead),
+        ),
+        (
+            "arrayPartialStore",
+            "([JJ)V",
+            Rejected(FailureKind::Malformed, DiagnosticCode::InvalidWideRead),
+        ),
+        (
+            "wrongArray",
+            "([B)I",
+            Rejected(
+                FailureKind::Malformed,
+                DiagnosticCode::MethodMalformed(
+                    diana_decomp::input::MethodProblem::InvalidArrayAccessType,
+                ),
+            ),
+        ),
+        (
+            "overwrittenLoad",
+            "(Lfixtures/Invalid;)J",
+            Rejected(FailureKind::Malformed, DiagnosticCode::InvalidWideRead),
+        ),
+        (
+            "partialStore",
+            "(Lfixtures/Invalid;J)V",
+            Rejected(FailureKind::Malformed, DiagnosticCode::InvalidWideRead),
+        ),
+        (
+            "wrongKind",
+            "(Lfixtures/Invalid;)J",
+            Rejected(
+                FailureKind::Malformed,
+                DiagnosticCode::MethodMalformed(
+                    diana_decomp::input::MethodProblem::InvalidFieldKind,
+                ),
+            ),
+        ),
+    ] {
+        let facts: PipelineFacts =
+            serde_json::from_str(include_str!("../fixtures/numeric-fields/catalog.json")).unwrap();
+        let catalog = DeclarationCatalog::with_declarations(
+            EnvironmentId(facts.environment_id),
+            facts.methods,
+            facts.classes,
+        )
+        .with_field_evidence(facts.fields);
+        let mut control = RunContext::new(Limits::default(), &|| false);
+        let engine = Engine::open(
+            vec![DexImage {
+                bytes: include_bytes!("../fixtures/numeric-fields/invalid.dex"),
+                header_offset: ByteOffset(0),
+                origin: ImageOrigin { input: InputId(0) },
+            }],
+            Options::default(),
+            catalog,
+            &mut control,
+        )
+        .unwrap();
+        let report = engine
+            .decompile(
+                Request {
+                    class: ClassKey {
+                        dex: DexId(0),
+                        class_def: ClassDefId(0),
+                    },
+                    method: Some(MethodSelector {
+                        name: name.encode_utf16().collect(),
+                        prototype: prototype.encode_utf16().collect(),
+                    }),
+                },
+                &mut control,
+            )
+            .unwrap();
+        let ClassOutput::Mixed { members, .. } = report.class();
+        match expected {
+            Java => assert!(
+                matches!(&members[0], MethodOutput::Java { .. }),
+                "store proof failed for {name}"
+            ),
+            Rejected(kind, code) => {
+                let reason = match &members[0] {
+                    MethodOutput::Debug { reason, .. }
+                    | MethodOutput::Unavailable { reason, .. } => reason,
+                    _ => panic!("invalid or unproved heap access produced Java"),
+                };
+                let diagnostic = &report.diagnostics()[reason.0];
+                assert_eq!(diagnostic.cause.kind(), kind);
+                assert_eq!(diagnostic.code(), code);
+            }
+        }
+    }
+}
+
+#[test]
 fn field_call_array_composition_preserves_native_volatile_declaration_evidence() {
     #[derive(Clone, Copy)]
     enum Evidence {
         Complete,
         Missing,
         NonVolatile,
+        UnknownConstantness,
+        MissingType,
+        ShadowedJava,
     }
     for policy in [
         diana_decomp::RepresentationPolicy::StructuredThenDispatch,
         diana_decomp::RepresentationPolicy::DispatchOnly,
     ] {
         let field_evidence = &[Evidence::Complete, Evidence::Missing, Evidence::NonVolatile][..];
-        for (class_id, name, prototype, evidence_cases) in [
-            (1, "combine", "(Lfixtures/Box;[II)I", field_evidence),
-            (1, "repeat", "(Lfixtures/Box;[II)I", field_evidence),
-            (1, "unused", "(Lfixtures/Box;[I)V", field_evidence),
+        for (numeric, class_id, name, prototype, evidence_cases) in [
             (
+                true,
+                1,
+                "objects",
+                "(ILjava/lang/Object;)[Ljava/lang/Object;",
+                &[Evidence::Complete, Evidence::ShadowedJava][..],
+            ),
+            (
+                true,
+                1,
+                "zeroObjects",
+                "(I)[Ljava/lang/Object;",
+                &[Evidence::Complete][..],
+            ),
+            (true, 1, "unusedObjects", "(I)V", &[Evidence::Complete][..]),
+            (
+                true,
+                1,
+                "asPeer",
+                "(Ljava/lang/Object;)Lfixtures/Box;",
+                &[Evidence::Complete, Evidence::MissingType][..],
+            ),
+            (
+                true,
+                1,
+                "unusedCast",
+                "(Ljava/lang/Object;)V",
+                &[Evidence::Complete, Evidence::MissingType][..],
+            ),
+            (
+                true,
+                1,
+                "isPeer",
+                "(Ljava/lang/Object;)Z",
+                &[Evidence::Complete, Evidence::MissingType][..],
+            ),
+            (
+                true,
+                1,
+                "asFloats",
+                "(Ljava/lang/Object;I)F",
+                &[Evidence::Complete][..],
+            ),
+            (
+                true,
+                1,
+                "isFloats",
+                "(Ljava/lang/Object;)Z",
+                &[Evidence::Complete][..],
+            ),
+            (
+                true,
+                1,
+                "exchangeObject",
+                "(Lfixtures/Box;Ljava/lang/Object;)Ljava/lang/Object;",
+                field_evidence,
+            ),
+            (
+                true,
+                1,
+                "exchangeString",
+                "(Lfixtures/Box;Ljava/lang/String;)Ljava/lang/String;",
+                field_evidence,
+            ),
+            (
+                true,
+                1,
+                "exchangePeer",
+                "(Lfixtures/Box;Lfixtures/Box;)Lfixtures/Box;",
+                field_evidence,
+            ),
+            (
+                true,
+                1,
+                "exchangeValues",
+                "(Lfixtures/Box;[F)[F",
+                field_evidence,
+            ),
+            (true, 1, "fieldArray", "(Lfixtures/Box;IF)F", field_evidence),
+            (
+                true,
+                1,
+                "staticReference",
+                "(Ljava/lang/Object;)Ljava/lang/Object;",
+                field_evidence,
+            ),
+            (
+                true,
+                1,
+                "nullReferences",
+                "(Lfixtures/Box;)Lfixtures/Box;",
+                field_evidence,
+            ),
+            (
+                true,
+                1,
+                "widenPeer",
+                "(Lfixtures/Box;Lfixtures/Box;)Ljava/lang/Object;",
+                field_evidence,
+            ),
+            (
+                true,
+                1,
+                "unusedReferences",
+                "(Lfixtures/Box;)V",
+                &[
+                    Evidence::Complete,
+                    Evidence::Missing,
+                    Evidence::NonVolatile,
+                    Evidence::UnknownConstantness,
+                ][..],
+            ),
+            (
+                true,
+                1,
+                "exchangeByte",
+                "(Lfixtures/Box;I)I",
+                field_evidence,
+            ),
+            (
+                true,
+                1,
+                "exchangeShort",
+                "(Lfixtures/Box;I)I",
+                field_evidence,
+            ),
+            (
+                true,
+                1,
+                "exchangeChar",
+                "(Lfixtures/Box;I)I",
+                field_evidence,
+            ),
+            (
+                true,
+                1,
+                "exchangeBoolean",
+                "(Lfixtures/Box;Z)Z",
+                field_evidence,
+            ),
+            (true, 1, "staticByte", "(I)I", field_evidence),
+            (true, 1, "staticShort", "(I)I", field_evidence),
+            (true, 1, "staticChar", "(I)I", field_evidence),
+            (true, 1, "staticBoolean", "(Z)Z", field_evidence),
+            (true, 1, "arrayByte", "([BII)I", &[Evidence::Complete][..]),
+            (true, 1, "arrayShort", "([SII)I", &[Evidence::Complete][..]),
+            (true, 1, "arrayChar", "([CII)I", &[Evidence::Complete][..]),
+            (
+                true,
+                1,
+                "arrayBoolean",
+                "([ZIZ)Z",
+                &[Evidence::Complete][..],
+            ),
+            (true, 1, "arrayLong", "([JIJ)J", &[Evidence::Complete][..]),
+            (true, 1, "arrayDouble", "([DID)D", &[Evidence::Complete][..]),
+            (true, 1, "arrayFloat", "([FIF)F", &[Evidence::Complete][..]),
+            (
+                true,
+                1,
+                "arrayUnused",
+                "([F[D[J)V",
+                &[Evidence::Complete][..],
+            ),
+            (
+                true,
+                1,
+                "arrayLiterals",
+                "([F[D[J)V",
+                &[Evidence::Complete][..],
+            ),
+            (
+                true,
+                1,
+                "chooseFloat",
+                "([F[FZI)F",
+                &[Evidence::Complete][..],
+            ),
+            (
+                true,
+                1,
+                "exchangeLong",
+                "(Lfixtures/Box;J)J",
+                field_evidence,
+            ),
+            (
+                true,
+                1,
+                "exchangeDouble",
+                "(Lfixtures/Box;D)D",
+                field_evidence,
+            ),
+            (
+                true,
+                1,
+                "exchangeFloat",
+                "(Lfixtures/Box;F)F",
+                field_evidence,
+            ),
+            (true, 1, "staticLong", "(J)J", field_evidence),
+            (true, 1, "staticDouble", "(D)D", field_evidence),
+            (true, 1, "staticFloat", "(F)F", field_evidence),
+            (true, 1, "literals", "(Lfixtures/Box;)V", field_evidence),
+            (true, 1, "unused", "(Lfixtures/Box;)V", field_evidence),
+            (false, 1, "combine", "(Lfixtures/Box;[II)I", field_evidence),
+            (false, 1, "repeat", "(Lfixtures/Box;[II)I", field_evidence),
+            (false, 1, "unused", "(Lfixtures/Box;[I)V", field_evidence),
+            (
+                false,
                 1,
                 "invoke",
                 "(Lfixtures/Reader;Lfixtures/Box;[II)I",
                 field_evidence,
             ),
-            (4, "direct", "(I)I", &[Evidence::Complete][..]),
-            (5, "value", "(I)I", &[Evidence::Complete][..]),
+            (false, 4, "direct", "(I)I", &[Evidence::Complete][..]),
+            (false, 5, "value", "(I)I", &[Evidence::Complete][..]),
         ] {
             for &evidence in evidence_cases {
-                let bytes = include_bytes!("../fixtures/shared-fields/classes.dex");
-                let mut facts: PipelineFacts =
-                    serde_json::from_str(include_str!("../fixtures/shared-fields/catalog.json"))
-                        .unwrap();
+                let (bytes, catalog): (&[u8], &str) = if numeric {
+                    (
+                        include_bytes!("../fixtures/numeric-fields/classes.dex"),
+                        include_str!("../fixtures/numeric-fields/catalog.json"),
+                    )
+                } else {
+                    (
+                        include_bytes!("../fixtures/shared-fields/classes.dex"),
+                        include_str!("../fixtures/shared-fields/catalog.json"),
+                    )
+                };
+                let mut facts: PipelineFacts = serde_json::from_str(catalog).unwrap();
                 match evidence {
                     Evidence::Complete => {}
                     Evidence::Missing => facts.fields.clear(),
@@ -490,6 +1324,24 @@ fn field_call_array_composition_preserves_native_volatile_declaration_evidence()
                         for field in &mut facts.fields {
                             field.access_flags &= !0x40;
                         }
+                    }
+                    Evidence::UnknownConstantness => {
+                        for field in &mut facts.fields {
+                            field.constant_kind = diana_decomp::JavaConstantKind::Unknown;
+                        }
+                    }
+                    Evidence::MissingType => {
+                        let target: Vec<u16> = "Lfixtures/Box;".encode_utf16().collect();
+                        facts.classes.retain(|class| class.descriptor != target);
+                    }
+                    Evidence::ShadowedJava => {
+                        let caller: Vec<u16> = "Lfixtures/Case;".encode_utf16().collect();
+                        let class = facts
+                            .classes
+                            .iter_mut()
+                            .find(|class| class.descriptor == caller)
+                            .unwrap();
+                        class.field_names.push("java".encode_utf16().collect());
                     }
                 }
                 let catalog = DeclarationCatalog::with_declarations(
@@ -528,11 +1380,14 @@ fn field_call_array_composition_preserves_native_volatile_declaration_evidence()
                     .unwrap();
                 let ClassOutput::Mixed { members, .. } = report.class();
                 match evidence {
-                    Evidence::Complete => assert!(
+                    Evidence::Complete | Evidence::UnknownConstantness => assert!(
                         matches!(&members[0], MethodOutput::Java { .. }),
                         "shared field composition failed for {name}"
                     ),
-                    Evidence::Missing | Evidence::NonVolatile => {
+                    Evidence::Missing
+                    | Evidence::NonVolatile
+                    | Evidence::MissingType
+                    | Evidence::ShadowedJava => {
                         let reason = match &members[0] {
                             MethodOutput::Debug { reason, .. }
                             | MethodOutput::Unavailable { reason, .. } => reason,
@@ -542,7 +1397,14 @@ fn field_call_array_composition_preserves_native_volatile_declaration_evidence()
                         };
                         let diagnostic = &report.diagnostics()[reason.0];
                         assert_eq!(diagnostic.cause.kind(), FailureKind::Unsupported);
-                        assert_eq!(diagnostic.code(), DiagnosticCode::BindingEvidenceMissing);
+                        assert_eq!(
+                            diagnostic.code(),
+                            if matches!(evidence, Evidence::MissingType | Evidence::ShadowedJava) {
+                                DiagnosticCode::BranchJavaUnsupported
+                            } else {
+                                DiagnosticCode::BindingEvidenceMissing
+                            }
+                        );
                     }
                 }
             }

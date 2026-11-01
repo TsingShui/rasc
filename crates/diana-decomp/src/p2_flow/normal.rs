@@ -8,7 +8,7 @@ use crate::{CodeUnitOffset, MethodBudget, RegisterId, RequestError};
 pub(crate) struct BlockId(pub u32);
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct EdgeId(pub u32);
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Eq, PartialEq)]
 pub(crate) enum DeclarationType {
     Long,
     Double,
@@ -20,9 +20,28 @@ pub(crate) enum DeclarationType {
     PrimitiveArray(crate::p5_types::PrimitiveArray),
     ObjectArray,
     Nominal(crate::TypeId),
+    ReferenceArray(crate::input::TypeProjection),
+    ProjectedNominal(crate::input::TypeProjection),
     Narrow(crate::p5_types::Narrow),
 }
 impl DeclarationType {
+    pub(crate) fn field_offset(self) -> u8 {
+        match self {
+            Self::Int | Self::Float => 0,
+            Self::Long | Self::Double => 1,
+            Self::Boolean => 3,
+            Self::Narrow(crate::p5_types::Narrow::Byte) => 4,
+            Self::Narrow(crate::p5_types::Narrow::Char) => 5,
+            Self::Narrow(crate::p5_types::Narrow::Short) => 6,
+            Self::Object
+            | Self::String
+            | Self::PrimitiveArray(_)
+            | Self::ObjectArray
+            | Self::Nominal(_)
+            | Self::ReferenceArray(_)
+            | Self::ProjectedNominal(_) => 2,
+        }
+    }
     pub(crate) fn width(self) -> ValueWidth {
         if matches!(self, Self::Long | Self::Double) {
             ValueWidth::Two
@@ -42,6 +61,8 @@ impl DeclarationType {
             Self::PrimitiveArray(kind) => Kind::PrimitiveArray(kind),
             Self::ObjectArray => Kind::ObjectArray,
             Self::Nominal(id) => Kind::Nominal(id),
+            Self::ReferenceArray(key) => Kind::ReferenceArray(key),
+            Self::ProjectedNominal(key) => Kind::ProjectedNominal(key),
         }
     }
     pub(crate) fn range(self) -> Option<crate::p5_types::IntRange> {
@@ -57,7 +78,9 @@ impl DeclarationType {
             | Self::Double
             | Self::PrimitiveArray(_)
             | Self::ObjectArray
-            | Self::Nominal(_) => None,
+            | Self::Nominal(_)
+            | Self::ReferenceArray(_)
+            | Self::ProjectedNominal(_) => None,
         }
     }
 }
@@ -171,9 +194,78 @@ pub(crate) struct ObjectCreationId(pub u32);
 pub(crate) struct ObjectCreation {
     pub reference: crate::TypeId,
 }
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub(crate) enum ArrayKind {
+    Primitive(crate::p5_types::PrimitiveArray),
+    Object,
+    Reference(crate::input::TypeProjection),
+}
+impl ArrayKind {
+    pub(crate) fn parse(
+        input: &MethodInput<'_, '_>,
+        id: crate::TypeId,
+        budget: &mut MethodBudget<'_, '_>,
+    ) -> Result<Option<Self>, RequestError> {
+        Ok(
+            match declaration_for_projection(input, input.type_projection(id, budget)?, budget)? {
+                Some(DeclarationType::PrimitiveArray(kind)) => Some(Self::Primitive(kind)),
+                Some(DeclarationType::ObjectArray) => Some(Self::Object),
+                Some(DeclarationType::ReferenceArray(key)) => Some(Self::Reference(key)),
+                _ => None,
+            },
+        )
+    }
+    pub(crate) fn element_type(
+        self,
+        input: &MethodInput<'_, '_>,
+        budget: &mut MethodBudget<'_, '_>,
+    ) -> Result<DeclarationType, RequestError> {
+        match self {
+            Self::Primitive(kind) => Ok(kind.value_type()),
+            Self::Object => Ok(DeclarationType::Object),
+            Self::Reference(key) => {
+                declaration_for_projection(input, input.component_projection(key, budget)?, budget)?
+                    .ok_or(RequestError::InternalInvariant(
+                        "array lost a component type",
+                    ))
+            }
+        }
+    }
+    pub(crate) fn object_descriptor() -> &'static [u16] {
+        &[
+            91, 76, 106, 97, 118, 97, 47, 108, 97, 110, 103, 47, 79, 98, 106, 101, 99, 116, 59,
+        ]
+    }
+    pub(crate) fn declaration(self) -> DeclarationType {
+        match self {
+            Self::Primitive(kind) => DeclarationType::PrimitiveArray(kind),
+            Self::Object => DeclarationType::ObjectArray,
+            Self::Reference(key) => DeclarationType::ReferenceArray(key),
+        }
+    }
+    pub(crate) fn kind(self) -> Kind {
+        self.declaration().kind()
+    }
+}
 pub(crate) struct ArrayCreation {
     pub reference: crate::TypeId,
-    pub component: crate::p5_types::PrimitiveArray,
+    pub component: ArrayKind,
+}
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct FilledArrayId(pub u32);
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub(crate) enum FilledResult {
+    Discarded,
+    Stored {
+        register: RegisterId,
+        pc: CodeUnitOffset,
+    },
+}
+pub(crate) struct FilledArraySite {
+    pub reference: crate::TypeId,
+    pub component: ArrayKind,
+    pub registers: Vec<RegisterId>,
+    pub pc: CodeUnitOffset,
 }
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub(crate) struct FreshFillId(pub u32);
@@ -188,7 +280,7 @@ pub(crate) struct EmptyFillSite {
 }
 pub(crate) struct CastSite {
     pub reference: crate::TypeId,
-    pub kind: crate::p5_types::BuiltinReference,
+    pub kind: DeclarationType,
 }
 pub(crate) struct StringLiteral<'a> {
     pub reference: crate::StringId,
@@ -197,10 +289,35 @@ pub(crate) struct StringLiteral<'a> {
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub(crate) enum ArrayElement {
     Int,
+    Wide,
     Object,
+    Boolean,
+    Byte,
+    Char,
+    Short,
+}
+impl ArrayElement {
+    pub(crate) fn offset(self) -> u8 {
+        match self {
+            Self::Int => 0,
+            Self::Wide => 1,
+            Self::Object => 2,
+            Self::Boolean => 3,
+            Self::Byte => 4,
+            Self::Char => 5,
+            Self::Short => 6,
+        }
+    }
+    pub(crate) fn accepts(self, kind: DeclarationType) -> bool {
+        match (self, kind) {
+            (Self::Object, DeclarationType::Object) => true,
+            _ => kind.field_offset() == self.offset(),
+        }
+    }
 }
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub(crate) enum Op {
+    Exception(RegisterId),
     ConstantWide(RegisterId, i64),
     MoveWide(RegisterId, RegisterId),
     LongBinary(RegisterId, RegisterId, Arithmetic, RegisterId),
@@ -211,12 +328,16 @@ pub(crate) enum Op {
     NewInstance(RegisterId, ObjectCreationId),
     Initialize(CallId),
     NewArray(RegisterId, RegisterId, ArrayCreationId),
+    FilledArray(FilledArrayId, FilledResult),
     FreshFill(RegisterId, FreshFillId),
     EmptyFill(RegisterId, EmptyFillId),
     Cast(RegisterId, CastId),
+    InstanceOf(RegisterId, RegisterId, crate::TypeId, DeclarationType),
     String(RegisterId, StringLiteralId),
-    FieldLoad(RegisterId, RegisterId, crate::FieldId),
-    FieldStore(RegisterId, RegisterId, crate::FieldId),
+    FieldLoad(RegisterId, RegisterId, crate::FieldId, DeclarationType),
+    FieldStore(RegisterId, RegisterId, crate::FieldId, DeclarationType),
+    StaticLoad(RegisterId, crate::FieldId, DeclarationType),
+    StaticStore(RegisterId, crate::FieldId, DeclarationType),
     ArrayLength(RegisterId, RegisterId),
     ArrayLoad(RegisterId, RegisterId, RegisterId, ArrayElement),
     ArrayStore(RegisterId, RegisterId, RegisterId, ArrayElement),
@@ -240,6 +361,7 @@ pub(crate) struct Switch {
 }
 #[derive(Clone, Copy)]
 pub(crate) enum Terminal {
+    Throw(RegisterId),
     ReturnVoid,
     Switch {
         register: RegisterId,
@@ -281,16 +403,27 @@ impl Effects {
 impl Op {
     pub(crate) fn result_width(self) -> ValueWidth {
         match self {
-            Self::ConstantWide(..)
+            Self::ArrayLoad(_, _, _, ArrayElement::Wide)
+            | Self::ConstantWide(..)
             | Self::MoveWide(..)
             | Self::LongBinary(..)
             | Self::DoubleBinary(..) => ValueWidth::Two,
+            Self::FieldLoad(_, _, _, kind) | Self::StaticLoad(_, _, kind)
+                if kind.width() == ValueWidth::Two =>
+            {
+                ValueWidth::Two
+            }
             Self::Unary(_, unary, _) if unary.signature().1.words() == 2 => ValueWidth::Two,
             _ => ValueWidth::One,
         }
     }
     pub(crate) fn read_width(self, index: usize) -> ValueWidth {
         match self {
+            Self::ArrayStore(_, _, _, ArrayElement::Wide) if index == 2 => ValueWidth::Two,
+            Self::FieldStore(_, _, _, kind) if index == 1 && kind.width() == ValueWidth::Two => {
+                ValueWidth::Two
+            }
+            Self::StaticStore(_, _, kind) if kind.width() == ValueWidth::Two => ValueWidth::Two,
             Self::MoveWide(..) | Self::DoubleBinary(..) => ValueWidth::Two,
             Self::LongBinary(_, _, Arithmetic::Shl | Arithmetic::Shr | Arithmetic::Ushr, _)
                 if index == 1 =>
@@ -305,14 +438,19 @@ impl Op {
     }
     pub(crate) fn effects(self) -> Effects {
         let conservative = matches!(self, Self::Call(_, _) | Self::Initialize(_));
+        let static_access = matches!(self, Self::StaticLoad(..) | Self::StaticStore(..));
         Effects {
-            heap_read: conservative || matches!(self, Self::ArrayLoad(..) | Self::FieldLoad(..)),
+            heap_read: conservative
+                || static_access
+                || matches!(self, Self::ArrayLoad(..) | Self::FieldLoad(..)),
             heap_write: conservative
+                || static_access
                 || matches!(
                     self,
                     Self::ArrayStore(..)
                         | Self::FieldStore(..)
                         | Self::NewInstance(..)
+                        | Self::FilledArray(..)
                         | Self::NewArray(..)
                         | Self::FreshFill(..)
                 ),
@@ -325,24 +463,29 @@ impl Op {
                 || matches!(
                     self,
                     Self::NewInstance(..)
+                        | Self::FilledArray(..)
                         | Self::NewArray(..)
                         | Self::FreshFill(..)
                         | Self::EmptyFill(..)
                         | Self::Cast(..)
+                        | Self::InstanceOf(..)
                         | Self::String(..)
                         | Self::ArrayLength(..)
                         | Self::ArrayLoad(..)
                         | Self::ArrayStore(..)
                         | Self::FieldLoad(..)
                         | Self::FieldStore(..)
+                        | Self::StaticLoad(..)
+                        | Self::StaticStore(..)
                 ),
             call: conservative,
-            class_init: conservative || matches!(self, Self::NewInstance(..)),
+            class_init: conservative || static_access || matches!(self, Self::NewInstance(..)),
         }
     }
 }
 #[derive(Clone, Copy)]
 enum Decoded {
+    Throw(RegisterId),
     ReturnVoid,
     Switch(RegisterId, u32),
     Op(Op),
@@ -373,6 +516,7 @@ impl MethodFrame {
 pub(crate) struct FlowBody<'a> {
     pub object_creations: Vec<ObjectCreation>,
     pub array_creations: Vec<ArrayCreation>,
+    pub filled_arrays: Vec<FilledArraySite>,
     pub fresh_fills: Vec<FreshFillSite>,
     pub empty_fills: Vec<EmptyFillSite>,
     pub casts: Vec<CastSite>,
@@ -386,6 +530,8 @@ pub(crate) struct FlowBody<'a> {
     pub parameters: Vec<DeclarationType>,
     pub blocks: Vec<Block>,
     pub edges: Vec<Edge>,
+    pub protection: crate::input::protection::CheckedProtection,
+    pub exception_edges: Vec<super::protection::ExceptionEdge>,
 }
 fn ix(value: u32) -> Result<usize, RequestError> {
     usize::try_from(value).map_err(|_| RequestError::PlatformCapacity)
@@ -393,7 +539,12 @@ fn ix(value: u32) -> Result<usize, RequestError> {
 pub(crate) fn destination(op: Op) -> Option<RegisterId> {
     match op {
         Op::Call(_, destination) => destination,
-        Op::ConstantWide(r, _)
+        Op::FilledArray(_, result) => match result {
+            FilledResult::Discarded => None,
+            FilledResult::Stored { register, .. } => Some(register),
+        },
+        Op::Exception(r)
+        | Op::ConstantWide(r, _)
         | Op::MoveWide(r, _)
         | Op::LongBinary(r, _, _, _)
         | Op::DoubleBinary(r, _, _, _)
@@ -402,6 +553,7 @@ pub(crate) fn destination(op: Op) -> Option<RegisterId> {
         | Op::NewInstance(r, _)
         | Op::NewArray(r, _, _)
         | Op::Cast(r, _)
+        | Op::InstanceOf(r, _, _, _)
         | Op::String(r, _)
         | Op::Constant(r, _)
         | Op::Move(r, _)
@@ -410,24 +562,26 @@ pub(crate) fn destination(op: Op) -> Option<RegisterId> {
         | Op::Compare(r, _, _, _)
         | Op::ArrayLength(r, _)
         | Op::ArrayLoad(r, _, _, _)
-        | Op::FieldLoad(r, _, _) => Some(r),
+        | Op::FieldLoad(r, _, _, _)
+        | Op::StaticLoad(r, _, _) => Some(r),
         Op::Nop
         | Op::ArrayStore(..)
         | Op::FieldStore(..)
+        | Op::StaticStore(..)
         | Op::EmptyFill(..)
         | Op::FreshFill(..)
         | Op::Initialize(..) => None,
     }
 }
 pub(crate) enum Reads<'a> {
-    Call(std::slice::Iter<'a, RegisterId>),
+    Many(std::slice::Iter<'a, RegisterId>),
     Local(std::array::IntoIter<Option<RegisterId>, 3>),
 }
 impl Iterator for Reads<'_> {
     type Item = RegisterId;
     fn next(&mut self) -> Option<RegisterId> {
         match self {
-            Self::Call(registers) => registers.next().copied(),
+            Self::Many(registers) => registers.next().copied(),
             Self::Local(registers) => {
                 for register in registers {
                     if register.is_some() {
@@ -440,13 +594,25 @@ impl Iterator for Reads<'_> {
     }
 }
 impl Op {
-    pub(crate) fn reads(self, calls: &[CallSite]) -> Result<Reads<'_>, RequestError> {
+    pub(crate) fn reads<'a>(
+        self,
+        calls: &'a [CallSite],
+        filled_arrays: &'a [FilledArraySite],
+    ) -> Result<Reads<'a>, RequestError> {
         let registers = match self {
             Self::Call(id, _) | Self::Initialize(id) => {
                 let call = calls.get(ix(id.0)?).ok_or(RequestError::InternalInvariant(
                     "operation has a foreign call identity",
                 ))?;
-                return Ok(Reads::Call(call.registers.iter()));
+                return Ok(Reads::Many(call.registers.iter()));
+            }
+            Self::FilledArray(id, _) => {
+                let site = filled_arrays
+                    .get(ix(id.0)?)
+                    .ok_or(RequestError::InternalInvariant(
+                        "filled array has a foreign identity",
+                    ))?;
+                return Ok(Reads::Many(site.registers.iter()));
             }
             Self::MoveWide(_, source)
             | Self::Unary(_, _, source)
@@ -455,8 +621,11 @@ impl Op {
             Self::FreshFill(register, _) => [Some(register), None, None],
             Self::EmptyFill(register, _) => [Some(register), None, None],
             Self::Cast(register, _) => [Some(register), None, None],
-            Self::FieldLoad(_, receiver, _) => [Some(receiver), None, None],
-            Self::FieldStore(receiver, value, _) => [Some(receiver), Some(value), None],
+            Self::InstanceOf(_, source, _, _) => [Some(source), None, None],
+            Self::StaticLoad(..) => [None, None, None],
+            Self::StaticStore(value, _, _) => [Some(value), None, None],
+            Self::FieldLoad(_, receiver, _, _) => [Some(receiver), None, None],
+            Self::FieldStore(receiver, value, _, _) => [Some(receiver), Some(value), None],
             Self::ArrayLength(_, array) => [Some(array), None, None],
             Self::ArrayLoad(_, array, index, _) => [Some(array), Some(index), None],
             Self::ArrayStore(array, index, value, _) => [Some(array), Some(index), Some(value)],
@@ -468,7 +637,8 @@ impl Op {
             Self::Binary(_, left, _, Operand::Literal(_)) | Self::Move(_, left) => {
                 [Some(left), None, None]
             }
-            Self::ConstantWide(_, _)
+            Self::Exception(_)
+            | Self::ConstantWide(_, _)
             | Self::NewInstance(..)
             | Self::String(..)
             | Self::Constant(_, _)
@@ -485,7 +655,8 @@ pub(crate) fn terminal_other(terminal: Terminal) -> Option<RegisterId> {
 }
 pub(crate) fn terminal_register(terminal: Terminal) -> Option<RegisterId> {
     match terminal {
-        Terminal::Return(r)
+        Terminal::Throw(r)
+        | Terminal::Return(r)
         | Terminal::Test { register: r, .. }
         | Terminal::Switch { register: r, .. } => Some(r),
         Terminal::Jump(_) | Terminal::ReturnVoid => None,
@@ -523,6 +694,81 @@ fn block_at(
     ))
 }
 
+pub(crate) fn declaration_for_projection(
+    input: &MethodInput<'_, '_>,
+    key: crate::input::TypeProjection,
+    budget: &mut MethodBudget<'_, '_>,
+) -> Result<Option<DeclarationType>, RequestError> {
+    let descriptor = input.projected_name(key, budget)?;
+    if let Some(kind) = primitive_field_type(descriptor, budget)? {
+        return Ok(Some(kind));
+    }
+    if descriptor.matches_with(
+        crate::p5_types::BuiltinReference::Object.descriptor(),
+        budget,
+    )? {
+        return Ok(Some(DeclarationType::Object));
+    }
+    if descriptor.matches_with(
+        crate::p5_types::BuiltinReference::String.descriptor(),
+        budget,
+    )? {
+        return Ok(Some(DeclarationType::String));
+    }
+    if let Some(kind) = crate::p5_types::PrimitiveArray::parse(descriptor, budget)? {
+        return Ok(Some(DeclarationType::PrimitiveArray(kind)));
+    }
+    if descriptor.matches_with(ArrayKind::object_descriptor(), budget)? {
+        return Ok(Some(DeclarationType::ObjectArray));
+    }
+    Ok(match descriptor.reader()?.next(budget)? {
+        Some(91) => Some(DeclarationType::ReferenceArray(key)),
+        Some(76) if key.removed() == 0 => Some(DeclarationType::Nominal(key.root())),
+        Some(76) => Some(DeclarationType::ProjectedNominal(key)),
+        _ => None,
+    })
+}
+pub(crate) fn reference_type(
+    input: &MethodInput<'_, '_>,
+    _descriptor: crate::input::DexString<'_>,
+    id: crate::TypeId,
+    budget: &mut MethodBudget<'_, '_>,
+) -> Result<Option<DeclarationType>, RequestError> {
+    Ok(
+        declaration_for_projection(input, input.type_projection(id, budget)?, budget)?
+            .filter(|kind| kind.field_offset() == 2),
+    )
+}
+pub(crate) fn field_type(
+    input: &MethodInput<'_, '_>,
+    _descriptor: crate::input::DexString<'_>,
+    id: crate::TypeId,
+    budget: &mut MethodBudget<'_, '_>,
+) -> Result<Option<DeclarationType>, RequestError> {
+    declaration_for_projection(input, input.type_projection(id, budget)?, budget)
+}
+pub(crate) fn primitive_field_type(
+    descriptor: crate::input::DexString<'_>,
+    budget: &mut MethodBudget<'_, '_>,
+) -> Result<Option<DeclarationType>, RequestError> {
+    let mut units = descriptor.reader()?;
+    let kind = match units.next(budget)? {
+        Some(73) => DeclarationType::Int,
+        Some(70) => DeclarationType::Float,
+        Some(74) => DeclarationType::Long,
+        Some(68) => DeclarationType::Double,
+        Some(90) => DeclarationType::Boolean,
+        Some(66) => DeclarationType::Narrow(crate::p5_types::Narrow::Byte),
+        Some(83) => DeclarationType::Narrow(crate::p5_types::Narrow::Short),
+        Some(67) => DeclarationType::Narrow(crate::p5_types::Narrow::Char),
+        _ => return Ok(None),
+    };
+    Ok(if units.next(budget)?.is_none() {
+        Some(kind)
+    } else {
+        None
+    })
+}
 pub(crate) fn decode<'a>(
     input: &MethodInput<'_, 'a>,
     budget: &mut MethodBudget<'_, '_>,
@@ -531,9 +777,10 @@ pub(crate) fn decode<'a>(
         return Ok(None);
     };
     let raw = checked.layout().original().clone();
-    if input.access_flags() & 0x10008 == 0x10008 || !raw.try_byte_range().as_range().is_empty() {
+    if input.access_flags() & 0x10008 == 0x10008 {
         return Ok(None);
     }
+    let protection = crate::input::protection::read(checked.layout(), budget)?;
     let result = if input
         .declaration()
         .prototype
@@ -599,27 +846,15 @@ pub(crate) fn decode<'a>(
                 .matches_with(&[67], budget)?
             {
                 DeclarationType::Narrow(crate::p5_types::Narrow::Char)
-            } else if input.declaration().prototype.return_type.matches_with(
-                crate::p5_types::BuiltinReference::String.descriptor(),
-                budget,
-            )? {
-                DeclarationType::String
-            } else if input.declaration().prototype.return_type.matches_with(
-                crate::p5_types::BuiltinReference::Object.descriptor(),
-                budget,
-            )? {
-                DeclarationType::Object
-            } else if let Some(kind) = crate::p5_types::PrimitiveArray::parse(
+            } else if let Some(kind) = reference_type(
+                input,
                 input.declaration().prototype.return_type,
+                input.declaration().prototype.return_type_idx,
                 budget,
             )? {
-                DeclarationType::PrimitiveArray(kind)
+                kind
             } else {
-                let mut units = input.declaration().prototype.return_type.reader()?;
-                if units.next(budget)? != Some(76) {
-                    return Ok(None);
-                }
-                DeclarationType::Nominal(input.declaration().prototype.return_type_idx)
+                return Ok(None);
             },
         )
     };
@@ -681,13 +916,11 @@ pub(crate) fn decode<'a>(
                 budget,
             )? {
                 DeclarationType::String
+            } else if let Some(kind) = reference_type(input, name, id, budget)? {
+                kind
             } else {
-                let mut units = name.reader()?;
-                if units.next(budget)? != Some(76) {
-                    supported = false;
-                    return Ok(());
-                }
-                DeclarationType::Nominal(id)
+                supported = false;
+                return Ok(());
             };
             push(&mut parameters, kind, budget)
         },
@@ -701,11 +934,26 @@ pub(crate) fn decode<'a>(
     let mut casts = Vec::new();
     let mut empty_fills = Vec::new();
     let mut array_creations = Vec::new();
+    let mut filled_arrays = Vec::new();
     let mut object_creations = Vec::new();
     let mut fresh_fills = Vec::new();
     let mut raw_switches: Vec<(Vec<(i32, CodeUnitOffset)>, CodeUnitOffset)> = Vec::new();
     let mut leaders = Vec::new();
     push(&mut leaders, CodeUnitOffset(0), budget)?;
+    for boundary in protection.boundaries() {
+        budget.charge_work(1)?;
+        push(
+            &mut leaders,
+            super::protection::boundary(&raw, boundary)?,
+            budget,
+        )?;
+    }
+    for target in protection.targets() {
+        budget.charge_work(1)?;
+        if checked.layout().is_reachable(target) {
+            push(&mut leaders, target, budget)?;
+        }
+    }
     let mut pc = CodeUnitOffset(0);
     while pc.0 < raw.code_units().0 {
         budget.charge_work(1)?;
@@ -746,6 +994,8 @@ pub(crate) fn decode<'a>(
             };
             let decoded = match spec.opcode {
                 0 => Decoded::Op(Op::Nop),
+                0x0d => Decoded::Op(Op::Exception(reg(0)?)),
+                0x27 => Decoded::Throw(reg(0)?),
                 4..=6 => Decoded::Op(Op::MoveWide(reg(0)?, reg(1)?)),
                 0x16..=0x19 => Decoded::Op(Op::ConstantWide(
                     reg(0)?,
@@ -918,7 +1168,7 @@ pub(crate) fn decode<'a>(
                         Decoded::Op(Op::Binary(reg(0)?, left, arithmetic, right))
                     }
                 }
-                0x52 | 0x59 => {
+                0x52..=0x6d => {
                     let Some(reference) = layout.references()[0] else {
                         return Err(RequestError::InternalInvariant(
                             "field operation lost reference",
@@ -929,19 +1179,25 @@ pub(crate) fn decode<'a>(
                             "field operation changed reference domain",
                         ));
                     };
-                    if !input
-                        .field_reference(id, budget)?
-                        .declaration
-                        .field_type
-                        .matches_with(&[73], budget)?
-                    {
+                    let field = input.field_reference(id, budget)?;
+                    let Some(kind) = field_type(
+                        input,
+                        field.declaration.field_type,
+                        field.declaration.field_type_idx,
+                        budget,
+                    )?
+                    else {
                         return Ok(None);
-                    }
-                    if spec.opcode == 0x52 {
-                        Decoded::Op(Op::FieldLoad(reg(0)?, reg(1)?, id))
-                    } else {
-                        Decoded::Op(Op::FieldStore(reg(1)?, reg(0)?, id))
-                    }
+                    };
+                    Decoded::Op(match (spec.opcode - 0x52) / 7 {
+                        0 => Op::FieldLoad(reg(0)?, reg(1)?, id, kind),
+                        1 => Op::FieldStore(reg(1)?, reg(0)?, id, kind),
+                        2 => Op::StaticLoad(reg(0)?, id, kind),
+                        3 => Op::StaticStore(reg(0)?, id, kind),
+                        _ => {
+                            return Err(RequestError::InternalInvariant("unexpected field opcode"));
+                        }
+                    })
                 }
                 0x22 => {
                     let Some(reference) = layout.references()[0] else {
@@ -970,11 +1226,7 @@ pub(crate) fn decode<'a>(
                             "array allocation changed reference domain",
                         ));
                     };
-                    let Some(component) = crate::p5_types::PrimitiveArray::parse(
-                        input.type_name(reference, budget)?,
-                        budget,
-                    )?
-                    else {
+                    let Some(component) = ArrayKind::parse(input, reference, budget)? else {
                         return Ok(None);
                     };
                     let id = ArrayCreationId(
@@ -990,6 +1242,63 @@ pub(crate) fn decode<'a>(
                         budget,
                     )?;
                     Decoded::Op(Op::NewArray(reg(0)?, reg(1)?, id))
+                }
+                0x24 | 0x25 => {
+                    let Some(reference) = layout.references()[0] else {
+                        return Err(RequestError::InternalInvariant("filled array lost type"));
+                    };
+                    let crate::raw::OperandReference::Type(reference) = reference.target else {
+                        return Err(RequestError::InternalInvariant(
+                            "filled array changed reference domain",
+                        ));
+                    };
+                    let Some(component) = ArrayKind::parse(input, reference, budget)? else {
+                        return Ok(None);
+                    };
+                    let mut registers = Vec::new();
+                    for register in operands.registers().iter() {
+                        budget.charge_work(1)?;
+                        push(&mut registers, register, budget)?;
+                    }
+                    let mut result = FilledResult::Discarded;
+                    if next.0 < raw.code_units().0 {
+                        let result_layout =
+                            instruction_layout(raw.instructions(), next, raw.version())
+                                .map_err(crate::input::MethodError::Decode)?;
+                        if matches!(result_layout.kind(),LayoutKind::Instruction(spec) if spec.opcode == 0x0c)
+                        {
+                            let result_operands = crate::input::operands::instruction_operands(
+                                raw.instructions(),
+                                next,
+                                result_layout,
+                            )
+                            .map_err(crate::input::MethodError::Decode)?;
+                            let register = result_operands.registers().iter().next().ok_or(
+                                RequestError::InternalInvariant(
+                                    "filled array result lost destination",
+                                ),
+                            )?;
+                            result = FilledResult::Stored { register, pc: next };
+                            next = next
+                                .checked_advance(result_layout.width())
+                                .ok_or(RequestError::PlatformCapacity)?;
+                        }
+                    }
+                    let id = FilledArrayId(
+                        u32::try_from(filled_arrays.len())
+                            .map_err(|_| RequestError::PlatformCapacity)?,
+                    );
+                    push(
+                        &mut filled_arrays,
+                        FilledArraySite {
+                            reference,
+                            component,
+                            registers,
+                            pc,
+                        },
+                        budget,
+                    )?;
+                    Decoded::Op(Op::FilledArray(id, result))
                 }
                 0x26 => {
                     let delta = operands
@@ -1038,7 +1347,7 @@ pub(crate) fn decode<'a>(
                         Decoded::Op(Op::EmptyFill(reg(0)?, id))
                     }
                 }
-                0x1f => {
+                0x1f | 0x20 => {
                     let Some(reference) = layout.references()[0] else {
                         return Err(RequestError::InternalInvariant("cast lost target"));
                     };
@@ -1048,24 +1357,19 @@ pub(crate) fn decode<'a>(
                         ));
                     };
                     let descriptor = input.type_name(reference, budget)?;
-                    let mut target = None;
-                    for kind in [
-                        crate::p5_types::BuiltinReference::Object,
-                        crate::p5_types::BuiltinReference::String,
-                    ] {
-                        if descriptor.matches_with(kind.descriptor(), budget)? {
-                            target = Some(kind);
-                            break;
-                        }
-                    }
-                    let Some(kind) = target else {
+                    let Some(kind) = reference_type(input, descriptor, reference, budget)? else {
                         return Ok(None);
                     };
-                    let id = CastId(
-                        u32::try_from(casts.len()).map_err(|_| RequestError::PlatformCapacity)?,
-                    );
-                    push(&mut casts, CastSite { reference, kind }, budget)?;
-                    Decoded::Op(Op::Cast(reg(0)?, id))
+                    if spec.opcode == 0x20 {
+                        Decoded::Op(Op::InstanceOf(reg(0)?, reg(1)?, reference, kind))
+                    } else {
+                        let id = CastId(
+                            u32::try_from(casts.len())
+                                .map_err(|_| RequestError::PlatformCapacity)?,
+                        );
+                        push(&mut casts, CastSite { reference, kind }, budget)?;
+                        Decoded::Op(Op::Cast(reg(0)?, id))
+                    }
                 }
                 0x1a | 0x1b => {
                     let Some(reference) = layout.references()[0] else {
@@ -1092,24 +1396,32 @@ pub(crate) fn decode<'a>(
                     Decoded::Op(Op::String(reg(0)?, id))
                 }
                 0x21 => Decoded::Op(Op::ArrayLength(reg(0)?, reg(1)?)),
-                0x44 | 0x46 => Decoded::Op(Op::ArrayLoad(
+                0x44..=0x4a => Decoded::Op(Op::ArrayLoad(
                     reg(0)?,
                     reg(1)?,
                     reg(2)?,
-                    if spec.opcode == 0x44 {
-                        ArrayElement::Int
-                    } else {
-                        ArrayElement::Object
+                    match spec.opcode - 0x44 {
+                        0 => ArrayElement::Int,
+                        1 => ArrayElement::Wide,
+                        2 => ArrayElement::Object,
+                        3 => ArrayElement::Boolean,
+                        4 => ArrayElement::Byte,
+                        5 => ArrayElement::Char,
+                        _ => ArrayElement::Short,
                     },
                 )),
-                0x4b | 0x4d => Decoded::Op(Op::ArrayStore(
+                0x4b..=0x51 => Decoded::Op(Op::ArrayStore(
                     reg(1)?,
                     reg(2)?,
                     reg(0)?,
-                    if spec.opcode == 0x4b {
-                        ArrayElement::Int
-                    } else {
-                        ArrayElement::Object
+                    match spec.opcode - 0x4b {
+                        0 => ArrayElement::Int,
+                        1 => ArrayElement::Wide,
+                        2 => ArrayElement::Object,
+                        3 => ArrayElement::Boolean,
+                        4 => ArrayElement::Byte,
+                        5 => ArrayElement::Char,
+                        _ => ArrayElement::Short,
                     },
                 )),
                 0xe => Decoded::ReturnVoid,
@@ -1214,29 +1526,12 @@ pub(crate) fn decode<'a>(
                         )),
                         Some(70) => InvokeResult::Word(DeclarationType::Float),
                         Some(74 | 68) => InvokeResult::Wide,
-                        Some(76 | 91) => {
-                            let kind = if descriptor.matches_with(
-                                crate::p5_types::BuiltinReference::Object.descriptor(),
-                                budget,
-                            )? {
-                                Some(DeclarationType::Object)
-                            } else if descriptor.matches_with(
-                                crate::p5_types::BuiltinReference::String.descriptor(),
-                                budget,
-                            )? {
-                                Some(DeclarationType::String)
-                            } else {
-                                let mut units = descriptor.reader()?;
-                                if units.next(budget)? == Some(76) {
-                                    Some(DeclarationType::Nominal(
-                                        method.declaration.prototype.return_type_idx,
-                                    ))
-                                } else {
-                                    None
-                                }
-                            };
-                            InvokeResult::Reference(kind)
-                        }
+                        Some(76 | 91) => InvokeResult::Reference(reference_type(
+                            input,
+                            descriptor,
+                            method.declaration.prototype.return_type_idx,
+                            budget,
+                        )?),
                         _ => {
                             return Err(RequestError::InternalInvariant(
                                 "checked invoke lost return descriptor",
@@ -1339,6 +1634,12 @@ pub(crate) fn decode<'a>(
                 }
                 _ => return Ok(None),
             };
+            if let Decoded::Op(op) = decoded
+                && op.effects().may_throw
+                && protection.at(pc, budget)?.is_some()
+            {
+                push(&mut leaders, next, budget)?;
+            }
             push(&mut instructions, (pc, decoded), budget)?;
         }
         pc = next;
@@ -1406,6 +1707,7 @@ pub(crate) fn decode<'a>(
                     ));
                 }
             }
+            Decoded::Throw(register) => Some(Terminal::Throw(register)),
             Decoded::ReturnVoid => Some(Terminal::ReturnVoid),
             Decoded::Return(r) => Some(Terminal::Return(r)),
             Decoded::Jump(to) => Some(Terminal::Jump(block_at(&pcs, to, budget)?)),
@@ -1469,9 +1771,15 @@ pub(crate) fn decode<'a>(
             _ => {}
         }
     }
+    let Some(exception_edges) = super::protection::build(&protection, &blocks, &edges, budget)?
+    else {
+        return Ok(None);
+    };
+    super::protection::verify(&raw, &protection, &blocks, &edges, &exception_edges, budget)?;
     Ok(Some(FlowBody {
         object_creations,
         array_creations,
+        filled_arrays,
         fresh_fills,
         empty_fills,
         casts,
@@ -1485,5 +1793,7 @@ pub(crate) fn decode<'a>(
         parameters,
         blocks,
         edges,
+        protection,
+        exception_edges,
     }))
 }

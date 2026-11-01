@@ -68,7 +68,7 @@ pub(crate) enum Statement {
         result: LocalId,
         payload: CodeUnitOffset,
     },
-    Cast(super::cast_ops::Statement),
+    TypeCheck(super::cast_ops::Statement),
     String {
         target: LocalId,
         reference: crate::StringId,
@@ -427,6 +427,7 @@ pub(super) fn operations(
     storage: &crate::p6_variables::normal::StorageBody<'_>,
     block: crate::pipeline::branch::BlockId,
     bindings: &mut SourceCalls,
+    names: &super::types::TypeNames,
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<Option<Vec<Statement>>, RequestError> {
     let ssa = &storage.typed;
@@ -464,10 +465,10 @@ pub(super) fn operations(
             && let Some(Some(id)) = ssa.initializations.deferred.get(ix(result.0)?)
         {
             push(&mut output, Statement::Deferred(*id), budget)?;
-        } else if matches!(op.op, Op::NewArray(..)) {
+        } else if matches!(op.op, Op::NewArray(..) | Op::FilledArray(..)) {
             push(
                 &mut output,
-                Statement::NewArray(super::fresh_fill::allocate(ssa, op)?),
+                Statement::NewArray(super::fresh_fill::allocate(storage, op, names, budget)?),
                 budget,
             )?;
         } else if matches!(op.op, Op::FreshFill(..)) {
@@ -493,10 +494,10 @@ pub(super) fn operations(
                 },
                 budget,
             )?;
-        } else if matches!(op.op, Op::Cast(..)) {
+        } else if matches!(op.op, Op::Cast(..) | Op::InstanceOf(..)) {
             push(
                 &mut output,
-                Statement::Cast(super::cast_ops::lower(ssa, op)?),
+                Statement::TypeCheck(super::cast_ops::lower(ssa, op, names, budget)?),
                 budget,
             )?;
         } else if let Op::String(_, literal) = op.op {
@@ -523,7 +524,10 @@ pub(super) fn operations(
                 },
                 budget,
             )?;
-        } else if matches!(op.op, Op::FieldLoad(..) | Op::FieldStore(..)) {
+        } else if matches!(
+            op.op,
+            Op::FieldLoad(..) | Op::FieldStore(..) | Op::StaticLoad(..) | Op::StaticStore(..)
+        ) {
             let Some(statement) = super::field_ops::lower(ssa, op, budget)? else {
                 return Ok(None);
             };

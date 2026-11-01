@@ -47,7 +47,8 @@ fn argument(
                 if inputs.len() != 1 {
                     return Ok(None);
                 }
-                let (None, Sym::Value(source)) = inputs[0] else {
+                let (crate::p3_ssa::normal::Incoming::EntrySeed, Sym::Value(source)) = inputs[0]
+                else {
                     return Ok(None);
                 };
                 value = source;
@@ -95,7 +96,10 @@ pub(super) fn solve(
     for (index, phi) in ssa.phis.iter().enumerate() {
         budget.charge_work(1)?;
         phis[ix(phi.result.0)?] = Some(index);
-        if phi.block == BlockId(0) && phi.inputs.as_slice() == [(None, Sym::Value(root))] {
+        if phi.block == BlockId(0)
+            && phi.inputs.as_slice()
+                == [(crate::p3_ssa::normal::Incoming::EntrySeed, Sym::Value(root))]
+        {
             deferred[ix(phi.result.0)?] = Some(InitializationId::This);
             push(&mut aliases, UninitAlias(phi.result), budget)?;
         }

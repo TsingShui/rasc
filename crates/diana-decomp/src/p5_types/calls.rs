@@ -58,7 +58,9 @@ fn conversion(
                         Kind::String
                         | Kind::PrimitiveArray(_)
                         | Kind::ObjectArray
-                        | Kind::Nominal(_),
+                        | Kind::Nominal(_)
+                        | Kind::ReferenceArray(_)
+                        | Kind::ProjectedNominal(_),
                     ),
                     BuiltinReference::Object,
                 ) => Some(UseConversion::UpcastObject),

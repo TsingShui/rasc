@@ -184,12 +184,14 @@ pub(super) fn verify(
                 )?;
             }
         }
-        let Some(statements) = super::calls::operations(storage, key, calls, budget)? else {
+        let Some(statements) = super::calls::operations(storage, key, calls, type_names, budget)?
+        else {
             return Ok(None);
         };
         let bound = &ssa.ssa.bound[index];
         let transfer =
             match block.terminal {
+                Terminal::Throw(_) => return Ok(None),
                 Terminal::ReturnVoid => {
                     if !outgoing.is_empty()
                         || !matches!(ssa.ssa.result, crate::pipeline::branch::ResultType::Void)
@@ -315,6 +317,8 @@ pub(super) fn verify(
                             | Kind::PrimitiveArray(_)
                             | Kind::ObjectArray
                             | Kind::Nominal(_)
+                            | Kind::ReferenceArray(_)
+                            | Kind::ProjectedNominal(_)
                     ) && !matches!(opcode, 0x32 | 0x33 | 0x38 | 0x39)
                     {
                         return Ok(None);
@@ -405,7 +409,7 @@ pub(super) fn verify(
         entry,
         cases,
     };
-    super::dispatcher_verify::verify(storage, &body, budget)?;
+    super::dispatcher_verify::verify(input, storage, &body, type_names, budget)?;
     if let crate::p7_regions::Shape::Structured(region) = plan.shape {
         return Ok(Some(VerifiedJavaMethod::structured(
             header.finish(),

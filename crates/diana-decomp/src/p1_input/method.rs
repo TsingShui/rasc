@@ -87,6 +87,60 @@ pub struct MethodInput<'i, 'a> {
 }
 
 impl<'i, 'a> MethodInput<'i, 'a> {
+    pub(crate) fn type_projection(
+        &self,
+        id: crate::TypeId,
+        budget: &mut MethodBudget<'_, '_>,
+    ) -> Result<super::TypeProjection, crate::RequestError> {
+        self.index.type_descriptor(id, budget)?;
+        Ok(super::type_projection::original(id))
+    }
+    pub(crate) fn projected_name(
+        &self,
+        key: super::TypeProjection,
+        budget: &mut MethodBudget<'_, '_>,
+    ) -> Result<DexString<'a>, crate::RequestError> {
+        super::type_projection::suffix(self.type_descriptor(key.root(), budget)?, key, budget)
+    }
+    pub(crate) fn component_projection(
+        &self,
+        key: super::TypeProjection,
+        budget: &mut MethodBudget<'_, '_>,
+    ) -> Result<super::TypeProjection, crate::RequestError> {
+        super::type_projection::component(self, key, budget)
+    }
+    pub(super) fn exact_type(
+        &self,
+        suffix: DexString<'_>,
+        budget: &mut MethodBudget<'_, '_>,
+    ) -> Result<Option<crate::TypeId>, crate::RequestError> {
+        let mut found = None;
+        for index in 0..self.index.header.type_ids.count {
+            budget.charge_work(1)?;
+            let id = crate::TypeId(index);
+            let name = self.type_descriptor(id, budget)?;
+            if name.utf16_len() != suffix.utf16_len() {
+                continue;
+            }
+            let mut left = name.reader()?;
+            let mut right = suffix.reader()?;
+            let mut equal = true;
+            while let Some(unit) = left.next(budget)? {
+                if right.next(budget)? != Some(unit) {
+                    equal = false;
+                    break;
+                }
+            }
+            if equal {
+                if found.is_some() {
+                    return Ok(None);
+                }
+                found = Some(id);
+            }
+        }
+        Ok(found)
+    }
+
     pub(crate) fn type_descriptor(
         &self,
         id: crate::TypeId,
@@ -393,6 +447,7 @@ impl<'a> ProgramIndex<'a> {
                         OperandReference::Type(id) => {
                             let (descriptor, shape) = self.type_descriptor(id, budget)?;
                             let valid = match spec.opcode {
+                                0x1f | 0x20 => matches!(shape, TypeShape::Class | TypeShape::Array),
                                 0x22 => matches!(shape, TypeShape::Class),
                                 0x23..=0x25 => matches!(shape, TypeShape::Array),
                                 _ => true,
@@ -409,7 +464,26 @@ impl<'a> ProgramIndex<'a> {
                             }
                         }
                         OperandReference::Field(id) => {
-                            self.field_reference(id, budget)?;
+                            let field = self.field_reference(id, budget)?;
+                            if matches!(spec.opcode, 0x52..=0x6d) {
+                                let first = field.declaration.field_type.reader()?.next(budget)?;
+                                let matches_kind = match (spec.opcode - 0x52) % 7 {
+                                    0 => matches!(first, Some(73 | 70)),
+                                    1 => matches!(first, Some(74 | 68)),
+                                    2 => matches!(first, Some(76 | 91)),
+                                    3 => first == Some(90),
+                                    4 => first == Some(66),
+                                    5 => first == Some(67),
+                                    6 => first == Some(83),
+                                    _ => false,
+                                };
+                                if !matches_kind {
+                                    return Err(MethodError::Malformed {
+                                        pc,
+                                        problem: super::MethodProblem::InvalidFieldKind,
+                                    });
+                                }
+                            }
                             if matches!(spec.opcode, 0x52..=0x6d)
                                 && let Some(flags) = self.local_field_flags(id, budget)?
                                 && (flags & 8 != 0) != matches!(spec.opcode, 0x60..=0x6d)

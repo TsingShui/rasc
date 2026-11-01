@@ -16,6 +16,7 @@ pub(crate) enum CallFormal {
 pub(crate) enum StaticResult {
     /// The exact non-builtin class result is retained in the sealed prototype.
     Nominal,
+    Array,
     Reference(crate::p5_types::BuiltinReference),
     Int,
     Boolean,
@@ -285,6 +286,15 @@ pub(super) fn collect_static(
         .matches_with(&[86], budget)?
     {
         StaticResult::Void
+    } else if reference
+        .declaration
+        .prototype
+        .return_type
+        .reader()?
+        .next(budget)?
+        == Some(91)
+    {
+        StaticResult::Array
     } else {
         let descriptor = copy_units(reference.declaration.prototype.return_type, budget)?;
         if descriptor.len() < 3 || descriptor.first() != Some(&76) || descriptor.last() != Some(&59)

@@ -75,6 +75,32 @@ impl<'a> DexString<'a> {
         Ok(Some(position))
     }
 
+    pub(super) fn array_suffix(
+        &self,
+        removed: u32,
+        control: &mut impl InputControl,
+    ) -> Result<Self, InputError> {
+        let mut reader = self.reader()?;
+        for _ in 0..removed {
+            if reader.next(control)? != Some(91) {
+                return Err(malformed(InputProblem::InvalidDescriptor, self.start_byte));
+            }
+        }
+        let capacity = || InputError::PlatformCapacity {
+            offset_byte: self.start_byte,
+        };
+        let bytes = usize::try_from(removed).map_err(|_| capacity())?;
+        // Every removed '[' occupies one byte and one UTF-16 unit.
+        let start = self.start_byte.0.checked_add(bytes).ok_or_else(capacity)?;
+        let length = self.utf16_len.0.checked_sub(removed).ok_or_else(capacity)?;
+        Ok(Self {
+            bytes: self.bytes,
+            start_byte: ByteOffset(start),
+            end_byte: self.end_byte,
+            utf16_len: Utf16Count(length),
+        })
+    }
+
     pub(crate) fn reader(&self) -> Result<Units<'a>, InputError> {
         Ok(Units {
             cursor: Cursor::bounded(self.bytes, self.start_byte, self.end_byte)?,

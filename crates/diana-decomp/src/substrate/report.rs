@@ -160,6 +160,7 @@ fn request_code(error: &crate::RequestError) -> crate::DiagnosticCode {
         RequestError::PlatformCapacity => Code::PlatformCapacity,
         RequestError::UnknownDex => Code::UnknownDex,
         RequestError::UndefinedRegister { .. } => Code::UndefinedRegister,
+        RequestError::DefinitionAvailabilityUnproved { .. } => Code::DefinitionAvailabilityUnproved,
         RequestError::InvalidWideRead { .. } => Code::InvalidWideRead,
         RequestError::JavaTargetLimit { .. } => Code::JavaTargetLimit,
         RequestError::BindingEvidenceMissing { .. }

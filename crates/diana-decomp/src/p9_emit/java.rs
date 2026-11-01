@@ -52,6 +52,12 @@ pub(super) fn value_use(
             local(value, output, budget)?;
         }
         ValueUse::Direct(value) => local(value, output, budget)?,
+        ValueUse::NullAssignment(_) => output.push("null", budget)?,
+        ValueUse::ObjectArrayView(value) => {
+            output.push("((java.lang.Object[]) ", budget)?;
+            local(value, output, budget)?;
+            output.push(")", budget)?;
+        }
         ValueUse::Boolean01(value) => {
             output.push("(", budget)?;
             local(value, output, budget)?;

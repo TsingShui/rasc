@@ -15,6 +15,8 @@ pub(crate) enum Kind {
     PrimitiveArray(super::PrimitiveArray),
     ObjectArray,
     Nominal(crate::TypeId),
+    ReferenceArray(crate::input::TypeProjection),
+    ProjectedNominal(crate::input::TypeProjection),
 }
 impl Kind {
     pub(crate) fn builtin_spelling(self) -> Option<&'static str> {
@@ -28,7 +30,7 @@ impl Kind {
             Self::Double => "double",
             Self::PrimitiveArray(kind) => kind.spelling(),
             Self::ObjectArray => "java.lang.Object[]",
-            Self::Nominal(_) => return None,
+            Self::Nominal(_) | Self::ReferenceArray(_) | Self::ProjectedNominal(_) => return None,
         })
     }
 }
@@ -41,16 +43,22 @@ pub(crate) struct TypedBody<'a> {
     pub arrays: Vec<Option<ArrayEvidence>>,
     pub bindings: Vec<crate::p4_calls::normal::CallEvidence>,
     pub call_uses: Vec<crate::p5_types::calls::CallUses>,
-    pub cast_uses: Vec<crate::p5_types::calls::TypedUse>,
+    pub cast_uses: Vec<Option<crate::p5_types::calls::TypedUse>>,
     pub numeric_uses: Vec<Option<super::numeric::NumericUses>>,
     pub returned_uses: Vec<Option<UseConversion>>,
     pub initializations: super::initialization::Initializations,
     pub empty_fills: Vec<PrimitiveFillUse>,
     pub array_lengths: Vec<crate::p5_types::calls::TypedUse>,
+    pub filled_arrays: Vec<FilledArrayUse>,
     pub fresh_fills: Vec<PrimitiveFillUse>,
 
     pub field_declarations: Vec<Option<crate::p4_calls::normal::FieldEvidence>>,
     pub field_uses: Vec<Option<FieldUse>>,
+}
+pub(crate) struct FilledArrayUse {
+    _sealed: (),
+    pub kind: Kind,
+    pub arguments: Vec<crate::p5_types::calls::TypedUse>,
 }
 pub(crate) struct PrimitiveFillUse {
     _sealed: (),
@@ -78,8 +86,14 @@ pub(crate) enum UseConversion {
     BooleanWord,
     Boolean01,
     Null(crate::p5_types::BuiltinReference),
+    NullAssignment,
     UpcastObject,
     Narrow(crate::p5_types::Narrow),
+}
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub(crate) enum ArrayReceiver {
+    Direct,
+    ObjectView,
 }
 pub(crate) enum ArrayUse {
     Length,
@@ -89,6 +103,7 @@ pub(crate) enum ArrayUse {
     Store {
         index: UseConversion,
         value: UseConversion,
+        receiver: ArrayReceiver,
     },
 }
 pub(crate) struct ArrayEvidence {
@@ -115,12 +130,14 @@ fn merge_range(
     }
 }
 pub(crate) fn solve<'a>(
+    input: &crate::input::MethodInput<'_, '_>,
     resolved: crate::p4_calls::normal::ResolvedBody<'a>,
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<Option<TypedBody<'a>>, RequestError> {
     let ssa = resolved.ssa;
     let bindings = resolved.calls;
     let field_declarations = resolved.fields;
+    let array_components = super::array_components::collect(input, &ssa, budget)?;
     let mut integral_bits = Vec::new();
     let mut ranges = Vec::new();
     let mut kinds = Vec::new();
@@ -140,7 +157,9 @@ pub(crate) fn solve<'a>(
                     | Kind::Double
                     | Kind::PrimitiveArray(_)
                     | Kind::ObjectArray
-                    | Kind::Nominal(_) => 0,
+                    | Kind::Nominal(_)
+                    | Kind::ReferenceArray(_)
+                    | Kind::ProjectedNominal(_) => 0,
                 };
                 (bits, declaration.range(), Some(kind))
             }
@@ -183,30 +202,31 @@ pub(crate) fn solve<'a>(
                 Op::NewArray(_, _, id) => (
                     0,
                     None,
-                    Some(Kind::PrimitiveArray(
+                    Some(
                         ssa.array_creations
                             .get(ix(id.0)?)
                             .ok_or(RequestError::InternalInvariant(
                                 "array allocation lost type",
                             ))?
-                            .component,
-                    )),
+                            .component
+                            .kind(),
+                    ),
                 ),
                 Op::Cast(_, id) => (
                     0,
                     None,
                     Some(
-                        match ssa
-                            .casts
+                        ssa.casts
                             .get(ix(id.0)?)
                             .ok_or(RequestError::InternalInvariant("cast lost target type"))?
                             .kind
-                        {
-                            crate::p5_types::BuiltinReference::Object => Kind::Object,
-                            crate::p5_types::BuiltinReference::String => Kind::String,
-                        },
+                            .kind(),
                     ),
                 ),
+                Op::InstanceOf(..) => (3, Some(super::IntRange::BOOLEAN), Some(Kind::Boolean)),
+                Op::FilledArray(id, _) => {
+                    (0, None, Some(ssa.filled_arrays[ix(id.0)?].component.kind()))
+                }
                 Op::String(..) => (0, None, Some(Kind::String)),
                 Op::Constant(_, value) => (
                     match value {
@@ -225,11 +245,16 @@ pub(crate) fn solve<'a>(
                     | crate::p2_flow::normal::Arithmetic::Xor,
                     _,
                 ) => (0, None, Some(Kind::Int)),
-                Op::FieldLoad(..)
-                | Op::ArrayLength(..)
-                | Op::ArrayLoad(_, _, _, crate::p2_flow::normal::ArrayElement::Int)
-                | Op::Binary(_, _, _, _)
-                | Op::Compare(_, _, _, _) => {
+                Op::FieldLoad(_, _, _, kind) | Op::StaticLoad(_, _, kind) => (
+                    match kind.kind() {
+                        Kind::Int => 7,
+                        Kind::Boolean => 3,
+                        _ => 0,
+                    },
+                    kind.range(),
+                    Some(kind.kind()),
+                ),
+                Op::ArrayLength(..) | Op::Binary(_, _, _, _) | Op::Compare(_, _, _, _) => {
                     (7, Some(crate::p5_types::IntRange::ALL), Some(Kind::Int))
                 }
                 Op::Call(call, _) => {
@@ -250,13 +275,37 @@ pub(crate) fn solve<'a>(
                     };
                     (bits, declaration.range(), Some(kind))
                 }
-                Op::ArrayLoad(_, _, _, crate::p2_flow::normal::ArrayElement::Object) => {
-                    (0, None, Some(Kind::Object))
+                Op::ArrayLoad(_, _, _, element) => {
+                    let operation = ssa.operation(id)?;
+                    let Some(component) =
+                        array_components.component(input, operation.input(0)?, budget)?
+                    else {
+                        return Ok(None);
+                    };
+                    let kind = component.kind();
+                    if !element.accepts(component) {
+                        return Err(crate::input::MethodError::Malformed {
+                            pc: operation.pc,
+                            problem: crate::input::MethodProblem::InvalidArrayAccessType,
+                        }
+                        .into());
+                    }
+                    (
+                        match kind {
+                            Kind::Int => 7,
+                            Kind::Boolean => 3,
+                            _ => 0,
+                        },
+                        component.range(),
+                        Some(kind),
+                    )
                 }
                 Op::Move(_, _) | Op::MoveWide(_, _) => (0, None, None),
+                Op::Exception(_) => return Ok(None),
                 Op::Nop
                 | Op::ArrayStore(..)
                 | Op::FieldStore(..)
+                | Op::StaticStore(..)
                 | Op::EmptyFill(..)
                 | Op::FreshFill(..)
                 | Op::Initialize(..) => {
@@ -266,12 +315,14 @@ pub(crate) fn solve<'a>(
                 }
             },
             Definition::Phi => (0, None, None),
+            Definition::ExceptionAt(_) => return Ok(None),
         };
         push(&mut integral_bits, bits, budget)?;
         push(&mut ranges, range, budget)?;
         push(&mut kinds, kind, budget)?;
     }
-    let numeric_valid = super::numeric::constrain(&ssa, &mut kinds, budget)?;
+    let numeric_valid =
+        super::numeric::constrain(input, &ssa, &mut kinds, &array_components, budget)?;
     let mut type_conflict = false;
     loop {
         let mut changed = false;
@@ -396,7 +447,7 @@ pub(crate) fn solve<'a>(
     if type_conflict {
         return Ok(None);
     }
-    let Some(arrays) = solve_arrays(&ssa, &kinds, &integral_bits, budget)? else {
+    let Some(arrays) = solve_arrays(input, &ssa, &kinds, &integral_bits, budget)? else {
         return Ok(None);
     };
     if !numeric_valid {
@@ -409,13 +460,18 @@ pub(crate) fn solve<'a>(
     let Some(array_uses) = solve_new_arrays(&ssa, &kinds, budget)? else {
         return Ok(None);
     };
+    let Some(filled_arrays) = solve_filled_arrays(input, &ssa, &kinds, &integral_bits, budget)?
+    else {
+        return Ok(None);
+    };
     let Some(empty_fills) = solve_empty_fills(&ssa, &kinds, budget)? else {
         return Ok(None);
     };
     let Some(cast_uses) = solve_casts(&ssa, &kinds, budget)? else {
         return Ok(None);
     };
-    let Some(field_uses) = solve_fields(&ssa, &field_declarations, &kinds, budget)? else {
+    let Some(field_uses) = solve_fields(&ssa, &field_declarations, &kinds, &integral_bits, budget)?
+    else {
         return Ok(None);
     };
     let Some(call_uses) =
@@ -438,6 +494,7 @@ pub(crate) fn solve<'a>(
         initializations,
         empty_fills,
         array_lengths: array_uses.lengths,
+        filled_arrays,
         fresh_fills: array_uses.fills,
         field_declarations,
         field_uses,
@@ -461,85 +518,98 @@ pub(crate) fn solve<'a>(
     Ok(Some(typed))
 }
 fn solve_arrays(
+    input: &crate::input::MethodInput<'_, '_>,
     ssa: &SsaBody<'_>,
     kinds: &[Option<Kind>],
     bits: &[u8],
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<Option<Vec<Option<ArrayEvidence>>>, RequestError> {
-    use crate::p2_flow::normal::ArrayElement;
     let mut result = Vec::new();
     for op in &ssa.operations {
         budget.charge_work(1)?;
+        if !matches!(
+            op.op,
+            Op::ArrayLength(..) | Op::ArrayLoad(..) | Op::ArrayStore(..)
+        ) {
+            push(&mut result, None, budget)?;
+            continue;
+        }
         let bad = || {
             RequestError::from(crate::input::MethodError::Malformed {
                 pc: op.pc,
                 problem: crate::input::MethodProblem::InvalidArrayAccessType,
             })
         };
-        let usage = match op.op {
-            Op::ArrayLength(..) | Op::ArrayLoad(..) | Op::ArrayStore(..) => {
-                let component = match kinds[ix(op.input(0)?.0)?] {
-                    Some(Kind::PrimitiveArray(kind))
-                        if kind == super::PrimitiveArray::Int
-                            || matches!(op.op, Op::ArrayLength(..)) =>
-                    {
-                        ArrayElement::Int
-                    }
-                    Some(Kind::ObjectArray) => ArrayElement::Object,
-                    _ => return Ok(None),
-                };
-                if matches!(op.op, Op::ArrayLength(..)) {
-                    ArrayUse::Length
-                } else {
-                    let element = match op.op {
-                        Op::ArrayLoad(_, _, _, element) | Op::ArrayStore(_, _, _, element) => {
-                            element
-                        }
-                        _ => {
-                            return Err(RequestError::InternalInvariant(
-                                "array access lost element kind",
-                            ));
-                        }
-                    };
-                    if component != element {
-                        return Err(bad());
-                    }
-                    let index = match kinds[ix(op.input(1)?.0)?] {
-                        Some(Kind::Int) => UseConversion::Identity,
-                        Some(Kind::Boolean) => UseConversion::BooleanWord,
-                        None => return Ok(None),
-                        _ => return Err(bad()),
-                    };
-                    if matches!(op.op, Op::ArrayLoad(..)) {
-                        ArrayUse::Load { index }
+        let component = match kinds[ix(op.input(0)?.0)?] {
+            Some(Kind::PrimitiveArray(kind)) => kind.value_type(),
+            Some(Kind::ObjectArray) => crate::p2_flow::normal::DeclarationType::Object,
+            Some(Kind::ReferenceArray(key)) => {
+                crate::p2_flow::normal::ArrayKind::Reference(key).element_type(input, budget)?
+            }
+            _ => return Ok(None),
+        };
+        let usage = if matches!(op.op, Op::ArrayLength(..)) {
+            ArrayUse::Length
+        } else {
+            let element = match op.op {
+                Op::ArrayLoad(_, _, _, element) | Op::ArrayStore(_, _, _, element) => element,
+                _ => {
+                    return Err(RequestError::InternalInvariant(
+                        "array access lost element kind",
+                    ));
+                }
+            };
+            if !element.accepts(component) {
+                return Err(bad());
+            }
+            let index = match kinds[ix(op.input(1)?.0)?] {
+                Some(Kind::Int) => UseConversion::Identity,
+                Some(Kind::Boolean) => UseConversion::BooleanWord,
+                None => return Ok(None),
+                _ => return Err(bad()),
+            };
+            if matches!(op.op, Op::ArrayLoad(..)) {
+                ArrayUse::Load { index }
+            } else {
+                let source = op.input(2)?;
+                let at = ix(source.0)?;
+                let receiver =
+                    if matches!(kinds[ix(op.input(0)?.0)?], Some(Kind::ReferenceArray(_))) {
+                        ArrayReceiver::ObjectView
                     } else {
-                        let at = ix(op.input(2)?.0)?;
-                        let value = match (component, kinds[at]) {
-                            (ArrayElement::Int, Some(Kind::Int))
-                            | (ArrayElement::Object, Some(Kind::Object)) => UseConversion::Identity,
-                            (ArrayElement::Int, Some(Kind::Boolean)) => UseConversion::BooleanWord,
-                            (
-                                ArrayElement::Object,
-                                Some(
-                                    Kind::String
-                                    | Kind::PrimitiveArray(_)
-                                    | Kind::ObjectArray
-                                    | Kind::Nominal(_),
-                                ),
+                        ArrayReceiver::Direct
+                    };
+                let value =
+                    if component.kind() == Kind::Object || receiver == ArrayReceiver::ObjectView {
+                        match kinds[at] {
+                            Some(Kind::Object) => UseConversion::Identity,
+                            Some(
+                                Kind::String
+                                | Kind::PrimitiveArray(_)
+                                | Kind::ObjectArray
+                                | Kind::Nominal(_)
+                                | Kind::ReferenceArray(_)
+                                | Kind::ProjectedNominal(_),
                             ) => UseConversion::UpcastObject,
-                            (ArrayElement::Object, Some(Kind::Int)) if bits[at] == 1 => {
+                            Some(Kind::Int) if bits[at] == 1 => {
                                 UseConversion::Null(crate::p5_types::BuiltinReference::Object)
                             }
-                            (_, None) => return Ok(None),
+                            None => return Ok(None),
                             _ => return Err(bad()),
+                        }
+                    } else {
+                        let Some(view) =
+                            super::primitive_stores::view(ssa, kinds, bits, source, component)?
+                        else {
+                            return Ok(None);
                         };
-                        ArrayUse::Store { index, value }
-                    }
+                        view
+                    };
+                ArrayUse::Store {
+                    index,
+                    value,
+                    receiver,
                 }
-            }
-            _ => {
-                push(&mut result, None, budget)?;
-                continue;
             }
         };
         push(
@@ -555,13 +625,17 @@ fn solve_fields(
     ssa: &SsaBody<'_>,
     declarations: &[Option<crate::p4_calls::normal::FieldEvidence>],
     kinds: &[Option<Kind>],
+    bits: &[u8],
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<Option<Vec<Option<FieldUse>>>, RequestError> {
     let mut uses = Vec::new();
     for op in &ssa.operations {
         budget.charge_work(1)?;
         let reference = match op.op {
-            Op::FieldLoad(_, _, id) | Op::FieldStore(_, _, id) => id,
+            Op::FieldLoad(_, _, id, _)
+            | Op::FieldStore(_, _, id, _)
+            | Op::StaticLoad(_, id, _)
+            | Op::StaticStore(_, id, _) => id,
             _ => {
                 push(&mut uses, None, budget)?;
                 continue;
@@ -578,23 +652,25 @@ fn solve_fields(
                 "field constraints changed reference",
             ));
         }
-        if kinds[ix(op.input(0)?.0)?] != Some(Kind::Nominal(evidence.owner)) {
+        let is_static = evidence.scope == crate::p4_calls::normal::FieldScope::Static;
+        if !is_static && kinds[ix(op.input(0)?.0)?] != Some(Kind::Nominal(evidence.owner)) {
             return Ok(None);
         }
-        let usage = if matches!(op.op, Op::FieldLoad(..)) {
+        let usage = if matches!(op.op, Op::FieldLoad(..) | Op::StaticLoad(..)) {
             FieldUse::Read
         } else {
-            let conversion = match kinds[ix(op.input(1)?.0)?] {
-                Some(Kind::Int) => UseConversion::Identity,
-                Some(Kind::Boolean) => UseConversion::BooleanWord,
-                None => return Ok(None),
-                _ => {
-                    return Err(crate::input::MethodError::Malformed {
-                        pc: op.pc,
-                        problem: crate::input::MethodProblem::InvalidFieldKind,
-                    }
-                    .into());
-                }
+            let kind = match op.op {
+                Op::FieldStore(_, _, _, kind) | Op::StaticStore(_, _, kind) => kind,
+                _ => return Err(RequestError::InternalInvariant("field store lost kind")),
+            };
+            let source = op.input(usize::from(!is_static))?;
+            let conversion = if kind.field_offset() == 2 {
+                super::references::store_view(ssa, kinds, source, kind)?
+            } else {
+                super::primitive_stores::view(ssa, kinds, bits, source, kind)?
+            };
+            let Some(conversion) = conversion else {
+                return Ok(None);
             };
             if evidence.scope == crate::p4_calls::normal::FieldScope::ConstructorThis {
                 if !super::calls::is_this(ssa, op.input(0)?, budget)? {
@@ -617,27 +693,28 @@ fn solve_casts(
     ssa: &SsaBody<'_>,
     kinds: &[Option<Kind>],
     budget: &mut MethodBudget<'_, '_>,
-) -> Result<Option<Vec<crate::p5_types::calls::TypedUse>>, RequestError> {
+) -> Result<Option<Vec<Option<crate::p5_types::calls::TypedUse>>>, RequestError> {
     let mut uses = Vec::new();
     for op in &ssa.operations {
         budget.charge_work(1)?;
-        let Op::Cast(_, id) = op.op else {
+        if !matches!(op.op, Op::Cast(..) | Op::InstanceOf(..)) {
+            push(&mut uses, None, budget)?;
             continue;
-        };
-        if ix(id.0)? != uses.len() {
-            return Err(RequestError::InternalInvariant(
-                "cast use changed arena identity",
-            ));
         }
         let value = op.input(0)?;
         let conversion = if ssa.is_zero(value)? {
             UseConversion::Null(crate::p5_types::BuiltinReference::Object)
         } else {
             match kinds[ix(value.0)?] {
-                Some(Kind::Object | Kind::String) => UseConversion::Identity,
-                Some(Kind::Nominal(_) | Kind::PrimitiveArray(_) | Kind::ObjectArray) => {
-                    UseConversion::UpcastObject
-                }
+                Some(Kind::Object) => UseConversion::Identity,
+                Some(
+                    Kind::String
+                    | Kind::Nominal(_)
+                    | Kind::ReferenceArray(_)
+                    | Kind::ProjectedNominal(_)
+                    | Kind::PrimitiveArray(_)
+                    | Kind::ObjectArray,
+                ) => UseConversion::UpcastObject,
                 None => return Ok(None),
                 _ => {
                     return Err(crate::input::MethodError::Malformed {
@@ -650,13 +727,78 @@ fn solve_casts(
         };
         push(
             &mut uses,
-            crate::p5_types::calls::TypedUse { value, conversion },
+            Some(crate::p5_types::calls::TypedUse { value, conversion }),
             budget,
         )?;
     }
     Ok(Some(uses))
 }
 
+fn solve_filled_arrays(
+    input: &crate::input::MethodInput<'_, '_>,
+    ssa: &SsaBody<'_>,
+    kinds: &[Option<Kind>],
+    bits: &[u8],
+    budget: &mut MethodBudget<'_, '_>,
+) -> Result<Option<Vec<FilledArrayUse>>, RequestError> {
+    if ssa.filled_arrays.is_empty() {
+        return Ok(Some(Vec::new()));
+    }
+    let mut result = Vec::new();
+    for op in &ssa.operations {
+        budget.charge_work(1)?;
+        let Op::FilledArray(id, _) = op.op else {
+            continue;
+        };
+        if ix(id.0)? != result.len() {
+            return Err(RequestError::InternalInvariant(
+                "filled arrays changed identity",
+            ));
+        }
+        let site = ssa
+            .filled_arrays
+            .get(ix(id.0)?)
+            .ok_or(RequestError::InternalInvariant("filled array lost type"))?;
+        if site.registers.len() != op.inputs.len() {
+            return Err(RequestError::InternalInvariant(
+                "filled array changed input count",
+            ));
+        }
+        // ART executes non-int primitive filled forms as runtime errors, not array initializers.
+        if matches!(site.component, crate::p2_flow::normal::ArrayKind::Primitive(kind) if kind != crate::p5_types::PrimitiveArray::Int)
+        {
+            return Ok(None);
+        }
+        let target = site.component.element_type(input, budget)?;
+        let mut arguments = Vec::new();
+        for &value in &op.inputs {
+            budget.charge_work(1)?;
+            let conversion = if target.field_offset() == 2 {
+                super::references::store_view(ssa, kinds, value, target)?
+            } else {
+                super::primitive_stores::view(ssa, kinds, bits, value, target)?
+            };
+            let Some(conversion) = conversion else {
+                return Ok(None);
+            };
+            push(
+                &mut arguments,
+                crate::p5_types::calls::TypedUse { value, conversion },
+                budget,
+            )?;
+        }
+        push(
+            &mut result,
+            FilledArrayUse {
+                _sealed: (),
+                kind: site.component.kind(),
+                arguments,
+            },
+            budget,
+        )?;
+    }
+    Ok(Some(result))
+}
 fn solve_empty_fills(
     ssa: &SsaBody<'_>,
     kinds: &[Option<Kind>],
@@ -825,7 +967,11 @@ fn return_use(
     if typed.kinds[index] == Some(result.kind())
         && matches!(
             result.kind(),
-            Kind::Nominal(_) | Kind::PrimitiveArray(_) | Kind::ObjectArray
+            Kind::Nominal(_)
+                | Kind::ReferenceArray(_)
+                | Kind::ProjectedNominal(_)
+                | Kind::PrimitiveArray(_)
+                | Kind::ObjectArray
         )
     {
         return Ok(Some(UseConversion::Identity));
@@ -837,7 +983,14 @@ fn return_use(
         | (Some(Kind::String), Kind::String) => Some(UseConversion::Identity),
         (Some(Kind::Boolean), Kind::Int) => Some(UseConversion::BooleanWord),
         (
-            Some(Kind::String | Kind::Nominal(_) | Kind::PrimitiveArray(_) | Kind::ObjectArray),
+            Some(
+                Kind::String
+                | Kind::Nominal(_)
+                | Kind::ReferenceArray(_)
+                | Kind::ProjectedNominal(_)
+                | Kind::PrimitiveArray(_)
+                | Kind::ObjectArray,
+            ),
             Kind::Object,
         ) => Some(UseConversion::UpcastObject),
         (Some(Kind::Int), Kind::Boolean)

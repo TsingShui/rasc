@@ -122,19 +122,28 @@ pub(super) fn operation(
             },
         ),
         Op::Nop => return Ok(None),
+        Op::Exception(_) => {
+            return Err(RequestError::InternalInvariant(
+                "handler entered ordinary Java lowering",
+            ));
+        }
         Op::NewInstance(..)
         | Op::Initialize(..)
         | Op::NewArray(..)
+        | Op::FilledArray(..)
         | Op::FreshFill(..)
         | Op::EmptyFill(..)
         | Op::Cast(..)
+        | Op::InstanceOf(..)
         | Op::String(..)
         | Op::Call(_, _)
         | Op::ArrayLength(..)
         | Op::ArrayLoad(..)
         | Op::ArrayStore(..)
         | Op::FieldLoad(..)
-        | Op::FieldStore(..) => {
+        | Op::FieldStore(..)
+        | Op::StaticLoad(..)
+        | Op::StaticStore(..) => {
             return Err(RequestError::InternalInvariant(
                 "call entered pure assignment lowering",
             ));
@@ -168,7 +177,12 @@ pub(crate) fn verify(
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<Option<VerifiedJavaMethod>, RequestError> {
     let storage = &plan.storage;
-    super::fresh_fill::validate(input, &storage.typed, budget)?;
+    if !super::array_ops::validate(input, catalog, &storage.typed, budget)? {
+        return Ok(None);
+    }
+    if !super::fresh_fill::validate(input, catalog, &storage.typed, budget)? {
+        return Ok(None);
+    }
     if !super::cast_ops::validate(input, catalog, &storage.typed, budget)? {
         return Ok(None);
     }

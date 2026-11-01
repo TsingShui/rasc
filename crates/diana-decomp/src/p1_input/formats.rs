@@ -97,6 +97,12 @@ pub struct OpcodeSpec {
     pub(super) may_throw: bool,
 }
 
+impl OpcodeSpec {
+    pub(crate) fn may_throw(self) -> bool {
+        self.may_throw
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum RegisterWidth {
     One,

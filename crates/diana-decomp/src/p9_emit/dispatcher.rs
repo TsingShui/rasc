@@ -73,7 +73,9 @@ pub(super) fn locals(
                     | Kind::String
                     | Kind::PrimitiveArray(_)
                     | Kind::ObjectArray
-                    | Kind::Nominal(_) => " = null",
+                    | Kind::Nominal(_)
+                    | Kind::ReferenceArray(_)
+                    | Kind::ProjectedNominal(_) => " = null",
                     Kind::Float => " = 0.0f",
                     Kind::Long => " = 0L",
                     Kind::Double => " = 0.0d",
@@ -123,10 +125,33 @@ pub(super) fn statements(
             crate::p8_java::calls::Statement::NewArray(array) => {
                 local(array.result, output, budget)?;
                 output.push(" = new ", budget)?;
-                output.push(array.component.component_spelling(), budget)?;
-                output.push("[", budget)?;
-                super::java::value_use(array.length, output, budget)?;
-                output.push("];\n", budget)?;
+                output.push(&array.base_type, budget)?;
+                match &array.contents {
+                    crate::p8_java::fresh_fill::Contents::Length(length) => {
+                        output.push("[", budget)?;
+                        super::java::value_use(*length, output, budget)?;
+                        output.push("]", budget)?;
+                        for _ in 0..array.trailing_dimensions {
+                            output.push("[]", budget)?;
+                        }
+                        output.push(";\n", budget)?;
+                    }
+                    crate::p8_java::fresh_fill::Contents::Elements(values) => {
+                        output.push("[]", budget)?;
+                        for _ in 0..array.trailing_dimensions {
+                            output.push("[]", budget)?;
+                        }
+                        output.push(" {", budget)?;
+                        for (index, &value) in values.iter().enumerate() {
+                            budget.charge_work(1)?;
+                            if index != 0 {
+                                output.push(", ", budget)?;
+                            }
+                            super::java::value_use(value, output, budget)?;
+                        }
+                        output.push("};\n", budget)?;
+                    }
+                }
             }
             crate::p8_java::calls::Statement::FreshFill(fill) => {
                 for (index, element) in fill.elements.iter().enumerate() {
@@ -148,12 +173,22 @@ pub(super) fn statements(
                 local(*array, output, budget)?;
                 output.push(".length;\n", budget)?;
             }
-            crate::p8_java::calls::Statement::Cast(cast) => {
-                local(cast.target, output, budget)?;
-                output.push(" = (", budget)?;
-                output.push(cast.kind.spelling(), budget)?;
-                output.push(") ", budget)?;
-                super::java::value_use(cast.source, output, budget)?;
+            crate::p8_java::calls::Statement::TypeCheck(check) => {
+                local(check.target, output, budget)?;
+                output.push(" = ", budget)?;
+                match check.operation {
+                    crate::p8_java::cast_ops::CheckKind::Cast => {
+                        output.push("(", budget)?;
+                        output.push(&check.type_name, budget)?;
+                        output.push(") ", budget)?;
+                        super::java::value_use(check.source, output, budget)?;
+                    }
+                    crate::p8_java::cast_ops::CheckKind::InstanceOf => {
+                        super::java::value_use(check.source, output, budget)?;
+                        output.push(" instanceof ", budget)?;
+                        output.push(&check.type_name, budget)?;
+                    }
+                }
                 output.push(";\n", budget)?;
             }
             crate::p8_java::calls::Statement::String { target, units, .. } => {
@@ -271,6 +306,8 @@ pub(super) fn open_if(
                         | Kind::PrimitiveArray(_)
                         | Kind::ObjectArray
                         | Kind::Nominal(_)
+                        | Kind::ReferenceArray(_)
+                        | Kind::ProjectedNominal(_)
                 ) {
                     "null"
                 } else {

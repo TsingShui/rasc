@@ -24,16 +24,17 @@ impl ArrayElement {
     }
 }
 impl PrimitiveArray {
-    pub(crate) fn component_spelling(self) -> &'static str {
+    pub(crate) fn value_type(self) -> crate::p2_flow::normal::DeclarationType {
+        use crate::p2_flow::normal::DeclarationType;
         match self {
-            Self::Boolean => "boolean",
-            Self::Byte => "byte",
-            Self::Short => "short",
-            Self::Char => "char",
-            Self::Int => "int",
-            Self::Float => "float",
-            Self::Long => "long",
-            Self::Double => "double",
+            Self::Boolean => DeclarationType::Boolean,
+            Self::Byte => DeclarationType::Narrow(super::Narrow::Byte),
+            Self::Short => DeclarationType::Narrow(super::Narrow::Short),
+            Self::Char => DeclarationType::Narrow(super::Narrow::Char),
+            Self::Int => DeclarationType::Int,
+            Self::Float => DeclarationType::Float,
+            Self::Long => DeclarationType::Long,
+            Self::Double => DeclarationType::Double,
         }
     }
     pub(crate) fn element(self, bits: u64) -> Option<ArrayElement> {

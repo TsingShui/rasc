@@ -7,8 +7,7 @@ use crate::p5_types::normal::Kind;
 use crate::p5_types::normal::TypedBody;
 use crate::substrate::owned::push;
 
-// Widening the original u32 type ID keeps nominal identities disjoint from
-// builtin identities without restricting the input type pool.
+// Disjoint 64-bit coordinate domains retain both the root type ID and array depth.
 pub(crate) fn local_type(kind: Kind) -> Result<LocalType, RequestError> {
     LocalType::new(
         LocalTypeId(match kind {
@@ -30,7 +29,9 @@ pub(crate) fn local_type(kind: Kind) -> Result<LocalType, RequestError> {
                 crate::p5_types::PrimitiveArray::Double => 13,
             },
             Kind::ObjectArray => 6,
-            Kind::Nominal(id) => u64::from(id.0) + 16,
+            Kind::Nominal(id) => u128::from(id.0) + 16,
+            Kind::ReferenceArray(key) => 16 + (1u128 << 64) + key.identity(),
+            Kind::ProjectedNominal(key) => 16 + (2u128 << 64) + key.identity(),
         }),
         if matches!(kind, Kind::Long | Kind::Double) {
             2
@@ -39,7 +40,23 @@ pub(crate) fn local_type(kind: Kind) -> Result<LocalType, RequestError> {
         },
     )
 }
-pub(crate) fn kind(local_type: LocalType) -> Result<Kind, RequestError> {
+fn kind(
+    local_type_value: LocalType,
+    locals: &[Local],
+    budget: &mut MethodBudget<'_, '_>,
+) -> Result<Kind, RequestError> {
+    if local_type_value.identity.0 >= 16 {
+        for local in locals {
+            budget.charge_work(1)?;
+            if local_type(local.kind)? == local_type_value {
+                return Ok(local.kind);
+            }
+        }
+        return Err(RequestError::InternalInvariant(
+            "temporary lost its checked source type",
+        ));
+    }
+    let local_type = local_type_value;
     match (local_type.identity.0, local_type.width) {
         (0, Width::One) => Ok(Kind::Int),
         (1, Width::One) => Ok(Kind::Boolean),
@@ -59,9 +76,7 @@ pub(crate) fn kind(local_type: LocalType) -> Result<Kind, RequestError> {
         (6, Width::One) => Ok(Kind::ObjectArray),
         (14, Width::Two) => Ok(Kind::Long),
         (15, Width::Two) => Ok(Kind::Double),
-        (identity, Width::One) if identity >= 16 => Ok(Kind::Nominal(crate::TypeId(
-            u32::try_from(identity - 16).map_err(|_| RequestError::PlatformCapacity)?,
-        ))),
+
         _ => Err(RequestError::InternalInvariant(
             "foreign normal storage type",
         )),
@@ -90,6 +105,7 @@ pub(crate) struct StorageBody<'a> {
     _sealed: (),
     pub typed: TypedBody<'a>,
     pub locals: Vec<Local>,
+    pub filled_targets: Vec<LocalId>,
     pub empty_fills: Vec<super::empty_fill::LengthOnly>,
     pub fresh_fills: Vec<super::fresh_fill::FreshArray>,
     pub object_allocations: Vec<super::object_allocation::DeferredAllocation>,
@@ -143,7 +159,13 @@ fn parallel(
         let mut selected = None;
         for &(edge, value) in &phi.inputs {
             budget.charge_work(1)?;
-            if edge == incoming && selected.replace(value).is_some() {
+            if edge
+                == incoming.map_or(
+                    crate::p3_ssa::normal::Incoming::EntrySeed,
+                    crate::p3_ssa::normal::Incoming::Normal,
+                )
+                && selected.replace(value).is_some()
+            {
                 return Err(RequestError::InternalInvariant(
                     "storage Phi has duplicate incoming edges",
                 ));
@@ -188,11 +210,12 @@ fn plan_edge(
                 "temporary does not extend storage",
             ));
         }
+        let source_kind = kind(temporary.kind, locals, budget)?;
         push(
             locals,
             Local {
                 id: temporary.local,
-                kind: kind(temporary.kind)?,
+                kind: source_kind,
                 initializer: Initializer::Default,
             },
             budget,
@@ -270,6 +293,61 @@ pub(crate) fn allocate<'a>(
         let proof = super::fresh_fill::prove(&typed, op, budget)?;
         push(&mut fresh_fills, proof, budget)?;
     }
+    let mut filled_targets = Vec::new();
+    if !typed.filled_arrays.is_empty() {
+        for op in &typed.ssa.operations {
+            budget.charge_work(1)?;
+            let crate::p2_flow::normal::Op::FilledArray(id, result) = op.op else {
+                continue;
+            };
+            let index = usize::try_from(id.0).map_err(|_| RequestError::PlatformCapacity)?;
+            if index != filled_targets.len() {
+                return Err(RequestError::InternalInvariant(
+                    "filled storage changed identity",
+                ));
+            }
+            let usage = typed
+                .filled_arrays
+                .get(index)
+                .ok_or(RequestError::InternalInvariant(
+                    "filled array lost typed contents",
+                ))?;
+            let target = match (result, op.result) {
+                (crate::p2_flow::normal::FilledResult::Stored { .. }, Some(value)) => {
+                    let value_index =
+                        usize::try_from(value.0).map_err(|_| RequestError::PlatformCapacity)?;
+                    if typed.kinds.get(value_index).copied().flatten() != Some(usage.kind) {
+                        return Err(RequestError::InternalInvariant(
+                            "filled result changed source type",
+                        ));
+                    }
+                    LocalId(value.0)
+                }
+                (crate::p2_flow::normal::FilledResult::Discarded, None) => {
+                    // Java array creation is not a standalone statement expression.
+                    let id = LocalId(
+                        u32::try_from(locals.len()).map_err(|_| RequestError::PlatformCapacity)?,
+                    );
+                    push(
+                        &mut locals,
+                        Local {
+                            id,
+                            kind: usage.kind,
+                            initializer: Initializer::Default,
+                        },
+                        budget,
+                    )?;
+                    id
+                }
+                _ => {
+                    return Err(RequestError::InternalInvariant(
+                        "filled result lost original binding",
+                    ));
+                }
+            };
+            push(&mut filled_targets, target, budget)?;
+        }
+    }
     let mut empty_fills = Vec::new();
     for op in &typed.ssa.operations {
         budget.charge_work(1)?;
@@ -307,6 +385,7 @@ pub(crate) fn allocate<'a>(
         _sealed: (),
         typed,
         locals,
+        filled_targets,
         empty_fills,
         fresh_fills,
         object_allocations,

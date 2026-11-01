@@ -31,7 +31,7 @@ pub(super) fn write(
             index,
             value,
         } => {
-            super::java::local(*array, output, budget)?;
+            super::java::value_use(*array, output, budget)?;
             output.push("[", budget)?;
             super::java::value_use(*index, output, budget)?;
             output.push("] = ", budget)?;

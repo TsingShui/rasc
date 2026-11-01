@@ -1,5 +1,5 @@
 use super::branch::{LocalId, ValueUse};
-use crate::p2_flow::normal::{ArrayElement, Op};
+use crate::p2_flow::normal::Op;
 use crate::p3_ssa::normal::{BoundOp, ValueId};
 use crate::p5_types::normal::{ArrayUse, Kind, TypedBody};
 use crate::{MethodBudget, RequestError};
@@ -15,10 +15,38 @@ pub(crate) enum Statement {
         result: LocalId,
     },
     Store {
-        array: LocalId,
+        array: ValueUse,
         index: ValueUse,
         value: ValueUse,
     },
+}
+pub(super) fn validate(
+    input: &crate::input::MethodInput<'_, '_>,
+    catalog: &crate::DeclarationCatalog,
+    typed: &TypedBody<'_>,
+    budget: &mut MethodBudget<'_, '_>,
+) -> Result<bool, RequestError> {
+    for evidence in &typed.arrays {
+        budget.charge_work(1)?;
+        if matches!(
+            evidence,
+            Some(crate::p5_types::normal::ArrayEvidence {
+                usage: ArrayUse::Store {
+                    receiver: crate::p5_types::normal::ArrayReceiver::ObjectView,
+                    ..
+                },
+                ..
+            })
+        ) {
+            return crate::p4_calls::qualifier_available(
+                input,
+                catalog,
+                &[106, 97, 118, 97],
+                budget,
+            );
+        }
+    }
+    Ok(true)
 }
 pub(crate) fn lower(ssa: &TypedBody<'_>, op: &BoundOp) -> Result<Statement, RequestError> {
     let evidence = ssa
@@ -46,8 +74,20 @@ pub(crate) fn lower(ssa: &TypedBody<'_>, op: &BoundOp) -> Result<Statement, Requ
             index: super::values::lower(LocalId(op.input(1)?.0), *index),
             result: result()?,
         }),
-        (Op::ArrayStore(..), ArrayUse::Store { index, value }) => Ok(Statement::Store {
-            array,
+        (
+            Op::ArrayStore(..),
+            ArrayUse::Store {
+                index,
+                value,
+                receiver,
+            },
+        ) => Ok(Statement::Store {
+            array: match receiver {
+                crate::p5_types::normal::ArrayReceiver::Direct => ValueUse::Direct(array),
+                crate::p5_types::normal::ArrayReceiver::ObjectView => {
+                    ValueUse::ObjectArrayView(array)
+                }
+            },
             index: super::values::lower(LocalId(op.input(1)?.0), *index),
             value: super::values::lower(LocalId(op.input(2)?.0), *value),
         }),
@@ -66,6 +106,12 @@ fn valid_view(
     if actual.value().0 != value.0 {
         return Ok(false);
     }
+    if matches!(
+        expected,
+        Kind::Int | Kind::Float | Kind::Long | Kind::Double
+    ) {
+        return super::dispatcher_verify::numeric_view(ssa, actual, Some(&value), expected);
+    }
     Ok(match (actual, expected, ssa.kinds[index]) {
         (ValueUse::Direct(_), Kind::Int, Some(Kind::Int))
         | (ValueUse::Direct(_), Kind::Object, Some(Kind::Object))
@@ -73,7 +119,14 @@ fn valid_view(
         (
             ValueUse::UpcastObject(_),
             Kind::Object,
-            Some(Kind::String | Kind::PrimitiveArray(_) | Kind::ObjectArray | Kind::Nominal(_)),
+            Some(
+                Kind::String
+                | Kind::PrimitiveArray(_)
+                | Kind::ObjectArray
+                | Kind::Nominal(_)
+                | Kind::ReferenceArray(_)
+                | Kind::ProjectedNominal(_),
+            ),
         ) => true,
         (
             ValueUse::Null {
@@ -87,6 +140,7 @@ fn valid_view(
     })
 }
 pub(crate) fn verify(
+    input: &crate::input::MethodInput<'_, '_>,
     ssa: &TypedBody<'_>,
     op: &BoundOp,
     actual: &Statement,
@@ -98,19 +152,11 @@ pub(crate) fn verify(
     let (opcode, registers) = match op.op {
         Op::ArrayLength(dst, array) => (0x21, [Some(dst), Some(array), None]),
         Op::ArrayLoad(dst, array, index, element) => (
-            if element == ArrayElement::Int {
-                0x44
-            } else {
-                0x46
-            },
+            0x44 + element.offset(),
             [Some(dst), Some(array), Some(index)],
         ),
         Op::ArrayStore(array, index, value, element) => (
-            if element == ArrayElement::Int {
-                0x4b
-            } else {
-                0x4d
-            },
+            0x4b + element.offset(),
             [Some(value), Some(array), Some(index)],
         ),
         _ => return Ok(false),
@@ -135,13 +181,11 @@ pub(crate) fn verify(
     let array = op.input(0)?;
     let component =
         match ssa.kinds[usize::try_from(array.0).map_err(|_| RequestError::PlatformCapacity)?] {
-            Some(Kind::PrimitiveArray(kind))
-                if kind == crate::p5_types::PrimitiveArray::Int
-                    || matches!(op.op, Op::ArrayLength(..)) =>
-            {
-                Kind::Int
+            Some(Kind::PrimitiveArray(kind)) => kind.value_type(),
+            Some(Kind::ObjectArray) => crate::p2_flow::normal::DeclarationType::Object,
+            Some(Kind::ReferenceArray(key)) => {
+                crate::p2_flow::normal::ArrayKind::Reference(key).element_type(input, budget)?
             }
-            Some(Kind::ObjectArray) => Kind::Object,
             _ => return Ok(false),
         };
     let result_matches = |result: LocalId, kind: Kind| -> Result<bool, RequestError> {
@@ -166,8 +210,8 @@ pub(crate) fn verify(
             },
         ) => {
             actual.0 == array.0
-                && ((element == ArrayElement::Int) == (component == Kind::Int))
-                && result_matches(*result, component)?
+                && element.accepts(component)
+                && result_matches(*result, component.kind())?
                 && valid_view(ssa, *index, op.input(1)?, Kind::Int)?
         }
         (
@@ -179,10 +223,28 @@ pub(crate) fn verify(
             },
         ) => {
             op.result.is_none()
-                && actual.0 == array.0
-                && ((element == ArrayElement::Int) == (component == Kind::Int))
+                && actual.value().0 == array.0
+                && matches!(
+                    (
+                        *actual,
+                        ssa.kinds[usize::try_from(array.0)
+                            .map_err(|_| RequestError::PlatformCapacity)?]
+                    ),
+                    (ValueUse::ObjectArrayView(_), Some(Kind::ReferenceArray(_)))
+                        | (
+                            ValueUse::Direct(_),
+                            Some(Kind::PrimitiveArray(_) | Kind::ObjectArray)
+                        )
+                )
+                && element.accepts(component)
                 && valid_view(ssa, *index, op.input(1)?, Kind::Int)?
-                && valid_view(ssa, *value, op.input(2)?, component)?
+                && if matches!(actual, ValueUse::ObjectArrayView(_)) {
+                    valid_view(ssa, *value, op.input(2)?, Kind::Object)?
+                } else if component.kind() == Kind::Object {
+                    valid_view(ssa, *value, op.input(2)?, component.kind())?
+                } else {
+                    super::values::verify_primitive_store(ssa, *value, op.input(2)?, component)?
+                }
         }
         _ => false,
     })

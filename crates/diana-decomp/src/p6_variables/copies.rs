@@ -4,7 +4,7 @@ use crate::{MethodBudget, RequestError};
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct LocalId(pub u32);
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) struct LocalTypeId(pub u64);
+pub(crate) struct LocalTypeId(pub u128);
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum Width {
     One,

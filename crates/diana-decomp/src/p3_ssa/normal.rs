@@ -17,15 +17,22 @@ pub(crate) enum Sym {
 }
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub(crate) enum Definition {
+    ExceptionAt(OpId),
     Parameter(u32),
     OpResult(OpId),
     Phi,
+}
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub(crate) enum Incoming {
+    EntrySeed,
+    Normal(EdgeId),
+    Exceptional(crate::p2_flow::protection::ExceptionEdgeId),
 }
 pub(crate) struct Phi {
     pub block: BlockId,
     pub register: RegisterId,
     pub result: ValueId,
-    pub inputs: Vec<(Option<EdgeId>, Sym)>,
+    pub inputs: Vec<(Incoming, Sym)>,
 }
 pub(crate) struct BoundOp {
     pub id: OpId,
@@ -52,6 +59,7 @@ pub(crate) struct BoundBlock {
 pub(crate) struct SsaBody<'a> {
     pub object_creations: Vec<crate::p2_flow::normal::ObjectCreation>,
     pub array_creations: Vec<crate::p2_flow::normal::ArrayCreation>,
+    pub filled_arrays: Vec<crate::p2_flow::normal::FilledArraySite>,
     pub fresh_fills: Vec<crate::p2_flow::normal::FreshFillSite>,
     pub empty_fills: Vec<crate::p2_flow::normal::EmptyFillSite>,
     pub casts: Vec<crate::p2_flow::normal::CastSite>,
@@ -67,6 +75,8 @@ pub(crate) struct SsaBody<'a> {
     pub parameters: Vec<DeclarationType>,
     pub blocks: Vec<Block>,
     pub edges: Vec<Edge>,
+    pub exception_edges: Vec<crate::p2_flow::protection::ExceptionEdge>,
+    pub protection: crate::input::protection::CheckedProtection,
     pub values: Vec<Definition>,
     pub phis: Vec<Phi>,
     pub bound: Vec<BoundBlock>,
@@ -95,7 +105,7 @@ impl SsaBody<'_> {
             ))?;
         match definition {
             Definition::OpResult(op) => Ok(matches!(self.operation(*op)?.op, Op::Constant(_, 0))),
-            Definition::Parameter(_) | Definition::Phi => Ok(false),
+            Definition::Parameter(_) | Definition::Phi | Definition::ExceptionAt(_) => Ok(false),
         }
     }
 }
@@ -195,6 +205,41 @@ fn phi_highs(
     }
     Ok(())
 }
+fn capture_exceptional(
+    flow: &FlowBody<'_>,
+    live: &[Vec<RegisterId>],
+    source: BlockId,
+    pc: CodeUnitOffset,
+    env: &[(RegisterId, Sym)],
+    snapshots: &mut [Vec<(RegisterId, Sym)>],
+    budget: &mut MethodBudget<'_, '_>,
+) -> Result<(), RequestError> {
+    for (index, edge) in flow.exception_edges.iter().enumerate() {
+        budget.charge_work(1)?;
+        if edge.source != source || edge.pc != pc {
+            continue;
+        }
+        for &register in &live[ix(edge.target.0)?] {
+            budget.charge_work(1)?;
+            write(
+                &mut snapshots[index],
+                register,
+                lookup(env, register, budget)?,
+                budget,
+            )?;
+            let high = super::word_ownership::high(register)?;
+            if high.0 < u32::from(flow.raw.registers_size()) {
+                write(
+                    &mut snapshots[index],
+                    high,
+                    lookup(env, high, budget)?,
+                    budget,
+                )?;
+            }
+        }
+    }
+    Ok(())
+}
 pub(crate) fn build<'a>(
     flow: FlowBody<'a>,
     budget: &mut MethodBudget<'_, '_>,
@@ -216,6 +261,17 @@ pub(crate) fn build<'a>(
                     for &register in &live[ix(edge.target.0)?] {
                         budget.charge_work(1)?;
                         add_register(&mut needed, register, budget)?;
+                    }
+                }
+            }
+            if matches!(block.terminal, crate::p2_flow::normal::Terminal::Throw(_)) {
+                for edge in &flow.exception_edges {
+                    budget.charge_work(1)?;
+                    if ix(edge.source.0)? == index && edge.pc == block.terminal_pc {
+                        for &register in &live[ix(edge.target.0)?] {
+                            budget.charge_work(1)?;
+                            add_register(&mut needed, register, budget)?;
+                        }
                     }
                 }
             }
@@ -248,9 +304,18 @@ pub(crate) fn build<'a>(
                         }
                     }
                 }
-                for register in operation.kind.reads(&flow.calls)? {
+                for register in operation.kind.reads(&flow.calls, &flow.filled_arrays)? {
                     budget.charge_work(1)?;
                     add_register(&mut needed, register, budget)?;
+                }
+                for edge in &flow.exception_edges {
+                    budget.charge_work(1)?;
+                    if ix(edge.source.0)? == index && edge.pc == operation.pc {
+                        for &register in &live[ix(edge.target.0)?] {
+                            budget.charge_work(1)?;
+                            add_register(&mut needed, register, budget)?;
+                        }
+                    }
                 }
             }
             for register in needed {
@@ -323,6 +388,11 @@ pub(crate) fn build<'a>(
         push(&mut call_ops, None, budget)?;
     }
     let mut outgoing = Vec::new();
+    let mut exceptional = Vec::new();
+    for _ in &flow.exception_edges {
+        budget.charge_work(1)?;
+        push(&mut exceptional, Vec::new(), budget)?;
+    }
     for (index, block) in flow.blocks.iter().enumerate() {
         budget.charge_work(1)?;
         let block_id = BlockId(u32::try_from(index).map_err(|_| RequestError::PlatformCapacity)?);
@@ -343,7 +413,7 @@ pub(crate) fn build<'a>(
                 ));
             }
             let mut inputs = Vec::new();
-            for register in operation.kind.reads(&flow.calls)? {
+            for register in operation.kind.reads(&flow.calls, &flow.filled_arrays)? {
                 budget.charge_work(1)?;
                 push(
                     &mut inputs,
@@ -351,11 +421,25 @@ pub(crate) fn build<'a>(
                     budget,
                 )?;
             }
+            capture_exceptional(
+                &flow,
+                &live,
+                block_id,
+                operation.pc,
+                &env,
+                &mut exceptional,
+                budget,
+            )?;
             let result = if let Some(register) = destination(operation.kind) {
                 let id = ValueId(
                     u32::try_from(values.len()).map_err(|_| RequestError::PlatformCapacity)?,
                 );
-                push(&mut values, Definition::OpResult(operation.id), budget)?;
+                let definition = if matches!(operation.kind, Op::Exception(_)) {
+                    Definition::ExceptionAt(operation.id)
+                } else {
+                    Definition::OpResult(operation.id)
+                };
+                push(&mut values, definition, budget)?;
                 commit(
                     &mut env,
                     register,
@@ -387,6 +471,17 @@ pub(crate) fn build<'a>(
                 budget,
             )?;
             push(&mut ops, operation.id, budget)?;
+        }
+        if matches!(block.terminal, crate::p2_flow::normal::Terminal::Throw(_)) {
+            capture_exceptional(
+                &flow,
+                &live,
+                block_id,
+                block.terminal_pc,
+                &env,
+                &mut exceptional,
+                budget,
+            )?;
         }
         let terminal = if let Some(register) = terminal_register(block.terminal) {
             Some(value(
@@ -441,7 +536,7 @@ pub(crate) fn build<'a>(
         if phi.block == BlockId(0) {
             push(
                 &mut phi.inputs,
-                (None, lookup(&seeds, phi.register, budget)?),
+                (Incoming::EntrySeed, lookup(&seeds, phi.register, budget)?),
                 budget,
             )?;
         }
@@ -451,10 +546,27 @@ pub(crate) fn build<'a>(
                 push(
                     &mut phi.inputs,
                     (
-                        Some(EdgeId(
+                        Incoming::Normal(EdgeId(
                             u32::try_from(index).map_err(|_| RequestError::PlatformCapacity)?,
                         )),
                         lookup(&outgoing[ix(edge.source.0)?], phi.register, budget)?,
+                    ),
+                    budget,
+                )?;
+            }
+        }
+    }
+    for phi in &mut phis {
+        for (index, edge) in flow.exception_edges.iter().enumerate() {
+            budget.charge_work(1)?;
+            if edge.target == phi.block {
+                push(
+                    &mut phi.inputs,
+                    (
+                        Incoming::Exceptional(crate::p2_flow::protection::ExceptionEdgeId(
+                            u32::try_from(index).map_err(|_| RequestError::PlatformCapacity)?,
+                        )),
+                        lookup(&exceptional[index], phi.register, budget)?,
                     ),
                     budget,
                 )?;
@@ -480,6 +592,7 @@ pub(crate) fn build<'a>(
         raw: flow.raw,
         object_creations: flow.object_creations,
         array_creations: flow.array_creations,
+        filled_arrays: flow.filled_arrays,
         fresh_fills: flow.fresh_fills,
         empty_fills: flow.empty_fills,
         casts: flow.casts,
@@ -488,11 +601,13 @@ pub(crate) fn build<'a>(
         frame: flow.frame,
         blocks: flow.blocks,
         edges: flow.edges,
+        exception_edges: flow.exception_edges,
+        protection: flow.protection,
         values,
         phis,
         bound,
     };
-    let widths = super::word_ownership::analyze(&ssa, &seeds, &outgoing, budget)?;
+    let widths = super::word_ownership::analyze(&ssa, &seeds, &outgoing, &exceptional, budget)?;
     verify(&ssa, &seeds, &widths, budget)?;
     Ok(ssa)
 }
@@ -502,6 +617,14 @@ fn verify(
     widths: &super::word_ownership::WidthFacts,
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<(), RequestError> {
+    crate::p2_flow::protection::verify(
+        &ssa.raw,
+        &ssa.protection,
+        &ssa.blocks,
+        &ssa.edges,
+        &ssa.exception_edges,
+        budget,
+    )?;
     let mut operation_count = 0usize;
     for (index, block) in ssa.blocks.iter().enumerate() {
         budget.charge_work(1)?;
@@ -524,6 +647,14 @@ fn verify(
                         .ok_or(RequestError::PlatformCapacity)?;
                 }
             }
+            for edge in &ssa.exception_edges {
+                budget.charge_work(1)?;
+                if edge.target == block_id {
+                    expected = expected
+                        .checked_add(1)
+                        .ok_or(RequestError::PlatformCapacity)?;
+                }
+            }
             if phi.inputs.len() != expected {
                 return Err(RequestError::InternalInvariant("incomplete Phi input set"));
             }
@@ -531,7 +662,7 @@ fn verify(
             let mut seed_count = 0usize;
             for &(edge, sym) in &phi.inputs {
                 budget.charge_work(1)?;
-                if edge.is_none() {
+                if edge == Incoming::EntrySeed {
                     seed_count = seed_count
                         .checked_add(1)
                         .ok_or(RequestError::PlatformCapacity)?;
@@ -573,7 +704,11 @@ fn verify(
                 .checked_add(1)
                 .ok_or(RequestError::PlatformCapacity)?;
             let mut inputs = op.inputs.iter();
-            for (position, register) in original.kind.reads(&ssa.calls)?.enumerate() {
+            for (position, register) in original
+                .kind
+                .reads(&ssa.calls, &ssa.filled_arrays)?
+                .enumerate()
+            {
                 budget.charge_work(1)?;
                 if inputs.next().copied()
                     != Some(widths.read(
@@ -609,9 +744,15 @@ fn verify(
                 }
                 verify_call(ssa, op.pc, call, None, budget)?;
             }
+            verify_exceptional_inputs(ssa, block_id, op.pc, &env, budget)?;
             match (destination(original.kind), op.result) {
                 (Some(register), Some(result)) => {
-                    if ssa.values.get(ix(result.0)?) != Some(&Definition::OpResult(id)) {
+                    let expected = if matches!(original.kind, Op::Exception(_)) {
+                        Definition::ExceptionAt(id)
+                    } else {
+                        Definition::OpResult(id)
+                    };
+                    if ssa.values.get(ix(result.0)?) != Some(&expected) {
                         return Err(RequestError::InternalInvariant(
                             "operation changed result definition",
                         ));
@@ -631,6 +772,9 @@ fn verify(
                     ));
                 }
             }
+        }
+        if matches!(block.terminal, crate::p2_flow::normal::Terminal::Throw(_)) {
+            verify_exceptional_inputs(ssa, block_id, block.terminal_pc, &env, budget)?;
         }
         for (register, actual) in [
             (terminal_register(block.terminal), ssa.bound[index].terminal),
@@ -659,7 +803,7 @@ fn verify(
             if edge.source != block_id {
                 continue;
             }
-            let id = Some(EdgeId(
+            let id = Incoming::Normal(EdgeId(
                 u32::try_from(edge_index).map_err(|_| RequestError::PlatformCapacity)?,
             ));
             for phi in &ssa.phis {
@@ -688,6 +832,44 @@ fn verify(
         ));
     }
     verify_availability(ssa, budget)
+}
+pub(super) fn verify_exceptional_inputs(
+    ssa: &SsaBody<'_>,
+    source: BlockId,
+    pc: CodeUnitOffset,
+    env: &[(RegisterId, Sym)],
+    budget: &mut MethodBudget<'_, '_>,
+) -> Result<(), RequestError> {
+    for (index, edge) in ssa.exception_edges.iter().enumerate() {
+        budget.charge_work(1)?;
+        if edge.source != source || edge.pc != pc {
+            continue;
+        }
+        let incoming = Incoming::Exceptional(crate::p2_flow::protection::ExceptionEdgeId(
+            u32::try_from(index).map_err(|_| RequestError::PlatformCapacity)?,
+        ));
+        for phi in &ssa.phis {
+            budget.charge_work(1)?;
+            if phi.block != edge.target {
+                continue;
+            }
+            let mut supplied = None;
+            for &(actual, value) in &phi.inputs {
+                budget.charge_work(1)?;
+                if actual == incoming && supplied.replace(value).is_some() {
+                    return Err(RequestError::InternalInvariant(
+                        "duplicate exceptional Phi edge",
+                    ));
+                }
+            }
+            if supplied != Some(lookup(env, phi.register, budget)?) {
+                return Err(RequestError::InternalInvariant(
+                    "exception Phi is not the pre-write environment",
+                ));
+            }
+        }
+    }
+    Ok(())
 }
 fn verify_call(
     ssa: &SsaBody<'_>,
@@ -763,10 +945,12 @@ fn verify_availability(
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<(), RequestError> {
     let mut bad = Vec::new();
+    let mut conservative = Vec::new();
     let mut grounded = Vec::new();
     for definition in &ssa.values {
         budget.charge_work(1)?;
         push(&mut bad, false, budget)?;
+        push(&mut conservative, false, budget)?;
         push(
             &mut grounded,
             !matches!(definition, Definition::Phi),
@@ -785,20 +969,32 @@ fn verify_availability(
                         bad[index] = true;
                         changed = true;
                     }
+                    if conservative[ix(source.0)?] && !conservative[index] {
+                        conservative[index] = true;
+                        changed = true;
+                    }
                 }
             }
         }
         for phi in &ssa.phis {
             budget.charge_work(1)?;
             let index = ix(phi.result.0)?;
-            for &(_, input) in &phi.inputs {
+            for &(incoming, input) in &phi.inputs {
                 budget.charge_work(1)?;
-                let (input_bad, input_grounded) = match input {
-                    Sym::Bad => (true, false),
-                    Sym::High(_) => (true, false),
-                    Sym::Value(source) => (bad[ix(source.0)?], grounded[ix(source.0)?]),
+                let (input_bad, input_conservative, input_grounded) = match input {
+                    Sym::Bad | Sym::High(_) => (true, false, false),
+                    Sym::Value(source) => (
+                        bad[ix(source.0)?],
+                        conservative[ix(source.0)?],
+                        grounded[ix(source.0)?],
+                    ),
                 };
-                if input_bad && !bad[index] {
+                let exceptional = matches!(incoming, Incoming::Exceptional(_));
+                if (input_conservative || input_bad && exceptional) && !conservative[index] {
+                    conservative[index] = true;
+                    changed = true;
+                }
+                if input_bad && !exceptional && !bad[index] {
                     bad[index] = true;
                     changed = true;
                 }
@@ -816,13 +1012,15 @@ fn verify_availability(
         let index = ix(value.0)?;
         if bad[index] || !grounded[index] {
             Err(RequestError::UndefinedRegister { register, pc })
+        } else if conservative[index] {
+            Err(RequestError::DefinitionAvailabilityUnproved { register, pc })
         } else {
             Ok(())
         }
     };
     for op in &ssa.operations {
         budget.charge_work(1)?;
-        for (register, &source) in op.op.reads(&ssa.calls)?.zip(&op.inputs) {
+        for (register, &source) in op.op.reads(&ssa.calls, &ssa.filled_arrays)?.zip(&op.inputs) {
             budget.charge_work(1)?;
             available(source, register, op.pc)?;
         }

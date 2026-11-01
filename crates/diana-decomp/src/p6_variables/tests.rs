@@ -134,7 +134,7 @@ fn t09_two_entry_dispatcher_preserves_edges_and_never_reads_da_defaults() {
                     | crate::p8_java::calls::Statement::NewArray(_)
                     | crate::p8_java::calls::Statement::FreshFill(_)
                     | crate::p8_java::calls::Statement::EmptyFill { .. }
-                    | crate::p8_java::calls::Statement::Cast(_)
+                    | crate::p8_java::calls::Statement::TypeCheck(_)
                     | crate::p8_java::calls::Statement::String { .. }
                     | crate::p8_java::calls::Statement::ReceiverCall { .. }
                     | crate::p8_java::calls::Statement::Array(_)

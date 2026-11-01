@@ -334,8 +334,8 @@ impl<'a> ProgramIndex<'a> {
                 ByteOffset(record.position_byte().0 - 2),
             ));
         }
-        let (field_type, shape) =
-            self.type_descriptor(TypeId(u32::from(record.read_u16_with(control)?)), control)?;
+        let field_type_idx = TypeId(u32::from(record.read_u16_with(control)?));
+        let (field_type, shape) = self.type_descriptor(field_type_idx, control)?;
         let name = self.string_with(StringId(record.read_u32_with(control)?), control)?;
         name.validate_name(control)?;
         if shape.words() == 0 {
@@ -344,7 +344,11 @@ impl<'a> ProgramIndex<'a> {
                 ByteOffset(record.position_byte().0 - 6),
             ));
         }
-        Ok(FieldDeclaration { name, field_type })
+        Ok(FieldDeclaration {
+            name,
+            field_type,
+            field_type_idx,
+        })
     }
 }
 
@@ -782,6 +786,7 @@ impl<'a> Prototype<'_, 'a> {
 pub(crate) struct FieldDeclaration<'a> {
     pub name: DexString<'a>,
     pub field_type: DexString<'a>,
+    pub field_type_idx: TypeId,
 }
 
 pub(crate) enum FieldStorage {

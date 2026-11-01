@@ -73,7 +73,8 @@ fn original_argument(
                 if inputs.len() != 1 {
                     return Ok(false);
                 }
-                let (None, Sym::Value(source)) = inputs[0] else {
+                let (crate::p3_ssa::normal::Incoming::EntrySeed, Sym::Value(source)) = inputs[0]
+                else {
                     return Ok(false);
                 };
                 value = source;

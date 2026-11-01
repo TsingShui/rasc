@@ -63,7 +63,9 @@ pub(super) fn prove(
         .array_creations
         .get(ix(creation.0)?)
         .ok_or_else(broken)?;
-    if creation.component != usage.component || allocation.pc.0 >= fill.pc.0 {
+    if creation.component != crate::p2_flow::normal::ArrayKind::Primitive(usage.component)
+        || allocation.pc.0 >= fill.pc.0
+    {
         return Err(unavailable());
     }
     let length = origin(typed, allocation.input(0)?, budget)?.ok_or_else(unavailable)?;

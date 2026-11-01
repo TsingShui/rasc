@@ -32,6 +32,20 @@ pub(crate) fn expected(op: Op, index: usize) -> Result<Option<Kind>, RequestErro
         }
         Op::LongBinary(..) => Some(Kind::Long),
         Op::Unary(_, unary, _) => Some(scalar_kind(unary.signature().0)),
+        Op::FieldStore(_, _, _, kind) if index == 1 && kind.field_offset() != 2 => {
+            Some(if kind.kind() == Kind::Boolean {
+                Kind::Int
+            } else {
+                kind.kind()
+            })
+        }
+        Op::StaticStore(_, _, kind) if kind.field_offset() != 2 => {
+            Some(if kind.kind() == Kind::Boolean {
+                Kind::Int
+            } else {
+                kind.kind()
+            })
+        }
         Op::Binary(..) | Op::ReverseSubtract(..) => Some(Kind::Int),
         _ => None,
     })
@@ -167,9 +181,11 @@ impl Families {
 }
 // Direct constants have independent use views. Non-literal copies and Phi
 // families must satisfy all consumers with one storage representation.
-pub(crate) fn constrain(
+pub(super) fn constrain(
+    input: &crate::input::MethodInput<'_, '_>,
     ssa: &SsaBody<'_>,
     kinds: &mut [Option<Kind>],
+    arrays: &super::array_components::ArrayComponents,
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<bool, RequestError> {
     let mut families = Families {
@@ -222,7 +238,30 @@ pub(crate) fn constrain(
         budget.charge_work(1)?;
         for (index, &value) in op.inputs.iter().enumerate() {
             budget.charge_work(1)?;
-            if let Some(expected) = expected(op.op, index)?
+            let expected = if let Op::FilledArray(id, _) = op.op {
+                let component = ssa.filled_arrays[ix(id.0)?]
+                    .component
+                    .element_type(input, budget)?;
+                if component.field_offset() == 2 {
+                    None
+                } else {
+                    Some(if component.kind() == Kind::Boolean {
+                        Kind::Int
+                    } else {
+                        component.kind()
+                    })
+                }
+            } else if matches!(op.op, Op::ArrayStore(..)) && index == 2 {
+                arrays
+                    .component(input, op.input(0)?, budget)?
+                    .map(|component| component.kind())
+                    .filter(|kind| {
+                        matches!(kind, Kind::Int | Kind::Long | Kind::Float | Kind::Double)
+                    })
+            } else {
+                expected(op.op, index)?
+            };
+            if let Some(expected) = expected
                 && !families.require(ssa, value, expected, budget)?
             {
                 return Ok(false);

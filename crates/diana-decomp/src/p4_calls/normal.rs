@@ -37,6 +37,7 @@ pub(crate) struct ResolvedBody<'a> {
 }
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub(crate) enum FieldScope {
+    Static,
     Instance,
     ConstructorThis,
 }
@@ -47,7 +48,7 @@ pub(crate) struct FieldEvidence {
     pub declaration: FieldDeclaration,
 }
 pub(crate) enum FieldDeclaration {
-    Known(super::field_facts::IntFieldAccess),
+    Known(super::field_facts::FieldAccess),
     Missing,
     Constant,
 }
@@ -89,20 +90,36 @@ pub(crate) fn collect<'a>(
     let mut fields = Vec::new();
     for op in &ssa.operations {
         budget.charge_work(1)?;
-        let (reference, usage) = match op.op {
-            crate::p2_flow::normal::Op::FieldLoad(_, _, id) => {
-                (id, super::field_facts::FieldUse::Read)
-            }
-            crate::p2_flow::normal::Op::FieldStore(_, _, id) => {
-                (id, super::field_facts::FieldUse::Write)
-            }
+        let (reference, usage, storage) = match op.op {
+            crate::p2_flow::normal::Op::FieldLoad(_, _, id, _) => (
+                id,
+                super::field_facts::FieldUse::Read,
+                super::field_facts::FieldStorage::Instance,
+            ),
+            crate::p2_flow::normal::Op::FieldStore(_, _, id, _) => (
+                id,
+                super::field_facts::FieldUse::Write,
+                super::field_facts::FieldStorage::Instance,
+            ),
+            crate::p2_flow::normal::Op::StaticLoad(_, id, _) => (
+                id,
+                super::field_facts::FieldUse::Read,
+                super::field_facts::FieldStorage::Static,
+            ),
+            crate::p2_flow::normal::Op::StaticStore(_, id, _) => (
+                id,
+                super::field_facts::FieldUse::Write,
+                super::field_facts::FieldStorage::Static,
+            ),
             _ => {
                 push(&mut fields, None, budget)?;
                 continue;
             }
         };
         let original = input.field_reference(reference, budget)?;
-        let scope = if input.access_flags() & 0x10000 != 0
+        let scope = if storage == super::field_facts::FieldStorage::Static {
+            FieldScope::Static
+        } else if input.access_flags() & 0x10000 != 0
             && usage == super::field_facts::FieldUse::Write
         {
             FieldScope::ConstructorThis
@@ -112,14 +129,8 @@ pub(crate) fn collect<'a>(
         let result = if scope == FieldScope::ConstructorThis {
             super::field_facts::collect_own_write(input, catalog, reference, op.pc, budget)
         } else {
-            super::field_facts::collect_int_field(
-                input,
-                catalog,
-                reference,
-                super::field_facts::FieldStorage::Instance,
-                usage,
-                op.pc,
-                budget,
+            super::field_facts::collect_field(
+                input, catalog, reference, storage, usage, op.pc, budget,
             )
         };
         let declaration = match result {

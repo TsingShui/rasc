@@ -13,16 +13,18 @@ pub(crate) enum FieldStorage {
     Instance,
     Static,
 }
-pub(crate) struct IntFieldAccess {
+pub(crate) struct FieldAccess {
+    pub kind: crate::p2_flow::normal::DeclarationType,
     pub storage: FieldStorage,
     _sealed: (),
     pub reference: FieldId,
     pub owner_type: crate::TypeId,
+    pub owner: Vec<u16>,
     pub name: Vec<u16>,
     pub usage: FieldUse,
     pub flags: u32,
 }
-pub(crate) fn collect_int_field(
+pub(crate) fn collect_field(
     input: &MethodInput<'_, '_>,
     catalog: &DeclarationCatalog,
     reference: FieldId,
@@ -30,16 +32,18 @@ pub(crate) fn collect_int_field(
     usage: FieldUse,
     pc: CodeUnitOffset,
     budget: &mut MethodBudget<'_, '_>,
-) -> Result<IntFieldAccess, RequestError> {
+) -> Result<FieldAccess, RequestError> {
     let missing = || RequestError::FieldBindingEvidenceMissing { reference, pc };
     let original = input.field_reference(reference, budget)?;
-    if !original
-        .declaration
-        .field_type
-        .matches_with(&[73], budget)?
-    {
+    let Some(kind) = crate::p2_flow::normal::field_type(
+        input,
+        original.declaration.field_type,
+        original.declaration.field_type_idx,
+        budget,
+    )?
+    else {
         return Err(missing());
-    }
+    };
     let Some(evidence) = catalog.field(
         original.owner,
         original.declaration.name,
@@ -63,6 +67,18 @@ pub(crate) fn collect_int_field(
         crate::input::ReferencedFieldMetadata::External => {}
         _ => return Err(missing()),
     }
+    if usage == FieldUse::Read
+        && evidence.access_flags & 16 != 0
+        && (kind.field_offset() != 2 || kind == crate::p2_flow::normal::DeclarationType::String)
+    {
+        match evidence.constant_kind {
+            JavaConstantKind::Constant => {
+                return Err(RequestError::JavaConstantFieldRead { reference, pc });
+            }
+            JavaConstantKind::Unknown => return Err(missing()),
+            JavaConstantKind::NonConstant => {}
+        }
+    }
     if !crate::p4_calls::source_type(input, catalog, &evidence.owner, budget)? {
         return Err(missing());
     }
@@ -79,20 +95,13 @@ pub(crate) fn collect_int_field(
     if names != 1 {
         return Err(missing());
     }
-    if usage == FieldUse::Read && evidence.access_flags & 16 != 0 {
-        match evidence.constant_kind {
-            JavaConstantKind::Constant => {
-                return Err(RequestError::JavaConstantFieldRead { reference, pc });
-            }
-            JavaConstantKind::Unknown => return Err(missing()),
-            JavaConstantKind::NonConstant => {}
-        }
-    }
-    Ok(IntFieldAccess {
+    Ok(FieldAccess {
+        kind,
         storage,
         _sealed: (),
         reference,
         owner_type: original.owner_type,
+        owner: crate::substrate::owned::copy_units(original.owner, budget)?,
         name: crate::substrate::owned::copy_units(original.declaration.name, budget)?,
         usage,
         flags: evidence.access_flags,
@@ -105,7 +114,7 @@ pub(crate) fn collect_own_write(
     reference: FieldId,
     pc: CodeUnitOffset,
     budget: &mut MethodBudget<'_, '_>,
-) -> Result<IntFieldAccess, RequestError> {
+) -> Result<FieldAccess, RequestError> {
     let original = input.field_reference(reference, budget)?;
     let write = super::fields::bind_own_int_write(input, catalog, reference, pc, budget)?;
     let native =
@@ -114,11 +123,13 @@ pub(crate) fn collect_own_write(
             .ok_or(RequestError::InternalInvariant(
                 "own field lost native declaration",
             ))?;
-    Ok(IntFieldAccess {
+    Ok(FieldAccess {
+        kind: crate::p2_flow::normal::DeclarationType::Int,
         _sealed: (),
         storage: FieldStorage::Instance,
         reference: write.reference,
         owner_type: original.owner_type,
+        owner: crate::substrate::owned::copy_units(original.owner, budget)?,
         name: write.name,
         usage: FieldUse::Write,
         flags: native.access_flags,

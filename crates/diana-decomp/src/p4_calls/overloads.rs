@@ -79,7 +79,12 @@ fn parameters(
         out.push(kind);
     }
     at = at.checked_add(1).ok_or(RequestError::PlatformCapacity)?;
-    if proto.get(at) == Some(&86) {
+    let array_result = proto.get(at) == Some(&91);
+    while proto.get(at) == Some(&91) {
+        budget.charge_work(1)?;
+        at = at.checked_add(1).ok_or(RequestError::PlatformCapacity)?;
+    }
+    if !array_result && proto.get(at) == Some(&86) {
         at = at.checked_add(1).ok_or(RequestError::PlatformCapacity)?;
     } else if proto.get(at) == Some(&76) {
         at = at.checked_add(1).ok_or(RequestError::PlatformCapacity)?;
