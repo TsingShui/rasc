@@ -1,6 +1,8 @@
 mod branch;
 pub(crate) use branch::{Arm, BodyBranch};
 mod graph;
+mod integer_switch;
+pub(crate) use integer_switch::{SwitchForm, choose as switch_form};
 mod normal;
 #[cfg(test)]
 mod tests;

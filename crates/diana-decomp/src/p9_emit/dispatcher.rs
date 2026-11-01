@@ -162,24 +162,39 @@ pub(super) fn write(
         match &case.transfer {
             Transfer::ReturnVoid => output.push("return;\n", budget)?,
             Transfer::Switch {
+                form,
                 value,
                 cases,
                 default,
             } => {
-                output.push("switch (", budget)?;
-                local(*value, output, budget)?;
-                output.push(") {\n", budget)?;
-                for (key, target) in cases {
-                    budget.charge_work(1)?;
-                    output.push("case ", budget)?;
-                    output.arguments(format_args!("{key}"), budget)?;
-                    output.push(": {\n", budget)?;
-                    edge(target, output, budget)?;
-                    output.push("}\n", budget)?;
+                if *form == crate::p7_regions::SwitchForm::Comparisons {
+                    for (key, target) in cases {
+                        budget.charge_work(1)?;
+                        output.push("if (", budget)?;
+                        local(*value, output, budget)?;
+                        output.push(" == ", budget)?;
+                        output.arguments(format_args!("{key}"), budget)?;
+                        output.push(") {\n", budget)?;
+                        edge(target, output, budget)?;
+                        output.push("}\n", budget)?;
+                    }
+                    edge(default, output, budget)?;
+                } else {
+                    output.push("switch (", budget)?;
+                    local(*value, output, budget)?;
+                    output.push(") {\n", budget)?;
+                    for (key, target) in cases {
+                        budget.charge_work(1)?;
+                        output.push("case ", budget)?;
+                        output.arguments(format_args!("{key}"), budget)?;
+                        output.push(": {\n", budget)?;
+                        edge(target, output, budget)?;
+                        output.push("}\n", budget)?;
+                    }
+                    output.push("default: {\n", budget)?;
+                    edge(default, output, budget)?;
+                    output.push("}\n}\n", budget)?;
                 }
-                output.push("default: {\n", budget)?;
-                edge(default, output, budget)?;
-                output.push("}\n}\n", budget)?;
             }
             Transfer::Return(value) => super::java::returned(*value, output, budget)?,
             Transfer::Jump(target) => edge(target, output, budget)?,

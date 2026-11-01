@@ -399,6 +399,7 @@ pub(super) fn verify(
             }
             (
                 Transfer::Switch {
+                    form,
                     value,
                     cases,
                     default,
@@ -411,6 +412,11 @@ pub(super) fn verify(
                         .ok_or(RequestError::InternalInvariant(
                             "switch certificate has a foreign table",
                         ))?;
+                if *form != crate::p7_regions::switch_form(cases, budget)? {
+                    return Err(RequestError::InternalInvariant(
+                        "switch density selection differs from its keys",
+                    ));
+                }
                 if cases.len() != original.cases.len()
                     || outgoing.len()
                         != cases

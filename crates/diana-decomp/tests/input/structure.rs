@@ -142,15 +142,18 @@ fn t03_method_reference_indices_are_checked_even_in_dead_code() {
 fn t03_method_switch_targets_keys_and_payload_kind_are_checked() {
     let packed = [0x002b, 4, 0, 0x000f, 0x0100, 1, 0, 0, 3, 0];
     check(&code(&packed, 1, 0), Limits::default()).unwrap();
-    let mut middle = packed;
-    middle[8] = 1;
-    assert!(matches!(
-        check(&code(&middle, 1, 0), Limits::default()),
-        Err(MethodError::Malformed {
-            problem: MethodProblem::InvalidBranchTarget,
-            ..
-        })
-    ));
+    for (low, high) in [(1, 0), (4, 0), (u16::MAX, 0x7fff)] {
+        let mut invalid = packed;
+        invalid[8] = low;
+        invalid[9] = high;
+        assert!(matches!(
+            check(&code(&invalid, 1, 0), Limits::default()),
+            Err(MethodError::Malformed {
+                problem: MethodProblem::InvalidBranchTarget,
+                ..
+            })
+        ));
+    }
     let wrong_kind = [0x002b, 4, 0, 0x000f, 0x0300, 1, 0, 0];
     assert!(matches!(
         check(&code(&wrong_kind, 1, 0), Limits::default()),
@@ -159,14 +162,18 @@ fn t03_method_switch_targets_keys_and_payload_kind_are_checked() {
             ..
         })
     ));
-    let unsorted = [0x002c, 4, 0, 0x000f, 0x0200, 2, 2, 0, 1, 0, 3, 0, 3, 0];
-    assert!(matches!(
-        check(&code(&unsorted, 1, 0), Limits::default()),
-        Err(MethodError::Malformed {
-            problem: MethodProblem::UnorderedSwitchKeys,
-            ..
-        })
-    ));
+    for (first, second) in [(2, 1), (1, 1)] {
+        let invalid = [
+            0x002c, 4, 0, 0x000f, 0x0200, 2, first, 0, second, 0, 3, 0, 3, 0,
+        ];
+        assert!(matches!(
+            check(&code(&invalid, 1, 0), Limits::default()),
+            Err(MethodError::Malformed {
+                problem: MethodProblem::UnorderedSwitchKeys,
+                ..
+            })
+        ));
+    }
 }
 
 #[test]

@@ -129,6 +129,7 @@ fn t09_two_entry_dispatcher_preserves_edges_and_never_reads_da_defaults() {
                     value,
                     cases,
                     default,
+                    ..
                 } => {
                     let selector = read(&values, *value);
                     cases

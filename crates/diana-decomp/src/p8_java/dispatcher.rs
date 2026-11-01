@@ -12,6 +12,7 @@ pub(crate) struct Edge {
 pub(crate) enum Transfer {
     ReturnVoid,
     Switch {
+        form: crate::p7_regions::SwitchForm,
         value: LocalId,
         cases: Vec<(i32, Edge)>,
         default: Edge,
@@ -221,6 +222,7 @@ pub(crate) fn verify(
                     budget,
                 )?;
                 Transfer::Switch {
+                    form: crate::p7_regions::switch_form(&cases, budget)?,
                     value,
                     cases,
                     default,
