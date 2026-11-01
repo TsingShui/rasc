@@ -1,10 +1,11 @@
+use crate::pipeline::control::InputControl;
 use crate::substrate::owned::push;
-use crate::{DeclarationCatalog, ExternalClassDeclaration, MethodBudget, RequestError};
+use crate::{DeclarationCatalog, ExternalClassDeclaration, RequestError};
 
 fn lookup<'a>(
     catalog: &'a DeclarationCatalog,
     name: &[u16],
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut impl InputControl,
 ) -> Result<Option<&'a ExternalClassDeclaration>, RequestError> {
     if name.first() == Some(&76) && name.last() == Some(&59) {
         return Ok(catalog.class(name, budget)?);
@@ -29,7 +30,7 @@ fn lookup<'a>(
 fn seen(
     classes: &[&ExternalClassDeclaration],
     class: &ExternalClassDeclaration,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut impl InputControl,
 ) -> Result<bool, RequestError> {
     for old in classes {
         budget.charge_work(1)?;
@@ -52,7 +53,7 @@ impl<'a> Hierarchy<'a> {
 pub(super) fn collect<'a>(
     catalog: &'a DeclarationCatalog,
     root: &'a ExternalClassDeclaration,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut impl InputControl,
 ) -> Result<Option<Hierarchy<'a>>, RequestError> {
     let mut pending = Vec::new();
     let mut active = Vec::new();
@@ -114,7 +115,7 @@ pub(super) fn subtype(
     catalog: &DeclarationCatalog,
     from: &[u16],
     to: &[u16],
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut impl InputControl,
 ) -> Result<Option<bool>, RequestError> {
     let Some(root) = lookup(catalog, from, budget)? else {
         return Ok(None);

@@ -142,6 +142,7 @@ pub(super) fn write(
                         }
                         Transfer::Return(value) => super::java::returned(*value, output, budget)?,
                         Transfer::ReturnVoid => output.push("return;\n", budget)?,
+                        Transfer::InitializerExit => output.push("break initExit;\n", budget)?,
                         Transfer::Throw(_) | Transfer::Rethrow { .. } => {
                             super::java::thrown(&case.transfer, output, budget)?
                         }

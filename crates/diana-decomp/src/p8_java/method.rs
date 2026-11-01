@@ -11,6 +11,7 @@ pub enum CompilationContract {
 /// not invoke a Java compiler.
 pub struct VerifiedJavaMethod {
     pub(crate) header: String,
+    pub(crate) syntax: super::initializers::MemberSyntax,
     pub(crate) body: MethodBody,
     environment: EnvironmentId,
     pub(crate) type_names: super::types::TypeNames,
@@ -24,11 +25,13 @@ impl VerifiedJavaMethod {
     pub(super) fn structured(
         header: String,
         body: super::structured::StructuredBody,
+        syntax: super::initializers::MemberSyntax,
         environment: EnvironmentId,
     ) -> Self {
         Self {
             header,
             body: MethodBody::Structured(body),
+            syntax,
             environment,
             type_names: super::types::TypeNames::default(),
         }
@@ -109,11 +112,13 @@ impl VerifiedJavaMethod {
     pub(super) fn protected(
         header: String,
         body: super::protected::ProtectedBody,
+        syntax: super::initializers::MemberSyntax,
         environment: EnvironmentId,
     ) -> Self {
         Self {
             header,
             body: MethodBody::Protected(body),
+            syntax,
             environment,
             type_names: super::types::TypeNames::default(),
         }
@@ -121,11 +126,13 @@ impl VerifiedJavaMethod {
     pub(super) fn dispatcher(
         header: String,
         body: super::dispatcher::Dispatcher,
+        syntax: super::initializers::MemberSyntax,
         environment: EnvironmentId,
     ) -> Self {
         Self {
             header,
             body: MethodBody::Dispatcher(body),
+            syntax,
             environment,
             type_names: super::types::TypeNames::default(),
         }

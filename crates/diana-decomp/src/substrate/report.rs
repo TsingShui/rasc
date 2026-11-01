@@ -163,6 +163,7 @@ fn request_code(error: &crate::RequestError) -> crate::DiagnosticCode {
         RequestError::DefinitionAvailabilityUnproved { .. } => Code::DefinitionAvailabilityUnproved,
         RequestError::InvalidWideRead { .. } => Code::InvalidWideRead,
         RequestError::MonitorScopeUnproved { .. } => Code::MonitorScopeUnproved,
+        RequestError::FinalAssignmentUnproved { .. } => Code::FinalAssignmentUnproved,
         RequestError::JavaTargetLimit { .. } => Code::JavaTargetLimit,
         RequestError::BindingEvidenceMissing { .. }
         | RequestError::FieldBindingEvidenceMissing { .. } => Code::BindingEvidenceMissing,
@@ -182,6 +183,11 @@ pub struct MethodFacts {
 }
 
 pub enum MethodOutput {
+    JavaInitializer {
+        facts: MethodFacts,
+        declaration: crate::VerifiedJavaInitializer,
+        source: String,
+    },
     Java {
         facts: MethodFacts,
         declaration: crate::VerifiedJavaMethod,
@@ -207,7 +213,9 @@ pub enum MethodOutput {
 impl MethodOutput {
     pub fn key(&self) -> MethodKey {
         match self {
-            Self::Java { facts, .. } | Self::DeclarationOnly { facts, .. } => facts.key,
+            Self::Java { facts, .. }
+            | Self::JavaInitializer { facts, .. }
+            | Self::DeclarationOnly { facts, .. } => facts.key,
             Self::Debug { key, .. } | Self::Unavailable { key, .. } => *key,
         }
     }
@@ -223,6 +231,7 @@ pub enum ClassOutput {
         descriptor: Vec<u16>,
         access_flags: u32,
         declaration: crate::VerifiedJavaUnit,
+        fields: Vec<crate::FieldOutput>,
         members: Vec<MethodOutput>,
     },
     Mixed {
@@ -230,11 +239,18 @@ pub enum ClassOutput {
         descriptor: Vec<u16>,
         access_flags: u32,
         shell: DeclarationOutput,
+        fields: Vec<crate::FieldOutput>,
         members: Vec<MethodOutput>,
     },
 }
 
 impl ClassOutput {
+    /// Original fields in DEX declaration order; partial facts retain their reason.
+    pub fn fields(&self) -> &[crate::FieldOutput] {
+        match self {
+            Self::JavaUnit { fields, .. } | Self::Mixed { fields, .. } => fields,
+        }
+    }
     /// Includes available Java and retained original code in Mixed results;
     /// class qualification does not filter member availability.
     pub fn members(&self) -> &[MethodOutput] {

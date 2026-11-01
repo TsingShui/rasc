@@ -139,6 +139,13 @@ Authors MUST preserve the existing test scope. A writing rule does not authorize
 CLI black-box tests, private-phase assertions, getter tests or auxiliary-tool
 self-tests. Independent acceptance values remain independent of engine output.
 
+Batch records MUST use repository-tracked input/test paths, fixed revisions,
+reproduction commands and explicit observed outcomes as their evidence references.
+Authors MUST NOT cite machine-local directories such as `.cache/`, temporary
+paths or private run-log paths in batch records. An unavailable execution log is
+not a shared artifact; report its observed result without presenting its local
+location as independently accessible evidence.
+
 ## 6. Terminology and prose
 
 Use one preferred term for one concept. Do not interchange distinct concepts to

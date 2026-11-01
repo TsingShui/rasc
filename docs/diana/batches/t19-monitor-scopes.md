@@ -50,19 +50,19 @@ retain JVM access bits separately from original DEX method flags. JDK API facts
 come from the locked Temurin 21.0.8+9 Java8 ct.sym entries. No expected case value
 or required disposition changed.
 
-Evidence lives under .cache/e2e/t19-monitor-scopes/:
+Observed verification at b321329:
 
-- nextest.log: 147 core Rust tests passed, zero skipped. Fmt, workspace Clippy
+- `cargo nextest run --workspace --all-features --locked`: 147 core Rust tests passed, zero skipped. Fmt, workspace Clippy
   with -D warnings, locked release build, diff and desensitization gates pass.
-- focused-e2e-second.log: every fixed T19 invocation passes, including D081's
+- `python3 tools/e2e.py run` with D036–D040/D081/D082 selected: every fixed T19 invocation passes, including D081's
   required classified Debug and D082's zero-trip/null and repeated acquisitions.
-- implicit-jvm/: original and recovered Java8 Drivers agree on instance/Class
+- Supplemental implicit-lock execution: original and recovered Java8 Drivers agree on instance/Class
   holdsLock, normal release, throwing release and the declared-only flag case.
-- collision-oracle/javac.log: independent rejection of the inherited-method
+- Java8 javac: independent rejection of the inherited-method
   binding counterexample; public core output preserves both available methods.
-- Full acceptance report: .cache/e2e/engine/run-t0em168b/report.json. The run still
-  exits nonzero for outstanding cards. D020 also gains full-unit acceptance.
-- member-comparison.json compares the committed run-2r3kb0zb baseline across
+- Full `python3 tools/e2e.py run`: 65/86 cases and 138/181 seams pass.
+  The run exits nonzero for outstanding cards. D020 also gains full-unit acceptance.
+- Original-member comparison against commit 3968517 covers
   2,379 original member observations: no identity/availability regression, raw
   source change or passing-seam regression. D050 valueOf stays Unsupported with
   identical Debug, now classified BranchJavaUnsupported after class-literal

@@ -173,6 +173,17 @@ impl<'a> Engine<'a> {
             primary: None,
         };
         let whole_class = request.method.is_none();
+        let (fields, field_issue) = if whole_class {
+            class_fields(
+                &image.index,
+                request.class,
+                &self.catalog,
+                &mut diagnostics,
+                control,
+            )?
+        } else {
+            (Vec::new(), None)
+        };
         let mut members = Vec::new();
         let result = (|| -> Result<(), RequestError> {
             match request.method {
@@ -243,11 +254,12 @@ impl<'a> Engine<'a> {
             return Err(diagnostics.preserve(error));
         }
         let mut shell_cause = DiagnosticCause::Unsupported(OutputReason::ClassAssemblyUnavailable);
-        let unit = if whole_class {
+        let unit = if whole_class && field_issue.is_none() {
             match crate::p8_java::class_unit::verify(
                 &image.index,
                 request.class,
                 &self.catalog,
+                &fields,
                 &members,
                 self.catalog.environment,
                 control,
@@ -275,6 +287,7 @@ impl<'a> Engine<'a> {
                 descriptor,
                 access_flags,
                 declaration,
+                fields,
                 members,
             }
         } else {
@@ -290,7 +303,8 @@ impl<'a> Engine<'a> {
                 key: request.class,
                 descriptor,
                 access_flags,
-                shell: DeclarationOutput::Unavailable(shell),
+                shell: DeclarationOutput::Unavailable(field_issue.unwrap_or(shell)),
+                fields,
                 members,
             }
         };
@@ -323,10 +337,21 @@ impl<'a> Engine<'a> {
                     declaration,
                     source,
                 }) => {
-                    return Ok(MethodOutput::Java {
-                        facts,
-                        declaration,
-                        source,
+                    return Ok(match crate::VerifiedJavaInitializer::seal(declaration) {
+                        crate::p8_java::initializers::JavaMember::Initializer(declaration) => {
+                            MethodOutput::JavaInitializer {
+                                facts,
+                                declaration,
+                                source,
+                            }
+                        }
+                        crate::p8_java::initializers::JavaMember::Method(declaration) => {
+                            MethodOutput::Java {
+                                facts,
+                                declaration,
+                                source,
+                            }
+                        }
                     });
                 }
                 Ok(NormalMember::Declaration { facts, declaration }) => {
@@ -490,6 +515,119 @@ fn normal_member(
     let reason =
         crate::pipeline::diagnostics::unsupported_method(&input, index, catalog, reason, budget)?;
     Ok(NormalMember::Raw { facts, reason })
+}
+
+fn class_fields(
+    index: &ProgramIndex<'_>,
+    key: crate::ClassKey,
+    catalog: &DeclarationCatalog,
+    diagnostics: &mut DiagnosticLog,
+    control: &mut RunContext<'_>,
+) -> Result<(Vec<crate::FieldOutput>, Option<DiagnosticId>), RequestError> {
+    let directory = crate::input::field_declarations::collect(index, key, control);
+    let directory = match directory {
+        Ok(directory) => directory,
+        Err(error)
+            if matches!(
+                error.kind(),
+                FailureKind::Cancelled
+                    | FailureKind::BudgetExceeded
+                    | FailureKind::InternalInvariant
+            ) =>
+        {
+            return Err(error);
+        }
+        Err(error) => {
+            let reason = add_diagnostic(
+                diagnostics,
+                Diagnostic {
+                    method: None,
+                    cause: DiagnosticCause::Request(error),
+                },
+                control,
+            )?;
+            return Ok((Vec::new(), Some(reason)));
+        }
+    };
+    let issue = match directory.issue {
+        Some(error) => Some(add_diagnostic(
+            diagnostics,
+            Diagnostic {
+                method: None,
+                cause: DiagnosticCause::Request(error),
+            },
+            control,
+        )?),
+        None => None,
+    };
+    let mut fields = Vec::new();
+    for field in directory.fields {
+        control.checkpoint()?;
+        let declaration = match &field.facts {
+            Ok(facts) => {
+                match crate::p4_calls::field_declarations::bind(index, key, catalog, facts, control)
+                {
+                    Ok(Some(ty)) => {
+                        crate::p8_java::field_declarations::verify(&field, facts, &ty, control)
+                    }
+                    Ok(None) => Ok(None),
+                    Err(error) => Err(error),
+                }
+            }
+            Err(_) => Ok(None),
+        };
+        let (facts, declaration) = match (field.facts, declaration) {
+            (Ok(facts), Ok(Some(declaration))) => (
+                Some(facts),
+                crate::FieldDeclarationOutput::Java(declaration),
+            ),
+            (facts, result) => {
+                let (facts, cause) = match (facts, result) {
+                    (Err(error), _) | (Ok(_), Err(error))
+                        if matches!(
+                            error.kind(),
+                            FailureKind::Cancelled
+                                | FailureKind::BudgetExceeded
+                                | FailureKind::InternalInvariant
+                        ) =>
+                    {
+                        return Err(error);
+                    }
+                    (Err(error), _) => (None, DiagnosticCause::Request(error)),
+                    (Ok(facts), Err(error)) => (Some(facts), DiagnosticCause::Request(error)),
+                    (Ok(facts), Ok(_)) => (
+                        Some(facts),
+                        DiagnosticCause::Unsupported(OutputReason::JavaDeclarationUnsupported),
+                    ),
+                };
+                let reason = add_diagnostic(
+                    diagnostics,
+                    Diagnostic {
+                        method: None,
+                        cause,
+                    },
+                    control,
+                )?;
+                (facts, crate::FieldDeclarationOutput::Unavailable(reason))
+            }
+        };
+        let initial = match field.initial {
+            Some(initial) => initial,
+            None => crate::FieldInitialValue::Unavailable(issue.ok_or(
+                RequestError::InternalInvariant("field lost preparation without reason"),
+            )?),
+        };
+        reserve(&mut fields, 1, control)?;
+        fields.push(crate::FieldOutput {
+            key: field.key,
+            access_flags: field.access_flags,
+            storage: field.storage,
+            facts,
+            initial,
+            declaration,
+        });
+    }
+    Ok((fields, issue))
 }
 
 struct DiagnosticLog {

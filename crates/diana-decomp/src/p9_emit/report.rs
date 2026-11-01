@@ -16,14 +16,26 @@ pub fn render(
     match &report.class {
         ClassOutput::JavaUnit {
             declaration,
+            fields,
             members,
             ..
         } => {
             output.push(&declaration.header, control)?;
+            for field in fields {
+                control.checkpoint()?;
+                let crate::FieldDeclarationOutput::Java(declaration) = &field.declaration else {
+                    return Err(RequestError::InternalInvariant(
+                        "JavaUnit contains unavailable field",
+                    ));
+                };
+                output.push(declaration.source(), control)?;
+                output.push("\n", control)?;
+            }
             for member in members {
                 control.checkpoint()?;
                 let source = match member {
-                    MethodOutput::Java { source, .. } => source.as_str(),
+                    MethodOutput::Java { source, .. }
+                    | MethodOutput::JavaInitializer { source, .. } => source.as_str(),
                     MethodOutput::DeclarationOnly { declaration, .. } => declaration.source(),
                     _ => {
                         return Err(RequestError::InternalInvariant(
@@ -48,6 +60,7 @@ pub fn render(
         ClassOutput::Mixed {
             descriptor,
             shell,
+            fields,
             members,
             ..
         } => {
@@ -66,6 +79,9 @@ pub fn render(
                 )?;
             }
             output.push("\n", control)?;
+            for field in fields {
+                write_field(report, field, &mut output, control)?;
+            }
             match shell {
                 DeclarationOutput::Unavailable(id) => {
                     write_reason(report, *id, &mut output, control)?
@@ -82,7 +98,8 @@ pub fn render(
                     control,
                 )?;
                 let (source, language) = match member {
-                    MethodOutput::Java { source, .. } => {
+                    MethodOutput::Java { source, .. }
+                    | MethodOutput::JavaInitializer { source, .. } => {
                         (Some(source.as_str()), SourceLanguage::Java)
                     }
                     MethodOutput::DeclarationOnly { declaration, .. } => {
@@ -129,6 +146,73 @@ pub fn render(
         source: output.finish(),
         spans,
     })
+}
+
+fn write_field(
+    report: &Report,
+    field: &crate::FieldOutput,
+    output: &mut TextBuffer,
+    control: &mut RunContext<'_>,
+) -> Result<(), RequestError> {
+    output.arguments(
+        format_args!(
+            "field {}/{}/{} flags={} {:?}\n",
+            field.key.class.dex.0,
+            field.key.class.class_def.0,
+            field.key.field.0,
+            field.access_flags,
+            field.storage
+        ),
+        control,
+    )?;
+    if let Some(facts) = &field.facts {
+        for (label, units) in [
+            ("name_utf16", &facts.name),
+            ("descriptor_utf16", &facts.descriptor),
+        ] {
+            output.push(label, control)?;
+            output.push(":", control)?;
+            for &unit in units {
+                output.arguments(format_args!(" {unit}"), control)?;
+            }
+            output.push("\n", control)?;
+        }
+    }
+    match &field.initial {
+        crate::FieldInitialValue::Encoded {
+            tag,
+            arg,
+            range,
+            bytes,
+        } => {
+            output.arguments(
+                format_args!(
+                    "encoded tag={tag} arg={arg} range={}..{} bytes:",
+                    range.start.0, range.end.0
+                ),
+                control,
+            )?;
+            for &byte in bytes {
+                output.arguments(format_args!(" {byte:02x}"), control)?;
+            }
+            output.push("\n", control)?;
+        }
+        crate::FieldInitialValue::ImplicitDefault => output.push("implicit default\n", control)?,
+        crate::FieldInitialValue::InstanceDefault => output.push("instance default\n", control)?,
+        crate::FieldInitialValue::Unavailable(reason) => {
+            write_reason(report, *reason, output, control)?
+        }
+    }
+    match &field.declaration {
+        crate::FieldDeclarationOutput::Java(declaration) => {
+            output.push(declaration.source(), control)?;
+            output.push("\n", control)?;
+        }
+        crate::FieldDeclarationOutput::Unavailable(reason) => {
+            write_reason(report, *reason, output, control)?
+        }
+    }
+    Ok(())
 }
 
 fn write_reason(

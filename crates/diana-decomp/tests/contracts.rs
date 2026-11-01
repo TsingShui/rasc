@@ -12,6 +12,8 @@ mod debug_program;
 mod fixture;
 #[path = "input/header.rs"]
 mod header;
+#[path = "pipeline/initialization.rs"]
+mod initialization;
 #[path = "input/invoke.rs"]
 mod invoke;
 #[path = "input/layout.rs"]

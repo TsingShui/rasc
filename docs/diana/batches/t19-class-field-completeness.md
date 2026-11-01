@@ -11,7 +11,7 @@ headers before sealing a complete unit. P9 renders the existing result. The
 shared ordinary method chain, public interfaces and independent expectations stay
 unchanged. Existing visitor work, metadata and cancellation accounting apply.
 
-The D042 baseline in .cache/e2e/engine/run-z4o_y5_h/ incorrectly labels source as
+The D042 baseline at b321329 incorrectly labels source as
 JavaUnit despite omitting field n; independent javac rejects that source. The
 AllHeaders selection never delivers MemberEntry::Field, so its field-rejection
 arm cannot run. The regression extends the existing public class-qualification
@@ -28,8 +28,9 @@ method-header qualification. Both static and instance counterexamples retain
 their original constructor as Java in Mixed. The inherited-binding negative
 and D040 positive remain covered by the existing core tests.
 
-Evidence: .cache/e2e/t19-class-field-completeness/ contains before-nextest.log,
-targeted-nextest.log, nextest.log, full-e2e.log and member-comparison.json.
+Reproduce the core regression with
+`cargo nextest run -p diana-decomp --all-features --locked t19_complete_method_bodies`.
+Run `python3 tools/e2e.py run` for the full fixed suite.
 The new self-made FieldShell.smali and StaticFieldShell.smali inputs use Java
 keyword field names, implicit default values and an ordinary Object constructor;
 the locked Smali 2.5.2 assembler produces their checked-in DEX fixtures. Their
@@ -37,9 +38,9 @@ catalog reuses the existing Object/JDK declaration evidence.
 
 On macOS arm64, fmt, strict workspace Clippy, locked release build and all
 147 cargo-nextest tests pass with zero skips. Diff and desensitization gates pass.
-Full E2E report .cache/e2e/engine/run-0u7fo4sk/report.json retains 65/86 cases and
+The full E2E run retains 65/86 cases and
 138/181 seams passing; outstanding cards keep the command exit nonzero.
-Comparison with run-t0em168b covers 2,379 original member observations, with
+Comparison with the b321329 baseline covers 2,379 original member observations, with
 identical member identity, status, source and diagnostics and no passing-seam
 regression. Only D042's class result changes from false JavaUnit to Mixed; both
 constructors remain Java. Required full-unit D042 still fails until its original

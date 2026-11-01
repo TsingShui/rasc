@@ -42,6 +42,7 @@ pub enum DiagnosticCode {
     DefinitionAvailabilityUnproved,
     InvalidWideRead,
     MonitorScopeUnproved,
+    FinalAssignmentUnproved,
     InternalInvariant,
 }
 

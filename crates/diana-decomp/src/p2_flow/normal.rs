@@ -824,9 +824,6 @@ pub(crate) fn decode<'a>(
         return Ok(None);
     };
     let raw = checked.layout().original().clone();
-    if input.access_flags() & 0x10008 == 0x10008 {
-        return Ok(None);
-    }
     let protection = crate::input::protection::read(checked.layout(), budget)?;
     let result = if input
         .declaration()

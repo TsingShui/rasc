@@ -37,6 +37,8 @@ pub enum RequestError {
         register: crate::RegisterId,
         pc: crate::CodeUnitOffset,
     },
+    #[error("final assignment unproved for {field:?}")]
+    FinalAssignmentUnproved { field: crate::FieldKey },
     #[error("monitor scope unproved at {pc:?}")]
     MonitorScopeUnproved { pc: crate::CodeUnitOffset },
     #[error("partial or invalid wide register {register:?} read at {pc:?}")]
@@ -88,6 +90,7 @@ impl RequestError {
             }
             Self::DefinitionAvailabilityUnproved { .. }
             | Self::MonitorScopeUnproved { .. }
+            | Self::FinalAssignmentUnproved { .. }
             | Self::ArrayFillShape { .. }
             | Self::JavaTargetLimit { .. }
             | Self::InitializationUnavailable { .. }

@@ -148,7 +148,10 @@ fn t09_two_entry_dispatcher_preserves_edges_and_never_reads_da_defaults() {
                 }
             }
             let edge = match &case.transfer {
-                Transfer::ReturnVoid | Transfer::Throw(_) | Transfer::Rethrow { .. } => {
+                Transfer::ReturnVoid
+                | Transfer::InitializerExit
+                | Transfer::Throw(_)
+                | Transfer::Rethrow { .. } => {
                     panic!("non-int exit outside the int cycle interpretation")
                 }
                 Transfer::Switch {

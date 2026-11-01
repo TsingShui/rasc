@@ -19,6 +19,7 @@ mod method;
 pub(crate) mod protection;
 mod type_projection;
 pub(crate) use type_projection::TypeProjection;
+pub(crate) mod field_declarations;
 pub(crate) mod operands;
 mod strings;
 mod structure;

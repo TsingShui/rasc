@@ -23,6 +23,7 @@ pub(crate) fn verify(
     index: &ProgramIndex<'_>,
     key: ClassKey,
     catalog: &crate::DeclarationCatalog,
+    fields: &[crate::FieldOutput],
     members: &[MethodOutput],
     environment: EnvironmentId,
     control: &mut RunContext<'_>,
@@ -34,39 +35,59 @@ pub(crate) fn verify(
     }
     let context = index.class_context(key.class_def, control)?;
     let interfaces = context.interfaces?;
-    let values = context.values_offset?;
-    let parent = context.superclass?;
-    if !interfaces.is_empty()
-        || values.is_some()
-        || context.annotations_offset != crate::ByteOffset(0)
-    {
+    context.values_offset?;
+    context.superclass?;
+    if !interfaces.is_empty() || context.annotations_offset != crate::ByteOffset(0) {
         return Ok(None);
     }
-    let Some(parent) = parent else {
-        return Ok(None);
-    };
-    if !parent.matches_with(
-        crate::p5_types::BuiltinReference::Object.descriptor(),
-        control,
-    )? {
-        return Ok(None);
-    }
-    let mut has_fields = false;
+    let mut field_position = 0usize;
+    let mut fields_admitted = true;
     class.visit_members_with(
         control,
         MemberSelection::Fields,
-        |entry, _control| -> Result<(), RequestError> {
+        |entry, control| -> Result<(), RequestError> {
             let MemberEntry::Field(field) = entry else {
                 return Err(RequestError::InternalInvariant(
                     "class field traversal delivered a method",
                 ));
             };
-            field.declaration?;
-            has_fields = true;
+            let declaration = field.declaration?;
+            let Some(actual) = fields.get(field_position) else {
+                fields_admitted = false;
+                return Ok(());
+            };
+            field_position = field_position.checked_add(1).ok_or(RequestError::PlatformCapacity)?;
+            let Some(facts) = &actual.facts else {
+                fields_admitted = false;
+                return Ok(());
+            };
+            let storage = match field.storage {
+                crate::input::catalog::FieldStorage::Instance => crate::FieldStorage::Instance,
+                crate::input::catalog::FieldStorage::Static { ordinal } => crate::FieldStorage::Static(crate::StaticFieldOrdinal(ordinal)),
+            };
+            if actual.key.class != key
+                || actual.key.field != field.field_idx
+                || actual.access_flags != field.access_flags
+                || actual.storage != storage
+                || !declaration.name.matches_with(&facts.name, control)?
+                || !declaration.field_type.matches_with(&facts.descriptor, control)?
+                || !matches!(&actual.declaration, crate::FieldDeclarationOutput::Java(field) if field.default_preparation)
+                || matches!(actual.initial, crate::FieldInitialValue::Unavailable(_))
+            {
+                fields_admitted = false;
+            }
+            for other in &fields[..field_position - 1] {
+                control.checkpoint()?;
+                if let Some(other) = &other.facts
+                    && crate::p0_knowledge::same_units(&facts.name, &other.name, control)?
+                {
+                    fields_admitted = false;
+                }
+            }
             Ok(())
         },
     )?;
-    if has_fields {
+    if !fields_admitted || field_position != fields.len() {
         return Ok(None);
     }
     let mut admitted = true;
@@ -98,6 +119,9 @@ pub(crate) fn verify(
                         .ok_or(RequestError::PlatformCapacity)?;
                     let facts = match member {
                         MethodOutput::Java {
+                            facts, declaration, ..
+                        } if declaration.environment() == environment => facts,
+                        MethodOutput::JavaInitializer {
                             facts, declaration, ..
                         } if declaration.environment() == environment => facts,
                         MethodOutput::DeclarationOnly { facts, .. } => facts,
@@ -156,6 +180,21 @@ pub(crate) fn verify(
     }
     header.push("class ", control)?;
     header.push(simple, control)?;
+    if !crate::p0_knowledge::same_units(
+        &binding.parent,
+        crate::p5_types::BuiltinReference::Object.descriptor(),
+        control,
+    )? {
+        let Some(parent) = super::calls::type_name(&binding.parent, control)? else {
+            return Ok(None);
+        };
+        super::declarations::check_constant_utf8(
+            &binding.parent[1..binding.parent.len() - 1],
+            control,
+        )?;
+        header.push(" extends ", control)?;
+        header.push(&parent, control)?;
+    }
     header.push(" {\n", control)?;
     control.checkpoint()?;
     Ok(Some(VerifiedJavaUnit {

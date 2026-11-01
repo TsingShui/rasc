@@ -12,6 +12,7 @@ pub(crate) struct Edge {
 }
 pub(crate) enum Transfer {
     ReturnVoid,
+    InitializerExit,
     Throw(super::branch::ValueUse),
     Rethrow {
         value: super::branch::ValueUse,
@@ -133,6 +134,13 @@ pub(super) fn verify(
     }
     super::declarations::check_target(input, budget)?;
     let flags = input.access_flags();
+    let initializer = super::initializers::is_initializer(input, budget)?;
+    if initializer
+        && (!super::initializers::header_admitted(input, budget)?
+            || !calls.throws.descriptors.is_empty())
+    {
+        return Ok(None);
+    }
     let expected_monitor = if flags & 0x20 == 0 {
         None
     } else if flags & 8 != 0 {
@@ -155,6 +163,8 @@ pub(super) fn verify(
             flags & !0x10007 != 0
                 || flags & 0x10000 == 0
                 || input.owner_access_flags() & 0x6200 != 0
+        } else if initializer {
+            false
         } else {
             flags & !0x2083f != 0
         }
@@ -183,7 +193,7 @@ pub(super) fn verify(
     } else {
         copy_units(input.declaration().name, budget)?
     };
-    if !super::declarations::identifier(&name, budget)? {
+    if !initializer && !super::declarations::identifier(&name, budget)? {
         return Ok(None);
     }
     let mut catch_names = Vec::new();
@@ -255,7 +265,11 @@ pub(super) fn verify(
                             "void exit changed its original contract",
                         ));
                     }
-                    Transfer::ReturnVoid
+                    if initializer {
+                        Transfer::InitializerExit
+                    } else {
+                        Transfer::ReturnVoid
+                    }
                 }
                 Terminal::Switch { table, .. } => {
                     let form = *plan
@@ -406,58 +420,62 @@ pub(super) fn verify(
         ));
     }
     let mut header = TextBuffer::new();
-    for (bit, text) in [
-        (1, "public "),
-        (2, "private "),
-        (4, "protected "),
-        (8, "static "),
-        (0x10, "final "),
-        (0x20, "synchronized "),
-        (0x800, "strictfp "),
-    ] {
-        if flags & bit != 0 {
-            header.push(text, budget)?;
+    if initializer {
+        header.push("static", budget)?;
+    } else {
+        for (bit, text) in [
+            (1, "public "),
+            (2, "private "),
+            (4, "protected "),
+            (8, "static "),
+            (0x10, "final "),
+            (0x20, "synchronized "),
+            (0x800, "strictfp "),
+        ] {
+            if flags & bit != 0 {
+                header.push(text, budget)?;
+            }
         }
-    }
-    if !constructor {
-        header.push(type_names.result(ssa.ssa.result, budget)?, budget)?;
-        header.push(" ", budget)?;
-    }
-    for unit in name {
-        header.character(
-            char::from_u32(u32::from(unit)).ok_or(RequestError::InternalInvariant(
-                "checked dispatcher identifier is not scalar",
-            ))?,
-            budget,
-        )?;
-    }
-    header.push("(", budget)?;
-    for (index, kind) in ssa
-        .ssa
-        .parameters
-        .iter()
-        .skip(ssa.ssa.frame.implicit_words())
-        .enumerate()
-    {
-        budget.charge_work(1)?;
-        if index != 0 {
-            header.push(", ", budget)?;
+        if !constructor {
+            header.push(type_names.result(ssa.ssa.result, budget)?, budget)?;
+            header.push(" ", budget)?;
         }
-        header.push(type_names.declaration(*kind, budget)?, budget)?;
-        header.push(" p", budget)?;
-        header.unsigned(
-            u64::try_from(index).map_err(|_| RequestError::PlatformCapacity)?,
-            budget,
-        )?;
-    }
-    header.push(")", budget)?;
-    for (index, descriptor) in calls.throws.descriptors.iter().enumerate() {
-        budget.charge_work(1)?;
-        let Some(name) = super::calls::type_name(descriptor, budget)? else {
-            return Ok(None);
-        };
-        header.push(if index == 0 { " throws " } else { ", " }, budget)?;
-        header.push(&name, budget)?;
+        for unit in name {
+            header.character(
+                char::from_u32(u32::from(unit)).ok_or(RequestError::InternalInvariant(
+                    "checked dispatcher identifier is not scalar",
+                ))?,
+                budget,
+            )?;
+        }
+        header.push("(", budget)?;
+        for (index, kind) in ssa
+            .ssa
+            .parameters
+            .iter()
+            .skip(ssa.ssa.frame.implicit_words())
+            .enumerate()
+        {
+            budget.charge_work(1)?;
+            if index != 0 {
+                header.push(", ", budget)?;
+            }
+            header.push(type_names.declaration(*kind, budget)?, budget)?;
+            header.push(" p", budget)?;
+            header.unsigned(
+                u64::try_from(index).map_err(|_| RequestError::PlatformCapacity)?,
+                budget,
+            )?;
+        }
+        header.push(")", budget)?;
+        for (index, descriptor) in calls.throws.descriptors.iter().enumerate() {
+            budget.charge_work(1)?;
+            let Some(name) = super::calls::type_name(descriptor, budget)? else {
+                return Ok(None);
+            };
+            header.push(if index == 0 { " throws " } else { ", " }, budget)?;
+            header.push(&name, budget)?;
+        }
     }
     let body = Dispatcher {
         prologue,
@@ -466,6 +484,18 @@ pub(super) fn verify(
         cases,
     };
     super::dispatcher_verify::verify(input, storage, &body, type_names, budget)?;
+    let syntax = if initializer {
+        let mut normal_exit = false;
+        for case in &body.cases {
+            budget.charge_work(1)?;
+            normal_exit |= matches!(case.transfer, Transfer::InitializerExit);
+        }
+        super::initializers::MemberSyntax::Initializer {
+            always_abrupt: !normal_exit,
+        }
+    } else {
+        super::initializers::MemberSyntax::Method
+    };
     if let crate::p7_regions::Shape::Protected(Some(region)) = plan.shape {
         return Ok(Some(VerifiedJavaMethod::protected(
             header.finish(),
@@ -474,6 +504,7 @@ pub(super) fn verify(
                 region: super::protected::SourceRegion::from_checked(region),
                 names: catch_names,
             },
+            syntax,
             environment,
         )));
     }
@@ -484,12 +515,14 @@ pub(super) fn verify(
                 storage: body,
                 region,
             },
+            syntax,
             environment,
         )));
     }
     Ok(Some(VerifiedJavaMethod::dispatcher(
         header.finish(),
         body,
+        syntax,
         environment,
     )))
 }

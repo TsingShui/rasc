@@ -12,6 +12,7 @@ mod receivers;
 pub(crate) use receivers::{ReceiverContract, ReceiverKind, resolve_receiver};
 #[cfg(test)]
 mod binding_tests;
+pub(crate) mod field_declarations;
 pub(crate) mod field_facts;
 mod fields;
 mod hierarchy;

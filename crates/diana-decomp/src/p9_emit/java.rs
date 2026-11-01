@@ -10,6 +10,13 @@ pub(crate) fn java(
     let mut output = TextBuffer::method(budget);
     output.push(&method.header, budget)?;
     output.push(" {\n", budget)?;
+    if let crate::p8_java::initializers::MemberSyntax::Initializer { always_abrupt } = method.syntax
+    {
+        output.push("initExit: {\n", budget)?;
+        if always_abrupt {
+            output.push("if (true) {\n", budget)?;
+        }
+    }
     match &method.body {
         MethodBody::Protected(body) => {
             super::protected::write(body, &method.type_names, &mut output, budget)?
@@ -20,6 +27,13 @@ pub(crate) fn java(
         MethodBody::Dispatcher(body) => {
             super::dispatcher::write(body, &method.type_names, &mut output, budget)?
         }
+    }
+    if let crate::p8_java::initializers::MemberSyntax::Initializer { always_abrupt } = method.syntax
+    {
+        if always_abrupt {
+            output.push("}\n", budget)?;
+        }
+        output.push("}\n", budget)?;
     }
     output.push("}\n", budget)?;
     budget.checkpoint()?;

@@ -350,6 +350,7 @@ pub(super) fn write(
         statements(case, output, budget)?;
         match &case.transfer {
             Transfer::ReturnVoid => output.push("return;\n", budget)?,
+            Transfer::InitializerExit => output.push("break initExit;\n", budget)?,
             Transfer::Throw(_) | Transfer::Rethrow { .. } => {
                 super::java::thrown(&case.transfer, output, budget)?
             }

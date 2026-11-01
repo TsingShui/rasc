@@ -24,11 +24,15 @@ pub use engine::{
     DexImage, Engine, MethodSelector, Options, RecoveryPolicy, RepresentationPolicy, Request,
 };
 pub use p8_java::{
-    CompilationContract, JavaCallSite, JavaInvokeKind, JavaMethodDecl, VerifiedJavaMethod,
-    VerifiedJavaUnit,
+    CompilationContract, JavaCallSite, JavaInvokeKind, JavaMethodDecl, VerifiedJavaField,
+    VerifiedJavaInitializer, VerifiedJavaMethod, VerifiedJavaUnit,
 };
 pub use p9_emit::render;
 pub use pipeline::request::{JavaTargetItem, RequestError};
+pub use substrate::fields::{
+    FieldDeclarationOutput, FieldFacts, FieldInitialValue, FieldKey, FieldOutput, FieldStorage,
+    StaticFieldOrdinal,
+};
 pub use substrate::report::{
     ClassOutput, DeclarationOutput, Diagnostic, DiagnosticCause, ImageFact, ImageOrigin,
     MethodFacts, MethodOutput, OriginSpan, OutputReason, RenderedReport, Report, SourceLanguage,

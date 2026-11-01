@@ -36,8 +36,8 @@ module → cover positive, negative, resource and already-accepted regression �
 record and finish. Create `docs/diana/batches/<id>.md` only when work actually
 starts, and record only the goal and non-goals, the fixed D IDs and versions, the
 producer and algorithm section numbers, the changed functions, the budget and
-cancellation points, the real commands, execution counts, platform and artifact
-relative paths, and the remaining obligations. That record MUST NOT copy expected
+cancellation points, the real commands, execution counts, platform, repository-tracked evidence paths and reproducible commands, and the
+remaining obligations. Batch evidence references follow WRITING §5. That record MUST NOT copy expected
 values or start a new progress database. Do not start a subagent without user
 authorization, do not mix several capabilities in one batch, and do not pre-lay
 every phase, trait, registry or AST node.
@@ -2140,6 +2140,14 @@ complete proof), and raw flags do not print declared synchronized directly.
 state, removing "redundant" locks, dynamic verification in a production run.
 
 ## T20 — <clinit>/<init>, encoded initial values and final fields
+
+**Progress**: The [initialization batch](batches/t20-initialization.md) adds
+original field results, explicit/implicit default preparation, checked source
+superclasses and ordinary-chain Java initializer bodies. D041/D042/D044/D046/D047
+pass full-unit source-JVM acceptance; D043 remains passed. Final path-count and
+delegation proofs, non-default preparation emission and D079 joint recovery
+remain pending. FinalAssignmentUnproved preserves the field identity and final
+modifier in the original facts; D045/D079 are not accepted.
 
 **Dependencies**: T19, T15. **Phase**: P1/P4/P8. **References**: DX-08/09
 (initialization).

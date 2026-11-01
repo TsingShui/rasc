@@ -768,7 +768,15 @@ pub(super) fn verify(
                     ));
                 }
             }
-            (Transfer::ReturnVoid, Terminal::ReturnVoid) => {
+            (Transfer::ReturnVoid | Transfer::InitializerExit, Terminal::ReturnVoid) => {
+                let initializer = super::initializers::is_initializer(input, budget)?;
+                if matches!(case.transfer, Transfer::InitializerExit) != initializer
+                    || initializer && !super::initializers::header_admitted(input, budget)?
+                {
+                    return Err(RequestError::InternalInvariant(
+                        "void completion changed initializer context",
+                    ));
+                }
                 if !outgoing.is_empty()
                     || !matches!(ssa.ssa.result, crate::pipeline::branch::ResultType::Void)
                     || ssa.ssa.bound[index].terminal.is_some()

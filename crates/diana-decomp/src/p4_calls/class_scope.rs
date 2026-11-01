@@ -6,6 +6,7 @@ use crate::{ClassDefId, DeclarationCatalog, DeclarationCoverage, RequestError};
 
 pub(crate) struct ClassBindings {
     pub owner: Vec<u16>,
+    pub parent: Vec<u16>,
     _sealed: (),
 }
 fn marker(
@@ -34,32 +35,53 @@ pub(crate) fn collect(
 ) -> Result<Option<ClassBindings>, RequestError> {
     let class = index.class_with(id, control)?;
     let owner = copy_units(class.descriptor, control)?;
-    let Some(parent) = catalog.class(
-        crate::p5_types::BuiltinReference::Object.descriptor(),
-        control,
-    )?
-    else {
+    let Some(original_parent) = index.class_context(id, control)?.superclass? else {
         return Ok(None);
     };
-    if parent.generic
-        || parent.enclosing_scope
-        || parent.parent.is_some()
-        || !parent.interfaces.is_empty()
-    {
+    let parent_name = copy_units(original_parent, control)?;
+    let Some(parent) = catalog.class(&parent_name, control)? else {
+        return Ok(None);
+    };
+    let Some(hierarchy) = super::hierarchy::collect(catalog, parent, control)? else {
+        return Ok(None);
+    };
+    let simple_start = marker(&owner, 47, true, control)?.map_or(1, |at| at + 1);
+    let prefix_end = marker(&parent_name, 47, false, control)?.unwrap_or(parent_name.len() - 1);
+    if crate::p0_knowledge::same_units(
+        &owner[simple_start..owner.len() - 1],
+        &parent_name[1..prefix_end],
+        control,
+    )? {
         return Ok(None);
     }
-    if matches!(parent.coverage, DeclarationCoverage::ExportedApi) {
-        let same = match (
-            marker(&owner, 47, true, control)?,
-            marker(&parent.descriptor, 47, true, control)?,
-        ) {
-            (Some(a), Some(b)) => {
-                crate::p0_knowledge::same_units(&owner[..a], &parent.descriptor[..b], control)?
-            }
-            _ => false,
-        };
-        if same {
+    for parent in hierarchy.declarations() {
+        control.charge_work(1)?;
+        if parent.generic
+            || parent.enclosing_scope
+            || !parent.interfaces.is_empty()
+            || parent.access_flags & (0x10 | 0x200) != 0
+        {
             return Ok(None);
+        }
+        if parent.access_flags & 0x400 != 0 && class.access_flags & 0x400 == 0 {
+            return Ok(None);
+        }
+        if parent.access_flags & 1 == 0 {
+            return Ok(None);
+        }
+        if matches!(parent.coverage, DeclarationCoverage::ExportedApi) {
+            let same = match (
+                marker(&owner, 47, true, control)?,
+                marker(&parent.descriptor, 47, true, control)?,
+            ) {
+                (Some(a), Some(b)) => {
+                    crate::p0_knowledge::same_units(&owner[..a], &parent.descriptor[..b], control)?
+                }
+                _ => false,
+            };
+            if same {
+                return Ok(None);
+            }
         }
     }
     let mut admitted = true;
@@ -77,30 +99,37 @@ pub(crate) fn collect(
                 let close = marker(&prototype, 41, false, control)?.ok_or(
                     RequestError::InternalInvariant("class method lost prototype terminator"),
                 )?;
-                for inherited in &parent.methods {
+                for ancestor in hierarchy.declarations() {
                     control.charge_work(1)?;
-                    if inherited.access_flags & 2 != 0
-                        || !crate::p0_knowledge::same_units(&name, &inherited.name, control)?
-                    {
-                        continue;
-                    }
-                    let Some(end) = marker(&inherited.prototype, 41, false, control)? else {
-                        admitted = false;
-                        continue;
-                    };
-                    if crate::p0_knowledge::same_units(
-                        &prototype[..=close],
-                        &inherited.prototype[..=end],
-                        control,
-                    )? {
-                        // Overriding/hiding needs a separate source declaration proof;
-                        // a verified body alone cannot establish a JavaUnit binding.
-                        admitted = false;
+                    for inherited in &ancestor.methods {
+                        control.charge_work(1)?;
+                        if inherited.access_flags & 2 != 0
+                            || !crate::p0_knowledge::same_units(&name, &inherited.name, control)?
+                        {
+                            continue;
+                        }
+                        let Some(end) = marker(&inherited.prototype, 41, false, control)? else {
+                            admitted = false;
+                            continue;
+                        };
+                        if crate::p0_knowledge::same_units(
+                            &prototype[..=close],
+                            &inherited.prototype[..=end],
+                            control,
+                        )? {
+                            // Overriding/hiding needs a separate source declaration proof;
+                            // a verified body alone cannot establish a JavaUnit binding.
+                            admitted = false;
+                        }
                     }
                 }
             }
             Ok(())
         },
     )?;
-    Ok(admitted.then_some(ClassBindings { owner, _sealed: () }))
+    Ok(admitted.then_some(ClassBindings {
+        owner,
+        parent: parent_name,
+        _sealed: (),
+    }))
 }
