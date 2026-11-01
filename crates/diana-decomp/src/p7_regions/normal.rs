@@ -3,7 +3,13 @@ use crate::p8_java::dispatcher::{Dispatcher, Transfer};
 use crate::pipeline::branch::{BlockId, EdgeId};
 use crate::substrate::owned::reserve;
 use crate::{MethodBudget, RequestError};
+pub(crate) struct Guard {
+    pub block: BlockId,
+    pub exit: EdgeId,
+    pub stub: Option<BlockId>,
+}
 pub(super) struct Candidate {
+    pub guards: Vec<Guard>,
     pub prelude: Vec<BlockId>,
     pub header: BlockId,
     pub body: Vec<BlockId>,
@@ -12,6 +18,21 @@ pub(super) struct Candidate {
     pub enter: EdgeId,
     pub leave: EdgeId,
     pub latch: EdgeId,
+}
+fn exit_stub(
+    storage: &Dispatcher,
+    target: BlockId,
+    exit: BlockId,
+    budget: &mut MethodBudget<'_, '_>,
+) -> Result<Option<Option<BlockId>>, RequestError> {
+    budget.charge_work(1)?;
+    if target == exit {
+        return Ok(Some(None));
+    }
+    Ok(match &storage.cases[index(target)?].transfer {
+        Transfer::Jump(edge) if edge.target == exit => Some(Some(target)),
+        _ => None,
+    })
 }
 pub(super) fn plan(
     storage: &Dispatcher,
@@ -71,6 +92,7 @@ pub(super) fn plan(
             used.push(value);
         }
         let mut body = Vec::new();
+        let mut guards = Vec::new();
         let mut current = enter.target;
         let mut latch = None;
         let mut fits = true;
@@ -82,9 +104,41 @@ pub(super) fn plan(
             }
             used[index(current)?] = true;
             push(&mut body, current, budget)?;
-            let Transfer::Jump(edge) = &storage.cases[index(current)?].transfer else {
-                fits = false;
-                break;
+            let edge = match &storage.cases[index(current)?].transfer {
+                Transfer::Jump(edge) => edge,
+                Transfer::Branch { yes, no, .. } => {
+                    let yes_exit = exit_stub(storage, yes.target, leave.target, budget)?;
+                    let no_exit = exit_stub(storage, no.target, leave.target, budget)?;
+                    let (exit, continuation, stub) = match (yes_exit, no_exit) {
+                        (Some(stub), None) => (yes, no, stub),
+                        (None, Some(stub)) => (no, yes, stub),
+                        _ => {
+                            fits = false;
+                            break;
+                        }
+                    };
+                    if let Some(stub) = stub {
+                        if used[index(stub)?] || !dom.dominates(header, stub, budget)? {
+                            fits = false;
+                            break;
+                        }
+                        used[index(stub)?] = true;
+                    }
+                    push(
+                        &mut guards,
+                        Guard {
+                            block: current,
+                            exit: exit.id,
+                            stub,
+                        },
+                        budget,
+                    )?;
+                    continuation
+                }
+                _ => {
+                    fits = false;
+                    break;
+                }
             };
             if edge.target == header {
                 latch = Some(edge.id);
@@ -127,6 +181,7 @@ pub(super) fn plan(
             continue;
         }
         return Ok(Some(Candidate {
+            guards,
             prelude,
             header,
             body,

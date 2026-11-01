@@ -6,6 +6,7 @@ use crate::substrate::owned::reserve;
 use crate::{MethodBudget, RequestError};
 pub(crate) struct NaturalLoop {
     _sealed: (),
+    pub guards: Vec<super::normal::Guard>,
     pub prelude: Vec<BlockId>,
     pub header: BlockId,
     pub body: Vec<BlockId>,
@@ -40,6 +41,7 @@ pub(super) fn verify(
         .chain(std::iter::once(&plan.header))
         .chain(plan.body.iter())
         .chain(plan.tail.iter())
+        .chain(plan.guards.iter().filter_map(|guard| guard.stub.as_ref()))
     {
         budget.charge_work(1)?;
         let Some(visited) = seen.get_mut(index(*block)?) else {
@@ -79,15 +81,46 @@ pub(super) fn verify(
     {
         return bad();
     }
+    let mut guards = plan.guards.iter();
     for (at, &node) in plan.body.iter().enumerate() {
         budget.charge_work(1)?;
         let target = plan.body.get(at + 1).copied().unwrap_or(plan.header);
-        let Transfer::Jump(edge) = &storage.cases[index(node)?].transfer else {
-            return bad();
+        let edge = match &storage.cases[index(node)?].transfer {
+            Transfer::Jump(edge) => edge,
+            Transfer::Branch { yes, no, .. } => {
+                let Some(guard) = guards.next() else {
+                    return bad();
+                };
+                if guard.block != node {
+                    return bad();
+                }
+                let (exit, continuation) = if guard.exit == yes.id {
+                    (yes, no)
+                } else if guard.exit == no.id {
+                    (no, yes)
+                } else {
+                    return bad();
+                };
+                if exit.target != guard.stub.unwrap_or(leave.target) {
+                    return bad();
+                }
+                if let Some(stub) = guard.stub {
+                    budget.charge_work(1)?;
+                    if !matches!(&storage.cases[index(stub)?].transfer,Transfer::Jump(edge) if edge.target==leave.target)
+                    {
+                        return bad();
+                    }
+                }
+                continuation
+            }
+            _ => return bad(),
         };
         if edge.target != target || (at + 1 == plan.body.len() && edge.id != plan.latch) {
             return bad();
         }
+    }
+    if guards.next().is_some() {
+        return bad();
     }
     for (at, &node) in plan.tail.iter().enumerate() {
         budget.charge_work(1)?;
@@ -110,6 +143,7 @@ pub(super) fn verify(
     }
     Ok(NaturalLoop {
         _sealed: (),
+        guards: plan.guards,
         prelude: plan.prelude,
         header: plan.header,
         body: plan.body,
