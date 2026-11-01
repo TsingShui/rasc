@@ -312,6 +312,36 @@ pub(super) fn collect_static(
         }
         StaticResult::Nominal
     };
+    let Some(formals) = original_formals(input, id, budget)? else {
+        return Ok(None);
+    };
+    if (matches!(result, StaticResult::Reference(_))
+        || formals
+            .iter()
+            .any(|formal| matches!(formal, CallFormal::Reference(_))))
+        && (input.qualifier_shadowed(&[106, 97, 118, 97], budget)?
+            || !clear_scope(catalog, &caller, &[106, 97, 118, 97], budget)?)
+    {
+        return Ok(None);
+    }
+    Ok(Some(StaticContract {
+        _sealed: (),
+        reference: id,
+        owner,
+        name,
+        prototype,
+        formals,
+        result,
+        declared_throws: super::throws::retain(target.throws.as_deref(), budget)?,
+    }))
+}
+
+pub(super) fn original_formals(
+    input: &MethodInput<'_, '_>,
+    id: MethodId,
+    budget: &mut MethodBudget<'_, '_>,
+) -> Result<Option<Vec<CallFormal>>, RequestError> {
+    let reference = input.method_reference(id, budget)?;
     let mut formals = Vec::new();
     let mut supported = true;
     reference.declaration.prototype.visit_parameter_types(
@@ -348,27 +378,8 @@ pub(super) fn collect_static(
     if !supported {
         return Ok(None);
     }
-    if (matches!(result, StaticResult::Reference(_))
-        || formals
-            .iter()
-            .any(|formal| matches!(formal, CallFormal::Reference(_))))
-        && (input.qualifier_shadowed(&[106, 97, 118, 97], budget)?
-            || !clear_scope(catalog, &caller, &[106, 97, 118, 97], budget)?)
-    {
-        return Ok(None);
-    }
-    Ok(Some(StaticContract {
-        _sealed: (),
-        reference: id,
-        owner,
-        name,
-        prototype,
-        formals,
-        result,
-        declared_throws: super::throws::retain(target.throws.as_deref(), budget)?,
-    }))
+    Ok(Some(formals))
 }
-
 pub(super) fn binding_available(
     input: &MethodInput<'_, '_>,
     catalog: &DeclarationCatalog,

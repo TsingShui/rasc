@@ -7,7 +7,17 @@ use crate::{DeclarationCatalog, MethodBudget, RequestError};
 
 pub(crate) enum CallEvidence {
     Declaration(StaticContract),
-    Missing,
+    Missing {
+        formals: Option<Vec<super::CallFormal>>,
+    },
+}
+impl CallEvidence {
+    pub(crate) fn formals(&self) -> Option<&[super::CallFormal]> {
+        match self {
+            Self::Declaration(contract) => Some(&contract.formals),
+            Self::Missing { formals } => formals.as_deref(),
+        }
+    }
 }
 pub(crate) struct ResolvedBody<'a> {
     _sealed: (),
@@ -26,7 +36,9 @@ pub(crate) fn collect<'a>(
         let evidence =
             match super::contracts::collect_static(input, catalog, call.reference, budget)? {
                 Some(contract) => CallEvidence::Declaration(contract),
-                None => CallEvidence::Missing,
+                None => CallEvidence::Missing {
+                    formals: super::contracts::original_formals(input, call.reference, budget)?,
+                },
             };
         push(&mut calls, evidence, budget)?;
     }
@@ -52,7 +64,7 @@ pub(crate) fn contract<'a>(
     let index = usize::try_from(id.0).map_err(|_| RequestError::PlatformCapacity)?;
     match calls.get(index) {
         Some(CallEvidence::Declaration(contract)) => Ok(contract),
-        Some(CallEvidence::Missing) => {
+        Some(CallEvidence::Missing { .. }) => {
             let site = ssa.calls.get(index).ok_or(RequestError::InternalInvariant(
                 "missing evidence lost call identity",
             ))?;

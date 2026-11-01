@@ -20,33 +20,7 @@ pub(crate) struct Assignment {
     pub target: LocalId,
     pub expression: Expression,
 }
-#[derive(Clone, Copy, Eq, PartialEq)]
-pub(crate) enum ValueUse {
-    Null {
-        value: LocalId,
-        kind: crate::p5_types::BuiltinReference,
-    },
-    UpcastObject(LocalId),
-    Direct(LocalId),
-    Boolean01(LocalId),
-    BooleanWord(LocalId),
-    Narrow {
-        value: LocalId,
-        kind: crate::p5_types::Narrow,
-    },
-}
-impl ValueUse {
-    pub(crate) fn value(self) -> LocalId {
-        match self {
-            Self::Direct(value)
-            | Self::Boolean01(value)
-            | Self::BooleanWord(value)
-            | Self::Narrow { value, .. }
-            | Self::UpcastObject(value)
-            | Self::Null { value, .. } => value,
-        }
-    }
-}
+pub(crate) use super::values::ValueUse;
 pub(super) fn returned(
     ssa: &TypedBody<'_>,
     value: LocalId,

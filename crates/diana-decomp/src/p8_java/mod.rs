@@ -14,6 +14,7 @@ pub(crate) mod receiver;
 mod receiver_verify;
 mod scalar;
 pub(crate) mod structured;
+pub(crate) mod values;
 pub(crate) mod zero_fill;
 pub use calls::{JavaCallSite, JavaInvokeKind};
 pub(crate) use scalar::MethodBody;

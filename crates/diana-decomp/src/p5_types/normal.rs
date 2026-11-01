@@ -34,6 +34,7 @@ pub(crate) struct TypedBody<'a> {
     pub ranges: Vec<Option<crate::p5_types::IntRange>>,
     pub arrays: Vec<Option<ArrayEvidence>>,
     pub bindings: Vec<crate::p4_calls::normal::CallEvidence>,
+    pub call_uses: Vec<crate::p5_types::calls::CallUses>,
 }
 impl TypedBody<'_> {
     pub(crate) fn contract(
@@ -44,20 +45,22 @@ impl TypedBody<'_> {
     }
 }
 #[derive(Clone, Copy, Eq, PartialEq)]
-pub(crate) enum ArrayConversion {
+pub(crate) enum UseConversion {
     Identity,
     BooleanWord,
-    Null,
+    Boolean01,
+    Null(crate::p5_types::BuiltinReference),
     UpcastObject,
+    Narrow(crate::p5_types::Narrow),
 }
 pub(crate) enum ArrayUse {
     Length,
     Load {
-        index: ArrayConversion,
+        index: UseConversion,
     },
     Store {
-        index: ArrayConversion,
-        value: ArrayConversion,
+        index: UseConversion,
+        value: UseConversion,
     },
 }
 pub(crate) struct ArrayEvidence {
@@ -239,6 +242,11 @@ pub(crate) fn solve<'a>(
     let Some(arrays) = solve_arrays(&ssa, &kinds, &integral_bits, budget)? else {
         return Ok(None);
     };
+    let Some(call_uses) =
+        super::calls::solve(&ssa, &bindings, &kinds, &integral_bits, &ranges, budget)?
+    else {
+        return Ok(None);
+    };
     Ok(Some(TypedBody {
         _sealed: (),
         ssa,
@@ -247,6 +255,7 @@ pub(crate) fn solve<'a>(
         ranges,
         arrays,
         bindings,
+        call_uses,
     }))
 }
 fn solve_arrays(
@@ -289,8 +298,8 @@ fn solve_arrays(
                         return Err(bad());
                     }
                     let index = match kinds[ix(op.input(1)?.0)?] {
-                        Some(Kind::Int) => ArrayConversion::Identity,
-                        Some(Kind::Boolean) => ArrayConversion::BooleanWord,
+                        Some(Kind::Int) => UseConversion::Identity,
+                        Some(Kind::Boolean) => UseConversion::BooleanWord,
                         None => return Ok(None),
                         _ => return Err(bad()),
                     };
@@ -300,18 +309,14 @@ fn solve_arrays(
                         let at = ix(op.input(2)?.0)?;
                         let value = match (component, kinds[at]) {
                             (ArrayElement::Int, Some(Kind::Int))
-                            | (ArrayElement::Object, Some(Kind::Object)) => {
-                                ArrayConversion::Identity
-                            }
-                            (ArrayElement::Int, Some(Kind::Boolean)) => {
-                                ArrayConversion::BooleanWord
-                            }
+                            | (ArrayElement::Object, Some(Kind::Object)) => UseConversion::Identity,
+                            (ArrayElement::Int, Some(Kind::Boolean)) => UseConversion::BooleanWord,
                             (
                                 ArrayElement::Object,
                                 Some(Kind::String | Kind::IntArray | Kind::ObjectArray),
-                            ) => ArrayConversion::UpcastObject,
+                            ) => UseConversion::UpcastObject,
                             (ArrayElement::Object, Some(Kind::Int)) if bits[at] == 1 => {
-                                ArrayConversion::Null
+                                UseConversion::Null(crate::p5_types::BuiltinReference::Object)
                             }
                             (_, None) => return Ok(None),
                             _ => return Err(bad()),

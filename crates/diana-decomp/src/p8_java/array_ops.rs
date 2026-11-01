@@ -1,7 +1,7 @@
 use super::branch::{LocalId, ValueUse};
 use crate::p2_flow::normal::{ArrayElement, Op};
 use crate::p3_ssa::normal::{BoundOp, ValueId};
-use crate::p5_types::normal::{ArrayConversion, ArrayUse, Kind, TypedBody};
+use crate::p5_types::normal::{ArrayUse, Kind, TypedBody};
 use crate::{MethodBudget, RequestError};
 
 pub(crate) enum Statement {
@@ -19,18 +19,6 @@ pub(crate) enum Statement {
         index: ValueUse,
         value: ValueUse,
     },
-}
-fn view(value: ValueId, conversion: ArrayConversion) -> ValueUse {
-    let value = LocalId(value.0);
-    match conversion {
-        ArrayConversion::Identity => ValueUse::Direct(value),
-        ArrayConversion::BooleanWord => ValueUse::BooleanWord(value),
-        ArrayConversion::Null => ValueUse::Null {
-            value,
-            kind: crate::p5_types::BuiltinReference::Object,
-        },
-        ArrayConversion::UpcastObject => ValueUse::UpcastObject(value),
-    }
 }
 pub(crate) fn lower(ssa: &TypedBody<'_>, op: &BoundOp) -> Result<Statement, RequestError> {
     let evidence = ssa
@@ -55,13 +43,13 @@ pub(crate) fn lower(ssa: &TypedBody<'_>, op: &BoundOp) -> Result<Statement, Requ
         }),
         (Op::ArrayLoad(..), ArrayUse::Load { index }) => Ok(Statement::Load {
             array,
-            index: view(op.input(1)?, *index),
+            index: super::values::lower(LocalId(op.input(1)?.0), *index),
             result: result()?,
         }),
         (Op::ArrayStore(..), ArrayUse::Store { index, value }) => Ok(Statement::Store {
             array,
-            index: view(op.input(1)?, *index),
-            value: view(op.input(2)?, *value),
+            index: super::values::lower(LocalId(op.input(1)?.0), *index),
+            value: super::values::lower(LocalId(op.input(2)?.0), *value),
         }),
         _ => Err(RequestError::InternalInvariant(
             "array type evidence changed operation kind",

@@ -1,4 +1,5 @@
 mod arrays;
+pub(crate) mod calls;
 mod integral;
 pub(crate) mod normal;
 pub(crate) use arrays::{ArrayElement, PrimitiveArray};

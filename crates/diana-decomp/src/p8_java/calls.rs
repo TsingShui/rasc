@@ -1,6 +1,5 @@
 use super::branch::{Assignment, LocalId, ValueUse};
-use crate::p4_calls::CallFormal;
-use crate::pipeline::branch::{CallId, Kind, Op, TypedBody};
+use crate::pipeline::branch::{CallId, Op, TypedBody};
 use crate::substrate::owned::{TextBuffer, reserve};
 use crate::{CodeUnitOffset, MethodBudget, MethodId, RequestError};
 
@@ -119,56 +118,6 @@ pub(super) fn empty_static(
         arguments: Vec::new(),
     }))
 }
-pub(super) fn argument(
-    ssa: &TypedBody<'_>,
-    value: LocalId,
-    formal: CallFormal,
-) -> Result<Option<ValueUse>, RequestError> {
-    let index = ix(value.0)?;
-    if let CallFormal::Reference(kind) = formal {
-        return Ok(
-            if ssa.ssa.is_zero(crate::pipeline::branch::ValueId(value.0))? {
-                Some(ValueUse::Null { value, kind })
-            } else {
-                match (ssa.kinds[index], kind) {
-                    (Some(Kind::Object), crate::p5_types::BuiltinReference::Object)
-                    | (Some(Kind::String), crate::p5_types::BuiltinReference::String) => {
-                        Some(ValueUse::Direct(value))
-                    }
-                    (Some(Kind::String), crate::p5_types::BuiltinReference::Object) => {
-                        Some(ValueUse::UpcastObject(value))
-                    }
-                    _ => None,
-                }
-            },
-        );
-    }
-    Ok(match (ssa.kinds[index], formal) {
-        (Some(Kind::Int), CallFormal::Int) | (Some(Kind::Boolean), CallFormal::Boolean) => {
-            Some(ValueUse::Direct(value))
-        }
-        (Some(Kind::Boolean), CallFormal::Int) => Some(ValueUse::BooleanWord(value)),
-        (Some(Kind::Int), CallFormal::Boolean)
-            if ssa.integral_bits[index] != 0 && ssa.integral_bits[index] & 4 == 0 =>
-        {
-            Some(ValueUse::Boolean01(value))
-        }
-        (Some(Kind::Int), CallFormal::Narrow(kind)) => {
-            let range = ssa.ranges[index];
-            let range = if ssa.integral_bits[index] != 0 && ssa.integral_bits[index] & 4 == 0 {
-                range.and_then(crate::p5_types::IntRange::known01)
-            } else {
-                range
-            };
-            if range.is_some_and(|range| range.within(kind.range())) {
-                Some(ValueUse::Narrow { value, kind })
-            } else {
-                None
-            }
-        }
-        _ => None,
-    })
-}
 pub(super) fn type_name(
     owner: &[u16],
     budget: &mut MethodBudget<'_, '_>,
@@ -214,10 +163,23 @@ pub(super) fn validate_bindings(
                 "call constraints changed original word arity",
             ));
         }
-        for (&value, &formal) in bound.inputs.iter().zip(&contract.formals) {
+        let uses = ssa
+            .call_uses
+            .get(index)
+            .ok_or(RequestError::InternalInvariant(
+                "call lost final use conversions",
+            ))?;
+        if uses.arguments.len() != bound.inputs.len() {
+            return Err(RequestError::InternalInvariant(
+                "call conversions changed arity",
+            ));
+        }
+        for (&value, typed_use) in bound.inputs.iter().zip(&uses.arguments) {
             budget.charge_work(1)?;
-            if argument(ssa, LocalId(value.0), formal)?.is_none() {
-                return Ok(false);
+            if value != typed_use.value {
+                return Err(RequestError::InternalInvariant(
+                    "call conversion changed definition or order",
+                ));
             }
         }
         if !crate::p4_calls::normal::binding_available(input, catalog, contract, budget)? {
@@ -267,13 +229,18 @@ fn plan(
     if bound.inputs.len() != contract.formals.len() {
         return Err(RequestError::InternalInvariant("owned call changed arity"));
     }
+    let uses = ssa
+        .call_uses
+        .get(ix(id.0)?)
+        .ok_or(RequestError::InternalInvariant("call lost typed uses"))?;
     let mut arguments = Vec::new();
-    for (&value, &formal) in bound.inputs.iter().zip(&contract.formals) {
+    for typed_use in &uses.arguments {
         budget.charge_work(1)?;
-        let Some(view) = argument(ssa, LocalId(value.0), formal)? else {
-            return Ok(None);
-        };
-        push(&mut arguments, view, budget)?;
+        push(
+            &mut arguments,
+            super::values::lower(LocalId(typed_use.value.0), typed_use.conversion),
+            budget,
+        )?;
     }
     Ok(Some(StaticCall {
         _sealed: (),
