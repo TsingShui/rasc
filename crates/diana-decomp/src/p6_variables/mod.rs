@@ -1,4 +1,5 @@
 pub(crate) mod allocation;
+pub(crate) mod arrays;
 mod copies;
 
 pub(crate) use copies::{

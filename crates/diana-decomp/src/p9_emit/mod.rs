@@ -7,6 +7,7 @@ mod debug;
 mod debug_program;
 mod dispatcher;
 mod error;
+mod fresh_array;
 mod java;
 mod json;
 mod literals;

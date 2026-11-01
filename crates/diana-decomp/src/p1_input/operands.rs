@@ -331,6 +331,30 @@ impl<'a> RawMethodView<'a> {
     }
 }
 
+pub(crate) fn array_payload(
+    bytes: &[u8],
+    pc: CodeUnitOffset,
+    layout: InsnLayout,
+) -> Result<ArrayElements<'_>, RawDecodeError> {
+    let LayoutKind::ArrayData {
+        element_width,
+        element_count,
+    } = layout.kind()
+    else {
+        return Err(overflow(pc));
+    };
+    let words = item_words(bytes, pc, layout)?;
+    let length = usize::try_from(element_count)
+        .ok()
+        .and_then(|count| count.checked_mul(element_width.0))
+        .ok_or_else(|| overflow(pc))?;
+    let end = 8usize.checked_add(length).ok_or_else(|| overflow(pc))?;
+    let data = words.get(8..end).ok_or_else(|| overflow(pc))?;
+    Ok(ArrayElements {
+        width: element_width,
+        chunks: data.chunks_exact(element_width.0),
+    })
+}
 pub(crate) fn switch_payload(
     bytes: &[u8],
     pc: CodeUnitOffset,

@@ -7,6 +7,7 @@ pub(crate) mod constructor;
 mod declarations;
 pub(crate) mod dispatcher;
 mod dispatcher_verify;
+pub(crate) mod fresh_array;
 pub(crate) mod receiver;
 mod receiver_verify;
 mod scalar;

@@ -17,6 +17,7 @@ pub struct VerifiedJavaMethod {
     environment: EnvironmentId,
 }
 pub(crate) enum MethodBody {
+    FreshArray(super::fresh_array::FreshArrayBody),
     ZeroFill(super::zero_fill::ZeroFillBody),
     Casts(super::casts::CastBody),
     Structured(super::structured::StructuredLoop),
@@ -33,6 +34,17 @@ pub(crate) enum MethodBody {
     Dispatcher(super::dispatcher::Dispatcher),
 }
 impl VerifiedJavaMethod {
+    pub(super) fn fresh_array(
+        header: String,
+        body: super::fresh_array::FreshArrayBody,
+        environment: EnvironmentId,
+    ) -> Self {
+        Self {
+            header,
+            body: MethodBody::FreshArray(body),
+            environment,
+        }
+    }
     pub(super) fn zero_fill(
         header: String,
         body: super::zero_fill::ZeroFillBody,
