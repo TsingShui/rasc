@@ -149,7 +149,8 @@ pub(super) fn verify(
                 )?;
             }
         }
-        let Some(statements) = super::calls::operations(ssa, key, &mut calls.receivers, budget)?
+        let Some(statements) =
+            super::calls::operations(storage, key, &mut calls.receivers, budget)?
         else {
             return Ok(None);
         };
@@ -274,7 +275,7 @@ pub(super) fn verify(
                         Kind::Boolean
                             | Kind::Object
                             | Kind::String
-                            | Kind::IntArray
+                            | Kind::PrimitiveArray(_)
                             | Kind::ObjectArray
                             | Kind::Nominal(_)
                     ) && !matches!(opcode, 0x32 | 0x33 | 0x38 | 0x39)
@@ -364,7 +365,7 @@ pub(super) fn verify(
         entry,
         cases,
     };
-    super::dispatcher_verify::verify(ssa, &body, budget)?;
+    super::dispatcher_verify::verify(storage, &body, budget)?;
     if matches!(
         representation,
         crate::RepresentationPolicy::StructuredThenDispatch

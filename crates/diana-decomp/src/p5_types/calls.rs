@@ -42,7 +42,12 @@ fn conversion(
                 (Some(Kind::Object), BuiltinReference::Object)
                 | (Some(Kind::String), BuiltinReference::String) => Some(UseConversion::Identity),
                 (
-                    Some(Kind::String | Kind::IntArray | Kind::ObjectArray | Kind::Nominal(_)),
+                    Some(
+                        Kind::String
+                        | Kind::PrimitiveArray(_)
+                        | Kind::ObjectArray
+                        | Kind::Nominal(_),
+                    ),
                     BuiltinReference::Object,
                 ) => Some(UseConversion::UpcastObject),
                 _ => None,

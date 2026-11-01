@@ -45,7 +45,12 @@ pub(super) fn returned(
             },
         );
     }
-    if ssa.kinds[index] == Some(result.kind()) && matches!(result.kind(), Kind::Nominal(_)) {
+    if ssa.kinds[index] == Some(result.kind())
+        && matches!(
+            result.kind(),
+            Kind::Nominal(_) | Kind::PrimitiveArray(_) | Kind::ObjectArray
+        )
+    {
         return Ok(Some(ValueUse::Direct(value)));
     }
     Ok(match (ssa.kinds[index], result.kind()) {
@@ -155,7 +160,8 @@ pub(super) fn operation(
             },
         ),
         Op::Nop => return Ok(None),
-        Op::Cast(..)
+        Op::EmptyFill(..)
+        | Op::Cast(..)
         | Op::String(..)
         | Op::Call(_, _)
         | Op::ArrayLength(..)
@@ -339,7 +345,7 @@ fn verify_diamond(
         Kind::Boolean
             | Kind::Object
             | Kind::String
-            | Kind::IntArray
+            | Kind::PrimitiveArray(_)
             | Kind::ObjectArray
             | Kind::Nominal(_)
     ) && !matches!(opcode, 0x38 | 0x39)

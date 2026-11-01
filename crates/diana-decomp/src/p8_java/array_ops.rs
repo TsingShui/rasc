@@ -73,7 +73,7 @@ fn valid_view(
         (
             ValueUse::UpcastObject(_),
             Kind::Object,
-            Some(Kind::String | Kind::IntArray | Kind::ObjectArray | Kind::Nominal(_)),
+            Some(Kind::String | Kind::PrimitiveArray(_) | Kind::ObjectArray | Kind::Nominal(_)),
         ) => true,
         (
             ValueUse::Null {
@@ -135,7 +135,12 @@ pub(crate) fn verify(
     let array = op.input(0)?;
     let component =
         match ssa.kinds[usize::try_from(array.0).map_err(|_| RequestError::PlatformCapacity)?] {
-            Some(Kind::IntArray) => Kind::Int,
+            Some(Kind::PrimitiveArray(kind))
+                if kind == crate::p5_types::PrimitiveArray::Int
+                    || matches!(op.op, Op::ArrayLength(..)) =>
+            {
+                Kind::Int
+            }
             Some(Kind::ObjectArray) => Kind::Object,
             _ => return Ok(false),
         };

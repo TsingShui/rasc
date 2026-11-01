@@ -112,7 +112,7 @@ pub(super) fn verify(
         (super::branch::ValueUse::Direct(_), Some(Kind::Object | Kind::String)) => true,
         (
             super::branch::ValueUse::UpcastObject(_),
-            Some(Kind::Nominal(_) | Kind::IntArray | Kind::ObjectArray),
+            Some(Kind::Nominal(_) | Kind::PrimitiveArray(_) | Kind::ObjectArray),
         ) => true,
         (
             super::branch::ValueUse::Null {

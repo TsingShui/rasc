@@ -380,7 +380,11 @@ fn diamond(
             }
             local(body.condition, output, budget)?;
         }
-        Kind::Object | Kind::String | Kind::IntArray | Kind::ObjectArray | Kind::Nominal(_) => {
+        Kind::Object
+        | Kind::String
+        | Kind::PrimitiveArray(_)
+        | Kind::ObjectArray
+        | Kind::Nominal(_) => {
             local(body.condition, output, budget)?;
             output.push(
                 if body.opcode == 0x38 {

@@ -123,7 +123,7 @@ fn static_call(
             | (
                 ValueUse::UpcastObject(_),
                 CallFormal::Reference(crate::p5_types::BuiltinReference::Object),
-                Some(Kind::String | Kind::IntArray | Kind::ObjectArray | Kind::Nominal(_)),
+                Some(Kind::String | Kind::PrimitiveArray(_) | Kind::ObjectArray | Kind::Nominal(_)),
             ) => true,
             (ValueUse::Direct(_), CallFormal::Int, Some(Kind::Int))
             | (ValueUse::Direct(_), CallFormal::Boolean, Some(Kind::Boolean))
@@ -255,11 +255,18 @@ fn edge(
 }
 
 pub(super) fn verify(
-    ssa: &TypedBody<'_>,
+    storage: &crate::p6_variables::normal::StorageBody<'_>,
     body: &Dispatcher,
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<(), RequestError> {
-    if body.locals.len() < ssa.ssa.values.len() || body.cases.len() != ssa.ssa.blocks.len() {
+    let ssa = &storage.typed;
+    let base_count = ssa
+        .ssa
+        .values
+        .len()
+        .checked_add(storage.empty_fills.len())
+        .ok_or(RequestError::PlatformCapacity)?;
+    if body.locals.len() < base_count || body.cases.len() != ssa.ssa.blocks.len() {
         return Err(RequestError::InternalInvariant(
             "dispatcher lost locals or block coverage",
         ));
@@ -301,6 +308,14 @@ pub(super) fn verify(
             if local.parameter != parameter {
                 return Err(RequestError::InternalInvariant(
                     "dispatcher fabricated an entry definition",
+                ));
+            }
+            push(&mut types, ty(local.kind)?, budget)?;
+        } else if index < base_count {
+            let proof = &storage.empty_fills[index - ssa.ssa.values.len()];
+            if proof.result != local.id || local.kind != Kind::Int || local.parameter.is_some() {
+                return Err(RequestError::InternalInvariant(
+                    "LengthOnly changed storage",
                 ));
             }
             push(&mut types, ty(local.kind)?, budget)?;
@@ -347,6 +362,25 @@ pub(super) fn verify(
                     "dispatcher omitted an original operation",
                 ))?;
             let matches = match actual {
+                super::calls::Statement::EmptyFill {
+                    array,
+                    result,
+                    payload,
+                } => {
+                    if let Op::EmptyFill(_, id) = bound.op {
+                        let proof = storage.empty_fills.get(ix(id.0)?).ok_or(
+                            RequestError::InternalInvariant("fill certificate lost storage"),
+                        )?;
+                        proof.pc == bound.pc
+                            && proof.payload == *payload
+                            && proof.result == *result
+                            && proof.array.0 == array.0
+                            && bound.input(0)?.0 == array.0
+                            && bound.result.is_none()
+                    } else {
+                        false
+                    }
+                }
                 super::calls::Statement::Cast(actual) => {
                     super::cast_ops::verify(ssa, bound, actual, budget)?
                 }

@@ -15,7 +15,7 @@ pub(crate) enum DeclarationType {
     Object,
     String,
     Float,
-    IntArray,
+    PrimitiveArray(crate::p5_types::PrimitiveArray),
     ObjectArray,
     Nominal(crate::TypeId),
     Narrow(crate::p5_types::Narrow),
@@ -28,7 +28,7 @@ impl DeclarationType {
             Self::Object => Kind::Object,
             Self::String => Kind::String,
             Self::Float => Kind::Float,
-            Self::IntArray => Kind::IntArray,
+            Self::PrimitiveArray(kind) => Kind::PrimitiveArray(kind),
             Self::ObjectArray => Kind::ObjectArray,
             Self::Nominal(id) => Kind::Nominal(id),
         }
@@ -42,7 +42,7 @@ impl DeclarationType {
             Self::Object
             | Self::String
             | Self::Float
-            | Self::IntArray
+            | Self::PrimitiveArray(_)
             | Self::ObjectArray
             | Self::Nominal(_) => None,
         }
@@ -114,6 +114,12 @@ pub(crate) struct CallSite {
 pub(crate) struct StringLiteralId(pub u32);
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub(crate) struct CastId(pub u32);
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub(crate) struct EmptyFillId(pub u32);
+pub(crate) struct EmptyFillSite {
+    pub payload: CodeUnitOffset,
+    pub width: usize,
+}
 pub(crate) struct CastSite {
     pub reference: crate::TypeId,
     pub kind: crate::p5_types::BuiltinReference,
@@ -129,6 +135,7 @@ pub(crate) enum ArrayElement {
 }
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub(crate) enum Op {
+    EmptyFill(RegisterId, EmptyFillId),
     Cast(RegisterId, CastId),
     String(RegisterId, StringLiteralId),
     FieldLoad(RegisterId, RegisterId, crate::FieldId),
@@ -203,7 +210,8 @@ impl Op {
             may_throw: conservative
                 || matches!(
                     self,
-                    Self::Cast(..)
+                    Self::EmptyFill(..)
+                        | Self::Cast(..)
                         | Self::String(..)
                         | Self::ArrayLength(..)
                         | Self::ArrayLoad(..)
@@ -245,6 +253,7 @@ impl MethodFrame {
     }
 }
 pub(crate) struct FlowBody<'a> {
+    pub empty_fills: Vec<EmptyFillSite>,
     pub casts: Vec<CastSite>,
     pub strings: Vec<StringLiteral<'a>>,
     pub frame: MethodFrame,
@@ -272,7 +281,7 @@ pub(crate) fn destination(op: Op) -> Option<RegisterId> {
         | Op::ArrayLength(r, _)
         | Op::ArrayLoad(r, _, _, _)
         | Op::FieldLoad(r, _, _) => Some(r),
-        Op::Nop | Op::ArrayStore(..) | Op::FieldStore(..) => None,
+        Op::Nop | Op::ArrayStore(..) | Op::FieldStore(..) | Op::EmptyFill(..) => None,
     }
 }
 pub(crate) enum Reads<'a> {
@@ -304,6 +313,7 @@ impl Op {
                 ))?;
                 return Ok(Reads::Call(call.registers.iter()));
             }
+            Self::EmptyFill(register, _) => [Some(register), None, None],
             Self::Cast(register, _) => [Some(register), None, None],
             Self::FieldLoad(_, receiver, _) => [Some(receiver), None, None],
             Self::FieldStore(receiver, value, _) => [Some(receiver), Some(value), None],
@@ -431,6 +441,11 @@ pub(crate) fn decode<'a>(
                 budget,
             )? {
                 DeclarationType::Object
+            } else if let Some(kind) = crate::p5_types::PrimitiveArray::parse(
+                input.declaration().prototype.return_type,
+                budget,
+            )? {
+                DeclarationType::PrimitiveArray(kind)
             } else {
                 let mut units = input.declaration().prototype.return_type.reader()?;
                 if units.next(budget)? != Some(76) {
@@ -461,8 +476,8 @@ pub(crate) fn decode<'a>(
                 DeclarationType::Int
             } else if name.matches_with(&[90], budget)? {
                 DeclarationType::Boolean
-            } else if name.matches_with(&[91, 73], budget)? {
-                DeclarationType::IntArray
+            } else if let Some(kind) = crate::p5_types::PrimitiveArray::parse(name, budget)? {
+                DeclarationType::PrimitiveArray(kind)
             } else if name.matches_with(
                 &[
                     91, 76, 106, 97, 118, 97, 47, 108, 97, 110, 103, 47, 79, 98, 106, 101, 99, 116,
@@ -509,6 +524,7 @@ pub(crate) fn decode<'a>(
     let mut calls = Vec::new();
     let mut strings = Vec::new();
     let mut casts = Vec::new();
+    let mut empty_fills = Vec::new();
     let mut raw_switches: Vec<(Vec<(i32, CodeUnitOffset)>, CodeUnitOffset)> = Vec::new();
     let mut leaders = Vec::new();
     push(&mut leaders, CodeUnitOffset(0), budget)?;
@@ -620,6 +636,39 @@ pub(crate) fn decode<'a>(
                     } else {
                         Decoded::Op(Op::FieldStore(reg(1)?, reg(0)?, id))
                     }
+                }
+                0x26 => {
+                    let delta = operands
+                        .offset()
+                        .ok_or(RequestError::InternalInvariant("fill lost payload offset"))?;
+                    let payload = CodeUnitOffset(pc.0.checked_add_signed(delta.0).ok_or(
+                        RequestError::InternalInvariant("checked fill target overflowed"),
+                    )?);
+                    let data = instruction_layout(raw.instructions(), payload, raw.version())
+                        .map_err(crate::input::MethodError::Decode)?;
+                    let LayoutKind::ArrayData {
+                        element_width,
+                        element_count,
+                    } = data.kind()
+                    else {
+                        return Err(RequestError::InternalInvariant("fill changed payload kind"));
+                    };
+                    if element_count != 0 {
+                        return Ok(None);
+                    }
+                    let id = EmptyFillId(
+                        u32::try_from(empty_fills.len())
+                            .map_err(|_| RequestError::PlatformCapacity)?,
+                    );
+                    push(
+                        &mut empty_fills,
+                        EmptyFillSite {
+                            payload,
+                            width: element_width.0,
+                        },
+                        budget,
+                    )?;
+                    Decoded::Op(Op::EmptyFill(reg(0)?, id))
                 }
                 0x1f => {
                     let Some(reference) = layout.references()[0] else {
@@ -1028,6 +1077,7 @@ pub(crate) fn decode<'a>(
         }
     }
     Ok(Some(FlowBody {
+        empty_fills,
         casts,
         strings,
         frame,

@@ -10,7 +10,7 @@ pub(crate) enum Kind {
     Object,
     String,
     Float,
-    IntArray,
+    PrimitiveArray(super::PrimitiveArray),
     ObjectArray,
     Nominal(crate::TypeId),
 }
@@ -22,7 +22,7 @@ impl Kind {
             Self::Object => "java.lang.Object",
             Self::String => "java.lang.String",
             Self::Float => "float",
-            Self::IntArray => "int[]",
+            Self::PrimitiveArray(kind) => kind.spelling(),
             Self::ObjectArray => "java.lang.Object[]",
             Self::Nominal(_) => return None,
         })
@@ -38,8 +38,15 @@ pub(crate) struct TypedBody<'a> {
     pub bindings: Vec<crate::p4_calls::normal::CallEvidence>,
     pub call_uses: Vec<crate::p5_types::calls::CallUses>,
     pub cast_uses: Vec<crate::p5_types::calls::TypedUse>,
+    pub empty_fills: Vec<EmptyFillUse>,
+
     pub field_declarations: Vec<Option<crate::p4_calls::normal::FieldEvidence>>,
     pub field_uses: Vec<Option<FieldUse>>,
+}
+pub(crate) struct EmptyFillUse {
+    _sealed: (),
+    pub array: crate::p3_ssa::normal::ValueId,
+    pub component: super::PrimitiveArray,
 }
 pub(crate) enum FieldUse {
     Read,
@@ -117,7 +124,7 @@ pub(crate) fn solve<'a>(
                     Kind::Object
                     | Kind::String
                     | Kind::Float
-                    | Kind::IntArray
+                    | Kind::PrimitiveArray(_)
                     | Kind::ObjectArray
                     | Kind::Nominal(_) => 0,
                 };
@@ -178,7 +185,7 @@ pub(crate) fn solve<'a>(
                     (0, None, Some(Kind::Object))
                 }
                 Op::Move(_, _) => (0, None, None),
-                Op::Nop | Op::ArrayStore(..) | Op::FieldStore(..) => {
+                Op::Nop | Op::ArrayStore(..) | Op::FieldStore(..) | Op::EmptyFill(..) => {
                     return Err(RequestError::InternalInvariant(
                         "NOP acquired a normal value definition",
                     ));
@@ -270,6 +277,9 @@ pub(crate) fn solve<'a>(
     let Some(arrays) = solve_arrays(&ssa, &kinds, &integral_bits, budget)? else {
         return Ok(None);
     };
+    let Some(empty_fills) = solve_empty_fills(&ssa, &kinds, budget)? else {
+        return Ok(None);
+    };
     let Some(cast_uses) = solve_casts(&ssa, &kinds, budget)? else {
         return Ok(None);
     };
@@ -291,6 +301,7 @@ pub(crate) fn solve<'a>(
         bindings,
         call_uses,
         cast_uses,
+        empty_fills,
         field_declarations,
         field_uses,
     }))
@@ -314,7 +325,12 @@ fn solve_arrays(
         let usage = match op.op {
             Op::ArrayLength(..) | Op::ArrayLoad(..) | Op::ArrayStore(..) => {
                 let component = match kinds[ix(op.input(0)?.0)?] {
-                    Some(Kind::IntArray) => ArrayElement::Int,
+                    Some(Kind::PrimitiveArray(kind))
+                        if kind == super::PrimitiveArray::Int
+                            || matches!(op.op, Op::ArrayLength(..)) =>
+                    {
+                        ArrayElement::Int
+                    }
                     Some(Kind::ObjectArray) => ArrayElement::Object,
                     _ => return Ok(None),
                 };
@@ -352,7 +368,7 @@ fn solve_arrays(
                                 ArrayElement::Object,
                                 Some(
                                     Kind::String
-                                    | Kind::IntArray
+                                    | Kind::PrimitiveArray(_)
                                     | Kind::ObjectArray
                                     | Kind::Nominal(_),
                                 ),
@@ -455,7 +471,7 @@ fn solve_casts(
         } else {
             match kinds[ix(value.0)?] {
                 Some(Kind::Object | Kind::String) => UseConversion::Identity,
-                Some(Kind::Nominal(_) | Kind::IntArray | Kind::ObjectArray) => {
+                Some(Kind::Nominal(_) | Kind::PrimitiveArray(_) | Kind::ObjectArray) => {
                     UseConversion::UpcastObject
                 }
                 None => return Ok(None),
@@ -471,6 +487,54 @@ fn solve_casts(
         push(
             &mut uses,
             crate::p5_types::calls::TypedUse { value, conversion },
+            budget,
+        )?;
+    }
+    Ok(Some(uses))
+}
+
+fn solve_empty_fills(
+    ssa: &SsaBody<'_>,
+    kinds: &[Option<Kind>],
+    budget: &mut MethodBudget<'_, '_>,
+) -> Result<Option<Vec<EmptyFillUse>>, RequestError> {
+    let mut uses = Vec::new();
+    for op in &ssa.operations {
+        budget.charge_work(1)?;
+        let Op::EmptyFill(_, id) = op.op else {
+            continue;
+        };
+        if ix(id.0)? != uses.len() {
+            return Err(RequestError::InternalInvariant(
+                "empty fill changed arena identity",
+            ));
+        }
+        let site = ssa
+            .empty_fills
+            .get(ix(id.0)?)
+            .ok_or(RequestError::InternalInvariant(
+                "fill lost original payload",
+            ))?;
+        let array = op.input(0)?;
+        let component = match kinds[ix(array.0)?] {
+            Some(Kind::PrimitiveArray(component)) if component.width() == site.width => component,
+            None => return Ok(None),
+            _ if ssa.is_zero(array)? => return Ok(None),
+            _ => {
+                return Err(crate::input::MethodError::Malformed {
+                    pc: op.pc,
+                    problem: crate::input::MethodProblem::InvalidArrayPayloadType,
+                }
+                .into());
+            }
+        };
+        push(
+            &mut uses,
+            EmptyFillUse {
+                _sealed: (),
+                array,
+                component,
+            },
             budget,
         )?;
     }

@@ -17,9 +17,18 @@ pub(crate) fn local_type(kind: Kind) -> Result<LocalType, RequestError> {
             Kind::Object => 2,
             Kind::Float => 3,
             Kind::String => 4,
-            Kind::IntArray => 5,
+            Kind::PrimitiveArray(kind) => match kind {
+                crate::p5_types::PrimitiveArray::Int => 5,
+                crate::p5_types::PrimitiveArray::Boolean => 7,
+                crate::p5_types::PrimitiveArray::Byte => 8,
+                crate::p5_types::PrimitiveArray::Short => 9,
+                crate::p5_types::PrimitiveArray::Char => 10,
+                crate::p5_types::PrimitiveArray::Float => 11,
+                crate::p5_types::PrimitiveArray::Long => 12,
+                crate::p5_types::PrimitiveArray::Double => 13,
+            },
             Kind::ObjectArray => 6,
-            Kind::Nominal(id) => u64::from(id.0) + 7,
+            Kind::Nominal(id) => u64::from(id.0) + 14,
         }),
         1,
     )
@@ -31,10 +40,19 @@ pub(crate) fn kind(local_type: LocalType) -> Result<Kind, RequestError> {
         (2, Width::One) => Ok(Kind::Object),
         (3, Width::One) => Ok(Kind::Float),
         (4, Width::One) => Ok(Kind::String),
-        (5, Width::One) => Ok(Kind::IntArray),
+        (5, Width::One) => Ok(Kind::PrimitiveArray(crate::p5_types::PrimitiveArray::Int)),
+        (id @ 7..=13, Width::One) => Ok(Kind::PrimitiveArray(match id {
+            7 => crate::p5_types::PrimitiveArray::Boolean,
+            8 => crate::p5_types::PrimitiveArray::Byte,
+            9 => crate::p5_types::PrimitiveArray::Short,
+            10 => crate::p5_types::PrimitiveArray::Char,
+            11 => crate::p5_types::PrimitiveArray::Float,
+            12 => crate::p5_types::PrimitiveArray::Long,
+            _ => crate::p5_types::PrimitiveArray::Double,
+        })),
         (6, Width::One) => Ok(Kind::ObjectArray),
-        (identity, Width::One) if identity >= 7 => Ok(Kind::Nominal(crate::TypeId(
-            u32::try_from(identity - 7).map_err(|_| RequestError::PlatformCapacity)?,
+        (identity, Width::One) if identity >= 14 => Ok(Kind::Nominal(crate::TypeId(
+            u32::try_from(identity - 14).map_err(|_| RequestError::PlatformCapacity)?,
         ))),
         _ => Err(RequestError::InternalInvariant(
             "foreign normal storage type",
@@ -57,6 +75,7 @@ pub(crate) struct StorageBody<'a> {
     _sealed: (),
     pub typed: TypedBody<'a>,
     pub locals: Vec<Local>,
+    pub empty_fills: Vec<super::empty_fill::LengthOnly>,
     entry: CopyPlan,
     normal: Vec<CopyPlan>,
 }
@@ -197,6 +216,31 @@ pub(crate) fn allocate<'a>(
             budget,
         )?;
     }
+    let mut empty_fills = Vec::new();
+    for op in &typed.ssa.operations {
+        budget.charge_work(1)?;
+        let crate::p2_flow::normal::Op::EmptyFill(_, id) = op.op else {
+            continue;
+        };
+        if usize::try_from(id.0).map_err(|_| RequestError::PlatformCapacity)? != empty_fills.len() {
+            return Err(RequestError::InternalInvariant(
+                "fill storage changed identity",
+            ));
+        }
+        let result =
+            LocalId(u32::try_from(locals.len()).map_err(|_| RequestError::PlatformCapacity)?);
+        let proof = super::empty_fill::prove(&typed, op, result, budget)?;
+        push(
+            &mut locals,
+            Local {
+                id: result,
+                kind: Kind::Int,
+                parameter: None,
+            },
+            budget,
+        )?;
+        push(&mut empty_fills, proof, budget)?;
+    }
     let entry = plan_edge(&typed, None, BlockId(0), &mut locals, budget)?;
     let mut normal = Vec::new();
     for (index, edge) in typed.ssa.edges.iter().enumerate() {
@@ -209,6 +253,7 @@ pub(crate) fn allocate<'a>(
         _sealed: (),
         typed,
         locals,
+        empty_fills,
         entry,
         normal,
     }))

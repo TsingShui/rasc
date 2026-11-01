@@ -58,6 +58,11 @@ pub(crate) struct ReceiverCall {
     pub arguments: Vec<ValueUse>,
 }
 pub(crate) enum Statement {
+    EmptyFill {
+        array: LocalId,
+        result: LocalId,
+        payload: CodeUnitOffset,
+    },
     Cast(super::cast_ops::Statement),
     String {
         target: LocalId,
@@ -359,16 +364,34 @@ fn plan(
     }))
 }
 pub(super) fn operations(
-    ssa: &TypedBody<'_>,
+    storage: &crate::p6_variables::normal::StorageBody<'_>,
     block: crate::pipeline::branch::BlockId,
     receivers: &mut [Option<crate::p4_calls::ReceiverContract>],
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<Option<Vec<Statement>>, RequestError> {
+    let ssa = &storage.typed;
     let mut output = Vec::new();
     for &id in &ssa.ssa.bound[ix(block.0)?].ops {
         budget.charge_work(1)?;
         let op = ssa.ssa.operation(id)?;
-        if matches!(op.op, Op::Cast(..)) {
+        if let Op::EmptyFill(_, id) = op.op {
+            let proof =
+                storage
+                    .empty_fills
+                    .get(ix(id.0)?)
+                    .ok_or(RequestError::InternalInvariant(
+                        "empty fill lost LengthOnly storage",
+                    ))?;
+            push(
+                &mut output,
+                Statement::EmptyFill {
+                    array: LocalId(proof.array.0),
+                    result: proof.result,
+                    payload: proof.payload,
+                },
+                budget,
+            )?;
+        } else if matches!(op.op, Op::Cast(..)) {
             push(
                 &mut output,
                 Statement::Cast(super::cast_ops::lower(ssa, op)?),
@@ -383,6 +406,7 @@ pub(super) fn operations(
                         "string lost original value",
                     ))?;
             let units = crate::substrate::owned::copy_units(original.value, budget)?;
+            super::declarations::check_string_literal(&units, budget)?;
             let target = LocalId(
                 op.result
                     .ok_or(RequestError::InternalInvariant("string lost result"))?

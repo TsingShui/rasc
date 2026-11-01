@@ -42,7 +42,7 @@ pub(super) fn locals(
                     Kind::Boolean => " = false",
                     Kind::Object
                     | Kind::String
-                    | Kind::IntArray
+                    | Kind::PrimitiveArray(_)
                     | Kind::ObjectArray
                     | Kind::Nominal(_) => " = null",
                     Kind::Float => " = 0.0f",
@@ -64,6 +64,12 @@ pub(super) fn statements(
     for statement in &case.statements {
         budget.charge_work(1)?;
         match statement {
+            crate::p8_java::calls::Statement::EmptyFill { array, result, .. } => {
+                local(*result, output, budget)?;
+                output.push(" = ", budget)?;
+                local(*array, output, budget)?;
+                output.push(".length;\n", budget)?;
+            }
             crate::p8_java::calls::Statement::Cast(cast) => {
                 local(cast.target, output, budget)?;
                 output.push(" = (", budget)?;
@@ -184,7 +190,7 @@ pub(super) fn open_if(
                     kind,
                     Kind::Object
                         | Kind::String
-                        | Kind::IntArray
+                        | Kind::PrimitiveArray(_)
                         | Kind::ObjectArray
                         | Kind::Nominal(_)
                 ) {
