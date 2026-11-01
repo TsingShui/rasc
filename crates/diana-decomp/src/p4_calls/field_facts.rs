@@ -119,7 +119,7 @@ pub(crate) fn collect_own_write(
     Ok(IntFieldAccess {
         _sealed: (),
         storage: FieldStorage::Instance,
-        reference,
+        reference: write.reference,
         owner_type: original.owner_type,
         owner: write.owner,
         name: write.name,

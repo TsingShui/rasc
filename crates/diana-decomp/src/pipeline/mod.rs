@@ -1,11 +1,7 @@
 pub(crate) mod branch;
-pub(crate) mod call_chain;
-pub(crate) mod constructor;
 pub(crate) mod control;
 pub(crate) mod diagnostics;
-pub(crate) mod effects;
 pub(crate) mod fill_shape;
 pub(crate) mod heap_access;
-pub(crate) mod receiver;
 pub(crate) mod request;
 pub(crate) use crate::p2_flow::primitives as scalar;

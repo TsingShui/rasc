@@ -1,4 +1,3 @@
-pub(crate) mod allocation;
 pub(crate) mod constructor_entry;
 mod copies;
 pub(crate) mod empty_fill;

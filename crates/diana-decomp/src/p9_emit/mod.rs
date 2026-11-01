@@ -1,9 +1,7 @@
 mod annotations;
 mod array_literals;
 mod array_ops;
-mod call_chain;
 mod comparison;
-mod constructor;
 mod debug;
 mod debug_program;
 mod dispatcher;
@@ -13,7 +11,6 @@ mod heap_access;
 mod java;
 mod json;
 mod literals;
-mod prefix;
 mod report;
 mod structured;
 pub(crate) use java::java;

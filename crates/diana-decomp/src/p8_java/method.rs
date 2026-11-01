@@ -18,9 +18,6 @@ pub struct VerifiedJavaMethod {
 pub(crate) enum MethodBody {
     HeapAccess(super::heap_access::Body),
     Structured(super::structured::StructuredLoop),
-    Constructor(super::constructor::ConstructorBody),
-    CallChain(super::call_chain::Body),
-    Receiver(super::receiver::ReceiverMethod),
     Diamond(super::branch::Diamond),
     Dispatcher(super::dispatcher::Dispatcher),
 }
@@ -45,42 +42,6 @@ impl VerifiedJavaMethod {
         Self {
             header,
             body: MethodBody::Structured(body),
-            environment,
-            type_names: super::types::TypeNames::default(),
-        }
-    }
-    pub(super) fn constructor(
-        header: String,
-        body: super::constructor::ConstructorBody,
-        environment: EnvironmentId,
-    ) -> Self {
-        Self {
-            header,
-            body: MethodBody::Constructor(body),
-            environment,
-            type_names: super::types::TypeNames::default(),
-        }
-    }
-    pub(super) fn call_chain(
-        header: String,
-        body: super::call_chain::Body,
-        environment: EnvironmentId,
-    ) -> Self {
-        Self {
-            header,
-            body: MethodBody::CallChain(body),
-            environment,
-            type_names: super::types::TypeNames::default(),
-        }
-    }
-    pub(super) fn receiver(
-        header: String,
-        body: super::receiver::ReceiverMethod,
-        environment: EnvironmentId,
-    ) -> Self {
-        Self {
-            header,
-            body: MethodBody::Receiver(body),
             environment,
             type_names: super::types::TypeNames::default(),
         }
@@ -140,123 +101,22 @@ impl VerifiedJavaMethod {
                 }),
                 _ => None,
             });
-        let receiver = match &self.body {
-            MethodBody::Receiver(body) => Some(super::JavaCallSite {
-                reference: body.contract.reference,
-                receiver: Some(body.receiver),
-                allocation: None,
-                owner: &body.contract.owner,
-                name: &body.contract.name,
-                prototype: &body.contract.prototype,
-                invoke: body.invoke,
-                result: Some(body.result),
-                kind: match body.contract.kind {
-                    crate::p4_calls::ReceiverKind::Super => super::JavaInvokeKind::Super,
-                    crate::p4_calls::ReceiverKind::Direct => super::JavaInvokeKind::Direct,
-                    crate::p4_calls::ReceiverKind::Virtual => super::JavaInvokeKind::Virtual,
-                    crate::p4_calls::ReceiverKind::Interface => super::JavaInvokeKind::Interface,
-                },
-            }),
-            _ => None,
-        };
-        let prefix = match &self.body {
-            MethodBody::Receiver(body) => Some(body.prefix.as_slice()),
-            MethodBody::Constructor(body) => Some(body.body.as_slice()),
-            _ => None,
-        };
-        let effects = prefix
-            .into_iter()
-            .flatten()
-            .filter_map(|statement| match statement {
-                super::receiver::PrefixStatement::Effect { contract, pc, .. } => {
-                    Some(super::JavaCallSite {
-                        reference: contract.reference,
-                        receiver: None,
-                        allocation: None,
-                        owner: &contract.owner,
-                        name: &contract.name,
-                        prototype: &contract.prototype,
-                        invoke: *pc,
-                        result: None,
-                        kind: super::JavaInvokeKind::Static,
-                    })
-                }
-                _ => None,
-            });
-        let chain = match &self.body {
-            MethodBody::CallChain(body) => Some(body.calls.as_slice()),
-            _ => None,
-        };
-        let chained = chain.into_iter().flatten().map(|call| {
-            let super::call_chain::Call {
-                pc, target, form, ..
-            } = call;
-            let (receiver, result, allocation) = match form {
-                super::call_chain::CallForm::Invoke {
-                    receiver, result, ..
-                } => (
-                    receiver.map(|(_, register)| register),
-                    result.as_ref().map(|local| local.pc),
-                    None,
-                ),
-                super::call_chain::CallForm::Construct { binding, .. } => {
-                    (Some(binding.receiver), None, Some(binding.allocation.0))
-                }
-            };
-            super::JavaCallSite {
-                reference: target.reference(),
-                receiver,
-                allocation,
-                owner: target.owner(),
-                name: target.name(),
-                prototype: target.prototype(),
-                invoke: *pc,
-                result,
-                kind: match target {
-                    crate::pipeline::call_chain::Target::Constructor(_) => {
-                        super::JavaInvokeKind::Direct
-                    }
-                    crate::pipeline::call_chain::Target::Static(_) => super::JavaInvokeKind::Static,
-                    crate::pipeline::call_chain::Target::Receiver(c) => match c.kind {
-                        crate::p4_calls::ReceiverKind::Virtual => super::JavaInvokeKind::Virtual,
-                        crate::p4_calls::ReceiverKind::Interface => {
-                            super::JavaInvokeKind::Interface
-                        }
-                        crate::p4_calls::ReceiverKind::Direct => super::JavaInvokeKind::Direct,
-                        crate::p4_calls::ReceiverKind::Super => super::JavaInvokeKind::Super,
-                    },
-                },
-            }
-        });
         let entry = match &self.body {
             MethodBody::Dispatcher(body) => body.prologue.first(),
             MethodBody::Structured(body) => body.storage.prologue.first(),
             _ => None,
         };
-        let constructor = match &self.body {
-            MethodBody::Constructor(body) => Some(super::JavaCallSite {
-                reference: body.chain.reference,
-                receiver: Some(body.receiver),
-                allocation: None,
-                owner: &body.chain.owner,
-                name: &[60, 105, 110, 105, 116, 62],
-                prototype: &body.chain.prototype,
-                invoke: body.chain_pc,
-                result: None,
-                kind: super::JavaInvokeKind::Direct,
-            }),
-            _ => entry.map(|entry| super::JavaCallSite {
-                reference: entry.contract.reference,
-                receiver: Some(entry.receiver),
-                allocation: None,
-                owner: &entry.contract.owner,
-                name: &[60, 105, 110, 105, 116, 62],
-                prototype: &entry.contract.prototype,
-                invoke: entry.pc,
-                result: None,
-                kind: super::JavaInvokeKind::Direct,
-            }),
-        };
+        let constructor = entry.map(|entry| super::JavaCallSite {
+            reference: entry.contract.reference,
+            receiver: Some(entry.receiver),
+            allocation: None,
+            owner: &entry.contract.owner,
+            name: &[60, 105, 110, 105, 116, 62],
+            prototype: &entry.contract.prototype,
+            invoke: entry.pc,
+            result: None,
+            kind: super::JavaInvokeKind::Direct,
+        });
         let arrays = match &self.body {
             MethodBody::HeapAccess(body) => Some(body.statements.as_slice()),
             _ => None,
@@ -278,12 +138,7 @@ impl VerifiedJavaMethod {
                 }),
                 _ => None,
             });
-        statics
-            .chain(array_calls)
-            .chain(constructor)
-            .chain(effects)
-            .chain(receiver)
-            .chain(chained)
+        statics.chain(array_calls).chain(constructor)
     }
     pub(super) fn dispatcher(
         header: String,

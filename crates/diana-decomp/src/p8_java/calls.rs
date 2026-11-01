@@ -286,6 +286,9 @@ pub(super) fn validate_bindings(
                     budget,
                 )?;
             }
+            if !throws.covers(catalog, &contract.declared_throws, budget)? {
+                return Ok(None);
+            }
             if uses.arguments(site.reference, site.pc)?.len() != contract.int_arity {
                 return Err(RequestError::InternalInvariant("constructor changed arity"));
             }
@@ -350,6 +353,9 @@ pub(super) fn validate_bindings(
                     reference: site.reference,
                     pc: site.pc,
                 })?;
+                if !throws.covers(catalog, &contract.declared_throws, budget)? {
+                    return Ok(None);
+                }
                 (Some(contract), &bound.inputs[1..])
             }
             None => {

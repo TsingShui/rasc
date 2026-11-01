@@ -1,11 +1,8 @@
 use super::contracts::plain;
-use crate::input::{MethodInput, RawMethodView};
-use crate::raw::{LayoutKind, OperandReference, instruction_layout};
+use crate::input::MethodInput;
 use crate::substrate::owned::{copy_proto, copy_units, reserve};
-use crate::{CodeUnitOffset, DeclarationCatalog, MethodBudget, MethodId, RegisterId, RequestError};
+use crate::{CodeUnitOffset, DeclarationCatalog, MethodBudget, MethodId, RequestError};
 
-#[derive(Clone, Copy, Eq, PartialEq)]
-pub(crate) struct AllocationId(pub CodeUnitOffset);
 pub(crate) struct ConstructorContract {
     _sealed: (),
     pub reference: MethodId,
@@ -13,16 +10,6 @@ pub(crate) struct ConstructorContract {
     pub prototype: Vec<u16>,
     pub int_arity: usize,
     pub declared_throws: Vec<Vec<u16>>,
-}
-pub(crate) struct AdjacentAllocation {
-    _sealed: (),
-    pub id: AllocationId,
-    pub init: CodeUnitOffset,
-    pub resume: CodeUnitOffset,
-    pub aliases: Vec<RegisterId>,
-    pub arguments: Vec<RegisterId>,
-    pub receiver: RegisterId,
-    pub contract: ConstructorContract,
 }
 #[derive(Clone, Copy)]
 pub(crate) enum ConstructorUse {
@@ -163,6 +150,9 @@ pub(crate) fn resolve(
     })
 }
 
+fn unavailable<T>(pc: CodeUnitOffset) -> Result<T, RequestError> {
+    Err(RequestError::InitializationUnavailable { pc })
+}
 pub(crate) fn prove_this_chain(
     input: &MethodInput<'_, '_>,
     catalog: &DeclarationCatalog,
@@ -217,147 +207,4 @@ pub(crate) fn prove_this_chain(
             }
         }
     }
-}
-fn unavailable<T>(pc: CodeUnitOffset) -> Result<T, RequestError> {
-    Err(RequestError::InitializationUnavailable { pc })
-}
-pub(crate) fn pair(
-    input: &MethodInput<'_, '_>,
-    raw: &RawMethodView<'_>,
-    start: CodeUnitOffset,
-    catalog: &DeclarationCatalog,
-    budget: &mut MethodBudget<'_, '_>,
-) -> Result<AdjacentAllocation, RequestError> {
-    let first = instruction_layout(raw.instructions(), start, raw.version())
-        .map_err(crate::input::MethodError::Decode)?;
-    if !matches!(first.kind(),LayoutKind::Instruction(spec) if spec.opcode==0x22) {
-        return Err(RequestError::InternalInvariant(
-            "allocation pair lost new-instance",
-        ));
-    }
-    let Some(reference) = first.references()[0] else {
-        return Err(RequestError::InternalInvariant(
-            "allocation lost type reference",
-        ));
-    };
-    let OperandReference::Type(ty) = reference.target else {
-        return Err(RequestError::InternalInvariant(
-            "allocation changed reference kind",
-        ));
-    };
-    let descriptor = copy_units(input.type_name(ty, budget)?, budget)?;
-    let operands = crate::input::operands::instruction_operands(raw.instructions(), start, first)
-        .map_err(crate::input::MethodError::Decode)?;
-    let Some(destination) = operands.registers().iter().next() else {
-        return Err(RequestError::InternalInvariant(
-            "allocation lost destination",
-        ));
-    };
-    let mut aliases = Vec::new();
-    reserve(&mut aliases, 1, budget)?;
-    aliases.push(destination);
-    let mut pc = start
-        .checked_advance(first.width())
-        .ok_or(RequestError::PlatformCapacity)?;
-    while pc.0 < raw.code_units().0 {
-        budget.charge_work(1)?;
-        let layout = instruction_layout(raw.instructions(), pc, raw.version())
-            .map_err(crate::input::MethodError::Decode)?;
-        let LayoutKind::Instruction(spec) = layout.kind() else {
-            return unavailable(pc);
-        };
-        let operands = crate::input::operands::instruction_operands(raw.instructions(), pc, layout)
-            .map_err(crate::input::MethodError::Decode)?;
-        let mut words = operands.registers().iter();
-        match spec.opcode {
-            7..=9 => {
-                let destination = words.next().ok_or(RequestError::InternalInvariant(
-                    "uninit move lost destination",
-                ))?;
-                let source = words
-                    .next()
-                    .ok_or(RequestError::InternalInvariant("uninit move lost source"))?;
-                let mut source_alias = false;
-                let mut destination_alias = false;
-                for &alias in &aliases {
-                    budget.charge_work(1)?;
-                    source_alias |= alias == source;
-                    destination_alias |= alias == destination;
-                }
-                if !source_alias {
-                    return unavailable(pc);
-                }
-                if !destination_alias {
-                    reserve(&mut aliases, 1, budget)?;
-                    aliases.push(destination);
-                }
-            }
-            0x70 | 0x76 => {
-                let receiver = words
-                    .next()
-                    .ok_or(RequestError::InternalInvariant("init lost receiver"))?;
-                let mut receiver_alias = false;
-                for &alias in &aliases {
-                    budget.charge_work(1)?;
-                    receiver_alias |= alias == receiver;
-                }
-                if !receiver_alias {
-                    return unavailable(pc);
-                }
-                let Some(reference) = layout.references()[0] else {
-                    return Err(RequestError::InternalInvariant(
-                        "init lost method reference",
-                    ));
-                };
-                let OperandReference::Method(reference) = reference.target else {
-                    return Err(RequestError::InternalInvariant(
-                        "init changed reference kind",
-                    ));
-                };
-                let contract = resolve(
-                    input,
-                    catalog,
-                    reference,
-                    &descriptor,
-                    ConstructorUse::Allocation,
-                    pc,
-                    budget,
-                )?;
-                let mut arguments = Vec::new();
-                for register in words {
-                    budget.charge_work(1)?;
-                    for &alias in &aliases {
-                        budget.charge_work(1)?;
-                        if register == alias {
-                            return unavailable(pc);
-                        }
-                    }
-                    reserve(&mut arguments, 1, budget)?;
-                    arguments.push(register);
-                }
-                if arguments.len() != contract.int_arity {
-                    return Err(RequestError::InternalInvariant(
-                        "checked constructor changed word arity",
-                    ));
-                }
-                return Ok(AdjacentAllocation {
-                    _sealed: (),
-                    id: AllocationId(start),
-                    init: pc,
-                    resume: pc
-                        .checked_advance(layout.width())
-                        .ok_or(RequestError::PlatformCapacity)?,
-                    aliases,
-                    arguments,
-                    receiver,
-                    contract,
-                });
-            }
-            _ => return unavailable(pc),
-        }
-        pc = pc
-            .checked_advance(layout.width())
-            .ok_or(RequestError::PlatformCapacity)?;
-    }
-    unavailable(start)
 }

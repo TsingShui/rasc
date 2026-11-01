@@ -203,27 +203,37 @@ pub(crate) fn compatible(
     let Some(allowed) = source_throws(input, catalog, budget)? else {
         return Ok(false);
     };
-    for exception in declared {
-        budget.charge_work(1)?;
-        if !contains(catalog, exception, THROWABLE, budget)? {
-            return Ok(false);
-        }
-        if contains(catalog, exception, RUNTIME, budget)?
-            || contains(catalog, exception, ERROR, budget)?
-        {
-            continue;
-        }
-        let mut covered = false;
-        for target in &allowed.descriptors {
+    allowed.covers(catalog, declared, budget)
+}
+impl SourceThrows {
+    pub(crate) fn covers(
+        &self,
+        catalog: &DeclarationCatalog,
+        declared: &[Vec<u16>],
+        budget: &mut MethodBudget<'_, '_>,
+    ) -> Result<bool, RequestError> {
+        for exception in declared {
             budget.charge_work(1)?;
-            if contains(catalog, exception, target, budget)? {
-                covered = true;
-                break;
+            if !contains(catalog, exception, THROWABLE, budget)? {
+                return Ok(false);
+            }
+            if contains(catalog, exception, RUNTIME, budget)?
+                || contains(catalog, exception, ERROR, budget)?
+            {
+                continue;
+            }
+            let mut covered = false;
+            for target in &self.descriptors {
+                budget.charge_work(1)?;
+                if contains(catalog, exception, target, budget)? {
+                    covered = true;
+                    break;
+                }
+            }
+            if !covered {
+                return Ok(false);
             }
         }
-        if !covered {
-            return Ok(false);
-        }
+        Ok(true)
     }
-    Ok(true)
 }

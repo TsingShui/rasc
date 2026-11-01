@@ -16,37 +16,6 @@ pub(crate) fn java(
         MethodBody::Structured(body) => {
             super::structured::write(body, &method.type_names, &mut output, budget)?
         }
-        MethodBody::Constructor(body) => super::constructor::write(body, &mut output, budget)?,
-        MethodBody::CallChain(body) => super::call_chain::write(body, &mut output, budget)?,
-        MethodBody::Receiver(body) => {
-            if body.invoke.0 >= body.result.0 || body.result.0 >= body.returned.0 {
-                return Err(RequestError::InternalInvariant(
-                    "verified receiver origins were reordered",
-                ));
-            }
-            super::prefix::write(
-                &body.prefix,
-                super::prefix::Scope::Before(body.invoke),
-                &mut output,
-                budget,
-            )?;
-            output.push(
-                match body.expression {
-                    crate::p8_java::receiver::ReceiverExpression::Parameter => "return p0.",
-                    crate::p8_java::receiver::ReceiverExpression::This => "return this.",
-                    crate::p8_java::receiver::ReceiverExpression::Super => "return super.",
-                },
-                budget,
-            )?;
-            output.push(&body.method, budget)?;
-            output.push("()", budget)?;
-            if let crate::pipeline::receiver::ResultUse::Add { literal, .. } = body.use_result {
-                output.push(" + (", budget)?;
-                output.arguments(format_args!("{literal}"), budget)?;
-                output.push(")", budget)?;
-            }
-            output.push(";\n", budget)?;
-        }
         MethodBody::Diamond(body) => diamond(body, &method.type_names, &mut output, budget)?,
         MethodBody::Dispatcher(body) => {
             super::dispatcher::write(body, &method.type_names, &mut output, budget)?
