@@ -7,6 +7,7 @@ use crate::{
 
 #[derive(Clone, Copy)]
 pub(crate) enum CallFormal {
+    Numeric(crate::pipeline::scalar::ScalarType),
     Int,
     Boolean,
     Narrow(crate::p5_types::Narrow),
@@ -20,6 +21,7 @@ pub(crate) enum StaticResult {
     Reference(crate::p5_types::BuiltinReference),
     Int,
     Boolean,
+    Numeric,
     Void,
 }
 /// An exact non-generic static declaration contract. Source expression binding
@@ -255,7 +257,15 @@ pub(super) fn collect_static(
     {
         return Ok(None);
     }
-    let result = if reference
+    let result_tag = reference
+        .declaration
+        .prototype
+        .return_type
+        .reader()?
+        .next(budget)?;
+    let result = if matches!(result_tag, Some(66 | 67 | 68 | 70 | 74 | 83)) {
+        StaticResult::Numeric
+    } else if reference
         .declaration
         .prototype
         .return_type
@@ -358,6 +368,12 @@ pub(super) fn original_formals(
             use crate::p5_types::Narrow;
             let formal = if name.matches_with(&[73], budget)? {
                 CallFormal::Int
+            } else if name.matches_with(&[74], budget)? {
+                CallFormal::Numeric(crate::pipeline::scalar::ScalarType::Long)
+            } else if name.matches_with(&[70], budget)? {
+                CallFormal::Numeric(crate::pipeline::scalar::ScalarType::Float)
+            } else if name.matches_with(&[68], budget)? {
+                CallFormal::Numeric(crate::pipeline::scalar::ScalarType::Double)
             } else if name.matches_with(&[90], budget)? {
                 CallFormal::Boolean
             } else if name.matches_with(&[66], budget)? {

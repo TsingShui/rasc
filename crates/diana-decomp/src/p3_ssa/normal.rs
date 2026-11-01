@@ -295,7 +295,7 @@ pub(crate) fn build<'a>(
                             && needed[position].0
                                 < destination
                                     .0
-                                    .checked_add(operation.kind.result_width().words())
+                                    .checked_add(operation.kind.result_width(&flow.calls)?.words())
                                     .ok_or(RequestError::PlatformCapacity)?
                         {
                             needed.swap_remove(position);
@@ -444,7 +444,7 @@ pub(crate) fn build<'a>(
                     &mut env,
                     register,
                     id,
-                    operation.kind.result_width(),
+                    operation.kind.result_width(&flow.calls)?,
                     budget,
                 )?;
                 Some(id)
@@ -714,7 +714,7 @@ fn verify(
                     != Some(widths.read(
                         &env,
                         register,
-                        original.kind.read_width(position),
+                        original.kind.read_width(position, &ssa.calls)?,
                         op.pc,
                         budget,
                     )?)
@@ -761,7 +761,7 @@ fn verify(
                         &mut env,
                         register,
                         result,
-                        original.kind.result_width(),
+                        original.kind.result_width(&ssa.calls)?,
                         budget,
                     )?;
                 }
@@ -908,6 +908,39 @@ fn verify_call(
             "call dropped original argument words",
         ));
     }
+    let mut word = 0usize;
+    if site.widths.len() != site.arguments.len() {
+        return Err(RequestError::InternalInvariant(
+            "call changed logical arity",
+        ));
+    }
+    for (&argument, width) in site.arguments.iter().zip(&site.widths) {
+        budget.charge_work(1)?;
+        if site.registers.get(word) != Some(&argument)
+            || *width == crate::p2_flow::normal::ValueWidth::Two
+                && word
+                    .checked_add(1)
+                    .and_then(|index| site.registers.get(index))
+                    .map(|register| register.0)
+                    != argument.0.checked_add(1)
+        {
+            return Err(RequestError::InternalInvariant(
+                "call changed logical argument words",
+            ));
+        }
+        word = word
+            .checked_add(if *width == crate::p2_flow::normal::ValueWidth::Two {
+                2
+            } else {
+                1
+            })
+            .ok_or(RequestError::PlatformCapacity)?;
+    }
+    if word != site.registers.len() {
+        return Err(RequestError::InternalInvariant(
+            "call dropped wide argument words",
+        ));
+    }
     if let Some(result_pc) = site.result_pc {
         if pc.checked_advance(original.width()) != Some(result_pc) {
             return Err(RequestError::InternalInvariant(
@@ -922,7 +955,7 @@ fn verify_call(
         let expected = match site.result {
             crate::p2_flow::normal::InvokeResult::Word(_) => Some(0x0a),
             crate::p2_flow::normal::InvokeResult::Reference(_) => Some(0x0c),
-            crate::p2_flow::normal::InvokeResult::Wide => Some(0x0b),
+            crate::p2_flow::normal::InvokeResult::Wide(_) => Some(0x0b),
             crate::p2_flow::normal::InvokeResult::Void => None,
         };
         if !matches!(result.kind(),LayoutKind::Instruction(spec) if Some(spec.opcode)==expected)

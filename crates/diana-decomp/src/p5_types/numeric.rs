@@ -268,6 +268,41 @@ pub(super) fn constrain(
             }
         }
     }
+    for (index, site) in ssa.calls.iter().enumerate() {
+        budget.charge_work(1)?;
+        let bound = ssa.call(crate::p2_flow::normal::CallId(
+            u32::try_from(index).map_err(|_| RequestError::PlatformCapacity)?,
+        ))?;
+        let mut argument = usize::from(site.kind != crate::p2_flow::normal::InvokeKind::Static);
+        let mut valid = true;
+        input
+            .method_reference(site.reference, budget)?
+            .declaration
+            .prototype
+            .visit_parameter_types(budget, |name, budget| -> Result<(), RequestError> {
+                let expected = match name.reader()?.next(budget)? {
+                    Some(74) => Some(Kind::Long),
+                    Some(68) => Some(Kind::Double),
+                    Some(70) => Some(Kind::Float),
+                    Some(66 | 67 | 73 | 83 | 90) => Some(Kind::Int),
+                    _ => None,
+                };
+                let value = *bound
+                    .inputs
+                    .get(argument)
+                    .ok_or(RequestError::InternalInvariant("call lost family argument"))?;
+                if let Some(expected) = expected {
+                    valid &= families.require(ssa, value, expected, budget)?;
+                }
+                argument = argument
+                    .checked_add(1)
+                    .ok_or(RequestError::PlatformCapacity)?;
+                Ok(())
+            })?;
+        if !valid || argument != bound.inputs.len() {
+            return Ok(false);
+        }
+    }
     if let ResultType::Value(result) = ssa.result {
         let kind = result.kind();
         if matches!(

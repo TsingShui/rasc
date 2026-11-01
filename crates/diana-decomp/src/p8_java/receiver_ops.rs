@@ -66,7 +66,7 @@ pub(super) fn verify(
     };
     if actual.arguments.len() != values.len()
         || values.len() != formals.len()
-        || values.len() != actual.contract.int_arity
+        || values.len() != actual.contract.arity
     {
         return Ok(false);
     }
@@ -82,16 +82,7 @@ pub(super) fn verify(
     }
     for ((&view, value), formal) in actual.arguments.iter().zip(values).zip(formals) {
         budget.charge_work(1)?;
-        if view.value().0 != value.0 || !matches!(formal, crate::p4_calls::CallFormal::Int) {
-            return Ok(false);
-        }
-        let kind =
-            typed.kinds[usize::try_from(value.0).map_err(|_| RequestError::PlatformCapacity)?];
-        if !matches!(
-            (view, kind),
-            (super::branch::ValueUse::Direct(_), Some(Kind::Int))
-                | (super::branch::ValueUse::BooleanWord(_), Some(Kind::Boolean))
-        ) {
+        if !super::dispatcher_verify::call_argument(typed, view, *value, *formal)? {
             return Ok(false);
         }
     }

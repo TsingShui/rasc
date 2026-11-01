@@ -144,7 +144,7 @@ pub(crate) enum InvokeResult {
     Void,
     Word(DeclarationType),
     Reference(Option<DeclarationType>),
-    Wide,
+    Wide(DeclarationType),
 }
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub(crate) enum InvokeKind {
@@ -178,6 +178,8 @@ pub(crate) struct CallSite {
     pub reference: crate::MethodId,
     pub result: InvokeResult,
     pub registers: Vec<RegisterId>,
+    pub arguments: Vec<RegisterId>,
+    pub widths: Vec<ValueWidth>,
     pub pc: CodeUnitOffset,
     pub result_pc: Option<CodeUnitOffset>,
 }
@@ -401,8 +403,19 @@ impl Effects {
     }
 }
 impl Op {
-    pub(crate) fn result_width(self) -> ValueWidth {
-        match self {
+    pub(crate) fn result_width(self, calls: &[CallSite]) -> Result<ValueWidth, RequestError> {
+        Ok(match self {
+            Self::Call(id, _)
+                if matches!(
+                    calls
+                        .get(ix(id.0)?)
+                        .ok_or(RequestError::InternalInvariant("call lost result width"))?
+                        .result,
+                    InvokeResult::Wide(_)
+                ) =>
+            {
+                ValueWidth::Two
+            }
             Self::ArrayLoad(_, _, _, ArrayElement::Wide)
             | Self::ConstantWide(..)
             | Self::MoveWide(..)
@@ -415,10 +428,18 @@ impl Op {
             }
             Self::Unary(_, unary, _) if unary.signature().1.words() == 2 => ValueWidth::Two,
             _ => ValueWidth::One,
-        }
+        })
     }
-    pub(crate) fn read_width(self, index: usize) -> ValueWidth {
-        match self {
+    pub(crate) fn read_width(
+        self,
+        index: usize,
+        calls: &[CallSite],
+    ) -> Result<ValueWidth, RequestError> {
+        Ok(match self {
+            Self::Call(id, _) | Self::Initialize(id) => *calls
+                .get(ix(id.0)?)
+                .and_then(|site| site.widths.get(index))
+                .ok_or(RequestError::InternalInvariant("call lost argument width"))?,
             Self::ArrayStore(_, _, _, ArrayElement::Wide) if index == 2 => ValueWidth::Two,
             Self::FieldStore(_, _, _, kind) if index == 1 && kind.width() == ValueWidth::Two => {
                 ValueWidth::Two
@@ -434,7 +455,7 @@ impl Op {
             Self::Unary(_, unary, _) if unary.signature().0.words() == 2 => ValueWidth::Two,
             Self::Compare(_, _, compare, _) if compare.operand().words() == 2 => ValueWidth::Two,
             _ => ValueWidth::One,
-        }
+        })
     }
     pub(crate) fn effects(self) -> Effects {
         let conservative = matches!(self, Self::Call(_, _) | Self::Initialize(_));
@@ -604,7 +625,7 @@ impl Op {
                 let call = calls.get(ix(id.0)?).ok_or(RequestError::InternalInvariant(
                     "operation has a foreign call identity",
                 ))?;
-                return Ok(Reads::Many(call.registers.iter()));
+                return Ok(Reads::Many(call.arguments.iter()));
             }
             Self::FilledArray(id, _) => {
                 let site = filled_arrays
@@ -1495,20 +1516,24 @@ pub(crate) fn decode<'a>(
                         .declaration
                         .name
                         .matches_with(&[60, 105, 110, 105, 116, 62], budget)?;
-                    let mut one_word = true;
+                    let kind = InvokeKind::from_opcode(spec.opcode)
+                        .ok_or(RequestError::InternalInvariant("invoke lost its kind"))?;
+                    let mut widths = Vec::new();
+                    if kind != InvokeKind::Static {
+                        push(&mut widths, ValueWidth::One, budget)?;
+                    }
                     method.declaration.prototype.visit_parameter_types(
                         budget,
                         |descriptor, budget| {
                             let mut units = descriptor.reader()?;
-                            if matches!(units.next(budget)?, Some(74 | 68)) {
-                                one_word = false;
-                            }
-                            Ok::<(), RequestError>(())
+                            let width = if matches!(units.next(budget)?, Some(74 | 68)) {
+                                ValueWidth::Two
+                            } else {
+                                ValueWidth::One
+                            };
+                            push(&mut widths, width, budget)
                         },
                     )?;
-                    if !one_word {
-                        return Ok(None);
-                    }
                     let descriptor = method.declaration.prototype.return_type;
                     let mut units = descriptor.reader()?;
                     let result = match units.next(budget)? {
@@ -1525,7 +1550,8 @@ pub(crate) fn decode<'a>(
                             crate::p5_types::Narrow::Char,
                         )),
                         Some(70) => InvokeResult::Word(DeclarationType::Float),
-                        Some(74 | 68) => InvokeResult::Wide,
+                        Some(74) => InvokeResult::Wide(DeclarationType::Long),
+                        Some(68) => InvokeResult::Wide(DeclarationType::Double),
                         Some(76 | 91) => InvokeResult::Reference(reference_type(
                             input,
                             descriptor,
@@ -1543,13 +1569,43 @@ pub(crate) fn decode<'a>(
                         budget.charge_work(1)?;
                         push(&mut registers, register, budget)?;
                     }
+                    let mut arguments = Vec::new();
+                    let mut word = 0usize;
+                    for width in &widths {
+                        budget.charge_work(1)?;
+                        let low = *registers.get(word).ok_or(RequestError::InternalInvariant(
+                            "invoke lost argument words",
+                        ))?;
+                        push(&mut arguments, low, budget)?;
+                        if *width == ValueWidth::Two
+                            && word
+                                .checked_add(1)
+                                .and_then(|index| registers.get(index))
+                                .map(|high| high.0)
+                                != low.0.checked_add(1)
+                        {
+                            return Err(RequestError::InternalInvariant(
+                                "invoke wide words lost adjacency",
+                            ));
+                        }
+                        word = word
+                            .checked_add(if *width == crate::p2_flow::normal::ValueWidth::Two {
+                                2
+                            } else {
+                                1
+                            })
+                            .ok_or(RequestError::PlatformCapacity)?;
+                    }
+                    if word != registers.len() {
+                        return Err(RequestError::InternalInvariant("invoke has surplus words"));
+                    }
                     let mut destination = None;
                     let mut result_pc = None;
                     if next.0 < raw.code_units().0 {
                         let result_layout =
                             instruction_layout(raw.instructions(), next, raw.version())
                                 .map_err(crate::input::MethodError::Decode)?;
-                        if matches!(result_layout.kind(),LayoutKind::Instruction(spec) if matches!(spec.opcode,0x0a|0x0c))
+                        if matches!(result_layout.kind(),LayoutKind::Instruction(spec) if matches!(spec.opcode,0x0a..=0x0c))
                         {
                             let valid = match result {
                                 InvokeResult::Word(_) => {
@@ -1558,9 +1614,10 @@ pub(crate) fn decode<'a>(
                                 InvokeResult::Reference(Some(_)) => {
                                     matches!(result_layout.kind(), LayoutKind::Instruction(spec) if spec.opcode == 0x0c)
                                 }
-                                InvokeResult::Reference(None) | InvokeResult::Wide => {
-                                    return Ok(None);
+                                InvokeResult::Wide(_) => {
+                                    matches!(result_layout.kind(), LayoutKind::Instruction(spec) if spec.opcode == 0x0b)
                                 }
+                                InvokeResult::Reference(None) => return Ok(None),
                                 InvokeResult::Void => false,
                             };
                             if !valid {
@@ -1595,11 +1652,12 @@ pub(crate) fn decode<'a>(
                                 CallTarget::Method
                             },
                             owner: method.owner_type,
-                            kind: InvokeKind::from_opcode(spec.opcode)
-                                .ok_or(RequestError::InternalInvariant("invoke lost its kind"))?,
+                            kind,
                             reference,
                             result,
                             registers,
+                            arguments,
+                            widths,
                             pc,
                             result_pc,
                         },

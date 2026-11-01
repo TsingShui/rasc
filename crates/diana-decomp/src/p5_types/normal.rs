@@ -261,6 +261,7 @@ pub(crate) fn solve<'a>(
                 Op::Call(call, _) => {
                     let declaration = match ssa.calls[ix(call.0)?].result {
                         crate::p2_flow::normal::InvokeResult::Word(kind)
+                        | crate::p2_flow::normal::InvokeResult::Wide(kind)
                         | crate::p2_flow::normal::InvokeResult::Reference(Some(kind)) => kind,
                         _ => {
                             return Err(RequestError::InternalInvariant(

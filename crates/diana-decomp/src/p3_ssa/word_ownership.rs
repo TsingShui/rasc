@@ -46,7 +46,9 @@ pub(super) fn analyze(
         budget.charge_work(1)?;
         let fact = match *definition {
             Definition::Parameter(index) => Fact::Known(ssa.parameters[ix(index)?].width()),
-            Definition::OpResult(id) => Fact::Known(ssa.operation(id)?.op.result_width()),
+            Definition::OpResult(id) => {
+                Fact::Known(ssa.operation(id)?.op.result_width(&ssa.calls)?)
+            }
             Definition::Phi => Fact::Unknown,
             Definition::ExceptionAt(_) => Fact::Known(ValueWidth::One),
         };

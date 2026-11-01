@@ -17,7 +17,7 @@ pub(crate) struct ReceiverContract {
     pub name: Vec<u16>,
     pub prototype: Vec<u16>,
     pub kind: ReceiverKind,
-    pub int_arity: usize,
+    pub arity: usize,
     pub declared_throws: Vec<Vec<u16>>,
 }
 pub(crate) fn resolve_receiver(
@@ -30,31 +30,10 @@ pub(crate) fn resolve_receiver(
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<Option<ReceiverContract>, RequestError> {
     let method = input.method_reference(reference, budget)?;
-    if !method
-        .declaration
-        .prototype
-        .return_type
-        .matches_with(&[73], budget)?
-    {
+    let Some(formals) = super::contracts::original_formals(input, reference, budget)? else {
         return Ok(None);
-    }
-    let mut int_arity = 0usize;
-    let mut supported = true;
-    method.declaration.prototype.visit_parameter_types(
-        budget,
-        |name, budget| -> Result<(), RequestError> {
-            if !name.matches_with(&[73], budget)? {
-                supported = false;
-            }
-            int_arity = int_arity
-                .checked_add(1)
-                .ok_or(RequestError::PlatformCapacity)?;
-            Ok(())
-        },
-    )?;
-    if !supported {
-        return Ok(None);
-    }
+    };
+    let arity = formals.len();
     let owner = copy_units(method.owner, budget)?;
     if !matches!(kind, ReceiverKind::Super)
         && !super::reference_types::source_subtype(input, catalog, parameter, &owner, budget)?
@@ -196,7 +175,7 @@ pub(crate) fn resolve_receiver(
         name,
         prototype,
         kind,
-        int_arity,
+        arity,
         declared_throws: super::throws::retain(selected.throws.as_deref(), budget)?,
     }))
 }

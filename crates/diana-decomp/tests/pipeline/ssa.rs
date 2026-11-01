@@ -348,6 +348,90 @@ use diana_decomp::{
 };
 
 #[test]
+fn t11_primitive_call_types_share_static_and_receiver_binding() {
+    for complete in [true, false] {
+        let mut facts: PipelineFacts =
+            serde_json::from_str(include_str!("../fixtures/primitive-calls/catalog.json")).unwrap();
+        if !complete {
+            let dep: Vec<u16> = "Lfixtures/Dep;".encode_utf16().collect();
+            facts.classes.retain(|class| class.descriptor != dep);
+        }
+        let mut control = RunContext::new(Limits::default(), &|| false);
+        let engine = Engine::open(
+            vec![DexImage {
+                bytes: include_bytes!("../fixtures/primitive-calls/classes.dex"),
+                header_offset: ByteOffset(0),
+                origin: ImageOrigin { input: InputId(0) },
+            }],
+            Options::default(),
+            DeclarationCatalog::with_declarations(
+                EnvironmentId(facts.environment_id),
+                facts.methods,
+                facts.classes,
+            ),
+            &mut control,
+        )
+        .unwrap();
+        let report = engine
+            .decompile(
+                Request {
+                    class: ClassKey {
+                        dex: DexId(0),
+                        class_def: ClassDefId(0),
+                    },
+                    method: None,
+                },
+                &mut control,
+            )
+            .unwrap();
+        let ClassOutput::Mixed { members, .. } = report.class();
+        for name in [
+            "longCall",
+            "floatCall",
+            "doubleCall",
+            "literalFloat",
+            "literalDouble",
+            "mixed",
+            "text",
+            "unused",
+            "receiverVoid",
+        ] {
+            let units: Vec<u16> = name.encode_utf16().collect();
+            let member = members
+                .iter()
+                .find(|member| match member {
+                    MethodOutput::Java { facts, .. }
+                    | MethodOutput::Debug {
+                        facts: Some(facts), ..
+                    } => facts.name == units,
+                    MethodOutput::Debug { source, .. } => {
+                        let raw: serde_json::Value = serde_json::from_str(source.source()).unwrap();
+                        raw["classes"][0]["methods"][0]["name"] == name
+                    }
+                    _ => false,
+                })
+                .unwrap();
+            if complete {
+                let MethodOutput::Java { declaration, .. } = member else {
+                    panic!("primitive call unavailable: {name}");
+                };
+                assert_eq!(declaration.calls().count(), 1);
+            } else {
+                let MethodOutput::Debug { source, reason, .. } = member else {
+                    panic!("missing call declaration became Java");
+                };
+                assert_eq!(
+                    report.diagnostics()[reason.0].cause.kind(),
+                    FailureKind::Unsupported
+                );
+                let raw: serde_json::Value = serde_json::from_str(source.source()).unwrap();
+                assert_eq!(raw["complete"], true);
+            }
+        }
+    }
+}
+
+#[test]
 fn t09_ordinary_throw_preserves_operands_and_requires_checked_exception_evidence() {
     for complete in [true, false] {
         let mut facts: PipelineFacts =
@@ -844,6 +928,63 @@ fn array_control_flow_uses_shared_definitions_and_rejects_invalid_element_and_in
 
 #[test]
 fn call_definition_errors_precede_missing_declarations_without_guessing_a_binding() {
+    for overwrite in [false, true] {
+        let mut words = vec![0x0016, 7];
+        if overwrite {
+            words.push(0x1112);
+        }
+        words.extend_from_slice(&[0x2071, 1, 0x0010, 0x000a, 0x000f]);
+        let fixture = code(&words, 3, 2);
+        let mut control = RunContext::new(Limits::default(), &|| false);
+        let engine = Engine::open(
+            vec![DexImage {
+                bytes: &fixture.bytes,
+                header_offset: ByteOffset(0),
+                origin: ImageOrigin { input: InputId(0) },
+            }],
+            Options::default(),
+            DeclarationCatalog::empty(EnvironmentId(0)),
+            &mut control,
+        )
+        .unwrap();
+        let report = engine
+            .decompile(
+                Request {
+                    class: ClassKey {
+                        dex: DexId(0),
+                        class_def: ClassDefId(0),
+                    },
+                    method: Some(MethodSelector {
+                        name: "f".encode_utf16().collect(),
+                        prototype: "(I)I".encode_utf16().collect(),
+                    }),
+                },
+                &mut control,
+            )
+            .unwrap();
+        let ClassOutput::Mixed { members, .. } = report.class();
+        let reason = match &members[0] {
+            MethodOutput::Debug { reason, .. } | MethodOutput::Unavailable { reason, .. } => reason,
+            _ => panic!("unchecked wide call became Java"),
+        };
+        let diagnostic = &report.diagnostics()[reason.0];
+        assert_eq!(
+            diagnostic.code(),
+            if overwrite {
+                DiagnosticCode::InvalidWideRead
+            } else {
+                DiagnosticCode::BindingEvidenceMissing
+            }
+        );
+        assert_eq!(
+            diagnostic.cause.kind(),
+            if overwrite {
+                FailureKind::Malformed
+            } else {
+                FailureKind::Unsupported
+            }
+        );
+    }
     use super::fixture::{CodeRecipe, with_code};
     for register in [0u16, 1] {
         let words = [0x1071, 0, register, 0x000a, 0x000f];

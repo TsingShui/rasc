@@ -46,6 +46,9 @@ fn conversion(
     ranges: &[Option<IntRange>],
 ) -> Result<Option<UseConversion>, RequestError> {
     let index = usize::try_from(value.0).map_err(|_| RequestError::PlatformCapacity)?;
+    if let CallFormal::Numeric(kind) = formal {
+        return super::numeric::view(ssa, kinds, value, super::numeric::scalar_kind(kind));
+    }
     if let CallFormal::Reference(kind) = formal {
         return Ok(if ssa.is_zero(value)? {
             Some(UseConversion::Null(kind))

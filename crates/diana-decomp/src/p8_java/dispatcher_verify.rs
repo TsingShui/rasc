@@ -126,6 +126,71 @@ fn same_expression(
         _ => false,
     })
 }
+pub(super) fn call_argument(
+    ssa: &TypedBody<'_>,
+    view: super::branch::ValueUse,
+    value: crate::p3_ssa::normal::ValueId,
+    formal: crate::p4_calls::CallFormal,
+) -> Result<bool, RequestError> {
+    use super::branch::ValueUse;
+    use crate::p4_calls::CallFormal;
+    let at = ix(value.0)?;
+    if view.value().0 != value.0 {
+        return Ok(false);
+    }
+    if let CallFormal::Numeric(kind) = formal {
+        return numeric_view(
+            ssa,
+            view,
+            Some(&value),
+            crate::p5_types::numeric::scalar_kind(kind),
+        );
+    }
+    Ok(match (view, formal, ssa.kinds[at]) {
+        (ValueUse::Null { kind, .. }, CallFormal::Reference(expected), _) => {
+            kind == expected && ssa.ssa.is_zero(value)?
+        }
+        (
+            ValueUse::Direct(_),
+            CallFormal::Reference(crate::p5_types::BuiltinReference::Object),
+            Some(Kind::Object),
+        )
+        | (
+            ValueUse::Direct(_),
+            CallFormal::Reference(crate::p5_types::BuiltinReference::String),
+            Some(Kind::String),
+        )
+        | (
+            ValueUse::UpcastObject(_),
+            CallFormal::Reference(crate::p5_types::BuiltinReference::Object),
+            Some(
+                Kind::String
+                | Kind::PrimitiveArray(_)
+                | Kind::ObjectArray
+                | Kind::Nominal(_)
+                | Kind::ReferenceArray(_)
+                | Kind::ProjectedNominal(_),
+            ),
+        ) => true,
+        (ValueUse::Direct(_), CallFormal::Int, Some(Kind::Int))
+        | (ValueUse::Direct(_), CallFormal::Boolean, Some(Kind::Boolean))
+        | (ValueUse::BooleanWord(_), CallFormal::Int, Some(Kind::Boolean)) => true,
+        (ValueUse::Boolean01(_), CallFormal::Boolean, Some(Kind::Int)) => {
+            ssa.integral_bits[at] != 0 && ssa.integral_bits[at] & 4 == 0
+        }
+        (ValueUse::Narrow { kind, .. }, CallFormal::Narrow(formal), Some(Kind::Int))
+            if kind == formal =>
+        {
+            let range = if ssa.integral_bits[at] != 0 && ssa.integral_bits[at] & 4 == 0 {
+                ssa.ranges[at].and_then(crate::p5_types::IntRange::known01)
+            } else {
+                ssa.ranges[at]
+            };
+            range.is_some_and(|range| range.within(kind.range()))
+        }
+        _ => false,
+    })
+}
 fn static_call(
     ssa: &TypedBody<'_>,
     id: crate::pipeline::branch::CallId,
@@ -176,8 +241,6 @@ fn static_call(
     if source.next().is_some() {
         return Ok(false);
     }
-    use super::branch::ValueUse;
-    use crate::p4_calls::CallFormal;
     for ((&view, &value), &formal) in actual
         .arguments
         .iter()
@@ -185,56 +248,7 @@ fn static_call(
         .zip(&contract.formals)
     {
         budget.charge_work(1)?;
-        let at = ix(value.0)?;
-        if view.value().0 != value.0 {
-            return Ok(false);
-        }
-        let valid = match (view, formal, ssa.kinds[at]) {
-            (ValueUse::Null { kind, .. }, CallFormal::Reference(expected), _) => {
-                kind == expected && ssa.ssa.is_zero(value)?
-            }
-            (
-                ValueUse::Direct(_),
-                CallFormal::Reference(crate::p5_types::BuiltinReference::Object),
-                Some(Kind::Object),
-            )
-            | (
-                ValueUse::Direct(_),
-                CallFormal::Reference(crate::p5_types::BuiltinReference::String),
-                Some(Kind::String),
-            )
-            | (
-                ValueUse::UpcastObject(_),
-                CallFormal::Reference(crate::p5_types::BuiltinReference::Object),
-                Some(
-                    Kind::String
-                    | Kind::PrimitiveArray(_)
-                    | Kind::ObjectArray
-                    | Kind::Nominal(_)
-                    | Kind::ReferenceArray(_)
-                    | Kind::ProjectedNominal(_),
-                ),
-            ) => true,
-            (ValueUse::Direct(_), CallFormal::Int, Some(Kind::Int))
-            | (ValueUse::Direct(_), CallFormal::Boolean, Some(Kind::Boolean))
-            | (ValueUse::BooleanWord(_), CallFormal::Int, Some(Kind::Boolean)) => true,
-            (ValueUse::Boolean01(_), CallFormal::Boolean, Some(Kind::Int)) => {
-                ssa.integral_bits[at] != 0 && ssa.integral_bits[at] & 4 == 0
-            }
-            (ValueUse::Narrow { kind, .. }, CallFormal::Narrow(formal), Some(Kind::Int))
-                if kind == formal =>
-            {
-                let range = ssa.ranges[at];
-                let range = if ssa.integral_bits[at] != 0 && ssa.integral_bits[at] & 4 == 0 {
-                    range.and_then(crate::p5_types::IntRange::known01)
-                } else {
-                    range
-                };
-                range.is_some_and(|range| range.within(kind.range()))
-            }
-            _ => false,
-        };
-        if !valid {
+        if !call_argument(ssa, view, value, formal)? {
             return Ok(false);
         }
     }
