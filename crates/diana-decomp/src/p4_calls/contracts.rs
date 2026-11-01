@@ -18,6 +18,7 @@ pub(crate) enum StaticResult {
     Nominal,
     Reference(crate::p5_types::BuiltinReference),
     Int,
+    Boolean,
     Void,
 }
 /// An exact non-generic static declaration contract. Source expression binding
@@ -264,6 +265,13 @@ pub(crate) fn resolve_static(
         .matches_with(&[73], budget)?
     {
         StaticResult::Int
+    } else if reference
+        .declaration
+        .prototype
+        .return_type
+        .matches_with(&[90], budget)?
+    {
+        StaticResult::Boolean
     } else if reference.declaration.prototype.return_type.matches_with(
         crate::p5_types::BuiltinReference::String.descriptor(),
         budget,

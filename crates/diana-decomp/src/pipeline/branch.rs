@@ -634,7 +634,8 @@ fn flow<'a>(
                         if matches!(result_layout.kind(),LayoutKind::Instruction(spec) if matches!(spec.opcode,0x0a|0x0c))
                         {
                             let valid = match contract.result {
-                                crate::p4_calls::StaticResult::Int => {
+                                crate::p4_calls::StaticResult::Int
+                                | crate::p4_calls::StaticResult::Boolean => {
                                     matches!(result_layout.kind(),LayoutKind::Instruction(spec) if spec.opcode==0x0a)
                                 }
                                 crate::p4_calls::StaticResult::Reference(_) => {
@@ -1360,7 +1361,8 @@ fn verify<'a>(
                         )
                         .map_err(crate::input::MethodError::Decode)?;
                         let expected = match site.contract.result {
-                            crate::p4_calls::StaticResult::Int => Some(0x0a),
+                            crate::p4_calls::StaticResult::Int
+                            | crate::p4_calls::StaticResult::Boolean => Some(0x0a),
                             crate::p4_calls::StaticResult::Reference(_)
                             | crate::p4_calls::StaticResult::Nominal => Some(0x0c),
                             crate::p4_calls::StaticResult::Void => None,
@@ -1533,6 +1535,7 @@ fn verify<'a>(
             Definition::Binary(_, _, _) | Definition::Compare(_, _, _) => 7,
             Definition::CallResult(call) => match ssa.calls[ix(call.0)?].contract.result {
                 crate::p4_calls::StaticResult::Int => 7,
+                crate::p4_calls::StaticResult::Boolean => 3,
                 _ => 0,
             },
             _ => 0,
@@ -1543,13 +1546,11 @@ fn verify<'a>(
             Definition::Binary(_, _, _) | Definition::Compare(_, _, _) => {
                 Some(crate::p5_types::IntRange::ALL)
             }
-            Definition::CallResult(call) => {
-                if ssa.calls[ix(call.0)?].contract.result == crate::p4_calls::StaticResult::Int {
-                    Some(crate::p5_types::IntRange::ALL)
-                } else {
-                    None
-                }
-            }
+            Definition::CallResult(call) => match ssa.calls[ix(call.0)?].contract.result {
+                crate::p4_calls::StaticResult::Int => Some(crate::p5_types::IntRange::ALL),
+                crate::p4_calls::StaticResult::Boolean => Some(crate::p5_types::IntRange::BOOLEAN),
+                _ => None,
+            },
             _ => None,
         };
         push(&mut ranges, range, budget)?;
@@ -1570,6 +1571,7 @@ fn verify<'a>(
                 Definition::CallResult(call) => {
                     Some(match ssa.calls[ix(call.0)?].contract.result {
                         crate::p4_calls::StaticResult::Int => Kind::Int,
+                        crate::p4_calls::StaticResult::Boolean => Kind::Boolean,
                         crate::p4_calls::StaticResult::Reference(
                             crate::p5_types::BuiltinReference::Object,
                         ) => Kind::Object,

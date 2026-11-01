@@ -288,7 +288,8 @@ pub(crate) fn build<'a>(
                             }
                             Some(ValueType::Reference(descriptor))
                         }
-                        crate::p4_calls::StaticResult::Reference(_) => return Ok(None),
+                        crate::p4_calls::StaticResult::Reference(_)
+                        | crate::p4_calls::StaticResult::Boolean => return Ok(None),
                     };
                     (Target::Static(contract), kind)
                 } else {
