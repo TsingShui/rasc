@@ -381,13 +381,6 @@ impl<'a> ProgramIndex<'a> {
         Ok(self.type_descriptor(id, control)?.0)
     }
 
-    pub(crate) fn field_owner_defined(
-        &self,
-        id: crate::FieldId,
-        control: &mut impl InputControl,
-    ) -> Result<bool, InputError> {
-        Ok(self.field_owner_class(id, control)?.is_some())
-    }
     pub(crate) fn field_owner_class(
         &self,
         id: FieldId,
@@ -411,13 +404,6 @@ impl<'a> ProgramIndex<'a> {
             }
         }
         Ok(found)
-    }
-    pub(crate) fn method_has_definition(
-        &self,
-        method_id: MethodId,
-        control: &mut impl InputControl,
-    ) -> Result<bool, InputError> {
-        Ok(self.local_method(method_id, control)?.is_some())
     }
     pub(crate) fn local_field_flags(
         &self,

@@ -349,7 +349,7 @@ fn edge(
         .ok_or(RequestError::InternalInvariant(
             "structure certificate has a foreign edge",
         ))?;
-    if actual.id != id || actual.target != original.target {
+    if actual.id != id || actual.source != original.source || actual.target != original.target {
         return Err(RequestError::InternalInvariant(
             "structure certificate changed the selected edge",
         ));

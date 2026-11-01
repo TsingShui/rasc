@@ -8,24 +8,9 @@ pub(crate) struct CatchName {
     pub kind: CatchType,
     pub source: String,
 }
-pub(crate) struct SourceRegion {
-    pub nodes: Vec<Node>,
-    pub root: crate::p7_regions::protection::NodeId,
-    _sealed: (),
-}
-impl SourceRegion {
-    pub(super) fn from_checked(region: Protection) -> Self {
-        Self {
-            nodes: region.nodes,
-            root: region.root,
-            _sealed: (),
-        }
-    }
-}
 pub(crate) struct ProtectedBody {
     pub storage: super::dispatcher::Dispatcher,
-    pub region: SourceRegion,
-    pub names: Vec<CatchName>,
+    pub source: super::source_control::Plan,
 }
 pub(super) fn names(
     input: &MethodInput<'_, '_>,

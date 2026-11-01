@@ -18,4 +18,3 @@ mod fields;
 mod hierarchy;
 mod overloads;
 pub(crate) use contracts::{CallFormal, StaticContract};
-pub(crate) use fields::check_external_static_read;

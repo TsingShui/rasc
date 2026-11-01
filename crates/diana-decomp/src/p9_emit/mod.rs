@@ -12,6 +12,7 @@ mod json;
 mod literals;
 mod protected;
 mod report;
+mod source_control;
 mod structured;
 pub(crate) use java::java;
 pub use report::render;

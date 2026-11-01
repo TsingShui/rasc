@@ -44,6 +44,7 @@ pub(crate) struct ResolvedBody<'a> {
     pub exceptions: Vec<super::exceptions::ExceptionBinding>,
     pub fields: Vec<Option<FieldEvidence>>,
     pub source_throws: Option<SourceThrows>,
+    pub decline_reason: Option<crate::OutputReason>,
 }
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub(crate) enum FieldScope {
@@ -70,8 +71,23 @@ pub(crate) fn collect<'a>(
 ) -> Result<ResolvedBody<'a>, RequestError> {
     let source_throws = super::throws::source_throws(input, catalog, budget)?;
     let mut calls = Vec::new();
+    let mut decline_reason = None;
     for call in &ssa.calls {
         budget.charge_work(1)?;
+        if decline_reason.is_none() && input.local_method(call.reference, budget)?.is_none() {
+            let original = input.method_reference(call.reference, budget)?;
+            if !catalog.contains_signature(
+                original.owner,
+                original.declaration.name,
+                &original.declaration.prototype,
+                budget,
+            )? {
+                decline_reason = Some(crate::OutputReason::BindingEvidenceMissing {
+                    reference: call.reference,
+                    pc: call.pc,
+                });
+            }
+        }
         let evidence = if call.kind != crate::p2_flow::normal::InvokeKind::Static {
             let original = input.method_reference(call.reference, budget)?;
             let facts = ReceiverFacts {
@@ -188,6 +204,7 @@ pub(crate) fn collect<'a>(
     Ok(ResolvedBody {
         _sealed: (),
         source_throws,
+        decline_reason,
         exceptions,
         ssa,
         calls,

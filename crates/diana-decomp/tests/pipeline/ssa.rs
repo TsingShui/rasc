@@ -1192,6 +1192,22 @@ fn call_definition_errors_precede_missing_declarations_without_guessing_a_bindin
             MethodOutput::Debug { reason, .. } | MethodOutput::Unavailable { reason, .. } => reason,
             _ => panic!("unchecked wide call became Java"),
         };
+        if !overwrite {
+            let MethodOutput::Debug { source, .. } = &members[0] else {
+                panic!("missing declaration lost complete original code");
+            };
+            let raw: serde_json::Value = serde_json::from_str(source.source()).unwrap();
+            assert_eq!(raw["complete"], true);
+            assert!(matches!(
+                &report.diagnostics()[reason.0].cause,
+                diana_decomp::DiagnosticCause::Request(
+                    diana_decomp::RequestError::BindingEvidenceMissing {
+                        reference: diana_decomp::MethodId(1),
+                        pc: diana_decomp::CodeUnitOffset(2),
+                    }
+                )
+            ));
+        }
         let diagnostic = &report.diagnostics()[reason.0];
         assert_eq!(
             diagnostic.code(),

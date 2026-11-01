@@ -6,6 +6,7 @@ use crate::substrate::owned::{TextBuffer, copy_units, reserve};
 use crate::{EnvironmentId, MethodBudget, RequestError, VerifiedJavaMethod};
 
 pub(crate) struct Edge {
+    pub source: BlockId,
     pub id: EdgeId,
     pub copies: Vec<Assignment>,
     pub target: BlockId,
@@ -81,6 +82,7 @@ fn edge(
     let mut output = Vec::new();
     copies(storage, Some(id), target, &mut output, budget)?;
     Ok(Edge {
+        source,
         id,
         copies: output,
         target,
@@ -462,23 +464,24 @@ pub(super) fn verify(
         super::initializers::MemberSyntax::Method
     };
     if let crate::p7_regions::Shape::Protected(Some(region)) = plan.shape {
+        let source = super::protected_control::lower(&body, &region, &catch_names, budget)?;
         return Ok(Some(VerifiedJavaMethod::protected(
             header.finish(),
             super::protected::ProtectedBody {
                 storage: body,
-                region: super::protected::SourceRegion::from_checked(region),
-                names: catch_names,
+                source,
             },
             syntax,
             environment,
         )));
     }
     if let crate::p7_regions::Shape::Structured(region) = plan.shape {
+        let source = super::natural_control::lower(&body, &region, budget)?;
         return Ok(Some(VerifiedJavaMethod::structured(
             header.finish(),
             super::structured::StructuredBody {
                 storage: body,
-                region,
+                source,
             },
             syntax,
             environment,

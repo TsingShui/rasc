@@ -29,6 +29,7 @@ fn storage<'a>(bytes: &'a [u8], method: u32, facts: &str) -> StorageBody<'a> {
         .unwrap();
     crate::pipeline::branch::build(&input, &catalog(facts), &mut budget)
         .unwrap()
+        .storage
         .unwrap_or_else(|| {
             panic!(
                 "missing storage for method {method}, length {}",
@@ -251,6 +252,7 @@ fn t17_exception_types_require_catch_hierarchy_evidence() {
         assert!(
             crate::pipeline::branch::build(&input, &catalog, &mut budget)
                 .unwrap()
+                .storage
                 .is_none(),
             "{problem}"
         );

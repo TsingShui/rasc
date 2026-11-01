@@ -19,12 +19,15 @@ pub(crate) mod initializers;
 mod method;
 pub use initializers::VerifiedJavaInitializer;
 mod monitor_ops;
+mod natural_control;
 pub(crate) mod object_allocation;
 pub(crate) mod protected;
+mod protected_control;
 mod protected_throws;
 #[cfg(test)]
 mod protection_tests;
 mod receiver_ops;
+pub(crate) mod source_control;
 pub(crate) mod structured;
 pub(crate) mod types;
 pub(crate) mod values;

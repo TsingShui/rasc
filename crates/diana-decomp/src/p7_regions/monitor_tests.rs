@@ -104,6 +104,7 @@ fn storage<'a>(
         .unwrap();
     crate::pipeline::branch::build(&input, &catalog, &mut budget)
         .unwrap()
+        .storage
         .unwrap()
 }
 #[test]
