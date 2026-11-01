@@ -51,6 +51,24 @@ pub(crate) fn verify(
     )? {
         return Ok(None);
     }
+    let mut has_fields = false;
+    class.visit_members_with(
+        control,
+        MemberSelection::Fields,
+        |entry, _control| -> Result<(), RequestError> {
+            let MemberEntry::Field(field) = entry else {
+                return Err(RequestError::InternalInvariant(
+                    "class field traversal delivered a method",
+                ));
+            };
+            field.declaration?;
+            has_fields = true;
+            Ok(())
+        },
+    )?;
+    if has_fields {
+        return Ok(None);
+    }
     let mut admitted = true;
     let mut position = 0usize;
     let mut constructor = false;
@@ -59,9 +77,10 @@ pub(crate) fn verify(
         MemberSelection::AllHeaders,
         |entry, control| -> Result<(), RequestError> {
             match entry {
-                MemberEntry::Field(field) => {
-                    field.declaration?;
-                    admitted = false;
+                MemberEntry::Field(_) => {
+                    return Err(RequestError::InternalInvariant(
+                        "class method-header traversal delivered a field",
+                    ));
                 }
                 MemberEntry::MethodHeader {
                     method_idx,

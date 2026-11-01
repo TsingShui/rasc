@@ -8,51 +8,85 @@ struct Facts {
     classes: Vec<crate::ExternalClassDeclaration>,
 }
 #[test]
-fn t19_complete_method_bodies_do_not_override_an_unproved_class_binding() {
-    let facts: Facts = serde_json::from_str(include_str!(
-        "../../tests/fixtures/monitor-scopes/unit-collision-catalog.json"
-    ))
-    .unwrap();
-    let mut control = RunContext::new(Limits::default(), &|| false);
-    let engine = crate::Engine::open(
-        vec![crate::DexImage {
-            bytes: include_bytes!("../../tests/fixtures/monitor-scopes/unit-collision.dex"),
-            header_offset: crate::ByteOffset(0),
-            origin: crate::ImageOrigin {
-                input: crate::InputId(0),
-            },
-        }],
-        crate::Options::default(),
-        DeclarationCatalog::with_declarations(EnvironmentId(0), facts.methods, facts.classes),
-        &mut control,
-    )
-    .unwrap();
-    let report = engine
-        .decompile(
-            crate::Request {
-                class: crate::ClassKey {
-                    dex: crate::DexId(0),
-                    class_def: ClassDefId(0),
+fn t19_complete_method_bodies_do_not_hide_unrecovered_fields_or_bindings() {
+    for (case, bytes, json, expected_names) in [
+        (
+            "static field",
+            include_bytes!("../../tests/fixtures/monitor-scopes/static-field-shell.dex").as_slice(),
+            include_str!("../../tests/fixtures/monitor-scopes/field-shell-catalog.json"),
+            &["<init>"][..],
+        ),
+        (
+            "instance field",
+            include_bytes!("../../tests/fixtures/monitor-scopes/field-shell.dex").as_slice(),
+            include_str!("../../tests/fixtures/monitor-scopes/field-shell-catalog.json"),
+            &["<init>"][..],
+        ),
+        (
+            "inherited binding",
+            include_bytes!("../../tests/fixtures/monitor-scopes/unit-collision.dex").as_slice(),
+            include_str!("../../tests/fixtures/monitor-scopes/unit-collision-catalog.json"),
+            &["<init>", "notify"][..],
+        ),
+    ] {
+        let facts: Facts = serde_json::from_str(json).unwrap();
+        let mut control = RunContext::new(Limits::default(), &|| false);
+        let engine = crate::Engine::open(
+            vec![crate::DexImage {
+                bytes,
+                header_offset: crate::ByteOffset(0),
+                origin: crate::ImageOrigin {
+                    input: crate::InputId(0),
                 },
-                method: None,
-            },
+            }],
+            crate::Options::default(),
+            DeclarationCatalog::with_declarations(EnvironmentId(0), facts.methods, facts.classes),
             &mut control,
         )
         .unwrap();
-    assert!(matches!(report.class(), crate::ClassOutput::Mixed { .. }));
-    assert!(
-        report
+        let report = engine
+            .decompile(
+                crate::Request {
+                    class: crate::ClassKey {
+                        dex: crate::DexId(0),
+                        class_def: ClassDefId(0),
+                    },
+                    method: None,
+                },
+                &mut control,
+            )
+            .unwrap();
+        assert!(
+            matches!(report.class(), crate::ClassOutput::Mixed { .. }),
+            "{case}: omitted declarations were admitted as a complete unit"
+        );
+        let actual_names: Vec<_> = report
             .class()
             .members()
             .iter()
-            .all(|member| matches!(member, crate::MethodOutput::Java { .. }))
-    );
-    assert!(
-        report
-            .diagnostics()
-            .iter()
-            .any(|diagnostic| diagnostic.code() == crate::DiagnosticCode::ClassAssemblyUnavailable)
-    );
+            .map(|member| {
+                let crate::MethodOutput::Java { facts, .. } = member else {
+                    panic!("{case}: available method was lost");
+                };
+                assert_eq!(facts.prototype, "()V".encode_utf16().collect::<Vec<_>>());
+                String::from_utf16(&facts.name).unwrap()
+            })
+            .collect();
+        assert_eq!(actual_names.len(), expected_names.len(), "{case}");
+        for expected in expected_names {
+            assert!(
+                actual_names.iter().any(|name| name == expected),
+                "{case}: missing {expected}"
+            );
+        }
+        assert!(
+            report
+                .diagnostics()
+                .iter()
+                .any(|diagnostic| diagnostic.code()
+                    == crate::DiagnosticCode::ClassAssemblyUnavailable)
+        );
+    }
 }
 fn storage<'a>(
     bytes: &'a [u8],

@@ -2089,7 +2089,10 @@ and D082 pass their fixed source-JVM invocations; D081 passes classified
 raw-integrity acceptance. D040 produces a verified JavaUnit. Supplemental public
 core cases cover implicit method locks, declared-only flags and U04 failures;
 native mutation cases reject changed locks, releases, cleanup, scopes and loop
-edges. The batch records full gates and original-member regression evidence.
+edges. The [class-field completeness correction](batches/t19-class-field-completeness.md)
+rejects units with unrecovered static or instance fields while preserving their
+available Java methods. The batches record full gates and original-member
+regression evidence.
 
 **Dependencies**: T18, T12. **Phase**: P2/P7/P8. **References**: DX-07
 (synchronization).

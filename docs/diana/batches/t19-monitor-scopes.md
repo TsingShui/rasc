@@ -68,5 +68,11 @@ Evidence lives under .cache/e2e/t19-monitor-scopes/:
   identical Debug, now classified BranchJavaUnsupported after class-literal
   decoding; D081 gains MonitorScopeUnproved.
 
+The [class-field completeness correction](t19-class-field-completeness.md)
+fixes a subsequently exposed unit-admission defect: the method-header visitor
+did not deliver fields to the field-rejection arm. The correction preserves
+D042's available constructors and reports Mixed instead of an incomplete
+JavaUnit. Its batch records the reproducer and full member-level regression.
+
 The evidence remains macOS arm64 source-JVM evidence. EngineCoreRC remains
 unaccepted.
