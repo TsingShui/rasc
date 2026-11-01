@@ -2,13 +2,17 @@ use crate::p5_types::initialization::{ChainArgument, ChainKind};
 use crate::p6_variables::normal::StorageBody;
 use crate::{CodeUnitOffset, MethodBudget, RegisterId, RequestError};
 
+pub(crate) struct PrologueArgument {
+    pub origin: ChainArgument,
+    pub view: super::branch::ValueUse,
+}
 pub(crate) struct Prologue {
     _sealed: (),
     pub contract: crate::p4_calls::allocation::ConstructorContract,
     pub kind: ChainKind,
     pub pc: CodeUnitOffset,
     pub receiver: RegisterId,
-    pub arguments: Vec<ChainArgument>,
+    pub arguments: Vec<PrologueArgument>,
 }
 pub(super) fn lower(
     storage: &StorageBody<'_>,
@@ -36,9 +40,23 @@ pub(super) fn lower(
             "constructor entry lost binding",
         ))?;
     let mut arguments = Vec::new();
-    for &argument in &entry.arguments {
+    let site = &storage.typed.ssa.calls[index];
+    let uses = storage.typed.call_uses[index].arguments(site.reference, site.pc)?;
+    if uses.len() != entry.arguments.len() {
+        return Err(RequestError::InternalInvariant(
+            "constructor origin/use arity changed",
+        ));
+    }
+    for (&origin, usage) in entry.arguments.iter().zip(uses) {
         budget.charge_work(1)?;
-        crate::substrate::owned::push(&mut arguments, argument, budget)?;
+        crate::substrate::owned::push(
+            &mut arguments,
+            PrologueArgument {
+                origin,
+                view: super::values::lower(super::branch::LocalId(usage.value.0), usage.conversion),
+            },
+            budget,
+        )?;
     }
     Ok(Some(Prologue {
         _sealed: (),
@@ -81,14 +99,34 @@ pub(super) fn verify(
         || actual.contract.owner != original.owner
         || actual.contract.prototype != original.prototype
         || actual.arguments.len() != entry.arguments.len()
-        || actual.arguments.len() != actual.contract.int_arity
+        || actual.arguments.len() != actual.contract.arity
     {
         return Ok(false);
     }
-    for (&value, &expected) in actual.arguments.iter().zip(&entry.arguments) {
+    let Some(formals) = original.formals.as_deref() else {
+        return Ok(false);
+    };
+    let op = storage.typed.ssa.call(chain.call)?;
+    if formals.len() != actual.arguments.len()
+        || op.inputs.len()
+            != actual
+                .arguments
+                .len()
+                .checked_add(1)
+                .ok_or(RequestError::PlatformCapacity)?
+    {
+        return Ok(false);
+    }
+    for (((value, &expected), &source), &formal) in actual
+        .arguments
+        .iter()
+        .zip(&entry.arguments)
+        .zip(op.inputs.iter().skip(1))
+        .zip(formals)
+    {
         budget.charge_work(1)?;
-        if !matches!((value,expected),(ChainArgument::Parameter(a),ChainArgument::Parameter(b)) if a==b)
-            && !matches!((value,expected),(ChainArgument::Literal(a),ChainArgument::Literal(b)) if a==b)
+        if value.origin != expected
+            || !super::dispatcher_verify::call_argument(&storage.typed, value.view, source, formal)?
         {
             return Ok(false);
         }

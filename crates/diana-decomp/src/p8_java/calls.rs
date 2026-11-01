@@ -281,7 +281,7 @@ pub(super) fn validate_bindings(
             if !throws.covers(catalog, &contract.declared_throws, budget)? {
                 return Ok(None);
             }
-            if uses.arguments(site.reference, site.pc)?.len() != contract.int_arity {
+            if uses.arguments(site.reference, site.pc)?.len() != contract.arity {
                 return Err(RequestError::InternalInvariant("constructor changed arity"));
             }
             push(&mut constructors, Some(contract), budget)?;

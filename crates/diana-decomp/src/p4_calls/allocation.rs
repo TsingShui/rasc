@@ -8,7 +8,7 @@ pub(crate) struct ConstructorContract {
     pub reference: MethodId,
     pub owner: Vec<u16>,
     pub prototype: Vec<u16>,
-    pub int_arity: usize,
+    pub arity: usize,
     pub declared_throws: Vec<Vec<u16>>,
 }
 #[derive(Clone, Copy)]
@@ -119,23 +119,10 @@ pub(crate) fn resolve(
             return Err(RequestError::BindingEvidenceMissing { reference, pc });
         }
     }
-    let mut int_arity = 0usize;
-    let mut supported = true;
-    method.declaration.prototype.visit_parameter_types(
-        budget,
-        |name, budget| -> Result<(), RequestError> {
-            if !name.matches_with(&[73], budget)? {
-                supported = false;
-            }
-            int_arity = int_arity
-                .checked_add(1)
-                .ok_or(RequestError::PlatformCapacity)?;
-            Ok(())
-        },
-    )?;
-    if !supported {
+    let Some(formals) = super::contracts::original_formals(input, reference, budget)? else {
         return unavailable(pc);
-    }
+    };
+    let arity = formals.len();
 
     if matches!(use_kind, ConstructorUse::Super) && class.access_flags & 0x10 != 0 {
         return Err(RequestError::BindingEvidenceMissing { reference, pc });
@@ -145,7 +132,7 @@ pub(crate) fn resolve(
         reference,
         owner: copy_units(method.owner, budget)?,
         prototype,
-        int_arity,
+        arity,
         declared_throws: super::throws::retain(target.throws.as_deref(), budget)?,
     })
 }

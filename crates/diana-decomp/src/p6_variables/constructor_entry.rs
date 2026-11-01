@@ -33,7 +33,7 @@ fn original_argument(
             Definition::OpResult(id) => {
                 let op = typed.ssa.operation(id)?;
                 match op.op {
-                    Op::Move(..) => value = op.input(0)?,
+                    Op::Move(..) | Op::MoveWide(..) => value = op.input(0)?,
                     Op::Constant(register, literal) => {
                         let raw = &typed.ssa.raw;
                         let layout = crate::raw::instruction_layout(
@@ -59,6 +59,36 @@ fn original_argument(
                         return Ok(
                             matches!(expected,ChainArgument::Literal(expected) if expected == literal && literal == bits)
                                 && matches!(layout.kind(),crate::raw::LayoutKind::Instruction(spec) if matches!(spec.opcode,0x12..=0x15))
+                                && operands.registers().iter().next() == Some(register),
+                        );
+                    }
+                    Op::ConstantWide(register, literal) => {
+                        let raw = &typed.ssa.raw;
+                        let layout = crate::raw::instruction_layout(
+                            raw.instructions(),
+                            op.pc,
+                            raw.version(),
+                        )
+                        .map_err(crate::input::MethodError::Decode)?;
+                        let operands = crate::input::operands::instruction_operands(
+                            raw.instructions(),
+                            op.pc,
+                            layout,
+                        )
+                        .map_err(crate::input::MethodError::Decode)?;
+                        let bits = match operands.literal() {
+                            Some(crate::raw::RawLiteral::Bits64(bits)) => {
+                                i64::from_le_bytes(bits.to_le_bytes())
+                            }
+                            Some(crate::raw::RawLiteral::Bits32(bits)) => {
+                                i64::from(i32::from_le_bytes(bits.to_le_bytes()))
+                            }
+                            Some(crate::raw::RawLiteral::Signed16(bits)) => i64::from(bits),
+                            _ => return Ok(false),
+                        };
+                        return Ok(
+                            matches!(expected, ChainArgument::WideLiteral(expected) if expected == literal && literal == bits)
+                                && matches!(layout.kind(), crate::raw::LayoutKind::Instruction(spec) if matches!(spec.opcode, 0x16..=0x19))
                                 && operands.registers().iter().next() == Some(register),
                         );
                     }
@@ -137,7 +167,7 @@ pub(super) fn prove(
         if prefix.pc.0 >= op.pc.0 {
             break;
         }
-        if matches!(prefix.op, Op::Move(..)) {
+        if matches!(prefix.op, Op::Move(..) | Op::MoveWide(..)) {
             let result = prefix.result.ok_or_else(broken)?;
             let is_this = typed.initializations.deferred.get(ix(result.0)?)
                 == Some(&Some(
@@ -146,7 +176,8 @@ pub(super) fn prove(
             let layout =
                 crate::raw::instruction_layout(raw.instructions(), prefix.pc, raw.version())
                     .map_err(crate::input::MethodError::Decode)?;
-            if !matches!(layout.kind(),crate::raw::LayoutKind::Instruction(spec) if if is_this { matches!(spec.opcode,7..=9) } else { matches!(spec.opcode,1..=3) })
+            let kind = typed.kinds[ix(result.0)?].ok_or_else(broken)?;
+            if !matches!(layout.kind(),crate::raw::LayoutKind::Instruction(spec) if if is_this { matches!(spec.opcode,7..=9) } else if matches!(kind, crate::p5_types::normal::Kind::Long | crate::p5_types::normal::Kind::Double) { matches!(spec.opcode,4..=6) } else if matches!(kind, crate::p5_types::normal::Kind::Int | crate::p5_types::normal::Kind::Boolean | crate::p5_types::normal::Kind::Float) { matches!(spec.opcode,1..=3) } else { matches!(spec.opcode,7..=9) })
             {
                 return Err(RequestError::InitializationUnavailable { pc: prefix.pc });
             }

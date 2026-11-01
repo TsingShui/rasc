@@ -1,7 +1,6 @@
 use super::{ChainArgument, ChainInitialization, ChainKind, InitializationId, UninitAlias};
 use crate::p2_flow::normal::{BlockId, CallTarget, MethodFrame, Op};
 use crate::p3_ssa::normal::{Definition, SsaBody, Sym, ValueId};
-use crate::p5_types::normal::Kind;
 use crate::substrate::owned::push;
 use crate::{MethodBudget, RequestError};
 
@@ -10,7 +9,6 @@ fn ix(value: u32) -> Result<usize, RequestError> {
 }
 fn argument(
     ssa: &SsaBody<'_>,
-    kinds: &[Option<Kind>],
     phis: &[Option<usize>],
     mut value: ValueId,
     budget: &mut MethodBudget<'_, '_>,
@@ -18,9 +16,6 @@ fn argument(
     for _ in &ssa.values {
         budget.charge_work(1)?;
         let index = ix(value.0)?;
-        if kinds[index] != Some(Kind::Int) {
-            return Ok(None);
-        }
         match ssa.values[index] {
             Definition::Parameter(parameter) if parameter > 0 => {
                 return Ok(Some(ChainArgument::Parameter(
@@ -35,7 +30,10 @@ fn argument(
                 let op = ssa.operation(id)?;
                 match op.op {
                     Op::Constant(_, literal) => return Ok(Some(ChainArgument::Literal(literal))),
-                    Op::Move(..) => value = op.input(0)?,
+                    Op::ConstantWide(_, literal) => {
+                        return Ok(Some(ChainArgument::WideLiteral(literal)));
+                    }
+                    Op::Move(..) | Op::MoveWide(..) => value = op.input(0)?,
                     _ => return Ok(None),
                 }
             }
@@ -62,7 +60,6 @@ fn argument(
 }
 pub(super) fn solve(
     ssa: &SsaBody<'_>,
-    kinds: &[Option<Kind>],
     deferred: &mut [Option<InitializationId>],
     calls: &mut [Option<InitializationId>],
     budget: &mut MethodBudget<'_, '_>,
@@ -108,8 +105,8 @@ pub(super) fn solve(
         budget.charge_work(1)?;
         let op = ssa.operation(id)?;
         match op.op {
-            Op::Nop | Op::Constant(..) => {}
-            Op::Move(..) => {
+            Op::Nop | Op::Constant(..) | Op::ConstantWide(..) => {}
+            Op::Move(..) | Op::MoveWide(..) => {
                 let source = op.input(0)?;
                 let result = op.result.ok_or(RequestError::InternalInvariant(
                     "constructor move lost result",
@@ -117,8 +114,6 @@ pub(super) fn solve(
                 if deferred[ix(source.0)?] == Some(InitializationId::This) {
                     deferred[ix(result.0)?] = Some(InitializationId::This);
                     push(&mut aliases, UninitAlias(result), budget)?;
-                } else if kinds[ix(source.0)?] != Some(Kind::Int) {
-                    return Err(unavailable(op.pc));
                 }
             }
             Op::Initialize(call) => {
@@ -131,7 +126,7 @@ pub(super) fn solve(
                 let mut arguments = Vec::new();
                 for &value in op.inputs.iter().skip(1) {
                     budget.charge_work(1)?;
-                    let Some(value) = argument(ssa, kinds, &phis, value, budget)? else {
+                    let Some(value) = argument(ssa, &phis, value, budget)? else {
                         return Err(unavailable(op.pc));
                     };
                     push(&mut arguments, value, budget)?;

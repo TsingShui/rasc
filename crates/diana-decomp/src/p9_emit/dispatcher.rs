@@ -33,15 +33,7 @@ pub(super) fn locals(
             if index != 0 {
                 output.push(", ", budget)?;
             }
-            match argument {
-                crate::p5_types::initialization::ChainArgument::Parameter(index) => {
-                    output.push("p", budget)?;
-                    output.unsigned(u64::from(*index), budget)?;
-                }
-                crate::p5_types::initialization::ChainArgument::Literal(value) => {
-                    output.arguments(format_args!("{value}"), budget)?
-                }
-            }
+            super::java::chain_argument(argument, output, budget)?;
         }
         output.push(");\n", budget)?;
     }

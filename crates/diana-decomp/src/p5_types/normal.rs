@@ -458,7 +458,7 @@ pub(crate) fn solve<'a>(
     let Some(numeric_uses) = super::numeric::solve(&ssa, &kinds, budget)? else {
         return Ok(None);
     };
-    let initializations = super::initialization::solve(&ssa, &kinds, budget)?;
+    let initializations = super::initialization::solve(&ssa, budget)?;
     let Some(array_uses) = solve_new_arrays(&ssa, &kinds, budget)? else {
         return Ok(None);
     };

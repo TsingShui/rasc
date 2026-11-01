@@ -36,6 +36,41 @@ pub(super) fn value_use(
     output: &mut TextBuffer,
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<(), RequestError> {
+    value_with(value, output, budget, local)
+}
+pub(super) fn chain_argument(
+    argument: &crate::p8_java::constructor_entry::PrologueArgument,
+    output: &mut TextBuffer,
+    budget: &mut MethodBudget<'_, '_>,
+) -> Result<(), RequestError> {
+    value_with(
+        argument.view,
+        output,
+        budget,
+        |_, output, budget| match argument.origin {
+            crate::p5_types::initialization::ChainArgument::Parameter(index) => {
+                output.push("p", budget)?;
+                output.unsigned(u64::from(index), budget)
+            }
+            crate::p5_types::initialization::ChainArgument::Literal(value) => {
+                output.arguments(format_args!("{value}"), budget)
+            }
+            crate::p5_types::initialization::ChainArgument::WideLiteral(value) => {
+                output.arguments(format_args!("{value}L"), budget)
+            }
+        },
+    )
+}
+fn value_with(
+    value: crate::p8_java::branch::ValueUse,
+    output: &mut TextBuffer,
+    budget: &mut MethodBudget<'_, '_>,
+    mut source: impl FnMut(
+        LocalId,
+        &mut TextBuffer,
+        &mut MethodBudget<'_, '_>,
+    ) -> Result<(), RequestError>,
+) -> Result<(), RequestError> {
     use crate::p8_java::branch::ValueUse;
     match value {
         ValueUse::DoubleLiteral { bits, .. } => super::literals::fp(bits, true, output, budget)?,
@@ -49,29 +84,29 @@ pub(super) fn value_use(
         }
         ValueUse::UpcastObject(value) => {
             output.push("(java.lang.Object) ", budget)?;
-            local(value, output, budget)?;
+            source(value, output, budget)?;
         }
-        ValueUse::Direct(value) => local(value, output, budget)?,
+        ValueUse::Direct(value) => source(value, output, budget)?,
         ValueUse::NullAssignment(_) => output.push("null", budget)?,
         ValueUse::ObjectArrayView(value) => {
             output.push("((java.lang.Object[]) ", budget)?;
-            local(value, output, budget)?;
+            source(value, output, budget)?;
             output.push(")", budget)?;
         }
         ValueUse::Boolean01(value) => {
             output.push("(", budget)?;
-            local(value, output, budget)?;
+            source(value, output, budget)?;
             output.push(" != 0)", budget)?;
         }
         ValueUse::Narrow { value, kind } => {
             output.push("(", budget)?;
             output.push(kind.spelling(), budget)?;
             output.push(") ", budget)?;
-            local(value, output, budget)?;
+            source(value, output, budget)?;
         }
         ValueUse::BooleanWord(value) => {
             output.push("(", budget)?;
-            local(value, output, budget)?;
+            source(value, output, budget)?;
             output.push(" ? 1 : 0)", budget)?;
         }
     }

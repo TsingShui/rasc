@@ -348,6 +348,130 @@ use diana_decomp::{
 };
 
 #[test]
+fn t12_constructor_arguments_keep_typed_allocation_and_chain_views() {
+    let bytes = include_bytes!("../fixtures/constructor-types/classes.dex");
+    let mut control = RunContext::new(Limits::default(), &|| false);
+    let index = diana_decomp::input::ProgramIndex::open(bytes, &mut control).unwrap();
+    let mut classes = Vec::new();
+    index
+        .visit_classes(&mut control, |id, class, control| {
+            let class = class?;
+            for name in ["Lfixtures/Case;", "Lfixtures/Box;", "Lfixtures/Parent;"] {
+                if class
+                    .descriptor
+                    .matches(&name.encode_utf16().collect::<Vec<_>>(), control)?
+                {
+                    classes.push((id, name));
+                }
+            }
+            Ok(())
+        })
+        .unwrap();
+    assert_eq!(classes.len(), 3);
+    let facts: PipelineFacts =
+        serde_json::from_str(include_str!("../fixtures/constructor-types/catalog.json")).unwrap();
+    let engine = Engine::open(
+        vec![DexImage {
+            bytes,
+            header_offset: ByteOffset(0),
+            origin: ImageOrigin { input: InputId(0) },
+        }],
+        Options::default(),
+        DeclarationCatalog::with_declarations(
+            EnvironmentId(facts.environment_id),
+            facts.methods,
+            facts.classes,
+        ),
+        &mut control,
+    )
+    .unwrap();
+    for &(class_def, name) in &classes {
+        let report = engine
+            .decompile(
+                Request {
+                    class: ClassKey {
+                        dex: DexId(0),
+                        class_def,
+                    },
+                    method: None,
+                },
+                &mut control,
+            )
+            .unwrap();
+        let ClassOutput::Mixed { members, .. } = report.class();
+        assert!(!members.is_empty());
+        assert!(
+            members
+                .iter()
+                .all(|member| matches!(member, MethodOutput::Java { .. })),
+            "typed constructor failed: {name}"
+        );
+    }
+    let mut facts: PipelineFacts =
+        serde_json::from_str(include_str!("../fixtures/constructor-types/catalog.json")).unwrap();
+    let owner: Vec<u16> = "Lfixtures/Box;".encode_utf16().collect();
+    let prototype: Vec<u16> = "(Ljava/lang/String;JFDZB)V".encode_utf16().collect();
+    let class = facts
+        .classes
+        .iter_mut()
+        .find(|class| class.descriptor == owner)
+        .unwrap();
+    class
+        .methods
+        .iter_mut()
+        .find(|method| method.prototype == prototype)
+        .unwrap()
+        .throws = None;
+    let engine = Engine::open(
+        vec![DexImage {
+            bytes,
+            header_offset: ByteOffset(0),
+            origin: ImageOrigin { input: InputId(0) },
+        }],
+        Options::default(),
+        DeclarationCatalog::with_declarations(
+            EnvironmentId(facts.environment_id),
+            facts.methods,
+            facts.classes,
+        ),
+        &mut control,
+    )
+    .unwrap();
+    let class_def = classes
+        .iter()
+        .find(|(_, name)| *name == "Lfixtures/Case;")
+        .unwrap()
+        .0;
+    let report = engine
+        .decompile(
+            Request {
+                class: ClassKey {
+                    dex: DexId(0),
+                    class_def,
+                },
+                method: Some(MethodSelector {
+                    name: "make".encode_utf16().collect(),
+                    prototype: "(Ljava/lang/String;JFDZB)Lfixtures/Box;"
+                        .encode_utf16()
+                        .collect(),
+                }),
+            },
+            &mut control,
+        )
+        .unwrap();
+    let ClassOutput::Mixed { members, .. } = report.class();
+    let MethodOutput::Debug { source, reason, .. } = &members[0] else {
+        panic!("unknown constructor throws became Java");
+    };
+    assert_eq!(
+        report.diagnostics()[reason.0].cause.kind(),
+        FailureKind::Unsupported
+    );
+    let raw: serde_json::Value = serde_json::from_str(source.source()).unwrap();
+    assert_eq!(raw["complete"], true);
+}
+
+#[test]
 fn t11_primitive_call_types_share_static_and_receiver_binding() {
     for complete in [true, false] {
         let mut facts: PipelineFacts =

@@ -2,7 +2,6 @@ use super::branch::{LocalId, ValueUse};
 use crate::p2_flow::normal::{CallTarget, Op};
 use crate::p3_ssa::normal::BoundOp;
 use crate::p5_types::initialization::InitializationId;
-use crate::p5_types::normal::Kind;
 use crate::p6_variables::normal::StorageBody;
 use crate::{CodeUnitOffset, MethodBudget, RegisterId, RequestError};
 
@@ -175,7 +174,7 @@ pub(super) fn verify(
         || actual.aliases.len() != proof.aliases.len()
         || site.registers.first() != Some(&actual.receiver)
         || op.result.is_some()
-        || actual.arguments.len() != actual.contract.int_arity
+        || actual.arguments.len() != actual.contract.arity
         || actual.arguments.len().checked_add(1) != Some(op.inputs.len())
     {
         return Ok(false);
@@ -200,15 +199,20 @@ pub(super) fn verify(
             return Ok(false);
         }
     }
-    for (&view, value) in actual.arguments.iter().zip(op.inputs.iter().skip(1)) {
+    let Some(formals) = original.formals.as_deref() else {
+        return Ok(false);
+    };
+    if formals.len() != actual.arguments.len() {
+        return Ok(false);
+    }
+    for ((&view, value), &formal) in actual
+        .arguments
+        .iter()
+        .zip(op.inputs.iter().skip(1))
+        .zip(formals)
+    {
         budget.charge_work(1)?;
-        if view.value().0 != value.0
-            || !matches!(
-                (view, typed.kinds[ix(value.0)?]),
-                (ValueUse::Direct(_), Some(Kind::Int))
-                    | (ValueUse::BooleanWord(_), Some(Kind::Boolean))
-            )
-        {
+        if !super::dispatcher_verify::call_argument(typed, view, *value, formal)? {
             return Ok(false);
         }
     }
