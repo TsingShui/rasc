@@ -12,13 +12,24 @@ pub(crate) struct TypedUse {
 }
 pub(crate) struct CallUses {
     _sealed: (),
-    pub arguments: Vec<TypedUse>,
+    arguments: Option<Vec<TypedUse>>,
     pub receiver: Option<TypedReceiver>,
 }
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub(crate) enum ReceiverIdentity {
     Reference,
     ImplicitThis,
+}
+impl CallUses {
+    pub(crate) fn arguments(
+        &self,
+        reference: crate::MethodId,
+        pc: crate::CodeUnitOffset,
+    ) -> Result<&[TypedUse], RequestError> {
+        self.arguments
+            .as_deref()
+            .ok_or(RequestError::BindingEvidenceMissing { reference, pc })
+    }
 }
 pub(crate) struct TypedReceiver {
     pub identity: ReceiverIdentity,
@@ -92,12 +103,6 @@ pub(crate) fn solve(
         let evidence = bindings.get(index).ok_or(RequestError::InternalInvariant(
             "call lost declaration constraints",
         ))?;
-        let Some(formals) = evidence.formals() else {
-            return Err(RequestError::BindingEvidenceMissing {
-                reference: site.reference,
-                pc: site.pc,
-            });
-        };
         let bound = ssa.call(id)?;
         let (receiver, values) = if site.kind == crate::p2_flow::normal::InvokeKind::Static {
             (None, bound.inputs.as_slice())
@@ -128,6 +133,18 @@ pub(crate) fn solve(
                 arguments,
             )
         };
+        let Some(formals) = evidence.formals() else {
+            push(
+                &mut uses,
+                CallUses {
+                    _sealed: (),
+                    arguments: None,
+                    receiver,
+                },
+                budget,
+            )?;
+            continue;
+        };
         if values.len() != formals.len() {
             return Err(RequestError::InternalInvariant(
                 "original formal word constraints changed",
@@ -151,7 +168,7 @@ pub(crate) fn solve(
             &mut uses,
             CallUses {
                 _sealed: (),
-                arguments,
+                arguments: Some(arguments),
                 receiver,
             },
             budget,

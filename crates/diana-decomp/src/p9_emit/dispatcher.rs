@@ -64,6 +64,28 @@ pub(super) fn statements(
     for statement in &case.statements {
         budget.charge_work(1)?;
         match statement {
+            crate::p8_java::calls::Statement::NewArray(array) => {
+                local(array.result, output, budget)?;
+                output.push(" = new ", budget)?;
+                output.push(array.component.component_spelling(), budget)?;
+                output.push("[", budget)?;
+                super::java::value_use(array.length, output, budget)?;
+                output.push("];\n", budget)?;
+            }
+            crate::p8_java::calls::Statement::FreshFill(fill) => {
+                for (index, element) in fill.elements.iter().enumerate() {
+                    budget.charge_work(1)?;
+                    local(fill.array, output, budget)?;
+                    output.push("[", budget)?;
+                    output.unsigned(
+                        u64::try_from(index).map_err(|_| RequestError::PlatformCapacity)?,
+                        budget,
+                    )?;
+                    output.push("] = ", budget)?;
+                    super::fresh_array::element(element, output, budget)?;
+                    output.push(";\n", budget)?;
+                }
+            }
             crate::p8_java::calls::Statement::EmptyFill { array, result, .. } => {
                 local(*result, output, budget)?;
                 output.push(" = ", budget)?;

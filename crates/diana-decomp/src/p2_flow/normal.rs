@@ -116,6 +116,19 @@ pub(crate) struct StringLiteralId(pub u32);
 pub(crate) struct CastId(pub u32);
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub(crate) struct EmptyFillId(pub u32);
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub(crate) struct ArrayCreationId(pub u32);
+pub(crate) struct ArrayCreation {
+    pub reference: crate::TypeId,
+    pub component: crate::p5_types::PrimitiveArray,
+}
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub(crate) struct FreshFillId(pub u32);
+pub(crate) struct FreshFillSite {
+    pub payload: CodeUnitOffset,
+    pub width: usize,
+    pub count: u32,
+}
 pub(crate) struct EmptyFillSite {
     pub payload: CodeUnitOffset,
     pub width: usize,
@@ -135,6 +148,8 @@ pub(crate) enum ArrayElement {
 }
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub(crate) enum Op {
+    NewArray(RegisterId, RegisterId, ArrayCreationId),
+    FreshFill(RegisterId, FreshFillId),
     EmptyFill(RegisterId, EmptyFillId),
     Cast(RegisterId, CastId),
     String(RegisterId, StringLiteralId),
@@ -206,11 +221,20 @@ impl Op {
         let conservative = matches!(self, Self::Call(_, _));
         Effects {
             heap_read: conservative || matches!(self, Self::ArrayLoad(..) | Self::FieldLoad(..)),
-            heap_write: conservative || matches!(self, Self::ArrayStore(..) | Self::FieldStore(..)),
+            heap_write: conservative
+                || matches!(
+                    self,
+                    Self::ArrayStore(..)
+                        | Self::FieldStore(..)
+                        | Self::NewArray(..)
+                        | Self::FreshFill(..)
+                ),
             may_throw: conservative
                 || matches!(
                     self,
-                    Self::EmptyFill(..)
+                    Self::NewArray(..)
+                        | Self::FreshFill(..)
+                        | Self::EmptyFill(..)
                         | Self::Cast(..)
                         | Self::String(..)
                         | Self::ArrayLength(..)
@@ -253,6 +277,8 @@ impl MethodFrame {
     }
 }
 pub(crate) struct FlowBody<'a> {
+    pub array_creations: Vec<ArrayCreation>,
+    pub fresh_fills: Vec<FreshFillSite>,
     pub empty_fills: Vec<EmptyFillSite>,
     pub casts: Vec<CastSite>,
     pub strings: Vec<StringLiteral<'a>>,
@@ -272,7 +298,8 @@ fn ix(value: u32) -> Result<usize, RequestError> {
 pub(crate) fn destination(op: Op) -> Option<RegisterId> {
     match op {
         Op::Call(_, destination) => destination,
-        Op::Cast(r, _)
+        Op::NewArray(r, _, _)
+        | Op::Cast(r, _)
         | Op::String(r, _)
         | Op::Constant(r, _)
         | Op::Move(r, _)
@@ -281,7 +308,11 @@ pub(crate) fn destination(op: Op) -> Option<RegisterId> {
         | Op::ArrayLength(r, _)
         | Op::ArrayLoad(r, _, _, _)
         | Op::FieldLoad(r, _, _) => Some(r),
-        Op::Nop | Op::ArrayStore(..) | Op::FieldStore(..) | Op::EmptyFill(..) => None,
+        Op::Nop
+        | Op::ArrayStore(..)
+        | Op::FieldStore(..)
+        | Op::EmptyFill(..)
+        | Op::FreshFill(..) => None,
     }
 }
 pub(crate) enum Reads<'a> {
@@ -313,6 +344,8 @@ impl Op {
                 ))?;
                 return Ok(Reads::Call(call.registers.iter()));
             }
+            Self::NewArray(_, length, _) => [Some(length), None, None],
+            Self::FreshFill(register, _) => [Some(register), None, None],
             Self::EmptyFill(register, _) => [Some(register), None, None],
             Self::Cast(register, _) => [Some(register), None, None],
             Self::FieldLoad(_, receiver, _) => [Some(receiver), None, None],
@@ -525,6 +558,8 @@ pub(crate) fn decode<'a>(
     let mut strings = Vec::new();
     let mut casts = Vec::new();
     let mut empty_fills = Vec::new();
+    let mut array_creations = Vec::new();
+    let mut fresh_fills = Vec::new();
     let mut raw_switches: Vec<(Vec<(i32, CodeUnitOffset)>, CodeUnitOffset)> = Vec::new();
     let mut leaders = Vec::new();
     push(&mut leaders, CodeUnitOffset(0), budget)?;
@@ -637,6 +672,38 @@ pub(crate) fn decode<'a>(
                         Decoded::Op(Op::FieldStore(reg(1)?, reg(0)?, id))
                     }
                 }
+                0x23 => {
+                    let Some(reference) = layout.references()[0] else {
+                        return Err(RequestError::InternalInvariant(
+                            "array allocation lost type",
+                        ));
+                    };
+                    let crate::raw::OperandReference::Type(reference) = reference.target else {
+                        return Err(RequestError::InternalInvariant(
+                            "array allocation changed reference domain",
+                        ));
+                    };
+                    let Some(component) = crate::p5_types::PrimitiveArray::parse(
+                        input.type_name(reference, budget)?,
+                        budget,
+                    )?
+                    else {
+                        return Ok(None);
+                    };
+                    let id = ArrayCreationId(
+                        u32::try_from(array_creations.len())
+                            .map_err(|_| RequestError::PlatformCapacity)?,
+                    );
+                    push(
+                        &mut array_creations,
+                        ArrayCreation {
+                            reference,
+                            component,
+                        },
+                        budget,
+                    )?;
+                    Decoded::Op(Op::NewArray(reg(0)?, reg(1)?, id))
+                }
                 0x26 => {
                     let delta = operands
                         .offset()
@@ -654,21 +721,35 @@ pub(crate) fn decode<'a>(
                         return Err(RequestError::InternalInvariant("fill changed payload kind"));
                     };
                     if element_count != 0 {
-                        return Ok(None);
+                        let id = FreshFillId(
+                            u32::try_from(fresh_fills.len())
+                                .map_err(|_| RequestError::PlatformCapacity)?,
+                        );
+                        push(
+                            &mut fresh_fills,
+                            FreshFillSite {
+                                payload,
+                                width: element_width.0,
+                                count: element_count,
+                            },
+                            budget,
+                        )?;
+                        Decoded::Op(Op::FreshFill(reg(0)?, id))
+                    } else {
+                        let id = EmptyFillId(
+                            u32::try_from(empty_fills.len())
+                                .map_err(|_| RequestError::PlatformCapacity)?,
+                        );
+                        push(
+                            &mut empty_fills,
+                            EmptyFillSite {
+                                payload,
+                                width: element_width.0,
+                            },
+                            budget,
+                        )?;
+                        Decoded::Op(Op::EmptyFill(reg(0)?, id))
                     }
-                    let id = EmptyFillId(
-                        u32::try_from(empty_fills.len())
-                            .map_err(|_| RequestError::PlatformCapacity)?,
-                    );
-                    push(
-                        &mut empty_fills,
-                        EmptyFillSite {
-                            payload,
-                            width: element_width.0,
-                        },
-                        budget,
-                    )?;
-                    Decoded::Op(Op::EmptyFill(reg(0)?, id))
                 }
                 0x1f => {
                     let Some(reference) = layout.references()[0] else {
@@ -1077,6 +1158,8 @@ pub(crate) fn decode<'a>(
         }
     }
     Ok(Some(FlowBody {
+        array_creations,
+        fresh_fills,
         empty_fills,
         casts,
         strings,

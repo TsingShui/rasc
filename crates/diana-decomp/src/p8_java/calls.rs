@@ -58,6 +58,8 @@ pub(crate) struct ReceiverCall {
     pub arguments: Vec<ValueUse>,
 }
 pub(crate) enum Statement {
+    NewArray(super::fresh_fill::Allocation),
+    FreshFill(super::fresh_fill::Fill),
     EmptyFill {
         array: LocalId,
         result: LocalId,
@@ -282,12 +284,13 @@ pub(super) fn validate_bindings(
                 (None, bound.inputs.as_slice())
             }
         };
-        if uses.arguments.len() != arguments.len() {
+        let views = uses.arguments(site.reference, site.pc)?;
+        if views.len() != arguments.len() {
             return Err(RequestError::InternalInvariant(
                 "call conversions changed arity",
             ));
         }
-        for (&value, typed_use) in arguments.iter().zip(&uses.arguments) {
+        for (&value, typed_use) in arguments.iter().zip(views) {
             budget.charge_work(1)?;
             if value != typed_use.value {
                 return Err(RequestError::InternalInvariant(
@@ -342,7 +345,7 @@ fn plan(
         .get(ix(id.0)?)
         .ok_or(RequestError::InternalInvariant("call lost typed uses"))?;
     let mut arguments = Vec::new();
-    for typed_use in &uses.arguments {
+    for typed_use in uses.arguments(site.reference, site.pc)? {
         budget.charge_work(1)?;
         push(
             &mut arguments,
@@ -374,7 +377,19 @@ pub(super) fn operations(
     for &id in &ssa.ssa.bound[ix(block.0)?].ops {
         budget.charge_work(1)?;
         let op = ssa.ssa.operation(id)?;
-        if let Op::EmptyFill(_, id) = op.op {
+        if matches!(op.op, Op::NewArray(..)) {
+            push(
+                &mut output,
+                Statement::NewArray(super::fresh_fill::allocate(ssa, op)?),
+                budget,
+            )?;
+        } else if matches!(op.op, Op::FreshFill(..)) {
+            push(
+                &mut output,
+                Statement::FreshFill(super::fresh_fill::fill(storage, op, budget)?),
+                budget,
+            )?;
+        } else if let Op::EmptyFill(_, id) = op.op {
             let proof =
                 storage
                     .empty_fills
@@ -448,7 +463,7 @@ pub(super) fn operations(
                     return Ok(None);
                 };
                 let mut arguments = Vec::new();
-                for argument in &ssa.call_uses[index].arguments {
+                for argument in ssa.call_uses[index].arguments(site.reference, site.pc)? {
                     budget.charge_work(1)?;
                     push(
                         &mut arguments,

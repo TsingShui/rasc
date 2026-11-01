@@ -362,6 +362,12 @@ pub(super) fn verify(
                     "dispatcher omitted an original operation",
                 ))?;
             let matches = match actual {
+                super::calls::Statement::NewArray(actual) => {
+                    super::fresh_fill::verify_allocation(ssa, bound, actual, budget)?
+                }
+                super::calls::Statement::FreshFill(actual) => {
+                    super::fresh_fill::verify_fill(storage, bound, actual, budget)?
+                }
                 super::calls::Statement::EmptyFill {
                     array,
                     result,
@@ -546,7 +552,12 @@ pub(super) fn verify(
                                 matches!(result, crate::pipeline::branch::DeclarationType::Object)
                                     && matches!(
                                         ssa.kinds[at],
-                                        Some(Kind::String | Kind::Nominal(_))
+                                        Some(
+                                            Kind::String
+                                                | Kind::Nominal(_)
+                                                | Kind::PrimitiveArray(_)
+                                                | Kind::ObjectArray
+                                        )
                                     )
                             }
                             ValueUse::Direct(_) => {
@@ -557,6 +568,10 @@ pub(super) fn verify(
                                         | crate::pipeline::branch::DeclarationType::Object
                                         | crate::pipeline::branch::DeclarationType::String
                                         | crate::pipeline::branch::DeclarationType::Nominal(_)
+                                        | crate::pipeline::branch::DeclarationType::PrimitiveArray(
+                                            _
+                                        )
+                                        | crate::pipeline::branch::DeclarationType::ObjectArray
                                 ) && ssa.kinds[at] == Some(result.kind())
                             }
                             ValueUse::Narrow { kind, .. } => {

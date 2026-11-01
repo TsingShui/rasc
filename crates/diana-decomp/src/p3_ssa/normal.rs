@@ -49,6 +49,8 @@ pub(crate) struct BoundBlock {
     pub other: Option<ValueId>,
 }
 pub(crate) struct SsaBody<'a> {
+    pub array_creations: Vec<crate::p2_flow::normal::ArrayCreation>,
+    pub fresh_fills: Vec<crate::p2_flow::normal::FreshFillSite>,
     pub empty_fills: Vec<crate::p2_flow::normal::EmptyFillSite>,
     pub casts: Vec<crate::p2_flow::normal::CastSite>,
     pub strings: Vec<crate::p2_flow::normal::StringLiteral<'a>>,
@@ -408,6 +410,8 @@ pub(crate) fn build<'a>(
         operations,
         result: flow.result,
         raw: flow.raw,
+        array_creations: flow.array_creations,
+        fresh_fills: flow.fresh_fills,
         empty_fills: flow.empty_fills,
         casts: flow.casts,
         strings: flow.strings,

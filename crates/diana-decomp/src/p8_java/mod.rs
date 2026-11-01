@@ -11,6 +11,7 @@ pub(crate) mod dispatcher;
 mod dispatcher_verify;
 pub(crate) mod field_ops;
 pub(crate) mod fresh_array;
+pub(crate) mod fresh_fill;
 pub(crate) mod heap_access;
 pub(crate) mod receiver;
 mod receiver_ops;

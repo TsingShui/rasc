@@ -59,9 +59,10 @@ pub(super) fn returned(
         | (Some(Kind::Object), Kind::Object)
         | (Some(Kind::String), Kind::String) => Some(ValueUse::Direct(value)),
         (Some(Kind::Boolean), Kind::Int) => Some(ValueUse::BooleanWord(value)),
-        (Some(Kind::String | Kind::Nominal(_)), Kind::Object) => {
-            Some(ValueUse::UpcastObject(value))
-        }
+        (
+            Some(Kind::String | Kind::Nominal(_) | Kind::PrimitiveArray(_) | Kind::ObjectArray),
+            Kind::Object,
+        ) => Some(ValueUse::UpcastObject(value)),
         (Some(Kind::Int), Kind::Boolean)
             if ssa.integral_bits[index] != 0 && ssa.integral_bits[index] & 4 == 0 =>
         {
@@ -160,7 +161,9 @@ pub(super) fn operation(
             },
         ),
         Op::Nop => return Ok(None),
-        Op::EmptyFill(..)
+        Op::NewArray(..)
+        | Op::FreshFill(..)
+        | Op::EmptyFill(..)
         | Op::Cast(..)
         | Op::String(..)
         | Op::Call(_, _)
@@ -211,6 +214,7 @@ pub(crate) fn verify(
     representation: crate::RepresentationPolicy,
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<Option<VerifiedJavaMethod>, RequestError> {
+    super::fresh_fill::validate(input, &storage.typed, budget)?;
     if !super::cast_ops::validate(input, catalog, &storage.typed, budget)? {
         return Ok(None);
     }

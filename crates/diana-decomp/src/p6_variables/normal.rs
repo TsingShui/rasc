@@ -76,6 +76,7 @@ pub(crate) struct StorageBody<'a> {
     pub typed: TypedBody<'a>,
     pub locals: Vec<Local>,
     pub empty_fills: Vec<super::empty_fill::LengthOnly>,
+    pub fresh_fills: Vec<super::fresh_fill::FreshArray>,
     entry: CopyPlan,
     normal: Vec<CopyPlan>,
 }
@@ -216,6 +217,20 @@ pub(crate) fn allocate<'a>(
             budget,
         )?;
     }
+    let mut fresh_fills = Vec::new();
+    for op in &typed.ssa.operations {
+        budget.charge_work(1)?;
+        let crate::p2_flow::normal::Op::FreshFill(_, id) = op.op else {
+            continue;
+        };
+        if usize::try_from(id.0).map_err(|_| RequestError::PlatformCapacity)? != fresh_fills.len() {
+            return Err(RequestError::InternalInvariant(
+                "fresh fill changed storage identity",
+            ));
+        }
+        let proof = super::fresh_fill::prove(&typed, op, budget)?;
+        push(&mut fresh_fills, proof, budget)?;
+    }
     let mut empty_fills = Vec::new();
     for op in &typed.ssa.operations {
         budget.charge_work(1)?;
@@ -254,6 +269,7 @@ pub(crate) fn allocate<'a>(
         typed,
         locals,
         empty_fills,
+        fresh_fills,
         entry,
         normal,
     }))

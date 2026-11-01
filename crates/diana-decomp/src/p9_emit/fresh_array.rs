@@ -12,7 +12,7 @@ fn value(
     output.push("v", budget)?;
     output.unsigned(u64::from(id.0), budget)
 }
-fn element(
+pub(super) fn element(
     element: &ArrayElement,
     output: &mut TextBuffer,
     budget: &mut MethodBudget<'_, '_>,

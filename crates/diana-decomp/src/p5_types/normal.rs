@@ -38,12 +38,14 @@ pub(crate) struct TypedBody<'a> {
     pub bindings: Vec<crate::p4_calls::normal::CallEvidence>,
     pub call_uses: Vec<crate::p5_types::calls::CallUses>,
     pub cast_uses: Vec<crate::p5_types::calls::TypedUse>,
-    pub empty_fills: Vec<EmptyFillUse>,
+    pub empty_fills: Vec<PrimitiveFillUse>,
+    pub array_lengths: Vec<crate::p5_types::calls::TypedUse>,
+    pub fresh_fills: Vec<PrimitiveFillUse>,
 
     pub field_declarations: Vec<Option<crate::p4_calls::normal::FieldEvidence>>,
     pub field_uses: Vec<Option<FieldUse>>,
 }
-pub(crate) struct EmptyFillUse {
+pub(crate) struct PrimitiveFillUse {
     _sealed: (),
     pub array: crate::p3_ssa::normal::ValueId,
     pub component: super::PrimitiveArray,
@@ -131,6 +133,18 @@ pub(crate) fn solve<'a>(
                 (bits, declaration.range(), Some(kind))
             }
             Definition::OpResult(id) => match ssa.operation(id)?.op {
+                Op::NewArray(_, _, id) => (
+                    0,
+                    None,
+                    Some(Kind::PrimitiveArray(
+                        ssa.array_creations
+                            .get(ix(id.0)?)
+                            .ok_or(RequestError::InternalInvariant(
+                                "array allocation lost type",
+                            ))?
+                            .component,
+                    )),
+                ),
                 Op::Cast(_, id) => (
                     0,
                     None,
@@ -185,7 +199,11 @@ pub(crate) fn solve<'a>(
                     (0, None, Some(Kind::Object))
                 }
                 Op::Move(_, _) => (0, None, None),
-                Op::Nop | Op::ArrayStore(..) | Op::FieldStore(..) | Op::EmptyFill(..) => {
+                Op::Nop
+                | Op::ArrayStore(..)
+                | Op::FieldStore(..)
+                | Op::EmptyFill(..)
+                | Op::FreshFill(..) => {
                     return Err(RequestError::InternalInvariant(
                         "NOP acquired a normal value definition",
                     ));
@@ -277,6 +295,9 @@ pub(crate) fn solve<'a>(
     let Some(arrays) = solve_arrays(&ssa, &kinds, &integral_bits, budget)? else {
         return Ok(None);
     };
+    let Some(array_uses) = solve_new_arrays(&ssa, &kinds, budget)? else {
+        return Ok(None);
+    };
     let Some(empty_fills) = solve_empty_fills(&ssa, &kinds, budget)? else {
         return Ok(None);
     };
@@ -302,6 +323,8 @@ pub(crate) fn solve<'a>(
         call_uses,
         cast_uses,
         empty_fills,
+        array_lengths: array_uses.lengths,
+        fresh_fills: array_uses.fills,
         field_declarations,
         field_uses,
     }))
@@ -497,7 +520,7 @@ fn solve_empty_fills(
     ssa: &SsaBody<'_>,
     kinds: &[Option<Kind>],
     budget: &mut MethodBudget<'_, '_>,
-) -> Result<Option<Vec<EmptyFillUse>>, RequestError> {
+) -> Result<Option<Vec<PrimitiveFillUse>>, RequestError> {
     let mut uses = Vec::new();
     for op in &ssa.operations {
         budget.charge_work(1)?;
@@ -530,7 +553,7 @@ fn solve_empty_fills(
         };
         push(
             &mut uses,
-            EmptyFillUse {
+            PrimitiveFillUse {
                 _sealed: (),
                 array,
                 component,
@@ -539,4 +562,84 @@ fn solve_empty_fills(
         )?;
     }
     Ok(Some(uses))
+}
+
+struct ArrayUses {
+    lengths: Vec<crate::p5_types::calls::TypedUse>,
+    fills: Vec<PrimitiveFillUse>,
+}
+fn solve_new_arrays(
+    ssa: &SsaBody<'_>,
+    kinds: &[Option<Kind>],
+    budget: &mut MethodBudget<'_, '_>,
+) -> Result<Option<ArrayUses>, RequestError> {
+    let mut lengths = Vec::new();
+    let mut fills = Vec::new();
+    for op in &ssa.operations {
+        budget.charge_work(1)?;
+        match op.op {
+            Op::NewArray(_, _, id) => {
+                if ix(id.0)? != lengths.len() {
+                    return Err(RequestError::InternalInvariant(
+                        "array creation changed identity",
+                    ));
+                }
+                let value = op.input(0)?;
+                let conversion = match kinds[ix(value.0)?] {
+                    Some(Kind::Int) => UseConversion::Identity,
+                    Some(Kind::Boolean) => UseConversion::BooleanWord,
+                    None => return Ok(None),
+                    _ => {
+                        return Err(crate::input::MethodError::Malformed {
+                            pc: op.pc,
+                            problem: crate::input::MethodProblem::InvalidTypeOperand,
+                        }
+                        .into());
+                    }
+                };
+                push(
+                    &mut lengths,
+                    crate::p5_types::calls::TypedUse { value, conversion },
+                    budget,
+                )?;
+            }
+            Op::FreshFill(_, id) => {
+                if ix(id.0)? != fills.len() {
+                    return Err(RequestError::InternalInvariant(
+                        "fresh fill changed identity",
+                    ));
+                }
+                let site = ssa
+                    .fresh_fills
+                    .get(ix(id.0)?)
+                    .ok_or(RequestError::InternalInvariant("fresh fill lost payload"))?;
+                let array = op.input(0)?;
+                let component = match kinds[ix(array.0)?] {
+                    Some(Kind::PrimitiveArray(component)) if component.width() == site.width => {
+                        component
+                    }
+                    None => return Ok(None),
+                    _ if ssa.is_zero(array)? => return Ok(None),
+                    _ => {
+                        return Err(crate::input::MethodError::Malformed {
+                            pc: op.pc,
+                            problem: crate::input::MethodProblem::InvalidArrayPayloadType,
+                        }
+                        .into());
+                    }
+                };
+                push(
+                    &mut fills,
+                    PrimitiveFillUse {
+                        _sealed: (),
+                        array,
+                        component,
+                    },
+                    budget,
+                )?;
+            }
+            _ => {}
+        }
+    }
+    Ok(Some(ArrayUses { lengths, fills }))
 }
