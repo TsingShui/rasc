@@ -195,3 +195,107 @@ fn t07_branch_inputs_preserve_edge_identity_and_reject_undefined_joins() {
         }
     }
 }
+
+#[test]
+fn array_control_flow_uses_shared_definitions_and_rejects_invalid_element_and_index_types() {
+    use super::fixture::{CodeRecipe, with_array_code};
+    use diana_decomp::RepresentationPolicy;
+    enum Expected {
+        Java,
+        InvalidArrayType,
+    }
+    let cases = [
+        (
+            vec![
+                0x2021, 0x0038, 6, 0x0112, 0x0044, 0x0102, 0x000f, 0xf012, 0x000f,
+            ],
+            3,
+            Expected::Java,
+        ),
+        (
+            vec![
+                0x0012, 0x0112, 0x4221, 0x2135, 8, 0x0344, 0x0104, 0x30b0, 0x01d8, 0x0101, 0xf828,
+                0x000f,
+            ],
+            5,
+            Expected::Java,
+        ),
+        (
+            vec![
+                0x3221, 0x0238, 7, 0x0012, 0x7112, 0x014b, 0x0003, 0x010f, 0x020f,
+            ],
+            4,
+            Expected::Java,
+        ),
+        (
+            vec![
+                0x2021, 0x0038, 6, 0x0112, 0x0046, 0x0102, 0x000f, 0xf012, 0x000f,
+            ],
+            3,
+            Expected::InvalidArrayType,
+        ),
+        (
+            vec![
+                0x2021, 0x0038, 6, 0x2107, 0x0044, 0x0102, 0x000f, 0xf012, 0x000f,
+            ],
+            3,
+            Expected::InvalidArrayType,
+        ),
+    ];
+    for (words, registers, expected) in cases {
+        let fixture = with_array_code(CodeRecipe {
+            instructions: &words,
+            registers_size: registers,
+            outs_size: 0,
+        });
+        for policy in [
+            RepresentationPolicy::StructuredThenDispatch,
+            RepresentationPolicy::DispatchOnly,
+        ] {
+            let mut control = RunContext::new(Limits::default(), &|| false);
+            let engine = Engine::open(
+                vec![DexImage {
+                    bytes: &fixture.bytes,
+                    header_offset: ByteOffset(0),
+                    origin: ImageOrigin { input: InputId(0) },
+                }],
+                Options::default(),
+                DeclarationCatalog::empty(EnvironmentId(0)),
+                &mut control,
+            )
+            .unwrap()
+            .with_representation(policy);
+            let report = engine
+                .decompile(
+                    Request {
+                        class: ClassKey {
+                            dex: DexId(0),
+                            class_def: ClassDefId(0),
+                        },
+                        method: Some(MethodSelector {
+                            name: "f".encode_utf16().collect(),
+                            prototype: "([I)I".encode_utf16().collect(),
+                        }),
+                    },
+                    &mut control,
+                )
+                .unwrap();
+            let ClassOutput::Mixed { members, .. } = report.class();
+            match expected {
+                Expected::Java => assert!(
+                    matches!(&members[0], MethodOutput::Java { .. }),
+                    "array control flow did not produce verified Java: {words:?}"
+                ),
+                Expected::InvalidArrayType => {
+                    let reason = match &members[0] {
+                        MethodOutput::Unavailable { reason, .. } => reason,
+                        MethodOutput::Debug { reason, .. } => reason,
+                        _ => panic!("invalid array input produced trusted Java: {words:?}"),
+                    };
+                    let diagnostic = &report.diagnostics()[reason.0];
+                    assert_eq!(diagnostic.cause.kind(), FailureKind::Malformed, "{words:?}");
+                }
+            }
+        }
+    }
+}

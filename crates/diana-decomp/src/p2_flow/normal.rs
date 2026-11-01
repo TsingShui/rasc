@@ -15,6 +15,8 @@ pub(crate) enum DeclarationType {
     Object,
     String,
     Float,
+    IntArray,
+    ObjectArray,
     Narrow(crate::p5_types::Narrow),
 }
 impl DeclarationType {
@@ -25,6 +27,8 @@ impl DeclarationType {
             Self::Object => Kind::Object,
             Self::String => Kind::String,
             Self::Float => Kind::Float,
+            Self::IntArray => Kind::IntArray,
+            Self::ObjectArray => Kind::ObjectArray,
         }
     }
     pub(crate) fn spelling(self) -> &'static str {
@@ -39,7 +43,7 @@ impl DeclarationType {
             Self::Int => Some(IntRange::ALL),
             Self::Boolean => Some(IntRange::BOOLEAN),
             Self::Narrow(kind) => Some(kind.range()),
-            Self::Object | Self::String | Self::Float => None,
+            Self::Object | Self::String | Self::Float | Self::IntArray | Self::ObjectArray => None,
         }
     }
 }
@@ -85,7 +89,15 @@ pub(crate) struct CallSite {
     pub result_pc: Option<CodeUnitOffset>,
 }
 #[derive(Clone, Copy, Eq, PartialEq)]
+pub(crate) enum ArrayElement {
+    Int,
+    Object,
+}
+#[derive(Clone, Copy, Eq, PartialEq)]
 pub(crate) enum Op {
+    ArrayLength(RegisterId, RegisterId),
+    ArrayLoad(RegisterId, RegisterId, RegisterId, ArrayElement),
+    ArrayStore(RegisterId, RegisterId, RegisterId, ArrayElement),
     Call(CallId, Option<RegisterId>),
     Compare(
         RegisterId,
@@ -148,9 +160,13 @@ impl Op {
     pub(crate) fn effects(self) -> Effects {
         let conservative = matches!(self, Self::Call(_, _));
         Effects {
-            heap_read: conservative,
-            heap_write: conservative,
-            may_throw: conservative,
+            heap_read: conservative || matches!(self, Self::ArrayLoad(..)),
+            heap_write: conservative || matches!(self, Self::ArrayStore(..)),
+            may_throw: conservative
+                || matches!(
+                    self,
+                    Self::ArrayLength(..) | Self::ArrayLoad(..) | Self::ArrayStore(..)
+                ),
             call: conservative,
             class_init: conservative,
         }
@@ -187,10 +203,13 @@ fn ix(value: u32) -> Result<usize, RequestError> {
 pub(crate) fn destination(op: Op) -> Option<RegisterId> {
     match op {
         Op::Call(_, destination) => destination,
-        Op::Constant(r, _) | Op::Move(r, _) | Op::Binary(r, _, _, _) | Op::Compare(r, _, _, _) => {
-            Some(r)
-        }
-        Op::Nop => None,
+        Op::Constant(r, _)
+        | Op::Move(r, _)
+        | Op::Binary(r, _, _, _)
+        | Op::Compare(r, _, _, _)
+        | Op::ArrayLength(r, _)
+        | Op::ArrayLoad(r, _, _, _) => Some(r),
+        Op::Nop | Op::ArrayStore(..) => None,
     }
 }
 pub(crate) enum Reads<'a> {
@@ -222,6 +241,9 @@ impl Op {
                 ))?;
                 return Ok(Reads::Call(call.registers.iter()));
             }
+            Self::ArrayLength(_, array) => [Some(array), None, None],
+            Self::ArrayLoad(_, array, index, _) => [Some(array), Some(index), None],
+            Self::ArrayStore(array, index, value, _) => [Some(array), Some(index), Some(value)],
             Self::Compare(_, left, _, right) => [Some(left), Some(right), None],
             Self::Binary(_, left, _, Operand::Register(right)) => [Some(left), Some(right), None],
             Self::Binary(_, left, _, Operand::Literal(_)) | Self::Move(_, left) => {
@@ -358,6 +380,16 @@ pub(crate) fn decode<'a>(
                 DeclarationType::Int
             } else if name.matches_with(&[90], budget)? {
                 DeclarationType::Boolean
+            } else if name.matches_with(&[91, 73], budget)? {
+                DeclarationType::IntArray
+            } else if name.matches_with(
+                &[
+                    91, 76, 106, 97, 118, 97, 47, 108, 97, 110, 103, 47, 79, 98, 106, 101, 99, 116,
+                    59,
+                ],
+                budget,
+            )? {
+                DeclarationType::ObjectArray
             } else if name.matches_with(&[70], budget)? {
                 DeclarationType::Float
             } else if name.matches_with(&[66], budget)? {
@@ -394,7 +426,6 @@ pub(crate) fn decode<'a>(
     let mut leaders = Vec::new();
     push(&mut leaders, CodeUnitOffset(0), budget)?;
     let mut pc = CodeUnitOffset(0);
-    let mut has_branch = false;
     while pc.0 < raw.code_units().0 {
         budget.charge_work(1)?;
         let layout = instruction_layout(raw.instructions(), pc, raw.version())
@@ -478,10 +509,30 @@ pub(crate) fn decode<'a>(
                     };
                     Decoded::Op(Op::Binary(reg(0)?, left, arithmetic, right))
                 }
+                0x21 => Decoded::Op(Op::ArrayLength(reg(0)?, reg(1)?)),
+                0x44 | 0x46 => Decoded::Op(Op::ArrayLoad(
+                    reg(0)?,
+                    reg(1)?,
+                    reg(2)?,
+                    if spec.opcode == 0x44 {
+                        ArrayElement::Int
+                    } else {
+                        ArrayElement::Object
+                    },
+                )),
+                0x4b | 0x4d => Decoded::Op(Op::ArrayStore(
+                    reg(1)?,
+                    reg(2)?,
+                    reg(0)?,
+                    if spec.opcode == 0x4b {
+                        ArrayElement::Int
+                    } else {
+                        ArrayElement::Object
+                    },
+                )),
                 0xe => Decoded::ReturnVoid,
                 0xf | 0x11 => Decoded::Return(reg(0)?),
                 0x2b | 0x2c => {
-                    has_branch = true;
                     let payload = target()?;
                     let payload_layout =
                         instruction_layout(raw.instructions(), payload, raw.version())
@@ -604,13 +655,11 @@ pub(crate) fn decode<'a>(
                     Decoded::Op(Op::Call(call, destination))
                 }
                 0x28..=0x2a => {
-                    has_branch = true;
                     let to = target()?;
                     push(&mut leaders, to, budget)?;
                     Decoded::Jump(to)
                 }
                 0x32..=0x3d => {
-                    has_branch = true;
                     let to = target()?;
                     push(&mut leaders, to, budget)?;
                     push(&mut leaders, next, budget)?;
@@ -631,15 +680,6 @@ pub(crate) fn decode<'a>(
             push(&mut instructions, (pc, decoded), budget)?;
         }
         pc = next;
-    }
-    if !has_branch
-        && calls.is_empty()
-        && !matches!(result, ResultType::Value(DeclarationType::Narrow(_)))
-        && !parameters
-            .iter()
-            .any(|kind| matches!(kind, DeclarationType::Narrow(_)))
-    {
-        return Ok(None);
     }
     // Block order follows original instruction order; no output sorting is used.
     let mut pcs = Vec::new();

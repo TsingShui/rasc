@@ -1,14 +1,11 @@
 use crate::input::{MethodInput, RawPrintable};
-use crate::pipeline::branch::{BlockId, Definition, EdgeId, Kind, Op, Sym, Terminal, TypedBody};
+use crate::p6_variables::normal::StorageBody;
+use crate::pipeline::branch::{BlockId, EdgeId, Kind, Op, Terminal, TypedBody};
 use crate::substrate::owned::{TextBuffer, copy_units, reserve};
 use crate::{EnvironmentId, MethodBudget, RequestError, VerifiedJavaMethod};
 
 pub(crate) use crate::p6_variables::LocalId;
-pub(crate) struct Local {
-    pub id: LocalId,
-    pub kind: Kind,
-    pub parameter: Option<u32>,
-}
+pub(crate) use crate::p6_variables::normal::Local;
 pub(crate) enum Right {
     Local(LocalId),
     Literal(i32),
@@ -131,98 +128,25 @@ fn edge(
     }
     found.ok_or(RequestError::InternalInvariant("diamond edge is missing"))
 }
+pub(super) fn local_declarations(
+    storage: &StorageBody<'_>,
+    budget: &mut MethodBudget<'_, '_>,
+) -> Result<Vec<Local>, RequestError> {
+    let mut locals = Vec::new();
+    for &local in &storage.locals {
+        budget.charge_work(1)?;
+        append(&mut locals, local, budget)?;
+    }
+    Ok(locals)
+}
 pub(super) fn copies(
-    ssa: &TypedBody<'_>,
+    storage: &StorageBody<'_>,
     incoming: Option<EdgeId>,
     target: BlockId,
     output: &mut Vec<Assignment>,
-    locals: &mut Vec<Local>,
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<(), RequestError> {
-    use crate::p6_variables::{Copy, LocalType, LocalTypeId, Width};
-    let mut parallel = Vec::new();
-    for phi in &ssa.ssa.phis {
-        budget.charge_work(1)?;
-        if phi.block == target {
-            let mut sym = None;
-            for &(edge, value) in &phi.inputs {
-                budget.charge_work(1)?;
-                if edge == incoming {
-                    if sym.is_some() {
-                        return Err(RequestError::InternalInvariant(
-                            "verified Phi has a duplicate edge",
-                        ));
-                    }
-                    sym = Some(value);
-                }
-            }
-            let sym = sym.ok_or(RequestError::InternalInvariant(
-                "verified Phi lost its edge",
-            ))?;
-            let Sym::Value(source) = sym else {
-                return Err(RequestError::InternalInvariant(
-                    "verified diamond contains a bad Phi input",
-                ));
-            };
-            append(
-                &mut parallel,
-                Copy {
-                    target: LocalId(phi.result.0),
-                    source: LocalId(source.0),
-                },
-                budget,
-            )?;
-        }
-    }
-    let mut types = Vec::new();
-    for local in locals.iter() {
-        budget.charge_work(1)?;
-        append(
-            &mut types,
-            LocalType::new(
-                LocalTypeId(match local.kind {
-                    Kind::Int => 0,
-                    Kind::Boolean => 1,
-                    Kind::Object => 2,
-                    Kind::String => 4,
-                    Kind::Float => 3,
-                }),
-                1,
-            )?,
-            budget,
-        )?;
-    }
-    let plan = crate::p6_variables::plan(&parallel, &types, budget)?;
-    for temporary in plan.temporaries {
-        budget.charge_work(1)?;
-        if ix(temporary.local.0)? != locals.len() {
-            return Err(RequestError::InternalInvariant(
-                "copy temporary does not extend local storage",
-            ));
-        }
-        let kind = match (temporary.kind.identity.0, temporary.kind.width) {
-            (0, Width::One) => Kind::Int,
-            (1, Width::One) => Kind::Boolean,
-            (2, Width::One) => Kind::Object,
-            (4, Width::One) => Kind::String,
-            (3, Width::One) => Kind::Float,
-            _ => {
-                return Err(RequestError::InternalInvariant(
-                    "diamond copy temporary has a foreign type",
-                ));
-            }
-        };
-        append(
-            locals,
-            Local {
-                id: temporary.local,
-                kind,
-                parameter: None,
-            },
-            budget,
-        )?;
-    }
-    for copy in plan.steps {
+    for copy in &storage.copies(incoming, target)?.steps {
         budget.charge_work(1)?;
         append(
             output,
@@ -252,7 +176,7 @@ pub(super) fn operation(
             },
         ),
         Op::Nop => return Ok(None),
-        Op::Call(_, _) => {
+        Op::Call(_, _) | Op::ArrayLength(..) | Op::ArrayLoad(..) | Op::ArrayStore(..) => {
             return Err(RequestError::InternalInvariant(
                 "call entered pure assignment lowering",
             ));
@@ -289,7 +213,7 @@ pub(super) fn operations(
 
 pub(crate) fn verify(
     input: &MethodInput<'_, '_>,
-    ssa: TypedBody<'_>,
+    storage: StorageBody<'_>,
     environment: EnvironmentId,
     representation: crate::RepresentationPolicy,
     budget: &mut MethodBudget<'_, '_>,
@@ -297,19 +221,20 @@ pub(crate) fn verify(
     if matches!(
         representation,
         crate::RepresentationPolicy::StructuredThenDispatch
-    ) && let Some(method) = verify_diamond(input, &ssa, environment, budget)?
+    ) && let Some(method) = verify_diamond(input, &storage, environment, budget)?
     {
         return Ok(Some(method));
     }
-    super::dispatcher::verify(input, &ssa, environment, representation, budget)
+    super::dispatcher::verify(input, &storage, environment, representation, budget)
 }
 
 fn verify_diamond(
     input: &MethodInput<'_, '_>,
-    ssa: &TypedBody<'_>,
+    storage: &StorageBody<'_>,
     environment: EnvironmentId,
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<Option<VerifiedJavaMethod>, RequestError> {
+    let ssa = &storage.typed;
     if ssa.ssa.blocks.len() != 4 {
         return Ok(None);
     }
@@ -384,26 +309,7 @@ fn verify_diamond(
     if !super::declarations::identifier(&name, budget)? {
         return Ok(None);
     }
-    let mut locals = Vec::new();
-    for (index, definition) in ssa.ssa.values.iter().enumerate() {
-        budget.charge_work(1)?;
-        let Some(kind) = ssa.kinds[index] else {
-            return Ok(None);
-        };
-        let parameter = match definition {
-            Definition::Parameter(index) => Some(*index),
-            _ => None,
-        };
-        append(
-            &mut locals,
-            Local {
-                id: LocalId(u32::try_from(index).map_err(|_| RequestError::PlatformCapacity)?),
-                kind,
-                parameter,
-            },
-            budget,
-        )?;
-    }
+    let locals = local_declarations(storage, budget)?;
     let condition = LocalId(
         ssa.ssa.bound[0]
             .terminal
@@ -416,8 +322,10 @@ fn verify_diamond(
     if condition_kind == Kind::Float {
         return Ok(None);
     }
-    if matches!(condition_kind, Kind::Boolean | Kind::Object | Kind::String)
-        && !matches!(opcode, 0x38 | 0x39)
+    if matches!(
+        condition_kind,
+        Kind::Boolean | Kind::Object | Kind::String | Kind::IntArray | Kind::ObjectArray
+    ) && !matches!(opcode, 0x38 | 0x39)
     {
         return Ok(None);
     }
@@ -433,42 +341,38 @@ fn verify_diamond(
         return Ok(None);
     };
     let mut entry = Vec::new();
-    copies(ssa, None, BlockId(0), &mut entry, &mut locals, budget)?;
+    copies(storage, None, BlockId(0), &mut entry, budget)?;
     operations(ssa, BlockId(0), &mut entry, budget)?;
     let mut yes_statements = Vec::new();
     copies(
-        ssa,
+        storage,
         Some(edge(ssa, BlockId(0), yes, budget)?),
         yes,
         &mut yes_statements,
-        &mut locals,
         budget,
     )?;
     operations(ssa, yes, &mut yes_statements, budget)?;
     copies(
-        ssa,
+        storage,
         Some(edge(ssa, yes, join, budget)?),
         join,
         &mut yes_statements,
-        &mut locals,
         budget,
     )?;
     let mut no_statements = Vec::new();
     copies(
-        ssa,
+        storage,
         Some(edge(ssa, BlockId(0), no, budget)?),
         no,
         &mut no_statements,
-        &mut locals,
         budget,
     )?;
     operations(ssa, no, &mut no_statements, budget)?;
     copies(
-        ssa,
+        storage,
         Some(edge(ssa, no, join, budget)?),
         join,
         &mut no_statements,
-        &mut locals,
         budget,
     )?;
     // Join operations are a sequence after both incoming copy plans. The first

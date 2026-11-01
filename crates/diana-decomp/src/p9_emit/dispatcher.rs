@@ -28,6 +28,8 @@ pub(super) fn locals(
                 Kind::Object => "java.lang.Object ",
                 Kind::String => "java.lang.String ",
                 Kind::Float => "float ",
+                Kind::IntArray => "int[] ",
+                Kind::ObjectArray => "java.lang.Object[] ",
             },
             budget,
         )?;
@@ -42,7 +44,7 @@ pub(super) fn locals(
                 match declaration.kind {
                     Kind::Int => " = 0",
                     Kind::Boolean => " = false",
-                    Kind::Object | Kind::String => " = null",
+                    Kind::Object | Kind::String | Kind::IntArray | Kind::ObjectArray => " = null",
                     Kind::Float => " = 0.0f",
                 },
                 budget,
@@ -62,6 +64,9 @@ pub(super) fn statements(
     for statement in &case.statements {
         budget.charge_work(1)?;
         match statement {
+            crate::p8_java::calls::Statement::Array(statement) => {
+                super::array_ops::write(statement, output, budget)?
+            }
             crate::p8_java::calls::Statement::Assignment(statement) => {
                 assignments(std::slice::from_ref(statement), output, budget)?
             }
@@ -133,7 +138,10 @@ pub(super) fn open_if(
             local(*right, output, budget)?;
         } else {
             output.push(
-                if matches!(kind, Kind::Object | Kind::String) {
+                if matches!(
+                    kind,
+                    Kind::Object | Kind::String | Kind::IntArray | Kind::ObjectArray
+                ) {
                     "null"
                 } else {
                     "0"

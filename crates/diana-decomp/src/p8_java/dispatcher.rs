@@ -1,6 +1,7 @@
 use super::branch::{Assignment, Local, LocalId, copies};
 use crate::input::{MethodInput, RawPrintable};
-use crate::pipeline::branch::{BlockId, Definition, EdgeId, Kind, Terminal, TypedBody};
+use crate::p6_variables::normal::StorageBody;
+use crate::pipeline::branch::{BlockId, EdgeId, Kind, Terminal};
 use crate::substrate::owned::{TextBuffer, copy_units, reserve};
 use crate::{EnvironmentId, MethodBudget, RequestError, VerifiedJavaMethod};
 
@@ -51,13 +52,13 @@ fn push<T>(
     Ok(())
 }
 fn edge(
-    ssa: &TypedBody<'_>,
+    storage: &StorageBody<'_>,
     id: EdgeId,
     source: BlockId,
     target: BlockId,
-    locals: &mut Vec<Local>,
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<Edge, RequestError> {
+    let ssa = &storage.typed;
     let original = ssa
         .ssa
         .edges
@@ -74,7 +75,7 @@ fn edge(
         ));
     }
     let mut output = Vec::new();
-    copies(ssa, Some(id), target, &mut output, locals, budget)?;
+    copies(storage, Some(id), target, &mut output, budget)?;
     Ok(Edge {
         id,
         copies: output,
@@ -84,11 +85,12 @@ fn edge(
 
 pub(crate) fn verify(
     input: &MethodInput<'_, '_>,
-    ssa: &TypedBody<'_>,
+    storage: &StorageBody<'_>,
     environment: EnvironmentId,
     representation: crate::RepresentationPolicy,
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<Option<VerifiedJavaMethod>, RequestError> {
+    let ssa = &storage.typed;
     let RawPrintable::Method(raw) = input.raw() else {
         return Err(RequestError::InternalInvariant(
             "dispatcher has no original method",
@@ -127,27 +129,9 @@ pub(crate) fn verify(
     if !super::declarations::identifier(&name, budget)? {
         return Ok(None);
     }
-    let mut locals = Vec::new();
-    for (index, definition) in ssa.ssa.values.iter().enumerate() {
-        budget.charge_work(1)?;
-        let Some(kind) = ssa.kinds[index] else {
-            return Ok(None);
-        };
-        push(
-            &mut locals,
-            Local {
-                id: LocalId(u32::try_from(index).map_err(|_| RequestError::PlatformCapacity)?),
-                kind,
-                parameter: match definition {
-                    Definition::Parameter(index) => Some(*index),
-                    _ => None,
-                },
-            },
-            budget,
-        )?;
-    }
+    let locals = super::branch::local_declarations(storage, budget)?;
     let mut entry = Vec::new();
-    copies(ssa, None, BlockId(0), &mut entry, &mut locals, budget)?;
+    copies(storage, None, BlockId(0), &mut entry, budget)?;
     let mut cases = Vec::new();
     for (index, block) in ssa.ssa.blocks.iter().enumerate() {
         budget.charge_work(1)?;
@@ -210,17 +194,16 @@ pub(crate) fn verify(
                             &mut cases,
                             (
                                 case_key,
-                                edge(ssa, outgoing[index], key, target, &mut locals, budget)?,
+                                edge(storage, outgoing[index], key, target, budget)?,
                             ),
                             budget,
                         )?;
                     }
                     let default = edge(
-                        ssa,
+                        storage,
                         outgoing[table.cases.len()],
                         key,
                         table.default,
-                        &mut locals,
                         budget,
                     )?;
                     Transfer::Switch {
@@ -255,7 +238,7 @@ pub(crate) fn verify(
                             "jump edge coverage is not exact",
                         ));
                     }
-                    Transfer::Jump(edge(ssa, outgoing[0], key, target, &mut locals, budget)?)
+                    Transfer::Jump(edge(storage, outgoing[0], key, target, budget)?)
                 }
                 Terminal::Test {
                     opcode, yes, no, ..
@@ -283,8 +266,14 @@ pub(crate) fn verify(
                     {
                         return Ok(None);
                     }
-                    if matches!(kind, Kind::Boolean | Kind::Object | Kind::String)
-                        && !matches!(opcode, 0x32 | 0x33 | 0x38 | 0x39)
+                    if matches!(
+                        kind,
+                        Kind::Boolean
+                            | Kind::Object
+                            | Kind::String
+                            | Kind::IntArray
+                            | Kind::ObjectArray
+                    ) && !matches!(opcode, 0x32 | 0x33 | 0x38 | 0x39)
                     {
                         return Ok(None);
                     }
@@ -293,8 +282,8 @@ pub(crate) fn verify(
                         right,
                         kind,
                         opcode,
-                        yes: edge(ssa, outgoing[0], key, yes, &mut locals, budget)?,
-                        no: edge(ssa, outgoing[1], key, no, &mut locals, budget)?,
+                        yes: edge(storage, outgoing[0], key, yes, budget)?,
+                        no: edge(storage, outgoing[1], key, no, budget)?,
                     }
                 }
             };

@@ -354,6 +354,8 @@ fn diamond(
                 Kind::Object => "java.lang.Object ",
                 Kind::String => "java.lang.String ",
                 Kind::Float => "float ",
+                Kind::IntArray => "int[] ",
+                Kind::ObjectArray => "java.lang.Object[] ",
             },
             budget,
         )?;
@@ -378,7 +380,7 @@ fn diamond(
             }
             local(body.condition, output, budget)?;
         }
-        Kind::Object | Kind::String => {
+        Kind::Object | Kind::String | Kind::IntArray | Kind::ObjectArray => {
             local(body.condition, output, budget)?;
             output.push(
                 if body.opcode == 0x38 {

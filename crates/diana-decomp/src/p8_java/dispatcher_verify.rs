@@ -1,6 +1,6 @@
 use super::branch::{Assignment, Expression, LocalId, Right};
 use super::dispatcher::{Dispatcher, Edge, Transfer};
-use crate::p6_variables::{Copy, CopyPlan, LocalType, LocalTypeId, Temporary};
+use crate::p6_variables::{Copy, CopyPlan, LocalType, Temporary};
 use crate::pipeline::branch::{BlockId, Definition, EdgeId, Kind, Op, Sym, Terminal, TypedBody};
 use crate::substrate::owned::reserve;
 use crate::{MethodBudget, RequestError};
@@ -16,18 +16,7 @@ fn push<T>(
     items.push(item);
     Ok(())
 }
-fn ty(kind: Kind) -> Result<LocalType, RequestError> {
-    LocalType::new(
-        LocalTypeId(match kind {
-            Kind::Int => 0,
-            Kind::Boolean => 1,
-            Kind::Object => 2,
-            Kind::String => 4,
-            Kind::Float => 3,
-        }),
-        1,
-    )
-}
+use crate::p6_variables::normal::local_type as ty;
 fn same_expression(actual: &Expression, bound: &crate::pipeline::branch::BoundOp) -> bool {
     use crate::p2_flow::normal::Operand;
     let left = bound.inputs.first();
@@ -342,6 +331,9 @@ pub(super) fn verify(
                     "dispatcher omitted an original operation",
                 ))?;
             let matches = match actual {
+                super::calls::Statement::Array(actual) => {
+                    super::array_ops::verify(ssa, bound, actual, budget)?
+                }
                 super::calls::Statement::Assignment(actual) => {
                     bound.result.map(|id| id.0) == Some(actual.target.0)
                         && same_expression(&actual.expression, bound)

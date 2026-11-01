@@ -118,8 +118,9 @@ fn t09_two_entry_dispatcher_preserves_edges_and_never_reads_da_defaults() {
                     crate::p8_java::calls::Statement::Assignment(statement) => {
                         assign(std::slice::from_ref(statement), &mut values)
                     }
-                    crate::p8_java::calls::Statement::StaticCall { .. } => {
-                        panic!("call outside the pure loop interpretation")
+                    crate::p8_java::calls::Statement::StaticCall { .. }
+                    | crate::p8_java::calls::Statement::Array(_) => {
+                        panic!("effectful operation outside the pure loop interpretation")
                     }
                 }
             }

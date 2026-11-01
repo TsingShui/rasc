@@ -10,6 +10,8 @@ pub(crate) enum Kind {
     Object,
     String,
     Float,
+    IntArray,
+    ObjectArray,
 }
 impl Kind {
     pub(crate) fn spelling(self) -> &'static str {
@@ -19,6 +21,8 @@ impl Kind {
             Self::Object => "java.lang.Object",
             Self::String => "java.lang.String",
             Self::Float => "float",
+            Self::IntArray => "int[]",
+            Self::ObjectArray => "java.lang.Object[]",
         }
     }
 }
@@ -28,6 +32,28 @@ pub(crate) struct TypedBody<'a> {
     pub kinds: Vec<Option<Kind>>,
     pub integral_bits: Vec<u8>,
     pub ranges: Vec<Option<crate::p5_types::IntRange>>,
+    pub arrays: Vec<Option<ArrayEvidence>>,
+}
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub(crate) enum ArrayConversion {
+    Identity,
+    BooleanWord,
+    Null,
+    UpcastObject,
+}
+pub(crate) enum ArrayUse {
+    Length,
+    Load {
+        index: ArrayConversion,
+    },
+    Store {
+        index: ArrayConversion,
+        value: ArrayConversion,
+    },
+}
+pub(crate) struct ArrayEvidence {
+    _sealed: (),
+    pub usage: ArrayUse,
 }
 fn ix(value: u32) -> Result<usize, RequestError> {
     usize::try_from(value).map_err(|_| RequestError::PlatformCapacity)
@@ -64,7 +90,11 @@ pub(crate) fn solve<'a>(
                 let bits = match kind {
                     Kind::Boolean => 3,
                     Kind::Int => 7,
-                    Kind::Object | Kind::String | Kind::Float => 0,
+                    Kind::Object
+                    | Kind::String
+                    | Kind::Float
+                    | Kind::IntArray
+                    | Kind::ObjectArray => 0,
                 };
                 (bits, declaration.range(), Some(kind))
             }
@@ -78,7 +108,10 @@ pub(crate) fn solve<'a>(
                     Some(crate::p5_types::IntRange::literal(value)),
                     Some(Kind::Int),
                 ),
-                Op::Binary(_, _, _, _) | Op::Compare(_, _, _, _) => {
+                Op::ArrayLength(..)
+                | Op::ArrayLoad(_, _, _, crate::p2_flow::normal::ArrayElement::Int)
+                | Op::Binary(_, _, _, _)
+                | Op::Compare(_, _, _, _) => {
                     (7, Some(crate::p5_types::IntRange::ALL), Some(Kind::Int))
                 }
                 Op::Call(call, _) => match ssa.calls[ix(call.0)?].contract.result {
@@ -103,8 +136,11 @@ pub(crate) fn solve<'a>(
                         ));
                     }
                 },
+                Op::ArrayLoad(_, _, _, crate::p2_flow::normal::ArrayElement::Object) => {
+                    (0, None, Some(Kind::Object))
+                }
                 Op::Move(_, _) => (0, None, None),
-                Op::Nop => {
+                Op::Nop | Op::ArrayStore(..) => {
                     return Err(RequestError::InternalInvariant(
                         "NOP acquired a normal value definition",
                     ));
@@ -193,11 +229,99 @@ pub(crate) fn solve<'a>(
     if type_conflict {
         return Ok(None);
     }
+    let Some(arrays) = solve_arrays(&ssa, &kinds, &integral_bits, budget)? else {
+        return Ok(None);
+    };
     Ok(Some(TypedBody {
         _sealed: (),
         ssa,
         kinds,
         integral_bits,
         ranges,
+        arrays,
     }))
+}
+fn solve_arrays(
+    ssa: &SsaBody<'_>,
+    kinds: &[Option<Kind>],
+    bits: &[u8],
+    budget: &mut MethodBudget<'_, '_>,
+) -> Result<Option<Vec<Option<ArrayEvidence>>>, RequestError> {
+    use crate::p2_flow::normal::ArrayElement;
+    let mut result = Vec::new();
+    for op in &ssa.operations {
+        budget.charge_work(1)?;
+        let bad = || {
+            RequestError::from(crate::input::MethodError::Malformed {
+                pc: op.pc,
+                problem: crate::input::MethodProblem::InvalidArrayAccessType,
+            })
+        };
+        let usage = match op.op {
+            Op::ArrayLength(..) | Op::ArrayLoad(..) | Op::ArrayStore(..) => {
+                let component = match kinds[ix(op.input(0)?.0)?] {
+                    Some(Kind::IntArray) => ArrayElement::Int,
+                    Some(Kind::ObjectArray) => ArrayElement::Object,
+                    _ => return Ok(None),
+                };
+                if matches!(op.op, Op::ArrayLength(..)) {
+                    ArrayUse::Length
+                } else {
+                    let element = match op.op {
+                        Op::ArrayLoad(_, _, _, element) | Op::ArrayStore(_, _, _, element) => {
+                            element
+                        }
+                        _ => {
+                            return Err(RequestError::InternalInvariant(
+                                "array access lost element kind",
+                            ));
+                        }
+                    };
+                    if component != element {
+                        return Err(bad());
+                    }
+                    let index = match kinds[ix(op.input(1)?.0)?] {
+                        Some(Kind::Int) => ArrayConversion::Identity,
+                        Some(Kind::Boolean) => ArrayConversion::BooleanWord,
+                        None => return Ok(None),
+                        _ => return Err(bad()),
+                    };
+                    if matches!(op.op, Op::ArrayLoad(..)) {
+                        ArrayUse::Load { index }
+                    } else {
+                        let at = ix(op.input(2)?.0)?;
+                        let value = match (component, kinds[at]) {
+                            (ArrayElement::Int, Some(Kind::Int))
+                            | (ArrayElement::Object, Some(Kind::Object)) => {
+                                ArrayConversion::Identity
+                            }
+                            (ArrayElement::Int, Some(Kind::Boolean)) => {
+                                ArrayConversion::BooleanWord
+                            }
+                            (
+                                ArrayElement::Object,
+                                Some(Kind::String | Kind::IntArray | Kind::ObjectArray),
+                            ) => ArrayConversion::UpcastObject,
+                            (ArrayElement::Object, Some(Kind::Int)) if bits[at] == 1 => {
+                                ArrayConversion::Null
+                            }
+                            (_, None) => return Ok(None),
+                            _ => return Err(bad()),
+                        };
+                        ArrayUse::Store { index, value }
+                    }
+                }
+            }
+            _ => {
+                push(&mut result, None, budget)?;
+                continue;
+            }
+        };
+        push(
+            &mut result,
+            Some(ArrayEvidence { _sealed: (), usage }),
+            budget,
+        )?;
+    }
+    Ok(Some(result))
 }

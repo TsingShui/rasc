@@ -38,6 +38,7 @@ pub(crate) struct StaticCall {
     pub arguments: Vec<ValueUse>,
 }
 pub(crate) enum Statement {
+    Array(super::array_ops::Statement),
     Assignment(Assignment),
     StaticCall {
         target: Option<LocalId>,
@@ -264,7 +265,16 @@ pub(super) fn operations(
     for &id in &ssa.ssa.bound[ix(block.0)?].ops {
         budget.charge_work(1)?;
         let op = ssa.ssa.operation(id)?;
-        if let Op::Call(id, _) = op.op {
+        if matches!(
+            op.op,
+            Op::ArrayLength(..) | Op::ArrayLoad(..) | Op::ArrayStore(..)
+        ) {
+            push(
+                &mut output,
+                Statement::Array(super::array_ops::lower(ssa, op)?),
+                budget,
+            )?;
+        } else if let Op::Call(id, _) = op.op {
             let Some(call) = plan(ssa, id, budget)? else {
                 return Ok(None);
             };

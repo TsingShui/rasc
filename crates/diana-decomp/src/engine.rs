@@ -514,6 +514,28 @@ fn normal_member(
         });
     }
     if crate::p8_java::source_group_admitted(index, key, &facts, budget)?
+        && let Some(ssa) = crate::pipeline::branch::build(&input, catalog, budget)?
+    {
+        if let Some(declaration) = crate::p8_java::branch::verify(
+            &input,
+            ssa,
+            catalog.environment,
+            representation,
+            budget,
+        )? {
+            let source = crate::p9_emit::java(&declaration, budget)?;
+            return Ok(NormalMember::Java {
+                facts,
+                declaration,
+                source,
+            });
+        }
+        return Ok(NormalMember::Raw {
+            facts,
+            reason: OutputReason::BranchJavaUnsupported,
+        });
+    }
+    if crate::p8_java::source_group_admitted(index, key, &facts, budget)?
         && let Some(plan) = crate::pipeline::heap_access::build(&input, catalog, budget)?
         && let Some(declaration) =
             crate::p8_java::heap_access::verify(&input, plan, catalog, catalog.environment, budget)?
@@ -571,28 +593,6 @@ fn normal_member(
             facts,
             declaration,
             source,
-        });
-    }
-    if crate::p8_java::source_group_admitted(index, key, &facts, budget)?
-        && let Some(ssa) = crate::pipeline::branch::build(&input, catalog, budget)?
-    {
-        if let Some(declaration) = crate::p8_java::branch::verify(
-            &input,
-            ssa,
-            catalog.environment,
-            representation,
-            budget,
-        )? {
-            let source = crate::p9_emit::java(&declaration, budget)?;
-            return Ok(NormalMember::Java {
-                facts,
-                declaration,
-                source,
-            });
-        }
-        return Ok(NormalMember::Raw {
-            facts,
-            reason: OutputReason::BranchJavaUnsupported,
         });
     }
     let reason = if matches!(input.raw(), RawPrintable::Declaration(_)) {

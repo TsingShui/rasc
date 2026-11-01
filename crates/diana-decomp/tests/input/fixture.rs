@@ -72,6 +72,20 @@ pub(super) fn with_code(recipe: CodeRecipe<'_>) -> Fixture {
     )
 }
 
+pub(super) fn with_array_code(recipe: CodeRecipe<'_>) -> Fixture {
+    build_internal(
+        "f",
+        false,
+        false,
+        None,
+        Some(recipe),
+        MetadataRecipe {
+            array_parameter: true,
+            ..MetadataRecipe::default()
+        },
+    )
+}
+
 pub(super) fn with_debug(recipe: CodeRecipe<'_>, program: &[u8]) -> Fixture {
     build_internal(
         "f",
@@ -102,6 +116,7 @@ pub(super) fn with_values(values: &[u8]) -> Fixture {
 
 #[derive(Default)]
 struct MetadataRecipe<'a> {
+    array_parameter: bool,
     debug: Option<&'a [u8]>,
     values: Option<&'a [u8]>,
     annotations: bool,
@@ -156,6 +171,10 @@ fn build_internal(
     .into_iter()
     .map(|s| s.encode_utf16().collect())
     .collect();
+    if metadata.array_parameter {
+        strings.push("[I".encode_utf16().collect());
+        strings.push("IL".encode_utf16().collect());
+    }
     strings.push(vec![0xd800, 0, 0xdc00]);
     strings.sort();
     strings.dedup();
@@ -169,7 +188,7 @@ fn build_internal(
             .position(|s| s.iter().copied().eq(text.encode_utf16()))
             .unwrap() as u32
     };
-    let types = [
+    let mut types = vec![
         "I",
         "J",
         "Lfixtures/Case;",
@@ -177,6 +196,9 @@ fn build_internal(
         "Ljava/lang/Object;",
         "V",
     ];
+    if metadata.array_parameter {
+        types.push("[I");
+    }
     let mut methods = [
         (2u16, 0u16, name),
         (2, 1, name),
@@ -205,7 +227,7 @@ fn build_internal(
     bytes[..8].copy_from_slice(b"dex\n035\0");
     let params = bytes.len();
     bytes.extend_from_slice(&1u32.to_le_bytes());
-    bytes.extend_from_slice(&0u16.to_le_bytes());
+    bytes.extend_from_slice(&(if metadata.array_parameter { 6u16 } else { 0u16 }).to_le_bytes());
     align(&mut bytes);
     let long_params = bytes.len();
     bytes.extend_from_slice(&1u32.to_le_bytes());
@@ -396,13 +418,20 @@ fn build_internal(
         bytes.extend_from_slice(&(count as u32).to_le_bytes());
         bytes.extend_from_slice(&(offset as u32).to_le_bytes());
     }
-    for (index, descriptor) in types.into_iter().enumerate() {
+    for (index, descriptor) in types.iter().copied().enumerate() {
         put(&mut bytes, type_ids + index * 4, sid(descriptor));
     }
-    for (index, (shorty, ret, parameters)) in
-        [("II", 0, params), ("IJ", 0, long_params), ("V", 5, 0)]
-            .into_iter()
-            .enumerate()
+    for (index, (shorty, ret, parameters)) in [
+        (
+            if metadata.array_parameter { "IL" } else { "II" },
+            0,
+            params,
+        ),
+        ("IJ", 0, long_params),
+        ("V", 5, 0),
+    ]
+    .into_iter()
+    .enumerate()
     {
         put(&mut bytes, proto_ids + index * 12, sid(shorty));
         put(&mut bytes, proto_ids + index * 12 + 4, ret);
