@@ -35,6 +35,8 @@ pub enum RequestError {
         register: crate::RegisterId,
         pc: crate::CodeUnitOffset,
     },
+    #[error("non-empty fill has no admitted FreshArray shape at {pc:?}")]
+    ArrayFillShape { pc: crate::CodeUnitOffset },
     #[error("allocation/initialization cannot be represented at {pc:?}")]
     InitializationUnavailable { pc: crate::CodeUnitOffset },
     #[error("binding evidence missing for method {reference:?} at {pc:?}")]
@@ -75,7 +77,8 @@ impl RequestError {
             Self::UnknownDex | Self::UndefinedRegister { .. } | Self::InvalidWideRead { .. } => {
                 FailureKind::Malformed
             }
-            Self::JavaTargetLimit { .. }
+            Self::ArrayFillShape { .. }
+            | Self::JavaTargetLimit { .. }
             | Self::InitializationUnavailable { .. }
             | Self::BindingEvidenceMissing { .. }
             | Self::FieldBindingEvidenceMissing { .. }

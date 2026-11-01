@@ -1,4 +1,6 @@
+mod arrays;
 mod integral;
+pub(crate) use arrays::PrimitiveArray;
 mod references;
 pub(crate) use references::BuiltinReference;
 mod scalar;

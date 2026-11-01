@@ -30,6 +30,7 @@ pub enum DiagnosticCode {
     MetadataUnavailable,
     BindingEvidenceMissing,
     JavaConstantFieldRead,
+    ArrayFillShape,
     InitializationUnavailable,
     BranchJavaUnsupported,
     JavaAnalysisUnavailable,

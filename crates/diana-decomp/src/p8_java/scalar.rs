@@ -17,6 +17,7 @@ pub struct VerifiedJavaMethod {
     environment: EnvironmentId,
 }
 pub(crate) enum MethodBody {
+    ZeroFill(super::zero_fill::ZeroFillBody),
     Casts(super::casts::CastBody),
     Structured(super::structured::StructuredLoop),
     Constructor(super::constructor::ConstructorBody),
@@ -32,6 +33,17 @@ pub(crate) enum MethodBody {
     Dispatcher(super::dispatcher::Dispatcher),
 }
 impl VerifiedJavaMethod {
+    pub(super) fn zero_fill(
+        header: String,
+        body: super::zero_fill::ZeroFillBody,
+        environment: EnvironmentId,
+    ) -> Self {
+        Self {
+            header,
+            body: MethodBody::ZeroFill(body),
+            environment,
+        }
+    }
     pub(super) fn casts(
         header: String,
         body: super::casts::CastBody,

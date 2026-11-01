@@ -422,6 +422,8 @@ fn normal_member(
     if let RawPrintable::Method(raw) = input.raw() {
         let original = raw.layout().original();
         let mut pc = CodeUnitOffset(0);
+        let mut missing_call = None;
+        let mut has_fill = false;
         while pc.0 < original.code_units().0 {
             budget.charge_work(1)?;
             let layout =
@@ -440,12 +442,15 @@ fn normal_member(
                     method.declaration.name,
                     &method.declaration.prototype,
                     budget,
-                )? {
-                    return Ok(NormalMember::Raw {
-                        facts,
-                        reason: OutputReason::BindingEvidenceMissing { reference: id, pc },
-                    });
+                )? && missing_call.is_none()
+                {
+                    missing_call = Some((id, pc));
                 }
+            }
+            if raw.layout().is_reachable(pc)
+                && matches!(layout.kind(),crate::raw::LayoutKind::Instruction(spec) if spec.opcode==0x26)
+            {
+                has_fill = true;
             }
             if raw.layout().is_reachable(pc)
                 && let crate::raw::LayoutKind::Instruction(spec) = layout.kind()
@@ -461,6 +466,15 @@ fn normal_member(
                 .ok_or(RequestError::InternalInvariant(
                     "checked call evidence extent overflowed",
                 ))?;
+        }
+        if has_fill {
+            crate::pipeline::fill_shape::check(&input, budget)?;
+        }
+        if let Some((reference, pc)) = missing_call {
+            return Ok(NormalMember::Raw {
+                facts,
+                reason: OutputReason::BindingEvidenceMissing { reference, pc },
+            });
         }
     }
     if crate::p8_java::source_group_admitted(index, key, &facts, budget)?
@@ -491,6 +505,18 @@ fn normal_member(
         && let Some(plan) = crate::pipeline::receiver::plan(&input, catalog, budget)?
         && let Some(declaration) =
             crate::p8_java::receiver::verify(&input, plan, catalog.environment, budget)?
+    {
+        let source = crate::p9_emit::java(&declaration, budget)?;
+        return Ok(NormalMember::Java {
+            facts,
+            declaration,
+            source,
+        });
+    }
+    if crate::p8_java::source_group_admitted(index, key, &facts, budget)?
+        && let Some(plan) = crate::pipeline::zero_fill::build(&input, budget)?
+        && let Some(declaration) =
+            crate::p8_java::zero_fill::verify(&input, plan, catalog.environment, budget)?
     {
         let source = crate::p9_emit::java(&declaration, budget)?;
         return Ok(NormalMember::Java {

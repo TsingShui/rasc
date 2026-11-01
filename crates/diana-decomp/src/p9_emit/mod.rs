@@ -13,6 +13,7 @@ mod literals;
 mod prefix;
 mod report;
 mod structured;
+mod zero_fill;
 pub(crate) use java::java;
 pub use report::render;
 mod initializers;

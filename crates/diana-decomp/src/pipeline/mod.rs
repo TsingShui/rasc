@@ -5,6 +5,8 @@ pub(crate) mod constructor;
 pub(crate) mod control;
 pub(crate) mod diagnostics;
 pub(crate) mod effects;
+pub(crate) mod fill_shape;
 pub(crate) mod receiver;
 pub(crate) mod request;
 pub(crate) mod scalar;
+pub(crate) mod zero_fill;

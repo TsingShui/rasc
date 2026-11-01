@@ -166,6 +166,7 @@ pub(crate) fn verify(
     };
     let flags = input.access_flags();
     if flags & !0x081f != 0
+        || (flags & 7).count_ones() > 1
         || raw.annotations().method_range().is_some()
         || raw.annotations().parameter_range().is_some()
         || !crate::p4_calls::qualifier_available(input, catalog, &[106, 97, 118, 97], budget)?
