@@ -7,10 +7,15 @@ pub(crate) mod constructor_entry;
 mod declarations;
 pub(crate) mod dispatcher;
 mod dispatcher_verify;
+mod exceptional;
 pub(crate) mod field_ops;
 pub(crate) mod fresh_fill;
 mod method;
 pub(crate) mod object_allocation;
+pub(crate) mod protected;
+mod protected_throws;
+#[cfg(test)]
+mod protection_tests;
 mod receiver_ops;
 pub(crate) mod structured;
 pub(crate) mod types;

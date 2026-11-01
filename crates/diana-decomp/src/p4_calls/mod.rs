@@ -1,15 +1,19 @@
 pub(crate) mod allocation;
 mod contracts;
+pub(crate) mod exceptions;
 pub(crate) mod normal;
 pub(crate) use contracts::qualifier_available;
 mod reference_types;
 pub(crate) use reference_types::source_type;
-mod throws;
+pub(crate) mod throws;
 pub(crate) use throws::source_throws;
 mod receivers;
 pub(crate) use receivers::{ReceiverContract, ReceiverKind, resolve_receiver};
+#[cfg(test)]
+mod binding_tests;
 pub(crate) mod field_facts;
 mod fields;
+mod hierarchy;
 mod overloads;
 pub(crate) use contracts::{CallFormal, StaticContract};
 pub(crate) use fields::check_external_static_read;

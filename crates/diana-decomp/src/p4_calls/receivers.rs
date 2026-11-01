@@ -1,4 +1,4 @@
-use super::contracts::{clear_scope, plain};
+use super::contracts::clear_scope;
 use crate::input::MethodInput;
 use crate::substrate::owned::{copy_proto, copy_units};
 use crate::{DeclarationCatalog, MethodBudget, MethodId, RequestError};
@@ -23,12 +23,13 @@ pub(crate) struct ReceiverContract {
 pub(crate) fn resolve_receiver(
     input: &MethodInput<'_, '_>,
     catalog: &DeclarationCatalog,
-    reference: MethodId,
+    invocation: &super::throws::Invocation<'_>,
     kind: ReceiverKind,
     parameter: &[u16],
     requires_java_namespace: bool,
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<Option<ReceiverContract>, RequestError> {
+    let reference = invocation.reference;
     let method = input.method_reference(reference, budget)?;
     let Some(formals) = super::contracts::original_formals(input, reference, budget)? else {
         return Ok(None);
@@ -49,15 +50,26 @@ pub(crate) fn resolve_receiver(
     let Some(class) = catalog.class(&owner, budget)? else {
         return Ok(None);
     };
-    if !plain(class, &caller, budget)?
+    let Some(source) = catalog.class(parameter, budget)? else {
+        return Ok(None);
+    };
+    if !super::contracts::directory(class, &caller, budget)?
         || class.access_flags & 1 == 0
         || (class.access_flags & 0x200 != 0) != matches!(kind, ReceiverKind::Interface)
         || !super::overloads::unique_target(
+            catalog,
             class,
+            &caller,
             &name,
             &prototype,
-            false,
-            matches!(kind, ReceiverKind::Direct),
+            super::overloads::Scope::Receiver {
+                source: if matches!(kind, ReceiverKind::Super) {
+                    class
+                } else {
+                    source
+                },
+                direct: matches!(kind, ReceiverKind::Direct),
+            },
             budget,
         )?
     {
@@ -103,7 +115,13 @@ pub(crate) fn resolve_receiver(
     {
         return Ok(None);
     }
-    if !super::throws::compatible(input, catalog, selected.throws.as_deref(), budget)? {
+    if !super::throws::compatible(
+        input,
+        catalog,
+        selected.throws.as_deref(),
+        invocation,
+        budget,
+    )? {
         return Ok(None);
     }
     if let Some(original) = input.local_method(reference, budget)? {
@@ -122,28 +140,6 @@ pub(crate) fn resolve_receiver(
             _ => false,
         };
         if !parent {
-            return Ok(None);
-        }
-    }
-    let Some(parent) = class.parent.as_deref() else {
-        return Ok(None);
-    };
-    if !crate::p0_knowledge::same_units(
-        parent,
-        crate::p5_types::BuiltinReference::Object.descriptor(),
-        budget,
-    )? {
-        return Ok(None);
-    }
-    let Some(object) = catalog.class(parent, budget)? else {
-        return Ok(None);
-    };
-    if !plain(object, &caller, budget)? || object.parent.is_some() {
-        return Ok(None);
-    }
-    for candidate in &object.methods {
-        budget.charge_work(1)?;
-        if crate::p0_knowledge::same_units(&candidate.name, &name, budget)? {
             return Ok(None);
         }
     }

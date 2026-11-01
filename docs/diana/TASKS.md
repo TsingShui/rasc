@@ -1712,6 +1712,12 @@ invoke-custom or bootstrap Java semantics, an all-platform catalog.
 
 ## T12 — Object initialization identity and restricted constructors
 
+**Progress**: [Inherited binding repair](batches/t12-inherited-constructor-binding.md)
+adds checked class/interface ancestry, constructor overload selection and
+covariant receiver/bridge proofs. D033 now passes source-JVM E2E without changing
+allocation/init order. Missing or cyclic ancestors, uncertain bridges/generics
+and real return-only collisions remain rejected.
+
 **Dependencies**: T11. **Phase**: P3/P4/P5/P8. **References**: DX-09, DX-02
 RecoverConstructors.
 
@@ -1962,6 +1968,14 @@ that Java feature, and T18 MUST add B.
 
 ## T17 — Handler Phi shadow snapshots and exception ingress copies
 
+**Progress**: [Exception-storage batch](batches/t17-exception-storage.md) adds
+the operator-approved P4/P5 catch-type prerequisite, exclusive P6 shadows,
+per-edge pre-throw snapshots and verified ingress copies. Source availability,
+exact types, ownership, coverage and resource/cancellation checks pass. P8 records
+original-site placement obligations. T18 consumes them for accepted protected
+regions and adds behavior evidence for D029/D030; its remaining acceptance is
+recorded below.
+
 **Dependencies**: T16, T08. **Phase**: P6. **References**: DX-05.
 
 **Files**: `src/p6_variables/{exceptional,copies,definitions}.rs`,
@@ -2000,7 +2014,7 @@ holding different old values, a loop try shadow, a shared target; M15 a snapshot
 checked cast, an Undefined snapshot, a snapshot placed after the call, an alias
 reuse that overwrites wrongly; the validator MUST fail.
 
-**Acceptance**: G0 plus `cargo test -p diana-decomp --test contracts t17_`, with
+**Acceptance**: G0 plus `cargo nextest run -p diana-decomp --all-features --locked t17_`, with
 B(F16, F17) added after T18. **Completion**: The plan and the certificates are
 recomputable, and "some shadow variables were generated" MUST NOT count as
 complete exception SSA lowering.
@@ -2009,6 +2023,15 @@ complete exception SSA lowering.
 boxes every exception, a dead-copy heuristic on exception paths.
 
 ## T18 — Restricted try/catch Java and protection-domain ownership
+
+**Progress**: [Protected-Java batch](batches/t18-protected-java.md) implements
+acyclic Sequence/Diamond ownership, ordered and shared catch entries, one nested
+layer, same-site snapshots/ingress and precise catch-parameter rethrow. D029,
+D030, D031, D032 and D035 pass source-JVM E2E; D034 remains passed. The
+[T12/T11 binding repair](batches/t12-inherited-constructor-binding.md) also makes
+D033 pass, so the fixed D029–D035 source-JVM group passes. Shared unassigned
+handler tails retain classified Debug. The implemented protection profile
+remains acyclic with one nested layer.
 
 **Dependencies**: T17, T13. **Phase**: P7/P8. **References**: DX-07, KU-07.
 

@@ -127,7 +127,9 @@ fn t09_two_entry_dispatcher_preserves_edges_and_never_reads_da_defaults() {
                     crate::p8_java::calls::Statement::Assignment(statement) => {
                         assign(std::slice::from_ref(statement), &mut values)
                     }
-                    crate::p8_java::calls::Statement::StaticCall { .. }
+                    crate::p8_java::calls::Statement::Snapshot(_)
+                    | crate::p8_java::calls::Statement::ExceptionBind { .. }
+                    | crate::p8_java::calls::Statement::StaticCall { .. }
                     | crate::p8_java::calls::Statement::ConstructorChain(_)
                     | crate::p8_java::calls::Statement::Deferred(_)
                     | crate::p8_java::calls::Statement::Initialize(_)
@@ -144,7 +146,7 @@ fn t09_two_entry_dispatcher_preserves_edges_and_never_reads_da_defaults() {
                 }
             }
             let edge = match &case.transfer {
-                Transfer::ReturnVoid | Transfer::Throw(_) => {
+                Transfer::ReturnVoid | Transfer::Throw(_) | Transfer::Rethrow { .. } => {
                     panic!("non-int exit outside the int cycle interpretation")
                 }
                 Transfer::Switch {

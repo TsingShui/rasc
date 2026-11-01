@@ -29,6 +29,7 @@ pub struct ExternalClassDeclaration {
     pub descriptor: Vec<u16>,
     pub access_flags: u32,
     pub parent: Option<Vec<u16>>,
+    /// Direct interface references as DEX descriptors or JVM internal names.
     pub interfaces: Vec<Vec<u16>>,
     pub methods: Vec<ExternalMethodDeclaration>,
     pub field_names: Vec<Vec<u16>>,

@@ -11,6 +11,9 @@ pub(crate) fn java(
     output.push(&method.header, budget)?;
     output.push(" {\n", budget)?;
     match &method.body {
+        MethodBody::Protected(body) => {
+            super::protected::write(body, &method.type_names, &mut output, budget)?
+        }
         MethodBody::Structured(body) => {
             super::structured::write(body, &method.type_names, &mut output, budget)?
         }
@@ -22,6 +25,27 @@ pub(crate) fn java(
     budget.checkpoint()?;
     Ok(output.finish())
 }
+pub(super) fn thrown(
+    transfer: &crate::p8_java::dispatcher::Transfer,
+    output: &mut TextBuffer,
+    budget: &mut MethodBudget<'_, '_>,
+) -> Result<(), RequestError> {
+    output.push("throw ", budget)?;
+    match transfer {
+        crate::p8_java::dispatcher::Transfer::Throw(value) => value_use(*value, output, budget)?,
+        crate::p8_java::dispatcher::Transfer::Rethrow { handler, .. } => {
+            output.push("caught", budget)?;
+            output.unsigned(u64::from(handler.0), budget)?;
+        }
+        _ => {
+            return Err(RequestError::InternalInvariant(
+                "throw renderer lost checked transfer",
+            ));
+        }
+    }
+    output.push(";\n", budget)
+}
+
 pub(super) fn returned(
     value: crate::p8_java::branch::ValueUse,
     output: &mut TextBuffer,

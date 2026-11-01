@@ -33,6 +33,7 @@ pub(crate) struct ResolvedBody<'a> {
     _sealed: (),
     pub ssa: SsaBody<'a>,
     pub calls: Vec<CallEvidence>,
+    pub exceptions: Vec<super::exceptions::ExceptionBinding>,
     pub fields: Vec<Option<FieldEvidence>>,
 }
 #[derive(Clone, Copy, Eq, PartialEq)]
@@ -150,8 +151,10 @@ pub(crate) fn collect<'a>(
             budget,
         )?;
     }
+    let exceptions = super::exceptions::collect(input, catalog, &ssa, budget)?;
     Ok(ResolvedBody {
         _sealed: (),
+        exceptions,
         ssa,
         calls,
         fields,
@@ -161,9 +164,10 @@ pub(crate) fn binding_available(
     input: &MethodInput<'_, '_>,
     catalog: &DeclarationCatalog,
     contract: &StaticContract,
+    invocation: &super::throws::Invocation<'_>,
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<bool, RequestError> {
-    super::contracts::binding_available(input, catalog, contract, budget)
+    super::contracts::binding_available(input, catalog, contract, invocation, budget)
 }
 pub(crate) fn contract<'a>(
     ssa: &SsaBody<'_>,

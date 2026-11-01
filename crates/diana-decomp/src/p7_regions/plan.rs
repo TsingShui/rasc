@@ -13,6 +13,7 @@ pub(crate) enum Region {
     Diamond(super::branch::Diamond),
 }
 pub(crate) enum Shape {
+    Protected(Option<super::protection::Protection>),
     Dispatcher,
     Structured(Region),
 }
@@ -91,7 +92,9 @@ pub(crate) fn build<'a>(
             budget,
         )?;
     }
-    let shape = if matches!(policy, RepresentationPolicy::DispatchOnly) {
+    let shape = if !storage.typed.ssa.raw.try_byte_range().as_range().is_empty() {
+        Shape::Protected(super::protection::build(&storage, budget)?)
+    } else if matches!(policy, RepresentationPolicy::DispatchOnly) {
         Shape::Dispatcher
     } else {
         let flow = Flow::build(&storage, budget)?;

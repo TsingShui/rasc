@@ -14,6 +14,7 @@ pub(crate) fn local_type(kind: Kind) -> Result<LocalType, RequestError> {
             Kind::Int => 0,
             Kind::Boolean => 1,
             Kind::Object => 2,
+            Kind::Throwable => (3u128 << 64) + 16,
             Kind::Float => 3,
             Kind::String => 4,
             Kind::Long => 14,
@@ -110,6 +111,7 @@ pub(crate) struct StorageBody<'a> {
     pub fresh_fills: Vec<super::fresh_fill::FreshArray>,
     pub object_allocations: Vec<super::object_allocation::DeferredAllocation>,
     pub constructor_entry: Option<super::constructor_entry::ConstructorEntry>,
+    pub exceptional: super::exceptional::ExceptionalStorage,
     entry: CopyPlan,
     normal: Vec<CopyPlan>,
 }
@@ -381,8 +383,12 @@ pub(crate) fn allocate<'a>(
         let plan = plan_edge(&typed, Some(id), edge.target, &mut locals, budget)?;
         push(&mut normal, plan, budget)?;
     }
+    let Some(exceptional) = super::exceptional::build(&typed, &mut locals, budget)? else {
+        return Ok(None);
+    };
     Ok(Some(StorageBody {
         _sealed: (),
+        exceptional,
         typed,
         locals,
         filled_targets,

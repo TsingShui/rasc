@@ -425,6 +425,7 @@ fn normal_member(
         OutputReason::JavaAnalysisUnavailable
     };
     if let Some(storage) = crate::pipeline::branch::build(&input, catalog, budget)? {
+        let protected = !storage.typed.ssa.raw.try_byte_range().as_range().is_empty();
         let planned = crate::p7_regions::build(storage, representation, budget)?;
         let group_admitted = crate::p8_java::source_group_admitted(index, key, &facts, budget)?;
         if group_admitted
@@ -443,7 +444,7 @@ fn normal_member(
                 source,
             });
         }
-        if group_admitted {
+        if group_admitted && !protected {
             reason = OutputReason::BranchJavaUnsupported;
         }
     }

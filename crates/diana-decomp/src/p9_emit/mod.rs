@@ -10,6 +10,7 @@ mod field_ops;
 mod java;
 mod json;
 mod literals;
+mod protected;
 mod report;
 mod structured;
 pub(crate) use java::java;

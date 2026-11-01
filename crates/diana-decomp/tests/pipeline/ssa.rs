@@ -198,92 +198,193 @@ fn t15_derived_array_components_preserve_store_checks_and_copy_cycles() {
 }
 
 #[test]
-fn t16_exception_availability_keeps_failure_kind_and_other_original_members() {
-    let facts: PipelineFacts =
-        serde_json::from_str(include_str!("../fixtures/throw-state/catalog.json")).unwrap();
-    let mut control = RunContext::new(Limits::default(), &|| false);
-    let engine = Engine::open(
-        vec![DexImage {
-            bytes: include_bytes!("../fixtures/throw-state/classes.dex"),
-            header_offset: ByteOffset(0),
-            origin: ImageOrigin { input: InputId(0) },
-        }],
-        Options::default(),
-        DeclarationCatalog::with_declarations(
-            EnvironmentId(facts.environment_id),
-            facts.methods,
-            facts.classes,
-        ),
-        &mut control,
-    )
-    .unwrap();
-    let report = engine
-        .decompile(
-            Request {
-                class: ClassKey {
-                    dex: DexId(0),
-                    class_def: ClassDefId(0),
-                },
-                method: None,
-            },
+fn t16_t17_t18_exception_availability_keeps_failure_kind_and_other_original_members() {
+    for (catalog_index, json) in [
+        include_str!("../fixtures/throw-state/catalog.json"),
+        include_str!("../fixtures/exception-storage/catalog.json"),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let facts: PipelineFacts = serde_json::from_str(json).unwrap();
+        let mut control = RunContext::new(Limits::default(), &|| false);
+        let engine = Engine::open(
+            vec![DexImage {
+                bytes: include_bytes!("../fixtures/throw-state/classes.dex"),
+                header_offset: ByteOffset(0),
+                origin: ImageOrigin { input: InputId(0) },
+            }],
+            Options::default(),
+            DeclarationCatalog::with_declarations(
+                EnvironmentId(facts.environment_id),
+                facts.methods,
+                facts.classes,
+            ),
             &mut control,
         )
         .unwrap();
-    let ClassOutput::Mixed { members, .. } = report.class();
-    assert_eq!(members.len(), 9);
-    for (method, kind, code) in [
-        (
-            1,
-            FailureKind::Unsupported,
-            DiagnosticCode::JavaAnalysisUnavailable,
-        ),
-        (
-            2,
-            FailureKind::Unsupported,
-            DiagnosticCode::JavaAnalysisUnavailable,
-        ),
-        (
-            3,
-            FailureKind::Unsupported,
-            DiagnosticCode::DefinitionAvailabilityUnproved,
-        ),
-        (
-            4,
-            FailureKind::Unsupported,
-            DiagnosticCode::JavaAnalysisUnavailable,
-        ),
-        (5, FailureKind::Malformed, DiagnosticCode::UndefinedRegister),
-        (
-            6,
-            FailureKind::Unsupported,
-            DiagnosticCode::JavaAnalysisUnavailable,
-        ),
-        (
-            7,
-            FailureKind::Unsupported,
-            DiagnosticCode::JavaAnalysisUnavailable,
-        ),
-        (
-            8,
-            FailureKind::Unsupported,
-            DiagnosticCode::JavaAnalysisUnavailable,
-        ),
-        (
-            9,
-            FailureKind::Unsupported,
-            DiagnosticCode::JavaAnalysisUnavailable,
-        ),
-    ] {
-        let member = members
-            .iter()
-            .find(|member| member.key().method == diana_decomp::MethodId(method))
+        let report = engine
+            .decompile(
+                Request {
+                    class: ClassKey {
+                        dex: DexId(0),
+                        class_def: ClassDefId(0),
+                    },
+                    method: None,
+                },
+                &mut control,
+            )
             .unwrap();
-        let reason = match member {
-            MethodOutput::Debug { reason, .. } | MethodOutput::Unavailable { reason, .. } => reason,
-            _ => panic!("unverified protected method became Java"),
-        };
-        assert_eq!(report.diagnostics()[reason.0].cause.kind(), kind);
-        assert_eq!(report.diagnostics()[reason.0].code(), code);
+        let ClassOutput::Mixed { members, .. } = report.class();
+        assert_eq!(members.len(), 9);
+        for (method, kind, code) in [
+            (
+                1,
+                FailureKind::Unsupported,
+                DiagnosticCode::JavaAnalysisUnavailable,
+            ),
+            (
+                2,
+                FailureKind::Unsupported,
+                DiagnosticCode::JavaAnalysisUnavailable,
+            ),
+            (
+                3,
+                FailureKind::Unsupported,
+                DiagnosticCode::DefinitionAvailabilityUnproved,
+            ),
+            (
+                4,
+                FailureKind::Unsupported,
+                DiagnosticCode::JavaAnalysisUnavailable,
+            ),
+            (5, FailureKind::Malformed, DiagnosticCode::UndefinedRegister),
+            (
+                6,
+                FailureKind::Unsupported,
+                DiagnosticCode::JavaAnalysisUnavailable,
+            ),
+            (
+                7,
+                FailureKind::Unsupported,
+                DiagnosticCode::JavaAnalysisUnavailable,
+            ),
+            (
+                8,
+                FailureKind::Unsupported,
+                DiagnosticCode::JavaAnalysisUnavailable,
+            ),
+            (
+                9,
+                FailureKind::Unsupported,
+                DiagnosticCode::JavaAnalysisUnavailable,
+            ),
+        ] {
+            let member = members
+                .iter()
+                .find(|member| member.key().method == diana_decomp::MethodId(method))
+                .unwrap();
+            if catalog_index == 1 && ![2, 3, 5, 8].contains(&method) {
+                assert!(
+                    matches!(member, MethodOutput::Java { .. }),
+                    "protected method {method} lost Java"
+                );
+                continue;
+            }
+            let reason = match member {
+                MethodOutput::Debug { reason, .. } | MethodOutput::Unavailable { reason, .. } => {
+                    reason
+                }
+                _ => panic!("unproved protected method became Java"),
+            };
+            assert_eq!(report.diagnostics()[reason.0].cause.kind(), kind);
+            assert_eq!(report.diagnostics()[reason.0].code(), code);
+        }
+    }
+}
+
+#[test]
+fn t18_checked_catch_reachability_and_shared_tail_preserve_public_admission() {
+    let positive = include_bytes!("../fixtures/protected-java/classes.dex").as_slice();
+    let shared = include_bytes!("../fixtures/protected-java/shared.dex").as_slice();
+    for (bytes, name, prototype, omit_throws, java) in [
+        (positive, "typed", "(Z)I", false, true),
+        (positive, "typed", "(Z)I", true, false),
+        (positive, "catchAll", "(Z)I", true, true),
+        (positive, "rethrow", "(ZZ)I", false, true),
+        (shared, "f", "(Z)I", false, false),
+    ] {
+        let mut facts: PipelineFacts =
+            serde_json::from_str(include_str!("../fixtures/protected-java/catalog.json")).unwrap();
+        if omit_throws {
+            let owner: Vec<u16> = "Lfixtures/Dep;".encode_utf16().collect();
+            let method: Vec<u16> = "choose".encode_utf16().collect();
+            facts
+                .classes
+                .iter_mut()
+                .find(|class| class.descriptor == owner)
+                .unwrap()
+                .methods
+                .iter_mut()
+                .find(|entry| entry.name == method)
+                .unwrap()
+                .throws = Some(Vec::new());
+        }
+        let catalog = DeclarationCatalog::with_declarations(
+            EnvironmentId(facts.environment_id),
+            facts.methods,
+            facts.classes,
+        );
+        let mut control = RunContext::new(Limits::default(), &|| false);
+        let engine = Engine::open(
+            vec![DexImage {
+                bytes,
+                header_offset: ByteOffset(0),
+                origin: ImageOrigin { input: InputId(0) },
+            }],
+            Options::default(),
+            catalog,
+            &mut control,
+        )
+        .unwrap();
+        let report = engine
+            .decompile(
+                Request {
+                    class: ClassKey {
+                        dex: DexId(0),
+                        class_def: ClassDefId(0),
+                    },
+                    method: Some(MethodSelector {
+                        name: name.encode_utf16().collect(),
+                        prototype: prototype.encode_utf16().collect(),
+                    }),
+                },
+                &mut control,
+            )
+            .unwrap();
+        let ClassOutput::Mixed { members, .. } = report.class();
+        if java {
+            assert!(matches!(&members[0], MethodOutput::Java { .. }), "{name}");
+        } else {
+            let MethodOutput::Debug { source, reason, .. } = &members[0] else {
+                panic!("unproved catch became Java");
+            };
+            assert_eq!(
+                report.diagnostics()[reason.0].cause.kind(),
+                FailureKind::Unsupported
+            );
+            assert_eq!(
+                report.diagnostics()[reason.0].code(),
+                DiagnosticCode::JavaAnalysisUnavailable
+            );
+            let raw: serde_json::Value = serde_json::from_str(source.source()).unwrap();
+            let code = &raw["classes"][0]["methods"][0]["code"];
+            assert!(!code["tries"].as_array().unwrap().is_empty());
+            if name == "f" {
+                assert_eq!(code["instructions"].as_array().unwrap().len(), 10);
+                assert_eq!(code["tries"][0]["handlers"].as_array().unwrap().len(), 2);
+            }
+        }
     }
 }
 

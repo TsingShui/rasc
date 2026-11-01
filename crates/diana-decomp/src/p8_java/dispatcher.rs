@@ -13,6 +13,10 @@ pub(crate) struct Edge {
 pub(crate) enum Transfer {
     ReturnVoid,
     Throw(super::branch::ValueUse),
+    Rethrow {
+        value: super::branch::ValueUse,
+        handler: BlockId,
+    },
     Switch {
         form: crate::p7_regions::SwitchForm,
         value: LocalId,
@@ -87,6 +91,7 @@ fn edge(
 
 pub(super) fn verify(
     input: &MethodInput<'_, '_>,
+    catalog: &crate::DeclarationCatalog,
     plan: crate::p7_regions::PlannedBody<'_>,
     type_names: &super::types::TypeNames,
     calls: &mut super::calls::SourceCalls,
@@ -94,6 +99,11 @@ pub(super) fn verify(
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<Option<VerifiedJavaMethod>, RequestError> {
     let storage = &plan.storage;
+    let placements = super::exceptional::obligations(storage, budget)?;
+    if !placements.is_empty() && !matches!(plan.shape, crate::p7_regions::Shape::Protected(Some(_)))
+    {
+        return Ok(None);
+    }
     let ssa = &storage.typed;
     let RawPrintable::Method(raw) = input.raw() else {
         return Err(RequestError::InternalInvariant(
@@ -106,6 +116,7 @@ pub(super) fn verify(
         .try_byte_range()
         .as_range()
         .is_empty()
+        && !matches!(plan.shape, crate::p7_regions::Shape::Protected(Some(_)))
     {
         return Ok(None);
     }
@@ -163,6 +174,14 @@ pub(super) fn verify(
     if !super::declarations::identifier(&name, budget)? {
         return Ok(None);
     }
+    let mut catch_names = Vec::new();
+    if let crate::p7_regions::Shape::Protected(Some(region)) = &plan.shape {
+        let Some(names) = super::protected::names(input, catalog, storage, region, calls, budget)?
+        else {
+            return Ok(None);
+        };
+        catch_names = names;
+    }
     let mut prologue = Vec::new();
     if let Some(entry) = super::constructor_entry::lower(storage, calls, budget)? {
         push(&mut prologue, entry, budget)?;
@@ -185,7 +204,8 @@ pub(super) fn verify(
                 )?;
             }
         }
-        let Some(statements) = super::calls::operations(storage, key, calls, type_names, budget)?
+        let Some(statements) =
+            super::calls::operations(storage, key, calls, type_names, &placements, budget)?
         else {
             return Ok(None);
         };
@@ -206,7 +226,14 @@ pub(super) fn verify(
                         .get(index)
                         .and_then(|usage| *usage)
                         .ok_or(RequestError::InternalInvariant("throw lost typed use"))?;
-                    Transfer::Throw(super::values::lower(LocalId(value.0), conversion))
+                    let usage = super::values::lower(LocalId(value.0), conversion);
+                    match super::exceptional::exception_root(ssa, value, budget)? {
+                        Some(handler) => Transfer::Rethrow {
+                            value: usage,
+                            handler,
+                        },
+                        None => Transfer::Throw(usage),
+                    }
                 }
                 Terminal::ReturnVoid => {
                     if !outgoing.is_empty()
@@ -426,6 +453,17 @@ pub(super) fn verify(
         cases,
     };
     super::dispatcher_verify::verify(input, storage, &body, type_names, budget)?;
+    if let crate::p7_regions::Shape::Protected(Some(region)) = plan.shape {
+        return Ok(Some(VerifiedJavaMethod::protected(
+            header.finish(),
+            super::protected::ProtectedBody {
+                storage: body,
+                region,
+                names: catch_names,
+            },
+            environment,
+        )));
+    }
     if let crate::p7_regions::Shape::Structured(region) = plan.shape {
         return Ok(Some(VerifiedJavaMethod::structured(
             header.finish(),

@@ -20,12 +20,13 @@ pub(crate) enum ConstructorUse {
 pub(crate) fn resolve(
     input: &MethodInput<'_, '_>,
     catalog: &DeclarationCatalog,
-    reference: MethodId,
+    invocation: &super::throws::Invocation<'_>,
     expected_owner: &[u16],
     use_kind: ConstructorUse,
-    pc: CodeUnitOffset,
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<ConstructorContract, RequestError> {
+    let reference = invocation.reference;
+    let pc = invocation.pc;
     let method = input.method_reference(reference, budget)?;
     if !method.owner.matches_with(expected_owner, budget)?
         || !method
@@ -63,16 +64,19 @@ pub(crate) fn resolve(
     let Some(class) = catalog.class(expected_owner, budget)? else {
         return Err(RequestError::BindingEvidenceMissing { reference, pc });
     };
-    if !plain(class, &caller, budget)?
+    if !super::contracts::directory(class, &caller, budget)?
         || class.access_flags & 0x6200 != 0
         || (matches!(use_kind, ConstructorUse::Allocation) && class.access_flags & 0x400 != 0)
         || !super::reference_types::source_type(input, catalog, expected_owner, budget)?
         || !super::overloads::unique_target(
+            catalog,
             class,
+            &caller,
             &[60, 105, 110, 105, 116, 62],
             &prototype,
-            false,
-            matches!(use_kind, ConstructorUse::This),
+            super::overloads::Scope::Constructor {
+                same_class: matches!(use_kind, ConstructorUse::This),
+            },
             budget,
         )?
     {
@@ -97,7 +101,7 @@ pub(crate) fn resolve(
         || (!matches!(use_kind, ConstructorUse::This) && target.access_flags & 1 == 0)
         || target.access_flags & (0x100 | 0x400) != 0
         || target.generic
-        || !super::throws::compatible(input, catalog, target.throws.as_deref(), budget)?
+        || !super::throws::compatible(input, catalog, target.throws.as_deref(), invocation, budget)?
     {
         return Err(RequestError::BindingEvidenceMissing { reference, pc });
     }
@@ -170,10 +174,13 @@ pub(crate) fn prove_this_chain(
                 let _contract = resolve(
                     input,
                     catalog,
-                    link.target,
+                    &super::throws::Invocation {
+                        reference: link.target,
+                        pc: link.pc,
+                        protection: None,
+                    },
                     &owner,
                     ConstructorUse::This,
-                    link.pc,
                     budget,
                 )?;
                 current = link.target;
@@ -184,10 +191,13 @@ pub(crate) fn prove_this_chain(
                 let _contract = resolve(
                     input,
                     catalog,
-                    link.target,
+                    &super::throws::Invocation {
+                        reference: link.target,
+                        pc: link.pc,
+                        protection: None,
+                    },
                     &parent,
                     ConstructorUse::Super,
-                    link.pc,
                     budget,
                 )?;
                 return Ok(());

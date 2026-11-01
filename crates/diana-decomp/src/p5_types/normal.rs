@@ -10,6 +10,7 @@ pub(crate) enum Kind {
     Int,
     Boolean,
     Object,
+    Throwable,
     String,
     Float,
     PrimitiveArray(super::PrimitiveArray),
@@ -24,6 +25,7 @@ impl Kind {
             Self::Int => "int",
             Self::Boolean => "boolean",
             Self::Object => "java.lang.Object",
+            Self::Throwable => "java.lang.Throwable",
             Self::String => "java.lang.String",
             Self::Float => "float",
             Self::Long => "long",
@@ -42,6 +44,7 @@ pub(crate) struct TypedBody<'a> {
     pub ranges: Vec<Option<crate::p5_types::IntRange>>,
     pub arrays: Vec<Option<ArrayEvidence>>,
     pub bindings: Vec<crate::p4_calls::normal::CallEvidence>,
+    pub exceptions: Vec<crate::p4_calls::exceptions::ExceptionBinding>,
     pub call_uses: Vec<crate::p5_types::calls::CallUses>,
     pub cast_uses: Vec<Option<crate::p5_types::calls::TypedUse>>,
     pub numeric_uses: Vec<Option<super::numeric::NumericUses>>,
@@ -137,6 +140,7 @@ pub(crate) fn solve<'a>(
 ) -> Result<Option<TypedBody<'a>>, RequestError> {
     let ssa = resolved.ssa;
     let bindings = resolved.calls;
+    let exceptions = resolved.exceptions;
     let field_declarations = resolved.fields;
     let array_components = super::array_components::collect(input, &ssa, budget)?;
     let mut integral_bits = Vec::new();
@@ -153,6 +157,7 @@ pub(crate) fn solve<'a>(
                     Kind::Int => 7,
                     Kind::Object
                     | Kind::String
+                    | Kind::Throwable
                     | Kind::Float
                     | Kind::Long
                     | Kind::Double
@@ -317,7 +322,26 @@ pub(crate) fn solve<'a>(
                 }
             },
             Definition::Phi => (0, None, None),
-            Definition::ExceptionAt(_) => return Ok(None),
+            Definition::ExceptionAt(id) => {
+                let mut kind = None;
+                for binding in &exceptions {
+                    budget.charge_work(1)?;
+                    if binding.operation == id {
+                        kind = binding.kind.map(|kind| match kind {
+                            crate::p4_calls::exceptions::ExceptionType::Nominal(id) => {
+                                Kind::Nominal(id)
+                            }
+                            crate::p4_calls::exceptions::ExceptionType::Throwable => {
+                                Kind::Throwable
+                            }
+                        });
+                    }
+                }
+                let Some(kind) = kind else {
+                    return Ok(None);
+                };
+                (0, None, Some(kind))
+            }
         };
         push(&mut integral_bits, bits, budget)?;
         push(&mut ranges, range, budget)?;
@@ -489,6 +513,7 @@ pub(crate) fn solve<'a>(
         ranges,
         arrays,
         bindings,
+        exceptions,
         call_uses,
         cast_uses,
         numeric_uses,
@@ -514,7 +539,10 @@ pub(crate) fn solve<'a>(
                 .ok_or(RequestError::InternalInvariant("typed throw lost value"))?;
             Some(if typed.ssa.is_zero(value)? {
                 UseConversion::NullAssignment
-            } else if matches!(typed.kinds[ix(value.0)?], Some(Kind::Nominal(_))) {
+            } else if matches!(
+                typed.kinds[ix(value.0)?],
+                Some(Kind::Nominal(_) | Kind::Throwable)
+            ) {
                 UseConversion::Identity
             } else {
                 return Ok(None);

@@ -16,6 +16,7 @@ pub struct VerifiedJavaMethod {
     pub(crate) type_names: super::types::TypeNames,
 }
 pub(crate) enum MethodBody {
+    Protected(super::protected::ProtectedBody),
     Structured(super::structured::StructuredBody),
     Dispatcher(super::dispatcher::Dispatcher),
 }
@@ -38,6 +39,7 @@ impl VerifiedJavaMethod {
         let cases = match &self.body {
             MethodBody::Dispatcher(body) => Some(body.cases.as_slice()),
             MethodBody::Structured(body) => Some(body.storage.cases.as_slice()),
+            MethodBody::Protected(body) => Some(body.storage.cases.as_slice()),
         };
         let statics = cases
             .into_iter()
@@ -89,6 +91,7 @@ impl VerifiedJavaMethod {
         let entry = match &self.body {
             MethodBody::Dispatcher(body) => body.prologue.first(),
             MethodBody::Structured(body) => body.storage.prologue.first(),
+            MethodBody::Protected(body) => body.storage.prologue.first(),
         };
         let constructor = entry.map(|entry| super::JavaCallSite {
             reference: entry.contract.reference,
@@ -102,6 +105,18 @@ impl VerifiedJavaMethod {
             kind: super::JavaInvokeKind::Direct,
         });
         statics.chain(constructor)
+    }
+    pub(super) fn protected(
+        header: String,
+        body: super::protected::ProtectedBody,
+        environment: EnvironmentId,
+    ) -> Self {
+        Self {
+            header,
+            body: MethodBody::Protected(body),
+            environment,
+            type_names: super::types::TypeNames::default(),
+        }
     }
     pub(super) fn dispatcher(
         header: String,

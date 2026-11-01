@@ -62,6 +62,7 @@ pub(super) fn locals(
                     Kind::Int => " = 0",
                     Kind::Boolean => " = false",
                     Kind::Object
+                    | Kind::Throwable
                     | Kind::String
                     | Kind::PrimitiveArray(_)
                     | Kind::ObjectArray
@@ -89,6 +90,18 @@ pub(super) fn statements(
     for statement in &case.statements {
         budget.charge_work(1)?;
         match statement {
+            crate::p8_java::calls::Statement::Snapshot(snapshot) => {
+                local(snapshot.copy.target, output, budget)?;
+                output.push(" = ", budget)?;
+                local(snapshot.copy.source, output, budget)?;
+                output.push(";\n", budget)?;
+            }
+            crate::p8_java::calls::Statement::ExceptionBind { handler, target } => {
+                local(*target, output, budget)?;
+                output.push(" = caught", budget)?;
+                output.unsigned(u64::from(handler.0), budget)?;
+                output.push(";\n", budget)?;
+            }
             crate::p8_java::calls::Statement::Deferred(_)
             | crate::p8_java::calls::Statement::ConstructorChain(_) => {}
             crate::p8_java::calls::Statement::Initialize(init) => {
@@ -329,10 +342,8 @@ pub(super) fn write(
         statements(case, output, budget)?;
         match &case.transfer {
             Transfer::ReturnVoid => output.push("return;\n", budget)?,
-            Transfer::Throw(value) => {
-                output.push("throw ", budget)?;
-                super::java::value_use(*value, output, budget)?;
-                output.push(";\n", budget)?;
+            Transfer::Throw(_) | Transfer::Rethrow { .. } => {
+                super::java::thrown(&case.transfer, output, budget)?
             }
             Transfer::Switch {
                 form,

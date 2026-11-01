@@ -41,7 +41,7 @@ fn package(descriptor: &[u16]) -> &[u16] {
         .rposition(|&unit| unit == 47)
         .map_or(&[], |end| &descriptor[..end])
 }
-pub(super) fn plain(
+pub(super) fn member_directory(
     class: &ExternalClassDeclaration,
     caller: &[u16],
     budget: &mut MethodBudget<'_, '_>,
@@ -57,12 +57,24 @@ pub(super) fn plain(
         .map_err(|_| RequestError::PlatformCapacity)?,
     )?;
     Ok(!class.generic
-        && !class.enclosing_scope
-        && class.interfaces.is_empty()
         && match class.coverage {
             DeclarationCoverage::AllDeclarations => true,
             DeclarationCoverage::ExportedApi => package(&class.descriptor) != package(caller),
         })
+}
+pub(super) fn directory(
+    class: &ExternalClassDeclaration,
+    caller: &[u16],
+    budget: &mut MethodBudget<'_, '_>,
+) -> Result<bool, RequestError> {
+    Ok(!class.enclosing_scope && member_directory(class, caller, budget)?)
+}
+pub(super) fn plain(
+    class: &ExternalClassDeclaration,
+    caller: &[u16],
+    budget: &mut MethodBudget<'_, '_>,
+) -> Result<bool, RequestError> {
+    Ok(class.interfaces.is_empty() && directory(class, caller, budget)?)
 }
 fn push<T>(
     values: &mut Vec<T>,
@@ -408,17 +420,26 @@ pub(super) fn binding_available(
     input: &MethodInput<'_, '_>,
     catalog: &DeclarationCatalog,
     contract: &StaticContract,
+    invocation: &super::throws::Invocation<'_>,
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<bool, RequestError> {
     let Some(class) = catalog.class(&contract.owner, budget)? else {
         return Ok(false);
     };
+    let caller = copy_units(input.owner(), budget)?;
     Ok(super::overloads::unique_target(
+        catalog,
         class,
+        &caller,
         &contract.name,
         &contract.prototype,
-        true,
-        false,
+        super::overloads::Scope::Static,
         budget,
-    )? && super::throws::compatible(input, catalog, Some(&contract.declared_throws), budget)?)
+    )? && super::throws::compatible(
+        input,
+        catalog,
+        Some(&contract.declared_throws),
+        invocation,
+        budget,
+    )?)
 }

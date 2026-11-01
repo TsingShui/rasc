@@ -16,9 +16,6 @@ pub(crate) fn build<'a>(
         return Ok(None);
     };
     let ssa = crate::p3_ssa::normal::build(flow, budget)?;
-    if !ssa.raw.try_byte_range().as_range().is_empty() {
-        return Ok(None);
-    }
     let resolved = crate::p4_calls::normal::collect(input, catalog, ssa, budget)?;
     let Some(typed) = crate::p5_types::normal::solve(input, resolved, budget)? else {
         return Ok(None);

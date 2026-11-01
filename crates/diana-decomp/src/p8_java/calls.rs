@@ -58,6 +58,11 @@ pub(crate) struct ReceiverCall {
     pub arguments: Vec<ValueUse>,
 }
 pub(crate) enum Statement {
+    Snapshot(crate::p6_variables::exceptional::Snapshot),
+    ExceptionBind {
+        handler: crate::p2_flow::normal::BlockId,
+        target: LocalId,
+    },
     Deferred(crate::p5_types::initialization::InitializationId),
     Initialize(super::object_allocation::Initialization),
     ConstructorChain(crate::MethodId),
@@ -166,40 +171,16 @@ pub(super) fn validate_bindings(
     let Some(throws) = crate::p4_calls::source_throws(input, catalog, budget)? else {
         return Ok(None);
     };
-    for (index, block) in ssa.ssa.blocks.iter().enumerate() {
-        budget.charge_work(1)?;
-        if !matches!(block.terminal, crate::p2_flow::normal::Terminal::Throw(_)) {
-            continue;
-        }
-        let value = ssa.ssa.bound[index]
-            .terminal
-            .ok_or(RequestError::InternalInvariant(
-                "throw lost binding operand",
-            ))?;
-        match ssa.thrown_uses.get(index).and_then(|usage| *usage) {
-            Some(crate::p5_types::normal::UseConversion::NullAssignment)
-                if ssa.ssa.is_zero(value)? => {}
-            Some(crate::p5_types::normal::UseConversion::Identity) => {
-                let Some(crate::p5_types::normal::Kind::Nominal(id)) = ssa.kinds[ix(value.0)?]
-                else {
-                    return Ok(None);
-                };
-                let descriptor = crate::substrate::owned::copy_units(
-                    input.type_descriptor(id, budget)?,
-                    budget,
-                )?;
-                if !throws.covers_exception(catalog, &descriptor, budget)? {
-                    return Ok(None);
-                }
-            }
-            _ => return Ok(None),
-        }
-    }
     let mut receivers = Vec::new();
     let mut constructors = Vec::new();
     for (index, site) in ssa.ssa.calls.iter().enumerate() {
         budget.charge_work(1)?;
         let id = CallId(u32::try_from(index).map_err(|_| RequestError::PlatformCapacity)?);
+        let invocation = crate::p4_calls::throws::Invocation {
+            reference: site.reference,
+            pc: site.pc,
+            protection: Some(&ssa.ssa.protection),
+        };
         let bound = ssa.ssa.call(id)?;
         let uses = ssa
             .call_uses
@@ -263,10 +244,9 @@ pub(super) fn validate_bindings(
             let contract = crate::p4_calls::allocation::resolve(
                 input,
                 catalog,
-                site.reference,
+                &invocation,
                 &owner,
                 use_kind,
-                site.pc,
                 budget,
             )?;
             if matches!(use_kind, crate::p4_calls::allocation::ConstructorUse::This) {
@@ -278,7 +258,14 @@ pub(super) fn validate_bindings(
                     budget,
                 )?;
             }
-            if !throws.covers(catalog, &contract.declared_throws, budget)? {
+            if !throws.covers_at(
+                input,
+                catalog,
+                &contract.declared_throws,
+                &ssa.ssa.protection,
+                site.pc,
+                budget,
+            )? {
                 return Ok(None);
             }
             if uses.arguments(site.reference, site.pc)?.len() != contract.arity {
@@ -335,7 +322,7 @@ pub(super) fn validate_bindings(
                 let contract = crate::p4_calls::resolve_receiver(
                     input,
                     catalog,
-                    site.reference,
+                    &invocation,
                     kind,
                     &descriptor,
                     false,
@@ -345,7 +332,14 @@ pub(super) fn validate_bindings(
                     reference: site.reference,
                     pc: site.pc,
                 })?;
-                if !throws.covers(catalog, &contract.declared_throws, budget)? {
+                if !throws.covers_at(
+                    input,
+                    catalog,
+                    &contract.declared_throws,
+                    &ssa.ssa.protection,
+                    site.pc,
+                    budget,
+                )? {
                     return Ok(None);
                 }
                 (Some(contract), &bound.inputs[1..])
@@ -357,7 +351,13 @@ pub(super) fn validate_bindings(
                     ));
                 }
                 let contract = ssa.contract(id)?;
-                if !crate::p4_calls::normal::binding_available(input, catalog, contract, budget)? {
+                if !crate::p4_calls::normal::binding_available(
+                    input,
+                    catalog,
+                    contract,
+                    &invocation,
+                    budget,
+                )? {
                     return Err(RequestError::BindingEvidenceMissing {
                         reference: site.reference,
                         pc: site.pc,
@@ -382,11 +382,15 @@ pub(super) fn validate_bindings(
         }
         push(&mut receivers, receiver, budget)?;
     }
-    Ok(Some(SourceCalls {
+    let result = SourceCalls {
         receivers,
         constructors,
         throws,
-    }))
+    };
+    if !super::protected_throws::validate(input, catalog, ssa, &result, budget)? {
+        return Ok(None);
+    }
+    Ok(Some(result))
 }
 fn plan(
     ssa: &TypedBody<'_>,
@@ -457,6 +461,7 @@ pub(super) fn operations(
     block: crate::pipeline::branch::BlockId,
     bindings: &mut SourceCalls,
     names: &super::types::TypeNames,
+    placements: &[super::exceptional::Placement<'_>],
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<Option<Vec<Statement>>, RequestError> {
     let ssa = &storage.typed;
@@ -464,6 +469,35 @@ pub(super) fn operations(
     for &id in &ssa.ssa.bound[ix(block.0)?].ops {
         budget.charge_work(1)?;
         let op = ssa.ssa.operation(id)?;
+        super::exceptional::snapshots(placements, block, op.pc, &mut output, budget)?;
+        if let Op::Exception(_) = op.op {
+            let target = LocalId(
+                op.result
+                    .ok_or(RequestError::InternalInvariant("catch lost value"))?
+                    .0,
+            );
+            push(
+                &mut output,
+                Statement::ExceptionBind {
+                    handler: block,
+                    target,
+                },
+                budget,
+            )?;
+            let ingress = super::exceptional::placed_ingress(placements, block, budget)?;
+            for copy in &ingress.copies.steps {
+                budget.charge_work(1)?;
+                push(
+                    &mut output,
+                    Statement::Assignment(Assignment {
+                        target: copy.target,
+                        expression: super::branch::Expression::Local(ValueUse::Direct(copy.source)),
+                    }),
+                    budget,
+                )?;
+            }
+            continue;
+        }
         if let Op::Initialize(call) = op.op {
             if ssa.initializations.calls.get(ix(call.0)?)
                 == Some(&Some(
@@ -639,6 +673,18 @@ pub(super) fn operations(
         } else if let Some(assignment) = super::branch::operation(ssa, op)? {
             push(&mut output, Statement::Assignment(assignment), budget)?;
         }
+    }
+    if matches!(
+        ssa.ssa.blocks[ix(block.0)?].terminal,
+        crate::p2_flow::normal::Terminal::Throw(_)
+    ) {
+        super::exceptional::snapshots(
+            placements,
+            block,
+            ssa.ssa.blocks[ix(block.0)?].terminal_pc,
+            &mut output,
+            budget,
+        )?;
     }
     Ok(Some(output))
 }

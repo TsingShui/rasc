@@ -364,6 +364,30 @@ fn edge(
     )
 }
 
+pub(super) fn snapshot_copies(
+    storage: &crate::p6_variables::normal::StorageBody<'_>,
+    block: BlockId,
+    pc: crate::CodeUnitOffset,
+    statements: &[super::calls::Statement],
+    index: &mut usize,
+    budget: &mut MethodBudget<'_, '_>,
+) -> Result<(), RequestError> {
+    for expected in &storage.exceptional.snapshots {
+        budget.charge_work(1)?;
+        if expected.source_block != block || expected.before != pc {
+            continue;
+        }
+        if !matches!(statements.get(*index), Some(super::calls::Statement::Snapshot(actual)) if actual == expected)
+        {
+            return Err(RequestError::InternalInvariant(
+                "snapshot changed same-site placement",
+            ));
+        }
+        *index = index.checked_add(1).ok_or(RequestError::PlatformCapacity)?;
+    }
+    Ok(())
+}
+
 pub(super) fn verify(
     input: &crate::input::MethodInput<'_, '_>,
     storage: &crate::p6_variables::normal::StorageBody<'_>,
@@ -490,6 +514,14 @@ pub(super) fn verify(
         for &id in &ssa.ssa.bound[index].ops {
             budget.charge_work(1)?;
             let bound = ssa.ssa.operation(id)?;
+            snapshot_copies(
+                storage,
+                case.key,
+                bound.pc,
+                &case.statements,
+                &mut statement,
+                budget,
+            )?;
             if matches!(bound.op, Op::Nop) {
                 continue;
             }
@@ -500,6 +532,12 @@ pub(super) fn verify(
                     "dispatcher omitted an original operation",
                 ))?;
             let matches = match actual {
+                super::calls::Statement::Snapshot(_) => false,
+                super::calls::Statement::ExceptionBind { handler, target } => {
+                    matches!(bound.op, Op::Exception(_))
+                        && *handler == case.key
+                        && bound.result.map(|value| value.0) == Some(target.0)
+                }
                 super::calls::Statement::ConstructorChain(reference) => {
                     if let Op::Initialize(call) = bound.op {
                         body.prologue.first().is_some_and(|entry| {
@@ -616,6 +654,32 @@ pub(super) fn verify(
             statement = statement
                 .checked_add(1)
                 .ok_or(RequestError::PlatformCapacity)?;
+            if matches!(bound.op, Op::Exception(_)) {
+                let ingress = super::exceptional::ingress(storage, case.key, budget)?;
+                for copy in &ingress.copies.steps {
+                    budget.charge_work(1)?;
+                    if !matches!(case.statements.get(statement), Some(super::calls::Statement::Assignment(actual))
+                        if actual.target == copy.target && matches!(actual.expression, Expression::Local(super::branch::ValueUse::Direct(source)) if source == copy.source))
+                    {
+                        return Err(RequestError::InternalInvariant(
+                            "handler ingress changed copy or binding position",
+                        ));
+                    }
+                    statement = statement
+                        .checked_add(1)
+                        .ok_or(RequestError::PlatformCapacity)?;
+                }
+            }
+        }
+        if matches!(block.terminal, Terminal::Throw(_)) {
+            snapshot_copies(
+                storage,
+                case.key,
+                block.terminal_pc,
+                &case.statements,
+                &mut statement,
+                budget,
+            )?;
         }
         if statement != case.statements.len() {
             return Err(RequestError::InternalInvariant(
@@ -634,19 +698,32 @@ pub(super) fn verify(
             }
         }
         match (&case.transfer, block.terminal) {
-            (Transfer::Throw(actual), Terminal::Throw(_)) => {
+            (
+                Transfer::Throw(actual) | Transfer::Rethrow { value: actual, .. },
+                Terminal::Throw(_),
+            ) => {
                 let value =
                     ssa.ssa.bound[index]
                         .terminal
                         .ok_or(RequestError::InternalInvariant(
                             "throw certificate lost operand",
                         ))?;
+                if let Transfer::Rethrow { handler, .. } = case.transfer
+                    && super::exceptional::exception_root(ssa, value, budget)? != Some(handler)
+                {
+                    return Err(RequestError::InternalInvariant(
+                        "rethrow changed catch parameter identity",
+                    ));
+                }
                 if !outgoing.is_empty()
                     || actual.value().0 != value.0
                     || !match actual {
                         super::branch::ValueUse::NullAssignment(_) => ssa.ssa.is_zero(value)?,
                         super::branch::ValueUse::Direct(_) => {
-                            matches!(ssa.kinds[ix(value.0)?], Some(Kind::Nominal(_)))
+                            matches!(
+                                ssa.kinds[ix(value.0)?],
+                                Some(Kind::Nominal(_) | Kind::Throwable)
+                            )
                         }
                         _ => false,
                     }

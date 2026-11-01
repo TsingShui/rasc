@@ -26,10 +26,8 @@ fn trace(
             Transfer::Jump(edge) => super::java::assignments(&edge.copies, output, budget)?,
             Transfer::Return(value) => super::java::returned(*value, output, budget)?,
             Transfer::ReturnVoid => output.push("return;\n", budget)?,
-            Transfer::Throw(value) => {
-                output.push("throw ", budget)?;
-                super::java::value_use(*value, output, budget)?;
-                output.push(";\n", budget)?;
+            Transfer::Throw(_) | Transfer::Rethrow { .. } => {
+                super::java::thrown(&block.transfer, output, budget)?
             }
             _ => {
                 return Err(RequestError::InternalInvariant(

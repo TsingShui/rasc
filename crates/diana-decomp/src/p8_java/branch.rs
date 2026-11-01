@@ -177,6 +177,9 @@ pub(crate) fn verify(
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<Option<VerifiedJavaMethod>, RequestError> {
     let storage = &plan.storage;
+    if matches!(plan.shape, crate::p7_regions::Shape::Protected(None)) {
+        return Ok(None);
+    }
     if !super::array_ops::validate(input, catalog, &storage.typed, budget)? {
         return Ok(None);
     }
@@ -193,8 +196,15 @@ pub(crate) fn verify(
     let Some(type_names) = super::types::resolve(input, catalog, storage, budget)? else {
         return Ok(None);
     };
-    let method =
-        super::dispatcher::verify(input, plan, &type_names, &mut calls, environment, budget)?;
+    let method = super::dispatcher::verify(
+        input,
+        catalog,
+        plan,
+        &type_names,
+        &mut calls,
+        environment,
+        budget,
+    )?;
     Ok(method.map(|mut method| {
         method.type_names = type_names;
         method

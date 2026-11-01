@@ -19,12 +19,12 @@ const ERROR: &[u16] = &[
 fn same(a: &[u16], b: &[u16], budget: &mut MethodBudget<'_, '_>) -> Result<bool, RequestError> {
     Ok(crate::p0_knowledge::same_units(a, b, budget)?)
 }
-fn contains(
+pub(crate) fn subtype(
     catalog: &DeclarationCatalog,
     from: &[u16],
     target: &[u16],
     budget: &mut MethodBudget<'_, '_>,
-) -> Result<bool, RequestError> {
+) -> Result<Option<bool>, RequestError> {
     let mut current = from;
     let mut seen: Vec<&[u16]> = Vec::new();
     loop {
@@ -32,25 +32,37 @@ fn contains(
         for old in &seen {
             budget.charge_work(1)?;
             if same(old, current, budget)? {
-                return Ok(false);
+                return Ok(None);
             }
         }
         let Some(class) = catalog.class(current, budget)? else {
-            return Ok(false);
+            return Ok(None);
         };
         if class.access_flags & 0x200 != 0 {
-            return Ok(false);
+            return Ok(None);
         }
         if same(current, target, budget)? {
-            return Ok(true);
+            return Ok(Some(true));
         }
         reserve(&mut seen, 1, budget)?;
         seen.push(current);
         let Some(parent) = class.parent.as_deref() else {
-            return Ok(false);
+            return Ok(if same(current, OBJECT, budget)? {
+                Some(false)
+            } else {
+                None
+            });
         };
         current = parent;
     }
+}
+fn contains(
+    catalog: &DeclarationCatalog,
+    from: &[u16],
+    to: &[u16],
+    budget: &mut MethodBudget<'_, '_>,
+) -> Result<bool, RequestError> {
+    Ok(subtype(catalog, from, to, budget)? == Some(true))
 }
 pub(super) fn retain(
     declared: Option<&[Vec<u16>]>,
@@ -73,6 +85,17 @@ pub(super) fn retain(
     }
     Ok(result)
 }
+pub(crate) fn unrestricted_catch(
+    catalog: &DeclarationCatalog,
+    name: &[u16],
+    budget: &mut MethodBudget<'_, '_>,
+) -> Result<bool, RequestError> {
+    Ok(contains(catalog, name, RUNTIME, budget)?
+        || contains(catalog, name, ERROR, budget)?
+        || contains(catalog, RUNTIME, name, budget)?
+        || contains(catalog, ERROR, name, budget)?)
+}
+
 pub(crate) struct SourceThrows {
     _sealed: (),
     pub descriptors: Vec<Vec<u16>>,
@@ -187,11 +210,17 @@ pub(crate) fn source_throws(
         descriptors,
     }))
 }
+pub(crate) struct Invocation<'a> {
+    pub reference: crate::MethodId,
+    pub pc: crate::CodeUnitOffset,
+    pub protection: Option<&'a crate::input::protection::CheckedProtection>,
+}
+
 pub(crate) fn compatible(
     input: &MethodInput<'_, '_>,
     catalog: &DeclarationCatalog,
     declared: Option<&[Vec<u16>]>,
-
+    invocation: &Invocation<'_>,
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<bool, RequestError> {
     let Some(declared) = declared else {
@@ -203,9 +232,52 @@ pub(crate) fn compatible(
     let Some(allowed) = source_throws(input, catalog, budget)? else {
         return Ok(false);
     };
-    allowed.covers(catalog, declared, budget)
+    match invocation.protection {
+        Some(protection) => {
+            allowed.covers_at(input, catalog, declared, protection, invocation.pc, budget)
+        }
+        None => allowed.covers(catalog, declared, budget),
+    }
 }
 impl SourceThrows {
+    pub(crate) fn covers_at(
+        &self,
+        input: &MethodInput<'_, '_>,
+        catalog: &DeclarationCatalog,
+        declared: &[Vec<u16>],
+        protection: &crate::input::protection::CheckedProtection,
+        pc: crate::CodeUnitOffset,
+        budget: &mut MethodBudget<'_, '_>,
+    ) -> Result<bool, RequestError> {
+        for exception in declared {
+            budget.charge_work(1)?;
+            if self.covers_exception(catalog, exception, budget)? {
+                continue;
+            }
+            let mut caught = false;
+            if let Some(chain) = protection.at(pc, budget)? {
+                for clause in chain {
+                    budget.charge_work(1)?;
+                    match clause.kind {
+                        crate::input::protection::CatchType::All => {
+                            caught = contains(catalog, exception, THROWABLE, budget)?;
+                        }
+                        crate::input::protection::CatchType::Typed(id) => {
+                            let target = copy_units(input.type_descriptor(id, budget)?, budget)?;
+                            caught = contains(catalog, exception, &target, budget)?;
+                        }
+                    }
+                    if caught {
+                        break;
+                    }
+                }
+            }
+            if !caught {
+                return Ok(false);
+            }
+        }
+        Ok(true)
+    }
     pub(crate) fn covers(
         &self,
         catalog: &DeclarationCatalog,
