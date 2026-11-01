@@ -36,7 +36,20 @@ pub(crate) struct StaticCall {
     pub method: String,
     pub arguments: Vec<ValueUse>,
 }
+pub(crate) struct ReceiverCall {
+    pub contract: crate::p4_calls::ReceiverContract,
+    pub receiver: LocalId,
+    pub original_receiver: crate::RegisterId,
+    pub invoke: CodeUnitOffset,
+    pub result_site: Option<CodeUnitOffset>,
+    pub method: String,
+    pub arguments: Vec<ValueUse>,
+}
 pub(crate) enum Statement {
+    ReceiverCall {
+        target: Option<LocalId>,
+        call: ReceiverCall,
+    },
     Field(super::field_ops::Statement),
     Array(super::array_ops::Statement),
     Assignment(Assignment),
@@ -153,29 +166,85 @@ pub(super) fn validate_bindings(
     catalog: &crate::DeclarationCatalog,
     ssa: &TypedBody<'_>,
     budget: &mut MethodBudget<'_, '_>,
-) -> Result<bool, RequestError> {
+) -> Result<Vec<Option<crate::p4_calls::ReceiverContract>>, RequestError> {
+    let mut receivers = Vec::new();
     for (index, site) in ssa.ssa.calls.iter().enumerate() {
         budget.charge_work(1)?;
         let id = CallId(u32::try_from(index).map_err(|_| RequestError::PlatformCapacity)?);
-        let contract = ssa.contract(id)?;
         let bound = ssa.ssa.call(id)?;
-        if bound.inputs.len() != contract.formals.len() {
-            return Err(RequestError::InternalInvariant(
-                "call constraints changed original word arity",
-            ));
-        }
         let uses = ssa
             .call_uses
             .get(index)
             .ok_or(RequestError::InternalInvariant(
                 "call lost final use conversions",
             ))?;
-        if uses.arguments.len() != bound.inputs.len() {
+        let (receiver, arguments) = match &uses.receiver {
+            Some(receiver) => {
+                if site.kind == crate::p2_flow::normal::InvokeKind::Static
+                    || bound.inputs.first() != Some(&receiver.value)
+                    || ssa.kinds[ix(receiver.value.0)?]
+                        != Some(crate::p5_types::normal::Kind::Nominal(
+                            receiver.original_type,
+                        ))
+                {
+                    return Err(RequestError::InternalInvariant(
+                        "receiver conversion changed original definition",
+                    ));
+                }
+                let descriptor = crate::substrate::owned::copy_units(
+                    input.type_descriptor(receiver.original_type, budget)?,
+                    budget,
+                )?;
+                let kind = match site.kind {
+                    crate::p2_flow::normal::InvokeKind::Virtual => {
+                        crate::p4_calls::ReceiverKind::Virtual
+                    }
+                    crate::p2_flow::normal::InvokeKind::Interface => {
+                        crate::p4_calls::ReceiverKind::Interface
+                    }
+                    crate::p2_flow::normal::InvokeKind::Static => {
+                        return Err(RequestError::InternalInvariant(
+                            "static call acquired receiver",
+                        ));
+                    }
+                };
+                let contract = crate::p4_calls::resolve_receiver(
+                    input,
+                    catalog,
+                    site.reference,
+                    kind,
+                    &descriptor,
+                    false,
+                    budget,
+                )?
+                .ok_or(RequestError::BindingEvidenceMissing {
+                    reference: site.reference,
+                    pc: site.pc,
+                })?;
+                (Some(contract), &bound.inputs[1..])
+            }
+            None => {
+                if site.kind != crate::p2_flow::normal::InvokeKind::Static {
+                    return Err(RequestError::InternalInvariant(
+                        "receiver call lost typed receiver",
+                    ));
+                }
+                let contract = ssa.contract(id)?;
+                if !crate::p4_calls::normal::binding_available(input, catalog, contract, budget)? {
+                    return Err(RequestError::BindingEvidenceMissing {
+                        reference: site.reference,
+                        pc: site.pc,
+                    });
+                }
+                (None, bound.inputs.as_slice())
+            }
+        };
+        if uses.arguments.len() != arguments.len() {
             return Err(RequestError::InternalInvariant(
                 "call conversions changed arity",
             ));
         }
-        for (&value, typed_use) in bound.inputs.iter().zip(&uses.arguments) {
+        for (&value, typed_use) in arguments.iter().zip(&uses.arguments) {
             budget.charge_work(1)?;
             if value != typed_use.value {
                 return Err(RequestError::InternalInvariant(
@@ -183,14 +252,9 @@ pub(super) fn validate_bindings(
                 ));
             }
         }
-        if !crate::p4_calls::normal::binding_available(input, catalog, contract, budget)? {
-            return Err(RequestError::BindingEvidenceMissing {
-                reference: site.reference,
-                pc: site.pc,
-            });
-        }
+        push(&mut receivers, receiver, budget)?;
     }
-    Ok(true)
+    Ok(receivers)
 }
 fn plan(
     ssa: &TypedBody<'_>,
@@ -259,6 +323,7 @@ fn plan(
 pub(super) fn operations(
     ssa: &TypedBody<'_>,
     block: crate::pipeline::branch::BlockId,
+    receivers: &mut [Option<crate::p4_calls::ReceiverContract>],
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<Option<Vec<Statement>>, RequestError> {
     let mut output = Vec::new();
@@ -280,6 +345,52 @@ pub(super) fn operations(
                 budget,
             )?;
         } else if let Op::Call(id, _) = op.op {
+            let index = ix(id.0)?;
+            if let Some(contract) = receivers
+                .get_mut(index)
+                .ok_or(RequestError::InternalInvariant("call lost binding slot"))?
+                .take()
+            {
+                let bound = ssa.ssa.call(id)?;
+                let site = &ssa.ssa.calls[index];
+                let Some(method) = identifier_text(&contract.name, budget)? else {
+                    return Ok(None);
+                };
+                let mut arguments = Vec::new();
+                for argument in &ssa.call_uses[index].arguments {
+                    budget.charge_work(1)?;
+                    push(
+                        &mut arguments,
+                        super::values::lower(LocalId(argument.value.0), argument.conversion),
+                        budget,
+                    )?;
+                }
+                let receiver = bound.input(0)?;
+                let original_receiver =
+                    *site
+                        .registers
+                        .first()
+                        .ok_or(RequestError::InternalInvariant(
+                            "call lost original receiver register",
+                        ))?;
+                push(
+                    &mut output,
+                    Statement::ReceiverCall {
+                        target: op.result.map(|value| LocalId(value.0)),
+                        call: ReceiverCall {
+                            contract,
+                            receiver: LocalId(receiver.0),
+                            original_receiver,
+                            invoke: site.pc,
+                            result_site: site.result_pc,
+                            method,
+                            arguments,
+                        },
+                    },
+                    budget,
+                )?;
+                continue;
+            }
             let Some(call) = plan(ssa, id, budget)? else {
                 return Ok(None);
             };

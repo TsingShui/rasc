@@ -203,9 +203,7 @@ pub(crate) fn verify(
     representation: crate::RepresentationPolicy,
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<Option<VerifiedJavaMethod>, RequestError> {
-    if !super::calls::validate_bindings(input, catalog, &storage.typed, budget)? {
-        return Ok(None);
-    }
+    let mut receivers = super::calls::validate_bindings(input, catalog, &storage.typed, budget)?;
     let Some(type_names) = super::types::resolve(input, catalog, &storage, budget)? else {
         return Ok(None);
     };
@@ -222,6 +220,7 @@ pub(crate) fn verify(
         input,
         &storage,
         &type_names,
+        &mut receivers,
         environment,
         representation,
         budget,

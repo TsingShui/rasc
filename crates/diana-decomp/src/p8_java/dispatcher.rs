@@ -87,6 +87,7 @@ pub(crate) fn verify(
     input: &MethodInput<'_, '_>,
     storage: &StorageBody<'_>,
     type_names: &super::types::TypeNames,
+    receivers: &mut [Option<crate::p4_calls::ReceiverContract>],
     environment: EnvironmentId,
     representation: crate::RepresentationPolicy,
     budget: &mut MethodBudget<'_, '_>,
@@ -148,7 +149,7 @@ pub(crate) fn verify(
                 )?;
             }
         }
-        let Some(statements) = super::calls::operations(ssa, key, budget)? else {
+        let Some(statements) = super::calls::operations(ssa, key, receivers, budget)? else {
             return Ok(None);
         };
         let bound = &ssa.ssa.bound[index];

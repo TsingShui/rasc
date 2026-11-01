@@ -9,6 +9,23 @@ pub(crate) fn source_type(
     descriptor: &[u16],
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<bool, RequestError> {
+    named_type(input, catalog, descriptor, false, budget)
+}
+pub(crate) fn source_reference_type(
+    input: &MethodInput<'_, '_>,
+    catalog: &DeclarationCatalog,
+    descriptor: &[u16],
+    budget: &mut MethodBudget<'_, '_>,
+) -> Result<bool, RequestError> {
+    named_type(input, catalog, descriptor, true, budget)
+}
+fn named_type(
+    input: &MethodInput<'_, '_>,
+    catalog: &DeclarationCatalog,
+    descriptor: &[u16],
+    allow_interface: bool,
+    budget: &mut MethodBudget<'_, '_>,
+) -> Result<bool, RequestError> {
     if descriptor.len() < 3 || descriptor.first() != Some(&76) || descriptor.last() != Some(&59) {
         return Ok(false);
     }
@@ -18,7 +35,8 @@ pub(crate) fn source_type(
     };
     if !plain(class, &caller, budget)?
         || class.access_flags & 1 == 0
-        || class.access_flags & 0x2200 != 0
+        || class.access_flags & 0x2000 != 0
+        || !allow_interface && class.access_flags & 0x200 != 0
     {
         return Ok(false);
     }

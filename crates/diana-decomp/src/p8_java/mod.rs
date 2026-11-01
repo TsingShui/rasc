@@ -12,6 +12,7 @@ pub(crate) mod field_ops;
 pub(crate) mod fresh_array;
 pub(crate) mod heap_access;
 pub(crate) mod receiver;
+mod receiver_ops;
 mod receiver_verify;
 mod scalar;
 pub(crate) mod structured;

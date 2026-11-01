@@ -74,7 +74,7 @@ impl TypeNames {
             }
         }
         let descriptor = copy_units(input.type_descriptor(id, budget)?, budget)?;
-        if !crate::p4_calls::source_type(input, catalog, &descriptor, budget)? {
+        if !crate::p4_calls::normal::source_reference_type(input, catalog, &descriptor, budget)? {
             return Ok(false);
         }
         let Some(source) = super::calls::type_name(&descriptor, budget)? else {

@@ -16,5 +16,12 @@ public final class Case {
         }
         return b.n;
     }
+    public static int invoke(Reader receiver, Box b, int[] a, int index) {
+        int old = b.n;
+        int next = receiver.value(index);
+        a[index] = old;
+        b.n = next;
+        return b.n + a[index];
+    }
     public static void unused(Box b, int[] a) { int old = b.n; int length = a.length; }
 }

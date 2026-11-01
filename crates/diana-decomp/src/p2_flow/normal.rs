@@ -82,7 +82,24 @@ pub(crate) enum InvokeResult {
     Reference(Option<DeclarationType>),
     Wide,
 }
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub(crate) enum InvokeKind {
+    Static,
+    Virtual,
+    Interface,
+}
+impl InvokeKind {
+    pub(crate) fn from_opcode(opcode: u8) -> Option<Self> {
+        match opcode {
+            0x71 | 0x77 => Some(Self::Static),
+            0x6e | 0x74 => Some(Self::Virtual),
+            0x72 | 0x78 => Some(Self::Interface),
+            _ => None,
+        }
+    }
+}
 pub(crate) struct CallSite {
+    pub kind: InvokeKind,
     pub reference: crate::MethodId,
     pub result: InvokeResult,
     pub registers: Vec<RegisterId>,
@@ -616,7 +633,7 @@ pub(crate) fn decode<'a>(
                     },
                     reg(2)?,
                 )),
-                0x71 | 0x77 => {
+                0x71 | 0x77 | 0x6e | 0x74 | 0x72 | 0x78 => {
                     let Some(reference) = layout.references()[0] else {
                         return Err(RequestError::InternalInvariant(
                             "checked invoke has no reference",
@@ -739,6 +756,8 @@ pub(crate) fn decode<'a>(
                     push(
                         &mut calls,
                         CallSite {
+                            kind: InvokeKind::from_opcode(spec.opcode)
+                                .ok_or(RequestError::InternalInvariant("invoke lost its kind"))?,
                             reference,
                             result,
                             registers,

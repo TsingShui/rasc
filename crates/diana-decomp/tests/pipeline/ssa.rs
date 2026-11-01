@@ -468,6 +468,7 @@ fn field_call_array_composition_preserves_native_volatile_declaration_evidence()
                 ("combine", "(Lfixtures/Box;[II)I"),
                 ("repeat", "(Lfixtures/Box;[II)I"),
                 ("unused", "(Lfixtures/Box;[I)V"),
+                ("invoke", "(Lfixtures/Reader;Lfixtures/Box;[II)I"),
             ] {
                 let bytes = include_bytes!("../fixtures/shared-fields/classes.dex");
                 let mut facts: PipelineFacts =

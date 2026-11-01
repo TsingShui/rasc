@@ -5,7 +5,14 @@ use crate::p3_ssa::normal::SsaBody;
 use crate::substrate::owned::push;
 use crate::{DeclarationCatalog, MethodBudget, RequestError};
 
+pub(crate) struct ReceiverFacts {
+    pub owner: Vec<u16>,
+    pub name: Vec<u16>,
+    pub prototype: Vec<u16>,
+    pub formals: Option<Vec<super::CallFormal>>,
+}
 pub(crate) enum CallEvidence {
+    Receiver(ReceiverFacts),
     Declaration(StaticContract),
     Missing {
         formals: Option<Vec<super::CallFormal>>,
@@ -15,6 +22,7 @@ impl CallEvidence {
     pub(crate) fn formals(&self) -> Option<&[super::CallFormal]> {
         match self {
             Self::Declaration(contract) => Some(&contract.formals),
+            Self::Receiver(facts) => facts.formals.as_deref(),
             Self::Missing { formals } => formals.as_deref(),
         }
     }
@@ -44,13 +52,25 @@ pub(crate) fn collect<'a>(
     let mut calls = Vec::new();
     for call in &ssa.calls {
         budget.charge_work(1)?;
-        let evidence =
+        let evidence = if call.kind != crate::p2_flow::normal::InvokeKind::Static {
+            let original = input.method_reference(call.reference, budget)?;
+            CallEvidence::Receiver(ReceiverFacts {
+                owner: crate::substrate::owned::copy_units(original.owner, budget)?,
+                name: crate::substrate::owned::copy_units(original.declaration.name, budget)?,
+                prototype: crate::substrate::owned::copy_proto(
+                    &original.declaration.prototype,
+                    budget,
+                )?,
+                formals: super::contracts::original_formals(input, call.reference, budget)?,
+            })
+        } else {
             match super::contracts::collect_static(input, catalog, call.reference, budget)? {
                 Some(contract) => CallEvidence::Declaration(contract),
                 None => CallEvidence::Missing {
                     formals: super::contracts::original_formals(input, call.reference, budget)?,
                 },
-            };
+            }
+        };
         push(&mut calls, evidence, budget)?;
     }
     let mut fields = Vec::new();
@@ -116,6 +136,9 @@ pub(crate) fn contract<'a>(
     let index = usize::try_from(id.0).map_err(|_| RequestError::PlatformCapacity)?;
     match calls.get(index) {
         Some(CallEvidence::Declaration(contract)) => Ok(contract),
+        Some(CallEvidence::Receiver(_)) => Err(RequestError::InternalInvariant(
+            "receiver call requested static contract",
+        )),
         Some(CallEvidence::Missing { .. }) => {
             let site = ssa.calls.get(index).ok_or(RequestError::InternalInvariant(
                 "missing evidence lost call identity",
@@ -129,4 +152,13 @@ pub(crate) fn contract<'a>(
             "foreign call evidence identity",
         )),
     }
+}
+
+pub(crate) fn source_reference_type(
+    input: &MethodInput<'_, '_>,
+    catalog: &DeclarationCatalog,
+    descriptor: &[u16],
+    budget: &mut MethodBudget<'_, '_>,
+) -> Result<bool, RequestError> {
+    super::reference_types::source_reference_type(input, catalog, descriptor, budget)
 }

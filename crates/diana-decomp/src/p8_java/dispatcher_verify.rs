@@ -331,6 +331,14 @@ pub(super) fn verify(
                     "dispatcher omitted an original operation",
                 ))?;
             let matches = match actual {
+                super::calls::Statement::ReceiverCall { target, call } => {
+                    if let Op::Call(id, _) = bound.op {
+                        target.map(|value| value.0) == bound.result.map(|value| value.0)
+                            && super::receiver_ops::verify(ssa, id, call, budget)?
+                    } else {
+                        false
+                    }
+                }
                 super::calls::Statement::Field(actual) => {
                     super::field_ops::verify(ssa, bound, actual, budget)?
                 }

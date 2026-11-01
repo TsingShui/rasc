@@ -591,7 +591,7 @@ fn verify_call(
         .ok_or(RequestError::InternalInvariant("call has foreign identity"))?;
     let original = instruction_layout(ssa.raw.instructions(), pc, ssa.raw.version())
         .map_err(crate::input::MethodError::Decode)?;
-    if !matches!(original.kind(),LayoutKind::Instruction(spec) if matches!(spec.opcode,0x71|0x77))
+    if !matches!(original.kind(),LayoutKind::Instruction(spec) if crate::p2_flow::normal::InvokeKind::from_opcode(spec.opcode) == Some(site.kind))
         || !matches!(original.references()[0],Some(reference) if reference.target==crate::raw::OperandReference::Method(site.reference))
     {
         return Err(RequestError::InternalInvariant(

@@ -13,6 +13,11 @@ pub(crate) struct TypedUse {
 pub(crate) struct CallUses {
     _sealed: (),
     pub arguments: Vec<TypedUse>,
+    pub receiver: Option<TypedReceiver>,
+}
+pub(crate) struct TypedReceiver {
+    pub value: ValueId,
+    pub original_type: crate::TypeId,
 }
 fn conversion(
     ssa: &SsaBody<'_>,
@@ -83,13 +88,34 @@ pub(crate) fn solve(
             });
         };
         let bound = ssa.call(id)?;
-        if bound.inputs.len() != formals.len() {
+        let (receiver, values) = if site.kind == crate::p2_flow::normal::InvokeKind::Static {
+            (None, bound.inputs.as_slice())
+        } else {
+            let Some((&value, arguments)) = bound.inputs.split_first() else {
+                return Err(RequestError::InternalInvariant(
+                    "receiver call lost receiver",
+                ));
+            };
+            let Some(Kind::Nominal(original_type)) =
+                kinds[usize::try_from(value.0).map_err(|_| RequestError::PlatformCapacity)?]
+            else {
+                return Ok(None);
+            };
+            (
+                Some(TypedReceiver {
+                    value,
+                    original_type,
+                }),
+                arguments,
+            )
+        };
+        if values.len() != formals.len() {
             return Err(RequestError::InternalInvariant(
                 "original formal word constraints changed",
             ));
         }
         let mut arguments = Vec::new();
-        for (&value, &formal) in bound.inputs.iter().zip(formals) {
+        for (&value, &formal) in values.iter().zip(formals) {
             budget.charge_work(1)?;
             let Some(conversion) = conversion(ssa, value, formal, kinds, bits, ranges)? else {
                 if matches!(evidence, CallEvidence::Missing { .. }) {
@@ -107,6 +133,7 @@ pub(crate) fn solve(
             CallUses {
                 _sealed: (),
                 arguments,
+                receiver,
             },
             budget,
         )?;

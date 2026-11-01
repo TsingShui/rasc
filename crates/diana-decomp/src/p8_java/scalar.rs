@@ -146,6 +146,24 @@ impl VerifiedJavaMethod {
             .flatten()
             .flat_map(|case| case.statements.iter())
             .filter_map(|statement| match statement {
+                super::calls::Statement::ReceiverCall { call, .. } => Some(super::JavaCallSite {
+                    reference: call.contract.reference,
+                    receiver: Some(call.original_receiver),
+                    allocation: None,
+                    owner: &call.contract.owner,
+                    name: &call.contract.name,
+                    prototype: &call.contract.prototype,
+                    invoke: call.invoke,
+                    result: call.result_site,
+                    kind: match call.contract.kind {
+                        crate::p4_calls::ReceiverKind::Virtual => super::JavaInvokeKind::Virtual,
+                        crate::p4_calls::ReceiverKind::Interface => {
+                            super::JavaInvokeKind::Interface
+                        }
+                        crate::p4_calls::ReceiverKind::Super => super::JavaInvokeKind::Super,
+                        crate::p4_calls::ReceiverKind::Direct => super::JavaInvokeKind::Direct,
+                    },
+                }),
                 super::calls::Statement::StaticCall { call, .. } => Some(super::JavaCallSite {
                     reference: call.reference,
                     receiver: None,

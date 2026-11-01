@@ -3,7 +3,7 @@ use crate::input::MethodInput;
 use crate::substrate::owned::{copy_proto, copy_units};
 use crate::{DeclarationCatalog, MethodBudget, MethodId, RequestError};
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Eq, PartialEq)]
 pub(crate) enum ReceiverKind {
     Super,
     Direct,

@@ -59,6 +59,24 @@ pub(super) fn statements(
     for statement in &case.statements {
         budget.charge_work(1)?;
         match statement {
+            crate::p8_java::calls::Statement::ReceiverCall { target, call } => {
+                if let Some(target) = target {
+                    local(*target, output, budget)?;
+                    output.push(" = ", budget)?;
+                }
+                local(call.receiver, output, budget)?;
+                output.push(".", budget)?;
+                output.push(&call.method, budget)?;
+                output.push("(", budget)?;
+                for (index, &argument) in call.arguments.iter().enumerate() {
+                    budget.charge_work(1)?;
+                    if index != 0 {
+                        output.push(", ", budget)?;
+                    }
+                    super::java::value_use(argument, output, budget)?;
+                }
+                output.push(");\n", budget)?;
+            }
             crate::p8_java::calls::Statement::Field(statement) => {
                 super::field_ops::write(statement, output, budget)?
             }
