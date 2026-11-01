@@ -35,6 +35,18 @@ fn numeric_view(
         ValueUse::BooleanWord(_) => {
             expected == Kind::Int && typed.kinds[ix(source.0)?] == Some(Kind::Boolean)
         }
+        ValueUse::DoubleLiteral { bits, .. } => {
+            if expected != Kind::Double
+                || bits & 0x7ff0_0000_0000_0000 == 0x7ff0_0000_0000_0000
+                    && bits & 0x000f_ffff_ffff_ffff != 0
+            {
+                return Ok(false);
+            }
+            let Definition::OpResult(id) = typed.ssa.values[ix(source.0)?] else {
+                return Ok(false);
+            };
+            matches!(typed.ssa.operation(id)?.op,Op::ConstantWide(_,original) if u64::from_le_bytes(original.to_le_bytes()) == bits)
+        }
         ValueUse::FloatLiteral { bits, .. } => {
             if expected != Kind::Float
                 || bits & 0x7f80_0000 == 0x7f80_0000 && bits & 0x007f_ffff != 0
@@ -57,32 +69,33 @@ fn same_expression(
     use crate::p2_flow::normal::Operand;
     let left = bound.inputs.first();
     let right = bound.inputs.get(1);
+    let required = |index| {
+        crate::p5_types::numeric::expected(bound.op, index)?.ok_or(RequestError::InternalInvariant(
+            "numeric verification lost operand family",
+        ))
+    };
     Ok(match (actual, bound.op) {
         (Expression::Unary(actual, source), Op::Unary(_, original, _)) => {
-            *actual == original
-                && numeric_view(
-                    typed,
-                    *source,
-                    left,
-                    if original.signature().0 == crate::pipeline::scalar::ScalarType::Float {
-                        Kind::Float
-                    } else {
-                        Kind::Int
-                    },
-                )?
+            *actual == original && numeric_view(typed, *source, left, required(0)?)?
         }
         (Expression::ReverseSubtract(actual, source), Op::ReverseSubtract(_, original, _)) => {
             *actual == original && numeric_view(typed, *source, left, Kind::Int)?
         }
         (Expression::Compare(a, compare, b), Op::Compare(_, _, original, _)) => {
-            numeric_view(typed, *a, left, Kind::Float)?
+            numeric_view(typed, *a, left, required(0)?)?
                 && *compare == original
-                && numeric_view(typed, *b, right, Kind::Float)?
+                && numeric_view(typed, *b, right, required(1)?)?
         }
         (Expression::Constant(actual), Op::Constant(_, original)) => *actual == original,
-        (Expression::Local(actual), Op::Move(_, _)) => {
+        (Expression::ConstantWide(actual), Op::ConstantWide(_, original)) => *actual == original,
+        (Expression::Local(actual), Op::Move(..) | Op::MoveWide(..)) => {
             if typed.numeric_uses[ix(bound.id.0)?].is_some() {
-                numeric_view(typed, *actual, left, Kind::Float)?
+                let kind = typed.kinds[ix(bound
+                    .result
+                    .ok_or(RequestError::InternalInvariant("copy lost result"))?
+                    .0)?]
+                .ok_or(RequestError::InternalInvariant("copy lost storage family"))?;
+                numeric_view(typed, *actual, left, kind)?
             } else {
                 left.is_some_and(|value| {
                     *actual == super::branch::ValueUse::Direct(LocalId(value.0))
@@ -91,11 +104,13 @@ fn same_expression(
         }
         (
             Expression::Binary(actual, kind, Right::Local(rhs)),
-            Op::FloatBinary(_, _, original, _),
+            Op::FloatBinary(_, _, original, _)
+            | Op::LongBinary(_, _, original, _)
+            | Op::DoubleBinary(_, _, original, _),
         ) => {
-            numeric_view(typed, *actual, left, Kind::Float)?
+            numeric_view(typed, *actual, left, required(0)?)?
                 && *kind == original
-                && numeric_view(typed, *rhs, right, Kind::Float)?
+                && numeric_view(typed, *rhs, right, required(1)?)?
         }
         (Expression::Binary(actual, kind, rhs), Op::Binary(_, _, original, operand)) => {
             numeric_view(typed, *actual, left, Kind::Int)?
@@ -660,13 +675,28 @@ pub(super) fn verify(
                         let at = ix(actual.value().0)?;
                         use super::branch::ValueUse;
                         !match actual {
-                            ValueUse::Null { .. } => false,
-                            ValueUse::FloatLiteral { .. } => numeric_view(
-                                ssa,
-                                *actual,
-                                ssa.ssa.bound[index].terminal.as_ref(),
-                                result.kind(),
-                            )?,
+                            ValueUse::Null { kind, .. } => {
+                                let declared = match result {
+                                    crate::pipeline::branch::DeclarationType::Object => {
+                                        Some(crate::p5_types::BuiltinReference::Object)
+                                    }
+                                    crate::pipeline::branch::DeclarationType::String => {
+                                        Some(crate::p5_types::BuiltinReference::String)
+                                    }
+                                    _ => None,
+                                };
+                                declared == Some(*kind)
+                                    && ssa.kinds[at] == Some(Kind::Int)
+                                    && ssa.integral_bits[at] == 1
+                            }
+                            ValueUse::FloatLiteral { .. } | ValueUse::DoubleLiteral { .. } => {
+                                numeric_view(
+                                    ssa,
+                                    *actual,
+                                    ssa.ssa.bound[index].terminal.as_ref(),
+                                    result.kind(),
+                                )?
+                            }
                             ValueUse::UpcastObject(_) => {
                                 matches!(result, crate::pipeline::branch::DeclarationType::Object)
                                     && matches!(
@@ -684,6 +714,8 @@ pub(super) fn verify(
                                     result,
                                     crate::pipeline::branch::DeclarationType::Int
                                         | crate::pipeline::branch::DeclarationType::Float
+                                        | crate::pipeline::branch::DeclarationType::Long
+                                        | crate::pipeline::branch::DeclarationType::Double
                                         | crate::pipeline::branch::DeclarationType::Boolean
                                         | crate::pipeline::branch::DeclarationType::Object
                                         | crate::pipeline::branch::DeclarationType::String

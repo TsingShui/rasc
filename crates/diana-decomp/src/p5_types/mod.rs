@@ -6,9 +6,7 @@ pub(crate) mod normal;
 pub(crate) mod numeric;
 pub(crate) use arrays::{ArrayElement, PrimitiveArray};
 mod references;
-pub(crate) use references::BuiltinReference;
-mod scalar;
 pub(crate) use integral::{IntRange, Narrow};
+pub(crate) use references::BuiltinReference;
 #[cfg(test)]
 mod tests;
-pub(crate) use scalar::{Conversion, Solved, solve};

@@ -1,41 +1,6 @@
-use crate::pipeline::scalar::{Expression, ScalarType};
 use crate::substrate::owned::TextBuffer;
 use crate::{MethodBudget, RequestError};
 
-pub(super) fn numeric(
-    expression: &Expression,
-    kind: ScalarType,
-    output: &mut TextBuffer,
-    budget: &mut MethodBudget<'_, '_>,
-) -> Result<(), RequestError> {
-    match (expression, kind) {
-        (Expression::Constant(0), ScalarType::String) => output.push("null", budget),
-        (Expression::Constant(value @ (0 | 1)), ScalarType::Boolean) => {
-            output.push(if *value == 0 { "false" } else { "true" }, budget)
-        }
-        (Expression::Constant(value), ScalarType::Int) => {
-            output.arguments(format_args!("{value}"), budget)
-        }
-        (Expression::ConstantWide(value), ScalarType::Long) => {
-            output.arguments(format_args!("{value}L"), budget)
-        }
-        (Expression::Constant(value), ScalarType::Float) => fp(
-            u64::from(u32::from_le_bytes(value.to_le_bytes())),
-            false,
-            output,
-            budget,
-        ),
-        (Expression::ConstantWide(value), ScalarType::Double) => fp(
-            u64::from_le_bytes(value.to_le_bytes()),
-            true,
-            output,
-            budget,
-        ),
-        _ => Err(RequestError::InternalInvariant(
-            "sealed literal view changed width or family",
-        )),
-    }
-}
 pub(super) fn string(
     units: &[u16],
     output: &mut TextBuffer,

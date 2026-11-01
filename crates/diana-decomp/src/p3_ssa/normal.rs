@@ -11,6 +11,7 @@ use crate::{CodeUnitOffset, MethodBudget, RegisterId, RequestError};
 pub(crate) struct ValueId(pub u32);
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub(crate) enum Sym {
+    High(ValueId),
     Value(ValueId),
     Bad,
 }
@@ -115,7 +116,7 @@ fn add_register(
     push(set, register, budget)?;
     Ok(true)
 }
-fn lookup(
+pub(super) fn lookup(
     env: &[(RegisterId, Sym)],
     register: RegisterId,
     budget: &mut MethodBudget<'_, '_>,
@@ -143,11 +144,56 @@ fn write(
     }
     push(env, (register, value), budget)
 }
-fn value(sym: Sym, register: RegisterId, pc: CodeUnitOffset) -> Result<ValueId, RequestError> {
+pub(super) fn value(
+    sym: Sym,
+    register: RegisterId,
+    pc: CodeUnitOffset,
+) -> Result<ValueId, RequestError> {
     match sym {
         Sym::Value(value) => Ok(value),
+        Sym::High(_) => Err(RequestError::InvalidWideRead { register, pc }),
         Sym::Bad => Err(RequestError::UndefinedRegister { register, pc }),
     }
+}
+fn commit(
+    env: &mut Vec<(RegisterId, Sym)>,
+    register: RegisterId,
+    value: ValueId,
+    width: crate::p2_flow::normal::ValueWidth,
+    budget: &mut MethodBudget<'_, '_>,
+) -> Result<(), RequestError> {
+    write(env, register, Sym::Value(value), budget)?;
+    if width == crate::p2_flow::normal::ValueWidth::Two {
+        write(
+            env,
+            super::word_ownership::high(register)?,
+            Sym::High(value),
+            budget,
+        )?;
+    }
+    Ok(())
+}
+// A live low slot reserves a symbolic following word only where no separate
+// live slot exists. Incoming-edge ownership and grounding discharge this
+// candidate relation before the SSA body is exposed.
+fn phi_highs(
+    phis: &[Phi],
+    block: BlockId,
+    registers: u16,
+    env: &mut Vec<(RegisterId, Sym)>,
+    budget: &mut MethodBudget<'_, '_>,
+) -> Result<(), RequestError> {
+    for phi in phis {
+        budget.charge_work(1)?;
+        if phi.block != block {
+            continue;
+        }
+        let high = super::word_ownership::high(phi.register)?;
+        if high.0 < u32::from(registers) && lookup(env, high, budget)? == Sym::Bad {
+            write(env, high, Sym::High(phi.result), budget)?;
+        }
+    }
+    Ok(())
 }
 pub(crate) fn build<'a>(
     flow: FlowBody<'a>,
@@ -189,7 +235,13 @@ pub(crate) fn build<'a>(
                     let mut position = 0;
                     while position < needed.len() {
                         budget.charge_work(1)?;
-                        if needed[position] == destination {
+                        if needed[position].0 >= destination.0
+                            && needed[position].0
+                                < destination
+                                    .0
+                                    .checked_add(operation.kind.result_width().words())
+                                    .ok_or(RequestError::PlatformCapacity)?
+                        {
                             needed.swap_remove(position);
                         } else {
                             position += 1;
@@ -212,22 +264,35 @@ pub(crate) fn build<'a>(
     }
     let mut values = Vec::new();
     let mut seeds = Vec::new();
-    let first = u32::from(flow.raw.registers_size())
-        .checked_sub(
-            u32::try_from(flow.parameters.len()).map_err(|_| RequestError::PlatformCapacity)?,
-        )
-        .ok_or(RequestError::InternalInvariant("parameter frame underflow"))?;
-    for index in 0..flow.parameters.len() {
+    let mut parameter_words = 0u32;
+    for parameter in &flow.parameters {
         budget.charge_work(1)?;
-        let number = u32::try_from(index).map_err(|_| RequestError::PlatformCapacity)?;
+        parameter_words = parameter_words
+            .checked_add(parameter.width().words())
+            .ok_or(RequestError::PlatformCapacity)?;
+    }
+    let mut register = RegisterId(
+        u32::from(flow.raw.registers_size())
+            .checked_sub(parameter_words)
+            .ok_or(RequestError::InternalInvariant("parameter frame underflow"))?,
+    );
+    for (index, parameter) in flow.parameters.iter().enumerate() {
+        budget.charge_work(1)?;
         let id = ValueId(u32::try_from(values.len()).map_err(|_| RequestError::PlatformCapacity)?);
-        push(&mut values, Definition::Parameter(number), budget)?;
-        let register = RegisterId(
-            first
-                .checked_add(number)
+        push(
+            &mut values,
+            Definition::Parameter(
+                u32::try_from(index).map_err(|_| RequestError::PlatformCapacity)?,
+            ),
+            budget,
+        )?;
+        commit(&mut seeds, register, id, parameter.width(), budget)?;
+        register = RegisterId(
+            register
+                .0
+                .checked_add(parameter.width().words())
                 .ok_or(RequestError::PlatformCapacity)?,
         );
-        push(&mut seeds, (register, Sym::Value(id)), budget)?;
     }
     let mut phis = Vec::new();
     for (index, registers) in live.iter().enumerate() {
@@ -268,6 +333,7 @@ pub(crate) fn build<'a>(
                 write(&mut env, phi.register, Sym::Value(phi.result), budget)?;
             }
         }
+        phi_highs(&phis, block_id, flow.raw.registers_size(), &mut env, budget)?;
         let mut ops = Vec::new();
         for operation in &block.ops {
             budget.charge_work(1)?;
@@ -290,7 +356,13 @@ pub(crate) fn build<'a>(
                     u32::try_from(values.len()).map_err(|_| RequestError::PlatformCapacity)?,
                 );
                 push(&mut values, Definition::OpResult(operation.id), budget)?;
-                write(&mut env, register, Sym::Value(id), budget)?;
+                commit(
+                    &mut env,
+                    register,
+                    id,
+                    operation.kind.result_width(),
+                    budget,
+                )?;
                 Some(id)
             } else {
                 None
@@ -349,20 +421,15 @@ pub(crate) fn build<'a>(
             if edge.source == block_id {
                 for &register in &live[ix(edge.target.0)?] {
                     budget.charge_work(1)?;
-                    let mut present = false;
-                    for &(slot, _) in &snapshot {
-                        budget.charge_work(1)?;
-                        if slot == register {
-                            present = true;
-                            break;
-                        }
-                    }
-                    if !present {
-                        push(
-                            &mut snapshot,
-                            (register, lookup(&env, register, budget)?),
-                            budget,
-                        )?;
+                    write(
+                        &mut snapshot,
+                        register,
+                        lookup(&env, register, budget)?,
+                        budget,
+                    )?;
+                    let high = super::word_ownership::high(register)?;
+                    if high.0 < u32::from(flow.raw.registers_size()) {
+                        write(&mut snapshot, high, lookup(&env, high, budget)?, budget)?;
                     }
                 }
             }
@@ -425,12 +492,14 @@ pub(crate) fn build<'a>(
         phis,
         bound,
     };
-    verify(&ssa, &seeds, budget)?;
+    let widths = super::word_ownership::analyze(&ssa, &seeds, &outgoing, budget)?;
+    verify(&ssa, &seeds, &widths, budget)?;
     Ok(ssa)
 }
 fn verify(
     ssa: &SsaBody<'_>,
     seeds: &[(RegisterId, Sym)],
+    widths: &super::word_ownership::WidthFacts,
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<(), RequestError> {
     let mut operation_count = 0usize;
@@ -475,6 +544,13 @@ fn verify(
                 return Err(RequestError::InternalInvariant("entry Phi lost EntrySeed"));
             }
         }
+        phi_highs(
+            &ssa.phis,
+            block_id,
+            ssa.raw.registers_size(),
+            &mut env,
+            budget,
+        )?;
         if ssa.bound[index].ops.len() != block.ops.len() {
             return Err(RequestError::InternalInvariant(
                 "SSA changed operation coverage",
@@ -497,10 +573,16 @@ fn verify(
                 .checked_add(1)
                 .ok_or(RequestError::PlatformCapacity)?;
             let mut inputs = op.inputs.iter();
-            for register in original.kind.reads(&ssa.calls)? {
+            for (position, register) in original.kind.reads(&ssa.calls)?.enumerate() {
                 budget.charge_work(1)?;
                 if inputs.next().copied()
-                    != Some(value(lookup(&env, register, budget)?, register, op.pc)?)
+                    != Some(widths.read(
+                        &env,
+                        register,
+                        original.kind.read_width(position),
+                        op.pc,
+                        budget,
+                    )?)
                 {
                     return Err(RequestError::InternalInvariant(
                         "SSA input is not the latest definition",
@@ -534,7 +616,13 @@ fn verify(
                             "operation changed result definition",
                         ));
                     }
-                    write(&mut env, register, Sym::Value(result), budget)?;
+                    commit(
+                        &mut env,
+                        register,
+                        result,
+                        original.kind.result_width(),
+                        budget,
+                    )?;
                 }
                 (None, None) => {}
                 _ => {
@@ -550,10 +638,12 @@ fn verify(
         ] {
             budget.charge_work(1)?;
             let expected = if let Some(register) = register {
-                Some(value(
-                    lookup(&env, register, budget)?,
+                Some(widths.read(
+                    &env,
                     register,
+                    super::word_ownership::terminal_width(ssa, index),
                     block.terminal_pc,
+                    budget,
                 )?)
             } else {
                 None
@@ -705,6 +795,7 @@ fn verify_availability(
                 budget.charge_work(1)?;
                 let (input_bad, input_grounded) = match input {
                     Sym::Bad => (true, false),
+                    Sym::High(_) => (true, false),
                     Sym::Value(source) => (bad[ix(source.0)?], grounded[ix(source.0)?]),
                 };
                 if input_bad && !bad[index] {

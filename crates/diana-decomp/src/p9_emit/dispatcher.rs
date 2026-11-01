@@ -75,6 +75,8 @@ pub(super) fn locals(
                     | Kind::ObjectArray
                     | Kind::Nominal(_) => " = null",
                     Kind::Float => " = 0.0f",
+                    Kind::Long => " = 0L",
+                    Kind::Double => " = 0.0d",
                 },
                 budget,
             )?;

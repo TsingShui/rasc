@@ -10,6 +10,8 @@ pub(crate) struct BlockId(pub u32);
 pub(crate) struct EdgeId(pub u32);
 #[derive(Clone, Copy)]
 pub(crate) enum DeclarationType {
+    Long,
+    Double,
     Int,
     Boolean,
     Object,
@@ -21,6 +23,13 @@ pub(crate) enum DeclarationType {
     Narrow(crate::p5_types::Narrow),
 }
 impl DeclarationType {
+    pub(crate) fn width(self) -> ValueWidth {
+        if matches!(self, Self::Long | Self::Double) {
+            ValueWidth::Two
+        } else {
+            ValueWidth::One
+        }
+    }
     pub(crate) fn kind(self) -> Kind {
         match self {
             Self::Int | Self::Narrow(_) => Kind::Int,
@@ -28,6 +37,8 @@ impl DeclarationType {
             Self::Object => Kind::Object,
             Self::String => Kind::String,
             Self::Float => Kind::Float,
+            Self::Long => Kind::Long,
+            Self::Double => Kind::Double,
             Self::PrimitiveArray(kind) => Kind::PrimitiveArray(kind),
             Self::ObjectArray => Kind::ObjectArray,
             Self::Nominal(id) => Kind::Nominal(id),
@@ -42,6 +53,8 @@ impl DeclarationType {
             Self::Object
             | Self::String
             | Self::Float
+            | Self::Long
+            | Self::Double
             | Self::PrimitiveArray(_)
             | Self::ObjectArray
             | Self::Nominal(_) => None,
@@ -52,6 +65,27 @@ impl DeclarationType {
 pub(crate) enum ResultType {
     Void,
     Value(DeclarationType),
+}
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub(crate) enum ValueWidth {
+    One,
+    Two,
+}
+impl ValueWidth {
+    pub(crate) fn words(self) -> u32 {
+        match self {
+            Self::One => 1,
+            Self::Two => 2,
+        }
+    }
+}
+impl ResultType {
+    pub(crate) fn width(self) -> ValueWidth {
+        match self {
+            Self::Void => ValueWidth::One,
+            Self::Value(kind) => kind.width(),
+        }
+    }
 }
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub(crate) enum Arithmetic {
@@ -167,6 +201,10 @@ pub(crate) enum ArrayElement {
 }
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub(crate) enum Op {
+    ConstantWide(RegisterId, i64),
+    MoveWide(RegisterId, RegisterId),
+    LongBinary(RegisterId, RegisterId, Arithmetic, RegisterId),
+    DoubleBinary(RegisterId, RegisterId, Arithmetic, RegisterId),
     FloatBinary(RegisterId, RegisterId, Arithmetic, RegisterId),
     Unary(RegisterId, crate::pipeline::scalar::Unary, RegisterId),
     ReverseSubtract(RegisterId, i32, RegisterId),
@@ -241,6 +279,30 @@ impl Effects {
     }
 }
 impl Op {
+    pub(crate) fn result_width(self) -> ValueWidth {
+        match self {
+            Self::ConstantWide(..)
+            | Self::MoveWide(..)
+            | Self::LongBinary(..)
+            | Self::DoubleBinary(..) => ValueWidth::Two,
+            Self::Unary(_, unary, _) if unary.signature().1.words() == 2 => ValueWidth::Two,
+            _ => ValueWidth::One,
+        }
+    }
+    pub(crate) fn read_width(self, index: usize) -> ValueWidth {
+        match self {
+            Self::MoveWide(..) | Self::DoubleBinary(..) => ValueWidth::Two,
+            Self::LongBinary(_, _, Arithmetic::Shl | Arithmetic::Shr | Arithmetic::Ushr, _)
+                if index == 1 =>
+            {
+                ValueWidth::One
+            }
+            Self::LongBinary(..) => ValueWidth::Two,
+            Self::Unary(_, unary, _) if unary.signature().0.words() == 2 => ValueWidth::Two,
+            Self::Compare(_, _, compare, _) if compare.operand().words() == 2 => ValueWidth::Two,
+            _ => ValueWidth::One,
+        }
+    }
     pub(crate) fn effects(self) -> Effects {
         let conservative = matches!(self, Self::Call(_, _) | Self::Initialize(_));
         Effects {
@@ -258,6 +320,7 @@ impl Op {
                 || matches!(
                     self,
                     Self::Binary(_, _, Arithmetic::Div | Arithmetic::Rem, _)
+                        | Self::LongBinary(_, _, Arithmetic::Div | Arithmetic::Rem, _)
                 )
                 || matches!(
                     self,
@@ -330,7 +393,11 @@ fn ix(value: u32) -> Result<usize, RequestError> {
 pub(crate) fn destination(op: Op) -> Option<RegisterId> {
     match op {
         Op::Call(_, destination) => destination,
-        Op::Unary(r, _, _)
+        Op::ConstantWide(r, _)
+        | Op::MoveWide(r, _)
+        | Op::LongBinary(r, _, _, _)
+        | Op::DoubleBinary(r, _, _, _)
+        | Op::Unary(r, _, _)
         | Op::ReverseSubtract(r, _, _)
         | Op::NewInstance(r, _)
         | Op::NewArray(r, _, _)
@@ -381,9 +448,9 @@ impl Op {
                 ))?;
                 return Ok(Reads::Call(call.registers.iter()));
             }
-            Self::Unary(_, _, source) | Self::ReverseSubtract(_, _, source) => {
-                [Some(source), None, None]
-            }
+            Self::MoveWide(_, source)
+            | Self::Unary(_, _, source)
+            | Self::ReverseSubtract(_, _, source) => [Some(source), None, None],
             Self::NewArray(_, length, _) => [Some(length), None, None],
             Self::FreshFill(register, _) => [Some(register), None, None],
             Self::EmptyFill(register, _) => [Some(register), None, None],
@@ -393,16 +460,19 @@ impl Op {
             Self::ArrayLength(_, array) => [Some(array), None, None],
             Self::ArrayLoad(_, array, index, _) => [Some(array), Some(index), None],
             Self::ArrayStore(array, index, value, _) => [Some(array), Some(index), Some(value)],
-            Self::FloatBinary(_, left, _, right) | Self::Compare(_, left, _, right) => {
-                [Some(left), Some(right), None]
-            }
+            Self::LongBinary(_, left, _, right)
+            | Self::DoubleBinary(_, left, _, right)
+            | Self::FloatBinary(_, left, _, right)
+            | Self::Compare(_, left, _, right) => [Some(left), Some(right), None],
             Self::Binary(_, left, _, Operand::Register(right)) => [Some(left), Some(right), None],
             Self::Binary(_, left, _, Operand::Literal(_)) | Self::Move(_, left) => {
                 [Some(left), None, None]
             }
-            Self::NewInstance(..) | Self::String(..) | Self::Constant(_, _) | Self::Nop => {
-                [None, None, None]
-            }
+            Self::ConstantWide(_, _)
+            | Self::NewInstance(..)
+            | Self::String(..)
+            | Self::Constant(_, _)
+            | Self::Nop => [None, None, None],
         };
         Ok(Reads::Local(registers.into_iter()))
     }
@@ -498,6 +568,20 @@ pub(crate) fn decode<'a>(
                 .declaration()
                 .prototype
                 .return_type
+                .matches_with(&[74], budget)?
+            {
+                DeclarationType::Long
+            } else if input
+                .declaration()
+                .prototype
+                .return_type
+                .matches_with(&[68], budget)?
+            {
+                DeclarationType::Double
+            } else if input
+                .declaration()
+                .prototype
+                .return_type
                 .matches_with(&[66], budget)?
             {
                 DeclarationType::Narrow(crate::p5_types::Narrow::Byte)
@@ -575,6 +659,10 @@ pub(crate) fn decode<'a>(
                 DeclarationType::ObjectArray
             } else if name.matches_with(&[70], budget)? {
                 DeclarationType::Float
+            } else if name.matches_with(&[74], budget)? {
+                DeclarationType::Long
+            } else if name.matches_with(&[68], budget)? {
+                DeclarationType::Double
             } else if name.matches_with(&[66], budget)? {
                 DeclarationType::Narrow(crate::p5_types::Narrow::Byte)
             } else if name.matches_with(&[83], budget)? {
@@ -658,6 +746,22 @@ pub(crate) fn decode<'a>(
             };
             let decoded = match spec.opcode {
                 0 => Decoded::Op(Op::Nop),
+                4..=6 => Decoded::Op(Op::MoveWide(reg(0)?, reg(1)?)),
+                0x16..=0x19 => Decoded::Op(Op::ConstantWide(
+                    reg(0)?,
+                    match operands.literal() {
+                        Some(RawLiteral::Bits64(value)) => i64::from_le_bytes(value.to_le_bytes()),
+                        Some(RawLiteral::Signed16(value)) => i64::from(value),
+                        Some(RawLiteral::Bits32(value)) => {
+                            i64::from(i32::from_le_bytes(value.to_le_bytes()))
+                        }
+                        _ => {
+                            return Err(RequestError::InternalInvariant(
+                                "wide literal lost raw bits",
+                            ));
+                        }
+                    },
+                )),
                 1..=3 | 7..=9 => Decoded::Op(Op::Move(reg(0)?, reg(1)?)),
                 0x12..=0x15 => Decoded::Op(Op::Constant(
                     reg(0)?,
@@ -668,11 +772,48 @@ pub(crate) fn decode<'a>(
                         _ => return Err(RequestError::InternalInvariant("scalar constant absent")),
                     },
                 )),
-                0x7b | 0x7c | 0x7f | 0x82 | 0x87 | 0x8d..=0x8f => {
+                0x7b..=0x8f => {
                     let unary = match spec.opcode {
                         0x7b => crate::pipeline::scalar::Unary::Neg,
                         0x7c => crate::pipeline::scalar::Unary::Not,
+                        0x7d => crate::pipeline::scalar::Unary::NegLong,
+                        0x7e => crate::pipeline::scalar::Unary::NotLong,
                         0x7f => crate::pipeline::scalar::Unary::NegFloat,
+                        0x80 => crate::pipeline::scalar::Unary::NegDouble,
+                        0x81 => crate::pipeline::scalar::Unary::IntToLong,
+                        0x83 => crate::pipeline::scalar::Unary::Convert {
+                            from: crate::pipeline::scalar::ScalarType::Int,
+                            to: crate::pipeline::scalar::ScalarType::Double,
+                        },
+                        0x84 => crate::pipeline::scalar::Unary::LongToInt,
+                        0x85 => crate::pipeline::scalar::Unary::Convert {
+                            from: crate::pipeline::scalar::ScalarType::Long,
+                            to: crate::pipeline::scalar::ScalarType::Float,
+                        },
+                        0x86 => crate::pipeline::scalar::Unary::Convert {
+                            from: crate::pipeline::scalar::ScalarType::Long,
+                            to: crate::pipeline::scalar::ScalarType::Double,
+                        },
+                        0x88 => crate::pipeline::scalar::Unary::Convert {
+                            from: crate::pipeline::scalar::ScalarType::Float,
+                            to: crate::pipeline::scalar::ScalarType::Long,
+                        },
+                        0x89 => crate::pipeline::scalar::Unary::Convert {
+                            from: crate::pipeline::scalar::ScalarType::Float,
+                            to: crate::pipeline::scalar::ScalarType::Double,
+                        },
+                        0x8a => crate::pipeline::scalar::Unary::Convert {
+                            from: crate::pipeline::scalar::ScalarType::Double,
+                            to: crate::pipeline::scalar::ScalarType::Int,
+                        },
+                        0x8b => crate::pipeline::scalar::Unary::Convert {
+                            from: crate::pipeline::scalar::ScalarType::Double,
+                            to: crate::pipeline::scalar::ScalarType::Long,
+                        },
+                        0x8c => crate::pipeline::scalar::Unary::Convert {
+                            from: crate::pipeline::scalar::ScalarType::Double,
+                            to: crate::pipeline::scalar::ScalarType::Float,
+                        },
                         0x82 => crate::pipeline::scalar::Unary::Convert {
                             from: crate::pipeline::scalar::ScalarType::Int,
                             to: crate::pipeline::scalar::ScalarType::Float,
@@ -686,6 +827,42 @@ pub(crate) fn decode<'a>(
                         _ => crate::pipeline::scalar::Unary::Short,
                     };
                     Decoded::Op(Op::Unary(reg(0)?, unary, reg(1)?))
+                }
+                0x9b..=0xa5 | 0xbb..=0xc5 => {
+                    let arithmetic = match spec.opcode {
+                        0x9b | 0xbb => Arithmetic::Add,
+                        0x9c | 0xbc => Arithmetic::Sub,
+                        0x9d | 0xbd => Arithmetic::Mul,
+                        0x9e | 0xbe => Arithmetic::Div,
+                        0x9f | 0xbf => Arithmetic::Rem,
+                        0xa0 | 0xc0 => Arithmetic::And,
+                        0xa1 | 0xc1 => Arithmetic::Or,
+                        0xa2 | 0xc2 => Arithmetic::Xor,
+                        0xa3 | 0xc3 => Arithmetic::Shl,
+                        0xa4 | 0xc4 => Arithmetic::Shr,
+                        _ => Arithmetic::Ushr,
+                    };
+                    let (left, right) = if spec.opcode < 0xb0 {
+                        (reg(1)?, reg(2)?)
+                    } else {
+                        (reg(0)?, reg(1)?)
+                    };
+                    Decoded::Op(Op::LongBinary(reg(0)?, left, arithmetic, right))
+                }
+                0xab..=0xaf | 0xcb..=0xcf => {
+                    let arithmetic = match spec.opcode {
+                        0xab | 0xcb => Arithmetic::Add,
+                        0xac | 0xcc => Arithmetic::Sub,
+                        0xad | 0xcd => Arithmetic::Mul,
+                        0xae | 0xce => Arithmetic::Div,
+                        _ => Arithmetic::Rem,
+                    };
+                    let (left, right) = if spec.opcode < 0xc0 {
+                        (reg(1)?, reg(2)?)
+                    } else {
+                        (reg(0)?, reg(1)?)
+                    };
+                    Decoded::Op(Op::DoubleBinary(reg(0)?, left, arithmetic, right))
                 }
                 0xa6..=0xaa | 0xc6..=0xca => {
                     let arithmetic = match spec.opcode {
@@ -936,7 +1113,8 @@ pub(crate) fn decode<'a>(
                     },
                 )),
                 0xe => Decoded::ReturnVoid,
-                0xf | 0x11 => Decoded::Return(reg(0)?),
+                0x10 if result.width() == ValueWidth::Two => Decoded::Return(reg(0)?),
+                0xf | 0x11 if result.width() == ValueWidth::One => Decoded::Return(reg(0)?),
                 0x2b | 0x2c => {
                     let payload = target()?;
                     let payload_layout =
@@ -969,6 +1147,16 @@ pub(crate) fn decode<'a>(
                     push(&mut raw_switches, (targets, next), budget)?;
                     Decoded::Switch(reg(0)?, id)
                 }
+                0x2f..=0x31 => Decoded::Op(Op::Compare(
+                    reg(0)?,
+                    reg(1)?,
+                    match spec.opcode {
+                        0x2f => crate::pipeline::scalar::Compare::DoubleL,
+                        0x30 => crate::pipeline::scalar::Compare::DoubleG,
+                        _ => crate::pipeline::scalar::Compare::Long,
+                    },
+                    reg(2)?,
+                )),
                 0x2d | 0x2e => Decoded::Op(Op::Compare(
                     reg(0)?,
                     reg(1)?,

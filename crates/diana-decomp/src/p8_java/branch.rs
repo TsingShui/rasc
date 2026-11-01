@@ -17,6 +17,7 @@ pub(crate) enum Expression {
     Binary(ValueUse, crate::pipeline::branch::Arithmetic, Right),
     Local(ValueUse),
     Constant(i32),
+    ConstantWide(i64),
 }
 pub(crate) struct Assignment {
     pub target: LocalId,
@@ -137,7 +138,9 @@ pub(super) fn operation(
         Op::Unary(_, unary, _) => Expression::Unary(unary, numeric(0)?),
         Op::ReverseSubtract(_, literal, _) => Expression::ReverseSubtract(literal, numeric(0)?),
         Op::Compare(_, _, compare, _) => Expression::Compare(numeric(0)?, compare, numeric(1)?),
-        Op::FloatBinary(_, _, kind, _) => {
+        Op::LongBinary(_, _, kind, _)
+        | Op::DoubleBinary(_, _, kind, _)
+        | Op::FloatBinary(_, _, kind, _) => {
             Expression::Binary(numeric(0)?, kind, Right::Local(numeric(1)?))
         }
         Op::Binary(_, _, kind, right) => Expression::Binary(
@@ -167,11 +170,14 @@ pub(super) fn operation(
             ));
         }
         Op::Constant(_, value) => Expression::Constant(value),
-        Op::Move(_, _) => Expression::Local(if typed.numeric_uses[ix(op.id.0)?].is_some() {
-            numeric(0)?
-        } else {
-            ValueUse::Direct(LocalId(op.input(0)?.0))
-        }),
+        Op::ConstantWide(_, value) => Expression::ConstantWide(value),
+        Op::Move(_, _) | Op::MoveWide(_, _) => {
+            Expression::Local(if typed.numeric_uses[ix(op.id.0)?].is_some() {
+                numeric(0)?
+            } else {
+                ValueUse::Direct(LocalId(op.input(0)?.0))
+            })
+        }
     };
     Ok(Some(Assignment {
         target: LocalId(

@@ -1,6 +1,6 @@
 use super::calls::TypedUse;
 use super::normal::{Kind, UseConversion};
-use crate::p2_flow::normal::{Op, ResultType, Terminal};
+use crate::p2_flow::normal::{Arithmetic, Op, ResultType, Terminal};
 use crate::p3_ssa::normal::{Definition, SsaBody, Sym, ValueId};
 use crate::pipeline::scalar::ScalarType;
 use crate::substrate::owned::push;
@@ -12,43 +12,80 @@ pub(crate) struct NumericUses {
 fn ix(id: u32) -> Result<usize, RequestError> {
     usize::try_from(id).map_err(|_| RequestError::PlatformCapacity)
 }
-pub(crate) fn scalar_kind(kind: ScalarType) -> Result<Kind, RequestError> {
+pub(crate) fn scalar_kind(kind: ScalarType) -> Kind {
     match kind {
-        ScalarType::Int => Ok(Kind::Int),
-        ScalarType::Float => Ok(Kind::Float),
-        _ => Err(RequestError::InternalInvariant(
-            "non-word scalar entered word constraints",
-        )),
+        ScalarType::Int => Kind::Int,
+        ScalarType::Long => Kind::Long,
+        ScalarType::Float => Kind::Float,
+        ScalarType::Double => Kind::Double,
     }
 }
-pub(crate) fn expected(op: Op) -> Result<Option<Kind>, RequestError> {
+pub(crate) fn expected(op: Op, index: usize) -> Result<Option<Kind>, RequestError> {
     Ok(match op {
-        Op::FloatBinary(..) | Op::Compare(..) => Some(Kind::Float),
-        Op::Unary(_, unary, _) => Some(scalar_kind(unary.signature().0)?),
+        Op::FloatBinary(..) => Some(Kind::Float),
+        Op::DoubleBinary(..) => Some(Kind::Double),
+        Op::Compare(_, _, compare, _) => Some(scalar_kind(compare.operand())),
+        Op::LongBinary(_, _, Arithmetic::Shl | Arithmetic::Shr | Arithmetic::Ushr, _)
+            if index == 1 =>
+        {
+            Some(Kind::Int)
+        }
+        Op::LongBinary(..) => Some(Kind::Long),
+        Op::Unary(_, unary, _) => Some(scalar_kind(unary.signature().0)),
         Op::Binary(..) | Op::ReverseSubtract(..) => Some(Kind::Int),
         _ => None,
     })
 }
-// These bits name integer (including boolean), float and nonnumeric storage
-// families, not the separate Known01 range facts.
+// These masks name representation families, not the separate Known01 facts.
 fn mask(kind: Kind) -> u8 {
     match kind {
         Kind::Int | Kind::Boolean => 1,
         Kind::Float => 2,
-        _ => 4,
+        Kind::Long => 4,
+        Kind::Double => 8,
+        _ => 16,
     }
 }
-pub(crate) fn literal(ssa: &SsaBody<'_>, value: ValueId) -> Result<Option<u32>, RequestError> {
+enum Literal {
+    Word(u32),
+    Wide(u64),
+}
+impl Literal {
+    fn allowed(&self) -> u8 {
+        match self {
+            Self::Word(_) => 3,
+            Self::Wide(_) => 12,
+        }
+    }
+    fn view(self, kind: Kind) -> Option<UseConversion> {
+        match (self, kind) {
+            (Self::Word(_), Kind::Int) | (Self::Wide(_), Kind::Long) => {
+                Some(UseConversion::Identity)
+            }
+            (Self::Word(bits), Kind::Float)
+                if bits & 0x7f80_0000 != 0x7f80_0000 || bits & 0x007f_ffff == 0 =>
+            {
+                Some(UseConversion::FloatLiteral(bits))
+            }
+            (Self::Wide(bits), Kind::Double)
+                if bits & 0x7ff0_0000_0000_0000 != 0x7ff0_0000_0000_0000
+                    || bits & 0x000f_ffff_ffff_ffff == 0 =>
+            {
+                Some(UseConversion::DoubleLiteral(bits))
+            }
+            _ => None,
+        }
+    }
+}
+fn literal(ssa: &SsaBody<'_>, value: ValueId) -> Result<Option<Literal>, RequestError> {
     let Definition::OpResult(id) = ssa.values[ix(value.0)?] else {
         return Ok(None);
     };
     Ok(match ssa.operation(id)?.op {
-        Op::Constant(_, bits) => Some(u32::from_le_bytes(bits.to_le_bytes())),
+        Op::Constant(_, bits) => Some(Literal::Word(u32::from_le_bytes(bits.to_le_bytes()))),
+        Op::ConstantWide(_, bits) => Some(Literal::Wide(u64::from_le_bytes(bits.to_le_bytes()))),
         _ => None,
     })
-}
-pub(crate) fn float_bits(bits: u32) -> bool {
-    bits & 0x7f80_0000 != 0x7f80_0000 || bits & 0x007f_ffff == 0
 }
 pub(crate) fn view(
     ssa: &SsaBody<'_>,
@@ -56,14 +93,8 @@ pub(crate) fn view(
     value: ValueId,
     expected: Kind,
 ) -> Result<Option<UseConversion>, RequestError> {
-    if expected == Kind::Float
-        && let Some(bits) = literal(ssa, value)?
-    {
-        return Ok(if float_bits(bits) {
-            Some(UseConversion::FloatLiteral(bits))
-        } else {
-            None
-        });
+    if let Some(literal) = literal(ssa, value)? {
+        return Ok(literal.view(expected));
     }
     Ok(match (kinds[ix(value.0)?], expected) {
         (Some(actual), expected) if actual == expected => Some(UseConversion::Identity),
@@ -71,7 +102,6 @@ pub(crate) fn view(
         _ => None,
     })
 }
-
 struct Families {
     parents: Vec<usize>,
     ranks: Vec<u8>,
@@ -127,16 +157,16 @@ impl Families {
         kind: Kind,
         budget: &mut MethodBudget<'_, '_>,
     ) -> Result<bool, RequestError> {
-        if let Some(bits) = literal(ssa, value)? {
-            return Ok(kind == Kind::Int || kind == Kind::Float && float_bits(bits));
+        if let Some(literal) = literal(ssa, value)? {
+            return Ok(literal.view(kind).is_some());
         }
         let root = self.root(ix(value.0)?, budget)?;
         self.allowed[root] &= mask(kind);
         Ok(self.allowed[root] != 0)
     }
 }
-// Direct constants have independent use views. A copy is storage: every
-// non-literal copy and Phi family must satisfy all of its consumers together.
+// Direct constants have independent use views. Non-literal copies and Phi
+// families must satisfy all consumers with one storage representation.
 pub(crate) fn constrain(
     ssa: &SsaBody<'_>,
     kinds: &mut [Option<Kind>],
@@ -150,10 +180,10 @@ pub(crate) fn constrain(
     for (index, kind) in kinds.iter().enumerate() {
         budget.charge_work(1)?;
         let value = ValueId(u32::try_from(index).map_err(|_| RequestError::PlatformCapacity)?);
-        let allowed = if literal(ssa, value)?.is_some() {
-            3
+        let allowed = if let Some(literal) = literal(ssa, value)? {
+            literal.allowed()
         } else {
-            kind.map_or(7, mask)
+            kind.map_or(31, mask)
         };
         push(&mut families.parents, index, budget)?;
         push(&mut families.ranks, 0, budget)?;
@@ -161,7 +191,7 @@ pub(crate) fn constrain(
     }
     for op in &ssa.operations {
         budget.charge_work(1)?;
-        if matches!(op.op, Op::Move(..))
+        if matches!(op.op, Op::Move(..) | Op::MoveWide(..))
             && literal(ssa, op.input(0)?)?.is_none()
             && !families.merge(
                 ix(op
@@ -190,18 +220,21 @@ pub(crate) fn constrain(
     }
     for op in &ssa.operations {
         budget.charge_work(1)?;
-        if let Some(expected) = expected(op.op)? {
-            for &value in &op.inputs {
-                budget.charge_work(1)?;
-                if !families.require(ssa, value, expected, budget)? {
-                    return Ok(false);
-                }
+        for (index, &value) in op.inputs.iter().enumerate() {
+            budget.charge_work(1)?;
+            if let Some(expected) = expected(op.op, index)?
+                && !families.require(ssa, value, expected, budget)?
+            {
+                return Ok(false);
             }
         }
     }
     if let ResultType::Value(result) = ssa.result {
         let kind = result.kind();
-        if matches!(kind, Kind::Int | Kind::Boolean | Kind::Float) {
+        if matches!(
+            kind,
+            Kind::Int | Kind::Boolean | Kind::Float | Kind::Long | Kind::Double
+        ) {
             for (index, block) in ssa.blocks.iter().enumerate() {
                 budget.charge_work(1)?;
                 if matches!(block.terminal, Terminal::Return(_)) {
@@ -227,8 +260,13 @@ pub(crate) fn constrain(
     for (index, kind) in kinds.iter_mut().enumerate() {
         budget.charge_work(1)?;
         let root = families.root(index, budget)?;
-        if kind.is_none() && families.allowed[root] == 2 {
-            *kind = Some(Kind::Float);
+        if kind.is_none() {
+            *kind = match families.allowed[root] {
+                2 => Some(Kind::Float),
+                4 => Some(Kind::Long),
+                8 => Some(Kind::Double),
+                _ => None,
+            };
         }
     }
     Ok(true)
@@ -241,28 +279,29 @@ pub(crate) fn solve(
     let mut result = Vec::new();
     for op in &ssa.operations {
         budget.charge_work(1)?;
-        let expected = if matches!(op.op, Op::Move(..)) {
-            if kinds[ix(op
+        let copy_kind = if matches!(op.op, Op::Move(..) | Op::MoveWide(..)) {
+            let kind = kinds[ix(op
                 .result
                 .ok_or(RequestError::InternalInvariant("copy lost result"))?
-                .0)?]
-                == Some(Kind::Float)
-            {
-                Some(Kind::Float)
-            } else {
-                None
-            }
+                .0)?];
+            kind.filter(|kind| matches!(kind, Kind::Float | Kind::Long | Kind::Double))
         } else {
-            expected(op.op)?
+            None
         };
-        let Some(expected) = expected else {
+        if expected(op.op, 0)?.is_none() && copy_kind.is_none() {
             push(&mut result, None, budget)?;
             continue;
-        };
+        }
         let mut uses = Vec::new();
-        for &value in &op.inputs {
+        for (index, &value) in op.inputs.iter().enumerate() {
             budget.charge_work(1)?;
-            let Some(conversion) = view(ssa, kinds, value, expected)? else {
+            let kind =
+                expected(op.op, index)?
+                    .or(copy_kind)
+                    .ok_or(RequestError::InternalInvariant(
+                        "numeric use lost requirement",
+                    ))?;
+            let Some(conversion) = view(ssa, kinds, value, kind)? else {
                 return Ok(None);
             };
             push(&mut uses, TypedUse { value, conversion }, budget)?;

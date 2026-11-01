@@ -5,6 +5,8 @@ use crate::{MethodBudget, RequestError};
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub(crate) enum Kind {
+    Long,
+    Double,
     Int,
     Boolean,
     Object,
@@ -22,6 +24,8 @@ impl Kind {
             Self::Object => "java.lang.Object",
             Self::String => "java.lang.String",
             Self::Float => "float",
+            Self::Long => "long",
+            Self::Double => "double",
             Self::PrimitiveArray(kind) => kind.spelling(),
             Self::ObjectArray => "java.lang.Object[]",
             Self::Nominal(_) => return None,
@@ -70,6 +74,7 @@ impl TypedBody<'_> {
 pub(crate) enum UseConversion {
     Identity,
     FloatLiteral(u32),
+    DoubleLiteral(u64),
     BooleanWord,
     Boolean01,
     Null(crate::p5_types::BuiltinReference),
@@ -131,6 +136,8 @@ pub(crate) fn solve<'a>(
                     Kind::Object
                     | Kind::String
                     | Kind::Float
+                    | Kind::Long
+                    | Kind::Double
                     | Kind::PrimitiveArray(_)
                     | Kind::ObjectArray
                     | Kind::Nominal(_) => 0,
@@ -138,11 +145,17 @@ pub(crate) fn solve<'a>(
                 (bits, declaration.range(), Some(kind))
             }
             Definition::OpResult(id) => match ssa.operation(id)?.op {
+                Op::ConstantWide(..) | Op::LongBinary(..) => (0, None, Some(Kind::Long)),
+                Op::DoubleBinary(..) => (0, None, Some(Kind::Double)),
                 Op::FloatBinary(..) => (0, None, Some(Kind::Float)),
                 Op::Unary(_, unary, _)
-                    if unary.signature().1 == crate::pipeline::scalar::ScalarType::Float =>
+                    if unary.signature().1 != crate::pipeline::scalar::ScalarType::Int =>
                 {
-                    (0, None, Some(Kind::Float))
+                    (
+                        0,
+                        None,
+                        Some(super::numeric::scalar_kind(unary.signature().1)),
+                    )
                 }
                 Op::Unary(_, unary, _) => (
                     7,
@@ -240,7 +253,7 @@ pub(crate) fn solve<'a>(
                 Op::ArrayLoad(_, _, _, crate::p2_flow::normal::ArrayElement::Object) => {
                     (0, None, Some(Kind::Object))
                 }
-                Op::Move(_, _) => (0, None, None),
+                Op::Move(_, _) | Op::MoveWide(_, _) => (0, None, None),
                 Op::Nop
                 | Op::ArrayStore(..)
                 | Op::FieldStore(..)
@@ -264,23 +277,25 @@ pub(crate) fn solve<'a>(
         let mut changed = false;
         for op in &ssa.operations {
             budget.charge_work(1)?;
-            if let Op::Move(_, _) = op.op {
+            if matches!(op.op, Op::Move(..) | Op::MoveWide(..)) {
                 let index = ix(op
                     .result
                     .ok_or(RequestError::InternalInvariant("move lost its result"))?
                     .0)?;
                 let source = ix(op.input(0)?.0)?;
-                let source_range = if kinds[index] == Some(Kind::Float) {
-                    None
-                } else {
-                    ranges[source]
-                };
+                let source_range =
+                    if matches!(kinds[index], Some(Kind::Float | Kind::Long | Kind::Double)) {
+                        None
+                    } else {
+                        ranges[source]
+                    };
                 changed |= merge_range(&mut ranges[index], source_range);
-                let merged = if kinds[index] == Some(Kind::Float) {
-                    0
-                } else {
-                    integral_bits[index] | integral_bits[source]
-                };
+                let merged =
+                    if matches!(kinds[index], Some(Kind::Float | Kind::Long | Kind::Double)) {
+                        0
+                    } else {
+                        integral_bits[index] | integral_bits[source]
+                    };
                 if merged != integral_bits[index] {
                     integral_bits[index] = merged;
                     changed = true;
@@ -794,8 +809,18 @@ fn return_use(
             },
         );
     }
-    if result.kind() == Kind::Float {
-        return super::numeric::view(&typed.ssa, &typed.kinds, value, Kind::Float);
+    if typed.kinds[index] == Some(Kind::Int) && typed.integral_bits[index] == 1 {
+        let kind = match result {
+            DeclarationType::String => Some(super::BuiltinReference::String),
+            DeclarationType::Object => Some(super::BuiltinReference::Object),
+            _ => None,
+        };
+        if let Some(kind) = kind {
+            return Ok(Some(UseConversion::Null(kind)));
+        }
+    }
+    if matches!(result.kind(), Kind::Float | Kind::Long | Kind::Double) {
+        return super::numeric::view(&typed.ssa, &typed.kinds, value, result.kind());
     }
     if typed.kinds[index] == Some(result.kind())
         && matches!(

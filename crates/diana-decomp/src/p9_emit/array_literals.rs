@@ -1,5 +1,4 @@
 use crate::p5_types::{ArrayElement, PrimitiveArray};
-use crate::pipeline::scalar::{Expression, ScalarType};
 use crate::substrate::owned::TextBuffer;
 use crate::{MethodBudget, RequestError};
 pub(super) fn element(
@@ -46,33 +45,26 @@ pub(super) fn element(
             budget,
         ),
         PrimitiveArray::Int | PrimitiveArray::Float => {
-            let value = i32::from_le_bytes(
-                u32::try_from(bits)
-                    .map_err(|_| {
-                        RequestError::InternalInvariant("sealed 32-bit literal overflowed")
-                    })?
-                    .to_le_bytes(),
-            );
-            super::literals::numeric(
-                &Expression::Constant(value),
-                if element.kind() == PrimitiveArray::Int {
-                    ScalarType::Int
-                } else {
-                    ScalarType::Float
-                },
-                output,
-                budget,
-            )
-        }
-        PrimitiveArray::Long | PrimitiveArray::Double => super::literals::numeric(
-            &Expression::ConstantWide(i64::from_le_bytes(bits.to_le_bytes())),
-            if element.kind() == PrimitiveArray::Long {
-                ScalarType::Long
+            let word = u32::try_from(bits)
+                .map_err(|_| RequestError::InternalInvariant("sealed 32-bit literal overflowed"))?;
+            if element.kind() == PrimitiveArray::Int {
+                output.arguments(
+                    format_args!("{}", i32::from_le_bytes(word.to_le_bytes())),
+                    budget,
+                )
             } else {
-                ScalarType::Double
-            },
-            output,
-            budget,
-        ),
+                super::literals::fp(u64::from(word), false, output, budget)
+            }
+        }
+        PrimitiveArray::Long | PrimitiveArray::Double => {
+            if element.kind() == PrimitiveArray::Long {
+                output.arguments(
+                    format_args!("{}L", i64::from_le_bytes(bits.to_le_bytes())),
+                    budget,
+                )
+            } else {
+                super::literals::fp(bits, true, output, budget)
+            }
+        }
     }
 }

@@ -3,6 +3,10 @@ use crate::p6_variables::LocalId;
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub(crate) enum ValueUse {
+    DoubleLiteral {
+        value: LocalId,
+        bits: u64,
+    },
     FloatLiteral {
         value: LocalId,
         bits: u32,
@@ -29,12 +33,14 @@ impl ValueUse {
             | Self::Narrow { value, .. }
             | Self::UpcastObject(value)
             | Self::Null { value, .. }
+            | Self::DoubleLiteral { value, .. }
             | Self::FloatLiteral { value, .. } => value,
         }
     }
 }
 pub(crate) fn lower(local: LocalId, conversion: UseConversion) -> ValueUse {
     match conversion {
+        UseConversion::DoubleLiteral(bits) => ValueUse::DoubleLiteral { value: local, bits },
         UseConversion::FloatLiteral(bits) => ValueUse::FloatLiteral { value: local, bits },
         UseConversion::Identity => ValueUse::Direct(local),
         UseConversion::BooleanWord => ValueUse::BooleanWord(local),

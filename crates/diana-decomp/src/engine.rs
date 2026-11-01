@@ -499,18 +499,6 @@ fn normal_member(
         }
     }
     if crate::p8_java::source_group_admitted(index, key, &facts, budget)?
-        && let Some(plan) = crate::pipeline::scalar::plan(&input, budget)?
-        && let Some(declaration) =
-            crate::p8_java::verify(&input, plan, catalog.environment, budget)?
-    {
-        let source = crate::p9_emit::java(&declaration, budget)?;
-        return Ok(NormalMember::Java {
-            facts,
-            declaration,
-            source,
-        });
-    }
-    if crate::p8_java::source_group_admitted(index, key, &facts, budget)?
         && let Some(plan) = crate::pipeline::constructor::build(&input, catalog, budget)?
         && let Some(declaration) =
             crate::p8_java::constructor::verify(&input, plan, catalog, catalog.environment, budget)?

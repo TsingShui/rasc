@@ -17,6 +17,8 @@ pub(crate) fn local_type(kind: Kind) -> Result<LocalType, RequestError> {
             Kind::Object => 2,
             Kind::Float => 3,
             Kind::String => 4,
+            Kind::Long => 14,
+            Kind::Double => 15,
             Kind::PrimitiveArray(kind) => match kind {
                 crate::p5_types::PrimitiveArray::Int => 5,
                 crate::p5_types::PrimitiveArray::Boolean => 7,
@@ -28,9 +30,13 @@ pub(crate) fn local_type(kind: Kind) -> Result<LocalType, RequestError> {
                 crate::p5_types::PrimitiveArray::Double => 13,
             },
             Kind::ObjectArray => 6,
-            Kind::Nominal(id) => u64::from(id.0) + 14,
+            Kind::Nominal(id) => u64::from(id.0) + 16,
         }),
-        1,
+        if matches!(kind, Kind::Long | Kind::Double) {
+            2
+        } else {
+            1
+        },
     )
 }
 pub(crate) fn kind(local_type: LocalType) -> Result<Kind, RequestError> {
@@ -51,8 +57,10 @@ pub(crate) fn kind(local_type: LocalType) -> Result<Kind, RequestError> {
             _ => crate::p5_types::PrimitiveArray::Double,
         })),
         (6, Width::One) => Ok(Kind::ObjectArray),
-        (identity, Width::One) if identity >= 14 => Ok(Kind::Nominal(crate::TypeId(
-            u32::try_from(identity - 14).map_err(|_| RequestError::PlatformCapacity)?,
+        (14, Width::Two) => Ok(Kind::Long),
+        (15, Width::Two) => Ok(Kind::Double),
+        (identity, Width::One) if identity >= 16 => Ok(Kind::Nominal(crate::TypeId(
+            u32::try_from(identity - 16).map_err(|_| RequestError::PlatformCapacity)?,
         ))),
         _ => Err(RequestError::InternalInvariant(
             "foreign normal storage type",

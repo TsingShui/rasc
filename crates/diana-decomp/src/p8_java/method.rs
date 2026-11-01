@@ -1,6 +1,3 @@
-use crate::input::{MethodInput, RawPrintable};
-use crate::pipeline::scalar::{Definition, LocalId, PlannedBody, ValueId};
-use crate::substrate::owned::{TextBuffer, copy_units};
 use crate::{EnvironmentId, MethodBudget, RequestError};
 
 /// Fixed source target used by native method verification and external V4 checks.
@@ -24,12 +21,6 @@ pub(crate) enum MethodBody {
     Constructor(super::constructor::ConstructorBody),
     CallChain(super::call_chain::Body),
     Receiver(super::receiver::ReceiverMethod),
-    Scalar {
-        definitions: Vec<Definition>,
-        locals: Vec<LocalId>,
-        returned: ValueId,
-        typing: crate::p5_types::Solved,
-    },
     Diamond(super::branch::Diamond),
     Dispatcher(super::dispatcher::Dispatcher),
 }
@@ -374,112 +365,4 @@ pub(crate) fn source_group_admitted(
             },
         )?;
     Ok(admitted)
-}
-
-pub(crate) fn verify(
-    input: &MethodInput<'_, '_>,
-    plan: PlannedBody<'_>,
-    environment: EnvironmentId,
-    budget: &mut MethodBudget<'_, '_>,
-) -> Result<Option<VerifiedJavaMethod>, RequestError> {
-    super::declarations::check_target(input, budget)?;
-    let RawPrintable::Method(raw) = input.raw() else {
-        return Err(RequestError::InternalInvariant(
-            "scalar plan lost its raw method",
-        ));
-    };
-    if !std::ptr::eq(
-        raw.layout().original().instructions(),
-        plan.raw.instructions(),
-    ) {
-        return Err(RequestError::InternalInvariant(
-            "scalar plan belongs to another original method",
-        ));
-    }
-    if raw.annotations().method_range().is_some() || raw.annotations().parameter_range().is_some() {
-        return Ok(None);
-    }
-    let flags = input.access_flags();
-    if flags & 8 == 0
-        || flags & !0x81f != 0
-        || (flags & 7).count_ones() > 1
-        || input.owner_access_flags() & 0x200 != 0
-    {
-        return Ok(None);
-    }
-    let name = copy_units(input.declaration().name, budget)?;
-    if !super::declarations::identifier(&name, budget)? {
-        return Ok(None);
-    }
-    if plan.locals.len() != plan.definitions.len()
-        || usize::try_from(plan.returned.0).map_err(|_| RequestError::PlatformCapacity)?
-            >= plan.locals.len()
-    {
-        return Err(RequestError::InternalInvariant(
-            "scalar AST has no typed return storage",
-        ));
-    }
-    for definition in &plan.definitions {
-        budget.charge_work(1)?;
-        if let crate::pipeline::scalar::Expression::String(units) = &definition.expression {
-            super::declarations::check_string_literal(units, budget)?;
-        }
-        if definition
-            .pc
-            .is_some_and(|pc| pc.0 >= plan.raw.code_units().0)
-        {
-            return Err(RequestError::InternalInvariant(
-                "scalar definition has a foreign origin",
-            ));
-        }
-    }
-    let mut header = TextBuffer::new();
-    for (bit, text) in [
-        (1, "public "),
-        (2, "private "),
-        (4, "protected "),
-        (8, "static "),
-        (0x10, "final "),
-        (0x800, "strictfp "),
-    ] {
-        if flags & bit != 0 {
-            header.push(text, budget)?;
-        }
-    }
-    header.push(plan.result.spelling()?, budget)?;
-    header.push(" ", budget)?;
-    for unit in name {
-        header.character(
-            char::from_u32(u32::from(unit)).ok_or(RequestError::InternalInvariant(
-                "checked scalar name is not ASCII",
-            ))?,
-            budget,
-        )?;
-    }
-    header.push("(", budget)?;
-    for (parameter, kind) in plan.parameters.iter().enumerate() {
-        budget.charge_work(1)?;
-        if parameter != 0 {
-            header.push(", ", budget)?;
-        }
-        header.push(kind.spelling()?, budget)?;
-        header.push(" p", budget)?;
-        header.unsigned(
-            u64::try_from(parameter).map_err(|_| RequestError::PlatformCapacity)?,
-            budget,
-        )?;
-    }
-    header.push(")", budget)?;
-    budget.checkpoint()?;
-    Ok(Some(VerifiedJavaMethod {
-        header: header.finish(),
-        body: MethodBody::Scalar {
-            definitions: plan.definitions,
-            locals: plan.locals,
-            returned: plan.returned,
-            typing: plan.typing,
-        },
-        environment,
-        type_names: super::types::TypeNames::default(),
-    }))
 }
