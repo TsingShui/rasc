@@ -1,4 +1,5 @@
 mod annotations;
+mod array_access;
 mod call_chain;
 mod casts;
 mod comparison;

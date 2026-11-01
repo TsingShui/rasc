@@ -514,6 +514,23 @@ fn normal_member(
         });
     }
     if crate::p8_java::source_group_admitted(index, key, &facts, budget)?
+        && let Some(plan) = crate::pipeline::array_access::build(&input, catalog, budget)?
+        && let Some(declaration) = crate::p8_java::array_access::verify(
+            &input,
+            plan,
+            catalog,
+            catalog.environment,
+            budget,
+        )?
+    {
+        let source = crate::p9_emit::java(&declaration, budget)?;
+        return Ok(NormalMember::Java {
+            facts,
+            declaration,
+            source,
+        });
+    }
+    if crate::p8_java::source_group_admitted(index, key, &facts, budget)?
         && let Some(plan) = crate::pipeline::fresh_array::build(&input, budget)?
         && let Some(declaration) =
             crate::p8_java::fresh_array::verify(&input, plan, catalog.environment, budget)?

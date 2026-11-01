@@ -17,6 +17,7 @@ pub struct VerifiedJavaMethod {
     environment: EnvironmentId,
 }
 pub(crate) enum MethodBody {
+    ArrayAccess(super::array_access::Body),
     FreshArray(super::fresh_array::FreshArrayBody),
     ZeroFill(super::zero_fill::ZeroFillBody),
     Casts(super::casts::CastBody),
@@ -34,6 +35,17 @@ pub(crate) enum MethodBody {
     Dispatcher(super::dispatcher::Dispatcher),
 }
 impl VerifiedJavaMethod {
+    pub(super) fn array_access(
+        header: String,
+        body: super::array_access::Body,
+        environment: EnvironmentId,
+    ) -> Self {
+        Self {
+            header,
+            body: MethodBody::ArrayAccess(body),
+            environment,
+        }
+    }
     pub(super) fn fresh_array(
         header: String,
         body: super::fresh_array::FreshArrayBody,
@@ -239,7 +251,29 @@ impl VerifiedJavaMethod {
             }),
             _ => None,
         };
+        let arrays = match &self.body {
+            MethodBody::ArrayAccess(body) => Some(body.statements.as_slice()),
+            _ => None,
+        };
+        let array_calls = arrays
+            .into_iter()
+            .flatten()
+            .filter_map(|statement| match statement {
+                super::array_access::Statement::Call { call, .. } => Some(super::JavaCallSite {
+                    reference: call.reference,
+                    receiver: None,
+                    allocation: None,
+                    owner: &call.original_owner,
+                    name: &call.original_name,
+                    prototype: &call.prototype,
+                    invoke: call.invoke,
+                    result: call.result_site,
+                    kind: super::JavaInvokeKind::Static,
+                }),
+                _ => None,
+            });
         statics
+            .chain(array_calls)
             .chain(constructor)
             .chain(effects)
             .chain(receiver)

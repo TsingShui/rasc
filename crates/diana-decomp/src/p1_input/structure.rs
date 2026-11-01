@@ -22,6 +22,7 @@ pub enum MethodProblem {
     InvalidRegisterSpan,
     InvalidTypeOperand,
     InvalidArrayPayloadType,
+    InvalidArrayAccessType,
     InsufficientOutgoingWords,
     InvalidInvokeWordCount,
     InvalidInvokeKind,
