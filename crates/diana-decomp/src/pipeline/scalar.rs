@@ -45,7 +45,7 @@ impl Compare {
         }
     }
 }
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Eq, PartialEq)]
 pub(crate) enum Unary {
     Neg,
     Not,

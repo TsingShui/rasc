@@ -59,6 +59,13 @@ pub(crate) enum Arithmetic {
     Sub,
     Mul,
     And,
+    Div,
+    Rem,
+    Or,
+    Xor,
+    Shl,
+    Shr,
+    Ushr,
 }
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub(crate) enum Operand {
@@ -160,6 +167,8 @@ pub(crate) enum ArrayElement {
 }
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub(crate) enum Op {
+    Unary(RegisterId, crate::pipeline::scalar::Unary, RegisterId),
+    ReverseSubtract(RegisterId, i32, RegisterId),
     NewInstance(RegisterId, ObjectCreationId),
     Initialize(CallId),
     NewArray(RegisterId, RegisterId, ArrayCreationId),
@@ -247,6 +256,10 @@ impl Op {
             may_throw: conservative
                 || matches!(
                     self,
+                    Self::Binary(_, _, Arithmetic::Div | Arithmetic::Rem, _)
+                )
+                || matches!(
+                    self,
                     Self::NewInstance(..)
                         | Self::NewArray(..)
                         | Self::FreshFill(..)
@@ -316,7 +329,9 @@ fn ix(value: u32) -> Result<usize, RequestError> {
 pub(crate) fn destination(op: Op) -> Option<RegisterId> {
     match op {
         Op::Call(_, destination) => destination,
-        Op::NewInstance(r, _)
+        Op::Unary(r, _, _)
+        | Op::ReverseSubtract(r, _, _)
+        | Op::NewInstance(r, _)
         | Op::NewArray(r, _, _)
         | Op::Cast(r, _)
         | Op::String(r, _)
@@ -363,6 +378,9 @@ impl Op {
                     "operation has a foreign call identity",
                 ))?;
                 return Ok(Reads::Call(call.registers.iter()));
+            }
+            Self::Unary(_, _, source) | Self::ReverseSubtract(_, _, source) => {
+                [Some(source), None, None]
             }
             Self::NewArray(_, length, _) => [Some(length), None, None],
             Self::FreshFill(register, _) => [Some(register), None, None],
@@ -639,39 +657,54 @@ pub(crate) fn decode<'a>(
                         _ => return Err(RequestError::InternalInvariant("scalar constant absent")),
                     },
                 )),
-                0x90..=0x92
-                | 0x95
-                | 0xb0..=0xb2
-                | 0xb5
-                | 0xd0
-                | 0xd2
-                | 0xd5
-                | 0xd8
-                | 0xda
-                | 0xdd => {
+                0x7b | 0x7c | 0x8d..=0x8f => {
+                    let unary = match spec.opcode {
+                        0x7b => crate::pipeline::scalar::Unary::Neg,
+                        0x7c => crate::pipeline::scalar::Unary::Not,
+                        0x8d => crate::pipeline::scalar::Unary::Byte,
+                        0x8e => crate::pipeline::scalar::Unary::Char,
+                        _ => crate::pipeline::scalar::Unary::Short,
+                    };
+                    Decoded::Op(Op::Unary(reg(0)?, unary, reg(1)?))
+                }
+                0x90..=0x9a | 0xb0..=0xba | 0xd0..=0xe2 => {
                     let arithmetic = match spec.opcode {
                         0x90 | 0xb0 | 0xd0 | 0xd8 => Arithmetic::Add,
-                        0x91 | 0xb1 => Arithmetic::Sub,
+                        0x91 | 0xb1 | 0xd1 | 0xd9 => Arithmetic::Sub,
+                        0x92 | 0xb2 | 0xd2 | 0xda => Arithmetic::Mul,
+                        0x93 | 0xb3 | 0xd3 | 0xdb => Arithmetic::Div,
+                        0x94 | 0xb4 | 0xd4 | 0xdc => Arithmetic::Rem,
                         0x95 | 0xb5 | 0xd5 | 0xdd => Arithmetic::And,
-                        _ => Arithmetic::Mul,
+                        0x96 | 0xb6 | 0xd6 | 0xde => Arithmetic::Or,
+                        0x97 | 0xb7 | 0xd7 | 0xdf => Arithmetic::Xor,
+                        0x98 | 0xb8 | 0xe0 => Arithmetic::Shl,
+                        0x99 | 0xb9 | 0xe1 => Arithmetic::Shr,
+                        _ => Arithmetic::Ushr,
                     };
                     let (left, right) = match spec.opcode {
-                        0x90..=0x92 | 0x95 => (reg(1)?, Operand::Register(reg(2)?)),
-                        0xb0..=0xb2 | 0xb5 => (reg(0)?, Operand::Register(reg(1)?)),
+                        0x90..=0x9a => (reg(1)?, Operand::Register(reg(2)?)),
+                        0xb0..=0xba => (reg(0)?, Operand::Register(reg(1)?)),
                         _ => (
                             reg(1)?,
                             Operand::Literal(match operands.literal() {
-                                Some(RawLiteral::Signed8(v)) => i32::from(v),
-                                Some(RawLiteral::Signed16(v)) => i32::from(v),
+                                Some(RawLiteral::Signed8(value)) => i32::from(value),
+                                Some(RawLiteral::Signed16(value)) => i32::from(value),
                                 _ => {
                                     return Err(RequestError::InternalInvariant(
-                                        "checked arithmetic immediate absent",
+                                        "int literal lost signed operand",
                                     ));
                                 }
                             }),
                         ),
                     };
-                    Decoded::Op(Op::Binary(reg(0)?, left, arithmetic, right))
+                    if matches!(spec.opcode, 0xd1 | 0xd9) {
+                        let Operand::Literal(literal) = right else {
+                            return Err(RequestError::InternalInvariant("rsub lost literal"));
+                        };
+                        Decoded::Op(Op::ReverseSubtract(reg(0)?, literal, left))
+                    } else {
+                        Decoded::Op(Op::Binary(reg(0)?, left, arithmetic, right))
+                    }
                 }
                 0x52 | 0x59 => {
                     let Some(reference) = layout.references()[0] else {

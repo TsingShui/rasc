@@ -308,6 +308,28 @@ pub(super) fn assignments(
         local(statement.target, output, budget)?;
         output.push(" = ", budget)?;
         match statement.expression {
+            BranchExpression::Unary(unary, source) => {
+                output.push(
+                    match unary {
+                        crate::pipeline::scalar::Unary::Neg => "-",
+                        crate::pipeline::scalar::Unary::Not => "~",
+                        crate::pipeline::scalar::Unary::Byte => "(byte) ",
+                        crate::pipeline::scalar::Unary::Char => "(char) ",
+                        crate::pipeline::scalar::Unary::Short => "(short) ",
+                        _ => {
+                            return Err(RequestError::InternalInvariant(
+                                "non-int unary entered int AST",
+                            ));
+                        }
+                    },
+                    budget,
+                )?;
+                value_use(source, output, budget)?;
+            }
+            BranchExpression::ReverseSubtract(literal, source) => {
+                output.arguments(format_args!("{literal} - "), budget)?;
+                value_use(source, output, budget)?;
+            }
             BranchExpression::Compare(a, compare, b) => super::comparison::write(
                 compare,
                 |right, output, budget| local(if right { b } else { a }, output, budget),
@@ -315,18 +337,25 @@ pub(super) fn assignments(
                 budget,
             )?,
             BranchExpression::Binary(left, kind, ref right) => {
-                local(left, output, budget)?;
+                value_use(left, output, budget)?;
                 output.push(
                     match kind {
                         crate::pipeline::branch::Arithmetic::Add => " + ",
                         crate::pipeline::branch::Arithmetic::Sub => " - ",
                         crate::pipeline::branch::Arithmetic::Mul => " * ",
                         crate::pipeline::branch::Arithmetic::And => " & ",
+                        crate::pipeline::branch::Arithmetic::Or => " | ",
+                        crate::pipeline::branch::Arithmetic::Xor => " ^ ",
+                        crate::pipeline::branch::Arithmetic::Div => " / ",
+                        crate::pipeline::branch::Arithmetic::Rem => " % ",
+                        crate::pipeline::branch::Arithmetic::Shl => " << ",
+                        crate::pipeline::branch::Arithmetic::Shr => " >> ",
+                        crate::pipeline::branch::Arithmetic::Ushr => " >>> ",
                     },
                     budget,
                 )?;
                 match right {
-                    crate::p8_java::branch::Right::Local(id) => local(*id, output, budget)?,
+                    crate::p8_java::branch::Right::Local(view) => value_use(*view, output, budget)?,
                     crate::p8_java::branch::Right::Literal(value) => {
                         output.arguments(format_args!("{value}"), budget)?
                     }

@@ -75,15 +75,17 @@ fn t09_two_entry_dispatcher_preserves_edges_and_never_reads_da_defaults() {
     fn assign(statements: &[Assignment], values: &mut [Option<i32>]) {
         for statement in statements {
             let value = match statement.expression {
-                Expression::Compare(_, _, _) => {
-                    panic!("FP comparison outside this int cycle interpretation")
+                Expression::Unary(..)
+                | Expression::ReverseSubtract(..)
+                | Expression::Compare(_, _, _) => {
+                    panic!("operation outside the existing int-cycle interpretation")
                 }
                 Expression::Local(id) => read(values, id),
                 Expression::Constant(value) => value,
                 Expression::Binary(left, kind, ref right) => {
-                    let left = read(values, left);
+                    let left = read(values, left.value());
                     let right = match right {
-                        Right::Local(id) => read(values, *id),
+                        Right::Local(view) => read(values, view.value()),
                         Right::Literal(value) => *value,
                     };
                     match kind {
@@ -91,6 +93,7 @@ fn t09_two_entry_dispatcher_preserves_edges_and_never_reads_da_defaults() {
                         Arithmetic::Sub => left.wrapping_sub(right),
                         Arithmetic::Mul => left.wrapping_mul(right),
                         Arithmetic::And => left & right,
+                        _ => panic!("operation outside the existing pure-loop obligations"),
                     }
                 }
             };

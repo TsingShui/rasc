@@ -38,6 +38,7 @@ pub(crate) struct TypedBody<'a> {
     pub bindings: Vec<crate::p4_calls::normal::CallEvidence>,
     pub call_uses: Vec<crate::p5_types::calls::CallUses>,
     pub cast_uses: Vec<crate::p5_types::calls::TypedUse>,
+    pub integer_uses: Vec<Option<IntegerUses>>,
     pub initializations: super::initialization::Initializations,
     pub empty_fills: Vec<PrimitiveFillUse>,
     pub array_lengths: Vec<crate::p5_types::calls::TypedUse>,
@@ -50,6 +51,9 @@ pub(crate) struct PrimitiveFillUse {
     _sealed: (),
     pub array: crate::p3_ssa::normal::ValueId,
     pub component: super::PrimitiveArray,
+}
+pub(crate) struct IntegerUses {
+    pub uses: Vec<crate::p5_types::calls::TypedUse>,
 }
 pub(crate) enum FieldUse {
     Read,
@@ -135,6 +139,17 @@ pub(crate) fn solve<'a>(
                 (bits, declaration.range(), Some(kind))
             }
             Definition::OpResult(id) => match ssa.operation(id)?.op {
+                Op::Unary(_, unary, _) => (
+                    7,
+                    Some(match unary {
+                        crate::pipeline::scalar::Unary::Byte => super::Narrow::Byte.range(),
+                        crate::pipeline::scalar::Unary::Char => super::Narrow::Char.range(),
+                        crate::pipeline::scalar::Unary::Short => super::Narrow::Short.range(),
+                        _ => super::IntRange::ALL,
+                    }),
+                    Some(Kind::Int),
+                ),
+                Op::ReverseSubtract(..) => (7, Some(super::IntRange::ALL), Some(Kind::Int)),
                 Op::NewInstance(_, id) => (
                     0,
                     None,
@@ -184,6 +199,14 @@ pub(crate) fn solve<'a>(
                     Some(crate::p5_types::IntRange::literal(value)),
                     Some(Kind::Int),
                 ),
+                Op::Binary(
+                    _,
+                    _,
+                    crate::p2_flow::normal::Arithmetic::And
+                    | crate::p2_flow::normal::Arithmetic::Or
+                    | crate::p2_flow::normal::Arithmetic::Xor,
+                    _,
+                ) => (0, None, Some(Kind::Int)),
                 Op::FieldLoad(..)
                 | Op::ArrayLength(..)
                 | Op::ArrayLoad(_, _, _, crate::p2_flow::normal::ArrayElement::Int)
@@ -236,7 +259,10 @@ pub(crate) fn solve<'a>(
         for op in &ssa.operations {
             budget.charge_work(1)?;
             match op.op {
-                Op::Compare(_, _, _, _) | Op::Binary(_, _, _, _) => {
+                Op::Compare(_, _, _, _)
+                | Op::Binary(_, _, _, _)
+                | Op::Unary(..)
+                | Op::ReverseSubtract(..) => {
                     let expected = if matches!(op.op, Op::Compare(_, _, _, _)) {
                         Kind::Float
                     } else {
@@ -244,7 +270,9 @@ pub(crate) fn solve<'a>(
                     };
                     for input in &op.inputs {
                         budget.charge_work(1)?;
-                        if kinds[ix(input.0)?].is_some_and(|kind| kind != expected) {
+                        if kinds[ix(input.0)?].is_some_and(|kind| {
+                            kind != expected && !(expected == Kind::Int && kind == Kind::Boolean)
+                        }) {
                             type_conflict = true;
                         }
                     }
@@ -268,6 +296,59 @@ pub(crate) fn solve<'a>(
                     }
                 }
                 _ => {}
+            }
+        }
+        for op in &ssa.operations {
+            budget.charge_work(1)?;
+            let Op::Binary(_, _, arithmetic, right) = op.op else {
+                continue;
+            };
+            if !matches!(
+                arithmetic,
+                crate::p2_flow::normal::Arithmetic::And
+                    | crate::p2_flow::normal::Arithmetic::Or
+                    | crate::p2_flow::normal::Arithmetic::Xor
+            ) {
+                continue;
+            }
+            let left = integral_bits[ix(op.input(0)?.0)?];
+            let right = match right {
+                crate::p2_flow::normal::Operand::Register(_) => integral_bits[ix(op.input(1)?.0)?],
+                crate::p2_flow::normal::Operand::Literal(0) => 1,
+                crate::p2_flow::normal::Operand::Literal(1) => 2,
+                crate::p2_flow::normal::Operand::Literal(_) => 4,
+            };
+            let known = |bits: u8| bits != 0 && bits & 4 == 0;
+            let fact = if matches!(arithmetic, crate::p2_flow::normal::Arithmetic::And)
+                && (known(left) || known(right))
+                || known(left) && known(right)
+            {
+                3
+            } else if left != 0 && right != 0 {
+                7
+            } else {
+                0
+            };
+            let index = ix(op
+                .result
+                .ok_or(RequestError::InternalInvariant(
+                    "bitwise operation lost result",
+                ))?
+                .0)?;
+            let merged = integral_bits[index] | fact;
+            if merged != integral_bits[index] {
+                integral_bits[index] = merged;
+                changed = true;
+            }
+            if fact != 0 {
+                changed |= merge_range(
+                    &mut ranges[index],
+                    Some(if fact & 4 == 0 {
+                        super::IntRange::BOOLEAN
+                    } else {
+                        super::IntRange::ALL
+                    }),
+                );
             }
         }
         for phi in &ssa.phis {
@@ -310,6 +391,9 @@ pub(crate) fn solve<'a>(
     let Some(arrays) = solve_arrays(&ssa, &kinds, &integral_bits, budget)? else {
         return Ok(None);
     };
+    let Some(integer_uses) = solve_integer_uses(&ssa, &kinds, budget)? else {
+        return Ok(None);
+    };
     let initializations = super::initialization::solve(&ssa, &kinds, budget)?;
     let Some(array_uses) = solve_new_arrays(&ssa, &kinds, budget)? else {
         return Ok(None);
@@ -338,6 +422,7 @@ pub(crate) fn solve<'a>(
         bindings,
         call_uses,
         cast_uses,
+        integer_uses,
         initializations,
         empty_fills,
         array_lengths: array_uses.lengths,
@@ -669,4 +754,38 @@ fn solve_new_arrays(
         }
     }
     Ok(Some(ArrayUses { lengths, fills }))
+}
+
+fn solve_integer_uses(
+    ssa: &SsaBody<'_>,
+    kinds: &[Option<Kind>],
+    budget: &mut MethodBudget<'_, '_>,
+) -> Result<Option<Vec<Option<IntegerUses>>>, RequestError> {
+    let mut result = Vec::new();
+    for op in &ssa.operations {
+        budget.charge_work(1)?;
+        if !matches!(
+            op.op,
+            Op::Binary(..) | Op::Unary(..) | Op::ReverseSubtract(..)
+        ) {
+            push(&mut result, None, budget)?;
+            continue;
+        }
+        let mut uses = Vec::new();
+        for &value in &op.inputs {
+            budget.charge_work(1)?;
+            let conversion = match kinds[ix(value.0)?] {
+                Some(Kind::Int) => UseConversion::Identity,
+                Some(Kind::Boolean) => UseConversion::BooleanWord,
+                _ => return Ok(None),
+            };
+            push(
+                &mut uses,
+                crate::p5_types::calls::TypedUse { value, conversion },
+                budget,
+            )?;
+        }
+        push(&mut result, Some(IntegerUses { uses }), budget)?;
+    }
+    Ok(Some(result))
 }

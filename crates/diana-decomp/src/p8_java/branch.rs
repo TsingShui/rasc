@@ -7,12 +7,14 @@ use crate::{EnvironmentId, MethodBudget, RequestError, VerifiedJavaMethod};
 pub(crate) use crate::p6_variables::LocalId;
 pub(crate) use crate::p6_variables::normal::Local;
 pub(crate) enum Right {
-    Local(LocalId),
+    Local(ValueUse),
     Literal(i32),
 }
 pub(crate) enum Expression {
+    Unary(crate::pipeline::scalar::Unary, ValueUse),
+    ReverseSubtract(i32, ValueUse),
     Compare(LocalId, crate::pipeline::scalar::Compare, LocalId),
-    Binary(LocalId, crate::pipeline::branch::Arithmetic, Right),
+    Binary(ValueUse, crate::pipeline::branch::Arithmetic, Right),
     Local(LocalId),
     Constant(i32),
 }
@@ -145,18 +147,40 @@ pub(super) fn copies(
     Ok(())
 }
 pub(super) fn operation(
+    typed: &TypedBody<'_>,
     op: &crate::pipeline::branch::BoundOp,
 ) -> Result<Option<Assignment>, RequestError> {
     use crate::p2_flow::normal::Operand;
+    let integer = |index: usize| -> Result<ValueUse, RequestError> {
+        let usage = typed
+            .integer_uses
+            .get(ix(op.id.0)?)
+            .and_then(Option::as_ref)
+            .and_then(|uses| uses.uses.get(index))
+            .ok_or(RequestError::InternalInvariant(
+                "integer operation lost typed use",
+            ))?;
+        if usage.value != op.input(index)? {
+            return Err(RequestError::InternalInvariant(
+                "integer use changed original input",
+            ));
+        }
+        Ok(super::values::lower(
+            LocalId(usage.value.0),
+            usage.conversion,
+        ))
+    };
     let expression = match op.op {
+        Op::Unary(_, unary, _) => Expression::Unary(unary, integer(0)?),
+        Op::ReverseSubtract(_, literal, _) => Expression::ReverseSubtract(literal, integer(0)?),
         Op::Compare(_, _, compare, _) => {
             Expression::Compare(LocalId(op.input(0)?.0), compare, LocalId(op.input(1)?.0))
         }
         Op::Binary(_, _, kind, right) => Expression::Binary(
-            LocalId(op.input(0)?.0),
+            integer(0)?,
             kind,
             match right {
-                Operand::Register(_) => Right::Local(LocalId(op.input(1)?.0)),
+                Operand::Register(_) => Right::Local(integer(1)?),
                 Operand::Literal(value) => Right::Literal(value),
             },
         ),
@@ -201,7 +225,7 @@ pub(super) fn operations(
     for &id in &ssa.ssa.bound[ix(block.0)?].ops {
         budget.charge_work(1)?;
         let op = ssa.ssa.operation(id)?;
-        if let Some(statement) = operation(op)? {
+        if let Some(statement) = operation(ssa, op)? {
             append(output, statement, budget)?;
         }
     }
