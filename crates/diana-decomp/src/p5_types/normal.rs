@@ -123,6 +123,7 @@ pub(crate) fn solve<'a>(
                 (bits, declaration.range(), Some(kind))
             }
             Definition::OpResult(id) => match ssa.operation(id)?.op {
+                Op::String(..) => (0, None, Some(Kind::String)),
                 Op::Constant(_, value) => (
                     match value {
                         0 => 1,

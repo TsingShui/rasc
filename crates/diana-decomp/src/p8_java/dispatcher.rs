@@ -83,11 +83,11 @@ fn edge(
     })
 }
 
-pub(crate) fn verify(
+pub(super) fn verify(
     input: &MethodInput<'_, '_>,
     storage: &StorageBody<'_>,
     type_names: &super::types::TypeNames,
-    receivers: &mut [Option<crate::p4_calls::ReceiverContract>],
+    calls: &mut super::calls::SourceCalls,
     environment: EnvironmentId,
     representation: crate::RepresentationPolicy,
     budget: &mut MethodBudget<'_, '_>,
@@ -115,7 +115,7 @@ pub(crate) fn verify(
             "dispatcher belongs to another method",
         ));
     }
-    if raw.annotations().method_range().is_some() || raw.annotations().parameter_range().is_some() {
+    if raw.annotations().parameter_range().is_some() {
         return Ok(None);
     }
     super::declarations::check_target(input, budget)?;
@@ -149,7 +149,8 @@ pub(crate) fn verify(
                 )?;
             }
         }
-        let Some(statements) = super::calls::operations(ssa, key, receivers, budget)? else {
+        let Some(statements) = super::calls::operations(ssa, key, &mut calls.receivers, budget)?
+        else {
             return Ok(None);
         };
         let bound = &ssa.ssa.bound[index];
@@ -350,6 +351,14 @@ pub(crate) fn verify(
         )?;
     }
     header.push(")", budget)?;
+    for (index, descriptor) in calls.throws.descriptors.iter().enumerate() {
+        budget.charge_work(1)?;
+        let Some(name) = super::calls::type_name(descriptor, budget)? else {
+            return Ok(None);
+        };
+        header.push(if index == 0 { " throws " } else { ", " }, budget)?;
+        header.push(&name, budget)?;
+    }
     let body = Dispatcher {
         locals,
         entry,

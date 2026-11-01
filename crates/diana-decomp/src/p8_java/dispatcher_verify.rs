@@ -347,6 +347,41 @@ pub(super) fn verify(
                     "dispatcher omitted an original operation",
                 ))?;
             let matches = match actual {
+                super::calls::Statement::String {
+                    target,
+                    reference,
+                    units,
+                } => {
+                    if let Op::String(destination, literal_id) = bound.op {
+                        let literal = ssa.ssa.strings.get(ix(literal_id.0)?).ok_or(
+                            RequestError::InternalInvariant("literal certificate lost original"),
+                        )?;
+                        let layout = crate::raw::instruction_layout(
+                            ssa.ssa.raw.instructions(),
+                            bound.pc,
+                            ssa.ssa.raw.version(),
+                        )
+                        .map_err(crate::input::MethodError::Decode)?;
+                        let operands = crate::input::operands::instruction_operands(
+                            ssa.ssa.raw.instructions(),
+                            bound.pc,
+                            layout,
+                        )
+                        .map_err(crate::input::MethodError::Decode)?;
+                        let mut registers = operands.registers().iter();
+                        bound.result.map(|value| value.0) == Some(target.0)
+                            && bound.inputs.is_empty()
+                            && ssa.kinds[ix(target.0)?] == Some(Kind::String)
+                            && matches!(layout.kind(), crate::raw::LayoutKind::Instruction(spec) if matches!(spec.opcode, 0x1a | 0x1b))
+                            && registers.next() == Some(destination)
+                            && registers.next().is_none()
+                            && *reference == literal.reference
+                            && matches!(layout.references()[0],Some(original) if original.target == crate::raw::OperandReference::String(*reference))
+                            && literal.value.matches_with(units, budget)?
+                    } else {
+                        false
+                    }
+                }
                 super::calls::Statement::ReceiverCall { target, call } => {
                     if let Op::Call(id, _) = bound.op {
                         target.map(|value| value.0) == bound.result.map(|value| value.0)

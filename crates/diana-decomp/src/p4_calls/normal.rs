@@ -1,4 +1,5 @@
 use super::StaticContract;
+pub(crate) use super::throws::SourceThrows;
 use crate::input::MethodInput;
 use crate::p2_flow::normal::CallId;
 use crate::p3_ssa::normal::SsaBody;

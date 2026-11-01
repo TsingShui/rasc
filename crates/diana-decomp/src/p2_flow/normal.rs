@@ -111,12 +111,19 @@ pub(crate) struct CallSite {
     pub result_pc: Option<CodeUnitOffset>,
 }
 #[derive(Clone, Copy, Eq, PartialEq)]
+pub(crate) struct StringLiteralId(pub u32);
+pub(crate) struct StringLiteral<'a> {
+    pub reference: crate::StringId,
+    pub value: crate::input::DexString<'a>,
+}
+#[derive(Clone, Copy, Eq, PartialEq)]
 pub(crate) enum ArrayElement {
     Int,
     Object,
 }
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub(crate) enum Op {
+    String(RegisterId, StringLiteralId),
     FieldLoad(RegisterId, RegisterId, crate::FieldId),
     FieldStore(RegisterId, RegisterId, crate::FieldId),
     ArrayLength(RegisterId, RegisterId),
@@ -189,7 +196,8 @@ impl Op {
             may_throw: conservative
                 || matches!(
                     self,
-                    Self::ArrayLength(..)
+                    Self::String(..)
+                        | Self::ArrayLength(..)
                         | Self::ArrayLoad(..)
                         | Self::ArrayStore(..)
                         | Self::FieldLoad(..)
@@ -229,6 +237,7 @@ impl MethodFrame {
     }
 }
 pub(crate) struct FlowBody<'a> {
+    pub strings: Vec<StringLiteral<'a>>,
     pub frame: MethodFrame,
     _sealed: (),
     pub calls: Vec<CallSite>,
@@ -245,7 +254,8 @@ fn ix(value: u32) -> Result<usize, RequestError> {
 pub(crate) fn destination(op: Op) -> Option<RegisterId> {
     match op {
         Op::Call(_, destination) => destination,
-        Op::Constant(r, _)
+        Op::String(r, _)
+        | Op::Constant(r, _)
         | Op::Move(r, _)
         | Op::Binary(r, _, _, _)
         | Op::Compare(r, _, _, _)
@@ -294,7 +304,7 @@ impl Op {
             Self::Binary(_, left, _, Operand::Literal(_)) | Self::Move(_, left) => {
                 [Some(left), None, None]
             }
-            Self::Constant(_, _) | Self::Nop => [None, None, None],
+            Self::String(..) | Self::Constant(_, _) | Self::Nop => [None, None, None],
         };
         Ok(Reads::Local(registers.into_iter()))
     }
@@ -486,6 +496,7 @@ pub(crate) fn decode<'a>(
     }
     let mut instructions = Vec::new();
     let mut calls = Vec::new();
+    let mut strings = Vec::new();
     let mut raw_switches: Vec<(Vec<(i32, CodeUnitOffset)>, CodeUnitOffset)> = Vec::new();
     let mut leaders = Vec::new();
     push(&mut leaders, CodeUnitOffset(0), budget)?;
@@ -597,6 +608,30 @@ pub(crate) fn decode<'a>(
                     } else {
                         Decoded::Op(Op::FieldStore(reg(1)?, reg(0)?, id))
                     }
+                }
+                0x1a | 0x1b => {
+                    let Some(reference) = layout.references()[0] else {
+                        return Err(RequestError::InternalInvariant(
+                            "string literal lost reference",
+                        ));
+                    };
+                    let crate::raw::OperandReference::String(reference) = reference.target else {
+                        return Err(RequestError::InternalInvariant(
+                            "literal changed reference domain",
+                        ));
+                    };
+                    let id = StringLiteralId(
+                        u32::try_from(strings.len()).map_err(|_| RequestError::PlatformCapacity)?,
+                    );
+                    push(
+                        &mut strings,
+                        StringLiteral {
+                            reference,
+                            value: input.string_literal(reference, budget)?,
+                        },
+                        budget,
+                    )?;
+                    Decoded::Op(Op::String(reg(0)?, id))
                 }
                 0x21 => Decoded::Op(Op::ArrayLength(reg(0)?, reg(1)?)),
                 0x44 | 0x46 => Decoded::Op(Op::ArrayLoad(
@@ -952,6 +987,7 @@ pub(crate) fn decode<'a>(
         }
     }
     Ok(Some(FlowBody {
+        strings,
         frame,
         _sealed: (),
         calls,

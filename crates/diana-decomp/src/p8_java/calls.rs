@@ -58,6 +58,11 @@ pub(crate) struct ReceiverCall {
     pub arguments: Vec<ValueUse>,
 }
 pub(crate) enum Statement {
+    String {
+        target: LocalId,
+        reference: crate::StringId,
+        units: Vec<u16>,
+    },
     ReceiverCall {
         target: Option<LocalId>,
         call: ReceiverCall,
@@ -173,12 +178,19 @@ pub(super) fn identifier_text(
 ) -> Result<Option<String>, RequestError> {
     text(units, budget)
 }
+pub(super) struct SourceCalls {
+    pub receivers: Vec<Option<crate::p4_calls::ReceiverContract>>,
+    pub throws: crate::p4_calls::normal::SourceThrows,
+}
 pub(super) fn validate_bindings(
     input: &crate::input::MethodInput<'_, '_>,
     catalog: &crate::DeclarationCatalog,
     ssa: &TypedBody<'_>,
     budget: &mut MethodBudget<'_, '_>,
-) -> Result<Vec<Option<crate::p4_calls::ReceiverContract>>, RequestError> {
+) -> Result<Option<SourceCalls>, RequestError> {
+    let Some(throws) = crate::p4_calls::source_throws(input, catalog, budget)? else {
+        return Ok(None);
+    };
     let mut receivers = Vec::new();
     for (index, site) in ssa.ssa.calls.iter().enumerate() {
         budget.charge_work(1)?;
@@ -279,7 +291,7 @@ pub(super) fn validate_bindings(
         }
         push(&mut receivers, receiver, budget)?;
     }
-    Ok(receivers)
+    Ok(Some(SourceCalls { receivers, throws }))
 }
 fn plan(
     ssa: &TypedBody<'_>,
@@ -355,7 +367,30 @@ pub(super) fn operations(
     for &id in &ssa.ssa.bound[ix(block.0)?].ops {
         budget.charge_work(1)?;
         let op = ssa.ssa.operation(id)?;
-        if matches!(op.op, Op::FieldLoad(..) | Op::FieldStore(..)) {
+        if let Op::String(_, literal) = op.op {
+            let original =
+                ssa.ssa
+                    .strings
+                    .get(ix(literal.0)?)
+                    .ok_or(RequestError::InternalInvariant(
+                        "string lost original value",
+                    ))?;
+            let units = crate::substrate::owned::copy_units(original.value, budget)?;
+            let target = LocalId(
+                op.result
+                    .ok_or(RequestError::InternalInvariant("string lost result"))?
+                    .0,
+            );
+            push(
+                &mut output,
+                Statement::String {
+                    target,
+                    reference: original.reference,
+                    units,
+                },
+                budget,
+            )?;
+        } else if matches!(op.op, Op::FieldLoad(..) | Op::FieldStore(..)) {
             let Some(statement) = super::field_ops::lower(ssa, op, budget)? else {
                 return Ok(None);
             };
