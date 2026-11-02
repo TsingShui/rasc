@@ -1503,3 +1503,127 @@ mod h05 {
         ));
     }
 }
+
+mod h06 {
+    use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+
+    use diana::analysis::decompile;
+    use diana::analysis::input::{InputError, InputLimit, InputLimits, InputOptions};
+    use diana::analysis::limits::{RequestLimits, enforce_output};
+    use diana::analysis::request::RequestScope;
+    use diana::analysis::selector::{self, Selector};
+    use diana_decomp::{FailureKind, Limits};
+
+    use super::support::TempDir;
+
+    const D085: &[u8] =
+        include_bytes!("../../../crates/diana-decomp/tests/fixtures/dynamic/d085.dex");
+
+    fn base() -> InputOptions {
+        InputOptions {
+            limits: InputLimits::default(),
+            allowed_root: None,
+        }
+    }
+
+    #[test]
+    fn h06_input_and_output_bounds_are_explicit_and_never_truncate() {
+        let dir = TempDir::new("h06-bounds");
+        let path = dir.file("input.dex", D085);
+        let limits = RequestLimits {
+            max_input_bytes: Some(8),
+            ..RequestLimits::default()
+        };
+        let error = RequestScope::open(
+            &path,
+            &InputOptions {
+                limits: limits.input(),
+                allowed_root: None,
+            },
+        )
+        .unwrap_err();
+        assert!(matches!(
+            error,
+            InputError::BudgetExceeded {
+                limit: InputLimit::InputBytes,
+                ..
+            }
+        ));
+
+        // The delivered payload is checked on its actual bytes.
+        assert!(enforce_output(b"0123456789", Some(10), "max_report_output_bytes").is_ok());
+        let error =
+            enforce_output(b"01234567890", Some(10), "max_report_output_bytes").unwrap_err();
+        assert_eq!(error.maximum, 10);
+        assert_eq!(error.actual, 11);
+        assert!(enforce_output(b"any", None, "max_report_output_bytes").is_ok());
+    }
+
+    #[test]
+    fn h06_cancellation_stops_the_request_without_a_partial_report() {
+        let dir = TempDir::new("h06-cancel");
+        let path = dir.file("input.dex", D085);
+        let scope = RequestScope::open(&path, &base()).unwrap();
+        let selector = Selector::Class(selector::class("Lfixtures/Case;").unwrap());
+
+        let cancelled = AtomicBool::new(true);
+        let stop = || cancelled.load(Ordering::Relaxed);
+        let mut control = diana_decomp::RunContext::new(Limits::default(), &stop);
+        let error = decompile::run(&scope, &selector, &mut control).unwrap_err();
+        assert_eq!(error.code(), 1);
+
+        // Cancelling after some real work also terminates instead of finishing.
+        let polls = AtomicU64::new(0);
+        let stop = || {
+            let seen = polls.fetch_add(1, Ordering::Relaxed) + 1;
+            seen > 200
+        };
+        let mut control = diana_decomp::RunContext::new(Limits::default(), &stop);
+        let result = decompile::run(&scope, &selector, &mut control);
+        if let Err(error) = result {
+            assert_eq!(error.code(), 1);
+            assert!(polls.load(Ordering::Relaxed) > 200);
+        } else {
+            panic!("cancellation after 200 checks still delivered a report");
+        }
+    }
+
+    #[test]
+    fn h06_method_and_report_output_limits_stay_separate() {
+        let dir = TempDir::new("h06-output");
+        let path = dir.file("input.dex", D085);
+        let scope = RequestScope::open(&path, &base()).unwrap();
+        let selector = Selector::Class(selector::class("Lfixtures/Case;").unwrap());
+
+        // A member-output limit turns the affected member into a classified
+        // failure; the request itself still yields a report for the other members.
+        let stop = || false;
+        let mut control = diana_decomp::RunContext::new(
+            Limits {
+                max_method_output_bytes: Some(16),
+                ..Limits::default()
+            },
+            &stop,
+        );
+        let decompiled = decompile::run(&scope, &selector, &mut control).unwrap();
+        assert!(
+            decompiled
+                .report
+                .diagnostics()
+                .iter()
+                .any(|diagnostic| diagnostic.cause.kind() == FailureKind::BudgetExceeded)
+        );
+
+        // A report-output limit stops rendering entirely instead of truncating it.
+        let mut control = diana_decomp::RunContext::new(
+            Limits {
+                max_report_output_bytes: Some(16),
+                ..Limits::default()
+            },
+            &stop,
+        );
+        let error = decompile::run(&scope, &selector, &mut control).unwrap_err();
+        assert_eq!(error.code(), 1);
+        assert!(error.to_string().contains("max_report_output_bytes"));
+    }
+}

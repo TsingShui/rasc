@@ -47,6 +47,17 @@ pub struct Decompiled {
     pub rendered: RenderedReport,
 }
 
+impl std::fmt::Debug for Decompiled {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("Decompiled")
+            .field("class_at", &self.class_at)
+            .field("method_at", &self.method_at)
+            .field("status", &self.status)
+            .finish_non_exhaustive()
+    }
+}
+
 /// Runs the shared engine chain for one locator.
 pub fn run(
     scope: &RequestScope,

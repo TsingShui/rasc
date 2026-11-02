@@ -33,6 +33,7 @@ pub fn publish_records(
     command: &str,
     format: Format,
     output: Option<&std::path::Path>,
+    limit: Option<u64>,
 ) -> Result<(), Failure> {
     let text = match format {
         Format::Text => {
@@ -80,7 +81,7 @@ pub fn publish_records(
             .to_string()
         }
     };
-    publish(output, text.as_bytes(), format)
+    publish(output, text.as_bytes(), format, limit)
 }
 
 /// Escapes a display field so one record never spans over two lines.

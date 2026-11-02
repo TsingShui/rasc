@@ -58,6 +58,8 @@ pub enum SelectorError {
     Ambiguous,
     #[error("no definition matches the selector")]
     NotFound,
+    #[error("the request was stopped before resolution finished")]
+    Stopped,
 }
 
 impl SelectorError {
@@ -68,6 +70,7 @@ impl SelectorError {
             Self::InvalidIndex => 1,
             Self::NotFound => 3,
             Self::Ambiguous => 4,
+            Self::Stopped => 1,
         }
     }
 }

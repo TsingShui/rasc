@@ -25,6 +25,7 @@ pub fn run(
     kind: Kind,
     format: Format,
     output: Option<&Path>,
+    limits: crate::analysis::limits::RequestLimits,
 ) -> Result<(), Failure> {
     let selector = match kind {
         Kind::Class => Selector::Class(selector::class(text).map_err(|error| Failure {
@@ -36,7 +37,7 @@ pub fn run(
             message: error.to_string(),
         })?),
     };
-    let scope = RequestScope::open(input, &super::options()).map_err(Failure::input)?;
+    let scope = RequestScope::open(input, &super::options(limits)).map_err(Failure::input)?;
     let mut control = diana_decomp::RunContext::new(diana_decomp::Limits::default(), &|| false);
     let decompiled = decompile::run(&scope, &selector, &mut control).map_err(|error| Failure {
         code: error.code(),
@@ -46,7 +47,12 @@ pub fn run(
         Format::Text => text_payload(&decompiled),
         Format::Json => json_payload(&decompiled),
     };
-    publish(output, payload.as_bytes(), format)
+    publish(
+        output,
+        payload.as_bytes(),
+        format,
+        limits.max_report_output_bytes,
+    )
 }
 
 fn text_payload(decompiled: &Decompiled) -> String {

@@ -14,6 +14,7 @@ pub mod decompile;
 pub mod dex;
 pub mod images;
 pub mod input;
+pub mod limits;
 pub mod manifest;
 pub mod query;
 pub mod request;

@@ -126,6 +126,24 @@ pub fn resolve_class<'a>(
     resolve_class_inner(images, selector, control, None, None)
 }
 
+/// Classifies an engine failure during resolution: a resource or cancellation stop
+/// is not a stale locator.
+fn stopped(error: ImageError) -> SelectorError {
+    let ImageError::Engine(error) = error else {
+        return SelectorError::Stopped;
+    };
+    engine_stopped(error)
+}
+
+fn engine_stopped(error: diana_decomp::input::InputError) -> SelectorError {
+    match error.kind() {
+        diana_decomp::FailureKind::Cancelled
+        | diana_decomp::FailureKind::BudgetExceeded
+        | diana_decomp::FailureKind::InternalInvariant => SelectorError::Stopped,
+        _ => SelectorError::InvalidIndex,
+    }
+}
+
 fn resolve_class_inner<'a>(
     images: &'a ImageSet<'a>,
     selector: &super::selector::ClassSelector,
@@ -139,17 +157,15 @@ fn resolve_class_inner<'a>(
         None => images.images().iter().collect(),
     };
     for image in image_list {
-        let index = images
-            .program(image, control)
-            .map_err(|_| SelectorError::InvalidIndex)?;
+        let index = images.program(image, control).map_err(stopped)?;
         if let Some(class_def) = selector.class_def {
             let class = index
                 .class(diana_decomp::ClassDefId(class_def), control)
-                .map_err(|_| SelectorError::InvalidIndex)?;
+                .map_err(engine_stopped)?;
             if !class
                 .descriptor
                 .matches(&selector.descriptor, control)
-                .map_err(|_| SelectorError::InvalidIndex)?
+                .map_err(engine_stopped)?
             {
                 // The index exists but names a different object: a stale locator.
                 return Err(SelectorError::InvalidIndex);
@@ -158,13 +174,15 @@ fn resolve_class_inner<'a>(
             continue;
         }
         let mut found = None;
-        let _ = index.visit_classes(control, |class_def, class, control| {
-            let class = class?;
-            if class.descriptor.matches(&selector.descriptor, control)? {
-                found = Some(class_def);
-            }
-            Ok(())
-        });
+        index
+            .visit_classes(control, |class_def, class, control| {
+                let class = class?;
+                if class.descriptor.matches(&selector.descriptor, control)? {
+                    found = Some(class_def);
+                }
+                Ok(())
+            })
+            .map_err(engine_stopped)?;
         if let Some(class_def) = found {
             candidates.push((image, class_def));
         }
@@ -176,16 +194,9 @@ fn resolve_class_inner<'a>(
         return Err(SelectorError::Ambiguous);
     }
     let (image, class_def) = candidates[0];
-    let index = images
-        .program(image, control)
-        .map_err(|_| SelectorError::InvalidIndex)?;
-    let class = index
-        .class(class_def, control)
-        .map_err(|_| SelectorError::InvalidIndex)?;
-    let descriptor = class
-        .descriptor
-        .units(control)
-        .map_err(|_| SelectorError::InvalidIndex)?;
+    let index = images.program(image, control).map_err(stopped)?;
+    let class = index.class(class_def, control).map_err(engine_stopped)?;
+    let descriptor = class.descriptor.units(control).map_err(engine_stopped)?;
     let (method_id, name, member_type) = if let Some((id, name, prototype)) = method {
         let id = diana_decomp::MethodId(id);
         let diana_decomp::input::ReferenceFacts::Method {
@@ -194,24 +205,20 @@ fn resolve_class_inner<'a>(
             ..
         } = index
             .reference_facts(diana_decomp::raw::OperandReference::Method(id), control)
-            .map_err(|_| SelectorError::InvalidIndex)?
+            .map_err(engine_stopped)?
         else {
             return Err(SelectorError::InvalidIndex);
         };
-        if !actual_name
-            .matches(name, control)
-            .map_err(|_| SelectorError::InvalidIndex)?
+        if !actual_name.matches(name, control).map_err(engine_stopped)?
             || !actual_prototype
                 .matches(prototype, control)
-                .map_err(|_| SelectorError::InvalidIndex)?
+                .map_err(engine_stopped)?
         {
             return Err(SelectorError::InvalidIndex);
         }
         (
             Some(id),
-            actual_name
-                .units(control)
-                .map_err(|_| SelectorError::InvalidIndex)?,
+            actual_name.units(control).map_err(engine_stopped)?,
             prototype.to_vec(),
         )
     } else if let Some((id, name, field_type)) = field {
@@ -222,24 +229,20 @@ fn resolve_class_inner<'a>(
             ..
         } = index
             .reference_facts(diana_decomp::raw::OperandReference::Field(id), control)
-            .map_err(|_| SelectorError::InvalidIndex)?
+            .map_err(engine_stopped)?
         else {
             return Err(SelectorError::InvalidIndex);
         };
-        if !actual_name
-            .matches(name, control)
-            .map_err(|_| SelectorError::InvalidIndex)?
+        if !actual_name.matches(name, control).map_err(engine_stopped)?
             || !actual_type
                 .matches(field_type, control)
-                .map_err(|_| SelectorError::InvalidIndex)?
+                .map_err(engine_stopped)?
         {
             return Err(SelectorError::InvalidIndex);
         }
         (
             None,
-            actual_name
-                .units(control)
-                .map_err(|_| SelectorError::InvalidIndex)?,
+            actual_name.units(control).map_err(engine_stopped)?,
             field_type.to_vec(),
         )
     } else {
@@ -264,13 +267,11 @@ pub fn resolve_method<'a>(
         // A short reference resolves through defined members, so an overload that
         // is not written out cannot be guessed.
         let class = resolve_class(images, &selector.class, control)?;
-        let index = images
-            .program(class.image, control)
-            .map_err(|_| SelectorError::InvalidIndex)?;
+        let index = images.program(class.image, control).map_err(stopped)?;
         let mut found = None;
         index
             .class(class.class_def, control)
-            .map_err(|_| SelectorError::InvalidIndex)?
+            .map_err(engine_stopped)?
             .visit_methods(control, |method, control| {
                 let declaration = method.declaration?;
                 if declaration.name.matches(&selector.name, control)?
@@ -285,7 +286,7 @@ pub fn resolve_method<'a>(
                 }
                 Ok(())
             })
-            .map_err(|_| SelectorError::InvalidIndex)?;
+            .map_err(engine_stopped)?;
         return match found {
             Some(id) => resolve_class_inner(
                 images,
@@ -337,14 +338,12 @@ pub fn resolve_string<'a>(
     control: &mut RunContext<'_>,
 ) -> Result<StringSelection<'a>, SelectorError> {
     let image = images.find(selector.entry, selector.logical)?;
-    let index = images
-        .program(image, control)
-        .map_err(|_| SelectorError::InvalidIndex)?;
+    let index = images.program(image, control).map_err(stopped)?;
     let string = diana_decomp::StringId(selector.string);
     let units = index
         .string(string, control)
         .and_then(|value| value.units(control))
-        .map_err(|_| SelectorError::InvalidIndex)?;
+        .map_err(engine_stopped)?;
     Ok(StringSelection {
         image,
         string,

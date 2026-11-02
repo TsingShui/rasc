@@ -10,12 +10,12 @@ mod table;
 
 use std::path::PathBuf;
 
-use clap::{Parser, Subcommand};
+use clap::{Args, Parser, Subcommand};
 
 use crate::analysis::at;
 use crate::analysis::axml::ManifestLimits;
 use crate::analysis::dex::{ClassFilter, ClassKind};
-use crate::analysis::input::{InputLimits, InputOptions};
+use crate::analysis::input::InputOptions;
 use crate::analysis::manifest;
 use crate::analysis::query::{Query, QueryKind, QueryLimits, QueryPlan, Row};
 use crate::analysis::request::RequestScope;
@@ -26,8 +26,42 @@ use table::Record;
 #[derive(Parser)]
 #[command(name = "diana", about = "Native APK/DEX analysis", version)]
 struct Cli {
+    #[command(flatten)]
+    limits: LimitArgs,
     #[command(subcommand)]
     command: Command,
+}
+
+#[derive(Args, Clone, Copy, Debug, Default)]
+struct LimitArgs {
+    #[arg(long, global = true)]
+    max_input_bytes: Option<u64>,
+    #[arg(long, global = true)]
+    max_inflated_bytes: Option<u64>,
+    #[arg(long, global = true)]
+    max_request_work_steps: Option<u64>,
+    #[arg(long, global = true)]
+    max_request_allocation_bytes: Option<u64>,
+    #[arg(long, global = true)]
+    max_work_steps: Option<u64>,
+    #[arg(long, global = true)]
+    max_method_output_bytes: Option<u64>,
+    #[arg(long, global = true)]
+    max_report_output_bytes: Option<u64>,
+}
+
+impl LimitArgs {
+    fn limits(&self) -> crate::analysis::limits::RequestLimits {
+        crate::analysis::limits::RequestLimits {
+            max_input_bytes: self.max_input_bytes,
+            max_inflated_bytes: self.max_inflated_bytes,
+            max_request_work_steps: self.max_request_work_steps,
+            max_request_allocation_bytes: self.max_request_allocation_bytes,
+            max_work_steps: self.max_work_steps,
+            max_method_output_bytes: self.max_method_output_bytes,
+            max_report_output_bytes: self.max_report_output_bytes,
+        }
+    }
 }
 
 #[derive(Subcommand)]
@@ -140,18 +174,19 @@ enum KindArg {
 /// Runs one command and maps its classified failure to an exit code.
 pub fn run() -> std::process::ExitCode {
     let cli = Cli::parse();
+    let limits = cli.limits.limits();
     let result = match cli.command {
         Command::Entries {
             input,
             format,
             output,
-        } => entries(&input, format, output.as_deref()),
+        } => entries(&input, format, output.as_deref(), limits),
         Command::Manifest {
             input,
             format,
             output,
             strict,
-        } => manifest_command(&input, format, output.as_deref(), strict),
+        } => manifest_command(&input, format, output.as_deref(), strict, limits),
         Command::GetClass {
             input,
             selector,
@@ -163,6 +198,7 @@ pub fn run() -> std::process::ExitCode {
             get::Kind::Class,
             format,
             output.as_deref(),
+            limits,
         ),
         Command::GetMethod {
             input,
@@ -175,6 +211,7 @@ pub fn run() -> std::process::ExitCode {
             get::Kind::Method,
             format,
             output.as_deref(),
+            limits,
         ),
         Command::Classes {
             input,
@@ -205,6 +242,7 @@ pub fn run() -> std::process::ExitCode {
             },
             format,
             output.as_deref(),
+            limits,
         ),
         Command::Fields {
             input,
@@ -224,6 +262,7 @@ pub fn run() -> std::process::ExitCode {
             },
             format,
             output.as_deref(),
+            limits,
         ),
         Command::Methods {
             input,
@@ -243,6 +282,7 @@ pub fn run() -> std::process::ExitCode {
             },
             format,
             output.as_deref(),
+            limits,
         ),
         Command::Strings {
             input,
@@ -261,6 +301,7 @@ pub fn run() -> std::process::ExitCode {
             },
             format,
             output.as_deref(),
+            limits,
         ),
     };
     match result {
@@ -272,9 +313,9 @@ pub fn run() -> std::process::ExitCode {
     }
 }
 
-fn options() -> InputOptions {
+fn options(limits: crate::analysis::limits::RequestLimits) -> InputOptions {
     InputOptions {
-        limits: InputLimits::default(),
+        limits: limits.input(),
         allowed_root: None,
     }
 }
@@ -283,8 +324,9 @@ fn entries(
     input: &std::path::Path,
     format: Format,
     output: Option<&std::path::Path>,
+    limits: crate::analysis::limits::RequestLimits,
 ) -> Result<(), Failure> {
-    let scope = RequestScope::open(input, &options()).map_err(Failure::input)?;
+    let scope = RequestScope::open(input, &options(limits)).map_err(Failure::input)?;
     let query = Query::new(
         &scope,
         QueryPlan {
@@ -339,7 +381,12 @@ fn entries(
             .to_string()
         }
     };
-    publish(output, text.as_bytes(), format)
+    publish(
+        output,
+        text.as_bytes(),
+        format,
+        limits.max_report_output_bytes,
+    )
 }
 
 fn manifest_command(
@@ -347,8 +394,9 @@ fn manifest_command(
     format: Format,
     output: Option<&std::path::Path>,
     strict: bool,
+    limits: crate::analysis::limits::RequestLimits,
 ) -> Result<(), Failure> {
-    let scope = RequestScope::open(input, &options()).map_err(Failure::input)?;
+    let scope = RequestScope::open(input, &options(limits)).map_err(Failure::input)?;
     let manifest = match manifest::read(&scope, ManifestLimits::default()) {
         Ok(manifest) => manifest,
         Err(error) => {
@@ -385,7 +433,12 @@ fn manifest_command(
         })
         .to_string(),
     };
-    publish(output, text.as_bytes(), format)?;
+    publish(
+        output,
+        text.as_bytes(),
+        format,
+        limits.max_report_output_bytes,
+    )?;
     if strict && manifest.is_partial() {
         return Err(Failure {
             code: 1,
@@ -418,8 +471,9 @@ fn query_command(
     args: QueryArgs,
     format: Format,
     output: Option<&std::path::Path>,
+    limits: crate::analysis::limits::RequestLimits,
 ) -> Result<(), Failure> {
-    let scope = RequestScope::open(input, &options()).map_err(Failure::input)?;
+    let scope = RequestScope::open(input, &options(limits)).map_err(Failure::input)?;
     let jobs = match args.jobs {
         Some(0) => {
             return Err(Failure {
@@ -500,5 +554,12 @@ fn query_command(
         QueryKind::Strings => "strings",
         QueryKind::Entries => "entries",
     };
-    table::publish_records(&records, columns, command, format, output)
+    table::publish_records(
+        &records,
+        columns,
+        command,
+        format,
+        output,
+        limits.max_report_output_bytes,
+    )
 }

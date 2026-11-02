@@ -2878,6 +2878,11 @@ unverified shape, immediately deleting every old dependency.
 
 ## H06 — Request cancellation, layered budgets and output publication
 
+**Progress**: The [limits batch](batches/h06-limits.md) maps explicit CLI options to
+the input and engine ledgers, threads a cooperative cancellation flag through one
+`RunContext`, and checks each delivered payload on its actual bytes before atomic
+publication. SIGINT and per-request caching are not claimed.
+
 **Dependencies**: H05, T09. **Scope**: CLI, control and engine output.
 
 **Files**: the root input, request, engine adapter and CLI emit;
