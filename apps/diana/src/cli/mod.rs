@@ -36,18 +36,25 @@ struct Cli {
 
 #[derive(Args, Clone, Copy, Debug, Default)]
 struct LimitArgs {
+    /// Bound on the leased input file bytes
     #[arg(long, global = true)]
     max_input_bytes: Option<u64>,
+    /// Bound on bytes inflated from one archive entry
     #[arg(long, global = true)]
     max_inflated_bytes: Option<u64>,
+    /// Bound on cumulative request work steps
     #[arg(long, global = true)]
     max_request_work_steps: Option<u64>,
+    /// Bound on cumulative request allocation bytes
     #[arg(long, global = true)]
     max_request_allocation_bytes: Option<u64>,
+    /// Bound on per-method work steps
     #[arg(long, global = true)]
     max_work_steps: Option<u64>,
+    /// Bound on one rendered member's UTF-8 length
     #[arg(long, global = true)]
     max_method_output_bytes: Option<u64>,
+    /// Bound on the final text/JSON payload bytes
     #[arg(long, global = true)]
     max_report_output_bytes: Option<u64>,
 }
@@ -69,133 +76,218 @@ impl LimitArgs {
 #[derive(Subcommand)]
 enum Command {
     /// List physical archive entries
+    #[command(
+        long_about = "Columns: name, compressed_size, uncompressed_size, compression. Physical records in directory order; numeric ZIP method, no label."
+    )]
     Entries {
+        /// Input file (APK, ZIP or bare DEX)
         input: PathBuf,
         #[arg(long, value_enum, default_value_t = Format::Text)]
+        /// Presentation of the same result
         format: Format,
         #[arg(short, long)]
+        /// Write the result to this file instead of stdout
         output: Option<PathBuf>,
     },
     /// List class definitions
+    #[command(
+        long_about = "Column: at. Restrict with --filter, --extends, --implements, --subinterface and --kind; hierarchy filters use direct edges only."
+    )]
     Classes {
+        /// Input file (APK, ZIP or bare DEX)
         input: PathBuf,
         #[arg(long)]
+        /// Case-insensitive literal over the semantic name/descriptor
         filter: Option<String>,
         #[arg(long)]
+        /// Only definitions whose own superclass is this class
         extends: Option<String>,
         #[arg(long)]
+        /// Only classes whose own interface list contains this interface
         implements: Option<String>,
         #[arg(long)]
+        /// Only interfaces whose own interface list contains this interface
         subinterface: Option<String>,
         #[arg(long, value_enum)]
+        /// Restrict to classes or interfaces
         kind: Option<KindArg>,
         #[arg(long)]
+        /// Workers for independent DEX images (default: min(8, CPUs))
         jobs: Option<usize>,
         #[arg(long, value_enum, default_value_t = Format::Text)]
+        /// Presentation of the same result
         format: Format,
         #[arg(short, long)]
+        /// Write the result to this file instead of stdout
         output: Option<PathBuf>,
     },
     /// List defined fields
+    #[command(
+        long_about = "Column: at. Only class_data definitions; --class selects the defining class exactly and --filter is a literal substring."
+    )]
     Fields {
+        /// Input file (APK, ZIP or bare DEX)
         input: PathBuf,
         #[arg(long)]
+        /// Case-insensitive literal over the semantic name/descriptor
         filter: Option<String>,
         #[arg(long)]
+        /// Exact defining class (descriptor or dotted name)
         class: Option<String>,
         #[arg(long)]
+        /// Workers for independent DEX images (default: min(8, CPUs))
         jobs: Option<usize>,
         #[arg(long, value_enum, default_value_t = Format::Text)]
+        /// Presentation of the same result
         format: Format,
         #[arg(short, long)]
+        /// Write the result to this file instead of stdout
         output: Option<PathBuf>,
     },
     /// List defined methods
+    #[command(
+        long_about = "Column: at. Only class_data definitions, including abstract, native, constructor and clinit declarations."
+    )]
     Methods {
+        /// Input file (APK, ZIP or bare DEX)
         input: PathBuf,
         #[arg(long)]
+        /// Case-insensitive literal over the semantic name/descriptor
         filter: Option<String>,
         #[arg(long)]
+        /// Exact defining class (descriptor or dotted name)
         class: Option<String>,
         #[arg(long)]
+        /// Workers for independent DEX images (default: min(8, CPUs))
         jobs: Option<usize>,
         #[arg(long, value_enum, default_value_t = Format::Text)]
+        /// Presentation of the same result
         format: Format,
         #[arg(short, long)]
+        /// Write the result to this file instead of stdout
         output: Option<PathBuf>,
     },
     /// List original string values
+    #[command(
+        long_about = "Columns: at, value, entry. string_ids order with the complete UTF-16 value; a code reference site is found with xref."
+    )]
     Strings {
+        /// Input file (APK, ZIP or bare DEX)
         input: PathBuf,
         #[arg(long)]
+        /// Case-insensitive literal over the semantic name/descriptor
         filter: Option<String>,
         #[arg(long)]
+        /// Workers for independent DEX images (default: min(8, CPUs))
         jobs: Option<usize>,
         #[arg(long, value_enum, default_value_t = Format::Text)]
+        /// Presentation of the same result
         format: Format,
         #[arg(short, long)]
+        /// Write the result to this file instead of stdout
         output: Option<PathBuf>,
     },
     /// Decompile one class
+    #[command(
+        long_about = "Displays the existing report: complete Java, or Mixed with every member and the reason of each failure. JSON follows schema 1."
+    )]
     GetClass {
+        /// Input file (APK, ZIP or bare DEX)
         input: PathBuf,
+        /// Class or method locator; see `at` in the package README
         selector: String,
         #[arg(long, value_enum, default_value_t = Format::Text)]
+        /// Presentation of the same result
         format: Format,
         #[arg(short, long)]
+        /// Write the result to this file instead of stdout
         output: Option<PathBuf>,
     },
     /// Decompile one method
+    #[command(
+        long_about = "Displays exactly the selected member: Java, declaration-only, debug facts or an unavailable reason with its excerpt."
+    )]
     GetMethod {
+        /// Input file (APK, ZIP or bare DEX)
         input: PathBuf,
+        /// Class or method locator; see `at` in the package README
         selector: String,
         #[arg(long, value_enum, default_value_t = Format::Text)]
+        /// Presentation of the same result
         format: Format,
         #[arg(short, long)]
+        /// Write the result to this file instead of stdout
         output: Option<PathBuf>,
     },
     /// Extract one physical entry
+    #[command(
+        long_about = "Writes exactly one entry. A binary XML payload is decoded to text XML by default; --raw keeps the original payload. Publication is atomic."
+    )]
     Extract {
+        /// Input file (APK, ZIP or bare DEX)
         input: PathBuf,
+        /// Exact physical entry name
         entry: String,
         #[arg(long)]
+        /// Physical record index when the name repeats
         entry_index: Option<usize>,
         #[arg(short, long)]
+        /// Output file for the extracted payload
         output: PathBuf,
         /// Keep the original payload bytes even for binary XML
         #[arg(long)]
+        /// Write the original payload bytes instead of decoded XML
         raw: bool,
         /// Replace an existing ordinary output file
         #[arg(long)]
+        /// Replace an existing ordinary output file
         force: bool,
         /// Exit non-zero when a decoded document is partial
         #[arg(long)]
+        /// Exit non-zero when the delivered document is partial
         strict: bool,
     },
     /// Find original reference sites
+    #[command(
+        long_about = "Columns: entry, context, match, use. Kinds: string, type, method, field; each real operand site is one row."
+    )]
     Xref {
+        /// Input file (APK, ZIP or bare DEX)
         input: PathBuf,
         /// string | type | method | field
+        /// Target kind: string, type, method or field
         kind: String,
+        /// Exact target value or complete reference
         target: String,
         #[arg(long)]
+        /// Exact defining class (descriptor or dotted name)
         class: Option<String>,
         #[arg(long)]
+        /// Workers for independent DEX images (default: min(8, CPUs))
         jobs: Option<usize>,
         #[arg(long, value_enum, default_value_t = Format::Text)]
+        /// Presentation of the same result
         format: Format,
         #[arg(short, long)]
+        /// Write the result to this file instead of stdout
         output: Option<PathBuf>,
     },
     /// Decode the binary AndroidManifest.xml
+    #[command(
+        long_about = "Selects the last physical AndroidManifest.xml and prints text XML or JSON with warnings for any recovered gap."
+    )]
     Manifest {
+        /// Input file (APK, ZIP or bare DEX)
         input: PathBuf,
         #[arg(long, value_enum, default_value_t = Format::Text)]
+        /// Presentation of the same result
         format: Format,
         #[arg(short, long)]
+        /// Write the result to this file instead of stdout
         output: Option<PathBuf>,
         /// Exit non-zero when the document is partial
         #[arg(long)]
+        /// Exit non-zero when the delivered document is partial
         strict: bool,
     },
 }

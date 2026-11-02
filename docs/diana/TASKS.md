@@ -2938,6 +2938,11 @@ arbitrary real-time preemption, a cross-process cache service.
 
 ## H07 — Unified help, output and agent documentation for the eleven commands
 
+**Progress**: The [help batch](batches/h07-help.md) freezes the ten product commands
+plus `help`, their columns, `at` grammar, JSON shapes, exit codes and the `extract`
+exception in the binary help and the package README, which also carries the agent
+usage text. Q07 was a manual review; no CLI golden test was added.
+
 **Dependencies**: H06, H09, H10. **Scope**: CLI consumers and usage text.
 
 **Files**: `src/cli/{args,mod,agent_skill}.rs`, `skill/SKILL.md`, README; the
