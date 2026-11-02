@@ -38,6 +38,7 @@ impl DecompileError {
 pub struct Decompiled {
     pub entry: Option<usize>,
     pub logical: u32,
+    pub header_offset: diana_decomp::ByteOffset,
     pub class: ClassKey,
     pub method: Option<diana_decomp::MethodId>,
     pub class_at: String,
@@ -131,6 +132,7 @@ pub fn run_with_catalog(
     Ok(Decompiled {
         entry,
         logical,
+        header_offset: selection.image.header_offset,
         class,
         method: selection.method,
         class_at,

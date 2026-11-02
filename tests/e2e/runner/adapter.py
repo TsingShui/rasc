@@ -58,7 +58,10 @@ def run_public(root, cache, spec, manifest, case_ids=None,representation=None,jo
     scheduled = sorted(runs,key=lambda item: -durations.get((item[0]['id'],item[1]['id'],item[2]),0))
     output = Path(tempfile.mkdtemp(prefix='run-',dir=base))
     run(['cargo','build','-p','diana-decomp','--release','--example','inspect_class','--locked'], root, output/'build.log', timeout=180)
+    run(['cargo','build','-p','diana','--release','--example','app_query','--example','app_decompile','--locked'], root, output/'build-app.log', timeout=180)
     executable = root/'target/release/examples'/('inspect_class.exe' if os.name=='nt' else 'inspect_class')
+    app_query = root/'target/release/examples'/('app_query.exe' if os.name=='nt' else 'app_query')
+    app_decompile = root/'target/release/examples'/('app_decompile.exe' if os.name=='nt' else 'app_decompile')
     revision=run(['git','rev-parse','HEAD'],root,output/'revision.log').strip()
     dirty=bool(run(['git','status','--porcelain','--untracked-files=no','--','Cargo.toml','Cargo.lock','apps/diana','crates/diana-decomp','tests/e2e','docs/diana/e2e_cases.json','tools/e2e.py'],root,output/'working-tree.log').strip())
     def execute(item):
@@ -100,6 +103,89 @@ def run_public(root, cache, spec, manifest, case_ids=None,representation=None,jo
                     path=work/(group+'.json');save(path,value);record['artifacts'][group]={'path':relative(path)}
                 record['execution']='completed'
                 record['owner_reports']=reports
+            elif seam in {'application-default-text','application-original-view'}:
+                binding = cert['bindings'][0]
+                selector, origin = binding['selector'], binding['origin']
+                asset = assets[origin['asset_id']]
+                path = root/asset['path']
+                if not path.is_file() or path.stat().st_size != asset['size']:
+                    raise PreparationError('missing/changed certified input')
+                logical = origin.get('logical_ordinal') or 0
+                prefix = 'e0:l%s:c%s' % (logical, selector['class_def_idx'])
+                class_at = prefix + '::' + selector['descriptor']
+                argv = [app_decompile,path,class_at]
+                if selector['kind']=='method':
+                    method_at = (prefix + ':m%s::' % selector['method_id_idx']
+                                 + selector['descriptor'] + '->' + selector['name'] + selector['proto'])
+                    argv.extend(['--method',method_at])
+                public_path=work/'public.json'
+                argv.extend(['--output',public_path])
+                run(argv,root,work/'app.log')
+                actual=load(public_path)
+                requested = selector['name']+selector['proto'] if selector['kind']=='method' else None
+                groups=_artifacts(actual,cert,[requested] if requested else [])
+                unit_source=groups.pop('java_unit_source',None)
+                if unit_source is not None:
+                    source_path=work/'unit'/Path(selector['descriptor'][1:-1]+'.java')
+                    source_path.parent.mkdir(parents=True,exist_ok=True)
+                    source_path.write_text(unit_source,encoding='utf-8')
+                    groups['java_input']={'sources':[{'path':relative(source_path)}]}
+                fragments=groups.pop('method_sources',None)
+                if fragments is not None:
+                    import re
+                    source_path=work/'context'/Path(selector['descriptor'][1:-1]+'.java')
+                    source_path.parent.mkdir(parents=True,exist_ok=True)
+                    original=root/'tests/e2e/sources'/case['id']/Path(selector['descriptor'][1:-1]+'.java')
+                    if not original.is_file() and case['id']=='D065':
+                        ordinal=origin['logical_ordinal']
+                        original=root/'tests/e2e/sources/D065/fixtures/mirror'/('logical'+str(ordinal))/'Case.java'
+                        text=original.read_text(encoding='utf-8')
+                        text,count=re.subn(r'^package logical'+str(ordinal)+r';','package fixtures;',text,count=1)
+                        if count!=1:raise PreparationError('certified mirror context has a different namespace')
+                        source_path.write_text(text,encoding='utf-8')
+                    elif original.is_file():
+                        source_path.write_text(original.read_text(encoding='utf-8'),encoding='utf-8')
+                    else:
+                        generated=cache/'prepared'/case['id']/Path(selector['descriptor'][1:-1]+'.java')
+                        entry=next((asset for asset in assets.values() if asset['path']==relative(generated)),None)
+                        if entry is None or not generated.is_file() or generated.stat().st_size!=entry['size']:
+                            raise PreparationError('application method context source missing')
+                        source_path.write_text(generated.read_text(encoding='utf-8'),encoding='utf-8')
+                    groups['java_input']={'sources':[{'path':relative(source_path)}]}
+                for group,value in groups.items():
+                    target_path=work/('source.txt' if group=='text' else group+'.json')
+                    if group=='text':target_path.write_bytes(value)
+                    else:save(target_path,value)
+                    record['artifacts'][group]={'path':relative(target_path)}
+                record['execution']='completed'
+            elif seam in {'query-defined-symbols','query-reference-sites'}:
+                binding = cert['bindings'][0]
+                origin = binding['origin']
+                asset = assets[origin['asset_id']]
+                path = root/asset['path']
+                if not path.is_file() or path.stat().st_size != asset['size']:
+                    raise PreparationError('missing/changed certified input')
+                query = invocation['input']['query']
+                if query == 'defined-methods':
+                    argv = [app_query,'defined-methods',path]
+                    if invocation['input'].get('nameFilter'):
+                        argv.extend(['--filter',invocation['input']['nameFilter']])
+                elif query == 'direct-method-xref':
+                    argv = [app_query,'direct-method-xref',path,'--target',invocation['input']['methodRef']]
+                else:
+                    raise PreparationError('unknown query kind')
+                text = run(argv,root,work/'query.log')
+                rows = json.loads(text)['rows']
+                for row in rows:
+                    row['origin'] = origin
+                path_out = work/'query.json'
+                save(path_out,{'rows':rows})
+                record['artifacts']['query']={'path':relative(path_out)}
+                outcome_path = work/'outcome.json'
+                save(outcome_path,{'outcome':'data','status':'data','selected':cert['bindings'],'members':[],
+                                   'diagnostics':[],'report':{'available':True},'published_success':False})
+                record['artifacts']['outcome']={'path':relative(outcome_path)}
+                record['execution']='completed'
             elif seam not in {'decompile-method','decompile-class','decompile-and-render','open-or-decompile','engine-original-view','engine-render'}:
                 record['reason'] = 'the public Engine adapter does not implement this seam'
             elif len(cert['bindings']) != 1:
