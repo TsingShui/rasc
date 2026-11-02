@@ -611,9 +611,28 @@ The specified columns contain no extra entry_index. Exact extraction of a duplic
 
 ```sh
 diana classes sample.apk --filter 'example'
+diana classes sample.apk --implements 'com.example.Repo'
+diana classes sample.apk --extends 'com.example.Base'
+diana classes sample.apk --subinterface 'com.example.Repo'
 diana fields sample.apk --class 'com.example.App'
 diana methods sample.apk --class 'com.example.App' --filter 'check'
 ```
+
+`classes` restricts its definition list with these options, which MAY be combined
+as a conjunction:
+
+- `--extends <class>`: the definition's own superclass is that class.
+- `--implements <interface>`: the definition is a class whose own interface list
+  contains that interface.
+- `--subinterface <interface>`: the definition is an interface whose own
+  interface list contains that interface.
+- `--kind class|interface`: the definition is or is not an interface.
+
+Each relation uses only the definition's own direct `super_class_idx` or
+`interface_list` edge. Diana MUST NOT compute a transitive superclass,
+implementation or sub-interface closure, and MUST NOT report a class that merely
+inherits the relation through another definition. Missing relations are an empty
+result, not a guessed one.
 
 Each command has only the `at` column. classes enumerates class_defs definitions; fields enumerates the static/instance fields actually defined in each class_data; methods enumerates direct/virtual **defined methods**, including abstract/native/constructor/clinit declarations, and the command MUST NOT treat every external reference in method_ids as a defined method.
 
@@ -708,11 +727,18 @@ kind is explicitly `string|type|method|field`; target is a literal exact value/d
 
 By default Diana scans code references in every root DEX and 041 logical member of the input, using the original opcode/ref index; the search MUST NOT decompile the source first and then search. `--class` constrains only the referencing definition, and the ambiguity rules for readable short selectors are the same as §6.3.
 
-The columns are exactly `entry, context, match`:
+The columns are exactly `entry, context, match, use`:
 
 - entry: the physical entry name of the referencing side; a display label does not decide identity.
 - context: `<referencing-method-at>@cu:<offset>`, where offset is the original code units of that method, displayed in hexadecimal such as `@cu:0x0012`; it is not an output line number.
 - match: the string value, TypeRef, MethodRef or FieldRef that is actually referenced, escaped per §6.2; Diana MUST NOT merely echo the user target while ignoring the real reference.
+- use: the original DEX mnemonic of the referencing instruction (`check-cast`, `instance-of`, `const-class`, `invoke-interface`, `iget`, `sput`, ...). It is the format-defined instruction name, not a Java expression or a source line kind.
+
+A site exists only where an original instruction carries a reference slot of the
+queried kind. Diana MUST NOT report a declaration type, a `catch` type or a
+`super_class_idx`/`interface_list` edge as an xref site; those relations are
+queried through `classes` per §6.4. When one instruction references the target
+twice, both slots are separate lines with the same context and `use`.
 
 **One line per actual reference site**; multiple sites in the same method get separate lines, and the CLI MUST NOT silently merge them as the old method-level findrefs result did. When the same site may reference the parameter repeatedly, the record is expressed by the defined opcode operand-site identity, and the search MUST NOT deduplicate by name. This refinement is intentional and is accepted by H09/Q09. An empty result with header/empty items exits 0; a successful search returns every match, with no pagination and no guaranteed order.
 

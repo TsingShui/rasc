@@ -743,6 +743,85 @@ impl<'a> ProgramIndex<'a> {
     }
 }
 
+/// Original declared type relations of one class definition.
+#[derive(Debug)]
+pub struct ClassHierarchy<'a> {
+    pub superclass: Option<DexString<'a>>,
+    pub interfaces: Vec<DexString<'a>>,
+}
+
+/// Resolved facts of one original operand reference. Only the four xref target
+/// families and prototypes are resolved; a call-site or method-handle slot keeps
+/// its unsupported form rather than being expanded into members.
+pub enum ReferenceFacts<'i, 'a> {
+    String(DexString<'a>),
+    Type(DexString<'a>),
+    Method {
+        owner: DexString<'a>,
+        name: DexString<'a>,
+        prototype: Prototype<'i, 'a>,
+    },
+    Field {
+        owner: DexString<'a>,
+        name: DexString<'a>,
+        field_type: DexString<'a>,
+    },
+    Proto(Prototype<'i, 'a>),
+    Unsupported,
+}
+
+impl std::fmt::Debug for ReferenceFacts<'_, '_> {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(match self {
+            Self::String(_) => "ReferenceFacts::String",
+            Self::Type(_) => "ReferenceFacts::Type",
+            Self::Method { .. } => "ReferenceFacts::Method",
+            Self::Field { .. } => "ReferenceFacts::Field",
+            Self::Proto(_) => "ReferenceFacts::Proto",
+            Self::Unsupported => "ReferenceFacts::Unsupported",
+        })
+    }
+}
+
+impl<'a> ProgramIndex<'a> {
+    /// Resolves one original operand reference to displayable facts. This is a
+    /// read-only table query; it starts no analysis and returns `Unsupported` for
+    /// reference families outside the xref targets.
+    pub fn reference_facts(
+        &self,
+        reference: crate::raw::OperandReference,
+        control: &mut RunContext<'_>,
+    ) -> Result<ReferenceFacts<'_, 'a>, InputError> {
+        use crate::raw::OperandReference;
+        Ok(match reference {
+            OperandReference::String(id) => ReferenceFacts::String(self.string(id, control)?),
+            OperandReference::Type(id) => {
+                ReferenceFacts::Type(self.type_descriptor(id, control)?.0)
+            }
+            OperandReference::Method(id) => {
+                let method = self.method_reference(id, control)?;
+                ReferenceFacts::Method {
+                    owner: method.owner,
+                    name: method.declaration.name,
+                    prototype: method.declaration.prototype,
+                }
+            }
+            OperandReference::Field(id) => {
+                let field = self.field_reference(id, control)?;
+                ReferenceFacts::Field {
+                    owner: field.owner,
+                    name: field.declaration.name,
+                    field_type: field.declaration.field_type,
+                }
+            }
+            OperandReference::Proto(id) => ReferenceFacts::Proto(self.prototype(id, control)?),
+            OperandReference::CallSite(_) | OperandReference::MethodHandle(_) => {
+                ReferenceFacts::Unsupported
+            }
+        })
+    }
+}
+
 pub(crate) struct ClassContext<'a> {
     pub superclass: Result<Option<DexString<'a>>, InputError>,
     pub interfaces: Result<&'a [u8], InputError>,
@@ -905,6 +984,31 @@ pub struct MethodEntry<'i, 'a> {
 }
 
 impl<'i, 'a> ClassView<'i, 'a> {
+    /// Read-only original type relations of this definition: the declared
+    /// superclass and the interface list in their original order. It describes
+    /// direct edges only and performs no closure or hierarchy analysis.
+    pub fn hierarchy(
+        &self,
+        control: &mut RunContext<'_>,
+    ) -> Result<ClassHierarchy<'a>, InputError> {
+        let context = self.index.class_context(self.class_def_idx, control)?;
+        let superclass = context.superclass?;
+        let mut interfaces = Vec::new();
+        for word in context.interfaces?.as_chunks::<2>().0 {
+            let id = TypeId(u32::from(u16::from_le_bytes(*word)));
+            interfaces
+                .try_reserve(1)
+                .map_err(|_| InputError::Allocation {
+                    offset_byte: self.index.header.class_defs.offset_byte,
+                })?;
+            interfaces.push(self.index.type_descriptor(id, control)?.0);
+        }
+        Ok(ClassHierarchy {
+            superclass,
+            interfaces,
+        })
+    }
+
     /// Visits original field definitions only, in class-data order. External
     /// ``field_ids`` references are not definitions. A boundary error returns
     /// after the delivered prefix; callers retain that prefix.

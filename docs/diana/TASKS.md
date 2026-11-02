@@ -2678,7 +2678,10 @@ all-platform file database, rewriting the ZIP codec for the snapshot.
 read-only P1 facts (`DexString::units`, `Prototype::visit_parameters`,
 `ClassView::visit_fields`, `string_ids_len`) and streams `entries`/`classes`/
 `methods`/`fields`/`strings` rows in completion order with explicit bounds,
-cancellation and original identity. `xref` and `manifest`/CLI columns remain.
+cancellation and original identity. The [xref batch](batches/h03-xref.md) adds
+instruction-level `string/type/method/field` sites with a `use` mnemonic column and
+the direct `--extends`/`--implements`/`--subinterface`/`--kind` filters on
+`classes`. `manifest` and the CLI layer remain.
 
 **Dependencies**: H02. **Scope**: the existing non-decompilation CLI capability.
 

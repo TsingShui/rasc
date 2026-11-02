@@ -465,6 +465,7 @@ mod h03 {
             kind,
             filter: None,
             class: None,
+            class_filter: diana::analysis::dex::ClassFilter::default(),
             limits: QueryLimits::default(),
             jobs,
         }
@@ -746,6 +747,248 @@ mod h03 {
             distinct.len(),
             rows.len(),
             "a batched query duplicated a row"
+        );
+    }
+}
+
+mod h03_xref {
+    use std::sync::atomic::AtomicBool;
+
+    use diana::analysis::dex::ClassFilter;
+    use diana::analysis::input::{InputLimits, InputOptions};
+    use diana::analysis::query::{Query, QueryKind, QueryLimits, QueryPlan, Row};
+    use diana::analysis::request::RequestScope;
+    use diana::analysis::xref::{Matched, Target, Xref, XrefPlan, XrefRow};
+
+    use super::support::TempDir;
+
+    const HIERARCHY_DEX: &[u8] =
+        include_bytes!("../../../crates/diana-decomp/tests/fixtures/hierarchy/hierarchy.dex");
+    const FIELD_DEX: &[u8] =
+        include_bytes!("../../../crates/diana-decomp/tests/fixtures/annotations/field.dex");
+
+    fn options() -> InputOptions {
+        InputOptions {
+            limits: InputLimits::default(),
+            allowed_root: None,
+        }
+    }
+
+    fn descriptor(text: &str) -> Vec<u16> {
+        diana::analysis::dex::class_descriptor(text)
+    }
+
+    fn text(units: &[u16]) -> String {
+        String::from_utf16(units).unwrap()
+    }
+
+    fn xref(scope: &RequestScope, plan: XrefPlan) -> Vec<XrefRow> {
+        let xref = Xref::new(scope, plan).unwrap();
+        let cancel = AtomicBool::new(false);
+        let mut rows = Vec::new();
+        xref.run(&cancel, &mut |row| {
+            rows.push(row);
+            Ok(())
+        })
+        .unwrap();
+        rows
+    }
+
+    fn target(kind: &str) -> Target {
+        match kind {
+            "type" => Target::Type(descriptor("fixtures.Repo")),
+            "method" => Target::Method {
+                owner: descriptor("fixtures.Repo"),
+                name: "save".encode_utf16().collect(),
+                prototype: "()V".encode_utf16().collect(),
+            },
+            other => panic!("unknown target kind {other}"),
+        }
+    }
+
+    #[test]
+    fn h03_xref_reports_every_code_site_with_its_original_instruction() {
+        let dir = TempDir::new("h03-xref");
+        let path = dir.file("hierarchy.dex", HIERARCHY_DEX);
+        let scope = RequestScope::open(&path, &options()).unwrap();
+        let rows = xref(
+            &scope,
+            XrefPlan {
+                target: target("type"),
+                class: None,
+                limits: QueryLimits::default(),
+                jobs: 1,
+            },
+        );
+        let sites: Vec<(String, u32, String)> = rows
+            .iter()
+            .map(|row| {
+                assert_eq!(text(&row.method_name), "sites");
+                assert_eq!(text(&row.method_prototype), "(Ljava/lang/Object;)V");
+                assert_eq!(row.matched, Matched::Type(descriptor("fixtures.Repo")));
+                (row.use_.to_owned(), row.code_unit, text(&row.method_name))
+            })
+            .collect();
+        let mut uses: Vec<String> = sites.iter().map(|site| site.0.clone()).collect();
+        uses.sort();
+        assert_eq!(uses, ["check-cast", "const-class", "instance-of"]);
+        let mut offsets: Vec<u32> = sites.iter().map(|site| site.1).collect();
+        offsets.sort_unstable();
+        offsets.dedup();
+        assert_eq!(offsets.len(), sites.len(), "two sites share one offset");
+        assert!(rows.iter().all(|row| row.class_def.0 == 4));
+
+        let rows = xref(
+            &scope,
+            XrefPlan {
+                target: target("method"),
+                class: None,
+                limits: QueryLimits::default(),
+                jobs: 1,
+            },
+        );
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].use_, "invoke-interface");
+        assert_eq!(
+            rows[0].matched,
+            Matched::Method {
+                owner: descriptor("fixtures.Repo"),
+                name: "save".encode_utf16().collect(),
+                prototype: "()V".encode_utf16().collect(),
+            }
+        );
+
+        let field_path = dir.file("field.dex", FIELD_DEX);
+        let field_scope = RequestScope::open(&field_path, &options()).unwrap();
+        let rows = xref(
+            &field_scope,
+            XrefPlan {
+                target: Target::Field {
+                    owner: descriptor("fixtures.Field"),
+                    name: "n".encode_utf16().collect(),
+                    field_type: "I".encode_utf16().collect(),
+                },
+                class: None,
+                limits: QueryLimits::default(),
+                jobs: 1,
+            },
+        );
+        assert_eq!(rows.len(), 1, "one field read site");
+        assert!(rows[0].use_.starts_with("iget"), "{}", rows[0].use_);
+        assert_eq!(text(&rows[0].method_name), "read");
+    }
+
+    #[test]
+    fn h03_xref_class_filter_excludes_other_definitions_and_keeps_empty_results() {
+        let dir = TempDir::new("h03-xref-filter");
+        let path = dir.file("hierarchy.dex", HIERARCHY_DEX);
+        let scope = RequestScope::open(&path, &options()).unwrap();
+        let plan = |class: Option<Vec<u16>>| XrefPlan {
+            target: Target::Type(descriptor("fixtures.Repo")),
+            class,
+            limits: QueryLimits::default(),
+            jobs: 2,
+        };
+        assert_eq!(
+            xref(&scope, plan(Some(descriptor("fixtures.Use")))).len(),
+            3
+        );
+        assert!(xref(&scope, plan(Some(descriptor("fixtures.MemoryRepo")))).is_empty());
+        assert!(
+            xref(
+                &scope,
+                XrefPlan {
+                    target: Target::Type(descriptor("fixtures.Absent")),
+                    class: None,
+                    limits: QueryLimits::default(),
+                    jobs: 1,
+                }
+            )
+            .is_empty()
+        );
+    }
+
+    #[test]
+    fn h03_classes_hierarchy_filters_report_direct_edges_only() {
+        let dir = TempDir::new("h03-hierarchy");
+        let path = dir.file("hierarchy.dex", HIERARCHY_DEX);
+        let scope = RequestScope::open(&path, &options()).unwrap();
+        let classes = |relation: ClassFilter| {
+            let query = Query::new(
+                &scope,
+                QueryPlan {
+                    kind: QueryKind::Classes,
+                    filter: None,
+                    class: None,
+                    class_filter: relation,
+                    limits: QueryLimits::default(),
+                    jobs: 1,
+                },
+            )
+            .unwrap();
+            let cancel = AtomicBool::new(false);
+            let mut rows = Vec::new();
+            query
+                .run(&cancel, &mut |row| {
+                    rows.push(row);
+                    Ok(())
+                })
+                .unwrap();
+            let mut descriptors: Vec<String> = rows
+                .iter()
+                .map(|row| match row {
+                    Row::Class(row) => text(&row.descriptor),
+                    _ => panic!("classes returned a foreign row"),
+                })
+                .collect();
+            descriptors.sort();
+            descriptors
+        };
+
+        assert_eq!(
+            classes(ClassFilter {
+                extends: Some(descriptor("fixtures.MemoryRepo")),
+                ..ClassFilter::default()
+            }),
+            ["Lfixtures/DiskRepo;"]
+        );
+        assert_eq!(
+            classes(ClassFilter {
+                implements: Some(descriptor("fixtures.Store")),
+                ..ClassFilter::default()
+            }),
+            ["Lfixtures/MemoryRepo;"]
+        );
+        assert_eq!(
+            classes(ClassFilter {
+                subinterface: Some(descriptor("fixtures.Repo")),
+                ..ClassFilter::default()
+            }),
+            ["Lfixtures/Store;"]
+        );
+        // Only direct edges: nobody lists Repo directly except the sub-interface,
+        // so no class implements it transitively.
+        assert!(
+            classes(ClassFilter {
+                implements: Some(descriptor("fixtures.Repo")),
+                ..ClassFilter::default()
+            })
+            .is_empty()
+        );
+        assert_eq!(
+            classes(ClassFilter {
+                kind: Some(diana::analysis::dex::ClassKind::Interface),
+                ..ClassFilter::default()
+            }),
+            ["Lfixtures/Repo;", "Lfixtures/Store;"]
+        );
+        assert_eq!(
+            classes(ClassFilter {
+                kind: Some(diana::analysis::dex::ClassKind::Class),
+                implements: Some(descriptor("fixtures.Store")),
+                ..ClassFilter::default()
+            }),
+            ["Lfixtures/MemoryRepo;"]
         );
     }
 }

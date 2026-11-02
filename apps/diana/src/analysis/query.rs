@@ -1,6 +1,4 @@
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{Receiver, SyncSender, sync_channel};
-use std::thread;
 
 use diana_decomp::{ControlError, FailureKind, Limits, RequestError, RunContext};
 
@@ -75,6 +73,9 @@ pub enum QueryError {
     /// A checked DEX read failure; its own kind survives unchanged.
     #[error(transparent)]
     Engine(#[from] diana_decomp::input::InputError),
+    /// A checked method-read failure; its own kind survives unchanged.
+    #[error(transparent)]
+    Method(#[from] diana_decomp::input::MethodError),
     #[error(transparent)]
     Request(#[from] RequestError),
     #[error("{limit} exceeded: requested {requested}, maximum {maximum}")]
@@ -98,6 +99,7 @@ impl QueryError {
         match self {
             Self::Input(error) => error.kind(),
             Self::Engine(error) => error.kind(),
+            Self::Method(error) => error.kind(),
             Self::Request(error) => error.kind(),
             Self::Budget { .. } => FailureKind::BudgetExceeded,
             Self::Cancelled => FailureKind::Cancelled,
@@ -123,6 +125,8 @@ pub struct QueryPlan {
     pub filter: Option<Vec<u16>>,
     /// Exact class descriptor restricting methods/fields to one definition.
     pub class: Option<Vec<u16>>,
+    /// Direct hierarchy relations restricting `classes`.
+    pub class_filter: super::dex::ClassFilter,
     pub limits: QueryLimits,
     pub jobs: usize,
 }
@@ -134,6 +138,7 @@ pub struct Query<'a> {
     kind: QueryKind,
     filter: Option<Vec<u16>>,
     class: Option<Vec<u16>>,
+    class_filter: super::dex::ClassFilter,
     limits: QueryLimits,
     jobs: usize,
     entries: Vec<EntryRecord>,
@@ -167,6 +172,7 @@ impl<'a> Query<'a> {
             kind: plan.kind,
             filter: plan.filter,
             class: plan.class,
+            class_filter: plan.class_filter,
             limits: plan.limits,
             jobs: plan.jobs,
             entries,
@@ -189,7 +195,6 @@ impl<'a> Query<'a> {
         if cancel.load(Ordering::Relaxed) {
             return Err(QueryError::Cancelled);
         }
-        let mut delivered = Counter::default();
         if self.kind == QueryKind::Entries {
             if self.images.is_empty() {
                 return Ok(());
@@ -197,7 +202,9 @@ impl<'a> Query<'a> {
             if self.entries.is_empty() {
                 return Err(QueryError::NotArchive);
             }
+            let mut delivered_rows = 0u64;
             for entry in &self.entries {
+                delivered_rows = delivered_rows.saturating_add(1);
                 cancel_check(cancel)?;
                 let row = EntryRow {
                     image: ImageIndex(0),
@@ -212,37 +219,61 @@ impl<'a> Query<'a> {
                 {
                     continue;
                 }
-                delivered.push(1, self.limits)?;
+                if let Some(maximum) = self.limits.max_rows
+                    && delivered_rows > maximum
+                {
+                    return Err(QueryError::Budget {
+                        limit: QueryLimit::Rows,
+                        requested: delivered_rows,
+                        maximum,
+                    });
+                }
                 sink(Row::Entry(row))?;
             }
             return Ok(());
         }
-        let workers = self.jobs.min(self.roots.len().max(1));
-        let (sender, receiver) = sync_channel::<Message>(workers);
-        let mut failure = None;
-        thread::scope(|scope| {
-            for worker in 0..workers {
-                let sender = sender.clone();
-                let roots = &self.roots;
-                let plan = (self.kind, &self.filter, &self.class, self.limits);
-                scope.spawn(move || {
-                    worker_loop(worker, workers, roots, plan, sender, cancel);
-                });
-            }
-            drop(sender);
-            consume(
-                receiver,
-                cancel,
-                self.limits,
-                &mut delivered,
-                sink,
-                &mut failure,
-            );
-        });
-        match failure {
-            Some(error) => Err(error),
-            None => Ok(()),
-        }
+        let kind = self.kind;
+        super::runner::run(
+            self.roots.len(),
+            self.jobs,
+            cancel,
+            self.limits,
+            |ordinal, cancel, emit| {
+                let root = &self.roots[ordinal];
+                let cancelled = || cancel.load(Ordering::Relaxed);
+                let mut control = RunContext::new(Limits::default(), &cancelled);
+                let image = ImageIndex(ordinal);
+                let filter = self.filter.as_deref();
+                let class = self.class.as_deref();
+                match kind {
+                    QueryKind::Entries => Ok(()),
+                    QueryKind::Classes => match dex::open(root.bytes(), &mut control) {
+                        Ok(index) => dex::classes(
+                            &index,
+                            image,
+                            filter,
+                            &self.class_filter,
+                            &mut control,
+                            emit,
+                        ),
+                        Err(error) => Err(error),
+                    },
+                    QueryKind::Methods => match dex::open(root.bytes(), &mut control) {
+                        Ok(index) => dex::methods(&index, image, class, filter, &mut control, emit),
+                        Err(error) => Err(error),
+                    },
+                    QueryKind::Fields => match dex::open(root.bytes(), &mut control) {
+                        Ok(index) => dex::fields(&index, image, class, filter, &mut control, emit),
+                        Err(error) => Err(error),
+                    },
+                    QueryKind::Strings => match dex::open(root.bytes(), &mut control) {
+                        Ok(index) => dex::strings(&index, image, filter, &mut control, emit),
+                        Err(error) => Err(error),
+                    },
+                }
+            },
+            sink,
+        )
     }
 }
 
@@ -252,176 +283,4 @@ fn cancel_check(cancel: &AtomicBool) -> Result<(), QueryError> {
     } else {
         Ok(())
     }
-}
-
-#[derive(Default)]
-struct Counter {
-    rows: u64,
-}
-
-impl Counter {
-    fn push(&mut self, count: u64, limits: QueryLimits) -> Result<(), QueryError> {
-        self.rows = self.rows.checked_add(count).ok_or(QueryError::WorkerLost)?;
-        if let Some(maximum) = limits.max_rows
-            && self.rows > maximum
-        {
-            return Err(QueryError::Budget {
-                limit: QueryLimit::Rows,
-                requested: self.rows,
-                maximum,
-            });
-        }
-        Ok(())
-    }
-}
-
-enum Message {
-    Batch(Vec<Row>),
-    Failed(QueryError),
-}
-
-fn worker_loop(
-    worker: usize,
-    workers: usize,
-    roots: &[DexRoot<'_>],
-    plan: (QueryKind, &Option<Vec<u16>>, &Option<Vec<u16>>, QueryLimits),
-    sender: SyncSender<Message>,
-    cancel: &AtomicBool,
-) {
-    let (kind, filter, class, limits) = plan;
-    let batch_rows = limits.max_batch_rows.unwrap_or(1).max(1);
-    for (ordinal, root) in roots.iter().enumerate() {
-        if ordinal % workers != worker {
-            continue;
-        }
-        let mut buffer = Batch {
-            rows: Vec::new(),
-            sender: &sender,
-            cancel,
-            batch_rows,
-        };
-        let cancel_read = || cancel.load(Ordering::Relaxed);
-        let mut control = RunContext::new(Limits::default(), &cancel_read);
-        let filter = filter.as_deref();
-        let class = class.as_deref();
-        let result = match kind {
-            QueryKind::Entries => Ok(()),
-            QueryKind::Classes => match dex::open(root.bytes(), &mut control) {
-                Ok(index) => {
-                    let mut emit = |row: dex::ClassRow| buffer.push(Row::Class(row));
-                    dex::classes(&index, ImageIndex(ordinal), filter, &mut control, &mut emit)
-                }
-                Err(error) => Err(error),
-            },
-            QueryKind::Methods => match dex::open(root.bytes(), &mut control) {
-                Ok(index) => {
-                    let mut emit = |row: dex::MethodRow| buffer.push(Row::Method(row));
-                    dex::methods(
-                        &index,
-                        ImageIndex(ordinal),
-                        class,
-                        filter,
-                        &mut control,
-                        &mut emit,
-                    )
-                }
-                Err(error) => Err(error),
-            },
-            QueryKind::Fields => match dex::open(root.bytes(), &mut control) {
-                Ok(index) => {
-                    let mut emit = |row: dex::FieldRow| buffer.push(Row::Field(row));
-                    dex::fields(
-                        &index,
-                        ImageIndex(ordinal),
-                        class,
-                        filter,
-                        &mut control,
-                        &mut emit,
-                    )
-                }
-                Err(error) => Err(error),
-            },
-            QueryKind::Strings => match dex::open(root.bytes(), &mut control) {
-                Ok(index) => {
-                    let mut emit = |row: dex::StringRow| buffer.push(Row::String(row));
-                    dex::strings(&index, ImageIndex(ordinal), filter, &mut control, &mut emit)
-                }
-                Err(error) => Err(error),
-            },
-        };
-        let result = match result {
-            Ok(()) => buffer.flush(),
-            Err(error) => Err(error),
-        };
-        if let Err(error) = result {
-            let _ = sender.send(Message::Failed(error));
-            return;
-        }
-    }
-}
-
-/// Row buffer that keeps the pending batch bounded by the explicit batch size.
-struct Batch<'a> {
-    rows: Vec<Row>,
-    sender: &'a SyncSender<Message>,
-    cancel: &'a AtomicBool,
-    batch_rows: u64,
-}
-
-impl Batch<'_> {
-    fn push(&mut self, row: Row) -> Result<(), QueryError> {
-        self.rows.push(row);
-        if u64::try_from(self.rows.len()).unwrap_or(u64::MAX) >= self.batch_rows {
-            self.flush()?;
-        }
-        Ok(())
-    }
-
-    fn flush(&mut self) -> Result<(), QueryError> {
-        if self.rows.is_empty() {
-            return Ok(());
-        }
-        cancel_check(self.cancel)?;
-        let rows = std::mem::take(&mut self.rows);
-        self.sender
-            .send(Message::Batch(rows))
-            .map_err(|_| QueryError::WorkerLost)
-    }
-}
-
-fn consume(
-    receiver: Receiver<Message>,
-    cancel: &AtomicBool,
-    limits: QueryLimits,
-    delivered: &mut Counter,
-    sink: &mut impl FnMut(Row) -> Result<(), QueryError>,
-    failure: &mut Option<QueryError>,
-) {
-    loop {
-        if let Err(error) = cancel_check(cancel) {
-            *failure = Some(error);
-            break;
-        }
-        match receiver.recv() {
-            Ok(Message::Batch(rows)) => {
-                let count = u64::try_from(rows.len()).unwrap_or(u64::MAX);
-                if let Err(error) = delivered.push(count, limits) {
-                    *failure = Some(error);
-                    break;
-                }
-                for row in rows {
-                    if let Err(error) = sink(row) {
-                        *failure = Some(error);
-                        return;
-                    }
-                }
-            }
-            Ok(Message::Failed(error)) => {
-                *failure = Some(error);
-                break;
-            }
-            Err(_) => break,
-        }
-    }
-    cancel.store(true, Ordering::Relaxed);
 }

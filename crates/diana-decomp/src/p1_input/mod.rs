@@ -29,8 +29,8 @@ mod structure;
 pub(crate) mod values;
 
 pub use catalog::{
-    ClassView, FieldDeclaration, FieldEntry, FieldStorage, MethodDeclaration, MethodEntry,
-    ProgramIndex, Prototype,
+    ClassHierarchy, ClassView, FieldDeclaration, FieldEntry, FieldStorage, MethodDeclaration,
+    MethodEntry, ProgramIndex, Prototype, ReferenceFacts,
 };
 pub use code::{MethodBody, RawMethodView};
 pub use container::DexContainer;

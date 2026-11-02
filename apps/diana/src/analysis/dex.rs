@@ -1,7 +1,7 @@
-use diana_decomp::input::{FieldStorage, ProgramIndex};
+use diana_decomp::input::{ClassView, FieldStorage, ProgramIndex};
 use diana_decomp::{ClassDefId, FieldId, MethodId, RunContext, StringId};
 
-use super::query::QueryError;
+use super::query::{QueryError, Row};
 
 /// App-local order of the root images in one request. It is display metadata and
 /// never decides original identity.
@@ -49,6 +49,84 @@ pub struct StringRow {
     pub units: Vec<u16>,
 }
 
+/// Definition kind restriction for `classes`.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ClassKind {
+    Class,
+    Interface,
+}
+
+/// Direct hierarchy relations restricting `classes`. Every configured relation
+/// must hold; none of them performs a transitive closure.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct ClassFilter {
+    /// The definition's own superclass is this descriptor.
+    pub extends: Option<Vec<u16>>,
+    /// The definition is a class and lists this interface directly.
+    pub implements: Option<Vec<u16>>,
+    /// The definition is an interface and lists this interface directly.
+    pub subinterface: Option<Vec<u16>>,
+    pub kind: Option<ClassKind>,
+}
+
+impl ClassFilter {
+    fn is_empty(&self) -> bool {
+        self.extends.is_none()
+            && self.implements.is_none()
+            && self.subinterface.is_none()
+            && self.kind.is_none()
+    }
+
+    fn admits(
+        &self,
+        class: &ClassView<'_, '_>,
+        control: &mut RunContext<'_>,
+    ) -> Result<bool, diana_decomp::input::InputError> {
+        let interface = class.access_flags & 0x200 != 0;
+        if let Some(kind) = self.kind
+            && interface != (kind == ClassKind::Interface)
+        {
+            return Ok(false);
+        }
+        if self.is_empty() {
+            return Ok(true);
+        }
+        let hierarchy = class.hierarchy(control)?;
+        if let Some(target) = &self.extends
+            && !matches!(&hierarchy.superclass, Some(parent) if parent.matches(target, control)?)
+        {
+            return Ok(false);
+        }
+        if let Some(target) = &self.implements {
+            if interface {
+                return Ok(false);
+            }
+            let mut listed = false;
+            for name in &hierarchy.interfaces {
+                control.checkpoint()?;
+                listed |= name.matches(target, control)?;
+            }
+            if !listed {
+                return Ok(false);
+            }
+        }
+        if let Some(target) = &self.subinterface {
+            if !interface {
+                return Ok(false);
+            }
+            let mut listed = false;
+            for name in &hierarchy.interfaces {
+                control.checkpoint()?;
+                listed |= name.matches(target, control)?;
+            }
+            if !listed {
+                return Ok(false);
+            }
+        }
+        Ok(true)
+    }
+}
+
 /// Opens one root image for read-only table queries. No method body or analysis
 /// product is built here.
 pub(super) fn open<'a>(
@@ -62,12 +140,13 @@ pub(super) fn classes(
     index: &ProgramIndex<'_>,
     image: ImageIndex,
     filter: Option<&[u16]>,
+    relation: &ClassFilter,
     control: &mut RunContext<'_>,
-    emit: &mut impl FnMut(ClassRow) -> Result<(), QueryError>,
+    emit: &mut dyn FnMut(Row) -> Result<(), QueryError>,
 ) -> Result<(), QueryError> {
     let mut failure: Option<QueryError> = None;
     let result = {
-        let mut forward = |row: ClassRow| -> Result<(), diana_decomp::input::InputError> {
+        let mut forward = |row: Row| -> Result<(), diana_decomp::input::InputError> {
             if failure.is_none()
                 && let Err(error) = emit(row)
             {
@@ -83,12 +162,15 @@ pub(super) fn classes(
             {
                 return Ok(());
             }
-            forward(ClassRow {
+            if !relation.admits(&class, control)? {
+                return Ok(());
+            }
+            forward(Row::Class(ClassRow {
                 image,
                 class_def,
                 descriptor,
                 access_flags: class.access_flags,
-            })?;
+            }))?;
             Ok(())
         })
     };
@@ -104,11 +186,11 @@ pub(super) fn methods(
     class_filter: Option<&[u16]>,
     filter: Option<&[u16]>,
     control: &mut RunContext<'_>,
-    emit: &mut impl FnMut(MethodRow) -> Result<(), QueryError>,
+    emit: &mut dyn FnMut(Row) -> Result<(), QueryError>,
 ) -> Result<(), QueryError> {
     let mut failure: Option<QueryError> = None;
     let result = {
-        let mut forward = |row: MethodRow| -> Result<(), diana_decomp::input::InputError> {
+        let mut forward = |row: Row| -> Result<(), diana_decomp::input::InputError> {
             if failure.is_none()
                 && let Err(error) = emit(row)
             {
@@ -141,14 +223,14 @@ pub(super) fn methods(
                     })?;
                 prototype.push(u16::from(b')'));
                 prototype.extend(declaration.prototype.return_type.units(control)?);
-                forward(MethodRow {
+                forward(Row::Method(MethodRow {
                     image,
                     class_def,
                     method: method.method_idx,
                     name,
                     prototype,
                     access_flags: method.access_flags,
-                })
+                }))
             })
         })
     };
@@ -164,11 +246,11 @@ pub(super) fn fields(
     class_filter: Option<&[u16]>,
     filter: Option<&[u16]>,
     control: &mut RunContext<'_>,
-    emit: &mut impl FnMut(FieldRow) -> Result<(), QueryError>,
+    emit: &mut dyn FnMut(Row) -> Result<(), QueryError>,
 ) -> Result<(), QueryError> {
     let mut failure: Option<QueryError> = None;
     let result = {
-        let mut forward = |row: FieldRow| -> Result<(), diana_decomp::input::InputError> {
+        let mut forward = |row: Row| -> Result<(), diana_decomp::input::InputError> {
             if failure.is_none()
                 && let Err(error) = emit(row)
             {
@@ -191,7 +273,7 @@ pub(super) fn fields(
                 {
                     return Ok(());
                 }
-                forward(FieldRow {
+                forward(Row::Field(FieldRow {
                     image,
                     class_def,
                     field: field.field_idx,
@@ -199,7 +281,7 @@ pub(super) fn fields(
                     field_type: declaration.field_type.units(control)?,
                     access_flags: field.access_flags,
                     storage: field.storage,
-                })
+                }))
             })
         })
     };
@@ -214,8 +296,17 @@ pub(super) fn strings(
     image: ImageIndex,
     filter: Option<&[u16]>,
     control: &mut RunContext<'_>,
-    emit: &mut impl FnMut(StringRow) -> Result<(), QueryError>,
+    emit: &mut dyn FnMut(Row) -> Result<(), QueryError>,
 ) -> Result<(), QueryError> {
+    let mut failure: Option<QueryError> = None;
+    let mut forward = |row: Row| -> Result<(), QueryError> {
+        if failure.is_none()
+            && let Err(error) = emit(row)
+        {
+            failure = Some(error);
+        }
+        Ok(())
+    };
     for ordinal in 0..index.string_ids_len() {
         control.checkpoint()?;
         let string = StringId(ordinal);
@@ -225,13 +316,16 @@ pub(super) fn strings(
         {
             continue;
         }
-        emit(StringRow {
+        forward(Row::String(StringRow {
             image,
             string,
             units,
-        })?;
+        }))?;
     }
-    Ok(())
+    match failure {
+        Some(error) => Err(error),
+        None => Ok(()),
+    }
 }
 
 /// Converts a class name in dotted form to an original descriptor. A value that is
