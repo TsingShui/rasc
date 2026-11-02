@@ -165,11 +165,29 @@ pub fn publish(
         let _ = std::fs::remove_file(&temporary_path);
         return Err(ExtractError::Io(error));
     }
-    if let Err(error) = std::fs::rename(&temporary_path, target) {
-        let _ = std::fs::remove_file(&temporary_path);
-        return Err(ExtractError::Io(error));
+    if force {
+        if let Err(error) = std::fs::rename(&temporary_path, target) {
+            let _ = std::fs::remove_file(&temporary_path);
+            return Err(ExtractError::Io(error));
+        }
+        return Ok(());
     }
-    Ok(())
+    // Publication without `force` must not have a check-then-rename race: linking
+    // the temporary name to the target fails atomically when it already exists.
+    match std::fs::hard_link(&temporary_path, target) {
+        Ok(()) => {
+            let _ = std::fs::remove_file(&temporary_path);
+            Ok(())
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+            let _ = std::fs::remove_file(&temporary_path);
+            Err(ExtractError::TargetExists)
+        }
+        Err(error) => {
+            let _ = std::fs::remove_file(&temporary_path);
+            Err(ExtractError::Io(error))
+        }
+    }
 }
 
 #[cfg(unix)]

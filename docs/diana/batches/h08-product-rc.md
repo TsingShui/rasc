@@ -34,7 +34,11 @@ rewritten, and never an engine-generated fragment.
 177 invocations, 181 seams. Result: **181/181 seams and 86/86 whole cases
 accepted**, with no failing seam and no member regression.
 
-The last seams to land were the 17 `extract-entry` invocations. The adapter now
+The last seams to land were the 17 `extract-entry` invocations. During regression a
+race in no-`force` publication was found: a check-then-rename allowed both of two
+concurrent publishers to succeed. Publication now links the temporary name to the
+target, which fails atomically when the target exists; five repeated D070 runs kept
+exactly one winner. The adapter now
 builds the D068–D070 archive, target and observer fixtures, drives
 `analysis::extract` through a development caller, and records the observations the
 comparator asserts: exact payload bytes for stored/deflated/duplicate records, the
