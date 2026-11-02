@@ -1,14 +1,16 @@
 name: Diana
 
-# Active workspace contains only Diana; the archived reference is not built or tested.
-# Build/lint isolation only: the engine and independently certified E2E suite
-# do not exist yet. This workflow neither runs empty tests as acceptance nor
-# prepares versions, uploads artifacts, tags or publishes releases.
+# Diana-only gates: format, lint, release build and the core Rust test suite.
+# The prepared APK/DEX E2E assets stay untracked, so the E2E runners remain an
+# operator step. Windows keeps build/lint only; the core suite has no Windows
+# evidence yet. No version preparation, artifact upload, tag or release.
+
 on:
   push:
     paths:
       - "apps/diana/**"
       - "crates/diana-decomp/**"
+      - "tests/**"
       - "Cargo.toml"
       - "Cargo.lock"
       - ".github/workflows/diana.yml"
@@ -16,6 +18,7 @@ on:
     paths:
       - "apps/diana/**"
       - "crates/diana-decomp/**"
+      - "tests/**"
       - "Cargo.toml"
       - "Cargo.lock"
       - ".github/workflows/diana.yml"
@@ -28,8 +31,8 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  scaffold:
-    name: Build and lint (${{ matrix.runner }})
+  gates:
+    name: Gates (${{ matrix.runner }})
     strategy:
       fail-fast: false
       matrix:
@@ -45,7 +48,7 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
-          key: diana-scaffold-${{ matrix.runner }}
+          key: diana-gates-${{ matrix.runner }}
 
       - name: Format
         run: cargo fmt --all -- --check
@@ -55,3 +58,11 @@ jobs:
 
       - name: Build
         run: cargo build --workspace --locked --release
+
+      - name: Install nextest
+        if: runner.os != 'Windows'
+        uses: taiki-e/install-action@nextest
+
+      - name: Tests
+        if: runner.os != 'Windows'
+        run: cargo nextest run --workspace --all-features --locked
