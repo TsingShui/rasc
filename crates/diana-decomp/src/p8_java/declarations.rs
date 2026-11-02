@@ -355,7 +355,12 @@ pub(super) fn identifier(
             category,
             G::DecimalNumber | G::NonspacingMark | G::SpacingMark
         );
-        if !start && !(position != 0 && continuation) {
+        let accepted = if position == 0 {
+            start
+        } else {
+            start || continuation
+        };
+        if !accepted {
             return Ok(false);
         }
         ascii.character(scalar, budget)?;
