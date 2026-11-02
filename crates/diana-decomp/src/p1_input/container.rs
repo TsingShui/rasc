@@ -139,6 +139,33 @@ impl<'a> DexContainer<'a> {
         }
     }
 
+    /// Original logical header offsets in physical order.
+    ///
+    /// A 041 container can hold several logical DEX members inside one physical
+    /// entry; an ordinary container yields exactly one offset at zero. The chain
+    /// was validated by `open`, so this only walks the recorded steps and charges
+    /// the request ledger; it allocates the offset list and no member copy.
+    pub fn logical_headers(
+        &self,
+        control: &mut RunContext<'_>,
+    ) -> Result<Vec<ByteOffset>, InputError> {
+        let mut headers = Vec::new();
+        let mut header = ByteOffset(0);
+        loop {
+            control.charge_work(1)?;
+            headers.try_reserve(1).map_err(|_| InputError::Allocation {
+                offset_byte: header,
+            })?;
+            headers.push(header);
+            let next = self.next_header(header, control)?;
+            if next.0 >= self.bytes.len() {
+                break;
+            }
+            header = next;
+        }
+        Ok(headers)
+    }
+
     pub(super) fn header_size(&self) -> ByteLength {
         ByteLength(if self.version == DexVersion::V041 {
             0x78

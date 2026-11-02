@@ -2757,6 +2757,11 @@ rewriting AXML, claiming a speedup after measuring a debug build.
 
 ## H04 — Raw DexImage, 041 and definition-identity adapter
 
+**Progress**: The [image and locator batch](batches/h04-images.md) parses the
+canonical and short selectors, maps roots to engine images including 041 logical
+members, and validates a locator's descriptor/name/proto before use. The engine
+loop for a selected object belongs to H05.
+
 **Dependencies**: H03, T04. **Scope**: the root → internal-engine input
 interface.
 

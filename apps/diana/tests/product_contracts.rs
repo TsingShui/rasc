@@ -1078,3 +1078,259 @@ mod h03_manifest {
         assert!(manifest.xml().contains("package=\"second.pkg\""));
     }
 }
+
+mod h04 {
+    use diana::analysis::images::{
+        ImageSet, resolve_class, resolve_field, resolve_method, resolve_string,
+    };
+    use diana::analysis::input::{InputLimits, InputOptions};
+    use diana::analysis::request::RequestScope;
+    use diana::analysis::selector;
+    use diana::analysis::selector::SelectorError;
+
+    use super::support::{TempDir, stored_entry, zip};
+
+    const POLY: &[u8] =
+        include_bytes!("../../../crates/diana-decomp/tests/fixtures/dynamic/poly.dex");
+    const FIELD: &[u8] =
+        include_bytes!("../../../crates/diana-decomp/tests/fixtures/annotations/field.dex");
+
+    fn options() -> InputOptions {
+        InputOptions {
+            limits: InputLimits::default(),
+            allowed_root: None,
+        }
+    }
+
+    fn control() -> diana_decomp::RunContext<'static> {
+        diana_decomp::RunContext::new(diana_decomp::Limits::default(), &|| false)
+    }
+
+    #[test]
+    fn h04_canonical_locators_validate_identity_and_reject_a_descriptor_mismatch() {
+        let dir = TempDir::new("h04-at");
+        let path = dir.file("poly.dex", POLY);
+        let scope = RequestScope::open(&path, &options()).unwrap();
+        let images = ImageSet::open(&scope).unwrap();
+        assert_eq!(images.images().len(), 1);
+        assert_eq!(images.images()[0].logical, 0);
+        assert_eq!(images.images()[0].header_offset.0, 0);
+        assert!(images.images()[0].entry.is_none());
+
+        let mut control = control();
+        let selector = selector::class("e0:l0:c0::Lfixtures/Poly;").unwrap();
+        let selection = resolve_class(&images, &selector, &mut control).unwrap();
+        assert_eq!(selection.class_def.0, 0);
+        assert_eq!(
+            String::from_utf16(&selection.descriptor).unwrap(),
+            "Lfixtures/Poly;"
+        );
+
+        // Same index, different descriptor: the locator is stale.
+        let wrong = selector::class("e0:l0:c0::Lfixtures/Other;").unwrap();
+        assert!(matches!(
+            resolve_class(&images, &wrong, &mut control),
+            Err(SelectorError::InvalidIndex)
+        ));
+        // Out-of-range class_def index.
+        let out_of_range = selector::class("e0:l0:c9::Lfixtures/Poly;").unwrap();
+        assert!(matches!(
+            resolve_class(&images, &out_of_range, &mut control),
+            Err(SelectorError::InvalidIndex)
+        ));
+        // Wrong physical entry / logical ordinal.
+        assert!(matches!(
+            resolve_class(
+                &images,
+                &selector::class("e9:l0:c0::Lfixtures/Poly;").unwrap(),
+                &mut control
+            ),
+            Err(SelectorError::NotFound)
+        ));
+        assert!(matches!(
+            resolve_class(
+                &images,
+                &selector::class("e0:l1:c0::Lfixtures/Poly;").unwrap(),
+                &mut control
+            ),
+            Err(SelectorError::NotFound)
+        ));
+        // A short dotted name resolves to the same definition.
+        let short = selector::class("fixtures.Poly").unwrap();
+        let resolved = resolve_class(&images, &short, &mut control).unwrap();
+        assert_eq!(resolved.class_def.0, 0);
+        assert_eq!(
+            selector::class("e0:l0:cZ::Lfixtures/Poly;")
+                .unwrap_err()
+                .code(),
+            1
+        );
+    }
+
+    #[test]
+    fn h04_member_locators_check_names_prototypes_and_field_types() {
+        let dir = TempDir::new("h04-members");
+        let poly = dir.file("poly.dex", POLY);
+        let scope = RequestScope::open(&poly, &options()).unwrap();
+        let images = ImageSet::open(&scope).unwrap();
+        let mut control = control();
+        let method = selector::method(
+            "e0:l0:c0:m1::Lfixtures/Poly;->call(Ljava/lang/invoke/MethodHandle;I)I",
+        )
+        .unwrap();
+        let selected = resolve_method(&images, &method, &mut control).unwrap();
+        assert_eq!(selected.method.unwrap().0, 1);
+        assert_eq!(String::from_utf16(&selected.name).unwrap(), "call");
+
+        let wrong_name = selector::method(
+            "e0:l0:c0:m1::Lfixtures/Poly;->other(Ljava/lang/invoke/MethodHandle;I)I",
+        )
+        .unwrap();
+        assert!(matches!(
+            resolve_method(&images, &wrong_name, &mut control),
+            Err(SelectorError::InvalidIndex)
+        ));
+        let wrong_proto = selector::method("e0:l0:c0:m1::Lfixtures/Poly;->call()I").unwrap();
+        assert!(matches!(
+            resolve_method(&images, &wrong_proto, &mut control),
+            Err(SelectorError::InvalidIndex)
+        ));
+
+        let field_path = dir.file("field.dex", FIELD);
+        let field_scope = RequestScope::open(&field_path, &options()).unwrap();
+        let field_images = ImageSet::open(&field_scope).unwrap();
+        let field = selector::field("e0:l0:c0:f0::Lfixtures/Field;->n:I").unwrap();
+        let selected = resolve_field(&field_images, &field, &mut control).unwrap();
+        assert_eq!(String::from_utf16(&selected.name).unwrap(), "n");
+        let wrong_type = selector::field("e0:l0:c0:f0::Lfixtures/Field;->n:J").unwrap();
+        assert!(matches!(
+            resolve_field(&field_images, &wrong_type, &mut control),
+            Err(SelectorError::InvalidIndex)
+        ));
+
+        let string = selector::string("e0:l0:s0").unwrap();
+        let resolved = resolve_string(&field_images, &string, &mut control).unwrap();
+        assert_eq!(resolved.string.0, 0);
+        assert!(!resolved.units.is_empty());
+        let missing = selector::string("e0:l0:s9999").unwrap();
+        assert!(matches!(
+            resolve_string(&field_images, &missing, &mut control),
+            Err(SelectorError::InvalidIndex)
+        ));
+    }
+
+    #[test]
+    fn h04_duplicate_definitions_are_reported_as_ambiguous() {
+        let dir = TempDir::new("h04-ambiguous");
+        let path = dir.file(
+            "two.apk",
+            &zip(&[
+                stored_entry("classes.dex", POLY),
+                stored_entry("classes2.dex", POLY),
+            ]),
+        );
+        let scope = RequestScope::open(&path, &options()).unwrap();
+        let images = ImageSet::open(&scope).unwrap();
+        assert_eq!(images.images().len(), 2);
+        assert_eq!(images.images()[0].label, "classes.dex");
+        assert_eq!(images.images()[1].label, "classes2.dex");
+        let mut control = control();
+        let short = selector::class("fixtures.Poly").unwrap();
+        let error = resolve_class(&images, &short, &mut control).unwrap_err();
+        assert!(matches!(error, SelectorError::Ambiguous));
+        assert_eq!(error.code(), 4);
+        // The canonical at still selects one definition.
+        let exact = selector::class("e1:l0:c0::Lfixtures/Poly;").unwrap();
+        let selected = resolve_class(&images, &exact, &mut control).unwrap();
+        assert_eq!(selected.image.entry.unwrap().0, 1);
+    }
+
+    #[test]
+    fn h04_locator_syntax_and_index_failures_are_distinguished() {
+        for text in ["", "e", "e0", "e0:l", "e0:l0", "e0:l0:"] {
+            let error = selector::class(text).unwrap_err();
+            assert_eq!(error.code(), 2, "{text:?}");
+        }
+        assert_eq!(selector::method("Lfixtures/Poly;").unwrap_err().code(), 2);
+        assert_eq!(
+            selector::method("Lfixtures/Poly;->call")
+                .unwrap_err()
+                .code(),
+            2
+        );
+        assert_eq!(
+            selector::field("Lfixtures/Field;->n").unwrap_err().code(),
+            2
+        );
+        assert_eq!(selector::string("e0:l0:x1").unwrap_err().code(), 2);
+    }
+}
+
+mod h04_native {
+    use std::path::Path;
+
+    use diana::analysis::images::{ImageSet, resolve_class, resolve_method};
+    use diana::analysis::input::{InputLimits, InputOptions};
+    use diana::analysis::request::RequestScope;
+    use diana::analysis::selector;
+
+    use super::support::TempDir;
+
+    fn options() -> InputOptions {
+        InputOptions {
+            limits: InputLimits::default(),
+            allowed_root: None,
+        }
+    }
+
+    fn container() -> Vec<u8> {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../.cache/e2e/prepared/D065/container.dex");
+        std::fs::read(&path)
+            .expect("prepare the certified D065 container with tools/e2e.py before core tests")
+    }
+
+    #[test]
+    fn h04_native_logical_members_keep_their_own_identity() {
+        let dir = TempDir::new("h04-native");
+        let path = dir.file("container.dex", &container());
+        let scope = RequestScope::open(&path, &options()).unwrap();
+        let images = ImageSet::open(&scope).unwrap();
+        assert_eq!(images.images().len(), 2);
+        assert_eq!(images.images()[0].logical, 0);
+        assert_eq!(images.images()[0].header_offset.0, 0);
+        assert_eq!(images.images()[1].logical, 1);
+        assert_eq!(images.images()[1].header_offset.0, 0x78);
+        // Both members are one physical entry.
+        assert!(images.images()[0].entry.is_none());
+        assert!(images.images()[1].entry.is_none());
+
+        let mut control = diana_decomp::RunContext::new(diana_decomp::Limits::default(), &|| false);
+        for logical in ["l0", "l1"] {
+            let text = format!("e0:{logical}:c0::Lfixtures/Case;");
+            let selected =
+                resolve_class(&images, &selector::class(&text).unwrap(), &mut control).unwrap();
+            assert_eq!(selected.class_def.0, 0);
+            assert_eq!(selected.image.logical, if logical == "l0" { 0 } else { 1 });
+            let method = format!("e0:{logical}:c0:m1::Lfixtures/Case;->f()I");
+            let selected =
+                resolve_method(&images, &selector::method(&method).unwrap(), &mut control).unwrap();
+            assert_eq!(selected.method.unwrap().0, 1);
+            assert_eq!(String::from_utf16(&selected.name).unwrap(), "f");
+        }
+        // A member that the container does not have is not found.
+        let missing = selector::class("e0:l2:c0::Lfixtures/Case;").unwrap();
+        assert!(matches!(
+            resolve_class(&images, &missing, &mut control),
+            Err(diana::analysis::selector::SelectorError::NotFound)
+        ));
+        // The same class index in another logical member is a different object.
+        let other = resolve_class(
+            &images,
+            &selector::class("e0:l1:c0::Lfixtures/Case;").unwrap(),
+            &mut control,
+        )
+        .unwrap();
+        assert_eq!(other.image.header_offset.0, 0x78);
+    }
+}
