@@ -3110,7 +3110,10 @@ and a hand-written lenient CRC check without review is forbidden.
 `--entry-index`) plus the required `-o` → a complete decompressed payload file.
 Method 0 leaves the bytes unchanged, method 8 decompresses the original bytes,
 the card MUST NOT normalize the DEX, switch to 041 or generate Java, and stdout
-stays empty.
+stays empty. A binary XML entry is decoded to text XML by default (the same
+bounded reader as `manifest`); `--raw` writes the original payload bytes. CRC and
+size are checked over the original payload before decoding, and a partial decoded
+document follows the manifest warning and `--strict` rules.
 
 **Steps**:
 1. The directory lookup keeps every physical record with the same name and exits 4 on an
@@ -3130,8 +3133,10 @@ stays empty.
    and write, and publish only after complete validation; cancellation, I/O, CRC and budget
    overrun release the temporary file and the reservation. `--force` replaces only a permitted
    ordinary file explicitly, with Windows and Unix semantics accepted separately.
-5. The byte stream passes through no UTF-8 or JSON conversion, there is no binary stdout or
-   success status line, and debug output and errors go only to stderr. Use an independent binary
+5. The default path decodes a binary XML entry through the checked reader and
+   otherwise copies the payload; `--raw` bypasses decoding. No other byte stream passes
+   through UTF-8 or JSON conversion, there is no binary stdout or success status
+   line, and debug output and errors go only to stderr. Use an independent binary
    file output adapter and do not misuse the generic emit for stdout and file at once.
 
 **Invariants / limits**: The output equals the complete decompressed payload of

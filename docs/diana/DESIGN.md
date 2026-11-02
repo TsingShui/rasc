@@ -749,9 +749,20 @@ twice, both slots are separate lines with the same context and `use`.
 ```sh
 diana extract sample.apk 'classes.dex' -o original.dex
 diana extract sample.apk 'classes.dex' --entry-index 4 -o original.dex
+diana extract sample.apk 'res/xml/prefs.xml' -o prefs.xml
+diana extract sample.apk 'res/xml/prefs.xml' -o prefs.axml --raw
 ```
 
 `extract` handles only physical APK/ZIP entries. Original bytes means **the complete decompressed entry payload**: method 0 yields the original payload directly, and method 8 yields the decompressed original deflate stream; it is not the ZIP local header or the compressed stream, and extract MUST NOT modify the DEX header/checksum, MUST NOT slice a 041 logical view and MUST NOT do any Java/smali conversion. The file content MUST be byte-for-byte equal to the decompressed bytes of the original entry.
+
+When the decompressed payload is binary XML (its leading chunk kind is
+`RES_XML_TYPE`), extract decodes it to text XML by default, using the same bounded
+reader as `manifest`; `--raw` selects the original payload bytes instead. The CRC
+and size are validated over the original decompressed payload before any decoding.
+A decoded document keeps the manifest warning rules of §6.7: content-affecting
+defects appear in place as comments and in the warning list, and `--strict` makes
+a partial document exit 1. A non-binary-XML entry is always written byte for byte,
+and a DEX or any other entry MUST NOT be transcoded.
 
 Diana MUST match `<entry-name>` exactly; a duplicate name without `--entry-index` exits 4 and lists the candidate physical indices; when an index is given, Diana MUST check that the name and index agree. Only one entry is extracted, `-o` is required and is a single file path, and Diana MUST NOT provide batch directory unpacking. In this way names such as `../` inside the ZIP cannot become output paths, which avoids ZipSlip.
 
