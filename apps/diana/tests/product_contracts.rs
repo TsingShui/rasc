@@ -1293,7 +1293,8 @@ mod h04_native {
     }
 
     fn container() -> Vec<u8> {
-        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/container.dex");
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../crates/diana-decomp/tests/fixtures/container/container.dex");
         std::fs::read(&path).expect("the certified two-member container fixture is readable")
     }
 

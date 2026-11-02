@@ -5,9 +5,8 @@ use serde_json::{Value, json};
 
 pub(super) fn d065() -> Vec<u8> {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../.cache/e2e/prepared/D065/container.dex");
-    std::fs::read(path)
-        .expect("prepare the certified D065 fixture with tools/e2e.py before core tests")
+        .join("tests/fixtures/container/container.dex");
+    std::fs::read(path).expect("the certified two-member container fixture is readable")
 }
 
 #[test]

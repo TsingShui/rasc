@@ -1,7 +1,7 @@
 /target/
 *.apk
 *.dex
-!/apps/diana/tests/fixtures/container.dex
+!/crates/diana-decomp/tests/fixtures/container/container.dex
 !/crates/diana-decomp/tests/fixtures/static-fields/classes.dex
 !/crates/diana-decomp/tests/fixtures/numeric-fields/classes.dex
 !/crates/diana-decomp/tests/fixtures/numeric-fields/invalid.dex
