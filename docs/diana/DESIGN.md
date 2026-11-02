@@ -775,10 +775,17 @@ Manifest decoding is allowed to deliver a **balanced partial** document. A recor
 that cannot be decoded, a text node that is not rendered, an out-of-pool name, an
 unsupported typed value, a repeated attribute or a damaged tail MUST be reported
 as a warning with its original byte offset, and the reader MUST close the elements
-that are still open, so the emitted text stays well-formed XML. Warnings appear on
-stderr for text and in the `warnings` array of the JSON result; they MUST NOT be
-silently dropped, and a warning-only result exits 0 because the request and its
-display completed. A non-AXML container, an unreadable or encrypted entry, an
+that are still open, so the emitted text stays well-formed XML. A warning that
+removes or replaces original content (skipped text or record, dropped or repeated
+attribute, truncated tail, closed element) MUST also appear as an in-place XML
+comment at that position, because an agent that reads only stdout would otherwise
+receive a shorter document without noticing. A naming substitution that keeps the
+value (a resolved resource id, or a name rewritten into the XML name production)
+is recorded in the warning list but MUST NOT emit a comment per attribute, so the
+text stays proportional to the input. All warnings appear in the `warnings` array
+of the JSON result and on stderr; they MUST NOT be silently dropped, and a
+warning-only result exits 0 because the request and its display completed. Where
+the strict policy is requested, a warning makes the exit non-zero. A non-AXML container, an unreadable or encrypted entry, an
 exceeded explicit budget, cancellation and I/O remain hard failures with a
 non-zero exit; the reader MUST NOT invent records to hide those.
 

@@ -233,6 +233,41 @@ fn utf8_prefix(record: &[u8], at: usize, index: u32) -> Result<(u32, usize), Man
     }
 }
 
+fn describe(kind: &ManifestWarningKind) -> String {
+    match kind {
+        ManifestWarningKind::TruncatedChunk => "chunk truncated; decoding stopped".to_owned(),
+        ManifestWarningKind::UnknownRecord(kind) => {
+            format!("record {kind:#06x} not supported; skipped")
+        }
+        ManifestWarningKind::SkippedText => {
+            "text record skipped (text nodes are not rendered)".to_owned()
+        }
+        ManifestWarningKind::InvalidString(index) => {
+            format!("string {index} outside the pool; empty value used")
+        }
+        ManifestWarningKind::DuplicateAttribute(name) => {
+            format!("attribute {name} repeated; first value kept")
+        }
+        ManifestWarningKind::RenamedName { original, emitted } => {
+            format!("name {original:?} rewritten as {emitted:?}")
+        }
+        ManifestWarningKind::ResolvedAttribute { resource, emitted } => {
+            format!("attribute {resource:#010x} resolved as android:{emitted}")
+        }
+        ManifestWarningKind::IdentifiedAttribute { resource } => {
+            format!("attribute id {resource:#010x} has no known name")
+        }
+        ManifestWarningKind::UnsupportedValue(kind) => {
+            format!("typed value {kind:#04x} unsupported; raw value used")
+        }
+        ManifestWarningKind::InvalidName(name) => {
+            format!("element name {name:?} cannot appear in XML; subtree skipped")
+        }
+        ManifestWarningKind::UnbalancedElement => "unbalanced element closed".to_owned(),
+        ManifestWarningKind::BrokenStringPool => "string pool unreadable".to_owned(),
+    }
+}
+
 struct Budget<'a> {
     limits: ManifestLimits,
     nodes: u64,
@@ -468,6 +503,60 @@ impl Decoder<'_> {
         Ok(())
     }
 
+    /// Writes a warning where it occurred and records it for JSON/stderr.
+    fn comment(&mut self, offset: usize, kind: ManifestWarningKind) -> Result<(), ManifestError> {
+        let depth = self.open.len();
+        let mut text = format!("diana: byte {offset}: {}", describe(&kind));
+        if text.contains("--") {
+            text = text.replace("--", "- -");
+        }
+        self.budget.indent(depth)?;
+        self.budget.write("<!-- ")?;
+        self.budget.write(&text)?;
+        self.budget.write(" -->\n")?;
+        self.warning(offset, kind)
+    }
+
+    /// Inserts buffered element-level warnings before the element start tag.
+    fn insert_comments(
+        &mut self,
+        at: usize,
+        depth: usize,
+        pending: Vec<(usize, ManifestWarningKind)>,
+    ) -> Result<(), ManifestError> {
+        let mut comments = String::new();
+        for (offset, kind) in pending {
+            let mut text = format!("diana: byte {offset}: {}", describe(&kind));
+            if text.contains("--") {
+                text = text.replace("--", "- -");
+            }
+            for _ in 0..depth {
+                comments.push_str("    ");
+            }
+            comments.push_str("<!-- ");
+            comments.push_str(&text);
+            comments.push_str(" -->\n");
+            self.warning(offset, kind)?;
+        }
+        let needed = self
+            .budget
+            .output
+            .len()
+            .checked_add(comments.len())
+            .ok_or(ManifestError::PlatformCapacity)?;
+        if let Some(maximum) = self.budget.limits.max_output_bytes
+            && u64::try_from(needed).map_err(|_| ManifestError::PlatformCapacity)? > maximum
+        {
+            return Err(ManifestError::Budget {
+                limit: ManifestLimit::OutputBytes,
+                requested: u64::try_from(needed).map_err(|_| ManifestError::PlatformCapacity)?,
+                maximum,
+            });
+        }
+        self.budget.output.insert_str(at, &comments);
+        Ok(())
+    }
+
     fn text(&mut self, offset: usize, index: u32) -> Result<String, ManifestError> {
         if let Some(pool) = self.pool.as_ref() {
             match pool.text(index, &mut self.budget) {
@@ -492,7 +581,7 @@ impl Decoder<'_> {
     fn run(&mut self, mut offset: usize, end: usize) -> Result<(), ManifestError> {
         while offset < end {
             if offset + 8 > end {
-                self.warning(offset, ManifestWarningKind::TruncatedChunk)?;
+                self.comment(offset, ManifestWarningKind::TruncatedChunk)?;
                 break;
             }
             let kind = u16_at(self.bytes, offset)?;
@@ -500,20 +589,20 @@ impl Decoder<'_> {
             let chunk_size = match usize::try_from(u32_at(self.bytes, offset + 4)?) {
                 Ok(size) => size,
                 Err(_) => {
-                    self.warning(offset, ManifestWarningKind::TruncatedChunk)?;
+                    self.comment(offset, ManifestWarningKind::TruncatedChunk)?;
                     break;
                 }
             };
             if chunk_header < 8 || chunk_size < chunk_header {
-                self.warning(offset, ManifestWarningKind::TruncatedChunk)?;
+                self.comment(offset, ManifestWarningKind::TruncatedChunk)?;
                 break;
             }
             let Some(chunk_end) = offset.checked_add(chunk_size) else {
-                self.warning(offset, ManifestWarningKind::TruncatedChunk)?;
+                self.comment(offset, ManifestWarningKind::TruncatedChunk)?;
                 break;
             };
             if chunk_end > end {
-                self.warning(offset, ManifestWarningKind::TruncatedChunk)?;
+                self.comment(offset, ManifestWarningKind::TruncatedChunk)?;
                 break;
             }
             match kind {
@@ -575,10 +664,18 @@ impl Decoder<'_> {
                     }
                 }
                 RES_XML_CDATA_TYPE => {
-                    self.warning(offset, ManifestWarningKind::SkippedText)?;
+                    if self.skip.is_none() {
+                        self.comment(offset, ManifestWarningKind::SkippedText)?;
+                    } else {
+                        self.warning(offset, ManifestWarningKind::SkippedText)?;
+                    }
                 }
                 other => {
-                    self.warning(offset, ManifestWarningKind::UnknownRecord(other))?;
+                    if self.skip.is_none() {
+                        self.comment(offset, ManifestWarningKind::UnknownRecord(other))?;
+                    } else {
+                        self.warning(offset, ManifestWarningKind::UnknownRecord(other))?;
+                    }
                 }
             }
             offset = chunk_end;
@@ -634,14 +731,20 @@ impl Decoder<'_> {
                 self.budget.write("\"")?;
             }
         }
+        let start = self.budget.output.len();
+        let mut pending: Vec<(usize, ManifestWarningKind)> = Vec::new();
         self.write_attributes(
             offset,
             attribute_start,
             attribute_size,
             attribute_count,
             end,
+            &mut pending,
         )?;
         self.budget.write(">\n")?;
+        if !pending.is_empty() {
+            self.insert_comments(start, depth, pending)?;
+        }
         self.open.push(name);
         Ok(())
     }
@@ -653,9 +756,10 @@ impl Decoder<'_> {
         attribute_size: usize,
         attribute_count: usize,
         end: usize,
+        pending: &mut Vec<(usize, ManifestWarningKind)>,
     ) -> Result<(), ManifestError> {
         if attribute_count != 0 && attribute_size < 20 {
-            self.warning(offset, ManifestWarningKind::TruncatedChunk)?;
+            pending.push((offset, ManifestWarningKind::TruncatedChunk));
             return Ok(());
         }
         let Some(base) = offset
@@ -671,11 +775,11 @@ impl Decoder<'_> {
                 .checked_mul(attribute_size)
                 .and_then(|step| base.checked_add(step))
             else {
-                self.warning(offset, ManifestWarningKind::TruncatedChunk)?;
+                pending.push((offset, ManifestWarningKind::TruncatedChunk));
                 break;
             };
             if at.checked_add(20).is_none_or(|limit| limit > end) {
-                self.warning(at, ManifestWarningKind::TruncatedChunk)?;
+                pending.push((at, ManifestWarningKind::TruncatedChunk));
                 break;
             }
             let namespace = self.namespace_uri(at)?;
@@ -695,17 +799,17 @@ impl Decoder<'_> {
             qualified.push_str(&label);
             if !valid_namespaced_name(&qualified) {
                 let emitted = sanitize_name(&qualified);
-                self.warning(
+                pending.push((
                     at,
                     ManifestWarningKind::RenamedName {
                         original: qualified,
                         emitted: emitted.clone(),
                     },
-                )?;
+                ));
                 qualified = emitted;
             }
             if seen.iter().any(|previous| previous == &qualified) {
-                self.warning(at, ManifestWarningKind::DuplicateAttribute(qualified))?;
+                pending.push((at, ManifestWarningKind::DuplicateAttribute(qualified)));
                 continue;
             }
             let value = match attribute_value(
@@ -718,7 +822,7 @@ impl Decoder<'_> {
             ) {
                 Ok(value) => value,
                 Err(ManifestError::UnsupportedValue { data_type, .. }) => {
-                    self.warning(at, ManifestWarningKind::UnsupportedValue(data_type))?;
+                    pending.push((at, ManifestWarningKind::UnsupportedValue(data_type)));
                     if raw != u32::MAX {
                         self.text(at, raw)?
                     } else {
@@ -814,6 +918,10 @@ impl Decoder<'_> {
 
     fn close_open(&mut self) -> Result<(), ManifestError> {
         while let Some(name) = self.open.pop() {
+            let depth = self.open.len();
+            self.budget.indent(depth)?;
+            self.budget
+                .write("<!-- diana: missing records; this element was closed here -->\n")?;
             self.warning(0, ManifestWarningKind::UnbalancedElement)?;
             self.budget.nodes()?;
             let depth = self.open.len();
@@ -1050,10 +1158,20 @@ mod tests {
     }
 
     fn balanced(xml: &str) -> bool {
-        let opens =
-            xml.matches('<').count() - xml.matches("</").count() - xml.matches("/>").count();
-        let closes = xml.matches("</").count();
-        opens == closes
+        let mut stripped = String::new();
+        let mut rest = xml;
+        while let Some(start) = rest.find("<!--") {
+            stripped.push_str(&rest[..start]);
+            let Some(end) = rest[start..].find("-->") else {
+                return false;
+            };
+            rest = &rest[start + end + 3..];
+        }
+        stripped.push_str(rest);
+        let opens = stripped.matches('<').count()
+            - stripped.matches("</").count()
+            - stripped.matches("/>").count();
+        opens == stripped.matches("</").count()
     }
 
     #[test]
@@ -1132,7 +1250,9 @@ mod tests {
         duplicate.extend_from_slice(&end(0));
         let duplicate = chunk(0x0003, 8, &duplicate);
         let decoded = decode(&duplicate, ManifestLimits::default()).unwrap();
-        assert_eq!(decoded.xml(), "<root a=\"b\">\n</root>\n");
+        assert!(decoded.xml().contains("a=\"b\""), "{}", decoded.xml());
+        assert!(decoded.xml().contains("repeated"), "{}", decoded.xml());
+        assert!(balanced(decoded.xml()));
         assert!(matches!(
             warnings(&decoded)[0],
             ManifestWarningKind::DuplicateAttribute(name) if name == "a"
@@ -1146,7 +1266,17 @@ mod tests {
         body.extend_from_slice(&element(0, &[attribute(u32::MAX, 1, 0x03, 2)]));
         body.extend_from_slice(&end(0));
         let decoded = decode(&chunk(0x0003, 8, &body), ManifestLimits::default()).unwrap();
-        assert_eq!(decoded.xml(), "<root bad_name=\"v\">\n</root>\n");
+        assert!(
+            decoded.xml().contains("<!-- diana: byte"),
+            "{}",
+            decoded.xml()
+        );
+        assert!(
+            decoded.xml().contains("bad_name=\"v\""),
+            "{}",
+            decoded.xml()
+        );
+        assert!(balanced(decoded.xml()));
         assert!(matches!(
             warnings(&decoded)[0],
             ManifestWarningKind::RenamedName { original, emitted }
