@@ -126,8 +126,20 @@ impl<'a> StringPool<'a> {
     ) -> Result<Self, ManifestError> {
         let count = u32_at(bytes, offset + 8)?;
         let flags = u32_at(bytes, offset + 16)?;
+        let style_count = u32_at(bytes, offset + 12)?;
         let strings_start = usize::try_from(u32_at(bytes, offset + 20)?)
             .map_err(|_| ManifestError::PlatformCapacity)?;
+        let styles_start = u32_at(bytes, offset + 24)?;
+        if style_count != 0 && styles_start == 0 {
+            return Err(ManifestError::InconsistentChunk { offset });
+        }
+        if styles_start != 0 {
+            bounded(
+                offset,
+                usize::try_from(styles_start).map_err(|_| ManifestError::PlatformCapacity)?,
+                end,
+            )?;
+        }
         let header = header.max(28);
         let offsets_start = bounded(offset, header, end)?;
         let offsets_len = usize::try_from(count)
@@ -590,6 +602,150 @@ fn attribute_value(
     };
     let _ = raw;
     Ok(value)
+}
+
+#[cfg(test)]
+mod mutation_tests {
+    use super::{ManifestError, ManifestLimits, decode};
+
+    fn chunk(kind: u16, header: u16, body: &[u8]) -> Vec<u8> {
+        let mut out = Vec::new();
+        out.extend_from_slice(&kind.to_le_bytes());
+        out.extend_from_slice(&header.to_le_bytes());
+        out.extend_from_slice(&u32::try_from(8 + body.len()).unwrap().to_le_bytes());
+        out.extend_from_slice(body);
+        out
+    }
+
+    fn pool(strings: &[&str], styles: bool) -> Vec<u8> {
+        let mut offsets = Vec::new();
+        let mut data = Vec::new();
+        for entry in strings {
+            offsets.extend_from_slice(&u32::try_from(data.len()).unwrap().to_le_bytes());
+            let units: Vec<u16> = entry.encode_utf16().collect();
+            data.extend_from_slice(&u16::try_from(units.len()).unwrap().to_le_bytes());
+            for unit in units {
+                data.extend_from_slice(&unit.to_le_bytes());
+            }
+            data.extend_from_slice(&[0, 0]);
+        }
+        let strings_start = 28 + offsets.len();
+        let mut body = Vec::new();
+        body.extend_from_slice(&u32::try_from(strings.len()).unwrap().to_le_bytes());
+        body.extend_from_slice(&u32::try_from(usize::from(styles)).unwrap().to_le_bytes());
+        body.extend_from_slice(&0u32.to_le_bytes());
+        body.extend_from_slice(&u32::try_from(strings_start).unwrap().to_le_bytes());
+        body.extend_from_slice(&0u32.to_le_bytes());
+        body.extend_from_slice(&offsets);
+        body.extend_from_slice(&data);
+        let mut chunk = chunk(0x0001, 28, &body);
+        if styles {
+            // Style spans are outside the decoded text and only need bounded shape.
+            let style_start = strings_start + data.len();
+            chunk[24..28].copy_from_slice(&u32::try_from(style_start).unwrap().to_le_bytes());
+            chunk.extend_from_slice(&[0u8; 4]);
+            let size = u32::try_from(chunk.len()).unwrap();
+            chunk[4..8].copy_from_slice(&size.to_le_bytes());
+        }
+        chunk
+    }
+
+    fn element(name: u32, attributes: &[(u32, u32)]) -> Vec<u8> {
+        let mut body = Vec::new();
+        body.extend_from_slice(&1u32.to_le_bytes());
+        body.extend_from_slice(&u32::MAX.to_le_bytes());
+        body.extend_from_slice(&u32::MAX.to_le_bytes());
+        body.extend_from_slice(&name.to_le_bytes());
+        body.extend_from_slice(&20u16.to_le_bytes());
+        body.extend_from_slice(&20u16.to_le_bytes());
+        body.extend_from_slice(&u16::try_from(attributes.len()).unwrap().to_le_bytes());
+        body.extend_from_slice(&0u16.to_le_bytes());
+        body.extend_from_slice(&0u16.to_le_bytes());
+        body.extend_from_slice(&0u16.to_le_bytes());
+        for &(attribute, value) in attributes {
+            body.extend_from_slice(&u32::MAX.to_le_bytes());
+            body.extend_from_slice(&attribute.to_le_bytes());
+            body.extend_from_slice(&u32::MAX.to_le_bytes());
+            body.extend_from_slice(&8u16.to_le_bytes());
+            body.push(0);
+            body.push(0x10);
+            body.extend_from_slice(&value.to_le_bytes());
+        }
+        chunk(0x0102, 16, &body)
+    }
+
+    fn end(name: u32) -> Vec<u8> {
+        let mut body = Vec::new();
+        body.extend_from_slice(&1u32.to_le_bytes());
+        body.extend_from_slice(&u32::MAX.to_le_bytes());
+        body.extend_from_slice(&u32::MAX.to_le_bytes());
+        body.extend_from_slice(&name.to_le_bytes());
+        chunk(0x0103, 16, &body)
+    }
+
+    fn document(styles: bool) -> Vec<u8> {
+        let mut body = pool(&["root", "child", "value", "deep"], styles);
+        body.extend_from_slice(&chunk(0x0180, 8, &0x0101_0015u32.to_le_bytes()));
+        body.extend_from_slice(&element(0, &[(2, 7), (3, 9)]));
+        body.extend_from_slice(&element(1, &[(2, 1)]));
+        body.extend_from_slice(&end(1));
+        body.extend_from_slice(&end(0));
+        chunk(0x0003, 8, &body)
+    }
+
+    /// A damaged AXML document must end in a classified error, never a panic or a
+    /// hang. The seed and the offset range are fixed so the case is reproducible.
+    #[test]
+    fn h03_axml_seeded_mutations_never_panic_or_hang() {
+        let previous = std::panic::take_hook();
+        std::panic::set_hook(Box::new(|_| {}));
+        for styles in [false, true] {
+            let original = document(styles);
+            let mut seed = 0x9e37_79b9u32;
+            let mut accepted = 0u32;
+            let mut rejected = 0u32;
+            for _ in 0..512 {
+                seed ^= seed << 13;
+                seed ^= seed >> 17;
+                seed ^= seed << 5;
+                let mut bytes = original.clone();
+                let position = usize::try_from(seed).unwrap() % bytes.len();
+                let value = u8::try_from(seed >> 24).unwrap();
+                bytes[position] ^= value | 1;
+                let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    decode(&bytes, ManifestLimits::default())
+                }));
+                match outcome {
+                    Ok(Ok(_)) => accepted += 1,
+                    Ok(Err(error)) => {
+                        let _: ManifestError = error;
+                        rejected += 1;
+                    }
+                    Err(_) => panic!("mutation at byte {position} panicked"),
+                }
+            }
+            assert_eq!(accepted + rejected, 512);
+            assert!(rejected > 0, "no mutation was rejected");
+        }
+        std::panic::set_hook(previous);
+    }
+
+    #[test]
+    fn h03_axml_rejects_text_records_and_keeps_style_pools_bounded() {
+        // A style-aware pool decodes normally; style spans do not alter the text.
+        let styled = document(true);
+        assert!(decode(&styled, ManifestLimits::default()).is_ok());
+        // A text/CDATA record is a classified unsupported record.
+        let mut body = pool(&["root"], false);
+        body.extend_from_slice(&element(0, &[]));
+        body.extend_from_slice(&chunk(0x0104, 16, &[0u8; 12]));
+        body.extend_from_slice(&end(0));
+        let text = chunk(0x0003, 8, &body);
+        assert!(matches!(
+            decode(&text, ManifestLimits::default()),
+            Err(ManifestError::UnsupportedChunk { kind: 0x0104 })
+        ));
+    }
 }
 
 #[cfg(test)]

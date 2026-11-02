@@ -94,10 +94,22 @@ The first sample also produced 1484 elements and 3187 attributes, exactly the
 binary counts of that manifest, and its text parses as well-formed XML with the
 `android` namespace declared.
 
-Known limitations, recorded rather than hidden: DTD/doctype records, style spans
-and text records are not interpreted (`UnsupportedChunk`); attribute values that
-are dimensions or fractions are printed as their raw hex data; the resource map is
-validated but not used for naming.
+A bounded mutation campaign then exercised structural robustness. Three real
+manifests were mutated 2000 times each with a fixed seed: a random offset and a
+1–4 byte window were XOR-ed before decoding. Result: 6000 runs, **0 panics, 0
+slow cases** (worst 6 ms, most 1–3 ms), every outcome either decoded or returned a
+classified `ManifestError`. A committed regression repeats the same idea on the
+self-made UTF-16 and styled-pool fixtures (512 mutations each) and asserts that a
+mutation never panics and that at least one is rejected. Mutation of payload
+strings legitimately yields a different but valid document, so "accepted" is not
+an error.
+
+Known limitations, recorded rather than hidden: text/CDATA and DTD records are
+rejected as `UnsupportedChunk`; string-pool style spans are bounds-checked but not
+interpreted, so styled text is not rendered; the resource map is validated but not
+used for naming. Attribute values that are dimensions or fractions are formatted
+from the AOSP complex encoding, and a repeated qualified attribute name inside one
+element is rejected.
 
 ## Gates
 
