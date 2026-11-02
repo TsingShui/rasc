@@ -1,7 +1,7 @@
 use super::branch::LocalId;
-use crate::p2_flow::normal::Terminal;
-use crate::p3_ssa::normal::BoundBlock;
-use crate::p5_types::normal::{Kind, TypedBody};
+use crate::p2_flow::Terminal;
+use crate::p3_ssa::BoundBlock;
+use crate::p5_types::{Kind, TypedBody};
 use crate::{MethodBudget, RequestError};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -211,10 +211,15 @@ mod tests {
         let input = index
             .method_input(crate::ClassDefId(0), method, &mut budget)
             .unwrap();
-        let storage = crate::pipeline::branch::build(&input, &catalog, &mut budget)
-            .unwrap()
-            .into_storage()
-            .unwrap();
+        let storage = crate::pipeline::branch::build(
+            &crate::engine::SchedulePermit::for_test(),
+            &input,
+            &catalog,
+            &mut budget,
+        )
+        .unwrap()
+        .into_storage()
+        .unwrap();
         let typed = &storage.typed;
         let block = &typed.ssa.blocks[0];
         let bound = &typed.ssa.bound[0];

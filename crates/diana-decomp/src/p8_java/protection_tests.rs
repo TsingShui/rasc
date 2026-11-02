@@ -1,5 +1,5 @@
 use crate::input::ProgramIndex;
-use crate::p6_variables::normal::StorageBody;
+use crate::p6_variables::StorageBody;
 use crate::p7_regions::protection::{self, Node, NodeId};
 use crate::{
     ClassDefId, DeclarationCatalog, EnvironmentId, FailureKind, Limits, MethodId, RunContext,
@@ -29,10 +29,15 @@ fn storage<'a>(bytes: &'a [u8], method: u32, json: &str) -> StorageBody<'a> {
     let input = index
         .method_input(ClassDefId(0), MethodId(method), &mut budget)
         .unwrap();
-    crate::pipeline::branch::build(&input, &catalog(json), &mut budget)
-        .unwrap()
-        .into_storage()
-        .unwrap()
+    crate::pipeline::branch::build(
+        &crate::engine::SchedulePermit::for_test(),
+        &input,
+        &catalog(json),
+        &mut budget,
+    )
+    .unwrap()
+    .into_storage()
+    .unwrap()
 }
 #[test]
 fn t18_protection_certificate_replays_original_scope_branches_and_catch_order() {
@@ -45,7 +50,9 @@ fn t18_protection_certificate_replays_original_scope_branches_and_catch_order() 
         let body = storage(bytes, method, json);
         let mut control = RunContext::new(Limits::default(), &|| false);
         let mut budget = control.method_budget().unwrap();
-        let mut plan = protection::build(&body, &mut budget).unwrap().unwrap();
+        let mut plan = protection::build_for_test(&body, &mut budget)
+            .unwrap()
+            .unwrap();
         protection::verify(&body, &plan, &mut budget).unwrap();
         match mutation {
             "order" => {
@@ -82,32 +89,33 @@ fn t18_protection_certificate_replays_original_scope_branches_and_catch_order() 
                 *yes = *no;
             }
             "expanded" => {
-                let outside =
-                    plan.nodes
-                        .iter()
-                        .enumerate()
-                        .find_map(|(index, node)| {
-                            let Node::Block(id) = node else {
-                                return None;
-                            };
-                            let block = &body.typed.ssa.blocks[usize::try_from(id.0).unwrap()];
-                            let call = block.ops.iter().find(|op| {
-                                matches!(op.kind, crate::p2_flow::normal::Op::Call(..))
-                            })?;
-                            if body
-                                .typed
-                                .ssa
-                                .protection
-                                .at(call.pc, &mut budget)
-                                .unwrap()
-                                .is_none()
-                            {
-                                Some(NodeId(u32::try_from(index).unwrap()))
-                            } else {
-                                None
-                            }
-                        })
-                        .unwrap();
+                let outside = plan
+                    .nodes
+                    .iter()
+                    .enumerate()
+                    .find_map(|(index, node)| {
+                        let Node::Block(id) = node else {
+                            return None;
+                        };
+                        let block = &body.typed.ssa.blocks[usize::try_from(id.0).unwrap()];
+                        let call = block
+                            .ops
+                            .iter()
+                            .find(|op| matches!(op.kind, crate::p2_flow::Op::Call(..)))?;
+                        if body
+                            .typed
+                            .ssa
+                            .protection
+                            .at(call.pc, &mut budget)
+                            .unwrap()
+                            .is_none()
+                        {
+                            Some(NodeId(u32::try_from(index).unwrap()))
+                        } else {
+                            None
+                        }
+                    })
+                    .unwrap();
                 for node in &mut plan.nodes {
                     if let Node::Sequence(children) = node {
                         children.retain(|id| *id != outside);
@@ -141,7 +149,11 @@ fn t18_protection_certificate_replays_original_scope_branches_and_catch_order() 
     let body = storage(SHARED, 2, CATALOG);
     let mut control = RunContext::new(Limits::default(), &|| false);
     let mut budget = control.method_budget().unwrap();
-    assert!(protection::build(&body, &mut budget).unwrap().is_none());
+    assert!(
+        protection::build_for_test(&body, &mut budget)
+            .unwrap()
+            .is_none()
+    );
 }
 
 #[test]
@@ -153,10 +165,15 @@ fn t18_snapshot_placement_and_precise_rethrow_use_checked_storage() {
         .method_input(ClassDefId(0), MethodId(5), &mut budget)
         .unwrap();
     let catalog = catalog(CATALOG);
-    let storage = crate::pipeline::branch::build(&input, &catalog, &mut budget)
-        .unwrap()
-        .into_storage()
-        .unwrap();
+    let storage = crate::pipeline::branch::build(
+        &crate::engine::SchedulePermit::for_test(),
+        &input,
+        &catalog,
+        &mut budget,
+    )
+    .unwrap()
+    .into_storage()
+    .unwrap();
     let mut calls = super::calls::validate_bindings(&input, &catalog, &storage.typed, &mut budget)
         .unwrap()
         .unwrap();
@@ -213,7 +230,7 @@ fn t18_snapshot_placement_and_precise_rethrow_use_checked_storage() {
         .blocks
         .iter()
         .enumerate()
-        .find(|(_, block)| matches!(block.terminal, crate::p2_flow::normal::Terminal::Throw(_)))
+        .find(|(_, block)| matches!(block.terminal, crate::p2_flow::Terminal::Throw(_)))
         .unwrap();
     let value = storage.typed.ssa.bound[index].terminal.unwrap();
     let handler = super::exceptional::exception_root(&storage.typed, value, &mut budget)
@@ -236,7 +253,7 @@ fn t18_protection_producer_and_independent_replay_enforce_resource_control() {
             let storage = storage(DIAMOND, 1, DIAMOND_CATALOG);
             let mut setup = RunContext::new(Limits::default(), &|| false);
             let mut setup_budget = setup.method_budget().unwrap();
-            let plan = protection::build(&storage, &mut setup_budget)
+            let plan = protection::build_for_test(&storage, &mut setup_budget)
                 .unwrap()
                 .unwrap();
             let cancelled = Cell::new(false);
@@ -254,7 +271,7 @@ fn t18_protection_producer_and_independent_replay_enforce_resource_control() {
             let error = if replay {
                 protection::verify(&storage, &plan, &mut budget).unwrap_err()
             } else {
-                match protection::build(&storage, &mut budget) {
+                match protection::build_for_test(&storage, &mut budget) {
                     Err(error) => error,
                     Ok(_) => panic!("protection ignored control"),
                 }

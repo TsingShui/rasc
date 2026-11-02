@@ -1,7 +1,7 @@
 use super::flow::{Flow, Transfer};
 use super::graph::index;
 use super::normal::Candidate;
-use crate::pipeline::branch::{BlockId, EdgeId};
+use crate::p2_flow::{BlockId, EdgeId};
 use crate::substrate::owned::reserve;
 use crate::{MethodBudget, RequestError};
 pub(crate) struct NaturalLoop {

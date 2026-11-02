@@ -14,7 +14,7 @@ pub(crate) enum FieldStorage {
     Static,
 }
 pub(crate) struct FieldAccess {
-    pub kind: crate::p2_flow::normal::DeclarationType,
+    pub kind: crate::p2_flow::DeclarationType,
     pub storage: FieldStorage,
     _sealed: (),
     pub reference: FieldId,
@@ -35,7 +35,7 @@ pub(crate) fn collect_field(
 ) -> Result<FieldAccess, RequestError> {
     let missing = || RequestError::FieldBindingEvidenceMissing { reference, pc };
     let original = input.field_reference(reference, budget)?;
-    let Some(kind) = crate::p2_flow::normal::field_type(
+    let Some(kind) = crate::p2_flow::field_type(
         input,
         original.declaration.field_type,
         original.declaration.field_type_idx,
@@ -69,7 +69,7 @@ pub(crate) fn collect_field(
     }
     if usage == FieldUse::Read
         && evidence.access_flags & 16 != 0
-        && (kind.field_offset() != 2 || kind == crate::p2_flow::normal::DeclarationType::String)
+        && (kind.field_offset() != 2 || kind == crate::p2_flow::DeclarationType::String)
     {
         match evidence.constant_kind {
             JavaConstantKind::Constant => {
@@ -124,7 +124,7 @@ pub(crate) fn collect_own_write(
                 "own field lost native declaration",
             ))?;
     Ok(FieldAccess {
-        kind: crate::p2_flow::normal::DeclarationType::Int,
+        kind: crate::p2_flow::DeclarationType::Int,
         _sealed: (),
         storage: FieldStorage::Instance,
         reference: write.reference,

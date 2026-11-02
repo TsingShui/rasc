@@ -88,11 +88,7 @@ fn t19_complete_method_bodies_do_not_hide_unrecovered_fields_or_bindings() {
         );
     }
 }
-fn storage<'a>(
-    bytes: &'a [u8],
-    json: &str,
-    method: u32,
-) -> crate::p6_variables::normal::StorageBody<'a> {
+fn storage<'a>(bytes: &'a [u8], json: &str, method: u32) -> crate::p6_variables::StorageBody<'a> {
     let facts: Facts = serde_json::from_str(json).unwrap();
     let catalog =
         DeclarationCatalog::with_declarations(EnvironmentId(0), facts.methods, facts.classes);
@@ -102,10 +98,15 @@ fn storage<'a>(
     let input = index
         .method_input(ClassDefId(0), MethodId(method), &mut budget)
         .unwrap();
-    crate::pipeline::branch::build(&input, &catalog, &mut budget)
-        .unwrap()
-        .into_storage()
-        .unwrap()
+    crate::pipeline::branch::build(
+        &crate::engine::SchedulePermit::for_test(),
+        &input,
+        &catalog,
+        &mut budget,
+    )
+    .unwrap()
+    .into_storage()
+    .unwrap()
 }
 #[test]
 fn t19_monitor_effects_advanced_exit_sites_and_finite_lock_proofs() {
@@ -212,7 +213,7 @@ fn t19_monitor_effects_advanced_exit_sites_and_finite_lock_proofs() {
         for op in &body.typed.ssa.operations {
             if matches!(
                 op.op,
-                crate::p2_flow::normal::Op::Monitor(crate::p2_flow::normal::MonitorKind::Exit, _)
+                crate::p2_flow::Op::Monitor(crate::p2_flow::MonitorKind::Exit, _)
             ) {
                 let next = crate::p2_flow::protection::selection_pc(op.op, op.pc).unwrap();
                 let expected = body

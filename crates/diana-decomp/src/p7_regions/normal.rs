@@ -1,7 +1,7 @@
 use super::branch::{BodyBranch, Guard};
 use super::flow::{Flow, Transfer};
 use super::graph::{dominators, graph, index, push};
-use crate::pipeline::branch::{BlockId, EdgeId};
+use crate::p2_flow::{BlockId, EdgeId};
 use crate::substrate::owned::reserve;
 use crate::{MethodBudget, RequestError};
 pub(super) struct Candidate {

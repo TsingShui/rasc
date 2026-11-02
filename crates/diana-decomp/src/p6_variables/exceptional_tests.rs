@@ -1,7 +1,7 @@
 use super::{exceptional, normal::StorageBody};
 use crate::input::ProgramIndex;
-use crate::p2_flow::normal::Op;
-use crate::p3_ssa::normal::{Definition, Sym, ValueId};
+use crate::p2_flow::Op;
+use crate::p3_ssa::{Definition, Sym, ValueId};
 use crate::{
     ClassDefId, DeclarationCatalog, EnvironmentId, FailureKind, Limits, MethodId, RunContext,
 };
@@ -27,15 +27,20 @@ fn storage<'a>(bytes: &'a [u8], method: u32, facts: &str) -> StorageBody<'a> {
     let input = index
         .method_input(ClassDefId(0), MethodId(method), &mut budget)
         .unwrap();
-    crate::pipeline::branch::build(&input, &catalog(facts), &mut budget)
-        .unwrap()
-        .into_storage()
-        .unwrap_or_else(|| {
-            panic!(
-                "missing storage for method {method}, length {}",
-                bytes.len()
-            )
-        })
+    crate::pipeline::branch::build(
+        &crate::engine::SchedulePermit::for_test(),
+        &input,
+        &catalog(facts),
+        &mut budget,
+    )
+    .unwrap()
+    .into_storage()
+    .unwrap_or_else(|| {
+        panic!(
+            "missing storage for method {method}, length {}",
+            bytes.len()
+        )
+    })
 }
 fn literal(body: &StorageBody<'_>, mut value: ValueId) -> i32 {
     for _ in &body.typed.ssa.values {
@@ -168,7 +173,7 @@ fn t17_certificate_rejects_wrong_source_placement_type_alias_and_ingress() {
             }
             2 => {
                 let source = usize::try_from(snapshot.copy.source.0).unwrap();
-                body.locals[source].kind = crate::p5_types::normal::Kind::Object;
+                body.locals[source].kind = crate::p5_types::Kind::Object;
             }
             3 => body.exceptional.shadows[1].local = body.exceptional.shadows[0].local,
             4 => {
@@ -188,7 +193,7 @@ fn t17_certificate_rejects_wrong_source_placement_type_alias_and_ingress() {
                     .unwrap();
                 phi.inputs[0].1 = Sym::Bad;
             }
-            8 => snapshot.source_block = crate::p2_flow::normal::BlockId(u32::MAX),
+            8 => snapshot.source_block = crate::p2_flow::BlockId(u32::MAX),
             9 => body.exceptional.ingress[0].bind_exception = body.typed.ssa.operations[0].id,
             10 => {
                 let count = body.typed.ssa.values.len();
@@ -249,10 +254,15 @@ fn t17_exception_types_require_catch_hierarchy_evidence() {
             .method_input(ClassDefId(0), MethodId(1), &mut budget)
             .unwrap();
         assert!(
-            crate::pipeline::branch::build(&input, &catalog, &mut budget)
-                .unwrap()
-                .into_storage()
-                .is_none(),
+            crate::pipeline::branch::build(
+                &crate::engine::SchedulePermit::for_test(),
+                &input,
+                &catalog,
+                &mut budget
+            )
+            .unwrap()
+            .into_storage()
+            .is_none(),
             "{problem}"
         );
     }

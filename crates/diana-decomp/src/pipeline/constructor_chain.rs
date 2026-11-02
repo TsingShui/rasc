@@ -1,26 +1,32 @@
 use crate::input::MethodInput;
 use crate::p5_types::initialization::ChainKind;
-use crate::p6_variables::normal::StorageBody;
+use crate::p6_variables::StorageBody;
 use crate::{DeclarationCatalog, MethodBudget, RequestError};
 
 pub(crate) fn verify<'m, 'i, 'a>(
+    schedule: &crate::engine::SchedulePermit,
     input: &'m MethodInput<'i, 'a>,
     catalog: &DeclarationCatalog,
     body: &StorageBody<'_>,
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<crate::p8_java::constructor_graph::Proof<'m, 'i, 'a>, RequestError> {
-    let mut graph = crate::p8_java::constructor_graph::Graph::new(input, body, budget)?;
+    let mut graph = crate::p8_java::constructor_graph::Graph::new(schedule, input, body, budget)?;
     while let Some(current) = graph.pending(budget)? {
-        let Some(flow) =
-            crate::p2_flow::entry::decode(input.program(), input.class_id(), current, budget)?
+        let Some(flow) = crate::p2_flow::entry::decode(
+            schedule,
+            input.program(),
+            input.class_id(),
+            current,
+            budget,
+        )?
         else {
             return Err(graph.unavailable());
         };
-        let entry = crate::p3_ssa::entry::build(flow, budget)?;
+        let entry = crate::p3_ssa::entry::build(schedule, flow, budget)?;
         let op = crate::p3_ssa::entry::operations(&entry)
             .last()
             .ok_or_else(|| graph.unavailable())?;
-        let crate::p2_flow::normal::Op::Initialize(call) = op.op else {
+        let crate::p2_flow::Op::Initialize(call) = op.op else {
             return Err(graph.unavailable());
         };
         let site = entry
@@ -29,6 +35,7 @@ pub(crate) fn verify<'m, 'i, 'a>(
             .get(usize::try_from(call.0).map_err(|_| RequestError::PlatformCapacity)?)
             .ok_or_else(|| graph.unavailable())?;
         let declarations = crate::p4_calls::entry_declarations::collect(
+            schedule,
             input,
             catalog,
             site.reference,
@@ -36,6 +43,7 @@ pub(crate) fn verify<'m, 'i, 'a>(
             budget,
         )?;
         let Some(link) = crate::p5_types::entry_initialization::prove(
+            schedule,
             &entry,
             declarations.formals(),
             declarations.scope(),

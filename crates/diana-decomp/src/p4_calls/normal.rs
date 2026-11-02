@@ -1,8 +1,8 @@
 use super::StaticContract;
 pub(crate) use super::throws::SourceThrows;
 use crate::input::MethodInput;
-use crate::p2_flow::normal::CallId;
-use crate::p3_ssa::normal::SsaBody;
+use crate::p2_flow::CallId;
+use crate::p3_ssa::SsaBody;
 use crate::substrate::owned::push;
 use crate::{DeclarationCatalog, MethodBudget, RequestError};
 
@@ -70,6 +70,16 @@ pub(crate) enum FieldDeclaration {
     Constant,
 }
 pub(crate) fn collect<'a>(
+    _schedule: &crate::engine::SchedulePermit,
+    input: &MethodInput<'_, '_>,
+    catalog: &DeclarationCatalog,
+    ssa: SsaBody<'a>,
+    budget: &mut MethodBudget<'_, '_>,
+) -> Result<ResolvedBody<'a>, RequestError> {
+    collect_impl(input, catalog, ssa, budget)
+}
+
+fn collect_impl<'a>(
     input: &MethodInput<'_, '_>,
     catalog: &DeclarationCatalog,
     ssa: SsaBody<'a>,
@@ -94,7 +104,7 @@ pub(crate) fn collect<'a>(
                 });
             }
         }
-        let evidence = if call.kind != crate::p2_flow::normal::InvokeKind::Static {
+        let evidence = if call.kind != crate::p2_flow::InvokeKind::Static {
             let original = input.method_reference(call.reference, budget)?;
             let facts = ReceiverFacts {
                 owner: crate::substrate::owned::copy_units(original.owner, budget)?,
@@ -110,7 +120,7 @@ pub(crate) fn collect<'a>(
                 pc: call.pc,
                 protection: Some(&ssa.protection),
             };
-            if call.target == crate::p2_flow::normal::CallTarget::Constructor {
+            if call.target == crate::p2_flow::CallTarget::Constructor {
                 let declarations =
                     super::constructor_evidence::collect(input, catalog, &invocation, budget)?;
                 CallEvidence::Constructor {
@@ -119,11 +129,11 @@ pub(crate) fn collect<'a>(
                 }
             } else {
                 let kind = match call.kind {
-                    crate::p2_flow::normal::InvokeKind::Direct => super::ReceiverKind::Direct,
-                    crate::p2_flow::normal::InvokeKind::Super => super::ReceiverKind::Super,
-                    crate::p2_flow::normal::InvokeKind::Virtual => super::ReceiverKind::Virtual,
-                    crate::p2_flow::normal::InvokeKind::Interface => super::ReceiverKind::Interface,
-                    crate::p2_flow::normal::InvokeKind::Static => {
+                    crate::p2_flow::InvokeKind::Direct => super::ReceiverKind::Direct,
+                    crate::p2_flow::InvokeKind::Super => super::ReceiverKind::Super,
+                    crate::p2_flow::InvokeKind::Virtual => super::ReceiverKind::Virtual,
+                    crate::p2_flow::InvokeKind::Interface => super::ReceiverKind::Interface,
+                    crate::p2_flow::InvokeKind::Static => {
                         return Err(RequestError::InternalInvariant(
                             "static call entered receiver collection",
                         ));
@@ -147,22 +157,22 @@ pub(crate) fn collect<'a>(
     for op in &ssa.operations {
         budget.charge_work(1)?;
         let (reference, usage, storage) = match op.op {
-            crate::p2_flow::normal::Op::FieldLoad(_, _, id, _) => (
+            crate::p2_flow::Op::FieldLoad(_, _, id, _) => (
                 id,
                 super::field_facts::FieldUse::Read,
                 super::field_facts::FieldStorage::Instance,
             ),
-            crate::p2_flow::normal::Op::FieldStore(_, _, id, _) => (
+            crate::p2_flow::Op::FieldStore(_, _, id, _) => (
                 id,
                 super::field_facts::FieldUse::Write,
                 super::field_facts::FieldStorage::Instance,
             ),
-            crate::p2_flow::normal::Op::StaticLoad(_, id, _) => (
+            crate::p2_flow::Op::StaticLoad(_, id, _) => (
                 id,
                 super::field_facts::FieldUse::Read,
                 super::field_facts::FieldStorage::Static,
             ),
-            crate::p2_flow::normal::Op::StaticStore(_, id, _) => (
+            crate::p2_flow::Op::StaticStore(_, id, _) => (
                 id,
                 super::field_facts::FieldUse::Write,
                 super::field_facts::FieldStorage::Static,

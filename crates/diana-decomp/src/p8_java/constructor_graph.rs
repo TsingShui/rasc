@@ -1,7 +1,7 @@
 use crate::input::MethodInput;
 use crate::p5_types::entry_initialization::Link;
 use crate::p5_types::initialization::ChainKind;
-use crate::p6_variables::normal::StorageBody;
+use crate::p6_variables::StorageBody;
 use crate::substrate::owned::push;
 use crate::{CodeUnitOffset, MethodBudget, MethodId, RequestError};
 
@@ -41,6 +41,14 @@ pub(crate) struct Graph<'m, 'i, 'a> {
 }
 impl<'m, 'i, 'a> Graph<'m, 'i, 'a> {
     pub(crate) fn new(
+        _schedule: &crate::engine::SchedulePermit,
+        input: &'m MethodInput<'i, 'a>,
+        body: &StorageBody<'_>,
+        budget: &mut MethodBudget<'_, '_>,
+    ) -> Result<Self, RequestError> {
+        Self::new_impl(input, body, budget)
+    }
+    fn new_impl(
         input: &'m MethodInput<'i, 'a>,
         body: &StorageBody<'_>,
         budget: &mut MethodBudget<'_, '_>,

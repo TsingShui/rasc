@@ -1,7 +1,7 @@
 use super::dispatcher::{Case, Dispatcher, Edge, Transfer};
 use super::protection_replay::membership;
 use super::source_control::{Label, Step};
-use crate::p2_flow::normal::BlockId;
+use crate::p2_flow::BlockId;
 use crate::p7_regions::protection::{Node, Protection};
 use crate::substrate::owned::push;
 use crate::{MethodBudget, RequestError};
@@ -22,7 +22,7 @@ fn case(storage: &Dispatcher, id: BlockId) -> Result<&Case, RequestError> {
 fn edge(
     storage: &Dispatcher,
     source: BlockId,
-    id: crate::p2_flow::normal::EdgeId,
+    id: crate::p2_flow::EdgeId,
 ) -> Result<&Edge, RequestError> {
     match &case(storage, source)?.transfer {
         Transfer::Jump(edge) if edge.id == id => Ok(edge),
@@ -326,7 +326,7 @@ pub(super) fn verify(
                     budget.charge_work(1)?;
                     if let super::calls::Statement::Monitor {
                         operation: actual,
-                        kind: crate::p2_flow::normal::MonitorKind::Enter,
+                        kind: crate::p2_flow::MonitorKind::Enter,
                         lock: expected,
                     } = statement
                     {

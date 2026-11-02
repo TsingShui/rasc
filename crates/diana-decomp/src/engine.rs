@@ -7,6 +7,17 @@ use crate::{
     MethodBudget, MethodKey, RequestError, RunContext,
 };
 
+// Phase implementations can name the credential, but only the scheduler can construct it.
+pub(crate) struct SchedulePermit {
+    _private: (),
+}
+#[cfg(test)]
+impl SchedulePermit {
+    pub(crate) fn for_test() -> Self {
+        Self { _private: () }
+    }
+}
+
 /// Original caller-owned bytes and one logical header selection. The caller
 /// retains the physical owner until this engine is dropped.
 #[derive(Clone, Copy)]
@@ -255,13 +266,13 @@ impl<'a> Engine<'a> {
         }
         let mut shell_cause = DiagnosticCause::Unsupported(OutputReason::ClassAssemblyUnavailable);
         let unit = if whole_class && field_issue.is_none() {
-            match crate::p8_java::class_unit::verify(
+            match crate::p8_java::verify_unit(
+                &SchedulePermit { _private: () },
                 &image.index,
                 request.class,
                 &self.catalog,
                 &fields,
                 &members,
-                self.catalog.environment,
                 control,
             ) {
                 Ok(unit) => unit,
@@ -507,23 +518,41 @@ fn normal_member(
         prototype: copy_proto(&input.declaration().prototype, budget)?,
         access_flags: input.access_flags(),
     };
-    if let Some(declaration) = crate::p8_java::declaration(&input, budget)? {
+    if let Some(declaration) =
+        crate::p8_java::declaration(&SchedulePermit { _private: () }, &input, budget)?
+    {
         return Ok(NormalMember::Declaration { facts, declaration });
     }
     use crate::pipeline::branch::Analysis;
     use crate::substrate::outcome::Outcome;
-    let (storage, declaration_failure) =
-        match crate::pipeline::branch::build(&input, catalog, budget)? {
-            Analysis::Ready {
-                storage,
-                declaration_failure,
-            } => (storage, declaration_failure),
-            Analysis::Declined(reason) => return Ok(NormalMember::Raw { facts, reason }),
-        };
-    let chain = crate::pipeline::constructor_chain::verify(&input, catalog, &storage, budget)?;
-    let planned = crate::p7_regions::build(storage, representation, budget)?;
+    let (storage, declaration_failure) = match crate::pipeline::branch::build(
+        &SchedulePermit { _private: () },
+        &input,
+        catalog,
+        budget,
+    )? {
+        Analysis::Ready {
+            storage,
+            declaration_failure,
+        } => (storage, declaration_failure),
+        Analysis::Declined(reason) => return Ok(NormalMember::Raw { facts, reason }),
+    };
+    let chain = crate::pipeline::constructor_chain::verify(
+        &SchedulePermit { _private: () },
+        &input,
+        catalog,
+        &storage,
+        budget,
+    )?;
+    let planned = crate::p7_regions::build(
+        &SchedulePermit { _private: () },
+        storage,
+        representation,
+        budget,
+    )?;
     let result = if crate::p8_java::source_group_admitted(index, key, &facts, budget)? {
         crate::p8_java::verify_method(
+            &SchedulePermit { _private: () },
             &input,
             catalog,
             planned,
@@ -598,9 +627,13 @@ fn class_fields(
             Ok(facts) => {
                 match crate::p4_calls::field_declarations::bind(index, key, catalog, facts, control)
                 {
-                    Ok(Some(ty)) => {
-                        crate::p8_java::field_declarations::verify(&field, facts, &ty, control)
-                    }
+                    Ok(Some(ty)) => crate::p8_java::verify_field(
+                        &SchedulePermit { _private: () },
+                        &field,
+                        facts,
+                        &ty,
+                        control,
+                    ),
                     Ok(None) => Ok(None),
                     Err(error) => Err(error),
                 }

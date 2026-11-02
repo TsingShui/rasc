@@ -69,13 +69,18 @@ fn final_control_replay_rejects_wrong_exits_missing_coverage_and_lock_operands()
         let input = index
             .method_input(ClassDefId(0), MethodId(method), &mut budget)
             .unwrap();
-        let storage = crate::pipeline::branch::build(&input, &catalog, &mut budget)
-            .unwrap()
-            .into_storage()
-            .unwrap();
+        let storage = crate::pipeline::branch::build(
+            &crate::engine::SchedulePermit::for_test(),
+            &input,
+            &catalog,
+            &mut budget,
+        )
+        .unwrap()
+        .into_storage()
+        .unwrap();
         let protection = if json.is_some() {
             Some(
-                crate::p7_regions::protection::build(&storage, &mut budget)
+                crate::p7_regions::protection::build_for_test(&storage, &mut budget)
                     .unwrap()
                     .unwrap(),
             )
@@ -104,16 +109,23 @@ fn final_control_replay_rejects_wrong_exits_missing_coverage_and_lock_operands()
         } else {
             Vec::new()
         };
-        let chain =
-            crate::pipeline::constructor_chain::verify(&input, &catalog, &storage, &mut budget)
-                .unwrap();
+        let chain = crate::pipeline::constructor_chain::verify(
+            &crate::engine::SchedulePermit::for_test(),
+            &input,
+            &catalog,
+            &storage,
+            &mut budget,
+        )
+        .unwrap();
         let planned = crate::p7_regions::build(
+            &crate::engine::SchedulePermit::for_test(),
             storage,
             crate::RepresentationPolicy::StructuredThenDispatch,
             &mut budget,
         )
         .unwrap();
         let method = crate::p8_java::verify_method(
+            &crate::engine::SchedulePermit::for_test(),
             &input,
             &catalog,
             planned,

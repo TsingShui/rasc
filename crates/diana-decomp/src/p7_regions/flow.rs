@@ -1,5 +1,5 @@
-use crate::p2_flow::normal::{BlockId, EdgeId, Terminal};
-use crate::p6_variables::normal::StorageBody;
+use crate::p2_flow::{BlockId, EdgeId, Terminal};
+use crate::p6_variables::StorageBody;
 use crate::substrate::owned::push;
 use crate::{MethodBudget, RequestError};
 

@@ -3,8 +3,8 @@ use super::{
     flow::{Flow, Transfer},
     normal, verify,
 };
-use crate::p2_flow::normal::{BlockId, MethodFrame, Op, Terminal};
-use crate::p6_variables::normal::StorageBody;
+use crate::p2_flow::{BlockId, MethodFrame, Op, Terminal};
+use crate::p6_variables::StorageBody;
 use crate::substrate::owned::push;
 use crate::{MethodBudget, RepresentationPolicy, RequestError};
 
@@ -85,6 +85,15 @@ fn diamond(
     Ok(Some(diamond))
 }
 pub(crate) fn build<'a>(
+    _schedule: &crate::engine::SchedulePermit,
+    storage: StorageBody<'a>,
+    policy: RepresentationPolicy,
+    budget: &mut MethodBudget<'_, '_>,
+) -> Result<PlannedBody<'a>, RequestError> {
+    build_impl(storage, policy, budget)
+}
+
+fn build_impl<'a>(
     storage: StorageBody<'a>,
     policy: RepresentationPolicy,
     budget: &mut MethodBudget<'_, '_>,

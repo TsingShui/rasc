@@ -1,8 +1,8 @@
 use super::normal::{Kind, UseConversion};
 use super::{BuiltinReference, IntRange};
-use crate::p2_flow::normal::CallId;
-use crate::p3_ssa::normal::{SsaBody, ValueId};
-use crate::p4_calls::{CallFormal, normal::CallEvidence};
+use crate::p2_flow::CallId;
+use crate::p3_ssa::{SsaBody, ValueId};
+use crate::p4_calls::{CallEvidence, CallFormal};
 use crate::substrate::owned::push;
 use crate::{MethodBudget, RequestError};
 
@@ -111,7 +111,7 @@ pub(crate) fn solve(
             "call lost declaration constraints",
         ))?;
         let bound = ssa.call(id)?;
-        let (receiver, values) = if site.kind == crate::p2_flow::normal::InvokeKind::Static {
+        let (receiver, values) = if site.kind == crate::p2_flow::InvokeKind::Static {
             (None, bound.inputs.as_slice())
         } else {
             let Some((&value, arguments)) = bound.inputs.split_first() else {
@@ -126,9 +126,9 @@ pub(crate) fn solve(
             };
             (
                 Some(TypedReceiver {
-                    identity: if site.target == crate::p2_flow::normal::CallTarget::Constructor {
+                    identity: if site.target == crate::p2_flow::CallTarget::Constructor {
                         ReceiverIdentity::Uninitialized
-                    } else if site.kind == crate::p2_flow::normal::InvokeKind::Super {
+                    } else if site.kind == crate::p2_flow::InvokeKind::Super {
                         if !is_this(ssa, value, budget)? {
                             return Ok(None);
                         }
@@ -193,8 +193,7 @@ pub(super) fn is_this(
 ) -> Result<bool, RequestError> {
     if !matches!(
         ssa.frame,
-        crate::p2_flow::normal::MethodFrame::Instance(_)
-            | crate::p2_flow::normal::MethodFrame::Constructor(_)
+        crate::p2_flow::MethodFrame::Instance(_) | crate::p2_flow::MethodFrame::Constructor(_)
     ) {
         return Ok(false);
     }
@@ -228,20 +227,20 @@ pub(super) fn is_this(
         }
         seen[index] = true;
         match ssa.values[index] {
-            crate::p3_ssa::normal::Definition::Parameter(0) => anchored = true,
-            crate::p3_ssa::normal::Definition::OpResult(id) => {
+            crate::p3_ssa::Definition::Parameter(0) => anchored = true,
+            crate::p3_ssa::Definition::OpResult(id) => {
                 let op = ssa.operation(id)?;
-                if !matches!(op.op, crate::p2_flow::normal::Op::Move(..)) {
+                if !matches!(op.op, crate::p2_flow::Op::Move(..)) {
                     return Ok(false);
                 }
                 push(&mut pending, op.input(0)?, budget)?;
             }
-            crate::p3_ssa::normal::Definition::Phi => {
+            crate::p3_ssa::Definition::Phi => {
                 let phi_index = phi_indices[index]
                     .ok_or(RequestError::InternalInvariant("this origin lost Phi"))?;
                 for &(_, source) in &ssa.phis[phi_index].inputs {
                     budget.charge_work(1)?;
-                    let crate::p3_ssa::normal::Sym::Value(source) = source else {
+                    let crate::p3_ssa::Sym::Value(source) = source else {
                         return Ok(false);
                     };
                     push(&mut pending, source, budget)?;

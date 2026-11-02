@@ -1,7 +1,8 @@
 use super::branch::{Assignment, Local, LocalId, copies};
 use crate::input::{MethodInput, RawPrintable};
-use crate::p6_variables::normal::StorageBody;
-use crate::pipeline::branch::{BlockId, EdgeId, Kind, Terminal};
+use crate::p2_flow::{BlockId, EdgeId, Terminal};
+use crate::p5_types::Kind;
+use crate::p6_variables::StorageBody;
 use crate::substrate::owned::{TextBuffer, copy_units, reserve};
 use crate::{EnvironmentId, MethodBudget, RequestError, VerifiedJavaMethod};
 
@@ -144,21 +145,18 @@ pub(super) fn verify(
     let expected_monitor = if flags & 0x20 == 0 {
         None
     } else if flags & 8 != 0 {
-        Some(crate::p2_flow::normal::MethodMonitor::DeclaringClass)
+        Some(crate::p2_flow::MethodMonitor::DeclaringClass)
     } else {
-        Some(crate::p2_flow::normal::MethodMonitor::This)
+        Some(crate::p2_flow::MethodMonitor::This)
     };
     if ssa.ssa.method_monitor != expected_monitor {
         return Err(RequestError::InternalInvariant(
             "method monitor changed original flags",
         ));
     }
-    let constructor = matches!(
-        ssa.ssa.frame,
-        crate::p2_flow::normal::MethodFrame::Constructor(_)
-    );
+    let constructor = matches!(ssa.ssa.frame, crate::p2_flow::MethodFrame::Constructor(_));
     if (!constructor
-        && (flags & 8 != 0) != matches!(ssa.ssa.frame, crate::p2_flow::normal::MethodFrame::Static))
+        && (flags & 8 != 0) != matches!(ssa.ssa.frame, crate::p2_flow::MethodFrame::Static))
         || if constructor {
             flags & !0x10007 != 0
                 || flags & 0x10000 == 0
@@ -259,7 +257,7 @@ pub(super) fn verify(
                 }
                 Terminal::ReturnVoid => {
                     if !outgoing.is_empty()
-                        || !matches!(ssa.ssa.result, crate::pipeline::branch::ResultType::Void)
+                        || !matches!(ssa.ssa.result, crate::p2_flow::ResultType::Void)
                     {
                         return Err(RequestError::InternalInvariant(
                             "void exit changed its original contract",

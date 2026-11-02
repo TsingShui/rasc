@@ -1,7 +1,7 @@
-use crate::p2_flow::normal::{MethodFrame, Op};
-use crate::p3_ssa::normal::{Definition, Sym, ValueId};
+use crate::p2_flow::{MethodFrame, Op};
+use crate::p3_ssa::{Definition, Sym, ValueId};
+use crate::p5_types::TypedBody;
 use crate::p5_types::initialization::{ChainArgument, ChainKind};
-use crate::p5_types::normal::TypedBody;
 use crate::{CodeUnitOffset, MethodBudget, RegisterId, RequestError};
 
 pub(crate) struct ConstructorEntry {
@@ -103,8 +103,7 @@ fn original_argument(
                 if inputs.len() != 1 {
                     return Ok(false);
                 }
-                let (crate::p3_ssa::normal::Incoming::EntrySeed, Sym::Value(source)) = inputs[0]
-                else {
+                let (crate::p3_ssa::Incoming::EntrySeed, Sym::Value(source)) = inputs[0] else {
                     return Ok(false);
                 };
                 value = source;
@@ -177,7 +176,7 @@ pub(super) fn prove(
                 crate::raw::instruction_layout(raw.instructions(), prefix.pc, raw.version())
                     .map_err(crate::input::MethodError::Decode)?;
             let kind = typed.kinds[ix(result.0)?].ok_or_else(broken)?;
-            if !matches!(layout.kind(),crate::raw::LayoutKind::Instruction(spec) if if is_this { matches!(spec.opcode,7..=9) } else if matches!(kind, crate::p5_types::normal::Kind::Long | crate::p5_types::normal::Kind::Double) { matches!(spec.opcode,4..=6) } else if matches!(kind, crate::p5_types::normal::Kind::Int | crate::p5_types::normal::Kind::Boolean | crate::p5_types::normal::Kind::Float) { matches!(spec.opcode,1..=3) } else { matches!(spec.opcode,7..=9) })
+            if !matches!(layout.kind(),crate::raw::LayoutKind::Instruction(spec) if if is_this { matches!(spec.opcode,7..=9) } else if matches!(kind, crate::p5_types::Kind::Long | crate::p5_types::Kind::Double) { matches!(spec.opcode,4..=6) } else if matches!(kind, crate::p5_types::Kind::Int | crate::p5_types::Kind::Boolean | crate::p5_types::Kind::Float) { matches!(spec.opcode,1..=3) } else { matches!(spec.opcode,7..=9) })
             {
                 return Err(RequestError::InitializationUnavailable { pc: prefix.pc });
             }

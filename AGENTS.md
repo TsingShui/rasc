@@ -72,8 +72,10 @@ completion still requires its fixed acceptance evidence, never empty scaffolds.
 Before changing an engine capability, contributors MUST read
 [DESIGN §4](docs/diana/DESIGN.md#4-phases-products-and-actual-order) and the owning
 [ALGORITHMS](docs/diana/ALGORITHMS.md) sections. The batch record MUST identify the owning phase,
-actual producer/consumer, invariant and existing independent evidence. When an
-implementation would contradict those contracts, contributors MUST stop the
+actual producer/consumer, invariant and existing independent evidence. Before
+implementation, contributors MUST also identify the consumed facts, their full or
+partial guarantees, and the classified failure/resource/cancellation behavior.
+When an implementation would contradict those contracts, contributors MUST stop the
 affected change and request a decision rather than weaken the design or add a
 bypass.
 
@@ -81,6 +83,19 @@ bypass.
   P3 SSA → P4 declaration constraints/evidence → P5 types/use conversions →
   P6 storage/copies → P7 regions → P8 Java verification. P9 MUST render existing
   products and original facts without further analysis.
+- Contributors MUST follow [DESIGN §4.1](docs/diana/DESIGN.md#41-stage-interface-authority)
+  when exposing stage entries, implementation modules and product views. A
+  read-only product or a passing behavior test does not establish phase ownership.
+- Before widening a phase's input access, module exports or product-construction
+  authority, contributors MUST obtain operator approval. The same approval is
+  required before adding an analysis-construction entry callable from outside its
+  owning phase or changing the phase-ownership or scheduling contract. Contributors MUST present
+  the producer/consumer need and the proposed interface change before editing it.
+- Contributors MUST NOT work around a missing producer or an access restriction
+  by widening visibility, forwarding internal implementations through another
+  module, adding an alternate analysis route or weakening a sealed product.
+  Contributors MUST stop the affected change and request a decision when the
+  capability cannot be implemented within the existing contract.
 - Contributors MUST put calls, fields, arrays, casts, allocation and fill into
   common operation, definition/use and effect products. Initialization and
   FreshArray proofs MUST consume those products in their owning phases, not

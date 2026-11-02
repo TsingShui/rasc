@@ -1,5 +1,5 @@
 use crate::input::RawMethodView;
-use crate::p2_flow::normal::{
+use crate::p2_flow::{
     Block, BlockId, CallId, CallSite, DeclarationType, Edge, EdgeId, FlowBody, Op, OpId,
     ResultType, Switch, destination, terminal_other, terminal_register,
 };
@@ -58,15 +58,15 @@ pub(crate) struct BoundBlock {
 }
 crate::substrate::checked::checked_product!(SsaBody, SsaBodyData);
 pub(crate) struct SsaBodyData<'a> {
-    pub object_creations: Vec<crate::p2_flow::normal::ObjectCreation>,
-    pub array_creations: Vec<crate::p2_flow::normal::ArrayCreation>,
-    pub filled_arrays: Vec<crate::p2_flow::normal::FilledArraySite>,
-    pub fresh_fills: Vec<crate::p2_flow::normal::FreshFillSite>,
-    pub empty_fills: Vec<crate::p2_flow::normal::EmptyFillSite>,
-    pub casts: Vec<crate::p2_flow::normal::CastSite>,
-    pub strings: Vec<crate::p2_flow::normal::StringLiteral<'a>>,
-    pub frame: crate::p2_flow::normal::MethodFrame,
-    pub method_monitor: Option<crate::p2_flow::normal::MethodMonitor>,
+    pub object_creations: Vec<crate::p2_flow::ObjectCreation>,
+    pub array_creations: Vec<crate::p2_flow::ArrayCreation>,
+    pub filled_arrays: Vec<crate::p2_flow::FilledArraySite>,
+    pub fresh_fills: Vec<crate::p2_flow::FreshFillSite>,
+    pub empty_fills: Vec<crate::p2_flow::EmptyFillSite>,
+    pub casts: Vec<crate::p2_flow::CastSite>,
+    pub strings: Vec<crate::p2_flow::StringLiteral<'a>>,
+    pub frame: crate::p2_flow::MethodFrame,
+    pub method_monitor: Option<crate::p2_flow::MethodMonitor>,
     _sealed: (),
     pub switches: Vec<Switch>,
     pub calls: Vec<CallSite>,
@@ -171,11 +171,11 @@ pub(super) fn commit(
     env: &mut Vec<(RegisterId, Sym)>,
     register: RegisterId,
     value: ValueId,
-    width: crate::p2_flow::normal::ValueWidth,
+    width: crate::p2_flow::ValueWidth,
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<(), RequestError> {
     write(env, register, Sym::Value(value), budget)?;
-    if width == crate::p2_flow::normal::ValueWidth::Two {
+    if width == crate::p2_flow::ValueWidth::Two {
         write(
             env,
             super::word_ownership::high(register)?,
@@ -248,7 +248,7 @@ pub(super) struct EntrySeeds {
 }
 pub(super) fn seed_parameters(
     count: usize,
-    width: impl Fn(usize) -> crate::p2_flow::normal::ValueWidth,
+    width: impl Fn(usize) -> crate::p2_flow::ValueWidth,
     registers: u16,
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<EntrySeeds, RequestError> {
@@ -285,9 +285,9 @@ pub(super) fn seed_parameters(
     Ok(EntrySeeds { values, env: seeds })
 }
 pub(super) fn bind_inputs(
-    operation: crate::p2_flow::normal::Operation,
+    operation: crate::p2_flow::Operation,
     calls: &[CallSite],
-    filled: &[crate::p2_flow::normal::FilledArraySite],
+    filled: &[crate::p2_flow::FilledArraySite],
     env: &[(RegisterId, Sym)],
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<Vec<ValueId>, RequestError> {
@@ -303,7 +303,7 @@ pub(super) fn bind_inputs(
     Ok(inputs)
 }
 pub(super) fn define_result(
-    operation: crate::p2_flow::normal::Operation,
+    operation: crate::p2_flow::Operation,
     calls: &[CallSite],
     env: &mut Vec<(RegisterId, Sym)>,
     values: &mut Vec<Definition>,
@@ -333,6 +333,14 @@ pub(super) fn define_result(
     }
 }
 pub(crate) fn build<'a>(
+    _schedule: &crate::engine::SchedulePermit,
+    flow: FlowBody<'a>,
+    budget: &mut MethodBudget<'_, '_>,
+) -> Result<SsaBody<'a>, RequestError> {
+    build_impl(flow, budget)
+}
+
+fn build_impl<'a>(
     flow: FlowBody<'a>,
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<SsaBody<'a>, RequestError> {
@@ -356,7 +364,7 @@ pub(crate) fn build<'a>(
                     }
                 }
             }
-            if matches!(block.terminal, crate::p2_flow::normal::Terminal::Throw(_)) {
+            if matches!(block.terminal, crate::p2_flow::Terminal::Throw(_)) {
                 for edge in &flow.exception_edges {
                     budget.charge_work(1)?;
                     if ix(edge.source.0)? == index && edge.pc == block.terminal_pc {
@@ -513,7 +521,7 @@ pub(crate) fn build<'a>(
             )?;
             push(&mut ops, operation.id, budget)?;
         }
-        if matches!(block.terminal, crate::p2_flow::normal::Terminal::Throw(_)) {
+        if matches!(block.terminal, crate::p2_flow::Terminal::Throw(_)) {
             capture_exceptional(
                 &flow,
                 &live,
@@ -816,7 +824,7 @@ fn verify(
                 }
             }
         }
-        if matches!(block.terminal, crate::p2_flow::normal::Terminal::Throw(_)) {
+        if matches!(block.terminal, crate::p2_flow::Terminal::Throw(_)) {
             verify_exceptional_inputs(ssa, block_id, block.terminal_pc, &env, budget)?;
         }
         for (register, actual) in [
@@ -942,7 +950,7 @@ pub(super) fn verify_call_words(
     for (&argument, width) in site.arguments.iter().zip(&site.widths) {
         budget.charge_work(1)?;
         if site.registers.get(word) != Some(&argument)
-            || *width == crate::p2_flow::normal::ValueWidth::Two
+            || *width == crate::p2_flow::ValueWidth::Two
                 && word
                     .checked_add(1)
                     .and_then(|index| site.registers.get(index))
@@ -954,7 +962,7 @@ pub(super) fn verify_call_words(
             ));
         }
         word = word
-            .checked_add(if *width == crate::p2_flow::normal::ValueWidth::Two {
+            .checked_add(if *width == crate::p2_flow::ValueWidth::Two {
                 2
             } else {
                 1
@@ -981,7 +989,7 @@ fn verify_call(
         .ok_or(RequestError::InternalInvariant("call has foreign identity"))?;
     let original = instruction_layout(ssa.raw.instructions(), pc, ssa.raw.version())
         .map_err(crate::input::MethodError::Decode)?;
-    if !matches!(original.kind(),LayoutKind::Instruction(spec) if crate::p2_flow::normal::InvokeKind::from_opcode(spec.opcode) == Some(site.kind))
+    if !matches!(original.kind(),LayoutKind::Instruction(spec) if crate::p2_flow::InvokeKind::from_opcode(spec.opcode) == Some(site.kind))
         || !matches!(original.references()[0],Some(reference) if reference.target==crate::raw::OperandReference::Method(site.reference))
     {
         return Err(RequestError::InternalInvariant(
@@ -1004,10 +1012,10 @@ fn verify_call(
             crate::input::operands::instruction_operands(ssa.raw.instructions(), result_pc, result)
                 .map_err(crate::input::MethodError::Decode)?;
         let expected = match site.result {
-            crate::p2_flow::normal::InvokeResult::Word(_) => Some(0x0a),
-            crate::p2_flow::normal::InvokeResult::Reference(_) => Some(0x0c),
-            crate::p2_flow::normal::InvokeResult::Wide(_) => Some(0x0b),
-            crate::p2_flow::normal::InvokeResult::Void => None,
+            crate::p2_flow::InvokeResult::Word(_) => Some(0x0a),
+            crate::p2_flow::InvokeResult::Reference(_) => Some(0x0c),
+            crate::p2_flow::InvokeResult::Wide(_) => Some(0x0b),
+            crate::p2_flow::InvokeResult::Void => None,
         };
         if !matches!(result.kind(),LayoutKind::Instruction(spec) if Some(spec.opcode)==expected)
             || operands.registers().iter().next() != destination

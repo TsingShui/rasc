@@ -1,6 +1,6 @@
 use crate::input::protection::CatchType;
-use crate::p2_flow::normal::{BlockId, Terminal};
-use crate::p6_variables::normal::StorageBody;
+use crate::p2_flow::{BlockId, Terminal};
+use crate::p6_variables::StorageBody;
 use crate::substrate::owned::push;
 use crate::{MethodBudget, RequestError};
 
@@ -135,7 +135,15 @@ pub(crate) fn blocks(
     Ok(result)
 }
 
-pub(crate) fn build(
+#[cfg(test)]
+pub(crate) fn build_for_test(
+    storage: &crate::p6_variables::StorageBody<'_>,
+    budget: &mut MethodBudget<'_, '_>,
+) -> Result<Option<Protection>, RequestError> {
+    build(storage, budget)
+}
+
+pub(super) fn build(
     storage: &StorageBody<'_>,
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<Option<Protection>, RequestError> {
@@ -226,7 +234,7 @@ fn check(
         push(&mut visited, false, budget)?;
     }
     let mut contexts: Vec<Vec<Clause>> = Vec::new();
-    let mut locks: Vec<Vec<crate::p2_flow::normal::OpId>> = Vec::new();
+    let mut locks: Vec<Vec<crate::p2_flow::OpId>> = Vec::new();
     push(&mut locks, Vec::new(), budget)?;
     let mut depths = Vec::new();
     push(&mut depths, 0u8, budget)?;
@@ -443,10 +451,7 @@ fn check(
                     (op.kind.effects().may_throw
                         && !matches!(
                             op.kind,
-                            crate::p2_flow::normal::Op::Monitor(
-                                crate::p2_flow::normal::MonitorKind::Exit,
-                                _
-                            )
+                            crate::p2_flow::Op::Monitor(crate::p2_flow::MonitorKind::Exit, _)
                         ))
                     .then_some(op.pc)
                 })

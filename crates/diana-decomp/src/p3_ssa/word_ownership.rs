@@ -1,5 +1,5 @@
 use super::normal::{Definition, Incoming, SsaBody, Sym, ValueId, lookup, value};
-use crate::p2_flow::normal::{ValueWidth, terminal_register};
+use crate::p2_flow::{ValueWidth, terminal_register};
 use crate::substrate::owned::push;
 use crate::{CodeUnitOffset, MethodBudget, RegisterId, RequestError};
 
@@ -186,7 +186,7 @@ impl WidthFacts {
 pub(super) fn terminal_width(ssa: &SsaBody<'_>, block: usize) -> ValueWidth {
     if matches!(
         ssa.blocks[block].terminal,
-        crate::p2_flow::normal::Terminal::Return(_)
+        crate::p2_flow::Terminal::Return(_)
     ) && terminal_register(ssa.blocks[block].terminal).is_some()
     {
         ssa.result.width()

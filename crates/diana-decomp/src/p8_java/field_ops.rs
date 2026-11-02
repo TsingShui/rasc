@@ -1,9 +1,9 @@
 use super::branch::{LocalId, ValueUse};
-use crate::p2_flow::normal::Op;
-use crate::p3_ssa::normal::BoundOp;
+use crate::p2_flow::Op;
+use crate::p3_ssa::BoundOp;
+use crate::p4_calls::FieldDeclaration;
 use crate::p4_calls::field_facts::{FieldAccess, FieldStorage, FieldUse};
-use crate::p4_calls::normal::FieldDeclaration;
-use crate::p5_types::normal::{FieldUse as TypedFieldUse, Kind, TypedBody};
+use crate::p5_types::{FieldUse as TypedFieldUse, Kind, TypedBody};
 use crate::{FieldId, MethodBudget, RequestError};
 
 pub(crate) enum Receiver {

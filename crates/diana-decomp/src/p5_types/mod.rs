@@ -4,7 +4,10 @@ pub(crate) mod calls;
 mod declaration_types;
 pub(crate) mod entry_initialization;
 pub(crate) mod initialization;
-pub(crate) mod normal;
+mod normal;
+pub(crate) use normal::{
+    ArrayEvidence, ArrayReceiver, ArrayUse, FieldUse, Kind, TypedBody, UseConversion, solve,
+};
 pub(crate) mod numeric;
 mod primitive_stores;
 pub(crate) use crate::substrate::primitive_types::PrimitiveArray;

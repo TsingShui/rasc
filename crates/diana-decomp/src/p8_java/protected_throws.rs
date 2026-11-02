@@ -1,7 +1,7 @@
 use super::calls::SourceCalls;
 use crate::input::{MethodInput, protection::CatchType};
-use crate::p2_flow::normal::{BlockId, Terminal};
-use crate::p5_types::normal::{Kind, TypedBody};
+use crate::p2_flow::{BlockId, Terminal};
+use crate::p5_types::{Kind, TypedBody};
 use crate::substrate::owned::{copy_units, push};
 use crate::{CodeUnitOffset, DeclarationCatalog, MethodBudget, RequestError};
 
@@ -91,7 +91,7 @@ fn call_bounds<'a>(
         return Ok(&contract.declared_throws);
     }
     Ok(&typed
-        .contract(crate::p2_flow::normal::CallId(
+        .contract(crate::p2_flow::CallId(
             u32::try_from(index).map_err(|_| RequestError::PlatformCapacity)?,
         ))?
         .declared_throws)

@@ -1,5 +1,5 @@
 use crate::p5_types::initialization::{ChainArgument, ChainKind};
-use crate::p6_variables::normal::StorageBody;
+use crate::p6_variables::StorageBody;
 use crate::{CodeUnitOffset, MethodBudget, RegisterId, RequestError};
 
 #[derive(Clone, Copy, Eq, PartialEq)]
@@ -107,7 +107,7 @@ pub(super) fn verify(
                 "constructor certificate lost chain",
             ))?;
     let index = usize::try_from(chain.call.0).map_err(|_| RequestError::PlatformCapacity)?;
-    let Some(crate::p4_calls::normal::CallEvidence::Constructor {
+    let Some(crate::p4_calls::CallEvidence::Constructor {
         facts: original, ..
     }) = storage.typed.bindings.get(index)
     else {

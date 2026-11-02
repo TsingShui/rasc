@@ -51,6 +51,9 @@ MUST NOT refresh it from actual output. Core tests cross public libraries and
 modules. Do not add CLI black-box tests, mechanical getter tests, or goldens for
 private IR, formatting or invocation counts. Optional beautification defaults off.
 
+The [stage-entry authority batch](batches/stage-entry-authority.md) records
+compiler-enforced construction-entry restrictions and preserved public results.
+
 ## 2. Order and completion definition
 
 The first chain is D009 (with D055/D059 rejection) → D001 fixed Phi/edge copy →

@@ -1,5 +1,5 @@
-use crate::p2_flow::normal::Op;
-use crate::p3_ssa::normal::{Definition, SsaBody, Sym};
+use crate::p2_flow::Op;
+use crate::p3_ssa::{Definition, SsaBody, Sym};
 use crate::substrate::owned::push;
 use crate::{MethodBudget, RequestError};
 
@@ -47,8 +47,8 @@ pub(crate) struct TypedBodyData<'a> {
     pub integral_bits: Vec<u8>,
     pub ranges: Vec<Option<crate::p5_types::IntRange>>,
     pub arrays: Vec<Option<ArrayEvidence>>,
-    pub bindings: Vec<crate::p4_calls::normal::CallEvidence>,
-    pub source_throws: Option<crate::p4_calls::normal::SourceThrows>,
+    pub bindings: Vec<crate::p4_calls::CallEvidence>,
+    pub source_throws: Option<crate::p4_calls::SourceThrows>,
     pub exceptions: Vec<crate::p4_calls::exceptions::ExceptionBinding>,
     pub call_uses: Vec<crate::p5_types::calls::CallUses>,
     pub cast_uses: Vec<Option<crate::p5_types::calls::TypedUse>>,
@@ -61,7 +61,7 @@ pub(crate) struct TypedBodyData<'a> {
     pub filled_arrays: Vec<FilledArrayUse>,
     pub fresh_fills: Vec<PrimitiveFillUse>,
 
-    pub field_declarations: Vec<Option<crate::p4_calls::normal::FieldEvidence>>,
+    pub field_declarations: Vec<Option<crate::p4_calls::FieldEvidence>>,
     pub field_uses: Vec<Option<FieldUse>>,
 }
 pub(crate) struct FilledArrayUse {
@@ -71,7 +71,7 @@ pub(crate) struct FilledArrayUse {
 }
 pub(crate) struct PrimitiveFillUse {
     _sealed: (),
-    pub array: crate::p3_ssa::normal::ValueId,
+    pub array: crate::p3_ssa::ValueId,
     pub component: super::PrimitiveArray,
 }
 pub(crate) enum FieldUse {
@@ -82,9 +82,9 @@ pub(crate) enum FieldUse {
 impl TypedBody<'_> {
     pub(crate) fn contract(
         &self,
-        id: crate::p2_flow::normal::CallId,
+        id: crate::p2_flow::CallId,
     ) -> Result<&crate::p4_calls::StaticContract, RequestError> {
-        crate::p4_calls::normal::contract(&self.ssa, &self.bindings, id)
+        crate::p4_calls::contract(&self.ssa, &self.bindings, id)
     }
 }
 #[derive(Clone, Copy, Eq, PartialEq)]
@@ -139,8 +139,17 @@ fn merge_range(
     }
 }
 pub(crate) fn solve<'a>(
+    _schedule: &crate::engine::SchedulePermit,
     input: &crate::input::MethodInput<'_, '_>,
-    resolved: crate::p4_calls::normal::ResolvedBody<'a>,
+    resolved: crate::p4_calls::ResolvedBody<'a>,
+    budget: &mut MethodBudget<'_, '_>,
+) -> Result<crate::substrate::outcome::Outcome<TypedBody<'a>>, RequestError> {
+    solve_impl(input, resolved, budget)
+}
+
+fn solve_impl<'a>(
+    input: &crate::input::MethodInput<'_, '_>,
+    resolved: crate::p4_calls::ResolvedBody<'a>,
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<crate::substrate::outcome::Outcome<TypedBody<'a>>, RequestError> {
     let resolved = resolved.into_data();
@@ -182,7 +191,7 @@ pub(crate) fn solve<'a>(
                 Op::DoubleBinary(..) => (0, None, Some(Kind::Double)),
                 Op::FloatBinary(..) => (0, None, Some(Kind::Float)),
                 Op::Unary(_, unary, _)
-                    if unary.signature().1 != crate::pipeline::scalar::ScalarType::Int =>
+                    if unary.signature().1 != crate::p2_flow::primitives::ScalarType::Int =>
                 {
                     (
                         0,
@@ -193,9 +202,9 @@ pub(crate) fn solve<'a>(
                 Op::Unary(_, unary, _) => (
                     7,
                     Some(match unary {
-                        crate::pipeline::scalar::Unary::Byte => super::Narrow::Byte.range(),
-                        crate::pipeline::scalar::Unary::Char => super::Narrow::Char.range(),
-                        crate::pipeline::scalar::Unary::Short => super::Narrow::Short.range(),
+                        crate::p2_flow::primitives::Unary::Byte => super::Narrow::Byte.range(),
+                        crate::p2_flow::primitives::Unary::Char => super::Narrow::Char.range(),
+                        crate::p2_flow::primitives::Unary::Short => super::Narrow::Short.range(),
                         _ => super::IntRange::ALL,
                     }),
                     Some(Kind::Int),
@@ -255,9 +264,9 @@ pub(crate) fn solve<'a>(
                 Op::Binary(
                     _,
                     _,
-                    crate::p2_flow::normal::Arithmetic::And
-                    | crate::p2_flow::normal::Arithmetic::Or
-                    | crate::p2_flow::normal::Arithmetic::Xor,
+                    crate::p2_flow::Arithmetic::And
+                    | crate::p2_flow::Arithmetic::Or
+                    | crate::p2_flow::Arithmetic::Xor,
                     _,
                 ) => (0, None, Some(Kind::Int)),
                 Op::FieldLoad(_, _, _, kind) | Op::StaticLoad(_, _, kind) => (
@@ -274,9 +283,9 @@ pub(crate) fn solve<'a>(
                 }
                 Op::Call(call, _) => {
                     let declaration = match ssa.calls[ix(call.0)?].result {
-                        crate::p2_flow::normal::InvokeResult::Word(kind)
-                        | crate::p2_flow::normal::InvokeResult::Wide(kind)
-                        | crate::p2_flow::normal::InvokeResult::Reference(Some(kind)) => kind,
+                        crate::p2_flow::InvokeResult::Word(kind)
+                        | crate::p2_flow::InvokeResult::Wide(kind)
+                        | crate::p2_flow::InvokeResult::Reference(Some(kind)) => kind,
                         _ => {
                             return Err(RequestError::InternalInvariant(
                                 "unsupported raw call result entered normal typing",
@@ -408,21 +417,21 @@ pub(crate) fn solve<'a>(
             };
             if !matches!(
                 arithmetic,
-                crate::p2_flow::normal::Arithmetic::And
-                    | crate::p2_flow::normal::Arithmetic::Or
-                    | crate::p2_flow::normal::Arithmetic::Xor
+                crate::p2_flow::Arithmetic::And
+                    | crate::p2_flow::Arithmetic::Or
+                    | crate::p2_flow::Arithmetic::Xor
             ) {
                 continue;
             }
             let left = integral_bits[ix(op.input(0)?.0)?];
             let right = match right {
-                crate::p2_flow::normal::Operand::Register(_) => integral_bits[ix(op.input(1)?.0)?],
-                crate::p2_flow::normal::Operand::Literal(0) => 1,
-                crate::p2_flow::normal::Operand::Literal(1) => 2,
-                crate::p2_flow::normal::Operand::Literal(_) => 4,
+                crate::p2_flow::Operand::Register(_) => integral_bits[ix(op.input(1)?.0)?],
+                crate::p2_flow::Operand::Literal(0) => 1,
+                crate::p2_flow::Operand::Literal(1) => 2,
+                crate::p2_flow::Operand::Literal(_) => 4,
             };
             let known = |bits: u8| bits != 0 && bits & 4 == 0;
-            let fact = if matches!(arithmetic, crate::p2_flow::normal::Arithmetic::And)
+            let fact = if matches!(arithmetic, crate::p2_flow::Arithmetic::And)
                 && (known(left) || known(right))
                 || known(left) && known(right)
             {
@@ -545,7 +554,7 @@ pub(crate) fn solve<'a>(
     };
     for (index, block) in ssa.blocks.iter().enumerate() {
         budget.charge_work(1)?;
-        if let crate::p2_flow::normal::Terminal::Test { opcode, .. } = block.terminal
+        if let crate::p2_flow::Terminal::Test { opcode, .. } = block.terminal
             && matches!(opcode, 0x34..=0x37 | 0x3a..=0x3d)
         {
             let value = ssa.bound[index]
@@ -608,7 +617,7 @@ pub(crate) fn solve<'a>(
     }
     for (index, block) in typed.0.ssa.blocks.iter().enumerate() {
         budget.charge_work(1)?;
-        let thrown = if matches!(block.terminal, crate::p2_flow::normal::Terminal::Throw(_)) {
+        let thrown = if matches!(block.terminal, crate::p2_flow::Terminal::Throw(_)) {
             let value = typed.ssa.bound[index]
                 .terminal
                 .ok_or(RequestError::InternalInvariant("typed throw lost value"))?;
@@ -628,7 +637,7 @@ pub(crate) fn solve<'a>(
             None
         };
         push(&mut typed.0.thrown_uses, thrown, budget)?;
-        if matches!(block.terminal, crate::p2_flow::normal::Terminal::Return(_)) {
+        if matches!(block.terminal, crate::p2_flow::Terminal::Return(_)) {
             let value = typed.ssa.bound[index]
                 .terminal
                 .ok_or(RequestError::InternalInvariant("typed return lost value"))?;
@@ -667,9 +676,9 @@ fn solve_arrays(
         };
         let component = match kinds[ix(op.input(0)?.0)?] {
             Some(Kind::PrimitiveArray(kind)) => kind.value_type(),
-            Some(Kind::ObjectArray) => crate::p2_flow::normal::DeclarationType::Object,
+            Some(Kind::ObjectArray) => crate::p2_flow::DeclarationType::Object,
             Some(Kind::ReferenceArray(key)) => {
-                crate::p2_flow::normal::ArrayKind::Reference(key).element_type(input, budget)?
+                crate::p2_flow::ArrayKind::Reference(key).element_type(input, budget)?
             }
             _ => return Ok(None),
         };
@@ -748,7 +757,7 @@ fn solve_arrays(
 
 fn solve_fields(
     ssa: &SsaBody<'_>,
-    declarations: &[Option<crate::p4_calls::normal::FieldEvidence>],
+    declarations: &[Option<crate::p4_calls::FieldEvidence>],
     kinds: &[Option<Kind>],
     bits: &[u8],
     budget: &mut MethodBudget<'_, '_>,
@@ -777,7 +786,7 @@ fn solve_fields(
                 "field constraints changed reference",
             ));
         }
-        let is_static = evidence.scope == crate::p4_calls::normal::FieldScope::Static;
+        let is_static = evidence.scope == crate::p4_calls::FieldScope::Static;
         if !is_static && kinds[ix(op.input(0)?.0)?] != Some(Kind::Nominal(evidence.owner)) {
             return Ok(None);
         }
@@ -797,7 +806,7 @@ fn solve_fields(
             let Some(conversion) = conversion else {
                 return Ok(None);
             };
-            if evidence.scope == crate::p4_calls::normal::FieldScope::ConstructorThis {
+            if evidence.scope == crate::p4_calls::FieldScope::ConstructorThis {
                 if !super::calls::is_this(ssa, op.input(0)?, budget)? {
                     return Err(RequestError::FieldBindingEvidenceMissing {
                         reference,
@@ -890,7 +899,7 @@ fn solve_filled_arrays(
             ));
         }
         // ART executes non-int primitive filled forms as runtime errors, not array initializers.
-        if matches!(site.component, crate::p2_flow::normal::ArrayKind::Primitive(kind) if kind != crate::p5_types::PrimitiveArray::Int)
+        if matches!(site.component, crate::p2_flow::ArrayKind::Primitive(kind) if kind != crate::p5_types::PrimitiveArray::Int)
         {
             return Ok(None);
         }
@@ -1054,9 +1063,9 @@ fn solve_new_arrays(
 
 fn return_use(
     typed: &TypedBody<'_>,
-    value: crate::p3_ssa::normal::ValueId,
+    value: crate::p3_ssa::ValueId,
 ) -> Result<Option<UseConversion>, RequestError> {
-    use crate::p2_flow::normal::{DeclarationType, ResultType};
+    use crate::p2_flow::{DeclarationType, ResultType};
     let index = ix(value.0)?;
     let ResultType::Value(result) = typed.ssa.result else {
         return Ok(None);

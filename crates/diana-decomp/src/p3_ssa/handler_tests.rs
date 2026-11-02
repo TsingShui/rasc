@@ -1,6 +1,6 @@
 use super::normal::{self, Definition, Incoming, Sym};
 use crate::input::{ProgramIndex, protection::CatchType};
-use crate::p2_flow::{normal as flow, protection::ExceptionEdgeId};
+use crate::p2_flow::{self as flow, protection::ExceptionEdgeId};
 use crate::{ClassDefId, CodeUnitOffset, FailureKind, Limits, MethodId, RegisterId, RunContext};
 
 #[test]
@@ -13,8 +13,19 @@ fn t16_ordered_catches_shared_handler_throw_and_wide_old_state() {
         let input = index
             .method_input(ClassDefId(0), MethodId(method), &mut budget)
             .unwrap();
-        let graph = flow::decode(&input, &mut budget).unwrap().unwrap();
-        let mut ssa = normal::build(graph, &mut budget).unwrap();
+        let graph = flow::decode(
+            &crate::engine::SchedulePermit::for_test(),
+            &input,
+            &mut budget,
+        )
+        .unwrap()
+        .unwrap();
+        let mut ssa = normal::build(
+            &crate::engine::SchedulePermit::for_test(),
+            graph,
+            &mut budget,
+        )
+        .unwrap();
         match method {
             6 => {
                 assert_eq!(ssa.exception_edges.len(), 3);
@@ -147,7 +158,15 @@ fn t16_protection_and_exception_ssa_charge_limits_and_check_cancellation() {
             .method_input(ClassDefId(0), MethodId(6), &mut setup)
             .unwrap();
         let graph = if ssa_stage {
-            Some(flow::decode(&input, &mut setup).unwrap().unwrap())
+            Some(
+                flow::decode(
+                    &crate::engine::SchedulePermit::for_test(),
+                    &input,
+                    &mut setup,
+                )
+                .unwrap()
+                .unwrap(),
+            )
         } else {
             None
         };
@@ -164,12 +183,20 @@ fn t16_protection_and_exception_ssa_charge_limits_and_check_cancellation() {
         let mut control = RunContext::new(limits, &cancelled);
         let mut budget = control.method_budget().unwrap();
         let error = if let Some(graph) = graph {
-            match normal::build(graph, &mut budget) {
+            match normal::build(
+                &crate::engine::SchedulePermit::for_test(),
+                graph,
+                &mut budget,
+            ) {
                 Err(error) => error,
                 Ok(_) => panic!("exception SSA ignored control"),
             }
         } else {
-            match flow::decode(&input, &mut budget) {
+            match flow::decode(
+                &crate::engine::SchedulePermit::for_test(),
+                &input,
+                &mut budget,
+            ) {
                 Err(error) => error,
                 Ok(_) => panic!("protection decoding ignored control"),
             }

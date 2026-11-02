@@ -1,14 +1,14 @@
+use crate::p6_variables::StorageBody;
 use crate::p6_variables::exceptional::{Ingress, Snapshot};
-use crate::p6_variables::normal::StorageBody;
 use crate::substrate::owned::push;
 use crate::{MethodBudget, RequestError};
 
 pub(super) fn exception_root(
-    typed: &crate::p5_types::normal::TypedBody<'_>,
-    value: crate::p3_ssa::normal::ValueId,
+    typed: &crate::p5_types::TypedBody<'_>,
+    value: crate::p3_ssa::ValueId,
     budget: &mut MethodBudget<'_, '_>,
-) -> Result<Option<crate::p2_flow::normal::BlockId>, RequestError> {
-    use crate::p3_ssa::normal::Definition;
+) -> Result<Option<crate::p2_flow::BlockId>, RequestError> {
+    use crate::p3_ssa::Definition;
     use crate::p5_types::reference_roots::Root;
     budget.charge_work(1)?;
     let Some(Root::Definition(root)) = typed.roots.one(value)? else {
@@ -30,7 +30,7 @@ pub(super) fn exception_root(
 
 pub(super) fn snapshots(
     placements: &[Placement<'_>],
-    block: crate::p2_flow::normal::BlockId,
+    block: crate::p2_flow::BlockId,
     pc: crate::CodeUnitOffset,
     statements: &mut Vec<super::calls::Statement>,
     budget: &mut MethodBudget<'_, '_>,
@@ -53,7 +53,7 @@ pub(super) fn snapshots(
 
 pub(super) fn placed_ingress<'a>(
     placements: &[Placement<'a>],
-    handler: crate::p2_flow::normal::BlockId,
+    handler: crate::p2_flow::BlockId,
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<&'a Ingress, RequestError> {
     for placement in placements {
@@ -71,7 +71,7 @@ pub(super) fn placed_ingress<'a>(
 
 pub(super) fn ingress<'a>(
     storage: &'a StorageBody<'_>,
-    handler: crate::p2_flow::normal::BlockId,
+    handler: crate::p2_flow::BlockId,
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<&'a Ingress, RequestError> {
     for ingress in &storage.exceptional.ingress {

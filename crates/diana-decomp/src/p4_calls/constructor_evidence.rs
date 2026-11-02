@@ -20,7 +20,7 @@ fn candidate(result: Result<ConstructorContract, RequestError>) -> Result<Candid
         Err(error) => Err(error),
     }
 }
-pub(crate) fn collect(
+pub(super) fn collect(
     input: &MethodInput<'_, '_>,
     catalog: &DeclarationCatalog,
     invocation: &super::throws::Invocation<'_>,

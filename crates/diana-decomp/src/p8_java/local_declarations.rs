@@ -1,5 +1,5 @@
-use crate::p5_types::normal::Kind;
-use crate::p6_variables::normal::{Initializer, Parameter, StorageBody};
+use crate::p5_types::Kind;
+use crate::p6_variables::{Initializer, Parameter, StorageBody};
 use crate::substrate::owned::push;
 use crate::{MethodBudget, RequestError};
 

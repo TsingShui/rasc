@@ -35,8 +35,8 @@ pub(crate) enum Unary {
     Complement,
     Cast(CastType),
 }
-pub(super) fn verify_unary(actual: Unary, original: crate::pipeline::scalar::Unary) -> bool {
-    use crate::pipeline::scalar::{ScalarType, Unary as Op};
+pub(super) fn verify_unary(actual: Unary, original: crate::p2_flow::primitives::Unary) -> bool {
+    use crate::p2_flow::primitives::{ScalarType, Unary as Op};
     matches!(
         (actual, original),
         (
@@ -78,8 +78,8 @@ pub(super) fn verify_unary(actual: Unary, original: crate::pipeline::scalar::Una
             )
     )
 }
-pub(super) fn unary(original: crate::pipeline::scalar::Unary) -> Unary {
-    use crate::pipeline::scalar::{ScalarType, Unary as Op};
+pub(super) fn unary(original: crate::p2_flow::primitives::Unary) -> Unary {
+    use crate::p2_flow::primitives::{ScalarType, Unary as Op};
     match original {
         Op::Neg | Op::NegLong | Op::NegFloat | Op::NegDouble => Unary::Negate,
         Op::Not | Op::NotLong => Unary::Complement,
@@ -132,7 +132,7 @@ impl Expression {
 }
 pub(super) fn comparison(
     left: ValueUse,
-    original: crate::pipeline::scalar::Compare,
+    original: crate::p2_flow::primitives::Compare,
     right: ValueUse,
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<Expression, RequestError> {
@@ -161,7 +161,7 @@ pub(super) fn comparison(
 }
 pub(super) fn verify(
     tree: &Expression,
-    original: crate::pipeline::scalar::Compare,
+    original: crate::p2_flow::primitives::Compare,
 ) -> Result<Option<(ValueUse, ValueUse)>, RequestError> {
     let Node::Conditional(less, negative, tail) = tree.node(tree.root)? else {
         return Ok(None);

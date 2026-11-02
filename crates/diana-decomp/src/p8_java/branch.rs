@@ -1,6 +1,7 @@
 use crate::input::MethodInput;
-use crate::p6_variables::normal::StorageBody;
-use crate::pipeline::branch::{BlockId, EdgeId, Op, TypedBody};
+use crate::p2_flow::{BlockId, EdgeId, Op};
+use crate::p5_types::TypedBody;
+use crate::p6_variables::StorageBody;
 use crate::substrate::owned::reserve;
 use crate::{EnvironmentId, MethodBudget, RequestError, VerifiedJavaMethod};
 
@@ -71,10 +72,10 @@ pub(super) fn copies(
 }
 pub(super) fn operation(
     typed: &TypedBody<'_>,
-    op: &crate::pipeline::branch::BoundOp,
+    op: &crate::p3_ssa::BoundOp,
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<Option<Assignment>, RequestError> {
-    use crate::p2_flow::normal::Operand;
+    use crate::p2_flow::Operand;
     let numeric = |index: usize| -> Result<ValueUse, RequestError> {
         let usage = typed
             .numeric_uses
@@ -166,6 +167,18 @@ pub(super) fn operation(
     }))
 }
 pub(crate) fn verify(
+    _schedule: &crate::engine::SchedulePermit,
+    input: &MethodInput<'_, '_>,
+    catalog: &crate::DeclarationCatalog,
+    plan: crate::p7_regions::PlannedBody<'_>,
+    chain: &super::constructor_graph::Proof<'_, '_, '_>,
+    environment: EnvironmentId,
+    budget: &mut MethodBudget<'_, '_>,
+) -> Result<crate::substrate::outcome::Outcome<VerifiedJavaMethod>, RequestError> {
+    verify_impl(input, catalog, plan, chain, environment, budget)
+}
+
+fn verify_impl(
     input: &MethodInput<'_, '_>,
     catalog: &crate::DeclarationCatalog,
     plan: crate::p7_regions::PlannedBody<'_>,

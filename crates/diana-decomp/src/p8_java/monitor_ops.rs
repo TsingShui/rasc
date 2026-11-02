@@ -1,8 +1,8 @@
 use super::branch::{LocalId, ValueUse};
 use super::calls::Statement;
-use crate::p2_flow::normal::{MonitorKind, Op, OpId};
-use crate::p3_ssa::normal::BoundOp;
-use crate::p5_types::normal::TypedBody;
+use crate::p2_flow::{MonitorKind, Op, OpId};
+use crate::p3_ssa::BoundOp;
+use crate::p5_types::TypedBody;
 use crate::p5_types::reference_roots::Root;
 use crate::{MethodBudget, RequestError};
 pub(super) fn lower(

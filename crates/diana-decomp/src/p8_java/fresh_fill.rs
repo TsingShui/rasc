@@ -1,8 +1,8 @@
 use super::branch::{LocalId, ValueUse};
-use crate::p2_flow::normal::{Op, OpId};
-use crate::p3_ssa::normal::BoundOp;
-use crate::p5_types::normal::{Kind, TypedBody};
-use crate::p6_variables::normal::StorageBody;
+use crate::p2_flow::{Op, OpId};
+use crate::p3_ssa::BoundOp;
+use crate::p5_types::{Kind, TypedBody};
+use crate::p6_variables::StorageBody;
 use crate::{CodeUnitOffset, MethodBudget, RequestError};
 
 pub(crate) enum Contents {
@@ -15,7 +15,7 @@ pub(crate) struct Allocation {
     pub base_type: String,
     pub trailing_dimensions: u32,
     pub reference: crate::TypeId,
-    pub component: crate::p2_flow::normal::ArrayKind,
+    pub component: crate::p2_flow::ArrayKind,
 }
 pub(crate) struct Fill {
     pub array: LocalId,
@@ -27,7 +27,7 @@ fn ix(value: u32) -> Result<usize, RequestError> {
     usize::try_from(value).map_err(|_| RequestError::PlatformCapacity)
 }
 fn spelling<'a>(
-    component: crate::p2_flow::normal::ArrayKind,
+    component: crate::p2_flow::ArrayKind,
     names: &'a super::types::TypeNames,
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<(&'a str, u32), RequestError> {
@@ -70,8 +70,7 @@ pub(super) fn validate(
         budget.charge_work(1)?;
         if matches!(
             component,
-            crate::p2_flow::normal::ArrayKind::Object
-                | crate::p2_flow::normal::ArrayKind::Reference(_)
+            crate::p2_flow::ArrayKind::Object | crate::p2_flow::ArrayKind::Reference(_)
         ) && !checked_java
         {
             if !crate::p4_calls::qualifier_available(input, catalog, &[106, 97, 118, 97], budget)? {
@@ -79,7 +78,7 @@ pub(super) fn validate(
             }
             checked_java = true;
         }
-        if crate::p2_flow::normal::ArrayKind::parse(input, reference, budget)? != Some(component) {
+        if crate::p2_flow::ArrayKind::parse(input, reference, budget)? != Some(component) {
             return Err(RequestError::InternalInvariant(
                 "array allocation changed original type",
             ));
@@ -272,7 +271,7 @@ pub(super) fn verify_allocation(
                     .ok_or(RequestError::InternalInvariant(
                         "filled certificate lost type",
                     ))?;
-            if matches!(site.component, crate::p2_flow::normal::ArrayKind::Primitive(kind) if kind != crate::p5_types::PrimitiveArray::Int)
+            if matches!(site.component, crate::p2_flow::ArrayKind::Primitive(kind) if kind != crate::p5_types::PrimitiveArray::Int)
             {
                 return Ok(false);
             }
@@ -319,7 +318,7 @@ pub(super) fn verify_allocation(
                 None
             };
             match result {
-                crate::p2_flow::normal::FilledResult::Stored { register, pc } => {
+                crate::p2_flow::FilledResult::Stored { register, pc } => {
                     let Some(result_layout) = following else { return Ok(false); };
                     if pc != next || op.result.map(|value| value.0) != Some(actual.result.0)
                         || !matches!(result_layout.kind(),crate::raw::LayoutKind::Instruction(spec) if spec.opcode == 0x0c)
@@ -329,7 +328,7 @@ pub(super) fn verify_allocation(
                     let mut registers = result_words.registers().iter();
                     if registers.next() != Some(register) || registers.next().is_some() { return Ok(false); }
                 }
-                crate::p2_flow::normal::FilledResult::Discarded => {
+                crate::p2_flow::FilledResult::Discarded => {
                     if op.result.is_some() || ix(actual.result.0)? < typed.ssa.values.len()
                         || following.is_some_and(|item| matches!(item.kind(),crate::raw::LayoutKind::Instruction(spec) if matches!(spec.opcode,0x0a..=0x0c))) {
                         return Ok(false);

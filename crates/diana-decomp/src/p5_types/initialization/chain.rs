@@ -1,6 +1,6 @@
 use super::{ChainArgument, ChainInitialization, ChainKind, InitializationId, UninitAlias};
-use crate::p2_flow::normal::{BlockId, CallTarget, MethodFrame, Op};
-use crate::p3_ssa::normal::{Definition, SsaBody, Sym, ValueId};
+use crate::p2_flow::{BlockId, CallTarget, MethodFrame, Op};
+use crate::p3_ssa::{Definition, SsaBody, Sym, ValueId};
 use crate::substrate::owned::push;
 use crate::{MethodBudget, RequestError};
 
@@ -66,8 +66,7 @@ pub(super) fn solve(
         budget.charge_work(1)?;
         phis[ix(phi.result.0)?] = Some(index);
         if phi.block == BlockId(0)
-            && phi.inputs.as_slice()
-                == [(crate::p3_ssa::normal::Incoming::EntrySeed, Sym::Value(root))]
+            && phi.inputs.as_slice() == [(crate::p3_ssa::Incoming::EntrySeed, Sym::Value(root))]
         {
             deferred[ix(phi.result.0)?] = Some(InitializationId::This);
             push(&mut aliases, UninitAlias(phi.result), budget)?;

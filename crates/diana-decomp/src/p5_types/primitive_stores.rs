@@ -1,7 +1,7 @@
 use super::normal::{Kind, UseConversion};
 use crate::RequestError;
-use crate::p2_flow::normal::DeclarationType;
-use crate::p3_ssa::normal::{SsaBody, ValueId};
+use crate::p2_flow::DeclarationType;
+use crate::p3_ssa::{SsaBody, ValueId};
 
 pub(super) fn view(
     ssa: &SsaBody<'_>,

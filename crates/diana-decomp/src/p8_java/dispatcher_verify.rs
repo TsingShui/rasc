@@ -1,7 +1,9 @@
 use super::branch::{Assignment, Expression, LocalId, Right};
 use super::dispatcher::{Dispatcher, Edge, Transfer};
+use crate::p2_flow::{BlockId, EdgeId, Op, Terminal};
+use crate::p3_ssa::{Definition, Sym};
+use crate::p5_types::{Kind, TypedBody};
 use crate::p6_variables::{Copy, CopyPlan, LocalType, Temporary};
-use crate::pipeline::branch::{BlockId, Definition, EdgeId, Kind, Op, Sym, Terminal, TypedBody};
 use crate::substrate::owned::reserve;
 use crate::{MethodBudget, RequestError};
 fn ix(id: u32) -> Result<usize, RequestError> {
@@ -16,11 +18,11 @@ fn push<T>(
     items.push(item);
     Ok(())
 }
-use crate::p6_variables::normal::local_type as ty;
+use crate::p6_variables::local_type as ty;
 pub(super) fn numeric_view(
     typed: &TypedBody<'_>,
     actual: super::branch::ValueUse,
-    source: Option<&crate::p3_ssa::normal::ValueId>,
+    source: Option<&crate::p3_ssa::ValueId>,
     expected: Kind,
 ) -> Result<bool, RequestError> {
     let Some(source) = source else {
@@ -64,9 +66,9 @@ pub(super) fn numeric_view(
 fn same_expression(
     typed: &TypedBody<'_>,
     actual: &Expression,
-    bound: &crate::pipeline::branch::BoundOp,
+    bound: &crate::p3_ssa::BoundOp,
 ) -> Result<bool, RequestError> {
-    use crate::p2_flow::normal::Operand;
+    use crate::p2_flow::Operand;
     let left = bound.inputs.first();
     let right = bound.inputs.get(1);
     let required = |index| {
@@ -134,7 +136,7 @@ fn same_expression(
 pub(super) fn call_argument(
     ssa: &TypedBody<'_>,
     view: super::branch::ValueUse,
-    value: crate::p3_ssa::normal::ValueId,
+    value: crate::p3_ssa::ValueId,
     formal: crate::p4_calls::CallFormal,
 ) -> Result<bool, RequestError> {
     use super::branch::ValueUse;
@@ -199,7 +201,7 @@ pub(super) fn call_argument(
 }
 fn static_call(
     ssa: &TypedBody<'_>,
-    id: crate::pipeline::branch::CallId,
+    id: crate::p2_flow::CallId,
     actual: &super::calls::StaticCall,
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<bool, RequestError> {
@@ -278,8 +280,8 @@ fn copies(
                 budget.charge_work(1)?;
                 if edge
                     == incoming.map_or(
-                        crate::p3_ssa::normal::Incoming::EntrySeed,
-                        crate::p3_ssa::normal::Incoming::Normal,
+                        crate::p3_ssa::Incoming::EntrySeed,
+                        crate::p3_ssa::Incoming::Normal,
                     )
                 {
                     if source.is_some() {
@@ -371,7 +373,7 @@ fn edge(
 }
 
 pub(super) fn snapshot_copies(
-    storage: &crate::p6_variables::normal::StorageBody<'_>,
+    storage: &crate::p6_variables::StorageBody<'_>,
     block: BlockId,
     pc: crate::CodeUnitOffset,
     statements: &[super::calls::Statement],
@@ -396,7 +398,7 @@ pub(super) fn snapshot_copies(
 
 pub(super) fn verify(
     input: &crate::input::MethodInput<'_, '_>,
-    storage: &crate::p6_variables::normal::StorageBody<'_>,
+    storage: &crate::p6_variables::StorageBody<'_>,
     body: &Dispatcher,
     names: &super::types::TypeNames,
     budget: &mut MethodBudget<'_, '_>,
@@ -441,24 +443,20 @@ pub(super) fn verify(
             }
             let parameter = match ssa.ssa.values[index] {
                 Definition::Parameter(parameter) => Some(match ssa.ssa.frame {
-                    crate::p2_flow::normal::MethodFrame::Static => {
-                        crate::p6_variables::normal::Parameter::Explicit(parameter)
+                    crate::p2_flow::MethodFrame::Static => {
+                        crate::p6_variables::Parameter::Explicit(parameter)
                     }
-                    crate::p2_flow::normal::MethodFrame::Instance(_)
-                    | crate::p2_flow::normal::MethodFrame::Constructor(_)
+                    crate::p2_flow::MethodFrame::Instance(_)
+                    | crate::p2_flow::MethodFrame::Constructor(_)
                         if parameter == 0 =>
                     {
-                        crate::p6_variables::normal::Parameter::This
+                        crate::p6_variables::Parameter::This
                     }
-                    crate::p2_flow::normal::MethodFrame::Instance(_)
-                    | crate::p2_flow::normal::MethodFrame::Constructor(_) => {
-                        crate::p6_variables::normal::Parameter::Explicit(
-                            parameter
-                                .checked_sub(1)
-                                .ok_or(RequestError::InternalInvariant(
-                                    "source receiver frame underflow",
-                                ))?,
-                        )
+                    crate::p2_flow::MethodFrame::Instance(_)
+                    | crate::p2_flow::MethodFrame::Constructor(_) => {
+                        crate::p6_variables::Parameter::Explicit(parameter.checked_sub(1).ok_or(
+                            RequestError::InternalInvariant("source receiver frame underflow"),
+                        )?)
                     }
                 }),
                 _ => None,
@@ -467,13 +465,13 @@ pub(super) fn verify(
                 == Some(&Some(
                     crate::p5_types::initialization::InitializationId::This,
                 )) {
-                crate::p6_variables::normal::Initializer::ThisAfterChain
+                crate::p6_variables::Initializer::ThisAfterChain
             } else if let Some(parameter) = parameter {
-                crate::p6_variables::normal::Initializer::Parameter(parameter)
+                crate::p6_variables::Initializer::Parameter(parameter)
             } else if let Some(Some(id)) = ssa.initializations.deferred.get(index) {
-                crate::p6_variables::normal::Initializer::Deferred(*id)
+                crate::p6_variables::Initializer::Deferred(*id)
             } else {
-                crate::p6_variables::normal::Initializer::Default
+                crate::p6_variables::Initializer::Default
             };
             if local.initializer != initializer {
                 return Err(RequestError::InternalInvariant(
@@ -485,14 +483,14 @@ pub(super) fn verify(
             let proof = &storage.empty_fills[index - ssa.ssa.values.len()];
             if proof.result != local.id
                 || local.kind != Kind::Int
-                || local.initializer != crate::p6_variables::normal::Initializer::Default
+                || local.initializer != crate::p6_variables::Initializer::Default
             {
                 return Err(RequestError::InternalInvariant(
                     "LengthOnly changed storage",
                 ));
             }
             push(&mut types, ty(local.kind)?, budget)?;
-        } else if local.initializer != crate::p6_variables::normal::Initializer::Default {
+        } else if local.initializer != crate::p6_variables::Initializer::Default {
             return Err(RequestError::InternalInvariant(
                 "copy temporary became a parameter",
             ));
@@ -788,7 +786,7 @@ pub(super) fn verify(
                     ));
                 }
                 if !outgoing.is_empty()
-                    || !matches!(ssa.ssa.result, crate::pipeline::branch::ResultType::Void)
+                    || !matches!(ssa.ssa.result, crate::p2_flow::ResultType::Void)
                     || ssa.ssa.bound[index].terminal.is_some()
                 {
                     return Err(RequestError::InternalInvariant(
@@ -844,7 +842,7 @@ pub(super) fn verify(
                 edge(ssa, body, default, outgoing[cases.len()], &types, budget)?;
             }
             (Transfer::Return(actual), Terminal::Return(_)) => {
-                let crate::pipeline::branch::ResultType::Value(result) = ssa.ssa.result else {
+                let crate::p2_flow::ResultType::Value(result) = ssa.ssa.result else {
                     return Err(RequestError::InternalInvariant(
                         "value return certificate has void descriptor",
                     ));
@@ -858,10 +856,10 @@ pub(super) fn verify(
                             ValueUse::NullAssignment(_) | ValueUse::ObjectArrayView(_) => false,
                             ValueUse::Null { kind, .. } => {
                                 let declared = match result {
-                                    crate::pipeline::branch::DeclarationType::Object => {
+                                    crate::p2_flow::DeclarationType::Object => {
                                         Some(crate::p5_types::BuiltinReference::Object)
                                     }
-                                    crate::pipeline::branch::DeclarationType::String => {
+                                    crate::p2_flow::DeclarationType::String => {
                                         Some(crate::p5_types::BuiltinReference::String)
                                     }
                                     _ => None,
@@ -879,7 +877,7 @@ pub(super) fn verify(
                                 )?
                             }
                             ValueUse::UpcastObject(_) => {
-                                matches!(result, crate::pipeline::branch::DeclarationType::Object)
+                                matches!(result, crate::p2_flow::DeclarationType::Object)
                                     && matches!(
                                         ssa.kinds[at],
                                         Some(
@@ -895,24 +893,18 @@ pub(super) fn verify(
                             ValueUse::Direct(_) => {
                                 matches!(
                                     result,
-                                    crate::pipeline::branch::DeclarationType::Int
-                                        | crate::pipeline::branch::DeclarationType::Float
-                                        | crate::pipeline::branch::DeclarationType::Long
-                                        | crate::pipeline::branch::DeclarationType::Double
-                                        | crate::pipeline::branch::DeclarationType::Boolean
-                                        | crate::pipeline::branch::DeclarationType::Object
-                                        | crate::pipeline::branch::DeclarationType::String
-                                        | crate::pipeline::branch::DeclarationType::Nominal(_)
-                                        | crate::pipeline::branch::DeclarationType::ReferenceArray(
-                                            _
-                                        )
-                                        | crate::pipeline::branch::DeclarationType::ProjectedNominal(
-                                            _
-                                        )
-                                        | crate::pipeline::branch::DeclarationType::PrimitiveArray(
-                                            _
-                                        )
-                                        | crate::pipeline::branch::DeclarationType::ObjectArray
+                                    crate::p2_flow::DeclarationType::Int
+                                        | crate::p2_flow::DeclarationType::Float
+                                        | crate::p2_flow::DeclarationType::Long
+                                        | crate::p2_flow::DeclarationType::Double
+                                        | crate::p2_flow::DeclarationType::Boolean
+                                        | crate::p2_flow::DeclarationType::Object
+                                        | crate::p2_flow::DeclarationType::String
+                                        | crate::p2_flow::DeclarationType::Nominal(_)
+                                        | crate::p2_flow::DeclarationType::ReferenceArray(_)
+                                        | crate::p2_flow::DeclarationType::ProjectedNominal(_)
+                                        | crate::p2_flow::DeclarationType::PrimitiveArray(_)
+                                        | crate::p2_flow::DeclarationType::ObjectArray
                                 ) && ssa.kinds[at] == Some(result.kind())
                             }
                             ValueUse::Narrow { kind, .. } => {
@@ -924,16 +916,16 @@ pub(super) fn verify(
                                 } else {
                                     range
                                 };
-                                matches!(result,crate::pipeline::branch::DeclarationType::Narrow(declared) if declared==*kind)
+                                matches!(result,crate::p2_flow::DeclarationType::Narrow(declared) if declared==*kind)
                                     && ssa.kinds[at] == Some(Kind::Int)
                                     && range.is_some_and(|range| range.within(kind.range()))
                             }
                             ValueUse::BooleanWord(_) => {
-                                matches!(result, crate::pipeline::branch::DeclarationType::Int)
+                                matches!(result, crate::p2_flow::DeclarationType::Int)
                                     && ssa.kinds[at] == Some(Kind::Boolean)
                             }
                             ValueUse::Boolean01(_) => {
-                                matches!(result, crate::pipeline::branch::DeclarationType::Boolean)
+                                matches!(result, crate::p2_flow::DeclarationType::Boolean)
                                     && ssa.kinds[at] == Some(Kind::Int)
                                     && ssa.integral_bits[at] != 0
                                     && ssa.integral_bits[at] & 4 == 0

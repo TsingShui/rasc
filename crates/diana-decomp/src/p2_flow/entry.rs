@@ -29,6 +29,16 @@ pub(crate) struct EntryWindowData<'a> {
     pub calls: Vec<CallSite>,
 }
 pub(crate) fn decode<'a>(
+    _schedule: &crate::engine::SchedulePermit,
+    index: &ProgramIndex<'a>,
+    class: ClassDefId,
+    method: MethodId,
+    budget: &mut MethodBudget<'_, '_>,
+) -> Result<Option<EntryWindow<'a>>, RequestError> {
+    decode_impl(index, class, method, budget)
+}
+
+fn decode_impl<'a>(
     index: &ProgramIndex<'a>,
     class: ClassDefId,
     method: MethodId,

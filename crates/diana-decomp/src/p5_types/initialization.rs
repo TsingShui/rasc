@@ -1,6 +1,6 @@
 mod chain;
-use crate::p2_flow::normal::{CallId, CallTarget, Op, OpId};
-use crate::p3_ssa::normal::{SsaBody, ValueId};
+use crate::p2_flow::{CallId, CallTarget, Op, OpId};
+use crate::p3_ssa::{SsaBody, ValueId};
 use crate::substrate::owned::push;
 use crate::{MethodBudget, RequestError, TypeId};
 
@@ -70,10 +70,7 @@ pub(super) fn solve(
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<Initializations, RequestError> {
     if ssa.object_creations.is_empty()
-        && !matches!(
-            ssa.frame,
-            crate::p2_flow::normal::MethodFrame::Constructor(_)
-        )
+        && !matches!(ssa.frame, crate::p2_flow::MethodFrame::Constructor(_))
     {
         for site in &ssa.calls {
             budget.charge_work(1)?;

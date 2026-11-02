@@ -1,9 +1,9 @@
 use super::normal::{Initializer, Local, local_type};
 use super::{Copy, CopyPlan, LocalId};
-use crate::p2_flow::normal::{BlockId, OpId};
 use crate::p2_flow::protection::ExceptionEdgeId;
-use crate::p3_ssa::normal::{Definition, Incoming, Sym, ValueId};
-use crate::p5_types::normal::TypedBody;
+use crate::p2_flow::{BlockId, OpId};
+use crate::p3_ssa::{Definition, Incoming, Sym, ValueId};
+use crate::p5_types::TypedBody;
 use crate::substrate::owned::push;
 use crate::{CodeUnitOffset, MethodBudget, RequestError};
 
@@ -201,7 +201,7 @@ pub(crate) fn verify(
             continue;
         };
         let op = typed.ssa.operation(id)?;
-        if !matches!(op.op, crate::p2_flow::normal::Op::Exception(_)) {
+        if !matches!(op.op, crate::p2_flow::Op::Exception(_)) {
             continue;
         }
         handlers = handlers
@@ -221,10 +221,10 @@ pub(crate) fn verify(
             .ok_or(invariant("catch binding lost definition"))?;
         let expected = binding.kind.map(|kind| match kind {
             crate::p4_calls::exceptions::ExceptionType::Nominal(id) => {
-                crate::p5_types::normal::Kind::Nominal(id)
+                crate::p5_types::Kind::Nominal(id)
             }
             crate::p4_calls::exceptions::ExceptionType::Throwable => {
-                crate::p5_types::normal::Kind::Throwable
+                crate::p5_types::Kind::Throwable
             }
         });
         if expected.is_none()
@@ -274,7 +274,7 @@ pub(crate) fn verify(
         if ingress.bind_exception != binding.operation
             || !matches!(
                 typed.ssa.operation(ingress.bind_exception)?.op,
-                crate::p2_flow::normal::Op::Exception(_)
+                crate::p2_flow::Op::Exception(_)
             )
         {
             return Err(invariant("ingress lost catch parameter binding"));

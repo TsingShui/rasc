@@ -1,6 +1,6 @@
 use super::protection::{Catch, Clause, Node, NodeId, add, blocks, entry, ix};
-use crate::p2_flow::normal::{BlockId, Terminal};
-use crate::p6_variables::normal::StorageBody;
+use crate::p2_flow::{BlockId, Terminal};
+use crate::p6_variables::StorageBody;
 use crate::substrate::owned::push;
 use crate::{MethodBudget, RequestError};
 
@@ -87,7 +87,7 @@ fn postdominators(
         budget.charge_work(1)?;
         if super::protected_loops::cut(
             loops,
-            crate::p2_flow::normal::EdgeId(
+            crate::p2_flow::EdgeId(
                 u32::try_from(index).map_err(|_| RequestError::PlatformCapacity)?,
             ),
             budget,
@@ -113,7 +113,7 @@ fn postdominators(
             budget.charge_work(1)?;
             if super::protected_loops::cut(
                 loops,
-                crate::p2_flow::normal::EdgeId(
+                crate::p2_flow::EdgeId(
                     u32::try_from(index).map_err(|_| RequestError::PlatformCapacity)?,
                 ),
                 budget,
@@ -154,7 +154,7 @@ fn postdominators(
             budget.charge_work(1)?;
             if super::protected_loops::cut(
                 loops,
-                crate::p2_flow::normal::EdgeId(
+                crate::p2_flow::EdgeId(
                     u32::try_from(index).map_err(|_| RequestError::PlatformCapacity)?,
                 ),
                 budget,
@@ -815,10 +815,7 @@ fn candidate(
                     (op.kind.effects().may_throw
                         && !matches!(
                             op.kind,
-                            crate::p2_flow::normal::Op::Monitor(
-                                crate::p2_flow::normal::MonitorKind::Exit,
-                                _
-                            )
+                            crate::p2_flow::Op::Monitor(crate::p2_flow::MonitorKind::Exit, _)
                         ))
                     .then_some(op.pc)
                 })

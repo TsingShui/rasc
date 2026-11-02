@@ -1,6 +1,6 @@
 use super::flow::{Edge, Flow, Transfer};
 use super::graph::index;
-use crate::pipeline::branch::{BlockId, EdgeId};
+use crate::p2_flow::{BlockId, EdgeId};
 use crate::{MethodBudget, RequestError};
 pub(crate) struct Guard {
     pub block: BlockId,

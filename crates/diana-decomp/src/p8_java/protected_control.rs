@@ -18,10 +18,7 @@ enum Work<'a> {
     Leave(&'a crate::p8_java::dispatcher::Edge),
     Catch(&'a Catch),
 }
-fn block<'a>(
-    body: &Input<'a>,
-    id: crate::p2_flow::normal::BlockId,
-) -> Result<&'a Case, RequestError> {
+fn block<'a>(body: &Input<'a>, id: crate::p2_flow::BlockId) -> Result<&'a Case, RequestError> {
     body.storage
         .cases
         .get(usize::try_from(id.0).map_err(|_| RequestError::PlatformCapacity)?)
@@ -89,7 +86,7 @@ fn lower_into(
                     for statement in &case.statements {
                         budget.charge_work(1)?;
                         if let crate::p8_java::calls::Statement::Monitor {
-                            kind: crate::p2_flow::normal::MonitorKind::Enter,
+                            kind: crate::p2_flow::MonitorKind::Enter,
                             lock: value,
                             operation,
                         } = statement

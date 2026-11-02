@@ -1,8 +1,8 @@
 use super::entry as entry_ssa;
 use super::normal::{self, Definition, Incoming, Sym};
 use crate::input::ProgramIndex;
-use crate::p2_flow::normal::{self as flow, Op};
 use crate::p2_flow::protection::{CatchRank, ExceptionEdgeId};
+use crate::p2_flow::{self as flow, Op};
 use crate::{
     ClassDefId, CodeUnitOffset, FailureKind, Limits, MethodId, RegisterId, RequestError, RunContext,
 };
@@ -17,8 +17,19 @@ fn t16_throwing_result_commits_only_normally_across_pure_result_boundaries() {
         let input = index
             .method_input(ClassDefId(0), MethodId(method), &mut budget)
             .unwrap();
-        let flow = flow::decode(&input, &mut budget).unwrap().unwrap();
-        let mut ssa = normal::build(flow, &mut budget).unwrap();
+        let flow = flow::decode(
+            &crate::engine::SchedulePermit::for_test(),
+            &input,
+            &mut budget,
+        )
+        .unwrap()
+        .unwrap();
+        let mut ssa = normal::build(
+            &crate::engine::SchedulePermit::for_test(),
+            flow,
+            &mut budget,
+        )
+        .unwrap();
         let call = ssa
             .operations
             .iter()
@@ -85,9 +96,7 @@ fn t16_throwing_result_commits_only_normally_across_pure_result_boundaries() {
             .find(|phi| phi.block == next.target && phi.register == RegisterId(0))
             .unwrap();
         assert!(returned.inputs.contains(&(
-            Incoming::Normal(crate::p2_flow::normal::EdgeId(
-                u32::try_from(normal_index).unwrap()
-            )),
+            Incoming::Normal(crate::p2_flow::EdgeId(u32::try_from(normal_index).unwrap())),
             Sym::Value(call_value)
         )));
         let exception = ssa
@@ -147,10 +156,21 @@ fn entry_replay_rejects_changed_definitions_word_order_and_missing_initializatio
         "missing",
         "parameter",
     ] {
-        let flow = crate::p2_flow::entry::decode(&index, ClassDefId(0), MethodId(0), &mut budget)
-            .unwrap()
-            .unwrap();
-        let mut entry = entry_ssa::build(flow, &mut budget).unwrap();
+        let flow = crate::p2_flow::entry::decode(
+            &crate::engine::SchedulePermit::for_test(),
+            &index,
+            ClassDefId(0),
+            MethodId(0),
+            &mut budget,
+        )
+        .unwrap()
+        .unwrap();
+        let mut entry = entry_ssa::build(
+            &crate::engine::SchedulePermit::for_test(),
+            flow,
+            &mut budget,
+        )
+        .unwrap();
         entry_ssa::verify(&entry, &mut budget).unwrap();
         match mutation {
             "input" => entry.operations.last_mut().unwrap().inputs.swap(0, 1),
@@ -199,10 +219,15 @@ fn partial_entry_producers_and_replay_observe_the_method_ledger() {
         let mut setup = RunContext::new(Limits::default(), &|| false);
         let index = crate::input::ProgramIndex::open(ENTRY_INITIALIZATION, &mut setup).unwrap();
         let mut setup_budget = setup.method_budget().unwrap();
-        let flow =
-            crate::p2_flow::entry::decode(&index, ClassDefId(0), MethodId(0), &mut setup_budget)
-                .unwrap()
-                .unwrap();
+        let flow = crate::p2_flow::entry::decode(
+            &crate::engine::SchedulePermit::for_test(),
+            &index,
+            ClassDefId(0),
+            MethodId(0),
+            &mut setup_budget,
+        )
+        .unwrap()
+        .unwrap();
         let cancelled = std::cell::Cell::new(false);
         let check = || cancelled.get();
         let mut control = RunContext::new(
@@ -217,19 +242,36 @@ fn partial_entry_producers_and_replay_observe_the_method_ledger() {
         let result = match stage {
             Stage::Decode => {
                 cancelled.set(cancel);
-                crate::p2_flow::entry::decode(&index, ClassDefId(0), MethodId(0), &mut budget)
-                    .map(|_| ())
+                crate::p2_flow::entry::decode(
+                    &crate::engine::SchedulePermit::for_test(),
+                    &index,
+                    ClassDefId(0),
+                    MethodId(0),
+                    &mut budget,
+                )
+                .map(|_| ())
             }
             Stage::Bind => {
                 cancelled.set(cancel);
-                entry_ssa::build(flow, &mut budget).map(|_| ())
+                entry_ssa::build(
+                    &crate::engine::SchedulePermit::for_test(),
+                    flow,
+                    &mut budget,
+                )
+                .map(|_| ())
             }
             Stage::Replay | Stage::Prove => {
-                let entry = entry_ssa::build(flow, &mut setup_budget).unwrap();
+                let entry = entry_ssa::build(
+                    &crate::engine::SchedulePermit::for_test(),
+                    flow,
+                    &mut setup_budget,
+                )
+                .unwrap();
                 cancelled.set(cancel);
                 match stage {
                     Stage::Replay => entry_ssa::verify(&entry, &mut budget),
                     Stage::Prove => crate::p5_types::entry_initialization::prove(
+                        &crate::engine::SchedulePermit::for_test(),
                         &entry,
                         &[crate::p2_flow::entry::ParameterFamily::Word],
                         Some(crate::p4_calls::allocation::ConstructorUse::This),

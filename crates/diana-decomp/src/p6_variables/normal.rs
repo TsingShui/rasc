@@ -1,10 +1,10 @@
 use super::{Copy, CopyPlan, LocalId, LocalType, LocalTypeId, Width};
 use crate::MethodBudget;
 use crate::RequestError;
-use crate::p2_flow::normal::{BlockId, EdgeId};
-use crate::p3_ssa::normal::{Definition, Sym};
-use crate::p5_types::normal::Kind;
-use crate::p5_types::normal::TypedBody;
+use crate::p2_flow::{BlockId, EdgeId};
+use crate::p3_ssa::{Definition, Sym};
+use crate::p5_types::Kind;
+use crate::p5_types::TypedBody;
 use crate::substrate::owned::push;
 
 // Disjoint 64-bit coordinate domains retain both the root type ID and array depth.
@@ -165,8 +165,8 @@ fn parallel(
             budget.charge_work(1)?;
             if edge
                 == incoming.map_or(
-                    crate::p3_ssa::normal::Incoming::EntrySeed,
-                    crate::p3_ssa::normal::Incoming::Normal,
+                    crate::p3_ssa::Incoming::EntrySeed,
+                    crate::p3_ssa::Incoming::Normal,
                 )
                 && selected.replace(value).is_some()
             {
@@ -228,6 +228,14 @@ fn plan_edge(
     Ok(plan)
 }
 pub(crate) fn allocate<'a>(
+    _schedule: &crate::engine::SchedulePermit,
+    typed: TypedBody<'a>,
+    budget: &mut MethodBudget<'_, '_>,
+) -> Result<crate::substrate::outcome::Outcome<StorageBody<'a>>, RequestError> {
+    allocate_impl(typed, budget)
+}
+
+fn allocate_impl<'a>(
     typed: TypedBody<'a>,
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<crate::substrate::outcome::Outcome<StorageBody<'a>>, RequestError> {
@@ -241,15 +249,15 @@ pub(crate) fn allocate<'a>(
         };
         let parameter = match definition {
             Definition::Parameter(parameter) => Some(match typed.ssa.frame {
-                crate::p2_flow::normal::MethodFrame::Static => Parameter::Explicit(*parameter),
-                crate::p2_flow::normal::MethodFrame::Instance(_)
-                | crate::p2_flow::normal::MethodFrame::Constructor(_)
+                crate::p2_flow::MethodFrame::Static => Parameter::Explicit(*parameter),
+                crate::p2_flow::MethodFrame::Instance(_)
+                | crate::p2_flow::MethodFrame::Constructor(_)
                     if *parameter == 0 =>
                 {
                     Parameter::This
                 }
-                crate::p2_flow::normal::MethodFrame::Instance(_)
-                | crate::p2_flow::normal::MethodFrame::Constructor(_) => {
+                crate::p2_flow::MethodFrame::Instance(_)
+                | crate::p2_flow::MethodFrame::Constructor(_) => {
                     Parameter::Explicit(parameter.checked_sub(1).ok_or(
                         RequestError::InternalInvariant("implicit receiver frame underflow"),
                     )?)
@@ -288,7 +296,7 @@ pub(crate) fn allocate<'a>(
     let mut fresh_fills = Vec::new();
     for op in &typed.ssa.operations {
         budget.charge_work(1)?;
-        let crate::p2_flow::normal::Op::FreshFill(_, id) = op.op else {
+        let crate::p2_flow::Op::FreshFill(_, id) = op.op else {
             continue;
         };
         if usize::try_from(id.0).map_err(|_| RequestError::PlatformCapacity)? != fresh_fills.len() {
@@ -303,7 +311,7 @@ pub(crate) fn allocate<'a>(
     if !typed.filled_arrays.is_empty() {
         for op in &typed.ssa.operations {
             budget.charge_work(1)?;
-            let crate::p2_flow::normal::Op::FilledArray(id, result) = op.op else {
+            let crate::p2_flow::Op::FilledArray(id, result) = op.op else {
                 continue;
             };
             let index = usize::try_from(id.0).map_err(|_| RequestError::PlatformCapacity)?;
@@ -319,7 +327,7 @@ pub(crate) fn allocate<'a>(
                     "filled array lost typed contents",
                 ))?;
             let target = match (result, op.result) {
-                (crate::p2_flow::normal::FilledResult::Stored { .. }, Some(value)) => {
+                (crate::p2_flow::FilledResult::Stored { .. }, Some(value)) => {
                     let value_index =
                         usize::try_from(value.0).map_err(|_| RequestError::PlatformCapacity)?;
                     if typed.kinds.get(value_index).copied().flatten() != Some(usage.kind) {
@@ -329,7 +337,7 @@ pub(crate) fn allocate<'a>(
                     }
                     LocalId(value.0)
                 }
-                (crate::p2_flow::normal::FilledResult::Discarded, None) => {
+                (crate::p2_flow::FilledResult::Discarded, None) => {
                     // Java array creation is not a standalone statement expression.
                     let id = LocalId(
                         u32::try_from(locals.len()).map_err(|_| RequestError::PlatformCapacity)?,
@@ -357,7 +365,7 @@ pub(crate) fn allocate<'a>(
     let mut empty_fills = Vec::new();
     for op in &typed.ssa.operations {
         budget.charge_work(1)?;
-        let crate::p2_flow::normal::Op::EmptyFill(_, id) = op.op else {
+        let crate::p2_flow::Op::EmptyFill(_, id) = op.op else {
             continue;
         };
         if usize::try_from(id.0).map_err(|_| RequestError::PlatformCapacity)? != empty_fills.len() {

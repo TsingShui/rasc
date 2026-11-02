@@ -15,6 +15,16 @@ impl VerifiedJavaField {
     }
 }
 pub(crate) fn verify(
+    _schedule: &crate::engine::SchedulePermit,
+    field: &FieldInput,
+    facts: &FieldFacts,
+    ty: &crate::p4_calls::field_declarations::FieldType,
+    control: &mut impl InputControl,
+) -> Result<Option<VerifiedJavaField>, RequestError> {
+    verify_impl(field, facts, ty, control)
+}
+
+fn verify_impl(
     field: &FieldInput,
     facts: &FieldFacts,
     ty: &crate::p4_calls::field_declarations::FieldType,

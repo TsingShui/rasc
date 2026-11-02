@@ -420,6 +420,46 @@ The only fixed points are the P3 live-in requirement and the P5 finite-facts clo
 
 Rationale: the ValueRecovery of dexdec depends on a structured Semantic IR [DX-01]; this design does not adopt it and keeps an explicit three-address computation that solves SSA/type/storage on the CFG first, which avoids repeated mutual scheduling of BDD/gated Phi/language syntax. This scheduling does not require DEX to have a natural phase order; explicit locals/copies increase output length in exchange for local verifiability of value provenance and transfer.
 
+### 4.1 Stage interface authority
+
+The scheduler owns analysis-construction order; a phase owns its algorithms and
+validated products. Reading an earlier product is distinct from starting its
+analysis again. A read-only wrapper prevents mutation, not unauthorized analysis
+or interpretation in the wrong phase.
+
+- Contributors MUST keep phase implementation modules private and expose only
+  the stage entries, products and read-only queries needed by actual consumers.
+  Contributors MUST NOT use convenience re-exports to expose private stage
+  implementations through the scheduler or another phase.
+- Stage interfaces MUST restrict analysis-construction entry points to
+  scheduler-owned authority. If an entry uses a scheduling credential, its thin
+  entry wrapper MUST NOT forward that credential into the algorithm
+  implementation. Phase implementations MUST NOT invoke another phase's
+  analysis-construction entry point.
+- Stage interfaces MUST distinguish analysis construction from read-only fact
+  queries and independent verification. Query consumers MUST NOT use a query to
+  build substitute whole-method analysis products. Independent verifiers MUST
+  retain their checks against original facts.
+- Contributors MUST limit stage inputs and product views to the facts required
+  by the consumer's stated obligations. Contributors MUST NOT expose an entire
+  program index or upstream graph merely to avoid defining the required view.
+  Earlier-phase facts and original bytes remain valid inputs where a specified
+  proof or independent replay requires them; phase numbers do not imply
+  adjacent-only reads.
+- The owning validator MUST be the only constructor of a sealed validated product.
+  Product interfaces MUST preserve that construction authority and immutable consumer
+  access. Consumers MUST NOT treat partial facts as whole-method validation or
+  infer guarantees beyond the product's stated scope.
+- The scheduler MUST compose ready products and classified outcomes rather than
+  perform phase-owned SSA, typing, storage or Java-legality analysis. P9 MUST
+  consume sealed presentation products and original debug facts without starting
+  analysis or recovering missing semantics.
+
+Compiler-enforced visibility, private construction and restricted entry authority
+protect different obligations. They do not establish that a newly written
+algorithm belongs in its phase. Contribution review and authorization follow the
+root [architecture guardrails](../../AGENTS.md#architecture-guardrails).
+
 ## 5. Identity, origin and product invariants
 
 ### 5.1 IDs and immutable raw

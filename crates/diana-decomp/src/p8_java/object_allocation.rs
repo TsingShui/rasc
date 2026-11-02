@@ -1,8 +1,8 @@
 use super::branch::{LocalId, ValueUse};
-use crate::p2_flow::normal::{CallTarget, Op};
-use crate::p3_ssa::normal::BoundOp;
+use crate::p2_flow::{CallTarget, Op};
+use crate::p3_ssa::BoundOp;
 use crate::p5_types::initialization::InitializationId;
-use crate::p6_variables::normal::StorageBody;
+use crate::p6_variables::StorageBody;
 use crate::{CodeUnitOffset, MethodBudget, RegisterId, RequestError};
 
 pub(crate) struct Initialization {
@@ -144,7 +144,7 @@ pub(super) fn verify(
         .ok_or(RequestError::InternalInvariant(
             "constructor certificate lost site",
         ))?;
-    let Some(crate::p4_calls::normal::CallEvidence::Constructor {
+    let Some(crate::p4_calls::CallEvidence::Constructor {
         facts: original, ..
     }) = typed.bindings.get(index)
     else {

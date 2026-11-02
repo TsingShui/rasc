@@ -3,7 +3,8 @@ mod copies;
 pub(crate) mod empty_fill;
 pub(crate) mod exceptional;
 pub(crate) mod fresh_fill;
-pub(crate) mod normal;
+mod normal;
+pub(crate) use normal::{Initializer, Parameter, StorageBody, allocate, local_type};
 pub(crate) mod object_allocation;
 
 pub(crate) use copies::{

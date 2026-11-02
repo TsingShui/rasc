@@ -1,7 +1,7 @@
 use super::PrimitiveArray;
 use crate::input::{MethodInput, TypeProjection};
-use crate::p2_flow::normal::{ArrayKind, DeclarationType, Op};
-use crate::p3_ssa::normal::{Definition, SsaBody, Sym, ValueId};
+use crate::p2_flow::{ArrayKind, DeclarationType, Op};
+use crate::p3_ssa::{Definition, SsaBody, Sym, ValueId};
 use crate::substrate::owned::push;
 use crate::{MethodBudget, RequestError};
 
@@ -140,7 +140,7 @@ pub(super) fn collect(
                 Op::FieldLoad(_, _, _, kind) | Op::StaticLoad(_, _, kind) => Some(kind),
                 Op::Cast(_, id) => Some(ssa.casts[ix(id.0)?].kind),
                 Op::Call(id, _) => match ssa.calls[ix(id.0)?].result {
-                    crate::p2_flow::normal::InvokeResult::Reference(Some(kind)) => Some(kind),
+                    crate::p2_flow::InvokeResult::Reference(Some(kind)) => Some(kind),
                     _ => None,
                 },
                 _ => None,

@@ -1,7 +1,7 @@
 use super::branch::{LocalId, ValueUse};
-use crate::p2_flow::normal::Op;
-use crate::p3_ssa::normal::{BoundOp, ValueId};
-use crate::p5_types::normal::{ArrayUse, Kind, TypedBody};
+use crate::p2_flow::Op;
+use crate::p3_ssa::{BoundOp, ValueId};
+use crate::p5_types::{ArrayUse, Kind, TypedBody};
 use crate::{MethodBudget, RequestError};
 
 pub(crate) enum Statement {
@@ -30,9 +30,9 @@ pub(super) fn validate(
         budget.charge_work(1)?;
         if matches!(
             evidence,
-            Some(crate::p5_types::normal::ArrayEvidence {
+            Some(crate::p5_types::ArrayEvidence {
                 usage: ArrayUse::Store {
-                    receiver: crate::p5_types::normal::ArrayReceiver::ObjectView,
+                    receiver: crate::p5_types::ArrayReceiver::ObjectView,
                     ..
                 },
                 ..
@@ -83,10 +83,8 @@ pub(crate) fn lower(ssa: &TypedBody<'_>, op: &BoundOp) -> Result<Statement, Requ
             },
         ) => Ok(Statement::Store {
             array: match receiver {
-                crate::p5_types::normal::ArrayReceiver::Direct => ValueUse::Direct(array),
-                crate::p5_types::normal::ArrayReceiver::ObjectView => {
-                    ValueUse::ObjectArrayView(array)
-                }
+                crate::p5_types::ArrayReceiver::Direct => ValueUse::Direct(array),
+                crate::p5_types::ArrayReceiver::ObjectView => ValueUse::ObjectArrayView(array),
             },
             index: super::values::lower(LocalId(op.input(1)?.0), *index),
             value: super::values::lower(LocalId(op.input(2)?.0), *value),
@@ -182,9 +180,9 @@ pub(crate) fn verify(
     let component =
         match ssa.kinds[usize::try_from(array.0).map_err(|_| RequestError::PlatformCapacity)?] {
             Some(Kind::PrimitiveArray(kind)) => kind.value_type(),
-            Some(Kind::ObjectArray) => crate::p2_flow::normal::DeclarationType::Object,
+            Some(Kind::ObjectArray) => crate::p2_flow::DeclarationType::Object,
             Some(Kind::ReferenceArray(key)) => {
-                crate::p2_flow::normal::ArrayKind::Reference(key).element_type(input, budget)?
+                crate::p2_flow::ArrayKind::Reference(key).element_type(input, budget)?
             }
             _ => return Ok(false),
         };

@@ -1,7 +1,7 @@
+use crate::p2_flow::Op;
 use crate::p2_flow::entry::ParameterFamily;
-use crate::p2_flow::normal::Op;
 use crate::p3_ssa::entry::{EntrySsa, Graph};
-use crate::p3_ssa::normal::{Definition, ValueId};
+use crate::p3_ssa::{Definition, ValueId};
 use crate::{CodeUnitOffset, MethodBudget, MethodId, RequestError};
 
 const WORD: u8 = 1;
@@ -10,7 +10,7 @@ const WIDE: u8 = 4;
 const ZERO: u8 = 8;
 const THIS: u8 = 16;
 #[derive(Clone, Copy, Eq, PartialEq)]
-pub(crate) enum Origin {
+pub(super) enum Origin {
     Parameter(u32),
     Word(i32),
     Wide(i64),
@@ -28,7 +28,7 @@ fn family(graph: &Graph<'_, '_>, origin: Origin) -> Result<u8, RequestError> {
         Origin::Wide(_) => WIDE,
     })
 }
-pub(crate) fn origin(
+pub(super) fn origin(
     graph: &Graph<'_, '_>,
     mut value: ValueId,
     budget: &mut MethodBudget<'_, '_>,
@@ -101,6 +101,16 @@ impl Link {
     }
 }
 pub(crate) fn prove(
+    _schedule: &crate::engine::SchedulePermit,
+    entry: &EntrySsa<'_>,
+    formals: &[ParameterFamily],
+    scope: Option<crate::p4_calls::allocation::ConstructorUse>,
+    budget: &mut MethodBudget<'_, '_>,
+) -> Result<Option<Link>, RequestError> {
+    prove_impl(entry, formals, scope, budget)
+}
+
+fn prove_impl(
     entry: &EntrySsa<'_>,
     formals: &[ParameterFamily],
     scope: Option<crate::p4_calls::allocation::ConstructorUse>,

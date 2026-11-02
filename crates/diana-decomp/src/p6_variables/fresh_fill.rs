@@ -1,6 +1,6 @@
-use crate::p2_flow::normal::{Op, OpId};
-use crate::p3_ssa::normal::{BoundOp, Definition, ValueId};
-use crate::p5_types::normal::TypedBody;
+use crate::p2_flow::{Op, OpId};
+use crate::p3_ssa::{BoundOp, Definition, ValueId};
+use crate::p5_types::TypedBody;
 use crate::substrate::owned::push;
 use crate::{CodeUnitOffset, MethodBudget, RequestError};
 
@@ -63,7 +63,7 @@ pub(super) fn prove(
         .array_creations
         .get(ix(creation.0)?)
         .ok_or_else(broken)?;
-    if creation.component != crate::p2_flow::normal::ArrayKind::Primitive(usage.component)
+    if creation.component != crate::p2_flow::ArrayKind::Primitive(usage.component)
         || allocation.pc.0 >= fill.pc.0
     {
         return Err(unavailable());

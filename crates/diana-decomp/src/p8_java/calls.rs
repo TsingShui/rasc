@@ -1,5 +1,6 @@
 use super::branch::{Assignment, LocalId, ValueUse};
-use crate::pipeline::branch::{CallId, Op, TypedBody};
+use crate::p2_flow::{CallId, Op};
+use crate::p5_types::TypedBody;
 use crate::substrate::owned::{TextBuffer, reserve};
 use crate::{CodeUnitOffset, MethodBudget, MethodId, RequestError};
 
@@ -59,8 +60,8 @@ pub(crate) struct ReceiverCall {
 }
 pub(crate) enum Statement {
     Monitor {
-        operation: crate::p2_flow::normal::OpId,
-        kind: crate::p2_flow::normal::MonitorKind,
+        operation: crate::p2_flow::OpId,
+        kind: crate::p2_flow::MonitorKind,
         lock: ValueUse,
     },
     Class {
@@ -70,7 +71,7 @@ pub(crate) enum Statement {
     },
     Snapshot(crate::p6_variables::exceptional::Snapshot),
     ExceptionBind {
-        handler: crate::p2_flow::normal::BlockId,
+        handler: crate::p2_flow::BlockId,
         target: LocalId,
     },
     Deferred(crate::p5_types::initialization::InitializationId),
@@ -173,7 +174,7 @@ pub(super) fn identifier_text(
 pub(super) struct SourceCalls {
     pub receivers: Vec<Option<crate::p4_calls::ReceiverContract>>,
     pub constructors: Vec<Option<crate::p4_calls::allocation::ConstructorContract>>,
-    pub throws: crate::p4_calls::normal::SourceThrows,
+    pub throws: crate::p4_calls::SourceThrows,
 }
 pub(super) fn validate_bindings(
     input: &crate::input::MethodInput<'_, '_>,
@@ -202,7 +203,7 @@ pub(super) fn validate_bindings(
             .ok_or(RequestError::InternalInvariant(
                 "call lost final use conversions",
             ))?;
-        if site.target == crate::p2_flow::normal::CallTarget::Constructor {
+        if site.target == crate::p2_flow::CallTarget::Constructor {
             let initialization = ssa
                 .initializations
                 .calls
@@ -255,7 +256,7 @@ pub(super) fn validate_bindings(
             }
             let owner =
                 crate::substrate::owned::copy_units(input.type_name(object, budget)?, budget)?;
-            let Some(crate::p4_calls::normal::CallEvidence::Constructor { declarations, .. }) =
+            let Some(crate::p4_calls::CallEvidence::Constructor { declarations, .. }) =
                 ssa.bindings.get(index)
             else {
                 return Err(RequestError::InternalInvariant(
@@ -283,12 +284,10 @@ pub(super) fn validate_bindings(
         push(&mut constructors, None, budget)?;
         let (receiver, arguments) = match &uses.receiver {
             Some(receiver) => {
-                if site.kind == crate::p2_flow::normal::InvokeKind::Static
+                if site.kind == crate::p2_flow::InvokeKind::Static
                     || bound.inputs.first() != Some(&receiver.value)
                     || ssa.kinds[ix(receiver.value.0)?]
-                        != Some(crate::p5_types::normal::Kind::Nominal(
-                            receiver.original_type,
-                        ))
+                        != Some(crate::p5_types::Kind::Nominal(receiver.original_type))
                 {
                     return Err(RequestError::InternalInvariant(
                         "receiver conversion changed original definition",
@@ -298,14 +297,14 @@ pub(super) fn validate_bindings(
                     input.type_descriptor(receiver.original_type, budget)?,
                     budget,
                 )?;
-                if site.kind == crate::p2_flow::normal::InvokeKind::Super
+                if site.kind == crate::p2_flow::InvokeKind::Super
                     && receiver.identity != crate::p5_types::calls::ReceiverIdentity::ImplicitThis
                 {
                     return Err(RequestError::InternalInvariant(
                         "super receiver lost this origin",
                     ));
                 }
-                let Some(crate::p4_calls::normal::CallEvidence::Receiver { declaration, .. }) =
+                let Some(crate::p4_calls::CallEvidence::Receiver { declaration, .. }) =
                     ssa.bindings.get(index)
                 else {
                     return Err(RequestError::InternalInvariant(
@@ -338,13 +337,13 @@ pub(super) fn validate_bindings(
                 (Some(contract), &bound.inputs[1..])
             }
             None => {
-                if site.kind != crate::p2_flow::normal::InvokeKind::Static {
+                if site.kind != crate::p2_flow::InvokeKind::Static {
                     return Err(RequestError::InternalInvariant(
                         "receiver call lost typed receiver",
                     ));
                 }
                 let contract = ssa.contract(id)?;
-                if !crate::p4_calls::normal::binding_available(
+                if !crate::p4_calls::binding_available(
                     input,
                     catalog,
                     contract,
@@ -450,8 +449,8 @@ fn plan(
     }))
 }
 pub(super) fn operations(
-    storage: &crate::p6_variables::normal::StorageBody<'_>,
-    block: crate::pipeline::branch::BlockId,
+    storage: &crate::p6_variables::StorageBody<'_>,
+    block: crate::p2_flow::BlockId,
     bindings: &mut SourceCalls,
     names: &super::types::TypeNames,
     placements: &[super::exceptional::Placement<'_>],
@@ -470,7 +469,7 @@ pub(super) fn operations(
         if let Op::Class(_, reference) = op.op {
             let mut source = TextBuffer::new();
             source.push(
-                names.name(crate::p5_types::normal::Kind::Nominal(reference), budget)?,
+                names.name(crate::p5_types::Kind::Nominal(reference), budget)?,
                 budget,
             )?;
             let target = LocalId(
@@ -695,7 +694,7 @@ pub(super) fn operations(
     }
     if matches!(
         ssa.ssa.blocks[ix(block.0)?].terminal,
-        crate::p2_flow::normal::Terminal::Throw(_)
+        crate::p2_flow::Terminal::Throw(_)
     ) {
         super::exceptional::snapshots(
             placements,

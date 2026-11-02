@@ -1,5 +1,6 @@
+use crate::p6_variables::LocalId;
 use crate::p8_java::MethodBody;
-use crate::p8_java::branch::{Assignment, Expression as BranchExpression, LocalId};
+use crate::p8_java::{Assignment, Expression as BranchExpression};
 use crate::substrate::owned::TextBuffer;
 use crate::{MethodBudget, RequestError, VerifiedJavaMethod};
 
@@ -63,7 +64,7 @@ pub(super) fn thrown(
 }
 
 pub(super) fn returned(
-    value: crate::p8_java::branch::ValueUse,
+    value: crate::p8_java::ValueUse,
     output: &mut TextBuffer,
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<(), RequestError> {
@@ -72,7 +73,7 @@ pub(super) fn returned(
     output.push(";\n", budget)
 }
 pub(super) fn value_use(
-    value: crate::p8_java::branch::ValueUse,
+    value: crate::p8_java::ValueUse,
     output: &mut TextBuffer,
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<(), RequestError> {
@@ -102,7 +103,7 @@ pub(super) fn chain_argument(
     )
 }
 fn value_with(
-    value: crate::p8_java::branch::ValueUse,
+    value: crate::p8_java::ValueUse,
     output: &mut TextBuffer,
     budget: &mut MethodBudget<'_, '_>,
     mut source: impl FnMut(
@@ -111,7 +112,7 @@ fn value_with(
         &mut MethodBudget<'_, '_>,
     ) -> Result<(), RequestError>,
 ) -> Result<(), RequestError> {
-    use crate::p8_java::branch::ValueUse;
+    use crate::p8_java::ValueUse;
     match value {
         ValueUse::DoubleLiteral { bits, .. } => super::literals::fp(bits, true, output, budget)?,
         ValueUse::FloatLiteral { bits, .. } => {
@@ -209,8 +210,8 @@ pub(super) fn assignments(
                     budget,
                 )?;
                 match right {
-                    crate::p8_java::branch::Right::Local(view) => value_use(*view, output, budget)?,
-                    crate::p8_java::branch::Right::Literal(value) => {
+                    crate::p8_java::Right::Local(view) => value_use(*view, output, budget)?,
+                    crate::p8_java::Right::Literal(value) => {
                         output.arguments(format_args!("{value}"), budget)?
                     }
                 }

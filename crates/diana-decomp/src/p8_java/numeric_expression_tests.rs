@@ -7,8 +7,8 @@ use crate::{
 #[test]
 fn final_numeric_expression_replay_rejects_nan_bias_relation_and_conversion_changes() {
     for (opcode, original) in [
-        (0x2d, crate::pipeline::scalar::Compare::FloatL),
-        (0x2e, crate::pipeline::scalar::Compare::FloatG),
+        (0x2d, crate::p2_flow::primitives::Compare::FloatL),
+        (0x2e, crate::p2_flow::primitives::Compare::FloatG),
     ] {
         let fixture = crate::test_fixture::with_code(crate::test_fixture::CodeRecipe {
             instructions: &[0x0114, 0, 0x3f80, 0x2282, opcode, 0x0201, 0x000f],
@@ -88,16 +88,16 @@ fn final_numeric_expression_replay_rejects_nan_bias_relation_and_conversion_chan
         }
         assert!(verify_unary(
             Unary::Cast(CastType::Float),
-            crate::pipeline::scalar::Unary::Convert {
-                from: crate::pipeline::scalar::ScalarType::Int,
-                to: crate::pipeline::scalar::ScalarType::Float
+            crate::p2_flow::primitives::Unary::Convert {
+                from: crate::p2_flow::primitives::ScalarType::Int,
+                to: crate::p2_flow::primitives::ScalarType::Float
             }
         ));
         assert!(!verify_unary(
             Unary::Cast(CastType::Int),
-            crate::pipeline::scalar::Unary::Convert {
-                from: crate::pipeline::scalar::ScalarType::Int,
-                to: crate::pipeline::scalar::ScalarType::Float
+            crate::p2_flow::primitives::Unary::Convert {
+                from: crate::p2_flow::primitives::ScalarType::Int,
+                to: crate::p2_flow::primitives::ScalarType::Float
             }
         ));
     }

@@ -1,4 +1,4 @@
-use crate::p5_types::normal::UseConversion;
+use crate::p5_types::UseConversion;
 use crate::p6_variables::LocalId;
 
 #[derive(Clone, Copy, Eq, PartialEq)]
@@ -44,12 +44,12 @@ impl ValueUse {
 }
 
 pub(super) fn verify_reference_store(
-    typed: &crate::p5_types::normal::TypedBody<'_>,
+    typed: &crate::p5_types::TypedBody<'_>,
     actual: ValueUse,
-    source: crate::p3_ssa::normal::ValueId,
-    target: crate::p2_flow::normal::DeclarationType,
+    source: crate::p3_ssa::ValueId,
+    target: crate::p2_flow::DeclarationType,
 ) -> Result<bool, crate::RequestError> {
-    use crate::p5_types::normal::Kind;
+    use crate::p5_types::Kind;
     let at = usize::try_from(source.0).map_err(|_| crate::RequestError::PlatformCapacity)?;
     if target.field_offset() != 2 || actual.value().0 != source.0 {
         return Ok(false);
@@ -76,13 +76,13 @@ pub(super) fn verify_reference_store(
 }
 
 pub(super) fn verify_primitive_store(
-    typed: &crate::p5_types::normal::TypedBody<'_>,
+    typed: &crate::p5_types::TypedBody<'_>,
     actual: ValueUse,
-    source: crate::p3_ssa::normal::ValueId,
-    target: crate::p2_flow::normal::DeclarationType,
+    source: crate::p3_ssa::ValueId,
+    target: crate::p2_flow::DeclarationType,
 ) -> Result<bool, crate::RequestError> {
-    use crate::p2_flow::normal::DeclarationType;
-    use crate::p5_types::normal::Kind;
+    use crate::p2_flow::DeclarationType;
+    use crate::p5_types::Kind;
     let at = usize::try_from(source.0).map_err(|_| crate::RequestError::PlatformCapacity)?;
     if actual.value().0 != source.0 {
         return Ok(false);

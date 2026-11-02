@@ -24,6 +24,25 @@ impl VerifiedJavaUnit {
     }
 }
 pub(crate) fn verify(
+    _schedule: &crate::engine::SchedulePermit,
+    index: &ProgramIndex<'_>,
+    key: ClassKey,
+    catalog: &crate::DeclarationCatalog,
+    fields: &[crate::FieldOutput],
+    members: &[MethodOutput],
+    control: &mut RunContext<'_>,
+) -> Result<Option<VerifiedJavaUnit>, RequestError> {
+    verify_impl(
+        index,
+        key,
+        catalog,
+        fields,
+        members,
+        catalog.environment,
+        control,
+    )
+}
+fn verify_impl(
     index: &ProgramIndex<'_>,
     key: ClassKey,
     catalog: &crate::DeclarationCatalog,

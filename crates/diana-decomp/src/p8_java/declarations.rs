@@ -15,6 +15,14 @@ impl JavaMethodDecl {
 }
 
 pub(crate) fn declaration(
+    _schedule: &crate::engine::SchedulePermit,
+    input: &MethodInput<'_, '_>,
+    budget: &mut MethodBudget<'_, '_>,
+) -> Result<Option<JavaMethodDecl>, RequestError> {
+    declaration_impl(input, budget)
+}
+
+fn declaration_impl(
     input: &MethodInput<'_, '_>,
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<Option<JavaMethodDecl>, RequestError> {

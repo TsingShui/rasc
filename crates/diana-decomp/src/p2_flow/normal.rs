@@ -298,7 +298,7 @@ pub(crate) enum Op {
     LongBinary(RegisterId, RegisterId, Arithmetic, RegisterId),
     DoubleBinary(RegisterId, RegisterId, Arithmetic, RegisterId),
     FloatBinary(RegisterId, RegisterId, Arithmetic, RegisterId),
-    Unary(RegisterId, crate::pipeline::scalar::Unary, RegisterId),
+    Unary(RegisterId, crate::p2_flow::primitives::Unary, RegisterId),
     ReverseSubtract(RegisterId, i32, RegisterId),
     NewInstance(RegisterId, ObjectCreationId),
     Initialize(CallId),
@@ -320,7 +320,7 @@ pub(crate) enum Op {
     Compare(
         RegisterId,
         RegisterId,
-        crate::pipeline::scalar::Compare,
+        crate::p2_flow::primitives::Compare,
         RegisterId,
     ),
     Binary(RegisterId, RegisterId, Arithmetic, Operand),
@@ -791,6 +791,14 @@ pub(crate) fn primitive_field_type(
     })
 }
 pub(crate) fn decode<'a>(
+    _schedule: &crate::engine::SchedulePermit,
+    input: &MethodInput<'_, 'a>,
+    budget: &mut MethodBudget<'_, '_>,
+) -> Result<crate::substrate::outcome::Outcome<FlowBody<'a>>, RequestError> {
+    decode_impl(input, budget)
+}
+
+fn decode_impl<'a>(
     input: &MethodInput<'_, 'a>,
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<crate::substrate::outcome::Outcome<FlowBody<'a>>, RequestError> {
@@ -1062,57 +1070,57 @@ pub(crate) fn decode<'a>(
                 0x27 => Decoded::Throw(reg(0)?),
                 0x7b..=0x8f => {
                     let unary = match spec.opcode {
-                        0x7b => crate::pipeline::scalar::Unary::Neg,
-                        0x7c => crate::pipeline::scalar::Unary::Not,
-                        0x7d => crate::pipeline::scalar::Unary::NegLong,
-                        0x7e => crate::pipeline::scalar::Unary::NotLong,
-                        0x7f => crate::pipeline::scalar::Unary::NegFloat,
-                        0x80 => crate::pipeline::scalar::Unary::NegDouble,
-                        0x81 => crate::pipeline::scalar::Unary::IntToLong,
-                        0x83 => crate::pipeline::scalar::Unary::Convert {
-                            from: crate::pipeline::scalar::ScalarType::Int,
-                            to: crate::pipeline::scalar::ScalarType::Double,
+                        0x7b => crate::p2_flow::primitives::Unary::Neg,
+                        0x7c => crate::p2_flow::primitives::Unary::Not,
+                        0x7d => crate::p2_flow::primitives::Unary::NegLong,
+                        0x7e => crate::p2_flow::primitives::Unary::NotLong,
+                        0x7f => crate::p2_flow::primitives::Unary::NegFloat,
+                        0x80 => crate::p2_flow::primitives::Unary::NegDouble,
+                        0x81 => crate::p2_flow::primitives::Unary::IntToLong,
+                        0x83 => crate::p2_flow::primitives::Unary::Convert {
+                            from: crate::p2_flow::primitives::ScalarType::Int,
+                            to: crate::p2_flow::primitives::ScalarType::Double,
                         },
-                        0x84 => crate::pipeline::scalar::Unary::LongToInt,
-                        0x85 => crate::pipeline::scalar::Unary::Convert {
-                            from: crate::pipeline::scalar::ScalarType::Long,
-                            to: crate::pipeline::scalar::ScalarType::Float,
+                        0x84 => crate::p2_flow::primitives::Unary::LongToInt,
+                        0x85 => crate::p2_flow::primitives::Unary::Convert {
+                            from: crate::p2_flow::primitives::ScalarType::Long,
+                            to: crate::p2_flow::primitives::ScalarType::Float,
                         },
-                        0x86 => crate::pipeline::scalar::Unary::Convert {
-                            from: crate::pipeline::scalar::ScalarType::Long,
-                            to: crate::pipeline::scalar::ScalarType::Double,
+                        0x86 => crate::p2_flow::primitives::Unary::Convert {
+                            from: crate::p2_flow::primitives::ScalarType::Long,
+                            to: crate::p2_flow::primitives::ScalarType::Double,
                         },
-                        0x88 => crate::pipeline::scalar::Unary::Convert {
-                            from: crate::pipeline::scalar::ScalarType::Float,
-                            to: crate::pipeline::scalar::ScalarType::Long,
+                        0x88 => crate::p2_flow::primitives::Unary::Convert {
+                            from: crate::p2_flow::primitives::ScalarType::Float,
+                            to: crate::p2_flow::primitives::ScalarType::Long,
                         },
-                        0x89 => crate::pipeline::scalar::Unary::Convert {
-                            from: crate::pipeline::scalar::ScalarType::Float,
-                            to: crate::pipeline::scalar::ScalarType::Double,
+                        0x89 => crate::p2_flow::primitives::Unary::Convert {
+                            from: crate::p2_flow::primitives::ScalarType::Float,
+                            to: crate::p2_flow::primitives::ScalarType::Double,
                         },
-                        0x8a => crate::pipeline::scalar::Unary::Convert {
-                            from: crate::pipeline::scalar::ScalarType::Double,
-                            to: crate::pipeline::scalar::ScalarType::Int,
+                        0x8a => crate::p2_flow::primitives::Unary::Convert {
+                            from: crate::p2_flow::primitives::ScalarType::Double,
+                            to: crate::p2_flow::primitives::ScalarType::Int,
                         },
-                        0x8b => crate::pipeline::scalar::Unary::Convert {
-                            from: crate::pipeline::scalar::ScalarType::Double,
-                            to: crate::pipeline::scalar::ScalarType::Long,
+                        0x8b => crate::p2_flow::primitives::Unary::Convert {
+                            from: crate::p2_flow::primitives::ScalarType::Double,
+                            to: crate::p2_flow::primitives::ScalarType::Long,
                         },
-                        0x8c => crate::pipeline::scalar::Unary::Convert {
-                            from: crate::pipeline::scalar::ScalarType::Double,
-                            to: crate::pipeline::scalar::ScalarType::Float,
+                        0x8c => crate::p2_flow::primitives::Unary::Convert {
+                            from: crate::p2_flow::primitives::ScalarType::Double,
+                            to: crate::p2_flow::primitives::ScalarType::Float,
                         },
-                        0x82 => crate::pipeline::scalar::Unary::Convert {
-                            from: crate::pipeline::scalar::ScalarType::Int,
-                            to: crate::pipeline::scalar::ScalarType::Float,
+                        0x82 => crate::p2_flow::primitives::Unary::Convert {
+                            from: crate::p2_flow::primitives::ScalarType::Int,
+                            to: crate::p2_flow::primitives::ScalarType::Float,
                         },
-                        0x87 => crate::pipeline::scalar::Unary::Convert {
-                            from: crate::pipeline::scalar::ScalarType::Float,
-                            to: crate::pipeline::scalar::ScalarType::Int,
+                        0x87 => crate::p2_flow::primitives::Unary::Convert {
+                            from: crate::p2_flow::primitives::ScalarType::Float,
+                            to: crate::p2_flow::primitives::ScalarType::Int,
                         },
-                        0x8d => crate::pipeline::scalar::Unary::Byte,
-                        0x8e => crate::pipeline::scalar::Unary::Char,
-                        _ => crate::pipeline::scalar::Unary::Short,
+                        0x8d => crate::p2_flow::primitives::Unary::Byte,
+                        0x8e => crate::p2_flow::primitives::Unary::Char,
+                        _ => crate::p2_flow::primitives::Unary::Short,
                     };
                     Decoded::Op(Op::Unary(reg(0)?, unary, reg(1)?))
                 }
@@ -1509,9 +1517,9 @@ pub(crate) fn decode<'a>(
                     reg(0)?,
                     reg(1)?,
                     match spec.opcode {
-                        0x2f => crate::pipeline::scalar::Compare::DoubleL,
-                        0x30 => crate::pipeline::scalar::Compare::DoubleG,
-                        _ => crate::pipeline::scalar::Compare::Long,
+                        0x2f => crate::p2_flow::primitives::Compare::DoubleL,
+                        0x30 => crate::p2_flow::primitives::Compare::DoubleG,
+                        _ => crate::p2_flow::primitives::Compare::Long,
                     },
                     reg(2)?,
                 )),
@@ -1519,9 +1527,9 @@ pub(crate) fn decode<'a>(
                     reg(0)?,
                     reg(1)?,
                     if spec.opcode == 0x2d {
-                        crate::pipeline::scalar::Compare::FloatL
+                        crate::p2_flow::primitives::Compare::FloatL
                     } else {
-                        crate::pipeline::scalar::Compare::FloatG
+                        crate::p2_flow::primitives::Compare::FloatG
                     },
                     reg(2)?,
                 )),

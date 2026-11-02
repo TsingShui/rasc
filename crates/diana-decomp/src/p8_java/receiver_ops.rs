@@ -1,6 +1,6 @@
-use crate::p2_flow::normal::{CallId, InvokeKind};
-use crate::p4_calls::normal::CallEvidence;
-use crate::p5_types::normal::{Kind, TypedBody};
+use crate::p2_flow::{CallId, InvokeKind};
+use crate::p4_calls::CallEvidence;
+use crate::p5_types::{Kind, TypedBody};
 use crate::{MethodBudget, RequestError};
 
 pub(super) fn verify(

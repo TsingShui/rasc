@@ -1,8 +1,8 @@
 use super::calls::TypedUse;
 use super::normal::{Kind, UseConversion};
-use crate::p2_flow::normal::{Arithmetic, Op, ResultType, Terminal};
-use crate::p3_ssa::normal::{Definition, SsaBody, Sym, ValueId};
-use crate::pipeline::scalar::ScalarType;
+use crate::p2_flow::primitives::ScalarType;
+use crate::p2_flow::{Arithmetic, Op, ResultType, Terminal};
+use crate::p3_ssa::{Definition, SsaBody, Sym, ValueId};
 use crate::substrate::owned::push;
 use crate::{MethodBudget, RequestError};
 
@@ -270,10 +270,10 @@ pub(super) fn constrain(
     }
     for (index, site) in ssa.calls.iter().enumerate() {
         budget.charge_work(1)?;
-        let bound = ssa.call(crate::p2_flow::normal::CallId(
+        let bound = ssa.call(crate::p2_flow::CallId(
             u32::try_from(index).map_err(|_| RequestError::PlatformCapacity)?,
         ))?;
-        let mut argument = usize::from(site.kind != crate::p2_flow::normal::InvokeKind::Static);
+        let mut argument = usize::from(site.kind != crate::p2_flow::InvokeKind::Static);
         let mut valid = true;
         input
             .method_reference(site.reference, budget)?

@@ -1,6 +1,6 @@
 use super::branch::ValueUse;
 use super::dispatcher::{Case, Dispatcher, Edge, Transfer};
-use crate::pipeline::branch::{BlockId, EdgeId};
+use crate::p2_flow::{BlockId, EdgeId};
 use crate::substrate::owned::push;
 use crate::{MethodBudget, RequestError};
 

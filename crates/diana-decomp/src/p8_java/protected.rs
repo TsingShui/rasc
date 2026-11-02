@@ -1,5 +1,5 @@
 use crate::input::{MethodInput, protection::CatchType};
-use crate::p6_variables::normal::StorageBody;
+use crate::p6_variables::StorageBody;
 use crate::p7_regions::protection::{Node, Protection};
 use crate::substrate::owned::{copy_units, push};
 use crate::{DeclarationCatalog, MethodBudget, RequestError};

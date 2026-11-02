@@ -1,6 +1,6 @@
-use crate::p2_flow::normal::Arithmetic;
+use crate::p2_flow::Arithmetic;
 use crate::p8_java::MethodBody;
-use crate::p8_java::branch::{Expression, Right, ValueUse};
+use crate::p8_java::{Expression, Right, ValueUse};
 use crate::test_fixture as fixture;
 use crate::*;
 

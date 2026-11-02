@@ -1,5 +1,5 @@
 use super::flow::{Flow, Transfer};
-use crate::pipeline::branch::BlockId;
+use crate::p2_flow::BlockId;
 use crate::substrate::owned::reserve;
 use crate::{MethodBudget, RequestError};
 pub(super) fn index(id: BlockId) -> Result<usize, RequestError> {

@@ -1,7 +1,7 @@
 use crate::input::MethodInput;
-use crate::p2_flow::normal::{DeclarationType, ResultType};
-use crate::p5_types::normal::Kind;
-use crate::p6_variables::normal::StorageBody;
+use crate::p2_flow::{DeclarationType, ResultType};
+use crate::p5_types::Kind;
+use crate::p6_variables::StorageBody;
 use crate::substrate::owned::{TextBuffer, copy_units, push};
 use crate::{DeclarationCatalog, MethodBudget, RequestError};
 
@@ -165,7 +165,7 @@ impl TypeNames {
                 }
                 source.push(builtin.spelling(), budget)?;
             } else {
-                if !crate::p4_calls::normal::source_reference_type(input, catalog, base, budget)? {
+                if !crate::p4_calls::source_reference_type(input, catalog, base, budget)? {
                     return Ok(false);
                 }
                 let Some(base) = super::calls::type_name(base, budget)? else {
@@ -203,12 +203,12 @@ pub(crate) fn resolve(
     }
     for op in &storage.typed.ssa.operations {
         budget.charge_work(1)?;
-        if let crate::p2_flow::normal::Op::Class(_, reference) = op.op
+        if let crate::p2_flow::Op::Class(_, reference) = op.op
             && !names.include(input, catalog, Kind::Nominal(reference), budget)?
         {
             return Ok(None);
         }
-        if let crate::p2_flow::normal::Op::InstanceOf(_, _, _, kind) = op.op
+        if let crate::p2_flow::Op::InstanceOf(_, _, _, kind) = op.op
             && !names.include(input, catalog, kind.kind(), budget)?
         {
             return Ok(None);

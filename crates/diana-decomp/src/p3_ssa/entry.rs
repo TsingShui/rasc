@@ -1,6 +1,6 @@
 use super::normal::{self, BoundOp, Definition, SsaBody, Sym, ValueId};
 use crate::p2_flow::entry::{EntryWindow, ParameterFamily};
-use crate::p2_flow::normal::{Op, OpId, ValueWidth, destination};
+use crate::p2_flow::{Op, OpId, ValueWidth, destination};
 use crate::substrate::owned::push;
 use crate::{MethodBudget, RegisterId, RequestError};
 
@@ -88,6 +88,14 @@ fn broken() -> RequestError {
     RequestError::InternalInvariant("entry SSA differs from original definition/use order")
 }
 pub(crate) fn build<'a>(
+    _schedule: &crate::engine::SchedulePermit,
+    flow: EntryWindow<'a>,
+    budget: &mut MethodBudget<'_, '_>,
+) -> Result<EntrySsa<'a>, RequestError> {
+    build_impl(flow, budget)
+}
+
+fn build_impl<'a>(
     flow: EntryWindow<'a>,
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<EntrySsa<'a>, RequestError> {
@@ -236,9 +244,9 @@ pub(crate) fn verify(
                 {
                     return Err(broken());
                 }
-                if site.kind != crate::p2_flow::normal::InvokeKind::Direct
-                    || site.target != crate::p2_flow::normal::CallTarget::Constructor
-                    || !matches!(site.result, crate::p2_flow::normal::InvokeResult::Void)
+                if site.kind != crate::p2_flow::InvokeKind::Direct
+                    || site.target != crate::p2_flow::CallTarget::Constructor
+                    || !matches!(site.result, crate::p2_flow::InvokeResult::Void)
                     || site.result_pc.is_some()
                     || site.widths.first() != Some(&ValueWidth::One)
                 {

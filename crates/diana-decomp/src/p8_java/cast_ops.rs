@@ -1,6 +1,6 @@
-use crate::p2_flow::normal::{DeclarationType, Op};
-use crate::p3_ssa::normal::BoundOp;
-use crate::p5_types::normal::{Kind, TypedBody};
+use crate::p2_flow::{DeclarationType, Op};
+use crate::p3_ssa::BoundOp;
+use crate::p5_types::{Kind, TypedBody};
 use crate::{MethodBudget, RequestError};
 
 #[derive(Clone, Copy, Eq, PartialEq)]
@@ -54,7 +54,7 @@ pub(super) fn validate(
             }
             checked_qualifier = true;
         }
-        if crate::p2_flow::normal::reference_type(
+        if crate::p2_flow::reference_type(
             input,
             input.type_name(reference, budget)?,
             reference,

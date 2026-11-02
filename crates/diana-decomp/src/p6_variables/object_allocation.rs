@@ -1,6 +1,6 @@
-use crate::p2_flow::normal::{Op, OpId};
+use crate::p2_flow::{Op, OpId};
 use crate::p5_types::initialization::Initialization;
-use crate::p5_types::normal::{Kind, TypedBody};
+use crate::p5_types::{Kind, TypedBody};
 use crate::substrate::owned::push;
 use crate::{MethodBudget, RequestError};
 
@@ -61,7 +61,7 @@ pub(super) fn prove(
             return Err(broken());
         }
         if value != root {
-            let crate::p3_ssa::normal::Definition::OpResult(id) = typed.ssa.values
+            let crate::p3_ssa::Definition::OpResult(id) = typed.ssa.values
                 [usize::try_from(value.0).map_err(|_| RequestError::PlatformCapacity)?]
             else {
                 return Err(broken());

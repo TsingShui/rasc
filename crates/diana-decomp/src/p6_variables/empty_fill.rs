@@ -1,6 +1,6 @@
-use crate::p2_flow::normal::Op;
-use crate::p3_ssa::normal::{BoundOp, ValueId};
-use crate::p5_types::normal::{Kind, TypedBody};
+use crate::p2_flow::Op;
+use crate::p3_ssa::{BoundOp, ValueId};
+use crate::p5_types::{Kind, TypedBody};
 use crate::{CodeUnitOffset, MethodBudget, RequestError};
 
 pub(crate) struct LengthOnly {

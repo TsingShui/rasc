@@ -1,6 +1,6 @@
 use super::normal::Kind;
-use crate::p2_flow::normal::Op;
-use crate::p3_ssa::normal::{Definition, SsaBody, Sym, ValueId};
+use crate::p2_flow::Op;
+use crate::p3_ssa::{Definition, SsaBody, Sym, ValueId};
 use crate::substrate::owned::push;
 use crate::{MethodBudget, RequestError, TypeId};
 

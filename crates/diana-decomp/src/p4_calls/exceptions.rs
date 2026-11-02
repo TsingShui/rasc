@@ -1,6 +1,6 @@
 use crate::input::{MethodInput, protection::CatchType};
-use crate::p2_flow::normal::{BlockId, Op, OpId};
-use crate::p3_ssa::normal::SsaBody;
+use crate::p2_flow::{BlockId, Op, OpId};
+use crate::p3_ssa::SsaBody;
 use crate::substrate::owned::{copy_units, push};
 use crate::{DeclarationCatalog, MethodBudget, RequestError, TypeId};
 

@@ -1,5 +1,5 @@
 use super::normal::Kind;
-use crate::p2_flow::normal::{ArrayKind, DeclarationType};
+use crate::p2_flow::{ArrayKind, DeclarationType};
 impl DeclarationType {
     pub(crate) fn kind(self) -> Kind {
         match self {

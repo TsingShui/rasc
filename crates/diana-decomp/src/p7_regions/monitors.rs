@@ -1,7 +1,7 @@
-use crate::p2_flow::normal::{BlockId, MonitorKind, Op, OpId, Terminal};
-use crate::p3_ssa::normal::ValueId;
+use crate::p2_flow::{BlockId, MonitorKind, Op, OpId, Terminal};
+use crate::p3_ssa::ValueId;
 use crate::p5_types::reference_roots::Root;
-use crate::p6_variables::normal::StorageBody;
+use crate::p6_variables::StorageBody;
 use crate::substrate::owned::push;
 use crate::{CodeUnitOffset, MethodBudget, RequestError};
 
@@ -199,7 +199,7 @@ fn check_fresh(
     }
     Ok(())
 }
-pub(crate) fn build(
+pub(super) fn build(
     storage: &StorageBody<'_>,
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<Option<Monitors>, RequestError> {

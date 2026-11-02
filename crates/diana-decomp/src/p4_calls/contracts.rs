@@ -7,7 +7,7 @@ use crate::{
 
 #[derive(Clone, Copy)]
 pub(crate) enum CallFormal {
-    Numeric(crate::pipeline::scalar::ScalarType),
+    Numeric(crate::p2_flow::primitives::ScalarType),
     Int,
     Boolean,
     Narrow(crate::substrate::primitive_types::Narrow),
@@ -390,11 +390,11 @@ pub(super) fn original_formals(
             let formal = if name.matches_with(&[73], budget)? {
                 CallFormal::Int
             } else if name.matches_with(&[74], budget)? {
-                CallFormal::Numeric(crate::pipeline::scalar::ScalarType::Long)
+                CallFormal::Numeric(crate::p2_flow::primitives::ScalarType::Long)
             } else if name.matches_with(&[70], budget)? {
-                CallFormal::Numeric(crate::pipeline::scalar::ScalarType::Float)
+                CallFormal::Numeric(crate::p2_flow::primitives::ScalarType::Float)
             } else if name.matches_with(&[68], budget)? {
-                CallFormal::Numeric(crate::pipeline::scalar::ScalarType::Double)
+                CallFormal::Numeric(crate::p2_flow::primitives::ScalarType::Double)
             } else if name.matches_with(&[90], budget)? {
                 CallFormal::Boolean
             } else if name.matches_with(&[66], budget)? {
