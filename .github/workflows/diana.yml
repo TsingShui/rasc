@@ -1,9 +1,12 @@
 name: Diana
 
 # Diana-only gates: format, lint, release build and the core Rust test suite.
-# The prepared APK/DEX E2E assets stay untracked, so the E2E runners remain an
-# operator step. Windows keeps build/lint only; the core suite has no Windows
-# evidence yet. No version preparation, artifact upload, tag or release.
+# `gates` runs the declared minimum toolchain (1.93) on three platforms; `latest`
+# reruns the same gates on current stable so new lints and warnings surface before
+# a toolchain bump. The prepared APK/DEX E2E assets stay untracked, so the E2E
+# runners remain an operator step. Windows keeps build/lint only because the core
+# suite has no Windows evidence yet. No version preparation, artifact upload, tag
+# or release.
 
 on:
   push:
@@ -65,4 +68,34 @@ jobs:
 
       - name: Tests
         if: runner.os != 'Windows'
+        run: cargo nextest run --workspace --all-features --locked
+
+  latest:
+    name: Gates (ubuntu-latest, stable)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Toolchain
+        run: |
+          rustup toolchain install stable --profile minimal --component rustfmt --component clippy
+          rustup default stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: diana-latest
+
+      - name: Format
+        run: cargo fmt --all -- --check
+
+      - name: Lint
+        run: cargo clippy --workspace --locked --all-targets --all-features -- -D warnings
+
+      - name: Build
+        run: cargo build --workspace --locked --release
+
+      - name: Install nextest
+        uses: taiki-e/install-action@nextest
+
+      - name: Tests
         run: cargo nextest run --workspace --all-features --locked
