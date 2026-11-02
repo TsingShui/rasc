@@ -186,7 +186,7 @@ pub struct MethodFacts {
 pub enum MethodOutput {
     Generated {
         facts: MethodFacts,
-        declaration: crate::p8_java::GeneratedBridge,
+        declaration: crate::GeneratedMember,
         original: DebugSource,
     },
     JavaInitializer {

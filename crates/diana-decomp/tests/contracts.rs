@@ -12,6 +12,8 @@ mod container;
 mod debug;
 #[path = "input/debug_program.rs"]
 mod debug_program;
+#[path = "pipeline/enums.rs"]
+mod enums;
 #[path = "input/fixture.rs"]
 mod fixture;
 #[path = "input/header.rs"]

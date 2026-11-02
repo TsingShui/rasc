@@ -28,6 +28,7 @@ pub(crate) fn class(
         index
             .annotation_directory(context.annotations_offset, control)?
             .class,
+        false,
         control,
     )
 }
@@ -43,11 +44,12 @@ pub(crate) fn method(
     let Some(range) = raw.method_range() else {
         return Ok(None);
     };
-    read(input.program(), range.start, control)
+    read(input.program(), range.start, true, control)
 }
 fn read(
     index: &ProgramIndex<'_>,
     offset: ByteOffset,
+    method_parameters: bool,
     control: &mut impl InputControl,
 ) -> Result<Option<Signature>, RequestError> {
     if offset == ByteOffset(0) {
@@ -61,6 +63,21 @@ fn read(
         let (at, visibility, ty, mut values) =
             index.next_annotation(&mut offsets, &mut last, control)?;
         let descriptor = index.type_descriptor(ty, control)?.0;
+        // MethodParameters is independent system metadata, not a Signature fragment.
+        if method_parameters
+            && visibility == 2
+            && descriptor.matches_with(
+                &[
+                    76, 100, 97, 108, 118, 105, 107, 47, 97, 110, 110, 111, 116, 97, 116, 105, 111,
+                    110, 47, 77, 101, 116, 104, 111, 100, 80, 97, 114, 97, 109, 101, 116, 101, 114,
+                    115, 59,
+                ],
+                control,
+            )?
+        {
+            while values.next(index, control)?.is_some() {}
+            continue;
+        }
         if !descriptor.matches_with(
             &[
                 76, 100, 97, 108, 118, 105, 107, 47, 97, 110, 110, 111, 116, 97, 116, 105, 111,

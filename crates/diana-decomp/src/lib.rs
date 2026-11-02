@@ -25,6 +25,8 @@ pub use engine::{
 };
 pub use input::ownership::{NestedClass, Ownership};
 pub use p8_java::CaptureCertificate;
+pub use p8_java::enums::{EnumFieldRole, EnumMemberRole, GeneratedEnumField, GeneratedEnumMember};
+pub use p8_java::member_emission::GeneratedMember;
 pub use p8_java::nested_plan::GeneratedCaptureField;
 pub use p8_java::{
     CompilationContract, GeneratedBridge, JavaCallSite, JavaInvokeKind, JavaMethodDecl,
@@ -34,7 +36,7 @@ pub use p9_emit::render;
 pub use pipeline::request::{JavaTargetItem, RequestError};
 pub use substrate::fields::{
     FieldDeclarationOutput, FieldFacts, FieldInitialValue, FieldKey, FieldOutput, FieldStorage,
-    StaticFieldOrdinal,
+    GeneratedField, StaticFieldOrdinal,
 };
 pub use substrate::report::NestedReport;
 pub use substrate::report::{

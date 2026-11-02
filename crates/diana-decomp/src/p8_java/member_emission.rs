@@ -18,11 +18,38 @@ impl GeneratedBridge {
         self.bridge
     }
 }
+/// Original generated member tied to its checked method or class owner.
+#[derive(Clone)]
+pub enum GeneratedMember {
+    Bridge(GeneratedBridge),
+    Enum(super::enums::GeneratedEnumMember),
+}
 #[derive(Default)]
 pub(crate) struct Plan {
+    issue: Option<RequestError>,
+    enumeration: Option<super::enums::Proof>,
     bridges: Vec<GeneratedBridge>,
 }
 impl Plan {
+    pub(crate) fn with_enum(proof: super::enums::Proof) -> Self {
+        Self {
+            issue: None,
+            enumeration: Some(proof),
+            bridges: Vec::new(),
+        }
+    }
+    pub(crate) fn rejected(error: RequestError) -> Self {
+        Self {
+            issue: Some(error),
+            ..Self::default()
+        }
+    }
+    pub(crate) fn take_issue(&mut self) -> Option<RequestError> {
+        self.issue.take()
+    }
+    pub(crate) fn enumeration(&self) -> Option<&super::enums::Proof> {
+        self.enumeration.as_ref()
+    }
     pub(crate) fn add(
         &mut self,
         bridge: GeneratedBridge,
@@ -48,14 +75,18 @@ impl Plan {
         &self,
         bridge: MethodId,
         control: &mut impl crate::pipeline::control::InputControl,
-    ) -> Result<Option<GeneratedBridge>, RequestError> {
+    ) -> Result<Option<GeneratedMember>, RequestError> {
         for entry in &self.bridges {
             control.charge_work(1)?;
             if entry.bridge == bridge {
-                return Ok(Some(entry.clone()));
+                return Ok(Some(GeneratedMember::Bridge(entry.clone())));
             }
         }
-        Ok(None)
+        Ok(self
+            .enumeration
+            .as_ref()
+            .and_then(|proof| proof.generated(bridge))
+            .map(GeneratedMember::Enum))
     }
 }
 

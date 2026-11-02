@@ -364,8 +364,9 @@ impl<'a> Engine<'a> {
                     ClassOutput::JavaUnit { fields, .. } | ClassOutput::Mixed { fields, .. } => {
                         for field in fields {
                             if field.key == generated.field() {
-                                field.declaration =
-                                    crate::FieldDeclarationOutput::Generated(generated);
+                                field.declaration = crate::FieldDeclarationOutput::Generated(
+                                    crate::GeneratedField::OuterCapture(generated),
+                                );
                             }
                         }
                     }
@@ -407,18 +408,7 @@ impl<'a> Engine<'a> {
             primary: None,
         };
         let whole_class = request.method.is_none();
-        let (fields, field_issue) = if whole_class {
-            class_fields(
-                &image.index,
-                request.class,
-                &self.catalog,
-                &mut diagnostics,
-                control,
-            )?
-        } else {
-            (Vec::new(), None)
-        };
-        let emission = if whole_class {
+        let mut emission = if whole_class {
             crate::pipeline::member_emission::collect(
                 &SchedulePermit { _private: () },
                 &image.index,
@@ -428,6 +418,18 @@ impl<'a> Engine<'a> {
             )?
         } else {
             crate::p8_java::member_emission::Plan::default()
+        };
+        let (fields, field_issue) = if whole_class {
+            class_fields(
+                &image.index,
+                request.class,
+                &self.catalog,
+                &emission,
+                &mut diagnostics,
+                control,
+            )?
+        } else {
+            (Vec::new(), None)
         };
         let mut members = Vec::new();
         let result = (|| -> Result<(), RequestError> {
@@ -536,8 +538,24 @@ impl<'a> Engine<'a> {
         if let Err(error) = result {
             return Err(diagnostics.preserve(error));
         }
-        let mut shell_cause = DiagnosticCause::Unsupported(OutputReason::ClassAssemblyUnavailable);
-        let unit = if whole_class && field_issue.is_none() {
+        let source_issue = emission.take_issue();
+        let source_rejected = source_issue.is_some();
+        let mut shell_cause = source_issue.map_or(
+            DiagnosticCause::Unsupported(OutputReason::ClassAssemblyUnavailable),
+            DiagnosticCause::Request,
+        );
+        let unit = if source_rejected {
+            None
+        } else if let Some(proof) = emission.enumeration() {
+            crate::p8_java::enums::unit(
+                &SchedulePermit { _private: () },
+                proof,
+                &fields,
+                &members,
+                self.catalog.environment,
+                control,
+            )?
+        } else if whole_class && field_issue.is_none() {
             match crate::p8_java::verify_unit(
                 &SchedulePermit { _private: () },
                 &image.index,
@@ -908,6 +926,7 @@ fn class_fields(
     index: &ProgramIndex<'_>,
     key: crate::ClassKey,
     catalog: &DeclarationCatalog,
+    emission: &crate::p8_java::member_emission::Plan,
     diagnostics: &mut DiagnosticLog,
     control: &mut RunContext<'_>,
 ) -> Result<(Vec<crate::FieldOutput>, Option<DiagnosticId>), RequestError> {
@@ -950,6 +969,26 @@ fn class_fields(
     let mut fields = Vec::new();
     for field in directory.fields {
         control.checkpoint()?;
+        if let Some(proof) = emission.enumeration()
+            && let Some(generated) = proof.field(field.key, control)?
+        {
+            let facts = field.facts?;
+            let initial = field.initial.ok_or(RequestError::InternalInvariant(
+                "enum field lost checked preparation",
+            ))?;
+            reserve(&mut fields, 1, control)?;
+            fields.push(crate::FieldOutput {
+                key: field.key,
+                access_flags: field.access_flags,
+                storage: field.storage,
+                facts: Some(facts),
+                initial,
+                declaration: crate::FieldDeclarationOutput::Generated(crate::GeneratedField::Enum(
+                    generated,
+                )),
+            });
+            continue;
+        }
         let declaration = match &field.facts {
             Ok(facts) => {
                 match crate::p4_calls::field_declarations::bind(index, key, catalog, facts, control)

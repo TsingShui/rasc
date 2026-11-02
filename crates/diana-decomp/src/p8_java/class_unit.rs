@@ -10,9 +10,29 @@ pub struct VerifiedJavaUnit {
     header: String,
     environment: EnvironmentId,
     preparation: String,
-    _binding: crate::p4_calls::class_scope::ClassBindings,
+    _binding: Binding,
+}
+enum Binding {
+    Class {
+        _binding: crate::p4_calls::class_scope::ClassBindings,
+    },
+    Enum {
+        _binding: super::enums::Binding,
+    },
 }
 impl VerifiedJavaUnit {
+    pub(super) fn enumeration(
+        header: String,
+        environment: EnvironmentId,
+        binding: super::enums::Binding,
+    ) -> Self {
+        Self {
+            header,
+            environment,
+            preparation: String::new(),
+            _binding: Binding::Enum { _binding: binding },
+        }
+    }
     pub(crate) fn source_header(&self) -> &str {
         &self.header
     }
@@ -71,7 +91,11 @@ fn verify_impl(
     let mut emission = super::member_emission::Plan::default();
     for member in members {
         control.charge_work(1)?;
-        if let MethodOutput::Generated { declaration, .. } = member {
+        if let MethodOutput::Generated {
+            declaration: crate::GeneratedMember::Bridge(declaration),
+            ..
+        } = member
+        {
             emission.add(declaration.clone(), control)?;
         }
     }
@@ -241,6 +265,7 @@ fn verify_impl(
                         .ok_or(RequestError::PlatformCapacity)?;
                     let generated = matches!(member, MethodOutput::Generated { .. });
                     if let MethodOutput::Generated { facts, declaration, .. } = member {
+                        let crate::GeneratedMember::Bridge(declaration) = declaration else { admitted = false; return Ok(()); };
                         let mut owner_present = false;
                         for other in members {
                             control.charge_work(1)?;
@@ -381,6 +406,6 @@ fn verify_impl(
         header: header.finish(),
         environment,
         preparation: preparation.finish(),
-        _binding: binding,
+        _binding: Binding::Class { _binding: binding },
     }))
 }

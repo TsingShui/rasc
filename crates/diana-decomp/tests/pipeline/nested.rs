@@ -365,8 +365,9 @@ fn t22_capture_certificate_requires_entry_receiver_outer_parameter_and_unique_wr
             variant == "capture"
         );
         if variant == "capture" {
-            let diana_decomp::FieldDeclarationOutput::Generated(field) =
-                &report.nested()[0].class().fields()[0].declaration
+            let diana_decomp::FieldDeclarationOutput::Generated(
+                diana_decomp::GeneratedField::OuterCapture(field),
+            ) = &report.nested()[0].class().fields()[0].declaration
             else {
                 panic!("capture field was not accounted for");
             };

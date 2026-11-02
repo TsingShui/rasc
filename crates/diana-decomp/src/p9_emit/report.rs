@@ -64,6 +64,12 @@ fn render_class(
             output.push(declaration.source_header(), control)?;
             for field in fields {
                 control.checkpoint()?;
+                if matches!(
+                    field.declaration,
+                    crate::FieldDeclarationOutput::Generated(_)
+                ) {
+                    continue;
+                }
                 let crate::FieldDeclarationOutput::Java(declaration) = &field.declaration else {
                     return Err(RequestError::InternalInvariant(
                         "JavaUnit contains unavailable field",
@@ -223,6 +229,29 @@ fn render_class(
         start: class_start,
         end: SourceByteOffset(output.len()),
     });
+    if matches!(class, ClassOutput::JavaUnit { .. }) {
+        for member in class.members() {
+            control.charge_work(1)?;
+            if let MethodOutput::Generated {
+                declaration: crate::GeneratedMember::Enum(declaration),
+                ..
+            } = member
+            {
+                if declaration.owner() != key {
+                    return Err(RequestError::InternalInvariant(
+                        "generated enum lost owner span",
+                    ));
+                }
+                reserve(spans, 1, control)?;
+                spans.push(OriginSpan {
+                    method: member.key(),
+                    start: class_start,
+                    end: SourceByteOffset(output.len()),
+                    language: SourceLanguage::Java,
+                });
+            }
+        }
+    }
     Ok(())
 }
 
@@ -262,7 +291,11 @@ fn write_java_members(
     }
     for member in members {
         control.checkpoint()?;
-        if let MethodOutput::Generated { declaration, .. } = member {
+        if let MethodOutput::Generated {
+            declaration: crate::GeneratedMember::Bridge(declaration),
+            ..
+        } = member
+        {
             let target = members
                 .iter()
                 .find(|member| member.key().method == declaration.target())
@@ -345,9 +378,14 @@ fn write_field(
         }
     }
     match &field.declaration {
-        crate::FieldDeclarationOutput::Generated(_) => {
+        crate::FieldDeclarationOutput::Generated(crate::GeneratedField::OuterCapture(_)) => {
             output.push("Generated: nested outer capture\n", control)?
         }
+        crate::FieldDeclarationOutput::Generated(crate::GeneratedField::Enum(field)) => output
+            .arguments(
+                format_args!("Generated: enum {:?}\n", field.role()),
+                control,
+            )?,
         crate::FieldDeclarationOutput::Java(declaration) => {
             output.push(declaration.source(), control)?;
             output.push("\n", control)?;

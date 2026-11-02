@@ -1839,6 +1839,32 @@ or recursive report tree is introduced. A rejected nested unit makes the owner
 Mixed while retaining available original nested results. A single inner fragment
 is not an independent JavaUnit.
 
+The canonical enum profile accepts a public final enum whose only fields are
+public static final constants and the private synthetic `$VALUES` array. Its
+complete method set is the `$values` array helper, clinit, hidden String/int
+constructor, values and valueOf. Native/catalog declarations and the original
+self-bound Enum Signature agree. Field preparation is complete/default; field
+annotations and additional members reject this profile.
+
+P4 binds declarations and the required standard Enum constructor/valueOf
+contracts. P8 consumes validated original code and checks the constructor entry,
+constant allocation/name/ordinal/store sequence, helper array order, values
+clone/cast and valueOf class/argument/cast. Exact references, registers, normal
+returns and absence of extra operations/protection are required. Declaration
+order comes from checked initializer stores, not field-table order. Executable
+references to backing storage outside these methods reject the owner. An extra
+constructor effect remains original Debug/Mixed rather than being silently
+consumed by enum syntax.
+
+Generated method evidence distinguishes bridge method owners from enum class
+owners; generated field evidence records constant ordinals or backing storage.
+P8 checks unique and complete original field/method coverage before sealing the
+enum unit binding. P9 renders the checked enum constants and maps generated method
+identities to the final class source span. Mixed output and standalone retrieval
+retain original snapshots. A local proof parse error remains a classified class
+issue while other members are retrieved; cancellation/resource/invariant errors
+terminate without a partial successful unit.
+
 The native covariant profile accepts a no-argument Object-returning bridge to
 the same owner's String-returning instance override. P4 requires the original
 public nonfinal override contract and complete nongeneric ancestor evidence.

@@ -4,6 +4,7 @@ pub(crate) mod class_scope;
 pub(crate) mod constructor_evidence;
 mod contracts;
 pub(crate) mod entry_declarations;
+pub(crate) mod enums;
 pub(crate) mod exceptions;
 pub(crate) mod interface_scope;
 pub(crate) mod nested_scope;

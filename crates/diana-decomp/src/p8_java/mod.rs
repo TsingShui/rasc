@@ -7,6 +7,7 @@ pub(crate) mod calls;
 pub(crate) mod capture;
 pub(crate) mod cast_ops;
 mod class_unit;
+pub(crate) mod enums;
 pub(crate) mod nested_plan;
 pub use capture::CaptureCertificate;
 pub(crate) use class_unit::verify as verify_unit;

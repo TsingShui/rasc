@@ -2338,6 +2338,12 @@ single-fragment status is correct.
 
 ## T23 — Restricted enum/annotation and complete shell classification
 
+**Progress**: The approved [canonical enum slice](batches/t23-enum.md) passes
+D050 and public generation/order/clone/valueOf/escape/custom-body regressions.
+Generated members retain original facts, raw snapshots and checked class-owner
+spans. T23 remains open for annotation declarations, defaults, retention/target
+and runtime literals, including D051.
+
 **Dependencies**: T22, T20. **Phase**: P1/P4/P8/P9. **References**: DX-08/09,
 RG-09.
 
