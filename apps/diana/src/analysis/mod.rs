@@ -7,8 +7,10 @@
 
 pub mod apk;
 pub mod archive;
+pub mod at;
 mod attr_names;
 pub mod axml;
+pub mod decompile;
 pub mod dex;
 pub mod images;
 pub mod input;

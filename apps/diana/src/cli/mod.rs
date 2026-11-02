@@ -4,7 +4,7 @@
 //! path. Output is written as a complete artifact: a temporary file in the target
 //! directory is renamed into place, so a failed run never leaves a half file.
 
-mod at;
+mod get;
 mod output;
 mod table;
 
@@ -12,6 +12,7 @@ use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
 
+use crate::analysis::at;
 use crate::analysis::axml::ManifestLimits;
 use crate::analysis::dex::{ClassFilter, ClassKind};
 use crate::analysis::input::{InputLimits, InputOptions};
@@ -99,6 +100,24 @@ enum Command {
         #[arg(short, long)]
         output: Option<PathBuf>,
     },
+    /// Decompile one class
+    GetClass {
+        input: PathBuf,
+        selector: String,
+        #[arg(long, value_enum, default_value_t = Format::Text)]
+        format: Format,
+        #[arg(short, long)]
+        output: Option<PathBuf>,
+    },
+    /// Decompile one method
+    GetMethod {
+        input: PathBuf,
+        selector: String,
+        #[arg(long, value_enum, default_value_t = Format::Text)]
+        format: Format,
+        #[arg(short, long)]
+        output: Option<PathBuf>,
+    },
     /// Decode the binary AndroidManifest.xml
     Manifest {
         input: PathBuf,
@@ -133,6 +152,30 @@ pub fn run() -> std::process::ExitCode {
             output,
             strict,
         } => manifest_command(&input, format, output.as_deref(), strict),
+        Command::GetClass {
+            input,
+            selector,
+            format,
+            output,
+        } => get::run(
+            &input,
+            &selector,
+            get::Kind::Class,
+            format,
+            output.as_deref(),
+        ),
+        Command::GetMethod {
+            input,
+            selector,
+            format,
+            output,
+        } => get::run(
+            &input,
+            &selector,
+            get::Kind::Method,
+            format,
+            output.as_deref(),
+        ),
         Command::Classes {
             input,
             filter,
@@ -410,13 +453,38 @@ fn query_command(
         .map_err(|error| Failure::query(error, 1))?;
     let mut records = Vec::with_capacity(rows.len());
     for row in &rows {
+        let image_index = match row {
+            Row::Class(row) => row.image.0,
+            Row::Method(row) => row.image.0,
+            Row::Field(row) => row.image.0,
+            Row::String(row) => row.image.0,
+            Row::Entry(row) => row.image.0,
+        };
+        let image = &images[image_index];
+        let entry = image.entry.map(|entry| entry.0);
         let record = match row {
-            Row::Class(row) => Record::new(at::class(&images[row.image.0], row)),
-            Row::Method(row) => Record::new(at::method(&images[row.image.0], row)),
-            Row::Field(row) => Record::new(at::field(&images[row.image.0], row)),
-            Row::String(row) => Record::new(at::string(&images[row.image.0], row))
-                .with_value(table::escape_units(&row.units))
-                .with_entry(images[row.image.0].label.clone()),
+            Row::Class(row) => Record::new(at::class(entry, 0, row.class_def.0, &row.descriptor)),
+            Row::Method(row) => Record::new(at::method(
+                entry,
+                0,
+                row.class_def.0,
+                row.method.0,
+                &row.class_descriptor,
+                &row.name,
+                &row.prototype,
+            )),
+            Row::Field(row) => Record::new(at::field(
+                entry,
+                0,
+                row.class_def.0,
+                row.field.0,
+                &row.class_descriptor,
+                &row.name,
+                &row.field_type,
+            )),
+            Row::String(row) => Record::new(at::string(entry, 0, row.string.0))
+                .with_value(at::escape_units(&row.units))
+                .with_entry(image.label.clone()),
             Row::Entry(_) => continue,
         };
         records.push(record);

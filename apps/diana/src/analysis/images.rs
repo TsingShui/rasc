@@ -260,9 +260,43 @@ pub fn resolve_method<'a>(
     selector: &super::selector::MethodSelector,
     control: &mut RunContext<'_>,
 ) -> Result<Selection<'a>, SelectorError> {
-    let id = selector.method.ok_or(SelectorError::Syntax(
-        "a method-at is required for this selection",
-    ))?;
+    let Some(id) = selector.method else {
+        // A short reference resolves through defined members, so an overload that
+        // is not written out cannot be guessed.
+        let class = resolve_class(images, &selector.class, control)?;
+        let index = images
+            .program(class.image, control)
+            .map_err(|_| SelectorError::InvalidIndex)?;
+        let mut found = None;
+        index
+            .class(class.class_def, control)
+            .map_err(|_| SelectorError::InvalidIndex)?
+            .visit_methods(control, |method, control| {
+                let declaration = method.declaration?;
+                if declaration.name.matches(&selector.name, control)?
+                    && declaration
+                        .prototype
+                        .matches(&selector.prototype, control)?
+                    && found.replace(method.method_idx).is_some()
+                {
+                    return Err(diana_decomp::input::InputError::InternalInvariant(
+                        "duplicate member selection",
+                    ));
+                }
+                Ok(())
+            })
+            .map_err(|_| SelectorError::InvalidIndex)?;
+        return match found {
+            Some(id) => resolve_class_inner(
+                images,
+                &selector.class,
+                control,
+                Some((id.0, &selector.name, &selector.prototype)),
+                None,
+            ),
+            None => Err(SelectorError::NotFound),
+        };
+    };
     resolve_class_inner(
         images,
         &selector.class,

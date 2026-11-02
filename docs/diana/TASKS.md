@@ -2816,6 +2816,12 @@ switching the default to the old engine, MCP class-id returning the new schema.
 
 ## H05 — CLI wiring and the semantic loop of the public decompilation interface
 
+**Progress**: The [decompile batch](batches/h05-decompile.md) wires
+`get-class`/`get-method` through the shared engine chain with canonical locators,
+Mixed/Debug preservation, `at`-mapped spans and JSON schema 1. The CLI still opens
+an empty declaration catalog; assembling it from the request's own declarations
+remains open.
+
 **Dependencies**: H04, T06. **Scope**: early CLI wiring that does not wait for
 the whole engine.
 

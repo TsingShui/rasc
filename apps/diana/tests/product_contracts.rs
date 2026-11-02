@@ -1334,3 +1334,172 @@ mod h04_native {
         assert_eq!(other.image.header_offset.0, 0x78);
     }
 }
+
+mod h05 {
+    use diana::analysis::decompile;
+    use diana::analysis::input::{InputLimits, InputOptions};
+    use diana::analysis::request::RequestScope;
+    use diana::analysis::selector::{self, Selector};
+    use diana_decomp::{ClassOutput, DeclarationCatalog, EnvironmentId, MethodOutput};
+
+    use super::support::TempDir;
+
+    const D085: &[u8] =
+        include_bytes!("../../../crates/diana-decomp/tests/fixtures/dynamic/d085.dex");
+    const POLY: &[u8] =
+        include_bytes!("../../../crates/diana-decomp/tests/fixtures/dynamic/poly.dex");
+    const D051: &[u8] =
+        include_bytes!("../../../crates/diana-decomp/tests/fixtures/annotations/d051.dex");
+    const D051_CATALOG: &str =
+        include_str!("../../../crates/diana-decomp/tests/fixtures/annotations/catalog.json");
+
+    #[derive(serde::Deserialize)]
+    struct Facts {
+        #[serde(default)]
+        methods: Vec<diana_decomp::ExternalMethodSignature>,
+        #[serde(default)]
+        classes: Vec<diana_decomp::ExternalClassDeclaration>,
+        #[serde(default)]
+        fields: Vec<diana_decomp::ExternalFieldEvidence>,
+    }
+
+    fn options() -> InputOptions {
+        InputOptions {
+            limits: InputLimits::default(),
+            allowed_root: None,
+        }
+    }
+
+    fn catalog(json: &str) -> DeclarationCatalog {
+        let facts: Facts = serde_json::from_str(json).unwrap();
+        DeclarationCatalog::with_declarations(EnvironmentId(0), facts.methods, facts.classes)
+            .with_field_evidence(facts.fields)
+    }
+
+    fn decompile_class(
+        bytes: &[u8],
+        name: &str,
+        text: &str,
+        catalog: DeclarationCatalog,
+    ) -> (TempDir, decompile::Decompiled) {
+        let dir = TempDir::new(name);
+        let path = dir.file("input.dex", bytes);
+        let scope = RequestScope::open(&path, &options()).unwrap();
+        let selector = Selector::Class(selector::class(text).unwrap());
+        let mut control = diana_decomp::RunContext::new(diana_decomp::Limits::default(), &|| false);
+        let decompiled =
+            decompile::run_with_catalog(&scope, &selector, catalog, &mut control).unwrap();
+        // The report owns everything; the leased input may be dropped.
+        drop(scope);
+        (dir, decompiled)
+    }
+
+    #[test]
+    fn h05_java_members_keep_spans_and_mixed_classes_stay_visible() {
+        let (_dir, decompiled) =
+            decompile_class(D051, "h05-java", "Lfixtures/Case;", catalog(D051_CATALOG));
+        assert!(matches!(
+            decompiled.report.class(),
+            ClassOutput::Mixed { .. } | ClassOutput::JavaUnit { .. }
+        ));
+        assert_eq!(decompiled.class_at, "e0:l0:c0::Lfixtures/Case;");
+        let members = decompiled.report.class().members();
+        assert_eq!(members.len(), 1);
+        assert!(matches!(members[0], MethodOutput::Java { .. }));
+        let span = decompiled
+            .rendered
+            .spans
+            .iter()
+            .find(|span| span.method == members[0].key())
+            .unwrap();
+        let slice = &decompiled.rendered.source[span.start.0..span.end.0];
+        let MethodOutput::Java { source, .. } = &members[0] else {
+            unreachable!()
+        };
+        assert_eq!(slice, source);
+        assert!(slice.contains("super()"));
+        assert!(span.start.0 <= span.end.0);
+        assert!(span.end.0 <= decompiled.rendered.source.len());
+    }
+
+    #[test]
+    fn h05_unsupported_members_keep_their_reason_and_other_members() {
+        // A class request keeps the Java constructor and the invoke-custom raw
+        // member; a method request returns only the failing member with its reason.
+        let (_dir, class) = decompile_class(D085, "h05-mixed", "Lfixtures/Case;", catalog("{}"));
+        let ClassOutput::Mixed { members, .. } = class.report.class() else {
+            panic!("a class with an unsupported member must be Mixed");
+        };
+        assert_eq!(members.len(), 3);
+        let dynamic = members
+            .iter()
+            .find(|member| member.key().method.0 == 2)
+            .unwrap();
+        assert!(matches!(dynamic, MethodOutput::Debug { .. }));
+        let reason = match dynamic {
+            MethodOutput::Debug { reason, .. } => reason,
+            _ => unreachable!(),
+        };
+        assert_eq!(
+            class.report.diagnostics()[reason.0].code(),
+            diana_decomp::DiagnosticCode::InvokeCustomUnsupported
+        );
+        assert!(
+            members
+                .iter()
+                .any(|member| matches!(member, MethodOutput::Java { .. }))
+        );
+
+        let dir = TempDir::new("h05-method");
+        let path = dir.file("input.dex", D085);
+        let scope = RequestScope::open(&path, &options()).unwrap();
+        let selector = Selector::Method(selector::method("Lfixtures/Case;->aDynamic()I").unwrap());
+        let mut control = diana_decomp::RunContext::new(diana_decomp::Limits::default(), &|| false);
+        let method =
+            decompile::run_with_catalog(&scope, &selector, catalog("{}"), &mut control).unwrap();
+        assert_eq!(method.method.unwrap().0, 2);
+        assert_eq!(method.report.class().members().len(), 1);
+        assert!(matches!(
+            method.report.class().members()[0],
+            MethodOutput::Debug { .. }
+        ));
+        assert!(
+            method
+                .method_at
+                .as_deref()
+                .unwrap()
+                .starts_with("e0:l0:c0:m2::Lfixtures/Case;->aDynamic()I")
+        );
+        let span = &method.rendered.spans[0];
+        let slice = &method.rendered.source[span.start.0..span.end.0];
+        assert!(slice.contains("invoke-custom"));
+        drop(scope);
+        drop(dir);
+    }
+
+    #[test]
+    fn h05_method_selector_requires_an_unambiguous_complete_reference() {
+        let dir = TempDir::new("h05-selector");
+        let poly = dir.file("poly.dex", POLY);
+        let scope = RequestScope::open(&poly, &options()).unwrap();
+        let mut control = diana_decomp::RunContext::new(diana_decomp::Limits::default(), &|| false);
+        // A bare name without the prototype is a syntax error; this is a method
+        // reference, not a guess.
+        let error = selector::method("Lfixtures/Poly;->call").unwrap_err();
+        assert_eq!(error.code(), 2);
+        let selector = Selector::Method(
+            selector::method("Lfixtures/Poly;->call(Ljava/lang/invoke/MethodHandle;I)I").unwrap(),
+        );
+        let selected =
+            decompile::run_with_catalog(&scope, &selector, catalog("{}"), &mut control).unwrap();
+        assert_eq!(selected.method.unwrap().0, 1);
+        assert_eq!(
+            selected.method_at.as_deref().unwrap(),
+            "e0:l0:c0:m1::Lfixtures/Poly;->call(Ljava/lang/invoke/MethodHandle;I)I"
+        );
+        assert!(matches!(
+            selected.report.class().members()[0],
+            MethodOutput::Debug { .. }
+        ));
+    }
+}
