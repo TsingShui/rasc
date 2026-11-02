@@ -8,6 +8,8 @@ import copy
 import json
 import os
 import tempfile
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 
@@ -26,22 +28,43 @@ def required_runs(spec, case_ids=None):
     return runs
 
 
-def run_public(root, cache, spec, manifest, case_ids=None,representation=None):
-    from e2e import PreparationError, relative, run, save
+def run_public(root, cache, spec, manifest, case_ids=None,representation=None,jobs=None):
+    from e2e import PreparationError, relative, run, save, load
     from .evaluate import compare_suite
     from .compare import Mismatch
+    if jobs is None:
+        jobs = os.cpu_count() or 1
+    if jobs < 1:
+        raise ValueError('jobs must be positive')
     runs = required_runs(spec, case_ids)
     assets = {a['id']:a for a in manifest['assets']}
     certified = {(c['id'],i['id']):i for c in manifest['cases'] for i in c['invocations']}
     base = cache/'engine'
     base.mkdir(parents=True,exist_ok=True)
+    durations = {}
+    latest = base/'latest.json'
+    if latest.is_file():
+        previous = root/load(latest)['report']
+        relative(previous)
+        if not previous.resolve().is_relative_to(base.resolve()):
+            raise PreparationError('previous report is outside the engine output directory')
+        for case, invocation, seam in runs:
+            timing_path = previous.parent/case['id']/invocation['id']/seam/'timing.json'
+            if timing_path.is_file():
+                duration = load(timing_path)['total_seconds']
+                if not isinstance(duration,(int,float)) or not 0 <= duration < float('inf'):
+                    raise PreparationError('invalid previous execution duration')
+                durations[(case['id'],invocation['id'],seam)] = duration
+    scheduled = sorted(runs,key=lambda item: -durations.get((item[0]['id'],item[1]['id'],item[2]),0))
     output = Path(tempfile.mkdtemp(prefix='run-',dir=base))
     run(['cargo','build','-p','diana-decomp','--release','--example','inspect_class','--locked'], root, output/'build.log', timeout=180)
     executable = root/'target/release/examples'/('inspect_class.exe' if os.name=='nt' else 'inspect_class')
     revision=run(['git','rev-parse','HEAD'],root,output/'revision.log').strip()
     dirty=bool(run(['git','status','--porcelain','--untracked-files=no','--','Cargo.toml','Cargo.lock','apps/diana','crates/diana-decomp','tests/e2e','docs/diana/e2e_cases.json','tools/e2e.py'],root,output/'working-tree.log').strip())
-    records = []
-    for case, invocation, seam in runs:
+    def execute(item):
+        case, invocation, seam = item
+        started = time.monotonic()
+        timing = {}
         record = {'schema_version':1,'spec_revision':spec['specRevision'],'case_id':case['id'],
                   'invocation_id':invocation['id'],'seam':seam,'producer':'diana-public-library',
                   'execution':'not_implemented','artifacts':{},'engine_revision':{'commit':revision,'working_tree_dirty':dirty}}
@@ -78,7 +101,9 @@ def run_public(root, cache, spec, manifest, case_ids=None,representation=None):
                     argv.extend(['--control',control_path])
                     record['request_controls']={'path':relative(control_path)}
                     catalog_path=work/'method-signatures.json'
+                    catalog_started = time.monotonic()
                     save(catalog_path,_catalog(root,assets,cert['catalog']['asset_id'],invocation['input'].get('javaConstantKind')))
+                    timing['catalog_seconds'] = time.monotonic() - catalog_started
                     argv.extend(['--catalog',catalog_path])
                     public_path=work/'public.json'
                     relative(public_path)
@@ -158,31 +183,41 @@ def run_public(root, cache, spec, manifest, case_ids=None,representation=None):
                     record['catalog']={'asset_id':cert['catalog']['asset_id'],'applied':'signatures and explicitly covered class directories'}
         except (PreparationError,OSError,ValueError,KeyError,TypeError,IndexError) as error:
             record['execution']='failed';record['reason']=str(error)
-        records.append(record)
+        timing['adapter_seconds'] = time.monotonic() - started
         save(work/'record.json',record)
-    save(output/'records.json',records)
-    results=[]
-    for case,invocation,seam in runs:
-        record=next(r for r in records if (r['case_id'],r['invocation_id'],r['seam'])==(case['id'],invocation['id'],seam))
         case_spec=copy.deepcopy(case);case_spec['seam']=seam
         case_spec['invocations']=[copy.deepcopy(invocation)]
         case_spec['invocations'][0]['input']['through']=[seam]
         local_spec={**spec,'cases':[case_spec]}
         verdict={'case_id':case['id'],'invocation_id':invocation['id'],'seam':seam,'execution':'failed'}
+        comparison_started = time.monotonic()
         try:
-            compare_suite(root,local_spec,manifest,[record])
+            compare_suite(root,local_spec,manifest,[record],timing=timing)
             verdict['execution']='passed'
         except (Mismatch,PreparationError,OSError,ValueError,KeyError,TypeError,IndexError) as error:
             verdict['reason']=str(error)
-        results.append(verdict)
-        print(case['id'],invocation['id'],seam,verdict['execution'],verdict.get('reason',''),flush=True)
+        timing['comparison_seconds'] = time.monotonic() - comparison_started
+        timing['total_seconds'] = time.monotonic() - started
+        save(work/'timing.json',timing)
+        return record, verdict
+
+    records=[]
+    results=[]
+    with ThreadPoolExecutor(max_workers=min(jobs,len(runs))) as pool:
+        futures=[pool.submit(execute,item) for item in scheduled]
+        for future in as_completed(futures):
+            record,verdict=future.result()
+            records.append(record)
+            results.append(verdict)
+            print(verdict['case_id'],verdict['invocation_id'],verdict['seam'],verdict['execution'],verdict.get('reason',''),flush=True)
+    save(output/'records.json',records)
     selected_cases={c['id'] for c,_,_ in runs}
     passed={cid for cid in selected_cases if all(r['execution']=='passed' for r in results if r['case_id']==cid)}
     all_runs=required_runs(spec)
     report={'execution':'passed' if len(passed)==len(selected_cases) else 'failed',
             'spec_revision':spec['specRevision'],'engine_revision':{'commit':revision,'working_tree_dirty':dirty},
             'profile':'native-public-library; certified declarations with per-class coverage; caller limits/cancellation; recovery disabled',
-            'representation':representation or 'structured_then_dispatch',
+            'representation':representation or 'structured_then_dispatch','jobs':jobs,
             'full_required_set':case_ids is None,'selected_cases':len(selected_cases),
             'selected_invocations':len({(c['id'],i['id']) for c,i,_ in runs}),'selected_seams':len(runs),
             'passed_cases':len(passed),'passed_seams':sum(r['execution']=='passed' for r in results),

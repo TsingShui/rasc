@@ -176,7 +176,7 @@ def query_assertions(value, original):
             'allCertifiedSites':Counter(keys)==Counter(sites),'mustNotInclude':names,'_definitions_complete':Counter(names)==Counter(defined)}
 
 
-def compare_suite(root, spec, manifest, records, case_ids=None, reference=False):
+def compare_suite(root, spec, manifest, records, case_ids=None, reference=False, timing=None):
     from e2e import load
     if not manifest['cases'] or manifest['spec']['revision']!=spec['specRevision']:raise Mismatch('empty/stale manifest')
     expected={(c['id'],i['id'],s):(c,i) for c,i,s in required_runs(spec,case_ids)}
@@ -221,7 +221,7 @@ def compare_suite(root, spec, manifest, records, case_ids=None, reference=False)
         if public is None:raise Mismatch('missing public classification')
         if not reference:
             from .materialize import observations
-            groups=observations(root,case,invocation,cert,manifest,result,groups)
+            groups=observations(root,case,invocation,cert,manifest,result,groups,timing=timing)
             public=groups['outcome']
         measured={'outcome':public_assertions(public),'diagnostic':diagnostic_assertions(public)}
         if 'driver' in groups:

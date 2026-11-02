@@ -9,12 +9,13 @@ import json
 import os
 from pathlib import Path
 import tempfile
+import time
 from . import classfile
 from .compare import Mismatch
 from .evaluate import normalized_debug
 
 
-def observations(root,case,invocation,certificate,manifest,result,groups):
+def observations(root,case,invocation,certificate,manifest,result,groups,timing=None):
     from e2e import Tools, compile_java, load, run
     assets={a['id']:a for a in manifest['assets']}
     original=assets[certificate['input_assets'][0]]
@@ -49,7 +50,9 @@ def observations(root,case,invocation,certificate,manifest,result,groups):
                 entry=locked_paths[path.relative_to(root).as_posix()]
                 if not path.is_file() or path.stat().st_size!=entry['size']:raise Mismatch('missing/changed dependency')
             classes=work/'classes'
+            started = time.monotonic()
             classfiles=compile_java(tools,sources+dependencies,classes,logs,'candidate')
+            if timing is not None:timing['candidate_compile_seconds'] = time.monotonic() - started
             compiled=[classfile.project(p) for p in classfiles]
             required_owners={b['selector']['descriptor'] for b in certificate['bindings'] if b['selector']['kind'] in {'class','method'}}
             if not required_owners <= {c['descriptor'] for c in compiled}:raise Mismatch('compiled output lacks selected original owner')
@@ -80,8 +83,12 @@ def observations(root,case,invocation,certificate,manifest,result,groups):
                 elif 'sources' not in driver:
                     driver={**driver,'sources':['driver/Driver.java']}
                 driver_classes=work/'driver'
+                started = time.monotonic()
                 compile_java(tools,[recipe_root/p for p in driver['sources']],driver_classes,logs,'driver',[classes])
+                if timing is not None:timing['driver_compile_seconds'] = time.monotonic() - started
+                started = time.monotonic()
                 text=run([tools.java,'-cp',os.pathsep.join(map(str,[driver_classes,classes])),driver['class'],*args],root,logs/'driver-run.log')
+                if timing is not None:timing['driver_run_seconds'] = time.monotonic() - started
                 groups['driver']=json.loads(text)
         elif groups['outcome']['outcome'] in {'java','declaration-only'}:
             raise Mismatch('Java result has no compilable submitted source')

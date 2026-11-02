@@ -313,7 +313,9 @@ fn debug_control(error: &diana_decomp::DebugError) -> Option<&diana_decomp::Cont
 
 fn write_value(value: Value, output: Option<String>) -> Result<(), Box<dyn std::error::Error>> {
     if let Some(path) = output {
-        serde_json::to_writer(std::fs::File::create(path)?, &value)?;
+        let mut writer = std::io::BufWriter::new(std::fs::File::create(path)?);
+        serde_json::to_writer(&mut writer, &value)?;
+        std::io::Write::flush(&mut writer)?;
     } else {
         serde_json::to_writer(std::io::stdout().lock(), &value)?;
     }

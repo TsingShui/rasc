@@ -64,9 +64,11 @@ def run(argv, cwd, log, timeout=90, output_cap=8 * 1024 * 1024):
     """
     import signal
     import threading
+    started = time.monotonic()
     argv = [str(x) for x in argv]
     log.parent.mkdir(parents=True, exist_ok=True)
-    save(log.with_suffix('.command.json'), {'argv':[a.replace(str(ROOT) + os.sep, '') if a != sys.executable else '<python3>' for a in argv], 'cwd':relative(cwd), 'timeout_seconds':timeout, 'output_cap_bytes':output_cap})
+    command = {'argv':[a.replace(str(ROOT) + os.sep, '') if a != sys.executable else '<python3>' for a in argv], 'cwd':relative(cwd), 'timeout_seconds':timeout, 'output_cap_bytes':output_cap}
+    save(log.with_suffix('.command.json'), command)
     output = bytearray()
     overflow = threading.Event()
     with subprocess.Popen(argv, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
@@ -93,6 +95,8 @@ def run(argv, cwd, log, timeout=90, output_cap=8 * 1024 * 1024):
             time.sleep(0.01)
         process.wait(timeout=10)
         reader.join(timeout=10)
+        command['elapsed_seconds'] = time.monotonic() - started
+        save(log.with_suffix('.command.json'), command)
         if reader.is_alive():
             raise PreparationError('child output stream did not terminate')
         if overflow.is_set():
@@ -355,7 +359,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('command', choices=['fetch-tools','prepare','verify-inputs','verify-harness','run'])
     parser.add_argument('--cache', type=Path, default=ROOT / '.cache/e2e')
-    parser.add_argument('--jobs', type=int, default=4)
+    parser.add_argument('--jobs', type=int, default=os.cpu_count() or 1, help='parallel workers for prepare and run (default: logical CPU count)')
     parser.add_argument('--case', action='append', dest='case_ids', help='run every invocation of the selected fixed case; repeatable')
     parser.add_argument('--representation',choices=('structured_then_dispatch','dispatch_only'),help='native Java representation adapter for core execution')
     args = parser.parse_args()
@@ -371,7 +375,7 @@ def main():
     elif args.command == 'run':
         tools.verify()
         from runner.adapter import run_public
-        report = run_public(ROOT,cache,load(SPEC),load(SUITE/'manifest.json'),args.case_ids,args.representation)
+        report = run_public(ROOT,cache,load(SPEC),load(SUITE/'manifest.json'),args.case_ids,args.representation,args.jobs)
         return 0 if report['execution']=='passed' else 1
     else:
         tools.verify()
