@@ -62,5 +62,5 @@ getters. See [interfaces / data](../../docs/diana/DESIGN.md),
 [preparation / tasks](../../docs/diana/TASKS.md).
 
 The `0.0.0` version is an unpublished scaffold marker. rasc and its release
-tooling are isolated under `ref-fork/rasc/`, outside the active workspace/CI. Shared test inputs/oracles live in root
+tooling were removed at commit 5cb156c and remain in git history only. Shared test inputs/oracles live in root
 `tests/e2e/`; crate tests cross public interfaces for actual core capabilities.

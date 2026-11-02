@@ -16,7 +16,8 @@ Implement nothing there until explicitly requested and separately designed.
 
 The current CLI/engine tasks and E2E preparation remain unchanged; these directory
 reservations do not mark any capability complete. The archived rasc implementation
-under `ref-fork/rasc/` stays excluded from active builds and tests.
+was removed from the tree at commit 5cb156c and stays outside active builds and
+tests; only git history retains it.
 
 See [core design](../docs/diana/DESIGN.md) and
 [preparation / tasks](../docs/diana/TASKS.md).

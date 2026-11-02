@@ -1,6 +1,6 @@
 name: Diana
 
-# Active workspace contains only Diana; ref-fork is never built or tested.
+# Active workspace contains only Diana; the archived reference is not built or tested.
 # Build/lint isolation only: the engine and independently certified E2E suite
 # do not exist yet. This workflow neither runs empty tests as acceptance nor
 # prepares versions, uploads artifacts, tags or publishes releases.

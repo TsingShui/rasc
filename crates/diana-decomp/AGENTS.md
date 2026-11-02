@@ -31,8 +31,8 @@ Read ../../docs/diana/DESIGN.md, ../../docs/diana/ALGORITHMS.md and
 - Test complex semantics and malformed/resource boundaries through public
   interfaces using the frozen repository tests/e2e/ assets. Never regenerate
   expected values from engine output or drop required failures to turn green.
-- Old sources/tests/release tooling live under ref-fork/rasc/, outside the root
-  workspace. Do not automatically build/test/lint/format or depend on them.
+- Old sources/tests/release tooling were removed from the working tree at commit
+  5cb156c and remain in git history only. Do not automatically build/test/lint/format or depend on them.
 - Build from the repository root with cargo build --locked -p diana-decomp.
   Keep publish=false and the independent scaffold version until release scope
   is explicitly approved; no automatic rasc version coupling.

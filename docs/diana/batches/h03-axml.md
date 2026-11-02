@@ -2,7 +2,7 @@
 
 Baseline: 3cc01da. Contracts: DESIGN §6.7 (`manifest`), §7 (application limits) and
 TASKS H03. ALGORITHMS is unchanged; the reader implements the checked contract
-itself instead of reusing the archived reader under `ref-fork/`.
+itself instead of reusing the archived reader.
 
 ## Products
 

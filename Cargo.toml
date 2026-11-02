@@ -2,9 +2,6 @@
 resolver = "3"
 members = ["apps/diana", "crates/diana-decomp"]
 default-members = ["apps/diana", "crates/diana-decomp"]
-# Archived legacy project has its own workspace and lockfile. It is not a
-# production dependency or part of any root build/test/format/lint command.
-exclude = ["ref-fork/rasc"]
 
 [profile.release]
 lto = "thin"

@@ -53,18 +53,17 @@ skips. The E2E adapter change adds no product test and no CLI black-box check.
 Reviewed by reading the workspace manifests, the source tree and the CI file:
 
 - `Cargo.toml` lists only `apps/diana` and `crates/diana-decomp` as members and
-  default members, and excludes `ref-fork/rasc`, which keeps its own workspace and
-  lockfile.
+  default members. The archived rasc tree was removed from the working tree after
+  this review and survives only in git history.
 - Both packages keep `publish = false` and the `0.0.0` scaffold marker; no tag,
   release workflow or publication step runs for this branch.
-- No active target, module or test references `ref-fork`, dexdec, rusty-dex or the
-  old MCP surface; those names appear only in documentation statements about
-  independence and in the archived tree. The earlier `skill`/MCP command was not
-  restored, and no adapter for MCP was designed.
-- `.github/workflows/diana.yml` runs the Diana-only gates and states that ref-fork is
-  never built or tested.
-- The reference tree remains complete and outside every root gate; nothing in it
-  was deleted or rewritten by this branch.
+- No active target, module or test references the archived tree, dexdec, rusty-dex
+  or the old MCP surface; those names appear only in documentation statements about
+  independence. The earlier `skill`/MCP command was not restored, and no adapter for
+  MCP was designed.
+- `.github/workflows/diana.yml` runs the Diana-only gates.
+- The archived tree is outside every root gate and now exists only in git history;
+  nothing in it was rewritten by this branch before removal.
 
 ## Remaining obligations
 

@@ -1116,7 +1116,7 @@ and assembly are explicit opt-in. A missing tool, fixture or classpath, a nonzer
 a timeout, 0 selected cases, or a missing or truncated artifact fails; a skip MUST NOT
 count as a pass. An approved revision's full suite is not filtered by current engine
 support; a batch MAY select fixed IDs, but the ledger keeps every required case and
-invocation in the JSON, including appended IDs. Do not run the ref-fork gate. The
+invocation in the JSON, including appended IDs. Do not run any archived reference gate. The
 workspace having zero selected tests is not a pass, and a command interface is not
 an actual run result.
 
@@ -1135,7 +1135,7 @@ paths in this page are relative to that crate), `src/{lib,engine}.rs`,
 `diana_decomp`, separate from the application package `apps/diana/`. The crate
 is already a workspace member, so building the scaffold MUST NOT count as this
 card done. The old dependencies were removed from the main workspace and lock
-and kept in ref-fork; H08 checks that they are not reintroduced. Versions follow
+and were removed with the archived tree at commit 5cb156c; H08 checks that they are not reintroduced. Versions follow
 the formal process, and the author MUST NOT hand-drive a release.
 
 **Input→output / Interface**: implement the
@@ -2563,8 +2563,9 @@ internal-crate positioning; no new MCP design.
 **Files**: the existing `apps/diana/Cargo.toml`/`src/main.rs` scaffold plus
 `apps/diana/src/lib.rs` and `src/cli/{args,mod}.rs` (all relative to the Diana
 application root); update the README/AGENTS product description. The old rasc
-tree already moved entirely to ref-fork and is reference-only, never built or
-tested; the historical release and license text is not replaced globally; this
+tree has been removed from the working tree at commit 5cb156c and survives only in
+git history, never built or tested; the historical release and license text is not
+replaced globally; this
 card creates no CLI test file.
 
 **Input→output / Interface**: the application package and binary `diana`
@@ -2586,7 +2587,8 @@ replaced the old one.
    corresponding module behavior tests carry complex domain obligations such as original
    identity, decode completeness and file safety.
 3. Implement the new product in the `apps/diana/` entry point and the internal-crate
-   scaffold; the root is already a Diana-only workspace. The old rasc stays in ref-fork and
+   scaffold; the root is already a Diana-only workspace. The old rasc survives only in
+git history and
    its CLI MUST NOT serve as an alias or dependency. H08 still needs product capability
    evidence, the old release tooling is archived, the Diana release policy is reviewed
    separately, and historical sources are not replaced wholesale.
@@ -2746,7 +2748,7 @@ or empty-list printing, and does not assert private phase call counts.
 **Acceptance**: G0 plus `cargo test -p diana --test product_contracts h03_` plus
 input and decompression regression through the Diana public domain interface.
 The old self-contained and inflate policy serve only as a review question;
-ref-fork tests are not run and their pass counts are not part of acceptance.
+archived tests are not run and their pass counts are not part of acceptance.
 **Completion**: The new CLI columns return every matching record; reading,
 matching and original-identity completeness hold, and output order and user
 pagination are deliberately cancelled; a slow entry does not block unrelated
@@ -2849,7 +2851,7 @@ clear the other members; there is no old-command alias and no dual engine.
    the per-method language, reason and original identity, and extra logging on stderr; the
    stdout and file payload of the same run agree; JSON does not serialize the private arena,
    and no MCP envelope is designed.
-5. Keep the old implementation in ref-fork for reading only, leaving no active old entry
+5. Keep the old implementation in git history only, leaving no active old entry
    point, dependency or dual-engine routing. A Diana request MUST NOT silently fall back to
    dexdec; a failure follows only the original original DEX debug contract.
 
@@ -2989,7 +2991,7 @@ or golden. F03/Q04/Q06/Q09/Q10 test complex UTF-16 fidelity, identity, spans and
 extraction safety, and basic layout is not retested.
 
 **Acceptance**: Format, lint and build checks plus the Q07 manual review, with
-no `h07_` test filter. The old tests stay in ref-fork; they are not deleted but
+no `h07_` test filter. The old tests survive in git history; they are not part of an active gate but
 enter no active gate. **Completion**: The eleven-command wiring matches the
 documentation, the matching domain task supplies complex verification, and no
 MCP is designed.
@@ -3011,7 +3013,7 @@ configuration preparation; MCP stays deferred.
 
 **Files**: the active root Cargo manifest and lock, README/AGENTS, the
 application query and engine adapter, `apps/diana/tests/product_contracts.rs`;
-verify that no ref-fork dependency exists, and maintain no old MCP build.
+verify that no archived-reference dependency exists, and maintain no old MCP build.
 
 **Input→output / Interface**: EngineCoreRC plus H01–H07 evidence → a
 CLIProductRC report, a live call-graph and dependency retirement list, and a
@@ -3026,11 +3028,11 @@ sequences to match; this card creates no tag and uploads no release.
    safety, cross-DEX and 041 identity, and engine behavior. Q01/Q07 are manual checklists only,
    Q08 rolls them up, and they MUST NOT be treated as executable test families.
 2. Verify that the active CLI and dependency graph contains no call to the old dexdec, MCP,
-   helper or ref-fork code; the old code stays complete in the reference and needs no compile or
+   helper or archived reference code; the historical code needs no compile or
    test run, and no new adapter is designed for MCP.
-3. ref-fork is neither a production dependency nor a gate; it keeps its original source, tests,
-   license and history, and the existence of the current reference directory MUST NOT make it a
-   second release product or a legacy dependency requiring a test run.
+3. The archived reference is neither a production dependency nor a gate; its original source,
+   tests, license and history survive in git history, and that history MUST NOT make it a second
+   release product or a legacy dependency requiring a test run.
 4. Verify that the active workspace contains Diana only, that packages stay `publish=false`, and
    that no archived release script or CI wiring exists; a reference-project build result MUST NOT
    replace product acceptance.

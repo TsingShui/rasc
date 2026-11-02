@@ -14,12 +14,12 @@ apps/diana-gui/         # Future GUI: documentation placeholder only
 apps/diana-web-ui/      # Future web interface: documentation placeholder only
 crates/diana-decomp/    # Independent native engine library
 docs/diana/            # Core design, algorithms, tasks and E2E specifications
-ref-fork/rasc/         # Archived rasc/dexdec/rusty-dex/vendor/tests, reference only
+# The archived rasc tree was removed at commit 5cb156c; it remains in git history only.
 ```
 
 The root is a virtual Cargo workspace containing **only Diana packages**. The
 rasc implementation and its crates/tests/release tooling remain in an independent
-reference workspace under `ref-fork/rasc/`; they are not production dependencies
+archived reference tree removed at commit 5cb156c; it is not a production dependency
 and are not built, tested or released by this branch’s CI or root Cargo commands.
 
 [Application targets](apps/README.md) share the `apps/` layout. GUI and web UI
@@ -74,7 +74,8 @@ qualification and hard failures remain separate from readable output.
 - [Tasks, preparation and acceptance](docs/diana/TASKS.md)
 - [Revisioned case specifications and independent expectations](docs/diana/e2e_cases.json)
 - [Sources and reproducibility](docs/diana/SOURCE_MAP.md)
-- [Archived reference scope](ref-fork/README.md)
+- Archived reference scope: removed from the tree at commit 5cb156c; see
+  [SOURCE_MAP](docs/diana/SOURCE_MAP.md) for the pinned upstream anchors
 
 The requested layout work does not mark H01/T01 or B01–B04 complete. Independently
 certify fixtures, expected behavior and the comparator before production feature

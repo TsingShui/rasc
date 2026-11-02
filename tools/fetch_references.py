@@ -51,7 +51,7 @@ REFERENCES = (
               "https://github.com/TsingShui/rasc.git",
               "ef8a4c92c6b89e8afed9ccbc1552feae67b6982d",
               ("src", "crates/dexdec/src", "crates/rusty-dex/src"),
-              note="Exact historical baseline; ref-fork/rasc is the separate in-tree archive."),
+              note="Exact historical baseline; the in-tree archive was removed at commit 5cb156c."),
     Reference("ku", "Kuna pipeline and development discipline",
               "https://github.com/Noelo-Lab/kuna.git",
               "29c44b57f8c1d9b35044aa4ee3f636c193288009",

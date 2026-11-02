@@ -14,7 +14,11 @@ References are identified by **public repository URL, pinned commit, and reposit
 
 Explicitly obtain pinned references in the current checkout as described in [SOURCE_MAP.md](SOURCE_MAP.md#10-reproducible-inputs-and-tools). References are for review and implementation, not implicit dependencies of production or E2E test runs. Offline collaborators use source bundles verified at the same commits; do not automatically switch to main or the author's machine paths.
 
-The old sources in this checkout are archived in their entirety under `ref-fork/rasc/` and do not participate in active builds or tests. When reading the pinned DX/old root paths above, prepend this repository-relative prefix in the checkout; public URL/commit/path anchors remain unchanged. See [DESIGN.md](DESIGN.md#1-product-boundary-and-engineering-scope).
+The old sources were archived under `ref-fork/rasc/` until commit 5cb156c, when
+that tree was removed from the working tree; they do not participate in active
+builds or tests and remain reachable in git history. Read the pinned DX/old root
+paths through their public URL, commit and path anchors below; those anchors are
+unchanged. See [DESIGN.md](DESIGN.md#1-product-boundary-and-engineering-scope).
 
 Product scope: Diana is the entire project, `diana` is the active product/CLI, and `diana-decomp` is the internal engine. Existing rasc source is a reuse source for CLI, input and lightweight queries; see [DESIGN.md](DESIGN.md#1-product-boundary-and-engineering-scope). No MCP protocol, schema or migration is designed. Decompilation algorithms are independently implemented; the experimental branch is not ported.
 
@@ -82,7 +86,9 @@ Check payload and `bytes()` paths in `crates/rusty-dex/src/dex/instructions.rs` 
 
 For each algorithm ported during implementation, add a record of source project/pinned commit/symbol, original license and copyright, adaptation differences, invariants, tests and whether it still depends on original helpers. The principle is “understand and reimplement or document a focused extraction,” not moving a directory into the new crate to enable gradually.
 
-- DX and rusty-dex retain their respective Apache-2.0 license files. Any copying must retain license/copyright, record changes and update the new distribution inventory.
+- DX and rusty-dex declare Apache-2.0. Their archived copies were removed with the
+  reference tree at commit 5cb156c; any future copying must retain license/copyright,
+  record changes and update the new distribution inventory.
 - The KU workspace declares its license and includes Ghidra/angr provenance. Before copying a file, inspect its header, the root LICENSE/NOTICE and upstream attribution, not just one Cargo line.
 - RG is an independent git repository/gitlink; the pinned manifest has no `license` field, and no LICENSE was found in that repository. **The parent repository's Apache-2.0 license does not automatically cover the gitlink child repository.** Referencing designs/symbols is not permission to copy code. Until the rights holder grants explicit permission, block porting and distribution of radguard programs/fixtures; use an independent implementation and self-made fixtures. The earlier assumption that a subdirectory inherits the parent's license is withdrawn; DAD-derived attribution still needs review.
 - This document cites symbols and algorithmic ideas; it does not copy unauthorized third-party programs or corpora. If license or fixture authorization cannot be confirmed, block that copying and retain the independent implementation/self-made fixture path; other design work is not blocked.
@@ -90,8 +96,8 @@ For each algorithm ported during implementation, add a record of source project/
 ### 6.1 Current reuse register
 
 Observed state: Diana production code contains no copied reference source. The
-reference trees remain only under `ref-fork/rasc/`, retain their own license files
-and are not workspace members. DX and rusty-dex license files are still present;
+archived reference tree was removed from the working tree at commit 5cb156c and
+survives only in git history; it is not a workspace member. DX and rusty-dex license files are still present;
 RG remains unreviewable for copying, so it stays reading-only. No vendored
 reference file was added to `crates/diana-decomp/` or `apps/diana/`.
 

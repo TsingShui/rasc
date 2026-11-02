@@ -20,7 +20,8 @@ recovery quality or to turn required Java acceptance into a pass.
   access files, the network or external processes. The code is native Rust,
   Rust>=1.93, edition2024, and both crates forbid unsafe.
 - The root workspace contains only those two crates. Diana MUST NOT depend on the
-  reference source `ref-fork/rasc/`; historical reference paths carry that prefix
+  archived reference; historical reference paths are resolved against their pinned
+upstream URL and commit
   locally, while the public source commit and path stay unchanged.
 - Input, source, code-unit and UTF16 coordinates are independent; Diana MUST
   range- and budget-check the offset and count of every input before any slice or
@@ -807,7 +808,7 @@ uses a reviewed native AXML reader through the checked contract of ALGORITHMS
 §14.4, with no automatic external tool. Focused reuse of the patched vendored
 reader requires review of its PATCHES, all reachable reads/allocations and depth
 handling; a patch list or chunk-skeleton check is not a safety certificate. Diana
-MUST NOT depend on the reader under ref-fork. Independently validate a decoder
+MUST NOT depend on the removed archived reader. Independently validate a decoder
 change through the public manifest Module within the agreed core test scope.
 
 ### 6.8 Help, errors and exit codes
@@ -821,7 +822,7 @@ change through the public manifest Module within the agreed core test scope.
 
 The CLI MUST end normally on BrokenPipe per the original Unix filter behavior and MUST NOT print a panic. The project name is uniformly Diana; Diana MUST NOT provide the previously proposed interfaces `getclass`, `findrefs`, `skill`, `--members`, `--require-java`, `--class-id`, `--offset` and `--limit`, because the canonical at already resolves exact identity.
 
-`mcp` is deferred, the old implementation exists only in ref-fork, and Diana MUST NOT restore it as an active interface or design a new protocol; Diana MUST NOT make the old agent skill installation logic migrate or delete user directories automatically. Agent usage instructions are ordinary documentation/release assets, and Diana MUST NOT add a twelfth public `skill` command.
+`mcp` is deferred, the old implementation survives only in git history, and Diana MUST NOT restore it as an active interface or design a new protocol; Diana MUST NOT make the old agent skill installation logic migrate or delete user directories automatically. Agent usage instructions are ordinary documentation/release assets, and Diana MUST NOT add a twelfth public `skill` command.
 
 ### 6.9 Interface validation
 

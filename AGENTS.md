@@ -17,14 +17,16 @@ is the repository-wide guide; package-local AGENTS.md files refine its scope.
 - `tools/fetch_references.py`: explicit reference downloads to ignored
   `.cache/references/`; no checksum checks, reference builds/tests or CI hooks.
 - `tests/e2e/`: shared self-made sources, inputs, independent oracles and core E2E runners.
-- `ref-fork/rasc/`: archived rasc source, dexdec, rusty-dex, patched vendor,
-  old tests, skill/docs and release tooling. Separate workspace/lockfile, excluded
-  from every root Cargo gate. Do not build, test, lint, format or release it
-  automatically, and do not add a Diana dependency on reference crates.
+- The archived rasc tree (rasc source, dexdec, rusty-dex, patched vendor, old
+  tests, skill/docs and release tooling) was removed from the working tree at
+  commit 5cb156c. It remains reachable in git history only: do not restore it,
+  build, test, lint, format or release it, and do not add a Diana dependency on
+  reference crates.
 
 See `docs/diana/DESIGN.md` §1 for actual paths. Older root-product/src paths in
-feature tasks mean the Diana application root `apps/diana/`; fixed historical
-reference paths map under `ref-fork/rasc/` without changing their upstream anchors.
+feature tasks mean the Diana application root `apps/diana/`; historical reference
+paths are resolved against their upstream URL and pinned commit in SOURCE_MAP, not
+by a local copy.
 Do not copy the reference tree wholesale or create speculative common modules.
 Use source ideas only through explicit review and focused extraction/reimplementation.
 
@@ -384,6 +386,6 @@ unless the user asks. Root NOTICE is removed as requested; retain existing crate
 license files without adding a license bundle.
 
 Diana packages remain `publish=false`, version `0.0.0` scaffold markers. No release
-workflow is active. The old rasc workflow/scripts are archived under ref-fork,
-not triggered by GitHub or part of Diana CI. Do not reactivate them or couple
-Diana versions to rasc. Future release policy requires explicit approval.
+workflow is active. The old rasc workflow/scripts were removed with the archived
+tree and exist only in git history; do not reactivate them or couple Diana versions
+to rasc. Future release policy requires explicit approval.
