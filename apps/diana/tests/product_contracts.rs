@@ -847,8 +847,16 @@ mod h03_xref {
                 jobs: 1,
             },
         );
-        assert_eq!(rows.len(), 1);
-        assert_eq!(rows[0].use_, "invoke-interface");
+        // Two members call the interface method twice each: every site is a row.
+        assert_eq!(rows.len(), 4);
+        assert!(rows.iter().all(|row| row.use_ == "invoke-interface"));
+        let mut offsets: Vec<(u32, u32)> = rows
+            .iter()
+            .map(|row| (row.method.0, row.code_unit))
+            .collect();
+        offsets.sort_unstable();
+        offsets.dedup();
+        assert_eq!(offsets.len(), rows.len());
         assert_eq!(
             rows[0].matched,
             Matched::Method {
@@ -1625,5 +1633,196 @@ mod h06 {
         let error = decompile::run(&scope, &selector, &mut control).unwrap_err();
         assert_eq!(error.code(), 1);
         assert!(error.to_string().contains("max_report_output_bytes"));
+    }
+}
+
+mod h09 {
+    use std::sync::atomic::AtomicBool;
+
+    use diana::analysis::input::{InputLimits, InputOptions};
+    use diana::analysis::query::{Query, QueryKind, QueryLimits, QueryPlan, Row};
+    use diana::analysis::request::RequestScope;
+    use diana::analysis::xref::{Matched, Target, Xref, XrefPlan};
+
+    use super::support::{TempDir, stored_entry, zip};
+
+    const HIERARCHY: &[u8] =
+        include_bytes!("../../../crates/diana-decomp/tests/fixtures/hierarchy/hierarchy.dex");
+    const D085: &[u8] =
+        include_bytes!("../../../crates/diana-decomp/tests/fixtures/dynamic/d085.dex");
+
+    fn options() -> InputOptions {
+        InputOptions {
+            limits: InputLimits::default(),
+            allowed_root: None,
+        }
+    }
+
+    fn descriptor(text: &str) -> Vec<u16> {
+        diana::analysis::dex::class_descriptor(text)
+    }
+
+    #[test]
+    fn h09_sites_keep_their_member_offset_and_logical_identity_across_inputs() {
+        let dir = TempDir::new("h09-sites");
+        let path = dir.file(
+            "two.apk",
+            &zip(&[
+                stored_entry("classes.dex", HIERARCHY),
+                stored_entry("classes2.dex", HIERARCHY),
+            ]),
+        );
+        let scope = RequestScope::open(&path, &options()).unwrap();
+        let xref = Xref::new(
+            &scope,
+            XrefPlan {
+                target: Target::Method {
+                    owner: descriptor("fixtures.Repo"),
+                    name: "save".encode_utf16().collect(),
+                    prototype: "()V".encode_utf16().collect(),
+                },
+                class: None,
+                limits: QueryLimits::default(),
+                jobs: 2,
+            },
+        )
+        .unwrap();
+        let cancel = AtomicBool::new(false);
+        let mut rows = Vec::new();
+        xref.run(&cancel, &mut |row| {
+            rows.push(row);
+            Ok(())
+        })
+        .unwrap();
+        // Four sites per image, eight in total; equal indices in the two entries
+        // are different objects and are never merged.
+        assert_eq!(rows.len(), 8);
+        let mut keys: Vec<(usize, u32, u32)> = rows
+            .iter()
+            .map(|row| (row.image.0, row.method.0, row.code_unit))
+            .collect();
+        keys.sort_unstable();
+        keys.dedup();
+        assert_eq!(keys.len(), rows.len());
+        assert!(
+            rows.iter()
+                .all(|row| matches!(row.matched, Matched::Method { .. }))
+        );
+        let mut per_image = [0usize; 2];
+        for row in &rows {
+            per_image[row.image.0] += 1;
+        }
+        assert_eq!(per_image, [4, 4]);
+    }
+
+    #[test]
+    fn h09_string_targets_use_exact_utf16_equality() {
+        let dir = TempDir::new("h09-string");
+        let path = dir.file("d085.dex", D085);
+        let scope = RequestScope::open(&path, &options()).unwrap();
+        let literal: Vec<u16> = vec![0, 55296, 42, 47, 92, 117, 48, 48, 48, 97];
+        let xref = Xref::new(
+            &scope,
+            XrefPlan {
+                target: Target::String(literal.clone()),
+                class: None,
+                limits: QueryLimits::default(),
+                jobs: 1,
+            },
+        )
+        .unwrap();
+        let cancel = AtomicBool::new(false);
+        let mut rows = Vec::new();
+        xref.run(&cancel, &mut |row| {
+            rows.push(row);
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].use_, "const-string");
+        assert_eq!(rows[0].matched, Matched::String(literal));
+
+        // A shorter prefix is not the same value.
+        let prefix = Target::String(vec![0, 55296, 42]);
+        let xref = Xref::new(
+            &scope,
+            XrefPlan {
+                target: prefix,
+                class: None,
+                limits: QueryLimits::default(),
+                jobs: 1,
+            },
+        )
+        .unwrap();
+        let mut rows = Vec::new();
+        xref.run(&cancel, &mut |row| {
+            rows.push(row);
+            Ok(())
+        })
+        .unwrap();
+        assert!(rows.is_empty());
+    }
+
+    #[test]
+    fn h09_defined_members_keep_abstract_and_constructor_declarations() {
+        let dir = TempDir::new("h09-members");
+        let path = dir.file("hierarchy.dex", HIERARCHY);
+        let scope = RequestScope::open(&path, &options()).unwrap();
+        let query = Query::new(
+            &scope,
+            QueryPlan {
+                kind: QueryKind::Methods,
+                filter: None,
+                class: Some(descriptor("fixtures.Repo")),
+                class_filter: Default::default(),
+                limits: QueryLimits::default(),
+                jobs: 1,
+            },
+        )
+        .unwrap();
+        let cancel = AtomicBool::new(false);
+        let mut rows = Vec::new();
+        query
+            .run(&cancel, &mut |row| {
+                rows.push(row);
+                Ok(())
+            })
+            .unwrap();
+        assert_eq!(rows.len(), 1);
+        // An interface method is a real definition, not an external method_id.
+        match &rows[0] {
+            Row::Method(row) => {
+                assert_eq!(String::from_utf16(&row.name).unwrap(), "save");
+                assert_eq!(row.access_flags & 0x400, 0x400);
+            }
+            _ => panic!("methods returned a foreign row"),
+        }
+
+        // An unused string-pool entry stays a string row and is never inferred as
+        // a code reference.
+        let query = Query::new(
+            &scope,
+            QueryPlan {
+                kind: QueryKind::Strings,
+                filter: None,
+                class: None,
+                class_filter: Default::default(),
+                limits: QueryLimits::default(),
+                jobs: 1,
+            },
+        )
+        .unwrap();
+        let mut strings = Vec::new();
+        query
+            .run(&cancel, &mut |row| {
+                if let Row::String(row) = row {
+                    strings.push(row);
+                }
+                Ok(())
+            })
+            .unwrap();
+        assert!(strings.iter().any(|row| {
+            String::from_utf16(&row.units).ok().as_deref() == Some("Lfixtures/Repo;")
+        }));
     }
 }

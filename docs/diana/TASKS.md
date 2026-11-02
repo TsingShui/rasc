@@ -3055,6 +3055,11 @@ evidence.
 
 ## H09 — Defined symbol listing and cross-DEX reference sites
 
+**Progress**: The [xref batch](batches/h09-xref-cli.md) wires `xref` with the four
+DESIGN columns, exact string/type/method/field targets and the exact `--class`
+restriction; `fields`/`methods` already list only real definitions. A 041 logical
+member beyond the first is not scanned yet.
+
 **Dependencies**: H04. **Scope**: fields/methods/xref with the specified
 columns, without running the decompiler.
 

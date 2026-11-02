@@ -54,6 +54,8 @@ pub enum Matched {
 pub struct XrefRow {
     pub image: ImageIndex,
     pub class_def: ClassDefId,
+    /// Original owner descriptor for the canonical method locator.
+    pub class_descriptor: Vec<u16>,
     pub method: MethodId,
     pub method_name: Vec<u16>,
     pub method_prototype: Vec<u16>,
@@ -152,6 +154,7 @@ fn scan_root(
             {
                 return Ok(());
             }
+            let class_descriptor = class.descriptor.units(control)?;
             class.visit_methods(control, |method, control| {
                 let declaration = method.declaration?;
                 let name = declaration.name.units(control)?;
@@ -204,6 +207,7 @@ fn scan_root(
                         (Ok(method_name), Ok(method_prototype)) => XrefRow {
                             image,
                             class_def,
+                            class_descriptor: class_descriptor.clone(),
                             method: method.method_idx,
                             method_name,
                             method_prototype,

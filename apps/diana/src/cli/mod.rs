@@ -7,6 +7,7 @@
 mod get;
 mod output;
 mod table;
+mod xref;
 
 use std::path::PathBuf;
 
@@ -152,6 +153,21 @@ enum Command {
         #[arg(short, long)]
         output: Option<PathBuf>,
     },
+    /// Find original reference sites
+    Xref {
+        input: PathBuf,
+        /// string | type | method | field
+        kind: String,
+        target: String,
+        #[arg(long)]
+        class: Option<String>,
+        #[arg(long)]
+        jobs: Option<usize>,
+        #[arg(long, value_enum, default_value_t = Format::Text)]
+        format: Format,
+        #[arg(short, long)]
+        output: Option<PathBuf>,
+    },
     /// Decode the binary AndroidManifest.xml
     Manifest {
         input: PathBuf,
@@ -209,6 +225,30 @@ pub fn run() -> std::process::ExitCode {
             &input,
             &selector,
             get::Kind::Method,
+            format,
+            output.as_deref(),
+            limits,
+        ),
+        Command::Xref {
+            input,
+            kind,
+            target,
+            class,
+            jobs,
+            format,
+            output,
+        } => xref::run(
+            &input,
+            &kind,
+            &target,
+            class.as_deref(),
+            match jobs {
+                Some(0) => {
+                    return std::process::ExitCode::from(2);
+                }
+                Some(jobs) => jobs,
+                None => default_jobs(),
+            },
             format,
             output.as_deref(),
             limits,

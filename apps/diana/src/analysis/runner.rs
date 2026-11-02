@@ -48,7 +48,11 @@ where
         }
         drop(sender);
         consume(receiver, cancel, limits, sink, &mut failure);
-        cancel.store(true, Ordering::Relaxed);
+        if failure.is_some() {
+            // Stop the workers of a failed request; a completed pass leaves the
+            // caller's flag untouched so the scope can be reused.
+            cancel.store(true, Ordering::Relaxed);
+        }
     });
     match failure {
         Some(error) => Err(error),

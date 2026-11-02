@@ -27,6 +27,51 @@ impl Record {
     }
 }
 
+/// Publishes already formatted columns with the given header.
+pub fn publish_rows(
+    rows: &[Vec<String>],
+    columns: &[&str],
+    command: &str,
+    format: Format,
+    output: Option<&std::path::Path>,
+    limit: Option<u64>,
+) -> Result<(), Failure> {
+    let text = match format {
+        Format::Text => {
+            let mut text = columns.join("\t");
+            text.push('\n');
+            for row in rows {
+                let escaped: Vec<String> = row.iter().map(|value| escape(value)).collect();
+                text.push_str(&escaped.join("\t"));
+                text.push('\n');
+            }
+            text
+        }
+        Format::Json => {
+            let items: Vec<_> = rows
+                .iter()
+                .map(|row| {
+                    let mut object = serde_json::Map::new();
+                    for (column, value) in columns.iter().zip(row) {
+                        object.insert(
+                            (*column).to_owned(),
+                            serde_json::Value::String(value.clone()),
+                        );
+                    }
+                    serde_json::Value::Object(object)
+                })
+                .collect();
+            serde_json::json!({
+                "schema_version": 1,
+                "command": command,
+                "items": items,
+            })
+            .to_string()
+        }
+    };
+    publish(output, text.as_bytes(), format, limit)
+}
+
 pub fn publish_records(
     records: &[Record],
     columns: &[&str],
