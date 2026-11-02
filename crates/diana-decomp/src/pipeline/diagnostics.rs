@@ -34,6 +34,8 @@ pub enum DiagnosticCode {
     InitializationUnavailable,
     BranchJavaUnsupported,
     JavaAnalysisUnavailable,
+    InvokeCustomUnsupported,
+    InvokePolymorphicUnsupported,
     JavaDeclarationUnsupported,
     ClassAssemblyUnavailable,
     JavaTargetLimit,

@@ -25,6 +25,8 @@ pub enum OutputReason {
         pc: crate::CodeUnitOffset,
     },
     JavaAnalysisUnavailable,
+    InvokeCustomUnsupported,
+    InvokePolymorphicUnsupported,
     JavaDeclarationUnsupported,
     ClassAssemblyUnavailable,
 }
@@ -71,6 +73,12 @@ impl Diagnostic {
             }
             DiagnosticCause::Unsupported(OutputReason::BranchJavaUnsupported) => {
                 Code::BranchJavaUnsupported
+            }
+            DiagnosticCause::Unsupported(OutputReason::InvokeCustomUnsupported) => {
+                Code::InvokeCustomUnsupported
+            }
+            DiagnosticCause::Unsupported(OutputReason::InvokePolymorphicUnsupported) => {
+                Code::InvokePolymorphicUnsupported
             }
             DiagnosticCause::Unsupported(OutputReason::JavaAnalysisUnavailable) => {
                 Code::JavaAnalysisUnavailable

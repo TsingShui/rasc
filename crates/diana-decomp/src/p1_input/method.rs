@@ -507,11 +507,11 @@ impl<'a> ProgramIndex<'a> {
                         OperandReference::Proto(id) => {
                             self.prototype(id, budget)?;
                         }
-                        OperandReference::CallSite(_) | OperandReference::MethodHandle(_) => {
-                            return Err(MethodError::ReferenceOutOfBounds {
-                                pc,
-                                reference: reference.target,
-                            });
+                        OperandReference::CallSite(id) => {
+                            self.call_site(id, budget)?;
+                        }
+                        OperandReference::MethodHandle(id) => {
+                            self.method_handle(id, budget)?;
                         }
                     }
                 }

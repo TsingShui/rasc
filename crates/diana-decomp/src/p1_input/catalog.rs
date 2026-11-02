@@ -14,6 +14,7 @@ use crate::{
 #[derive(Clone, Copy)]
 struct Section {
     kind: u16,
+    count: u32,
     start_byte: ByteOffset,
     end_byte: ByteOffset,
 }
@@ -53,9 +54,9 @@ impl<'a> ProgramIndex<'a> {
             header.map_byte_range.end,
         )?;
         let count = count_usize(cursor.read_u32_with(control)?, header.map_byte_range.start)?;
-        // The 035 map has 18 distinct supported kinds, checked by read_header.
         let mut sections = [Section {
             kind: 0,
+            count: 0,
             start_byte: ByteOffset(0),
             end_byte: ByteOffset(0),
         }; SUPPORTED_MAP_KINDS];
@@ -68,7 +69,7 @@ impl<'a> ProgramIndex<'a> {
         for index in 0..count {
             let kind = cursor.read_u16_with(control)?;
             cursor.read_u16_with(control)?;
-            cursor.read_u32_with(control)?;
+            let item_count = cursor.read_u32_with(control)?;
             let start_byte = file_offset(
                 cursor.read_u32_with(control)?,
                 ByteOffset(cursor.position_byte().0 - 4),
@@ -78,6 +79,7 @@ impl<'a> ProgramIndex<'a> {
             }
             sections[index] = Section {
                 kind,
+                count: item_count,
                 start_byte,
                 end_byte: header.data_byte_range.end,
             };
@@ -204,6 +206,43 @@ impl<'a> ProgramIndex<'a> {
             end = end.min(link.start);
         }
         Cursor::bounded(self.bytes, offset_byte, end)
+    }
+
+    pub(super) fn mapped_count(&self, kind: u16) -> u32 {
+        map_kind(kind)
+            .and_then(|(bit, _)| self.sections[bit.trailing_zeros() as usize])
+            .map_or(0, |section| section.count)
+    }
+    pub(super) fn mapped_entry(
+        &self,
+        kind: u16,
+        id: u32,
+        stride: ByteLength,
+        control: &mut impl InputControl,
+    ) -> Result<Cursor<'a>, InputError> {
+        let (bit, _) = map_kind(kind)
+            .ok_or_else(|| malformed(InputProblem::InvalidReference, self.header.header_offset))?;
+        let section = self.sections[bit.trailing_zeros() as usize]
+            .ok_or_else(|| malformed(InputProblem::InvalidReference, self.header.header_offset))?;
+        if id >= section.count {
+            return Err(malformed(
+                InputProblem::InvalidReference,
+                section.start_byte,
+            ));
+        }
+        let prefix = checked_range(
+            ByteLength(section.end_byte.0),
+            section.start_byte,
+            count_usize(id, section.start_byte)?,
+            stride,
+        )?;
+        let range = checked_range(ByteLength(section.end_byte.0), prefix.end, 1, stride)?;
+        let cursor = self.item(kind, range.start, control)?;
+        if cursor.remaining_byte().0 < stride.0 {
+            return Err(malformed(InputProblem::Truncated, range.start));
+        }
+        control.charge_metadata(1)?;
+        Cursor::bounded(self.bytes, range.start, range.end)
     }
 
     fn table(

@@ -21,7 +21,7 @@ impl ResultKind {
     }
 }
 
-/// Checks the 035 invoke families against original prototypes, without resolving
+/// Checks ordinary/custom invoke words against original prototypes, without resolving
 /// dispatch or assigning types to register values. All reads use the normal
 /// method ledger; borrowed iterators require no scratch allocation.
 pub(super) fn check_producer(
@@ -35,17 +35,36 @@ pub(super) fn check_producer(
     if spec.registers == RegisterShape::ArrayWords {
         return Ok(Some(ResultKind::Object));
     }
-    if !matches!(spec.opcode, 0x6e..=0x72 | 0x74..=0x78) {
+    if !matches!(
+        spec.opcode,
+        0x6e..=0x72 | 0x74..=0x78 | 0xfa..=0xfd
+    ) {
         return Ok(None);
     }
-    let Some(OperandReference::Method(id)) = layout.references()[0].map(|r| r.target) else {
-        return Err(MethodError::InternalInvariant(
-            "invoke has no method reference",
-        ));
+    let prototype = match (spec.opcode, layout.references()[0].map(|r| r.target)) {
+        // A polymorphic call's own declaration describes the receiver only; the
+        // second reference supplies the actual argument/result prototype.
+        (0xfa | 0xfb, Some(OperandReference::Method(id))) => {
+            index.method_reference(id, budget)?;
+            let Some(OperandReference::Proto(proto)) = layout.references()[1].map(|r| r.target)
+            else {
+                return Err(MethodError::InternalInvariant(
+                    "polymorphic invoke has no checked prototype reference",
+                ));
+            };
+            index.prototype(proto, budget)?
+        }
+        (_, Some(OperandReference::Method(id))) => {
+            index.method_reference(id, budget)?.declaration.prototype
+        }
+        (_, Some(OperandReference::CallSite(id))) => index.call_site(id, budget)?.into_prototype(),
+        _ => {
+            return Err(MethodError::InternalInvariant(
+                "invoke has no checked target reference",
+            ));
+        }
     };
-    let method = index.method_reference(id, budget)?;
-    let prototype = method.declaration.prototype;
-    let receiver = !matches!(spec.opcode, 0x71 | 0x77);
+    let receiver = !matches!(spec.opcode, 0x71 | 0x77 | 0xfc | 0xfd);
     // A checked type_list has a u32 count, so its word total plus a receiver
     // is at most 2 * u32::MAX + 1 and fits u64.
     let expected_words = prototype.parameter_words.0 + u64::from(receiver);

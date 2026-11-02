@@ -66,10 +66,10 @@ def project(path):
             name_type = pool[value['b']]
             return {'owner':'L'+class_name(value['a'])+';','name':text(name_type['a']),'proto':text(name_type['b'])}
         return value
-    def attributes():
+    def attributes(source=reader):
         result = {}
-        for _ in range(reader.u2()):
-            name = text(reader.u2()); data = reader.take(reader.u4())
+        for _ in range(source.u2()):
+            name = text(source.u2()); data = source.take(source.u4())
             if name in result: raise ValueError('duplicate classfile attribute')
             result[name] = data
         return result
@@ -90,11 +90,12 @@ def project(path):
             if 'Code' in attrs:
                 body = Reader(attrs['Code'])
                 stack, locals_, size = body.u2(), body.u2(), body.u4()
-                if size >= 65536:
+                if not 0 < size < 65536:
                     raise ValueError('illegal JVM code_length')
                 code = body.take(size)
-                sites, pc = [], 0
+                sites, starts, pc = [], set(), 0
                 while pc < len(code):
+                    starts.add(pc)
                     op = code[pc]
                     width = 1
                     if op in (0xaa,0xab):
@@ -123,7 +124,17 @@ def project(path):
                     if 0xb2 <= op <= 0xb9:
                         sites.append({'pc':pc,'opcode':op,'reference':reference(int.from_bytes(code[pc + 1:pc + 3],'big'))})
                     pc += width
-                member['code'] = {'length':size,'max_stack':stack,'max_locals':locals_,'sites':sites}
+                handlers = []
+                for _ in range(body.u2()):
+                    start, end, handler, catch = body.u2(), body.u2(), body.u2(), body.u2()
+                    if not 0 <= start < end <= size or start not in starts or end != size and end not in starts or handler not in starts:
+                        raise ValueError('illegal JVM exception handler range')
+                    if catch and (catch >= count or not pool[catch] or pool[catch]['tag'] != 7):
+                        raise ValueError('illegal JVM catch type reference')
+                    handlers.append({'start':start,'end':end,'handler':handler,'type':None if catch == 0 else 'L'+class_name(catch)+';'})
+                code_attributes = attributes(body)
+                if body.cursor != len(body.data): raise ValueError('extra Code attribute data')
+                member['code'] = {'length':size,'max_stack':stack,'max_locals':locals_,'handlers':handlers,'attributes':list(code_attributes),'sites':sites}
             target.append(member)
     attrs = attributes()
     if reader.cursor != len(reader.data): raise ValueError('extra classfile data')

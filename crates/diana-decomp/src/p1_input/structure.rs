@@ -178,8 +178,8 @@ impl<'a> ProgramIndex<'a> {
             OperandReference::Field(id) => id.0 < self.header.field_ids.count,
             OperandReference::Method(id) => id.0 < self.header.method_ids.count,
             OperandReference::Proto(id) => id.0 < self.header.proto_ids.count,
-            // These reference tables are not accepted by the map reader yet.
-            OperandReference::CallSite(_) | OperandReference::MethodHandle(_) => false,
+            OperandReference::CallSite(id) => id.0 < self.mapped_count(7),
+            OperandReference::MethodHandle(id) => id.0 < self.mapped_count(8),
         }
     }
 }

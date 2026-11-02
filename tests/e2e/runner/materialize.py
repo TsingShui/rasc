@@ -16,7 +16,7 @@ from .evaluate import normalized_debug
 
 
 def observations(root,case,invocation,certificate,manifest,result,groups,timing=None):
-    from e2e import Tools, compile_java, load, run
+    from e2e import Tools, compile_java, load, relative, run, save
     assets={a['id']:a for a in manifest['assets']}
     original=assets[certificate['input_assets'][0]]
     cache=root/original['path'].split('/prepared/',1)[0]
@@ -53,7 +53,11 @@ def observations(root,case,invocation,certificate,manifest,result,groups,timing=
             started = time.monotonic()
             classfiles=compile_java(tools,sources+dependencies,classes,logs,'candidate')
             if timing is not None:timing['candidate_compile_seconds'] = time.monotonic() - started
-            compiled=[classfile.project(p) for p in classfiles]
+            compiled=[{**classfile.project(p),'artifact_bytes':p.stat().st_size} for p in classfiles]
+            if any(c['major'] != 52 or c['minor'] != 0 for c in compiled):
+                raise Mismatch('compiled artifact is not the required Java 8 target')
+            if any(('code' in m) == bool(m['flags'] & (0x100 | 0x400)) for c in compiled for m in c['methods']):
+                raise Mismatch('compiled method has inconsistent Code presence')
             required_owners={b['selector']['descriptor'] for b in certificate['bindings'] if b['selector']['kind'] in {'class','method'}}
             if not required_owners <= {c['descriptor'] for c in compiled}:raise Mismatch('compiled output lacks selected original owner')
             if case['validationScope'] in {'full-unit','full-unit-set'}:
@@ -68,6 +72,9 @@ def observations(root,case,invocation,certificate,manifest,result,groups,timing=
                     if {(f['name'],f['type']) for f in c['fields']}!={(f['name'],f['proto']) for f in actual_class['fields']}:
                         raise Mismatch('full unit lost/added an original field')
             groups['declaration']={'compiled':compiled}
+            declaration_path=(root/result['artifacts']['outcome']['path']).parent/'declaration.json'
+            save(declaration_path,groups['declaration'])
+            result['artifacts']['declaration']={'path':relative(declaration_path)}
             if certificate['driver'] is not None:
                 driver=recipe.get('driver') or {}
                 args=[invocation['id']]

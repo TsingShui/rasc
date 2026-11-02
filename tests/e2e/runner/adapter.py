@@ -100,7 +100,7 @@ def run_public(root, cache, spec, manifest, case_ids=None,representation=None,jo
                     path=work/(group+'.json');save(path,value);record['artifacts'][group]={'path':relative(path)}
                 record['execution']='completed'
                 record['owner_reports']=reports
-            elif seam not in {'decompile-method','decompile-class','decompile-and-render','open-or-decompile','engine-original-view'}:
+            elif seam not in {'decompile-method','decompile-class','decompile-and-render','open-or-decompile','engine-original-view','engine-render'}:
                 record['reason'] = 'the public Engine adapter does not implement this seam'
             elif len(cert['bindings']) != 1:
                 record['reason'] = 'multi-target public requests are not implemented'
@@ -226,6 +226,7 @@ def run_public(root, cache, spec, manifest, case_ids=None,representation=None,jo
             verdict['execution']='passed'
         except (Mismatch,PreparationError,OSError,ValueError,KeyError,TypeError,IndexError) as error:
             verdict['reason']=str(error)
+        save(work/'record.json',record)
         timing['comparison_seconds'] = time.monotonic() - comparison_started
         timing['total_seconds'] = time.monotonic() - started
         save(work/'timing.json',timing)

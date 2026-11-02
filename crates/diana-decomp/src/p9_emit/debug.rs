@@ -4,7 +4,7 @@ use crate::input::catalog::{FieldEntry, FieldStorage, MemberEntry, MemberSelecti
 use crate::input::formats::encoding_head;
 use crate::input::{
     ClassView, Cursor, InputError, MethodBody, MethodEntry, MethodError, ProgramIndex,
-    RawMethodView, UnsupportedInput,
+    RawMethodView,
 };
 use crate::raw::{LayoutKind, OperandReference, RawCodeItem, RawDecodeError, RawLiteral};
 use crate::{
@@ -571,16 +571,7 @@ pub(super) fn write_reference(
             output.string(proto.return_type, budget)?;
         }
         OperandReference::CallSite(_) | OperandReference::MethodHandle(_) => {
-            let kind = if matches!(reference, OperandReference::CallSite(_)) {
-                0x0007
-            } else {
-                0x0008
-            };
-            return Err(InputError::Unsupported {
-                reason: UnsupportedInput::MapType(kind),
-                offset_byte: index.header.header_offset,
-            }
-            .into());
+            return super::dynamic::write(index, output, reference, budget);
         }
     }
     output.push("}", budget)

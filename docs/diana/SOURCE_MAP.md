@@ -87,6 +87,36 @@ For each algorithm ported during implementation, add a record of source project/
 - RG is an independent git repository/gitlink; the pinned manifest has no `license` field, and no LICENSE was found in that repository. **The parent repository's Apache-2.0 license does not automatically cover the gitlink child repository.** Referencing designs/symbols is not permission to copy code. Until the rights holder grants explicit permission, block porting and distribution of radguard programs/fixtures; use an independent implementation and self-made fixtures. The earlier assumption that a subdirectory inherits the parent's license is withdrawn; DAD-derived attribution still needs review.
 - This document cites symbols and algorithmic ideas; it does not copy unauthorized third-party programs or corpora. If license or fixture authorization cannot be confirmed, block that copying and retain the independent implementation/self-made fixture path; other design work is not blocked.
 
+### 6.1 Current reuse register
+
+Observed state: Diana production code contains no copied reference source. The
+reference trees remain only under `ref-fork/rasc/`, retain their own license files
+and are not workspace members. DX and rusty-dex license files are still present;
+RG remains unreviewable for copying, so it stays reading-only. No vendored
+reference file was added to `crates/diana-decomp/` or `apps/diana/`.
+
+Production dependencies remain the reviewed set in the package manifests: `serde`,
+`serde_json`, `thiserror`, `rayon`, `unicode-general-category` and the optional
+`fastrace` 0.7 `perf` feature. They are general-purpose libraries, not decompiler
+implementations. Both workspace packages declare `Apache-2.0`; the repository
+[LICENSE](../../LICENSE) is that license text. No per-crate license bundle was
+added, per the repository instruction to retain existing files rather than
+introduce a new bundle.
+
+Test inputs are self-made. Java sources are compiled with the locked Temurin
+21.0.8+9 `--release 8`; DEX fixtures come from locked D8 8.3.37, the self-made
+D085 Python builder or hand-written Smali assembled by locked smali 2.5.2, and
+declaration facts come from that locked JDK, locked classfiles or the same
+self-made definitions. `Polymorphic.smali` and the D085 builder are authored here,
+not recovered output or downloaded programs. Reference papers and tools stay in
+ignored `.cache/references/` and are used as specifications and assertions, not as
+oracles or copied fixtures.
+
+This register records the observed repository state for the accepted batches. It
+does not grant permission to copy from RG, and it does not certify any future
+focused extraction; such a change requires a new record with source, commit,
+license and adaptation differences.
+
 ## 7. Additional one-command references and reading targets
 
 ```sh

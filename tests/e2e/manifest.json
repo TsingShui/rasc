@@ -24,8 +24,8 @@
     {
       "id": "asset-098c0653e0d2ad2c2279a4ee",
       "path": "tests/e2e/runner/adapter.py",
-      "sha256": "e09e15e91bcd30c61535666c40f07100254d3e04dd0866c836a9c1eb4dac4e3f",
-      "size": 31371,
+      "sha256": "fbc0fdd2548406888964584f44bb5a8e83c13a98c35bb54fa2943e98437cfad4",
+      "size": 31427,
       "source_paths": [
         "tests/e2e/runner/adapter.py"
       ],
@@ -57,8 +57,8 @@
     {
       "id": "asset-e1dc00706863c43089cad95d",
       "path": "tests/e2e/runner/classfile.py",
-      "sha256": "aa18ea8459553714f793ed29c4f8539bb82f045d6aff6a9d073cfdebc35e519a",
-      "size": 7367,
+      "sha256": "4776ef42c3c27a99e1b3442ad84fde4c740c2bd626c525fc512115ccc51f24fa",
+      "size": 8334,
       "source_paths": [
         "tests/e2e/runner/classfile.py"
       ],
@@ -134,8 +134,8 @@
     {
       "id": "asset-f10d7d1f848a3c1ccc040b52",
       "path": "tests/e2e/runner/materialize.py",
-      "sha256": "263e913f2cbe9e2e1d22bc9bf55f61a454e1eba3defd2a963699e1b1f04b213b",
-      "size": 8415,
+      "sha256": "6e2bf4e5653a38397c326e28d545a98c9cfe068ad97292d86912384621f5a25b",
+      "size": 9065,
       "source_paths": [
         "tests/e2e/runner/materialize.py"
       ],
@@ -1138,8 +1138,8 @@
     {
       "id": "asset-be4261d1ca3af6230aa59c9a",
       "path": ".cache/e2e/prepared/D001/classfiles.json",
-      "sha256": "0eafee9c184ab45450a86c2e353092d4fed6a9ced2c21163f52af231407e66f5",
-      "size": 1303,
+      "sha256": "329de074a641f49fc0b4d9468d371854291162987dec9d04f4a5c62e545827fa",
+      "size": 1450,
       "source_paths": [
         "tests/e2e/sources/D001/driver/Driver.java",
         "tests/e2e/sources/D001/fixtures/Case.java",
@@ -1480,8 +1480,8 @@
     {
       "id": "asset-562aca081e84ce9636e4fd3b",
       "path": ".cache/e2e/prepared/D001/catalog.json",
-      "sha256": "49827a05beb35d2fc12a8a46316381dcce3d1047f3ffd4568f1d75343c6dc133",
-      "size": 1572,
+      "sha256": "6266e7f8061ce4b7be364ac5d351558145318f7e2252f91781cc8147106bda64",
+      "size": 1731,
       "source_paths": [
         "tests/e2e/sources/D001/driver/Driver.java",
         "tests/e2e/sources/D001/fixtures/Case.java",
@@ -1571,8 +1571,8 @@
     {
       "id": "asset-1c44d9ea34829d6214d304d6",
       "path": ".cache/e2e/prepared/D002/classfiles.json",
-      "sha256": "e02a78fe531e3b7a57b9059eed57d041f6023cca30250668f6eb1da190e620b6",
-      "size": 1301,
+      "sha256": "2dabc8a55144f20b3c88d06ad56d3b3abb1a9f6ee5104f2f16551bdfb475d2f7",
+      "size": 1448,
       "source_paths": [
         "tests/e2e/sources/D002/driver/Driver.java",
         "tests/e2e/sources/D002/fixtures/Case.java",
@@ -1951,8 +1951,8 @@
     {
       "id": "asset-e69d50e0a4607fec99d1c1b8",
       "path": ".cache/e2e/prepared/D002/catalog.json",
-      "sha256": "df4a0a37d5d0f60c3b003deead3c596486be20febbdd087e0656f158c4b2da58",
-      "size": 1570,
+      "sha256": "a307bed3979d3e87da4cbc87e8afbc9125bdc9b4be121514cde96f8fc71798cb",
+      "size": 1729,
       "source_paths": [
         "tests/e2e/sources/D002/driver/Driver.java",
         "tests/e2e/sources/D002/fixtures/Case.java",
@@ -2042,8 +2042,8 @@
     {
       "id": "asset-be342af56448d3c8a5249662",
       "path": ".cache/e2e/prepared/D003/classfiles.json",
-      "sha256": "c6d17f5ebec17efcf7d4f23c526799d9ba7ddccd7061c56a474026e19a1fa94d",
-      "size": 1304,
+      "sha256": "bd00a899af862c89d1bede6f9b9b74439879ad5e8ea9520aeb3dd16ae5b5b652",
+      "size": 1451,
       "source_paths": [
         "tests/e2e/sources/D003/driver/Driver.java",
         "tests/e2e/sources/D003/fixtures/Case.java",
@@ -2422,8 +2422,8 @@
     {
       "id": "asset-30195625ceb3bd31f01842c6",
       "path": ".cache/e2e/prepared/D003/catalog.json",
-      "sha256": "3118b3d6186a57017d374978787ff01f35466a974fd79e4d6eb777c755fe948d",
-      "size": 1573,
+      "sha256": "21db59f7cda1fc10faa4a23712e0a7c5102902432790af6021005f54a085d36b",
+      "size": 1732,
       "source_paths": [
         "tests/e2e/sources/D003/driver/Driver.java",
         "tests/e2e/sources/D003/fixtures/Case.java",
@@ -2513,8 +2513,8 @@
     {
       "id": "asset-80b85596b0d7d5182eb79847",
       "path": ".cache/e2e/prepared/D004/classfiles.json",
-      "sha256": "471863ff62c224f1c951f3a24fda195f449c67a3321637c2cde054118af7e4b1",
-      "size": 1300,
+      "sha256": "aed476e02ed04bbe4ef4a2897d083546782333af34092fb19ffa28dfb05ee28f",
+      "size": 1447,
       "source_paths": [
         "tests/e2e/sources/D004/driver/Driver.java",
         "tests/e2e/sources/D004/fixtures/Case.java",
@@ -2855,8 +2855,8 @@
     {
       "id": "asset-890c2d205a4b5a23de555071",
       "path": ".cache/e2e/prepared/D004/catalog.json",
-      "sha256": "7fb2d59347f7c0d644bd6f5d031b0e2a1f6ef1f19f442f8312420c575393884c",
-      "size": 1569,
+      "sha256": "5687064d6abd3c9d101c2a68a7b916a0d976dd4d0a0bd228afc5c389f9d60436",
+      "size": 1728,
       "source_paths": [
         "tests/e2e/sources/D004/driver/Driver.java",
         "tests/e2e/sources/D004/fixtures/Case.java",
@@ -2946,8 +2946,8 @@
     {
       "id": "asset-040f235f0b2f8809f20159bd",
       "path": ".cache/e2e/prepared/D005/classfiles.json",
-      "sha256": "d84a6c4970901aea2cbcf50cc8ba26a1116ea0730a1fceb248ae65c33a85f5c5",
-      "size": 1300,
+      "sha256": "4211fcf3b64bbf887c9f16da0ddb918bb1693c43a472a8b5cebb7178102efe26",
+      "size": 1447,
       "source_paths": [
         "tests/e2e/sources/D005/driver/Driver.java",
         "tests/e2e/sources/D005/fixtures/Case.java",
@@ -3250,8 +3250,8 @@
     {
       "id": "asset-b34a92362c30ac13e775233a",
       "path": ".cache/e2e/prepared/D005/catalog.json",
-      "sha256": "765792801cf138040204b1577c506529c74e9ab71f5e4cdb328c638ec83089f5",
-      "size": 1569,
+      "sha256": "1dae2e0064d0b79353d594311108bc6a50a8586432575fe24dd150c8be2a2c9f",
+      "size": 1728,
       "source_paths": [
         "tests/e2e/sources/D005/driver/Driver.java",
         "tests/e2e/sources/D005/fixtures/Case.java",
@@ -3354,8 +3354,8 @@
     {
       "id": "asset-ee9b15a15d8f6d7eeda32d60",
       "path": ".cache/e2e/prepared/D006/classfiles.json",
-      "sha256": "35379e177b1d98549d7556bd19a69c35d975f728d8ef5691d6ca7c0e3fa86328",
-      "size": 8707,
+      "sha256": "ba99e7faa47c27e4396554c81459b2b3d8131e32b384f5502852d7bca315220f",
+      "size": 9310,
       "source_paths": [
         "tests/e2e/sources/D006/driver/Driver.java",
         "tests/e2e/sources/D006/fixtures/Case.java",
@@ -3776,8 +3776,8 @@
     {
       "id": "asset-12002d6808d8df557a614868",
       "path": ".cache/e2e/prepared/D006/catalog.json",
-      "sha256": "e2209b578ace74ebf1644d2bb58ab1cd327a90289351a8d6c8107c910fccc4ec",
-      "size": 9640,
+      "sha256": "92d7ba6c017eaf677530dc5b602fd7f4d3adb1c05750cab0dee49f47e3420e8d",
+      "size": 10291,
       "source_paths": [
         "tests/e2e/sources/D006/driver/Driver.java",
         "tests/e2e/sources/D006/fixtures/Case.java",
@@ -3869,8 +3869,8 @@
     {
       "id": "asset-6ce2181fdd0c6faf9e5621f1",
       "path": ".cache/e2e/prepared/D007/classfiles.json",
-      "sha256": "f6aae66e1358cb5e40c8677828bb49b1df389ae6591596a6c87466ff3e5f3849",
-      "size": 1296,
+      "sha256": "a2fcc8394313646c93b6912873bab6b7423a54b4e1b91ff9bf82d743b6b0b858",
+      "size": 1443,
       "source_paths": [
         "tests/e2e/sources/D007/driver/Driver.java",
         "tests/e2e/sources/D007/fixtures/Case.java",
@@ -4287,8 +4287,8 @@
     {
       "id": "asset-2caed742998d76f8187a0786",
       "path": ".cache/e2e/prepared/D007/catalog.json",
-      "sha256": "bb10b4057946ff1ac790f872b8e44f70ce5f2ff86144b686fe94f1b7d41e934b",
-      "size": 1565,
+      "sha256": "2b7a286977c4c4e72b7c2f194f0d2b87e7c10f37921abe821b687053029823fb",
+      "size": 1724,
       "source_paths": [
         "tests/e2e/sources/D007/driver/Driver.java",
         "tests/e2e/sources/D007/fixtures/Case.java",
@@ -4378,8 +4378,8 @@
     {
       "id": "asset-345f65547adccb1e25f892d6",
       "path": ".cache/e2e/prepared/D008/classfiles.json",
-      "sha256": "89461dee21320ddbf6293b1ee87a9f8156f5fd3e76bec0e582b4cf3fdd70c6be",
-      "size": 1296,
+      "sha256": "eab23d1c916568d754357f220a8bb205d4e7b09e1616cc8192db2d7ff06f3f4f",
+      "size": 1443,
       "source_paths": [
         "tests/e2e/sources/D008/driver/Driver.java",
         "tests/e2e/sources/D008/fixtures/Case.java",
@@ -4758,8 +4758,8 @@
     {
       "id": "asset-dcaf80a3fd4694af49dcc6a0",
       "path": ".cache/e2e/prepared/D008/catalog.json",
-      "sha256": "13d268fcf2f9c11009063982f15a3dbb389d9d84aba3f25c0cfd9ea39000f5ad",
-      "size": 1565,
+      "sha256": "af67d76107f4f4d1b1b686dd6696725ea168adca989aacb5f2c44ebabdfa113c",
+      "size": 1724,
       "source_paths": [
         "tests/e2e/sources/D008/driver/Driver.java",
         "tests/e2e/sources/D008/fixtures/Case.java",
@@ -4849,8 +4849,8 @@
     {
       "id": "asset-916b1c90b29bb6a658c9a032",
       "path": ".cache/e2e/prepared/D009/classfiles.json",
-      "sha256": "63d58cbf455572d37cc6e1cca89fbd927ca283e6767296fa179521b9f03360e6",
-      "size": 1288,
+      "sha256": "baf4d69ab4a64564c66aeccd198fff91a04178ac9beea778193abfed1cd9bcd3",
+      "size": 1396,
       "source_paths": [
         "tests/e2e/sources/D009/driver/Driver.java",
         "tests/e2e/sources/D009/fixtures/Case.java",
@@ -5191,8 +5191,8 @@
     {
       "id": "asset-6885500d3382a29d589dd45b",
       "path": ".cache/e2e/prepared/D009/catalog.json",
-      "sha256": "c973bda1176882586dc651a0ac7346ae33de48d58e5ddfc9d49460ecb7cea4c9",
-      "size": 1555,
+      "sha256": "c5706d590ae7a3cde4c4fa31512508259daacd58814bbde6e64e37e5f13d6d37",
+      "size": 1671,
       "source_paths": [
         "tests/e2e/sources/D009/driver/Driver.java",
         "tests/e2e/sources/D009/fixtures/Case.java",
@@ -5282,8 +5282,8 @@
     {
       "id": "asset-60abf6436ec3d59307887356",
       "path": ".cache/e2e/prepared/D010/classfiles.json",
-      "sha256": "2c37b7eb17587521d56d1967ba79102111193377b0f7eea6421ab6361d5565da",
-      "size": 1288,
+      "sha256": "9c495e18eae58e4a5f20ced2b6e86ca9ecbc4e6fdf1fa365145b9d892eeafcf0",
+      "size": 1396,
       "source_paths": [
         "tests/e2e/sources/D010/driver/Driver.java",
         "tests/e2e/sources/D010/fixtures/Case.java",
@@ -5624,8 +5624,8 @@
     {
       "id": "asset-3f088c342908f62cc52c7284",
       "path": ".cache/e2e/prepared/D010/catalog.json",
-      "sha256": "27f0067f7b29fbf130fe8ec8a340866438493df50e575fd48e1024aaee7a50bf",
-      "size": 1555,
+      "sha256": "4beb49514f4ea839af98bbd00f79b271e2bdce02cbfe59d20da726e1303b9307",
+      "size": 1671,
       "source_paths": [
         "tests/e2e/sources/D010/driver/Driver.java",
         "tests/e2e/sources/D010/fixtures/Case.java",
@@ -5715,8 +5715,8 @@
     {
       "id": "asset-15c083bf984a1baef5b58b8e",
       "path": ".cache/e2e/prepared/D011/classfiles.json",
-      "sha256": "ec1c063b846e26481a4e176a436c3b2a9364a99aa463b88e6cb769c4196cce7a",
-      "size": 1588,
+      "sha256": "1c02492c6e0e5b1fdc223cbea70e3532802a48845a5bea8764632c5fb84de946",
+      "size": 1750,
       "source_paths": [
         "tests/e2e/sources/D011/driver/Driver.java",
         "tests/e2e/sources/D011/fixtures/Case.java",
@@ -6095,8 +6095,8 @@
     {
       "id": "asset-916d162f46fddb1fce68f270",
       "path": ".cache/e2e/prepared/D011/catalog.json",
-      "sha256": "702491e03498637e125707f80833b160f3decf3d8f66a57762c4ee2622dd6c2d",
-      "size": 1889,
+      "sha256": "85c7b88a4b3c9417144f4052d3067491850dd8712ef31058fb4c8021e11cf0fd",
+      "size": 2063,
       "source_paths": [
         "tests/e2e/sources/D011/driver/Driver.java",
         "tests/e2e/sources/D011/fixtures/Case.java",
@@ -6186,8 +6186,8 @@
     {
       "id": "asset-c0b8fe02ba80559d22731c2c",
       "path": ".cache/e2e/prepared/D012/classfiles.json",
-      "sha256": "50a85e8a483790152b20a20aac05b8978beb2e16b61d30c864624367e32edac3",
-      "size": 1577,
+      "sha256": "4896d809a15f28d0e1ff1763329a443ee0c49afcfa89567c91081956e9c37b5e",
+      "size": 1739,
       "source_paths": [
         "tests/e2e/sources/D012/driver/Driver.java",
         "tests/e2e/sources/D012/fixtures/Case.java",
@@ -6528,8 +6528,8 @@
     {
       "id": "asset-2e746fd85db588486ac96e8c",
       "path": ".cache/e2e/prepared/D012/catalog.json",
-      "sha256": "a9d38d77e521720facc54d22f5e68c6342ad314d0e0da02d460d495b29f04542",
-      "size": 1876,
+      "sha256": "9cd3d1af72ced1d4a0acdc460c39d54d8810004cff7b7c30fd85425ed2661220",
+      "size": 2050,
       "source_paths": [
         "tests/e2e/sources/D012/driver/Driver.java",
         "tests/e2e/sources/D012/fixtures/Case.java",
@@ -6619,8 +6619,8 @@
     {
       "id": "asset-55e032f1686201e657b91720",
       "path": ".cache/e2e/prepared/D013/classfiles.json",
-      "sha256": "2aae69e9396de357b19b55555ab141a1c834fefa3a425bc32cd6b24f8a3f71b8",
-      "size": 1297,
+      "sha256": "5f33add9bc1a210f11d9fa582be61fa247501ee6d0e8e757efeff4564f938c8f",
+      "size": 1444,
       "source_paths": [
         "tests/e2e/sources/D013/driver/Driver.java",
         "tests/e2e/sources/D013/fixtures/Case.java",
@@ -7037,8 +7037,8 @@
     {
       "id": "asset-b9aa6b8eced1d276cd4e210f",
       "path": ".cache/e2e/prepared/D013/catalog.json",
-      "sha256": "aa7370f67b834cfe319dcf0f4b0ca2394f48359c9585b924162ef0442672ff14",
-      "size": 1566,
+      "sha256": "727c1028551c7fcf8443ec98adebe91e6cf0a59bc7423cf290df59da5dac1d99",
+      "size": 1725,
       "source_paths": [
         "tests/e2e/sources/D013/driver/Driver.java",
         "tests/e2e/sources/D013/fixtures/Case.java",
@@ -7128,8 +7128,8 @@
     {
       "id": "asset-1feb2a4730227c55e651c7af",
       "path": ".cache/e2e/prepared/D014/classfiles.json",
-      "sha256": "9f19830ac72b329499ca94f97e61dd18c54d24a1920bdae5e3d884945635e69a",
-      "size": 1914,
+      "sha256": "045c97d9c574cb455071d6e462dece7bd10b38a79020abc354ca7086b29ae7ec",
+      "size": 2169,
       "source_paths": [
         "tests/e2e/sources/D014/driver/Driver.java",
         "tests/e2e/sources/D014/fixtures/Case.java",
@@ -7546,8 +7546,8 @@
     {
       "id": "asset-1d53b165e53c011e1dbbcdd6",
       "path": ".cache/e2e/prepared/D014/catalog.json",
-      "sha256": "69826f78a005e591f78e00a7b76988869b4413c2233783bdc30ef716f352ef8c",
-      "size": 2251,
+      "sha256": "c6ed1c3ef2f16351339a93d87c8e9510cbccca650722266ac1c250915c7dded1",
+      "size": 2526,
       "source_paths": [
         "tests/e2e/sources/D014/driver/Driver.java",
         "tests/e2e/sources/D014/fixtures/Case.java",
@@ -7637,8 +7637,8 @@
     {
       "id": "asset-1a9ba49447cb87823071db48",
       "path": ".cache/e2e/prepared/D015/classfiles.json",
-      "sha256": "93605ac8d0a74f6d22ba24a7bed3c29e7e2e949844e4dde0d25f30010aa2510f",
-      "size": 2183,
+      "sha256": "2d65c6795aa1883905e6cf0417c8ee1b5f59664b0f0cc0b468f23191c8e46b9a",
+      "size": 2609,
       "source_paths": [
         "tests/e2e/sources/D015/driver/Driver.java",
         "tests/e2e/sources/D015/fixtures/Case.java",
@@ -7979,8 +7979,8 @@
     {
       "id": "asset-89092409627d9f2763d36526",
       "path": ".cache/e2e/prepared/D015/catalog.json",
-      "sha256": "9fb0cddfdf0ef7490a3d7aa3717b2a142889fc3178ae91e441af6819342b2bda",
-      "size": 2548,
+      "sha256": "07391e34ed03befc3a20785005a7f7390d66c0a9f159dd2be03fe9551896ac37",
+      "size": 3010,
       "source_paths": [
         "tests/e2e/sources/D015/driver/Driver.java",
         "tests/e2e/sources/D015/fixtures/Case.java",
@@ -8070,8 +8070,8 @@
     {
       "id": "asset-64b6abca070b1fa1c054eb7c",
       "path": ".cache/e2e/prepared/D016/classfiles.json",
-      "sha256": "0ab851405d4a2d7f49e6af8c5f00c4adea53d81e9e515596e60a74dcf05dc173",
-      "size": 1597,
+      "sha256": "01eb78e97d0a447193b0b5a2ba6ee8e1ed6e2f4515c47749e78a7f3af646cef9",
+      "size": 1759,
       "source_paths": [
         "tests/e2e/sources/D016/driver/Driver.java",
         "tests/e2e/sources/D016/fixtures/Case.java",
@@ -8412,8 +8412,8 @@
     {
       "id": "asset-3888434cb9e40f1de71f580f",
       "path": ".cache/e2e/prepared/D016/catalog.json",
-      "sha256": "9b479b9ca91ee47788cb335009dc97be89dccafb4362361d2ee9bfa7ac111d5f",
-      "size": 1898,
+      "sha256": "c33f60bb56825542a6340a122e68d34cc885bb076e061c24b9598f7c28089e4f",
+      "size": 2072,
       "source_paths": [
         "tests/e2e/sources/D016/driver/Driver.java",
         "tests/e2e/sources/D016/fixtures/Case.java",
@@ -8503,8 +8503,8 @@
     {
       "id": "asset-b24855ae8adf59c4a72d30e6",
       "path": ".cache/e2e/prepared/D017/classfiles.json",
-      "sha256": "5547d1ca31788989de9ba47abb842f49d6815a38ffe0fd44b7605e025582c9dc",
-      "size": 1285,
+      "sha256": "5fb011efc0abdf4ce99345afb29798ceb6e13cce35f76413f196cd37a0b382b9",
+      "size": 1393,
       "source_paths": [
         "tests/e2e/sources/D017/driver/Driver.java",
         "tests/e2e/sources/D017/fixtures/Case.java",
@@ -8959,8 +8959,8 @@
     {
       "id": "asset-9531883f26314eed819468db",
       "path": ".cache/e2e/prepared/D017/catalog.json",
-      "sha256": "397b2d0b4f8fa01563612cbfc0394ceb152d3a1edda479ed0016bdcc5932cfc9",
-      "size": 1552,
+      "sha256": "489ec4983283969949b7ad851963263a39a23ae4aa02f67cb35cf90499a88c56",
+      "size": 1668,
       "source_paths": [
         "tests/e2e/sources/D017/driver/Driver.java",
         "tests/e2e/sources/D017/fixtures/Case.java",
@@ -9076,8 +9076,8 @@
     {
       "id": "asset-ae187ba7fa0440395c7458df",
       "path": ".cache/e2e/prepared/D018/classfiles.json",
-      "sha256": "8763d0cf7c21af3d5b2df95e4fc1b411aaca94f2877b9b980d9ad0b616add538",
-      "size": 10127,
+      "sha256": "18dd3cd7763c6f6b703d115ff2167f9a54e043d3dc17d82cae9698ac06da308a",
+      "size": 10667,
       "source_paths": [
         "tests/e2e/sources/D018/driver/Driver.java",
         "tests/e2e/sources/D018/fixtures/Case.java",
@@ -9544,8 +9544,8 @@
     {
       "id": "asset-0522a7dcda6111ed03836592",
       "path": ".cache/e2e/prepared/D018/catalog.json",
-      "sha256": "c3a20b981043d335441aa4894df4b23532b1b4f3fbb1079b8f9c053f16cdf9d4",
-      "size": 11200,
+      "sha256": "47a1b30eb04a0adc29420f98a0ae77f8d402d27821c1199ab647e12fd78a0388",
+      "size": 11780,
       "source_paths": [
         "tests/e2e/sources/D018/driver/Driver.java",
         "tests/e2e/sources/D018/fixtures/Case.java",
@@ -9652,8 +9652,8 @@
     {
       "id": "asset-3a494fdef7e2f41aa9625cbf",
       "path": ".cache/e2e/prepared/D019/classfiles.json",
-      "sha256": "e259ba018c7ef1d9672600c78e956cf9ac933d395547a48e81b0e9f565d39af7",
-      "size": 6170,
+      "sha256": "17e20e8f442226cd5aa6e4c0579002977e4d5f447e06b09d2c47f970cecc2d9e",
+      "size": 6548,
       "source_paths": [
         "tests/e2e/sources/D019/driver/Driver.java",
         "tests/e2e/sources/D019/fixtures/Case.java",
@@ -10034,8 +10034,8 @@
     {
       "id": "asset-d199425b7c414a66b450eb97",
       "path": ".cache/e2e/prepared/D019/catalog.json",
-      "sha256": "67ea62a6db21c124d7bd6312a9459595e68856f23fdd4002f7bb73d8b46cdce5",
-      "size": 6885,
+      "sha256": "9e4144790b3f9e655f3940b10f5e31b1283914d3f602b2ef167cdbe2d245c163",
+      "size": 7291,
       "source_paths": [
         "tests/e2e/sources/D019/driver/Driver.java",
         "tests/e2e/sources/D019/fixtures/Case.java",
@@ -10153,8 +10153,8 @@
     {
       "id": "asset-ea95c0945436ce6010e4f04d",
       "path": ".cache/e2e/prepared/D020/classfiles.json",
-      "sha256": "a1cd6c414b20a9062699b3a775f7ec0e5f89c1b8fb770e70ceb41fb3e878515c",
-      "size": 4353,
+      "sha256": "f41a310ad0a03471934687032dbb8d7f20064f8de91751adb73e2e5baf3bec9e",
+      "size": 4677,
       "source_paths": [
         "tests/e2e/sources/D020/driver/Driver.java",
         "tests/e2e/sources/D020/fixtures/Base.java",
@@ -10621,8 +10621,8 @@
     {
       "id": "asset-f2a87e515e5f62169eddb891",
       "path": ".cache/e2e/prepared/D020/catalog.json",
-      "sha256": "af2d8095ce30ca44a8ee91d69ccc45451381f1fa153c70810363dd5022bf0a4c",
-      "size": 4920,
+      "sha256": "b8defb1016b6c20da4e6380e7b0775b2865dd2db63a2146e18ec7a50e6f37c61",
+      "size": 5268,
       "source_paths": [
         "tests/e2e/sources/D020/driver/Driver.java",
         "tests/e2e/sources/D020/fixtures/Base.java",
@@ -10742,8 +10742,8 @@
     {
       "id": "asset-0b1e1aebc317a83b57a70187",
       "path": ".cache/e2e/prepared/D021/classfiles.json",
-      "sha256": "640259ec3e09e15d77bb56696ba7d3a01a9b137c16304c764cd749a0cfe9b5db",
-      "size": 7048,
+      "sha256": "b256a28251248468dc755799021486b340038ab67cb5ec065022c114267c9a2f",
+      "size": 7480,
       "source_paths": [
         "tests/e2e/sources/D021/driver/Driver.java",
         "tests/e2e/sources/D021/fixtures/Base.java",
@@ -11210,8 +11210,8 @@
     {
       "id": "asset-834a3df6df0ebabb61cf7eeb",
       "path": ".cache/e2e/prepared/D021/catalog.json",
-      "sha256": "648ec2f956b3486bdc5f2bb36a7695916482b1a5296354545c7a20e8c26e2b4f",
-      "size": 7861,
+      "sha256": "cf86d46247cd814a4abfb3c2d426c0f815a3024af4b05db09deac28732cd3df7",
+      "size": 8325,
       "source_paths": [
         "tests/e2e/sources/D021/driver/Driver.java",
         "tests/e2e/sources/D021/fixtures/Base.java",
@@ -11331,8 +11331,8 @@
     {
       "id": "asset-8c120b9b24355a78842d24ff",
       "path": ".cache/e2e/prepared/D022/classfiles.json",
-      "sha256": "683ed1eae1baeee804fa30e6750e4c180db6949b2bf7108c8a894d37357d1603",
-      "size": 8181,
+      "sha256": "bcff6c9d7b2b626d4114941cac07e8297794df972d7e6a8428ed45533010ba9e",
+      "size": 8613,
       "source_paths": [
         "tests/e2e/sources/D022/driver/Driver.java",
         "tests/e2e/sources/D022/fixtures/Case.java",
@@ -11799,8 +11799,8 @@
     {
       "id": "asset-3e4535223b2788cf79075468",
       "path": ".cache/e2e/prepared/D022/catalog.json",
-      "sha256": "7c3fb6d48c19c0ac866672996fc407e9e48a1f2f74b5f87de502eb82f7e1629c",
-      "size": 9076,
+      "sha256": "d0a8eaacf999dd665f6799b912c0a7682357bc1cdbccc225c4052ae3ed4d5c9b",
+      "size": 9540,
       "source_paths": [
         "tests/e2e/sources/D022/driver/Driver.java",
         "tests/e2e/sources/D022/fixtures/Case.java",
@@ -11920,8 +11920,8 @@
     {
       "id": "asset-c9094285159008352512747b",
       "path": ".cache/e2e/prepared/D023/classfiles.json",
-      "sha256": "c6694244817be8f52564d22343a39c89c0a1a234f55860681a0a6730cba578e0",
-      "size": 3432,
+      "sha256": "af1a4af2b8c1fe3870b711c720d9647abc3c82a7c1b67b1ca5a3be1583d524e2",
+      "size": 3648,
       "source_paths": [
         "tests/e2e/sources/D023/driver/Driver.java",
         "tests/e2e/sources/D023/fixtures/Case.java",
@@ -12430,8 +12430,8 @@
     {
       "id": "asset-6fed644b49a3b510baf1fc09",
       "path": ".cache/e2e/prepared/D023/catalog.json",
-      "sha256": "25bbd5c8a63e11af8ca823b121132a49aedf798421f6290bdfa03a77f3e3c545",
-      "size": 3913,
+      "sha256": "48a5d8a02ceb00e80ef050254764ea69ec33f195cbb0acf00451643de1fb75d8",
+      "size": 4145,
       "source_paths": [
         "tests/e2e/sources/D023/driver/Driver.java",
         "tests/e2e/sources/D023/fixtures/Case.java",
@@ -12538,8 +12538,8 @@
     {
       "id": "asset-cf2f9f757c3af5c4c77bc71a",
       "path": ".cache/e2e/prepared/D024/classfiles.json",
-      "sha256": "07380c42ff7cec7cbe0d35a0ab589d7bb1686ddfaec1b133015b71585a41057d",
-      "size": 5791,
+      "sha256": "a82692cd302801a9780681c69248e85bf640d407121e2f002d3a519a3680a36e",
+      "size": 6169,
       "source_paths": [
         "tests/e2e/sources/D024/driver/Driver.java",
         "tests/e2e/sources/D024/fixtures/Case.java",
@@ -12960,8 +12960,8 @@
     {
       "id": "asset-7309befe8065e993b9825095",
       "path": ".cache/e2e/prepared/D024/catalog.json",
-      "sha256": "2da790d8a7b3bbf5e3dc7bdcbca7cac95ed2217c2aaf6abb951e3ac82b1b3111",
-      "size": 6484,
+      "sha256": "4168265391740b0e5cc81557f5323bbd245d11fdbe5ec359411cf8f0a22828a0",
+      "size": 6890,
       "source_paths": [
         "tests/e2e/sources/D024/driver/Driver.java",
         "tests/e2e/sources/D024/fixtures/Case.java",
@@ -13053,8 +13053,8 @@
     {
       "id": "asset-ed6211308a287548c3b6efbe",
       "path": ".cache/e2e/prepared/D025/classfiles.json",
-      "sha256": "04a2f1a1028c7ac5e384256cb7fa04fcf51e4d8360d5309a8182102e4c5be932",
-      "size": 1313,
+      "sha256": "f212ccf201acd22083f8f0a5c44771a55eaa38cbc03b4d2a23a9ea1b724fa3b6",
+      "size": 1421,
       "source_paths": [
         "tests/e2e/sources/D025/driver/Driver.java",
         "tests/e2e/sources/D025/fixtures/Case.java",
@@ -13433,8 +13433,8 @@
     {
       "id": "asset-8a2da962dd8c552769c8f871",
       "path": ".cache/e2e/prepared/D025/catalog.json",
-      "sha256": "b56b33d262830aba90f638a4955f3b763f6add4fcf1b270e790028d610f152b8",
-      "size": 1582,
+      "sha256": "d672850828f7c9ed824bacbd0e7fb2d32ab1e0217d9a6dd0d0e09459a3241093",
+      "size": 1698,
       "source_paths": [
         "tests/e2e/sources/D025/driver/Driver.java",
         "tests/e2e/sources/D025/fixtures/Case.java",
@@ -13524,8 +13524,8 @@
     {
       "id": "asset-4ebe82d55ea48b42d7ea55da",
       "path": ".cache/e2e/prepared/D026/classfiles.json",
-      "sha256": "da394ef2fe0c9265e5495927ec790b6c7705c639425be20ddb36d9a05110021f",
-      "size": 1322,
+      "sha256": "ba8cedfac974baea8ca8302b84c2c34653a9438f3b7e07d8086d730ae877b9f9",
+      "size": 1430,
       "source_paths": [
         "tests/e2e/sources/D026/driver/Driver.java",
         "tests/e2e/sources/D026/fixtures/Case.java",
@@ -13904,8 +13904,8 @@
     {
       "id": "asset-2130809ca62d62b12bebb644",
       "path": ".cache/e2e/prepared/D026/catalog.json",
-      "sha256": "bfa8ffbd919bad770e1bc09cb5c2949358dd4639abe246165cb71ef961d79795",
-      "size": 1589,
+      "sha256": "44a66830870a8e75808322214b8a809de04814096f87230523e8c3a2e7473ed8",
+      "size": 1705,
       "source_paths": [
         "tests/e2e/sources/D026/driver/Driver.java",
         "tests/e2e/sources/D026/fixtures/Case.java",
@@ -14122,8 +14122,8 @@
     {
       "id": "asset-e7dfba807ca1b30c737cf963",
       "path": ".cache/e2e/prepared/D027/classfiles.json",
-      "sha256": "de863a14e45fdec8020558c3403ccaa95f3b8c3fa7a1f10ab0fc303dcf53b24d",
-      "size": 1585,
+      "sha256": "895bb004f7da7f2dbc652afd4db580caaf67c0cc59529ea9215fb9c62f29b11a",
+      "size": 1747,
       "source_paths": [
         "tests/e2e/sources/D027/fixtures/Case.java",
         "tests/e2e/sources/D027/fixtures/Case.smali",
@@ -14352,8 +14352,8 @@
     {
       "id": "asset-cb70519d4f250b04ec514e6b",
       "path": ".cache/e2e/prepared/D027/catalog.json",
-      "sha256": "a791c3f943d4eefac319d4f0392e23d5c52200c3fe6b45738251016df9e4ea97",
-      "size": 1886,
+      "sha256": "03cebde0195c9d67d3a623618de91e24fa48ebad702476c628f7befec2957c5c",
+      "size": 2060,
       "source_paths": [
         "tests/e2e/sources/D027/fixtures/Case.java",
         "tests/e2e/sources/D027/fixtures/Case.smali",
@@ -14458,8 +14458,8 @@
     {
       "id": "asset-b76540a812d200be8dcb989f",
       "path": ".cache/e2e/prepared/D028/classfiles.json",
-      "sha256": "979674f164a2940ae42c4c754e1df97c7625b3d18f7c4416b6db074a735aa95c",
-      "size": 2920,
+      "sha256": "123aa7edab3df44f5391997f9517a0fdff650e391df4d8675355d52864511920",
+      "size": 3082,
       "source_paths": [
         "tests/e2e/sources/D028/driver/Driver.java",
         "tests/e2e/sources/D028/fixtures/Box.java",
@@ -14880,8 +14880,8 @@
     {
       "id": "asset-75439e3b5708e0dfecf78e37",
       "path": ".cache/e2e/prepared/D028/catalog.json",
-      "sha256": "496f10d17a59285f9a7c8273b6c39ea5af4e1c6b0282ea8bcffea2917c6b458b",
-      "size": 3345,
+      "sha256": "3f923e5f726a7ed1b141fd4687e1d608f4ab7418638498c3e99bcd4837bd1c30",
+      "size": 3519,
       "source_paths": [
         "tests/e2e/sources/D028/driver/Driver.java",
         "tests/e2e/sources/D028/fixtures/Box.java",
@@ -14999,8 +14999,8 @@
     {
       "id": "asset-7c09f862856ece5053ed7bcc",
       "path": ".cache/e2e/prepared/D029/classfiles.json",
-      "sha256": "81845f018174a0da19b12fdb6e1104b992840e7c9d9732b5c44836abe8645cd7",
-      "size": 9245,
+      "sha256": "2b067cbea28b31560226a10d0ecb8f140dacacdd4b50d26eb56424f11220f752",
+      "size": 10191,
       "source_paths": [
         "tests/e2e/sources/D029/driver/Driver.java",
         "tests/e2e/sources/D029/fixtures/Case.java",
@@ -15467,8 +15467,8 @@
     {
       "id": "asset-860235751da3d2f24f737a41",
       "path": ".cache/e2e/prepared/D029/catalog.json",
-      "sha256": "927b0524d39c9dea85ab1b849561f3bb8cf312dd1c89855afd392e985935fcb1",
-      "size": 10254,
+      "sha256": "6713825e5c9fb69bda2bcd0fcd527628d6a08201dcf2357df68b8f9037cc9e53",
+      "size": 11276,
       "source_paths": [
         "tests/e2e/sources/D029/driver/Driver.java",
         "tests/e2e/sources/D029/fixtures/Case.java",
@@ -15588,8 +15588,8 @@
     {
       "id": "asset-50f389982ca7a42ded9e64be",
       "path": ".cache/e2e/prepared/D030/classfiles.json",
-      "sha256": "bec5593f22f26992a53caba50365b66850cb9c5faa2bfbba85b793d97100ef67",
-      "size": 10111,
+      "sha256": "e84731d056f9e129aa34b385647484a1cca3726825251a8f1c1266106dfb2dc5",
+      "size": 10858,
       "source_paths": [
         "tests/e2e/sources/D030/driver/Driver.java",
         "tests/e2e/sources/D030/fixtures/Case.java",
@@ -16098,8 +16098,8 @@
     {
       "id": "asset-06efff179ed9c4fe7942164e",
       "path": ".cache/e2e/prepared/D030/catalog.json",
-      "sha256": "4082c685557d7579602ac154237c9b1618127b463c57c5a1fa715938df643f44",
-      "size": 11176,
+      "sha256": "c0ed8825b82cce62dcd24f92e27d671e80418edb3d53076d201ccaa0248d6551",
+      "size": 11981,
       "source_paths": [
         "tests/e2e/sources/D030/driver/Driver.java",
         "tests/e2e/sources/D030/fixtures/Case.java",
@@ -16232,8 +16232,8 @@
     {
       "id": "asset-948768be9a9710efcf25c6d1",
       "path": ".cache/e2e/prepared/D031/classfiles.json",
-      "sha256": "2261ec0ee1d6fb05596e970a648667e2af28fbf9d5f379572e8893a53431d7f2",
-      "size": 5496,
+      "sha256": "7894ea8ca198eac2099e467559b94e30d95163e41e8f59839a36ca7a55758935",
+      "size": 6211,
       "source_paths": [
         "tests/e2e/sources/D031/driver/Driver.java",
         "tests/e2e/sources/D031/fixtures/BaseError.java",
@@ -16882,8 +16882,8 @@
     {
       "id": "asset-b69942037f5ca8a4bac54da7",
       "path": ".cache/e2e/prepared/D031/catalog.json",
-      "sha256": "769cafeb9614b626e44b044363c09222b726515acd3f41ebd839bd0ea898511e",
-      "size": 6167,
+      "sha256": "78ed8c00adf463b4860ddc237ac3752921e2704f7f9b66d69713bc055b252c10",
+      "size": 6940,
       "source_paths": [
         "tests/e2e/sources/D031/driver/Driver.java",
         "tests/e2e/sources/D031/fixtures/BaseError.java",
@@ -17005,8 +17005,8 @@
     {
       "id": "asset-3d8a933df2e87ea58b43c9eb",
       "path": ".cache/e2e/prepared/D032/classfiles.json",
-      "sha256": "138e70794e5cb78ed206a6a0c112131ebca6dcb4c5ff74a29bb040f115165568",
-      "size": 7930,
+      "sha256": "f2c048734fc6e6f8a363955e14032e66368fd851d1f71f328d4150c4122f5f52",
+      "size": 8621,
       "source_paths": [
         "tests/e2e/sources/D032/driver/Driver.java",
         "tests/e2e/sources/D032/fixtures/Case.java",
@@ -17473,8 +17473,8 @@
     {
       "id": "asset-9bfac95eb4f80edd4276f779",
       "path": ".cache/e2e/prepared/D032/catalog.json",
-      "sha256": "37e2469a7570ec189e1f08135f7a56ec0df1ca054a8c51f8bb8ac2ff4238a21e",
-      "size": 8817,
+      "sha256": "db4921b569670030e625b6561dec809111a5afa94e92b1e98eb131114d42cdae",
+      "size": 9562,
       "source_paths": [
         "tests/e2e/sources/D032/driver/Driver.java",
         "tests/e2e/sources/D032/fixtures/Case.java",
@@ -17581,8 +17581,8 @@
     {
       "id": "asset-4c6d312dc7fb32941993967e",
       "path": ".cache/e2e/prepared/D033/classfiles.json",
-      "sha256": "e45ac4b4ca86452cef21d35e7678b951f5790b0772fd1ecd7e40c4d057558988",
-      "size": 7713,
+      "sha256": "7570d9ff95402a6cc9acf46fc03c764fd97ca1f7477c3566b7712ab2c37564c5",
+      "size": 8221,
       "source_paths": [
         "tests/e2e/sources/D033/driver/Driver.java",
         "tests/e2e/sources/D033/fixtures/Case.java",
@@ -17963,8 +17963,8 @@
     {
       "id": "asset-890c21e786527259d7853449",
       "path": ".cache/e2e/prepared/D033/catalog.json",
-      "sha256": "9c9aa27ab2e675e67a766830b0eaedc8b30f745ee5b50d9090e082c4ad13aed4",
-      "size": 8530,
+      "sha256": "c174be83f3edce9328f34679070dc34da2ee5fca833dd3c3d9baae9c6c4fe722",
+      "size": 9080,
       "source_paths": [
         "tests/e2e/sources/D033/driver/Driver.java",
         "tests/e2e/sources/D033/fixtures/Case.java",
@@ -18082,8 +18082,8 @@
     {
       "id": "asset-a782cb7e8f7b9f64c5e3a861",
       "path": ".cache/e2e/prepared/D034/classfiles.json",
-      "sha256": "3e2f0b21793082a96c65ee929bcfdda23ee8024c187e85c8252285365478b77d",
-      "size": 7347,
+      "sha256": "9b8bdb8344e7baccfff7f905c7240187eee1031f8a552f09f935e374010038d1",
+      "size": 7962,
       "source_paths": [
         "tests/e2e/sources/D034/driver/Driver.java",
         "tests/e2e/sources/D034/fixtures/Case.java",
@@ -18550,8 +18550,8 @@
     {
       "id": "asset-8be250317c40407621eb5029",
       "path": ".cache/e2e/prepared/D034/catalog.json",
-      "sha256": "86879ba4b335a46e038dc9ed0b3de094d8f6e348ecd1ceb5708d3e32361723e0",
-      "size": 8176,
+      "sha256": "1bf6e295a2cb8883370ef12aaf6ad3d6abb173ee9e608a0ae4b2185d1dbaa8ad",
+      "size": 8841,
       "source_paths": [
         "tests/e2e/sources/D034/driver/Driver.java",
         "tests/e2e/sources/D034/fixtures/Case.java",
@@ -18684,8 +18684,8 @@
     {
       "id": "asset-2833b8cb16b4b3512f0b612d",
       "path": ".cache/e2e/prepared/D035/classfiles.json",
-      "sha256": "1c1df4d10a5917fff7b872b91f9a333ecf1e3dc35abe4b22d9bb8fccd4521adb",
-      "size": 9465,
+      "sha256": "3c583059fce9feed8362a94a815f9d76b4ba49fb5fe9ca7f758010c2b7a97064",
+      "size": 10354,
       "source_paths": [
         "tests/e2e/sources/D035/driver/Driver.java",
         "tests/e2e/sources/D035/fixtures/Case.java",
@@ -19246,8 +19246,8 @@
     {
       "id": "asset-b3c93924b8d05b56f0a7d77f",
       "path": ".cache/e2e/prepared/D035/catalog.json",
-      "sha256": "87181a21adf1e30dbe4a0fed35871bf4bf7dcafe5ad14389b13043370054d6e4",
-      "size": 10494,
+      "sha256": "9d717373edc3140b49bc1d417c16be4b68748805ee13b88263845ed46bd9cdd6",
+      "size": 11453,
       "source_paths": [
         "tests/e2e/sources/D035/driver/Driver.java",
         "tests/e2e/sources/D035/fixtures/Case.java",
@@ -19343,8 +19343,8 @@
     {
       "id": "asset-ab4b509489268b076b55fe77",
       "path": ".cache/e2e/prepared/D036/classfiles.json",
-      "sha256": "7bee46566f269ca556d41d5efa0242fa1cf270e2d5792424639aba0c32bc594a",
-      "size": 1612,
+      "sha256": "6c0b678c240ec9521034338c5f4888b770fab88262b5bf6a5c15f9e55b4593ef",
+      "size": 2042,
       "source_paths": [
         "tests/e2e/sources/D036/driver/Driver.java",
         "tests/e2e/sources/D036/fixtures/Case.java",
@@ -19685,8 +19685,8 @@
     {
       "id": "asset-3977c57c275f843ad9c5e263",
       "path": ".cache/e2e/prepared/D036/catalog.json",
-      "sha256": "e8a7e27138c3f8a1f20ec3b480e86385cb38590bcd713086208a5a9d6c8a7f27",
-      "size": 1907,
+      "sha256": "a6d74787104756e739833b3b72f5ebadc672510cbcba8db13332db11c11e67fc",
+      "size": 2375,
       "source_paths": [
         "tests/e2e/sources/D036/driver/Driver.java",
         "tests/e2e/sources/D036/fixtures/Case.java",
@@ -19802,8 +19802,8 @@
     {
       "id": "asset-0f3664915ecb1a368ee24ee0",
       "path": ".cache/e2e/prepared/D037/classfiles.json",
-      "sha256": "31dc6f41d3adaf3b86b307ff2a6eb08517be088d99f9e86546c2860a99147afc",
-      "size": 7122,
+      "sha256": "a8d196d3bfe507a15d35912b8ddb10e7ce540cb1eb3bc6b569126be887950b18",
+      "size": 7875,
       "source_paths": [
         "tests/e2e/sources/D037/driver/Driver.java",
         "tests/e2e/sources/D037/fixtures/Case.java",
@@ -20270,8 +20270,8 @@
     {
       "id": "asset-a0a86c9300d337d0a83ea138",
       "path": ".cache/e2e/prepared/D037/catalog.json",
-      "sha256": "739b3f7846ab60d6d6094cc962c8bb62b281bb75813712efcbd020a416458c44",
-      "size": 7933,
+      "sha256": "80f1f9fd9a723fc2af41e993b027698f7f0afc01271078887414c280b96983d9",
+      "size": 8748,
       "source_paths": [
         "tests/e2e/sources/D037/driver/Driver.java",
         "tests/e2e/sources/D037/fixtures/Case.java",
@@ -20378,8 +20378,8 @@
     {
       "id": "asset-79dc377843cda9d442457455",
       "path": ".cache/e2e/prepared/D038/classfiles.json",
-      "sha256": "c9116c434f8286213b6a1d02ec7273edd596b5674854b5e8c284b020d77da129",
-      "size": 5563,
+      "sha256": "f2bcc1caf1fce4cc9e3b2db48443b84fe4db28ace28f9f7f30146df12951401a",
+      "size": 6482,
       "source_paths": [
         "tests/e2e/sources/D038/driver/Driver.java",
         "tests/e2e/sources/D038/fixtures/Case.java",
@@ -20760,8 +20760,8 @@
     {
       "id": "asset-e14da96c519381cf997d42d5",
       "path": ".cache/e2e/prepared/D038/catalog.json",
-      "sha256": "6dc492253b8b75b6b998d49fdd02d7a5fbef6e2bd0f7bc1d2bbe345db90591d9",
-      "size": 6228,
+      "sha256": "546a82458f425d547bc0f3d7091bb722d8ba0cc6dcd56b267cced9961a47f6d1",
+      "size": 7225,
       "source_paths": [
         "tests/e2e/sources/D038/driver/Driver.java",
         "tests/e2e/sources/D038/fixtures/Case.java",
@@ -20866,8 +20866,8 @@
     {
       "id": "asset-c642956e7801787f2c09f888",
       "path": ".cache/e2e/prepared/D039/classfiles.json",
-      "sha256": "dc826de2c3874da635a4da631690134e08f4b5fb1ae2a2e4fe9bc7a9a8d6095e",
-      "size": 8110,
+      "sha256": "79461a80b48308d13d6f0d1a083d5c7cf1897f6cd79419912f18598cdced9cfa",
+      "size": 8810,
       "source_paths": [
         "tests/e2e/sources/D039/driver/Driver.java",
         "tests/e2e/sources/D039/fixtures/Case.java",
@@ -21248,8 +21248,8 @@
     {
       "id": "asset-0ba4cbbe36c492475816cbd9",
       "path": ".cache/e2e/prepared/D039/catalog.json",
-      "sha256": "37ac29d488994eed21e8120721eec0c30bc2de1ada0420ab5e6a1de481b79ded",
-      "size": 8989,
+      "sha256": "a941cf50ae4638fcd3fe1d27dea1eb735cda50309f6dace7258ea2d710d62c95",
+      "size": 9747,
       "source_paths": [
         "tests/e2e/sources/D039/driver/Driver.java",
         "tests/e2e/sources/D039/fixtures/Case.java",
@@ -21341,8 +21341,8 @@
     {
       "id": "asset-4d598b2a44c2405e03dc840c",
       "path": ".cache/e2e/prepared/D040/classfiles.json",
-      "sha256": "ab9da9f1f51acf03edee9a8927964496be192fe326d6fbae8fd20f5b39975675",
-      "size": 2150,
+      "sha256": "6a82076dafa10ffe7f787d4b3bf19b0e2da59cebf3b385ebf139e1670076cc58",
+      "size": 2312,
       "source_paths": [
         "tests/e2e/sources/D040/driver/Driver.java",
         "tests/e2e/sources/D040/fixtures/Case.java",
@@ -21683,8 +21683,8 @@
     {
       "id": "asset-fc4266a4adc4dc5a68f07520",
       "path": ".cache/e2e/prepared/D040/catalog.json",
-      "sha256": "cf4993b6000dca59b91ce58cf4f0e2f997b97e0cca9b804e912005c2b5122c09",
-      "size": 2495,
+      "sha256": "51c93f4c528ac2c5803fdef93d5f1b4b7242500160a6641aca903a543403b1f0",
+      "size": 2669,
       "source_paths": [
         "tests/e2e/sources/D040/driver/Driver.java",
         "tests/e2e/sources/D040/fixtures/Case.java",
@@ -21800,8 +21800,8 @@
     {
       "id": "asset-76d7dcdd10933b8d6dcd5329",
       "path": ".cache/e2e/prepared/D041/classfiles.json",
-      "sha256": "3e1e2764b2e6d5ef9c7fe29571ebb755ac53f6edde7e99f5bc6701978afb9489",
-      "size": 6197,
+      "sha256": "4e28a05603c7f47f3c54a26989d93b56e9e67afa098e269c601db773e72f52b5",
+      "size": 6521,
       "source_paths": [
         "tests/e2e/sources/D041/driver/Driver.java",
         "tests/e2e/sources/D041/fixtures/Base.java",
@@ -22268,8 +22268,8 @@
     {
       "id": "asset-26306e0e88c3bc5c3d3a0f1d",
       "path": ".cache/e2e/prepared/D041/catalog.json",
-      "sha256": "565545a7f941fd4933467d7de3c60b4631686e46e31abe92d58dcb58bf8edf8d",
-      "size": 6920,
+      "sha256": "8c21605c9a0b8cb8a2910160d844fe8d050f9098346049c444dd059227e0965b",
+      "size": 7268,
       "source_paths": [
         "tests/e2e/sources/D041/driver/Driver.java",
         "tests/e2e/sources/D041/fixtures/Base.java",
@@ -22376,8 +22376,8 @@
     {
       "id": "asset-f0ff6f5547d4225e049aab57",
       "path": ".cache/e2e/prepared/D042/classfiles.json",
-      "sha256": "98bb48ca981fb89552b27c8f3e0eabaaea6c8c3bcfbcdf309938a1182a9fd4fc",
-      "size": 7242,
+      "sha256": "74ee42cee2939cd76407b40b7202269dc2047b05be4700e03858bc161cb12f24",
+      "size": 7566,
       "source_paths": [
         "tests/e2e/sources/D042/driver/Driver.java",
         "tests/e2e/sources/D042/fixtures/Case.java",
@@ -22758,8 +22758,8 @@
     {
       "id": "asset-30efdac54d2855ddd3f4a0b2",
       "path": ".cache/e2e/prepared/D042/catalog.json",
-      "sha256": "001d71bed9c31b65ea798ab82983c6cd5ddb42b0512ea0bf84e0d21d4b79cf88",
-      "size": 8039,
+      "sha256": "8e99063b430fa5d3e1613fa1a25c1c8d56be1add2575fe362dd12b0fe8a567ed",
+      "size": 8387,
       "source_paths": [
         "tests/e2e/sources/D042/driver/Driver.java",
         "tests/e2e/sources/D042/fixtures/Case.java",
@@ -22877,8 +22877,8 @@
     {
       "id": "asset-3447912c9eaf735758db74e8",
       "path": ".cache/e2e/prepared/D043/classfiles.json",
-      "sha256": "125bdf3c0c1e96a8bfe991e59498264e23de88f51b78d8cfbd5db4908600bf47",
-      "size": 8837,
+      "sha256": "b2569b38c8d12f53178716c9b8691eb8e146ce82ede39a620b920c7ea0af9076",
+      "size": 9269,
       "source_paths": [
         "tests/e2e/sources/D043/driver/Driver.java",
         "tests/e2e/sources/D043/fixtures/Box.java",
@@ -23345,8 +23345,8 @@
     {
       "id": "asset-65921cd2d5bc74aed6e42887",
       "path": ".cache/e2e/prepared/D043/catalog.json",
-      "sha256": "72108356436ec00a35c98b251d21d9b243ef59370a500b05908de49f0187f66b",
-      "size": 9796,
+      "sha256": "66149c4eedbaaf6b5a9dea1f50d06bd558e3c83f22744665d659767630a6c2e2",
+      "size": 10260,
       "source_paths": [
         "tests/e2e/sources/D043/driver/Driver.java",
         "tests/e2e/sources/D043/fixtures/Box.java",
@@ -23453,8 +23453,8 @@
     {
       "id": "asset-aab69b5e7d79514156d907f5",
       "path": ".cache/e2e/prepared/D044/classfiles.json",
-      "sha256": "b6961761b608b7ad69ed623376d04401f1956a659f5cda90432caf7e4443737b",
-      "size": 6693,
+      "sha256": "deee2b28ebe847525cef4f1f8e20cf5a90bb58b1e5d69b5d41cb75204cff2fc0",
+      "size": 7125,
       "source_paths": [
         "tests/e2e/sources/D044/driver/Driver.java",
         "tests/e2e/sources/D044/fixtures/Case.java",
@@ -23835,8 +23835,8 @@
     {
       "id": "asset-0b11d397c7d25e348a843985",
       "path": ".cache/e2e/prepared/D044/catalog.json",
-      "sha256": "f817f3afd438da1ff37d7734bf6db8f4f758af58ff990209c3b7a48c621109bf",
-      "size": 7474,
+      "sha256": "9f456475929bba0be4f3262e94519e466d1e40631d3c2a16e6c909ff7ef7a850",
+      "size": 7938,
       "source_paths": [
         "tests/e2e/sources/D044/driver/Driver.java",
         "tests/e2e/sources/D044/fixtures/Case.java",
@@ -23928,8 +23928,8 @@
     {
       "id": "asset-764a1762f7d9daf4930346cc",
       "path": ".cache/e2e/prepared/D045/classfiles.json",
-      "sha256": "591142c21583b8e4cc5059c8dbbd7cb3052c2fbb97df6219de8a0c167035a1b5",
-      "size": 1613,
+      "sha256": "6a4e4e511939a6debe62c55097021f7ca4f4a21dfcf94ebeb3aedaa251940b28",
+      "size": 1706,
       "source_paths": [
         "tests/e2e/sources/D045/driver/Driver.java",
         "tests/e2e/sources/D045/fixtures/Case.java",
@@ -24270,8 +24270,8 @@
     {
       "id": "asset-aa8c4d8c9df90ad18616d03d",
       "path": ".cache/e2e/prepared/D045/catalog.json",
-      "sha256": "711e242ff4635be5a73272d1403fb5e27b6716ee8949f9e13b6ac05a04a17d4e",
-      "size": 1906,
+      "sha256": "152e02de1822367405214b88e5e7425547b955b9114028a256fa16b87e06edc1",
+      "size": 2007,
       "source_paths": [
         "tests/e2e/sources/D045/driver/Driver.java",
         "tests/e2e/sources/D045/fixtures/Case.java",
@@ -24481,8 +24481,8 @@
     {
       "id": "asset-2087727160c2f4cf030106bb",
       "path": ".cache/e2e/prepared/D046/classfiles.json",
-      "sha256": "f49fbb2046d7d7ce41602bd99dcb39d690ecb590817668808c4e5d9e37542fc7",
-      "size": 1438,
+      "sha256": "71a2590adcae15e1ee344522860a15ee659e4f11a75a33e63a7fa22c6c24e175",
+      "size": 1492,
       "source_paths": [
         "tests/e2e/sources/D046/fixtures/Case.java",
         "tests/e2e/sources/D046/fixtures/Driver.java",
@@ -24671,8 +24671,8 @@
     {
       "id": "asset-0e5b3ffaf41127e224fe8afc",
       "path": ".cache/e2e/prepared/D046/catalog.json",
-      "sha256": "a74b16d1578a6739a55e9474ca5205d4416490c1d1c4e03913b5be72476908fd",
-      "size": 1727,
+      "sha256": "cd0b8f3d2047f771b469ea6e752a13188c160dcf0d9da47c688f8e00608c7f4f",
+      "size": 1785,
       "source_paths": [
         "tests/e2e/sources/D046/fixtures/Case.java",
         "tests/e2e/sources/D046/fixtures/Driver.java",
@@ -24790,8 +24790,8 @@
     {
       "id": "asset-e05fb7cb18eb7b00831d45af",
       "path": ".cache/e2e/prepared/D047/classfiles.json",
-      "sha256": "6a63c9cee3300842dfd8b5368ed721d2f4fd3c1cf97ed67df91e2cb925c7148c",
-      "size": 7467,
+      "sha256": "124ffe42096326b47bce5b008cb710586b40fe6de34ce412f9585614647d477b",
+      "size": 7899,
       "source_paths": [
         "tests/e2e/sources/D047/driver/Driver.java",
         "tests/e2e/sources/D047/fixtures/Case.java",
@@ -25258,8 +25258,8 @@
     {
       "id": "asset-285aa27c96a1e26acafa38b5",
       "path": ".cache/e2e/prepared/D047/catalog.json",
-      "sha256": "be5e5c2c1aa27b2d1d305fdc494633bca53b790094b6bb689cb35b1fb1e1b64e",
-      "size": 8314,
+      "sha256": "6b29779676de288ea95e5381d73ce3fde68ff91bd2bde66c0705e01d7bcf2e16",
+      "size": 8778,
       "source_paths": [
         "tests/e2e/sources/D047/driver/Driver.java",
         "tests/e2e/sources/D047/fixtures/Case.java",
@@ -25366,8 +25366,8 @@
     {
       "id": "asset-61995e1831388a7be1c0cfd5",
       "path": ".cache/e2e/prepared/D048/classfiles.json",
-      "sha256": "0cb3182c1e9c80b6a930639df9a1a7cb7fcf51a99a1ab4ab9c27461f1cf6596d",
-      "size": 3190,
+      "sha256": "6e61c9f2d824461cd3a29ab5ffb90fcce2a9b64abce0dc9ee7cc70aaf556375b",
+      "size": 3460,
       "source_paths": [
         "tests/e2e/sources/D048/driver/Driver.java",
         "tests/e2e/sources/D048/fixtures/Base.java",
@@ -25748,8 +25748,8 @@
     {
       "id": "asset-2d8015205113ed060677f908",
       "path": ".cache/e2e/prepared/D048/catalog.json",
-      "sha256": "f28710e86b67c6131915ba6ebf103f05f8f584c9323b1a32dff25dcc28aa7e49",
-      "size": 3641,
+      "sha256": "c65f29bc32a900587797a3c51f34eeed7aee8e62e8f787a4b742a8dd598f71cb",
+      "size": 3931,
       "source_paths": [
         "tests/e2e/sources/D048/driver/Driver.java",
         "tests/e2e/sources/D048/fixtures/Base.java",
@@ -25841,8 +25841,8 @@
     {
       "id": "asset-1051a8e64cf2f050ca182359",
       "path": ".cache/e2e/prepared/D049/classfiles.json",
-      "sha256": "1984d4cd6b7c8c563de11eabb64f1f516b8859634220b93efde503d63ad342ed",
-      "size": 3776,
+      "sha256": "e924d01d4d59db180fafc7d9bebe627dd01b99aa8d03396611b1ef96dd7d504c",
+      "size": 3938,
       "source_paths": [
         "tests/e2e/sources/D049/driver/Driver.java",
         "tests/e2e/sources/D049/fixtures/Outer.java",
@@ -26241,8 +26241,8 @@
     {
       "id": "asset-47026c30b7aa889d95c1f9c6",
       "path": ".cache/e2e/prepared/D049/catalog.json",
-      "sha256": "05837f51dca2cfcf07e035ca60f022db426e37469d45aad777e68db40ecdf814",
-      "size": 4281,
+      "sha256": "d14a9f4685e4d7191ae9220174f3826acbff88e2c0fc952b893650b2fd2ca5c6",
+      "size": 4455,
       "source_paths": [
         "tests/e2e/sources/D049/driver/Driver.java",
         "tests/e2e/sources/D049/fixtures/Outer.java",
@@ -26332,8 +26332,8 @@
     {
       "id": "asset-10c8598f34a4cf37697c6625",
       "path": ".cache/e2e/prepared/D050/classfiles.json",
-      "sha256": "6cba45ff2096910cc56e22393a3aed031915386e1ce2b4b03678f57e06beea67",
-      "size": 5776,
+      "sha256": "66e00cb6adcdd302d52b6564f1b723c6ed58d64c8f178ae9aede2e2abc97832e",
+      "size": 6046,
       "source_paths": [
         "tests/e2e/sources/D050/driver/Driver.java",
         "tests/e2e/sources/D050/fixtures/Case.java",
@@ -26636,8 +26636,8 @@
     {
       "id": "asset-3723abcd793749a5cecc1754",
       "path": ".cache/e2e/prepared/D050/catalog.json",
-      "sha256": "067e599c5fbcf936172b460fe42d6ba6fe717a5be71280c918b2f6f145bde119",
-      "size": 6425,
+      "sha256": "bc1b9bbe8074036e151b0f940a08d532a60c871c39e1da4479412c286a6ccbef",
+      "size": 6715,
       "source_paths": [
         "tests/e2e/sources/D050/driver/Driver.java",
         "tests/e2e/sources/D050/fixtures/Case.java",
@@ -26740,8 +26740,8 @@
     {
       "id": "asset-a983346cdc02cf7d239e25ff",
       "path": ".cache/e2e/prepared/D051/classfiles.json",
-      "sha256": "9d8c323d85fade4d7aeb0da9c40b6646406396d10cee812675319c89361a5e20",
-      "size": 1979,
+      "sha256": "33faebffd3bbc709e4fa8c515ca9ced2c1a4454f962879560fe615322fb0f91d",
+      "size": 2033,
       "source_paths": [
         "tests/e2e/sources/D051/driver/Driver.java",
         "tests/e2e/sources/D051/fixtures/Case.java",
@@ -27122,8 +27122,8 @@
     {
       "id": "asset-c06885c36de0cb2e2f6134c5",
       "path": ".cache/e2e/prepared/D051/catalog.json",
-      "sha256": "f6e3f322c8575d9fd56642d28aafddb07df8a26d1daef8c6f8afd048dc791cc3",
-      "size": 2324,
+      "sha256": "7294adda1f60e64845d528a10fe44d80142715d52eb5c843496e974acac78405",
+      "size": 2382,
       "source_paths": [
         "tests/e2e/sources/D051/driver/Driver.java",
         "tests/e2e/sources/D051/fixtures/Case.java",
@@ -27215,8 +27215,8 @@
     {
       "id": "asset-b8e0c8c4ae2d1d63644d916d",
       "path": ".cache/e2e/prepared/D052/classfiles.json",
-      "sha256": "c73ba47feb5dc7a4988da99c9e4cafa231fbbffcd429a63d76a468eac546094e",
-      "size": 1312,
+      "sha256": "9a11da5f458f04a11671fb7ba471f3f140e4ad729fbe6f1ea01842d3cdf2cf54",
+      "size": 1420,
       "source_paths": [
         "tests/e2e/sources/D052/driver/Driver.java",
         "tests/e2e/sources/D052/fixtures/Case.java",
@@ -27519,8 +27519,8 @@
     {
       "id": "asset-60de04f8b15c54d977ff36ec",
       "path": ".cache/e2e/prepared/D052/catalog.json",
-      "sha256": "b22ef0edb29958a53602aae4095401711ab5dc17006d5206e2cf582e710eaaa2",
-      "size": 1581,
+      "sha256": "e430972f3bdfc71035f8cb4693ae17fc0558a69889bf6c89cb06e2417503cb29",
+      "size": 1697,
       "source_paths": [
         "tests/e2e/sources/D052/driver/Driver.java",
         "tests/e2e/sources/D052/fixtures/Case.java",
@@ -27610,8 +27610,8 @@
     {
       "id": "asset-3c0a35521b09980722c15a14",
       "path": ".cache/e2e/prepared/D053/classfiles.json",
-      "sha256": "fba2dbd5aa455caaa973edf5b962e3a75dcb975f614726070a091064aa1cbced",
-      "size": 1639,
+      "sha256": "03c2860e2f30c71fd6c02a8b79ecc3ed97ca9178260aa8eb3887e992b9489494",
+      "size": 1801,
       "source_paths": [
         "tests/e2e/sources/D053/driver/Driver.java",
         "tests/e2e/sources/D053/fixtures/Case.java",
@@ -27952,8 +27952,8 @@
     {
       "id": "asset-933b189150b7374c552b88ed",
       "path": ".cache/e2e/prepared/D053/catalog.json",
-      "sha256": "303633dc03c8d3939ef6b33f21243443303316b4179a414568374c567d7113d1",
-      "size": 1942,
+      "sha256": "6a553b7a94506b8d948aafe2d24868c2620930f7311eb25100669b2bba37abb0",
+      "size": 2116,
       "source_paths": [
         "tests/e2e/sources/D053/driver/Driver.java",
         "tests/e2e/sources/D053/fixtures/Case.java",
@@ -28043,8 +28043,8 @@
     {
       "id": "asset-c297812722521c44e2158bb6",
       "path": ".cache/e2e/prepared/D054/classfiles.json",
-      "sha256": "b7e6d918af426e2f3c610c9025f4e675f06f2be11ed66efcf08f3598b6183f99",
-      "size": 1311,
+      "sha256": "713e1b47529fb1e8ed13391e3b12cc0c24e8df11fbe44164afbb61f3cc89ff6f",
+      "size": 1419,
       "source_paths": [
         "tests/e2e/sources/D054/driver/Driver.java",
         "tests/e2e/sources/D054/fixtures/Case.java",
@@ -28347,8 +28347,8 @@
     {
       "id": "asset-4eccab82593edfa5d49a0dbe",
       "path": ".cache/e2e/prepared/D054/catalog.json",
-      "sha256": "df8372e0eccff9c74d201c72abe5c0fa73a0ba5b0346ec994963925227526cca",
-      "size": 1580,
+      "sha256": "080da3187dae6129756d2aa864e80043afeecacaeb86e050671bc2b7db49bcde",
+      "size": 1696,
       "source_paths": [
         "tests/e2e/sources/D054/driver/Driver.java",
         "tests/e2e/sources/D054/fixtures/Case.java",
@@ -30239,8 +30239,8 @@
     {
       "id": "asset-1f69b9908353fb34b42f4cc4",
       "path": ".cache/e2e/prepared/D061/classfiles.json",
-      "sha256": "3f15cf94e6114f6948577b0de512ebe74bf3ae6ba6fe6b65f6046d63426d6659",
-      "size": 2577,
+      "sha256": "53a8d687e6ac660632c83aef3fab3d140264e406cb9e218238a98d5a69312556",
+      "size": 2685,
       "source_paths": [
         "tests/e2e/sources/D061/fixtures/Case.smali",
         "tests/e2e/sources/D061/fixtures/ErrA.java",
@@ -30305,8 +30305,8 @@
     {
       "id": "asset-5d3db6e83efd267f68be535f",
       "path": ".cache/e2e/prepared/D061/catalog.json",
-      "sha256": "9f8e22a88d11c1b5a91697d33da87c240dbe0ff3790d77c54ae41fc9baab63bc",
-      "size": 3046,
+      "sha256": "e9cf896c60063d059aafa4289565d90a3a1e673449e2d4460215132913affede",
+      "size": 3162,
       "source_paths": [
         "tests/e2e/sources/D061/fixtures/Case.smali",
         "tests/e2e/sources/D061/fixtures/ErrA.java",
@@ -30387,8 +30387,8 @@
     {
       "id": "asset-c82c0e07a941b16072f1c7ba",
       "path": ".cache/e2e/prepared/D062/classfiles.json",
-      "sha256": "36b02a3a9ef08ed22d2ce47ea962d9796a9e4451dc1b82549e7d99d3a6555aaa",
-      "size": 1285,
+      "sha256": "5e9622474a4721d08de7b702a0091217e85400388d147e9f2182db91f52cfbe7",
+      "size": 1393,
       "source_paths": [
         "tests/e2e/sources/D062/fixtures/Case.java",
         "tests/e2e/sources/D062/recipe.json"
@@ -30598,8 +30598,8 @@
     {
       "id": "asset-2d8732cc89669fe3313340c5",
       "path": ".cache/e2e/prepared/D062/catalog.json",
-      "sha256": "96733f5e44d678fb272c1952835e453cf6b7c542eb8102d19aaded1e868c8503",
-      "size": 1552,
+      "sha256": "16e24753a9c031e233ebcfa5636771a5b52f2c4602a75f4123da19088acd7abb",
+      "size": 1668,
       "source_paths": [
         "tests/e2e/sources/D062/fixtures/Case.java",
         "tests/e2e/sources/D062/recipe.json"
@@ -30674,8 +30674,8 @@
     {
       "id": "asset-f62c340bb927969e16ea44e8",
       "path": ".cache/e2e/prepared/D063/classfiles.json",
-      "sha256": "0712c2081e2ba054e726765a2e9dab1ae58a31f92128c0096bd92b6880019f84",
-      "size": 1287,
+      "sha256": "30980d04ba3e0fb5fc5e85d35d2ff318f30b75774c8492127e35cd6c1cd9db80",
+      "size": 1395,
       "source_paths": [
         "tests/e2e/sources/D063/fixtures/Case.java",
         "tests/e2e/sources/D063/recipe.json"
@@ -30885,8 +30885,8 @@
     {
       "id": "asset-9682f4860deaa4be4f0a9214",
       "path": ".cache/e2e/prepared/D063/catalog.json",
-      "sha256": "428e15ae3086f9fe2ead42ba1f6d52079c25ef870a65449b53f6753b62277f0a",
-      "size": 1554,
+      "sha256": "abb57aab53e27a216a86d12a8cf97c5df9721413e718f857ed95a7094fea14a8",
+      "size": 1670,
       "source_paths": [
         "tests/e2e/sources/D063/fixtures/Case.java",
         "tests/e2e/sources/D063/recipe.json"
@@ -30974,8 +30974,8 @@
     {
       "id": "asset-efb1885e67c62b5148d7b111",
       "path": ".cache/e2e/prepared/D064/classfiles.json",
-      "sha256": "4e236460c0402aec4f7e915e7c91afe3ef1ca31918969dc456c258ed8ea04b09",
-      "size": 4697,
+      "sha256": "5f13d36ad3e5cd2036a51df9363e726cd96a388fddd5e6b8331dcba3e4f68b27",
+      "size": 5291,
       "source_paths": [
         "tests/e2e/sources/D064/fixtures/Case.java",
         "tests/e2e/sources/D064/fixtures/ReportCase.java",
@@ -31257,8 +31257,8 @@
     {
       "id": "asset-57208251f19cd1b9a1000fb1",
       "path": ".cache/e2e/prepared/D064/catalog.json",
-      "sha256": "98d0fa645566588f4f33f0a371e01013b65dd4e120c5feaac4dcb3b38a677098",
-      "size": 5318,
+      "sha256": "28d56950166f819eb1123b2364979b8cafb1bc4994cf3c95cbced30f3175266f",
+      "size": 5956,
       "source_paths": [
         "tests/e2e/sources/D064/fixtures/Case.java",
         "tests/e2e/sources/D064/fixtures/ReportCase.java",
@@ -31387,8 +31387,8 @@
     {
       "id": "asset-d71db8ac63349b6c4a550cf5",
       "path": ".cache/e2e/prepared/D065/classfiles.json",
-      "sha256": "02a99d95d99eaffa5221f55b0bbf5f701254c93a248b50323d3200a3e1087c85",
-      "size": 10270,
+      "sha256": "db353dfe97a4dc8d39f9ffdc1aa59824e99a02ee7d2a2017f927d72f9681932a",
+      "size": 10633,
       "source_paths": [
         "tests/e2e/sources/D065/driver/Driver.java",
         "tests/e2e/sources/D065/fixtures/build_dex041.py",
@@ -31769,8 +31769,8 @@
     {
       "id": "asset-7b4d08e6cdb25803190220f8",
       "path": ".cache/e2e/prepared/D065/catalog.json",
-      "sha256": "97bfc1fb3dd5635bdedc21c2e4ec3e0b5b474a78000ea09e58ff2765740b739d",
-      "size": 11279,
+      "sha256": "63e93c57429c63be8c622617461eb7327b0138eea73f5b3b15defba6c48580f1",
+      "size": 11670,
       "source_paths": [
         "tests/e2e/sources/D065/driver/Driver.java",
         "tests/e2e/sources/D065/fixtures/build_dex041.py",
@@ -32111,8 +32111,8 @@
     {
       "id": "asset-2374601f42a51a958f810181",
       "path": ".cache/e2e/prepared/D067/classfiles.json",
-      "sha256": "4330de99179a2fedfdf981db4b8da3fc86b06e801fe797bcee7666a2974d09c0",
-      "size": 5408,
+      "sha256": "ffbde1caffb65279ddc61d3632a8598d1c6e9293be4cfb2d3dd1401068470e97",
+      "size": 5732,
       "source_paths": [
         "tests/e2e/sources/D067/driver/Driver.java",
         "tests/e2e/sources/D067/fixtures/Case.java",
@@ -32493,8 +32493,8 @@
     {
       "id": "asset-c654874bffc78be293724670",
       "path": ".cache/e2e/prepared/D067/catalog.json",
-      "sha256": "0de5092987fa5c0eec750495d379fc85ee74967c026174147124a57860f023fc",
-      "size": 6059,
+      "sha256": "a6733db67e938440ba525e96ff883dd8c83e1f0d4ea12034206bd26323ce9efd",
+      "size": 6407,
       "source_paths": [
         "tests/e2e/sources/D067/driver/Driver.java",
         "tests/e2e/sources/D067/fixtures/Case.java",
@@ -33379,8 +33379,8 @@
     {
       "id": "asset-39889860d99f85721736248f",
       "path": ".cache/e2e/prepared/D071/classfiles.json",
-      "sha256": "caea27bfcd72a5fddfc4e6acc41c97b4d4203b3dfd06be0b04bf71f775f0a43f",
-      "size": 3776,
+      "sha256": "522dc35b87e9ed8ddd79eef6a3b01dc920e38ea6698cea1dd8062e8de2bf3578",
+      "size": 4310,
       "source_paths": [
         "tests/e2e/sources/D071/driver/Driver.java",
         "tests/e2e/sources/D071/fixtures/Case.java",
@@ -34001,8 +34001,8 @@
     {
       "id": "asset-a9fb0c03c73221e7e431fc6b",
       "path": ".cache/e2e/prepared/D071/catalog.json",
-      "sha256": "c8217234bf87654a2dd0748ed0e1d980e57c62db20ced3665e0a4f33e57e515d",
-      "size": 4301,
+      "sha256": "fafe4d261e8d4f4612e2a8c486352e20e28001755f9227559d567f76480bbc03",
+      "size": 4879,
       "source_paths": [
         "tests/e2e/sources/D071/driver/Driver.java",
         "tests/e2e/sources/D071/fixtures/Case.java",
@@ -34094,8 +34094,8 @@
     {
       "id": "asset-e6856f00b80650fdcc55dca9",
       "path": ".cache/e2e/prepared/D072/classfiles.json",
-      "sha256": "a72c9205388b1991c2686b27c8af40ee292deb846491b7333d1b40349804447c",
-      "size": 1604,
+      "sha256": "9d052f5f8115091430342b8eadfdd386cd029a8015698356ce0ea9518c3d85a6",
+      "size": 1805,
       "source_paths": [
         "tests/e2e/sources/D072/driver/Driver.java",
         "tests/e2e/sources/D072/fixtures/Case.java",
@@ -34512,8 +34512,8 @@
     {
       "id": "asset-2d16c1f6359a0324dadce5cf",
       "path": ".cache/e2e/prepared/D072/catalog.json",
-      "sha256": "22c2df1c3228513569573bae3224f8e69f54c061c3958e65d3fec557a426d9b4",
-      "size": 1907,
+      "sha256": "d4a6a1ee9218cd959c4e91b082950585415fa0465272f418e4396157cb092cd1",
+      "size": 2124,
       "source_paths": [
         "tests/e2e/sources/D072/driver/Driver.java",
         "tests/e2e/sources/D072/fixtures/Case.java",
@@ -34730,8 +34730,8 @@
     {
       "id": "asset-0571a023531a4dc9008bbf43",
       "path": ".cache/e2e/prepared/D073/classfiles.json",
-      "sha256": "fdfc2c69c9c8e32235a5bdb10b55fc18b4b2f483aca1fb945c791e2cf2e3f11c",
-      "size": 1283,
+      "sha256": "a4e090c79b066b4010d65f7eed48c93c1597bbe7cb4361668bdfc25a61872d94",
+      "size": 1391,
       "source_paths": [
         "tests/e2e/sources/D073/fixtures/Case.java",
         "tests/e2e/sources/D073/fixtures/Case.smali",
@@ -34960,8 +34960,8 @@
     {
       "id": "asset-c1ec0ebfaa01a99443a61a73",
       "path": ".cache/e2e/prepared/D073/catalog.json",
-      "sha256": "21ba368fda7a295860c495cd58917c18246b1821ec7dc7507f26f6b941909fde",
-      "size": 1550,
+      "sha256": "da506228da1ce83bc8afd4e77a6907765062d1d5689b4235d93d48abd073b450",
+      "size": 1666,
       "source_paths": [
         "tests/e2e/sources/D073/fixtures/Case.java",
         "tests/e2e/sources/D073/fixtures/Case.smali",
@@ -36158,8 +36158,8 @@
     {
       "id": "asset-b71bb9a8de02d82bc8e3900c",
       "path": ".cache/e2e/prepared/D075/classfiles.json",
-      "sha256": "fb4bec281775148f4efd449e4cbc2d709b85bea76995cf1a45b38dbe1e3b8be9",
-      "size": 4475,
+      "sha256": "403d1295c8c5374c9b66f6aa2c93d60e75271270a92bcda01a77a3a5c261faa1",
+      "size": 4745,
       "source_paths": [
         "tests/e2e/sources/D075/driver/instance254/Driver.java",
         "tests/e2e/sources/D075/driver/static255/Driver.java",
@@ -37084,8 +37084,8 @@
     {
       "id": "asset-13a80c0332758faeb0560179",
       "path": ".cache/e2e/prepared/D075/catalog.json",
-      "sha256": "6c156e31a81c930766121c7e42b63e4d4e11123777823466d2d7b0bb0f80e415",
-      "size": 4982,
+      "sha256": "7933becc2638bd78d0ead96bd1b71b6fd96b4732febd4921802a4fc02cdcff48",
+      "size": 5272,
       "source_paths": [
         "tests/e2e/sources/D075/driver/instance254/Driver.java",
         "tests/e2e/sources/D075/driver/static255/Driver.java",
@@ -37213,8 +37213,8 @@
     {
       "id": "asset-16de763faca21f262e888448",
       "path": ".cache/e2e/prepared/D076/classfiles.json",
-      "sha256": "b4411320f7cd1ee2bbd6ce82bba236ffb5fda13d608f715cc377bfe4838f70ca",
-      "size": 2627,
+      "sha256": "64a464e298366118307251f461ce23d41e57e2fa7fed6df7ed55ff6ae481fb0a",
+      "size": 2843,
       "source_paths": [
         "tests/e2e/sources/D076/driver/Driver.java",
         "tests/e2e/sources/D076/fixtures/__pycache__/build_dex.cpython-314.pyc",
@@ -37963,8 +37963,8 @@
     {
       "id": "asset-8a63cd892f8cf38c8d60fb21",
       "path": ".cache/e2e/prepared/D076/catalog.json",
-      "sha256": "bfd291d6f5ae53b903a550725cd8432f3a4f941529765fe0f532877835a4f698",
-      "size": 3026,
+      "sha256": "cd9338cd04b0a0174d7c8019872fc97db103c40dc71c1dc90ee4ee444792dacb",
+      "size": 3258,
       "source_paths": [
         "tests/e2e/sources/D076/driver/Driver.java",
         "tests/e2e/sources/D076/fixtures/__pycache__/build_dex.cpython-314.pyc",
@@ -38071,8 +38071,8 @@
     {
       "id": "asset-c53cbc15455e8c839c29182b",
       "path": ".cache/e2e/prepared/D077/classfiles.json",
-      "sha256": "e2b542e8094978c869b4efe28f1959c8de326a9cbadff007a43a4539f1362e28",
-      "size": 2359500,
+      "sha256": "26839a8f34776e607a49bd6252f76875f9f949ca027b9e241064c03d66c07e0b",
+      "size": 2359716,
       "source_paths": [
         "tests/e2e/sources/D077/driver/Driver.java",
         "tests/e2e/sources/D077/fixtures/Dep.java",
@@ -38497,8 +38497,8 @@
     {
       "id": "asset-c541f596512626eaeaca213e",
       "path": ".cache/e2e/prepared/D077/catalog.json",
-      "sha256": "f7987f9878d2759861f2f957ddbf5f98fe3451eb86010465ccd2344b6bb6a429",
-      "size": 2539955,
+      "sha256": "9ab106a2a6a5def7750c1280fbe99e0a981485534f37238a087ac9908d7065de",
+      "size": 2540187,
       "source_paths": [
         "tests/e2e/sources/D077/driver/Driver.java",
         "tests/e2e/sources/D077/fixtures/Dep.java",
@@ -38943,8 +38943,8 @@
     {
       "id": "asset-a98810fd1b61d6af6125cc34",
       "path": ".cache/e2e/prepared/D079/classfiles.json",
-      "sha256": "9f8121391bc23dd9b7c0010b06d5b19acfc1b245765b73fa3147ea1a61f92c96",
-      "size": 8734,
+      "sha256": "5a0d7aaa8294540c7a82f02a3589dae729d09bf36aadb8f46e443ee2542898b3",
+      "size": 9220,
       "source_paths": [
         "tests/e2e/sources/D079/driver/Driver.java",
         "tests/e2e/sources/D079/fixtures/Case.java",
@@ -39453,8 +39453,8 @@
     {
       "id": "asset-e9ef7b0afa7b0891c914fb88",
       "path": ".cache/e2e/prepared/D079/catalog.json",
-      "sha256": "1627aa2c86f0ff74ed60b164a3623caa2f43546d29c818f8a9c480add519363f",
-      "size": 9703,
+      "sha256": "3f1d48d3c7ca8113191bde7f291dda708c4200f9885262a0411dc7207850bed0",
+      "size": 10225,
       "source_paths": [
         "tests/e2e/sources/D079/driver/Driver.java",
         "tests/e2e/sources/D079/fixtures/Case.java",
@@ -39694,8 +39694,8 @@
     {
       "id": "asset-2e8f6451ab676ada1274950b",
       "path": ".cache/e2e/prepared/D080/classfiles.json",
-      "sha256": "d5e54b82efe9ce432a58f3aba3b4638e31ee6a1ae03776cf001b0894cdcab3cd",
-      "size": 1263,
+      "sha256": "522ee2144615132fda367bedec10d22c0d7135bc253c95b7ab5b8016f00b0787",
+      "size": 1317,
       "source_paths": [
         "tests/e2e/sources/D080/fixtures/Case.smali",
         "tests/e2e/sources/D080/fixtures/External.java",
@@ -39805,8 +39805,8 @@
     {
       "id": "asset-9a150954553cdfb358a1a683",
       "path": ".cache/e2e/prepared/D080/catalog.json",
-      "sha256": "934a5f49576a23befae9bf6a2453342f34979a8cc9afec104f42793906ad3885",
-      "size": 1674,
+      "sha256": "a1c1f309f387c758a61cc81736140c3411545f89de6dacf899d14f68fd841963",
+      "size": 1732,
       "source_paths": [
         "tests/e2e/sources/D080/fixtures/Case.smali",
         "tests/e2e/sources/D080/fixtures/External.java",
@@ -40157,8 +40157,8 @@
     {
       "id": "asset-1bc82557d78e8746239f58bd",
       "path": ".cache/e2e/prepared/D082/classfiles.json",
-      "sha256": "6529fb4b18cdf7e2ef39f0516ad6ae54042b669ae35ef27c80d4d8398335f77c",
-      "size": 1624,
+      "sha256": "465135b54ccb0f46176eb0a73f0f64175ce42e5aae4e89e44f1e40fce4a82747",
+      "size": 2055,
       "source_paths": [
         "tests/e2e/sources/D082/driver/Driver.java",
         "tests/e2e/sources/D082/fixtures/Case.java",
@@ -40537,8 +40537,8 @@
     {
       "id": "asset-f61befa5780780ef9cde0773",
       "path": ".cache/e2e/prepared/D082/catalog.json",
-      "sha256": "4a41cc2121999ccd0002f7a962fdeefa441a32f2299868eb1556ed1d7e30de22",
-      "size": 1921,
+      "sha256": "1fbda8e0b8829e78838b319e6e05c0c3c42239fc08ac171d9310fae0fe10ffaf",
+      "size": 2390,
       "source_paths": [
         "tests/e2e/sources/D082/driver/Driver.java",
         "tests/e2e/sources/D082/fixtures/Case.java",
@@ -40628,8 +40628,8 @@
     {
       "id": "asset-39be77d5274e812def8c5ef0",
       "path": ".cache/e2e/prepared/D083/classfiles.json",
-      "sha256": "e8b7892c507d2fed272b71f39103c64e08fd4cdacc47d93aa4d7c3ef8dfb5ff2",
-      "size": 1296,
+      "sha256": "ce42d631863371b1abbc9c104f84f68343bab661b4b8e562b48dcd9f3b93b048",
+      "size": 1443,
       "source_paths": [
         "tests/e2e/sources/D083/driver/Driver.java",
         "tests/e2e/sources/D083/fixtures/Case.java",
@@ -41008,8 +41008,8 @@
     {
       "id": "asset-7a5840e5514868ac872f4fc0",
       "path": ".cache/e2e/prepared/D083/catalog.json",
-      "sha256": "dcc111e0f81a543a68bcb16f8fce9355d41f1731b57cd495c96218bf50173e3f",
-      "size": 1565,
+      "sha256": "61c7fc7aa0de247d3dfa5ba0ce0143614d4c470b83d27b9e40a7b93e7b10a2b4",
+      "size": 1724,
       "source_paths": [
         "tests/e2e/sources/D083/driver/Driver.java",
         "tests/e2e/sources/D083/fixtures/Case.java",
@@ -41798,8 +41798,8 @@
     {
       "id": "asset-6d13e8dad02667a555910a8a",
       "path": ".cache/e2e/prepared/D086/classfiles.json",
-      "sha256": "38f02a635237ae5b8f34c9e6a7462a7be79f72220e26ba18e1518fa6eac143db",
-      "size": 1275,
+      "sha256": "4e076132d5f37bec34453f29cb368033ddc29ad48ac32ec86636e717bcc99379",
+      "size": 1383,
       "source_paths": [
         "tests/e2e/sources/D086/driver/Driver.java",
         "tests/e2e/sources/D086/fixtures/Case.java",
@@ -41988,8 +41988,8 @@
     {
       "id": "asset-eb160bb3a3788ff702002975",
       "path": ".cache/e2e/prepared/D086/catalog.json",
-      "sha256": "e8b155bccbcf48503e2cad485fb0838ecab5ab9496670d1df8c79965e06b952a",
-      "size": 1540,
+      "sha256": "216c0f69d556b1c2dd6b806245ff3862899234fda8604d65759bfabcfd8765b3",
+      "size": 1656,
       "source_paths": [
         "tests/e2e/sources/D086/driver/Driver.java",
         "tests/e2e/sources/D086/fixtures/Case.java",

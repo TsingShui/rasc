@@ -30,7 +30,15 @@ integers, float/double bits, references and nested array/annotation order. Their
 explicit stack uses checked counts and fallback accounting; malformed tails
 retain their checked prefix. Core tests exercise malformed input, UTF16
 integrity, resource limits and cancellation.
-The Engine interface awaits integration.
+Engine exposes class/method requests and owned reports through the public library.
+Ordinary code uses the shared CFG → SSA → declaration/type → storage → region →
+Java chain. Unit verification distinguishes complete Java from Mixed results;
+independent members and original metadata remain available after local failure.
+P1 checks dynamic call-site/handle encodings and original references; invoke-custom
+retains a classified unsupported exit and a readable original snapshot. P9 renders
+existing products and maps source slices to original identities. Current accepted
+profiles and remaining EngineCoreRC obligations are recorded in
+[TASKS](../../docs/diana/TASKS.md); this package does not claim CoreRC acceptance.
 
 From the repository root:
 

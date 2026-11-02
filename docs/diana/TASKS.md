@@ -441,7 +441,8 @@ expected values are independent of Diana; F/Q labels are historical capability
 tags. Compute the actual execution set and both denominators from the JSON
 `required`, `acceptanceGate` and `invocations` fields; the current specification
 holds 86 cases and 177 invocation scenarios. The accepted preparation artifacts
-are recorded in §3; engine results remain not-implemented.
+are recorded in §3; current engine evidence is recorded in task progress and
+batch acceptance records.
 
 ### Case format, revision basis and obligation mapping
 
@@ -2445,6 +2446,21 @@ failure keeps the baseline, and the card does not affect the T25 core gate.
 finally recovery, a global restart, a registry and persistent HARD assertions.
 
 ## T25 — Fixed core-set hardening and EngineCoreRC
+
+**Progress**: The approved [rendered-integrity batch](batches/t25-rendered-integrity.md)
+passes both D085 engine-render invocations with checked original call-site/handle
+facts, InvokeCustomUnsupported and retained Java/raw members and spans. Workspace
+nextest passes 190 tests, zero skips; full E2E is 158/181 seams and 79/86 cases.
+D085 still fails its required application seam. The
+[artifact/replay batch](batches/t25-artifact-replay.md) retains actual compiled
+Code/handler/pool observations and repeats all required invocations with different
+worker counts and hash seeds without identity/status regressions. Polymorphic
+invocations now check the prototype reference and stay raw-only with a specific
+reason. The [engine-gate rollup](batches/t25-core-rc.md) records 156/156 required
+engine seams accepted, the known-unsupported raw coverage, the seeded mutation
+matrix and the source/license review; its evidence comes from a working tree, so
+EngineCoreRC stays unaccepted until a clean-revision repetition. ProductRC remains
+open for the application seams.
 
 **Dependencies**: T23, T14. **Phase**: all/verification. T24 is optional
 beautification and is not a prerequisite of this card. **References**: KU-04/08,

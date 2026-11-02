@@ -1,7 +1,5 @@
 use super::strings::TypeShape;
-use super::{
-    Cursor, InputError, InputProblem, MethodError, ProgramIndex, UnsupportedInput, malformed,
-};
+use super::{Cursor, InputError, InputProblem, MethodError, ProgramIndex, malformed};
 use crate::pipeline::control::InputControl;
 use crate::raw::OperandReference;
 use crate::{ByteLength, ByteOffset, ByteRange, FieldId, MethodId, StringId, TypeId};
@@ -9,6 +7,7 @@ use crate::{ByteLength, ByteOffset, ByteRange, FieldId, MethodId, StringId, Type
 #[derive(Clone, Copy)]
 pub(crate) struct ValueOrdinal(pub u32);
 
+#[derive(Clone, Copy)]
 pub(crate) enum EncodedKind {
     Signed(i64),
     Unsigned(u64),
@@ -20,6 +19,7 @@ pub(crate) enum EncodedKind {
     Annotation { type_id: TypeId, count: u32 },
 }
 
+#[derive(Clone, Copy)]
 pub(crate) struct EncodedValue<'a> {
     pub ordinal: ValueOrdinal,
     pub name: Option<StringId>,
@@ -30,6 +30,7 @@ pub(crate) struct EncodedValue<'a> {
     pub bytes: &'a [u8],
 }
 
+#[derive(Clone, Copy)]
 pub(crate) enum ValueStep<'a> {
     Value(EncodedValue<'a>),
     EndContainer,
@@ -256,11 +257,15 @@ impl<'a> EncodedValues<'a> {
                 }
             }
             0x15 | 0x16 => {
-                return Err(InputError::Unsupported {
-                    reason: UnsupportedInput::EncodedValueTag(tag),
-                    offset_byte: start,
+                if index.header.version < super::formats::DexVersion::V038 {
+                    return Err(InputError::Unsupported {
+                        reason: super::UnsupportedInput::EncodedValueTag(tag),
+                        offset_byte: start,
+                    }
+                    .into());
                 }
-                .into());
+                let id = u32::try_from(self.bits(width, budget)?).map_err(|_| invalid(start))?;
+                EncodedKind::Reference(index.encoded_dynamic_reference(tag, id, start, budget)?)
             }
             0x17..=0x1b => {
                 // The validated maximum width is four bytes.

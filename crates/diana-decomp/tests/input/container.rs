@@ -11,7 +11,7 @@ pub(super) fn d065() -> Vec<u8> {
 }
 
 #[test]
-fn t04_native_versions_keep_known_widths_with_explicit_unsupported_references() {
+fn t04_native_versions_keep_known_widths_when_a_dynamic_reference_table_is_missing() {
     for version in [b"039", b"040"] {
         let mut fixture = with_code(CodeRecipe {
             instructions: &[0x00fe, 0, 0x000f],
@@ -25,12 +25,16 @@ fn t04_native_versions_keep_known_widths_with_explicit_unsupported_references() 
         let source = index
             .debug_method(ClassDefId(0), MethodId(0), &mut fallback)
             .unwrap();
-        assert_eq!(source.failure_kind(), Some(FailureKind::Unsupported));
+        assert_eq!(source.failure_kind(), Some(FailureKind::Malformed));
         let value: Value = serde_json::from_str(source.source()).unwrap();
         let instructions = &value["classes"][0]["methods"][0]["code"]["instructions"];
         assert_eq!(instructions[0]["width"], 2);
         assert_eq!(instructions[1]["pc"], 2);
-        assert_eq!(instructions[0]["reference"]["unavailable"], "unsupported");
+        assert_eq!(instructions[0]["reference"]["unavailable"], "malformed");
+        assert_eq!(
+            value["classes"][0]["methods"][0]["code"]["raw_words"],
+            serde_json::json!([0x00fe, 0, 0x000f])
+        );
     }
 }
 

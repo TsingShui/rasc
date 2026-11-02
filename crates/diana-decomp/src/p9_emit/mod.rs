@@ -5,6 +5,7 @@ mod comparison;
 mod debug;
 mod debug_program;
 mod dispatcher;
+mod dynamic;
 mod error;
 mod field_ops;
 mod java;

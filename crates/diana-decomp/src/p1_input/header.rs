@@ -6,7 +6,7 @@ use super::{
 use crate::pipeline::control::InputControl;
 use crate::{ByteLength, ByteOffset, ByteRange, RunContext};
 
-pub(super) const SUPPORTED_MAP_KINDS: usize = 18;
+pub(super) const SUPPORTED_MAP_KINDS: usize = 20;
 const TABLE_STRIDES: [ByteLength; 6] = [
     ByteLength(4),
     ByteLength(4),
@@ -277,12 +277,19 @@ fn check_map(
     control.charge_metadata(u64::from(count))?;
     let mut seen = 0u32;
     let mut previous_offset = None;
+    let mut dynamic_end = None;
     for _ in 0..count {
         let record = cursor.position_byte();
         let kind = cursor.read_u16_with(control)?;
         let unused = cursor.read_u16_with(control)?;
         let size = cursor.read_u32_with(control)?;
         let item_offset = file_offset(cursor.read_u32_with(control)?, ByteOffset(record.0 + 8))?;
+        if matches!(kind, 7 | 8) && container.version < DexVersion::V038 {
+            return Err(InputError::Unsupported {
+                reason: UnsupportedInput::MapType(kind),
+                offset_byte: record,
+            });
+        }
         let (bit, alignment) = map_kind(kind).ok_or(InputError::Unsupported {
             reason: UnsupportedInput::MapType(kind),
             offset_byte: record,
@@ -297,8 +304,29 @@ fn check_map(
         if !item_offset.0.is_multiple_of(alignment) {
             return Err(malformed(InputProblem::InvalidAlignment, record));
         }
+        if dynamic_end.is_some_and(|end| item_offset < end) {
+            return Err(malformed(InputProblem::OverlappingSections, item_offset));
+        }
         seen |= bit;
         previous_offset = Some(item_offset);
+        if matches!(kind, 7 | 8) {
+            let range = checked_range(
+                ByteLength(data.end.0),
+                item_offset,
+                count_usize(size, record)?,
+                ByteLength(if kind == 7 { 4 } else { 8 }),
+            )?;
+            container.check_data_range(range, control)?;
+            dynamic_end = Some(range.end);
+            if overlaps(range, map_range) {
+                return Err(malformed(InputProblem::OverlappingSections, item_offset));
+            }
+            for table in tables {
+                if overlaps(range, table_range(*table)?) {
+                    return Err(malformed(InputProblem::OverlappingSections, item_offset));
+                }
+            }
+        }
         match kind {
             0 => {
                 if size != 1 || item_offset != header_offset {
@@ -311,6 +339,7 @@ fn check_map(
                     return Err(malformed(InputProblem::InvalidMap, record));
                 }
             }
+            7 | 8 => {}
             0x1000 => {
                 if size != 1 || item_offset != offset {
                     return Err(malformed(InputProblem::InvalidMap, record));
@@ -355,6 +384,7 @@ fn check_map(
 pub(super) fn map_kind(kind: u16) -> Option<(u32, usize)> {
     let (bit, alignment) = match kind {
         0..=6 => (u32::from(kind), 4),
+        7..=8 => (18 + u32::from(kind - 7), 4),
         0x1000..=0x1003 => (7 + u32::from(kind - 0x1000), 4),
         0x2000..=0x2006 => (
             11 + u32::from(kind - 0x2000),

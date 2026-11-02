@@ -10,6 +10,7 @@ mod code;
 mod container;
 mod cursor;
 pub(crate) mod debug_program;
+mod dynamic;
 mod error;
 pub(crate) mod formats;
 mod header;

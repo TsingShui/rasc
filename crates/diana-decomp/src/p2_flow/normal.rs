@@ -1667,6 +1667,16 @@ fn decode_impl<'a>(
                         next,
                     )
                 }
+                0xfc | 0xfd => {
+                    return Ok(crate::substrate::outcome::Outcome::Declined(
+                        crate::OutputReason::InvokeCustomUnsupported,
+                    ));
+                }
+                0xfa | 0xfb => {
+                    return Ok(crate::substrate::outcome::Outcome::Declined(
+                        crate::OutputReason::InvokePolymorphicUnsupported,
+                    ));
+                }
                 _ => {
                     return Ok(crate::substrate::outcome::Outcome::Declined(
                         crate::OutputReason::JavaAnalysisUnavailable,
