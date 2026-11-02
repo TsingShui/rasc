@@ -179,6 +179,48 @@ pub struct ReferenceRow {
     pub matched: String,
 }
 
+/// Direct class-definition relations only: no opcode scan or transitive traversal.
+/// Compare descriptors rather than a single resolved id so duplicate type ids work too.
+pub(crate) fn find_class_relations(
+    data: &[u8],
+    target: &str,
+    interfaces: bool,
+) -> Result<Vec<String>> {
+    let dex = Dex::parse(data)?;
+    let needle = mutf8::encode_mutf8(target);
+    let mut rows = Vec::new();
+    for index in 0..dex.header.classes_size {
+        let class_def = dex.header.classes_off + index * 32;
+        let matches_type = |type_idx: usize| -> Result<bool> {
+            Ok(dex.string_bytes(dex.type_string_idx(type_idx)?)? == needle)
+        };
+        let matched = if interfaces {
+            let offset = dex.u32(class_def + 12)? as usize;
+            if offset == 0 {
+                false
+            } else {
+                let size = dex.u32(offset)? as usize;
+                let list = offset
+                    .checked_add(4)
+                    .context("interface list offset overflow")?;
+                check_table(data, list, size, 2, "interface type_list")?;
+                let mut matched = false;
+                for position in 0..size {
+                    matched |= matches_type(read_u16(data, list + position * 2)? as usize)?;
+                }
+                matched
+            }
+        } else {
+            let superclass = dex.u32(class_def + 8)?;
+            superclass != u32::MAX && matches_type(superclass as usize)?
+        };
+        if matched {
+            rows.push(dex.type_name(dex.u32(class_def)? as usize)?);
+        }
+    }
+    Ok(rows)
+}
+
 pub fn find_references(data: &[u8], query: &Query) -> Result<Vec<ReferenceRow>> {
     let dex = Dex::parse(data)?;
     let (kind, targets) = dex.resolve_targets(query)?;
@@ -1143,6 +1185,26 @@ pub(crate) mod tests {
         let checksum = adler32(&out[12..]);
         write_u32(&mut out, 0x08, checksum);
         out
+    }
+
+    #[test]
+    fn inheritance_queries_visit_every_logical_dex_041_member() {
+        let mut data = dex041_container(&[2, 3]);
+        for offset in container::logical_offsets(&data).unwrap() {
+            let defs = read_u32(&data, offset + 0x64).unwrap() as usize;
+            write_u32(&mut data, defs + 32 + 8, 1);
+        }
+        let mut rows = Vec::new();
+        for logical in container::logical_dexes("classes.dex", &data).unwrap() {
+            rows.push((
+                logical.name,
+                find_class_relations(&logical.data, "LFixture0;", false).unwrap(),
+            ));
+        }
+        assert_eq!(rows.len(), 2);
+        assert_ne!(rows[0].0, rows[1].0);
+        assert_eq!(rows[0].1, ["LFixture1;"]);
+        assert_eq!(rows[1].1, ["LFixture1;"]);
     }
 
     /// Rows for `find_references` are grouped by ascending method index, which is

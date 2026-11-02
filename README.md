@@ -47,10 +47,17 @@ rasc getclass --members app.apk com.example.Main       # source prefixed by per-
 rasc findrefs app.apk string Authorization             # references across every root DEX
 rasc findrefs app.apk method onCreate --class com.example.Main
 rasc findrefs app.apk field INSTANCE --class example --fuzzy-class
+rasc findrefs app.apk extends android.app.Activity -o subclasses.txt
+rasc findrefs app.apk impl android.os.IInterface -o impls.txt
 rasc classes app.apk                                   # class index
 rasc manifest app.apk                                  # binary AndroidManifest.xml -> XML
 rasc skill                                             # install the rasc skill for coding agents
 ```
+
+CLI `findrefs extends` and `impl` match an exact dotted class name or Dalvik descriptor.
+They inspect only the direct superclass and declared interfaces, not transitive ancestry.
+Output is `dex | descriptor extends target` or `dex | descriptor implements target`, with
+the target normalized to a Dalvik descriptor. These query kinds are not yet available in MCP.
 
 See `rasc --help` for more usage information, or `rasc <command> --help` for command-specific options.
 

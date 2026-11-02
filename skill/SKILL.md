@@ -16,6 +16,8 @@ rasc getclass app.apk com.example.Main                # one class -> Java-like s
 rasc getclass --members app.apk com.example.Main      # the same, prefixed by its member indices
 rasc findrefs app.apk string Authorization            # references in every root DEX
 rasc findrefs app.apk type Gson
+rasc findrefs app.apk extends android.app.Activity -o subclasses.txt
+rasc findrefs app.apk impl android.os.IInterface -o impls.txt
 rasc findrefs app.apk method onCreate --class com.example.Main
 rasc findrefs app.apk field INSTANCE --class example --fuzzy-class
 rasc classes app.apk [-f substring]                   # class index
@@ -93,7 +95,11 @@ rasc getclass --members app.apk com.example.Main
 
 - `getclass` accepts a dotted name or a Dalvik descriptor (`Lcom/example/Main;`); a class
   that does not exist is an error (exit 1), not empty output.
-- `findrefs` queries are literal, not regex. Rows: `classesN.dex | referencing member | matched=(referenced targets)`.
+- `findrefs` code queries are literal, not regex. Rows: `classesN.dex | referencing member | matched=(referenced targets)`.
+- CLI `findrefs extends` / `impl` accept an exact dotted name or Dalvik descriptor. They query
+  only the direct superclass / declared interfaces, not transitive ancestry. Rows:
+  `dex | descriptor extends target` / `dex | descriptor implements target` (target normalized
+  to a Dalvik descriptor). These two query kinds are not yet exposed through MCP.
 - `classes` rows: `dex | descriptor | dotted name | package=... | class=...`. The full index
   is tens of MiB, so filter it (`-f`) or pipe it.
 - `-o FILE` writes exactly the stdout bytes; `--threads N` caps parallelism (default: one

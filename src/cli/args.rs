@@ -35,7 +35,7 @@ pub enum Command {
     Entries(EntriesArgs),
     /// List every string in every root DEX of an archive.
     Strings(StringsArgs),
-    /// Find code references across every DEX in an APK.
+    /// Find code references or direct inheritance relations across every DEX.
     Findrefs(FindRefsArgs),
     /// Decode and print AndroidManifest.xml from an APK.
     Manifest(ManifestArgs),
@@ -162,6 +162,9 @@ pub struct GetClassArgs {
 }
 
 #[derive(Debug, Args)]
+#[command(
+    after_help = "Examples:\n  rasc findrefs app.apk extends android.app.Activity -o subclasses.txt\n  rasc findrefs app.apk impl android.os.IInterface -o impls.txt"
+)]
 pub struct FindRefsArgs {
     #[arg(long)]
     pub debug: bool,
@@ -179,12 +182,25 @@ impl FindRefsArgs {
             FindKind::Type(q) => Ok(Query::Type(q.value.clone())),
             FindKind::Method(q) => Ok(Query::Method(q.member_query("method")?)),
             FindKind::Field(q) => Ok(Query::Field(q.member_query("field")?)),
+            FindKind::Extends(_) | FindKind::Impl(_) => {
+                bail!("inheritance queries use the class-definition scanner")
+            }
+        }
+    }
+
+    pub fn class_relation(&self) -> Result<Option<(String, bool)>> {
+        match &self.kind {
+            FindKind::Extends(q) => Ok(Some((format_class_name(&q.value)?, false))),
+            FindKind::Impl(q) => Ok(Some((format_class_name(&q.value)?, true))),
+            _ => Ok(None),
         }
     }
 
     pub fn output_path(&self) -> Option<&Path> {
         match &self.kind {
-            FindKind::String(q) | FindKind::Type(q) => q.output.as_deref(),
+            FindKind::String(q) | FindKind::Type(q) | FindKind::Extends(q) | FindKind::Impl(q) => {
+                q.output.as_deref()
+            }
             FindKind::Method(q) | FindKind::Field(q) => q.output.as_deref(),
         }
     }
@@ -194,6 +210,10 @@ impl FindRefsArgs {
 pub enum FindKind {
     String(ValueQuery),
     Type(ValueQuery),
+    /// Find classes whose direct superclass is the target (dotted or Dalvik name).
+    Extends(ValueQuery),
+    /// Find classes directly declaring the target interface (dotted or Dalvik name).
+    Impl(ValueQuery),
     Method(MemberArgs),
     Field(MemberArgs),
 }
@@ -232,5 +252,26 @@ impl MemberArgs {
             bail!("{kind} query needs at least one of class or {kind} name");
         }
         Ok(MemberQuery { name, class })
+    }
+}
+
+#[cfg(test)]
+mod inheritance_tests {
+    use super::*;
+
+    #[test]
+    fn cli_normalizes_dotted_and_descriptor_targets() {
+        for kind in ["extends", "impl"] {
+            for name in ["android.app.Activity", "Landroid/app/Activity;"] {
+                let cli = Cli::try_parse_from(["rasc", "findrefs", "app.apk", kind, name]).unwrap();
+                let Command::Findrefs(args) = cli.command else {
+                    panic!("expected findrefs");
+                };
+                assert_eq!(
+                    args.class_relation().unwrap(),
+                    Some(("Landroid/app/Activity;".to_owned(), kind == "impl"))
+                );
+            }
+        }
     }
 }

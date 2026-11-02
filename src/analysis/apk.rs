@@ -312,6 +312,42 @@ pub fn find_reference_hits(
     find_reference_hits_with_policy(path, ArchivePolicy::default(), query, threads, debug)
 }
 
+/// Render direct superclass/interface matches in upstream-compatible text form.
+pub(crate) fn find_class_relations_with_policy(
+    path: &Path,
+    policy: ArchivePolicy,
+    target: &str,
+    interfaces: bool,
+    threads: usize,
+    debug: bool,
+) -> Result<Vec<String>> {
+    map_dex_entries(
+        path,
+        policy,
+        threads,
+        EntryOrder::Natural,
+        None,
+        |inflated| {
+            let mut rows = Vec::new();
+            let verb = if interfaces { "implements" } else { "extends" };
+            for logical in dex::container::logical_dexes(&inflated.entry.name, inflated.data()?)? {
+                for descriptor in dex::find_class_relations(&logical.data, target, interfaces)? {
+                    rows.push(format!("{} | {descriptor} {verb} {target}", logical.name));
+                }
+            }
+            if debug {
+                crate::diag::diagnose(format_args!(
+                    "[APK] '{}' rows={} total={:.2} us",
+                    inflated.entry.name,
+                    rows.len(),
+                    inflated.started.elapsed().as_secs_f64() * 1_000_000.0
+                ));
+            }
+            Ok(rows)
+        },
+    )
+}
+
 pub(crate) fn find_reference_hits_with_policy(
     path: &Path,
     policy: ArchivePolicy,

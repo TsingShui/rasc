@@ -180,6 +180,22 @@ fn run_command(args: Cli, archive_policy: apk::ArchivePolicy, started: Instant) 
     let mut status = 0;
     match args.command {
         Command::Findrefs(args) => {
+            if let Some((target, interfaces)) = args.class_relation()? {
+                let mut rows = apk::find_class_relations_with_policy(
+                    &args.apk_path,
+                    archive_policy,
+                    &target,
+                    interfaces,
+                    args.threads,
+                    args.debug,
+                )?;
+                rows.par_sort_unstable();
+                emit_rows(rows.into_iter().map(|row| row + "\n"), args.output_path())?;
+                if args.debug {
+                    debug_timing(started);
+                }
+                return Ok(0);
+            }
             let query = args.query()?;
             let scan_started = Instant::now();
             let mut hits = apk::find_reference_hits_with_policy(
