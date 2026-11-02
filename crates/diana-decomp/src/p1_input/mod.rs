@@ -20,6 +20,7 @@ mod type_projection;
 pub(crate) use type_projection::TypeProjection;
 pub(crate) mod field_declarations;
 pub(crate) mod operands;
+pub(crate) mod signature;
 mod strings;
 mod structure;
 pub(crate) mod values;

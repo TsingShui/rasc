@@ -34,6 +34,9 @@ pub fn render(
             output.push(declaration.preparation(), control)?;
             for member in members {
                 control.checkpoint()?;
+                if matches!(member, MethodOutput::Generated { .. }) {
+                    continue;
+                }
                 let source = match member {
                     MethodOutput::Java { source, .. }
                     | MethodOutput::JavaInitializer { source, .. } => source.as_str(),
@@ -55,6 +58,32 @@ pub fn render(
                     language: SourceLanguage::Java,
                 });
                 output.push("\n", control)?;
+            }
+            for member in members {
+                control.checkpoint()?;
+                if let MethodOutput::Generated { declaration, .. } = member {
+                    let target = members
+                        .iter()
+                        .find(|member| member.key().method == declaration.target())
+                        .ok_or(RequestError::InternalInvariant(
+                            "generated bridge lost owner",
+                        ))?;
+                    let span = spans
+                        .iter()
+                        .find(|span| span.method == target.key())
+                        .ok_or(RequestError::InternalInvariant(
+                            "generated bridge lost owner span",
+                        ))?;
+                    let start = span.start;
+                    let end = span.end;
+                    reserve(&mut spans, 1, control)?;
+                    spans.push(OriginSpan {
+                        method: member.key(),
+                        start,
+                        end,
+                        language: SourceLanguage::Java,
+                    });
+                }
             }
             output.push("}\n", control)?;
         }
@@ -99,6 +128,9 @@ pub fn render(
                     control,
                 )?;
                 let (source, language) = match member {
+                    MethodOutput::Generated { original, .. } => {
+                        (Some(original.source()), SourceLanguage::DexDebug)
+                    }
                     MethodOutput::Java { source, .. }
                     | MethodOutput::JavaInitializer { source, .. } => {
                         (Some(source.as_str()), SourceLanguage::Java)

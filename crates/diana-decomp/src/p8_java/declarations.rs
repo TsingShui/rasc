@@ -7,30 +7,43 @@ use crate::{JavaTargetItem, MethodBudget, RequestError};
 /// This is a fragment, not a JavaUnit or an executable recovered body.
 pub struct JavaMethodDecl {
     source: String,
+    signature: Option<Vec<u16>>,
 }
 impl JavaMethodDecl {
     pub fn source(&self) -> &str {
         &self.source
+    }
+    /// Original verified Signature units retained when emitting an erased declaration.
+    pub fn signature(&self) -> Option<&[u16]> {
+        self.signature.as_deref()
     }
 }
 
 pub(crate) fn declaration(
     _schedule: &crate::engine::SchedulePermit,
     input: &MethodInput<'_, '_>,
+    catalog: &crate::DeclarationCatalog,
+    signature: Option<&crate::p4_calls::raw_signature::RawSignature>,
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<Option<JavaMethodDecl>, RequestError> {
-    declaration_impl(input, budget)
+    declaration_impl(input, catalog, signature, budget)
 }
 
 fn declaration_impl(
     input: &MethodInput<'_, '_>,
+    catalog: &crate::DeclarationCatalog,
+    signature: Option<&crate::p4_calls::raw_signature::RawSignature>,
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<Option<JavaMethodDecl>, RequestError> {
     check_target(input, budget)?;
     let RawPrintable::Declaration(raw) = input.raw() else {
         return Ok(None);
     };
-    if raw.annotations().method_range().is_some() || raw.annotations().parameter_range().is_some() {
+    if raw.annotations().parameter_range().is_some() {
+        return Ok(None);
+    }
+    let raw_generic = raw.annotations().method_range().is_some();
+    if raw_generic && signature.is_none() {
         return Ok(None);
     }
     let flags = input.access_flags();
@@ -72,8 +85,11 @@ fn declaration_impl(
             output.push(word, budget)?;
         }
     }
-    if !primitive_type(
+    if !declaration_type(
+        input,
         input.declaration().prototype.return_type,
+        raw_generic,
+        catalog,
         &mut output,
         budget,
     )? {
@@ -97,7 +113,7 @@ fn declaration_impl(
             if parameter != 0 {
                 output.push(", ", budget)?;
             }
-            supported &= primitive_type(name, &mut output, budget)?;
+            supported &= declaration_type(input, name, raw_generic, catalog, &mut output, budget)?;
             output.push(" p", budget)?;
             output.unsigned(parameter, budget)?;
             parameter = parameter
@@ -113,6 +129,20 @@ fn declaration_impl(
     budget.checkpoint()?;
     Ok(Some(JavaMethodDecl {
         source: output.finish(),
+        signature: if raw_generic {
+            let Some(signature) = signature else {
+                return Err(RequestError::InternalInvariant(
+                    "verified signature disappeared",
+                ));
+            };
+            let mut units = Vec::new();
+            for &unit in signature.units() {
+                crate::substrate::owned::push(&mut units, unit, budget)?;
+            }
+            Some(units)
+        } else {
+            None
+        },
     }))
 }
 
@@ -234,6 +264,34 @@ fn primitive_type(
     for _ in 0..dimensions {
         output.push("[]", budget)?;
     }
+    Ok(true)
+}
+
+fn declaration_type(
+    input: &MethodInput<'_, '_>,
+    name: DexString<'_>,
+    raw: bool,
+    catalog: &crate::DeclarationCatalog,
+    output: &mut TextBuffer,
+    budget: &mut MethodBudget<'_, '_>,
+) -> Result<bool, RequestError> {
+    let descriptor = copy_units(name, budget)?;
+    if raw && !crate::p4_calls::qualifier_available(input, catalog, &[106, 97, 118, 97], budget)? {
+        return Ok(false);
+    }
+    if !raw || descriptor.first() != Some(&76) {
+        return primitive_type(name, output, budget);
+    }
+    let Some(class) = catalog.class(&descriptor, budget)? else {
+        return Ok(false);
+    };
+    if class.access_flags & 1 == 0 || class.enclosing_scope {
+        return Ok(false);
+    }
+    let Some(source) = super::calls::type_name(&descriptor, budget)? else {
+        return Ok(false);
+    };
+    output.push(&source, budget)?;
     Ok(true)
 }
 

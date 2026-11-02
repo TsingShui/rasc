@@ -4,7 +4,7 @@
 chain includes checked heap operations, exception SSA/storage, protected Java,
 monitor scopes and T20 initialization. T20's supported source profile and fixed
 D041–D047/D079 obligations pass; unproved initialization remains classified
-Debug/Mixed. Complete source declarations in T21–T23 and core/application rollup
+Debug/Mixed. Remaining source declarations in T22–T23 and core/application rollup
 remain open. EngineCoreRC is not accepted. The frozen draft-7 specification holds
 86 required cases and 177 must-run invocation scenarios.**
 This page owns the workflow, preparation, task cards and verification. Read
@@ -2224,6 +2224,21 @@ final contract MUST NOT be deleted to hide the problem.
 carrier, interprocedural init optimization, constant propagation.
 
 ## T21 — Raw generics, bridge/override and source binding legality
+
+**Progress**: The [interface-unit slice](batches/t21-interface-unit.md) admits
+D078's complete 2200-method abstract interface without invented constructors or
+pool estimates. The [covariant bridge slice](batches/t21-covariant-bridge.md)
+adds D048 Generated ownership, D021 source override binding and the approved
+D075 invocation-catalog/context correction; all fixed T21 cases pass, including
+D084 rejection. The [raw-signature slice](batches/t21-raw-signature.md) adds checked List<String>
+and Object-bounded identity erasure for no-code declarations with retained
+original Signature. The [generic-call slice](batches/t21-generic-call.md)
+verifies static Object-bound identity binding using existing Object use views.
+The [raw-interface acceptance](batches/t21-raw-interface.md) verifies variable-
+independent raw parent/interface binding and an evidenced String specialization
+with an actual javac-generated parameter-cast bridge. T21's bounded supported
+source profiles pass their fixed and supplemental obligations; unproved generic
+substitution remains classified Debug/Mixed.
 
 **Dependencies**: T20, T11. **Phase**: P0/P4/P5/P8. **References**: DX-08 and
 the signature/source ABI questions.

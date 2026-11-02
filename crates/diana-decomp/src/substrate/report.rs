@@ -183,6 +183,11 @@ pub struct MethodFacts {
 }
 
 pub enum MethodOutput {
+    Generated {
+        facts: MethodFacts,
+        declaration: crate::p8_java::GeneratedBridge,
+        original: DebugSource,
+    },
     JavaInitializer {
         facts: MethodFacts,
         declaration: crate::VerifiedJavaInitializer,
@@ -213,7 +218,8 @@ pub enum MethodOutput {
 impl MethodOutput {
     pub fn key(&self) -> MethodKey {
         match self {
-            Self::Java { facts, .. }
+            Self::Generated { facts, .. }
+            | Self::Java { facts, .. }
             | Self::JavaInitializer { facts, .. }
             | Self::DeclarationOnly { facts, .. } => facts.key,
             Self::Debug { key, .. } | Self::Unavailable { key, .. } => *key,

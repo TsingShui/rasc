@@ -45,7 +45,7 @@ pub(crate) fn bind_own_int_write(
         return Err(missing());
     };
     let caller = crate::substrate::owned::copy_units(input.owner(), budget)?;
-    if !super::contracts::plain(class, &caller, budget)?
+    if !super::contracts::plain(catalog, class, &caller, budget)?
         || !input.plain_owner_scope(class.parent.as_deref(), budget)?
     {
         return Err(missing());

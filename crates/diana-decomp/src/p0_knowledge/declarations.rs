@@ -18,6 +18,9 @@ pub struct ExternalMethodDeclaration {
     pub access_flags: u32,
     pub throws: Option<Vec<Vec<u16>>>,
     pub generic: bool,
+    /// Original JVM Signature UTF-16 units; absent means no supplied signature evidence.
+    #[serde(default)]
+    pub signature: Option<Vec<u16>>,
 }
 
 /// A complete directory in the stated coverage scope. Missing classes remain
@@ -36,4 +39,7 @@ pub struct ExternalClassDeclaration {
     pub coverage: DeclarationCoverage,
     pub generic: bool,
     pub enclosing_scope: bool,
+    /// Original JVM class Signature UTF-16 units, not inferred from the descriptor.
+    #[serde(default)]
+    pub signature: Option<Vec<u16>>,
 }

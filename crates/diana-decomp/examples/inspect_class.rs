@@ -169,6 +169,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         ClassOutput::Mixed { members, .. } | ClassOutput::JavaUnit { members, .. } => members.iter().map(|member| {
             let key = member.key();
             let (status, facts, reason) = match member {
+                MethodOutput::Generated { facts, .. } => ("generated", Some(facts), None),
                 MethodOutput::Java { facts, .. } | MethodOutput::JavaInitializer { facts, .. } => ("java",Some(facts),None),
                 MethodOutput::DeclarationOnly { facts, .. } => ("declaration_only", Some(facts), None),
                 MethodOutput::Debug { facts, reason, .. } => ("debug", facts.as_ref(), Some(reason.0)),

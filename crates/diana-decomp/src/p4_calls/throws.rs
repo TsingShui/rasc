@@ -128,7 +128,7 @@ pub(crate) fn source_throws(
     let Some(class) = catalog.class(&caller, budget)? else {
         return Ok(None);
     };
-    if !plain(class, &caller, budget)?
+    if !plain(catalog, class, &caller, budget)?
         || !matches!(class.parent.as_deref(),Some(parent) if same(parent,OBJECT,budget)?)
         || !input.plain_owner_scope(class.parent.as_deref(), budget)?
     {
@@ -167,7 +167,7 @@ pub(crate) fn source_throws(
     let Some(object) = catalog.class(OBJECT, budget)? else {
         return Ok(None);
     };
-    if !plain(object, &caller, budget)? || object.parent.is_some() {
+    if !plain(catalog, object, &caller, budget)? || object.parent.is_some() {
         return Ok(None);
     }
     for method in &object.methods {

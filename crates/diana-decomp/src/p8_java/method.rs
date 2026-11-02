@@ -166,6 +166,7 @@ pub(crate) fn source_group_admitted(
     index: &crate::input::ProgramIndex<'_>,
     key: crate::MethodKey,
     facts: &crate::MethodFacts,
+    emission: Option<&super::member_emission::Plan>,
     budget: &mut impl crate::pipeline::control::InputControl,
 ) -> Result<bool, RequestError> {
     use crate::input::catalog::{MemberEntry, MemberSelection};
@@ -188,7 +189,12 @@ pub(crate) fn source_group_admitted(
                 ..
             } = entry
             {
-                if method_idx == key.method {
+                if method_idx == key.method
+                    || match emission {
+                        Some(plan) => plan.permits(method_idx, key.method, budget)?,
+                        None => false,
+                    }
+                {
                     return Ok(());
                 }
                 let declaration = match declaration {

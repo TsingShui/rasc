@@ -1,5 +1,7 @@
 #[path = "input/annotations.rs"]
 mod annotations;
+#[path = "pipeline/bridge.rs"]
+mod bridge;
 #[path = "input/catalog.rs"]
 mod catalog;
 #[path = "pipeline/conditions.rs"]

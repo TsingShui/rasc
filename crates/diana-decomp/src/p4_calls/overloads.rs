@@ -305,7 +305,9 @@ pub(super) fn unique_target(
     let Some(selected) = selected else {
         return Ok(false);
     };
-    if selected.generic || selected.access_flags & (0x40 | 0x80) != 0 {
+    if !super::raw_signature::object_identity(selected, budget)?
+        || selected.access_flags & (0x40 | 0x80) != 0
+    {
         return Ok(false);
     }
     let is_static = matches!(scope, Scope::Static);
@@ -375,6 +377,8 @@ pub(super) fn unique_target(
                 continue;
             }
             if method.generic
+                && (!std::ptr::eq(method, selected)
+                    || !super::raw_signature::object_identity(method, budget)?)
                 || method.access_flags & 0x80 != 0
                 || (method.access_flags & 8 != 0) != is_static
                 || method.access_flags & 1 == 0 && !(same_class && std::ptr::eq(*owner, class))

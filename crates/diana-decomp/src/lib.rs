@@ -24,8 +24,8 @@ pub use engine::{
     DexImage, Engine, MethodSelector, Options, RecoveryPolicy, RepresentationPolicy, Request,
 };
 pub use p8_java::{
-    CompilationContract, JavaCallSite, JavaInvokeKind, JavaMethodDecl, VerifiedJavaField,
-    VerifiedJavaInitializer, VerifiedJavaMethod, VerifiedJavaUnit,
+    CompilationContract, GeneratedBridge, JavaCallSite, JavaInvokeKind, JavaMethodDecl,
+    VerifiedJavaField, VerifiedJavaInitializer, VerifiedJavaMethod, VerifiedJavaUnit,
 };
 pub use p9_emit::render;
 pub use pipeline::request::{JavaTargetItem, RequestError};

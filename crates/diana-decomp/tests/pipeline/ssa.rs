@@ -127,6 +127,7 @@ fn t15_derived_array_components_preserve_store_checks_and_copy_cycles() {
                             access_flags: 9,
                             throws: Some(Vec::new()),
                             generic: false,
+                            signature: None,
                         });
                 }
                 MissingComponent => {

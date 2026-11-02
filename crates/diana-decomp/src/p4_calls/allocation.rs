@@ -54,8 +54,13 @@ pub(crate) fn resolve(
         };
         let mask = 1 | 0x10 | 0x200 | 0x400 | 0x1000 | 0x2000 | 0x4000;
         if caller_class.access_flags & mask != input.owner_access_flags() & mask
-            || !plain(caller_class, &caller, budget)?
-            || !input.plain_owner_scope(caller_class.parent.as_deref(), budget)?
+            || !plain(catalog, caller_class, &caller, budget)?
+            || !super::interface_scope::owner(
+                input,
+                catalog,
+                caller_class.parent.as_deref(),
+                budget,
+            )?
             || !matches!(caller_class.parent.as_deref(),Some(parent) if crate::p0_knowledge::same_units(parent,expected_owner,budget)?)
         {
             return Err(RequestError::BindingEvidenceMissing { reference, pc });
@@ -111,6 +116,7 @@ pub(crate) fn resolve(
         if original.access_flags & mask != target.access_flags & mask
             || original.owner_access_flags & class_mask != class.access_flags & class_mask
             || !original.plain_scope
+                && !super::interface_scope::owner(input, catalog, class.parent.as_deref(), budget)?
         {
             return Err(RequestError::BindingEvidenceMissing { reference, pc });
         }

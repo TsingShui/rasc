@@ -1,3 +1,4 @@
+use super::interface_scope::Interfaces;
 use crate::input::ProgramIndex;
 use crate::input::catalog::{MemberEntry, MemberSelection};
 use crate::pipeline::control::InputControl;
@@ -7,6 +8,7 @@ use crate::{ClassDefId, DeclarationCatalog, DeclarationCoverage, RequestError};
 pub(crate) struct ClassBindings {
     pub owner: Vec<u16>,
     pub parent: Vec<u16>,
+    pub interfaces: Interfaces,
     _sealed: (),
 }
 fn marker(
@@ -35,6 +37,9 @@ pub(crate) fn collect(
 ) -> Result<Option<ClassBindings>, RequestError> {
     let class = index.class_with(id, control)?;
     let owner = copy_units(class.descriptor, control)?;
+    let Some(interfaces) = super::interface_scope::collect(index, id, catalog, control)? else {
+        return Ok(None);
+    };
     let Some(original_parent) = index.class_context(id, control)?.superclass? else {
         return Ok(None);
     };
@@ -56,7 +61,7 @@ pub(crate) fn collect(
     }
     for parent in hierarchy.declarations() {
         control.charge_work(1)?;
-        if parent.generic
+        if !super::raw_signature::raw_class(parent, control)?
             || parent.enclosing_scope
             || !parent.interfaces.is_empty()
             || parent.access_flags & (0x10 | 0x200) != 0
@@ -89,7 +94,12 @@ pub(crate) fn collect(
         control,
         MemberSelection::AllHeaders,
         |entry, control| -> Result<(), RequestError> {
-            if let MemberEntry::MethodHeader { declaration, .. } = entry {
+            if let MemberEntry::MethodHeader {
+                access_flags,
+                declaration,
+                ..
+            } = entry
+            {
                 let declaration = declaration?;
                 let name = copy_units(declaration.name, control)?;
                 if name == [60, 105, 110, 105, 116, 62] {
@@ -119,7 +129,38 @@ pub(crate) fn collect(
                         )? {
                             // Overriding/hiding needs a separate source declaration proof;
                             // a verified body alone cannot establish a JavaUnit binding.
-                            admitted = false;
+                            let own = catalog.class(&owner, control)?;
+                            let mut source_override = false;
+                            if let Some(own) = own {
+                                for method in &own.methods {
+                                    control.charge_work(1)?;
+                                    if method.name == name && method.prototype == prototype {
+                                        source_override = method.access_flags & 7 == 1
+                                            && inherited.access_flags & (1 | 16) == 1
+                                            && (method.access_flags & 8) == (inherited.access_flags & 8)
+                                            && !method.generic
+                                            && matches!(&method.throws, Some(throws) if throws.is_empty());
+                                    }
+                                }
+                            }
+                            let exact_override = source_override && prototype == inherited.prototype;
+                            let covariant = source_override && inherited.prototype[end + 1..]
+                                == [
+                                    76, 106, 97, 118, 97, 47, 108, 97, 110, 103, 47, 79, 98, 106,
+                                    101, 99, 116, 59,
+                                ]
+                                && prototype[close + 1..]
+                                    == [
+                                        76, 106, 97, 118, 97, 47, 108, 97, 110, 103, 47, 83, 116,
+                                        114, 105, 110, 103, 59,
+                                    ]
+                                && inherited.access_flags & (1 | 8 | 16) == 1;
+                            let bridge_declaration = access_flags == 0x1041
+                                && prototype == inherited.prototype
+                                && inherited.access_flags & (1 | 8 | 16) == 1;
+                            if !covariant && !bridge_declaration && !exact_override {
+                                admitted = false;
+                            }
                         }
                     }
                 }
@@ -130,6 +171,7 @@ pub(crate) fn collect(
     Ok(admitted.then_some(ClassBindings {
         owner,
         parent: parent_name,
+        interfaces,
         _sealed: (),
     }))
 }

@@ -56,16 +56,43 @@ fn verify_impl(
     environment: EnvironmentId,
     control: &mut RunContext<'_>,
 ) -> Result<Option<VerifiedJavaUnit>, RequestError> {
+    let mut emission = super::member_emission::Plan::default();
+    for member in members {
+        control.charge_work(1)?;
+        if let MethodOutput::Generated { declaration, .. } = member {
+            emission.add(declaration.clone(), control)?;
+        }
+    }
     let class = index.class_with(key.class_def, control)?;
-    if class.access_flags & !(1 | 0x10 | 0x400) != 0 || class.access_flags & (0x10 | 0x400) == 0x410
+    let interface = class.access_flags & 0x200 != 0;
+    if interface {
+        if class.access_flags & !(1 | 0x200 | 0x400) != 0
+            || class.access_flags & 0x400 == 0
+            || !fields.is_empty()
+        {
+            return Ok(None);
+        }
+    } else if class.access_flags & !(1 | 0x10 | 0x400) != 0
+        || class.access_flags & (0x10 | 0x400) == 0x410
     {
         return Ok(None);
+    }
+    if interface {
+        for member in members {
+            control.charge_work(1)?;
+            if !matches!(member, MethodOutput::DeclarationOnly { .. }) {
+                return Ok(None);
+            }
+        }
     }
     let context = index.class_context(key.class_def, control)?;
     let interfaces = context.interfaces?;
     context.values_offset?;
     context.superclass?;
-    if !interfaces.is_empty() || context.annotations_offset != crate::ByteOffset(0) {
+    if interface && !interfaces.is_empty()
+        || !index.no_class_annotations(context.annotations_offset, control)?
+            && crate::input::signature::class(index, key.class_def, control)?.is_none()
+    {
         return Ok(None);
     }
     let mut preparation = TextBuffer::new();
@@ -189,7 +216,17 @@ fn verify_impl(
                     position = position
                         .checked_add(1)
                         .ok_or(RequestError::PlatformCapacity)?;
+                    let generated = matches!(member, MethodOutput::Generated { .. });
+                    if let MethodOutput::Generated { facts, declaration, .. } = member {
+                        let mut owner_present = false;
+                        for other in members {
+                            control.charge_work(1)?;
+                            owner_present |= matches!(other, MethodOutput::Java { facts, declaration: owner, .. } if facts.key.method == declaration.target() && owner.environment() == environment);
+                        }
+                        if declaration.bridge() != facts.key.method || !owner_present { admitted = false; }
+                    }
                     let facts = match member {
+                        MethodOutput::Generated { facts, .. } => facts,
                         MethodOutput::Java {
                             facts, declaration, ..
                         } if declaration.environment() == environment => facts,
@@ -209,7 +246,7 @@ fn verify_impl(
                         || !declaration
                             .prototype
                             .matches_with(&facts.prototype, control)?
-                        || !super::method::source_group_admitted(index, facts.key, facts, control)?
+                        || !generated && !super::method::source_group_admitted(index, facts.key, facts, Some(&emission), control)?
                     {
                         admitted = false;
                     }
@@ -224,7 +261,11 @@ fn verify_impl(
             Ok(())
         },
     )?;
-    if !admitted || position != members.len() || !constructor {
+    if !admitted
+        || position != members.len()
+        || (!interface && !constructor)
+        || (interface && constructor)
+    {
         return Ok(None);
     }
     let Some(binding) =
@@ -232,6 +273,15 @@ fn verify_impl(
     else {
         return Ok(None);
     };
+    if interface
+        && !crate::p0_knowledge::same_units(
+            &binding.parent,
+            crate::p5_types::BuiltinReference::Object.descriptor(),
+            control,
+        )?
+    {
+        return Ok(None);
+    }
     super::declarations::check_constant_utf8(&binding.owner[1..binding.owner.len() - 1], control)?;
     let Some(name) = super::calls::type_name(&binding.owner, control)? else {
         return Ok(None);
@@ -246,11 +296,11 @@ fn verify_impl(
         &name
     };
     for (bit, word) in [(1, "public "), (0x10, "final "), (0x400, "abstract ")] {
-        if class.access_flags & bit != 0 {
+        if class.access_flags & bit != 0 && !(interface && bit == 0x400) {
             header.push(word, control)?;
         }
     }
-    header.push("class ", control)?;
+    header.push(if interface { "interface " } else { "class " }, control)?;
     header.push(simple, control)?;
     if !crate::p0_knowledge::same_units(
         &binding.parent,
@@ -266,6 +316,22 @@ fn verify_impl(
         )?;
         header.push(" extends ", control)?;
         header.push(&parent, control)?;
+    }
+    if !binding.interfaces.names().is_empty() {
+        header.push(" implements ", control)?;
+        for (position, descriptor) in binding.interfaces.names().iter().enumerate() {
+            control.charge_work(1)?;
+            if position != 0 {
+                header.push(", ", control)?;
+            }
+            let Some(name) = super::calls::type_name(descriptor, control)? else {
+                return Ok(None);
+            };
+            header.push(&name, control)?;
+            if binding.interfaces.string_specialization() {
+                header.push("<java.lang.String>", control)?;
+            }
+        }
     }
     header.push(" {\n", control)?;
     control.checkpoint()?;

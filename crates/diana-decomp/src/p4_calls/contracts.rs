@@ -56,7 +56,7 @@ pub(super) fn member_directory(
         )
         .map_err(|_| RequestError::PlatformCapacity)?,
     )?;
-    Ok(!class.generic
+    Ok(super::raw_signature::raw_class(class, budget)?
         && match class.coverage {
             DeclarationCoverage::AllDeclarations => true,
             DeclarationCoverage::ExportedApi => package(&class.descriptor) != package(caller),
@@ -70,11 +70,15 @@ pub(super) fn directory(
     Ok(!class.enclosing_scope && member_directory(class, caller, budget)?)
 }
 pub(super) fn plain(
+    catalog: &DeclarationCatalog,
     class: &ExternalClassDeclaration,
     caller: &[u16],
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<bool, RequestError> {
-    Ok(class.interfaces.is_empty() && directory(class, caller, budget)?)
+    Ok(
+        super::interface_scope::catalog_plain(catalog, class, budget)?
+            && directory(class, caller, budget)?,
+    )
 }
 fn push<T>(
     values: &mut Vec<T>,
@@ -117,7 +121,7 @@ pub(super) fn clear_scope(
         let Some(class) = catalog.class(at, budget)? else {
             return Ok(false);
         };
-        if !plain(class, caller, budget)? {
+        if !plain(catalog, class, caller, budget)? {
             return Ok(false);
         }
         for name in &class.field_names {
@@ -197,7 +201,7 @@ pub(super) fn collect_static(
     if !crate::p0_knowledge::same_units(&target.prototype, &prototype, budget)?
         || target.access_flags & 9 != 9
         || target.access_flags & (0x40 | 0x80) != 0
-        || target.generic
+        || !super::raw_signature::object_identity(target, budget)?
         || target.throws.is_none()
     {
         return Ok(None);
@@ -335,7 +339,7 @@ pub(super) fn collect_static(
         let Some(class) = catalog.class(&descriptor, budget)? else {
             return Ok(None);
         };
-        if !plain(class, &caller, budget)?
+        if !plain(catalog, class, &caller, budget)?
             || class.access_flags & 1 == 0
             || class.access_flags & 0x2200 != 0
         {

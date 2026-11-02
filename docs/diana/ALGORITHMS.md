@@ -1806,6 +1806,35 @@ Concretely, only the following rules are accepted:
   preservation; arrays and Strings are output per UTF16/original bits, and class/enum values use the
   exact descriptor. System metadata MUST NOT be fabricated as a Java annotation.
 
+The native covariant profile accepts a no-argument Object-returning bridge to
+the same owner's String-returning instance override. P4 requires the original
+public nonfinal override contract and complete nongeneric ancestor evidence.
+P8 checks bridge/synthetic flags, the original entry receiver, exact virtual
+target, adjacent object result and return, with no extra instruction or protection.
+Class requests determine this emission plan before ordinary Explicit analysis;
+a passing template retains its original method identity and raw snapshot.
+Standalone requests do not use class-owned bridge generation. P8 unit admission
+requires the explicit target's Java result and maps the Generated identity to
+that owner's verified source span. A failed owner unit displays the retained
+original bridge snapshot rather than a synthetic successful Java method.
+
+A bounded parameter bridge additionally supports one evidenced
+interface<String> specialization. P1 supplies original class Signature fragments;
+P4 checks their equality to the caller facts, the interface's Object-bound class
+parameter and its (TT;)TT; method contract. P8 checks the original String cast,
+entry receiver/argument, exact String target and return. The emitted interface
+specialization is required to make javac generate that same bridge. Missing or
+contradicted specialization never permits deleting the bridge.
+
+Raw generic method declarations require original/catalog Signature equality and
+checked descriptor erasure. The supported profiles are parameterized reference
+returns and one Object-bounded identity variable. Static identity calls use exact
+Object source formals and result views; other applicable generic competitors reject
+binding. Raw parent/interface profiles require a complete Object-bound class
+Signature and variable-independent member contracts. P8 retains original method
+Signature alongside the erased declaration; it does not infer arbitrary generic
+parent substitutions from the descriptor.
+
 Generated is a checked core emission rule, not “delete whatever looks synthetic”. A failure of any
 rule MUST NOT produce an exception stub for an arbitrary method; the corresponding required
 full-unit case remains failing.

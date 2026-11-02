@@ -131,6 +131,7 @@ fn t12_covariant_constructor_and_receiver_binding_rejects_unproved_directories()
                     access_flags: 1,
                     throws: Some(Vec::new()),
                     generic: false,
+                    signature: None,
                 });
             }
         }

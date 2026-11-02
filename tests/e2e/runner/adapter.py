@@ -131,7 +131,7 @@ def run_public(root, cache, spec, manifest, case_ids=None,representation=None,jo
                     record['request_controls']={'path':relative(control_path)}
                     catalog_path=work/'method-signatures.json'
                     catalog_started = time.monotonic()
-                    save(catalog_path,_catalog(root,assets,cert['catalog']['asset_id'],invocation['input'].get('javaConstantKind')))
+                    save(catalog_path,_catalog(root,assets,cert['catalog']['asset_id'],invocation['input'].get('javaConstantKind'),binding['role']))
                     timing['catalog_seconds'] = time.monotonic() - catalog_started
                     argv.extend(['--catalog',catalog_path])
                     public_path=work/'public.json'
@@ -179,7 +179,9 @@ def run_public(root, cache, spec, manifest, case_ids=None,representation=None,jo
                                             if dependency is None:raise ValueError('generated context dependency is absent from the manifest')
                                             if not (root/path).is_file() or (root/path).stat().st_size!=dependency['size']:raise ValueError('missing/changed generated context dependency')
                                             if path not in support_sources:support_sources.append(path)
-                                else:original_path=cache/'prepared'/case['id']/'reference'/binding['role']/Path(selector['descriptor'][1:-1]+'.java')
+                                else:
+                                    original_path=root/'tests/e2e/sources'/case['id']/'reference'/binding['role']/Path(selector['descriptor'][1:-1]+'.java')
+                                    if not original_path.is_file():original_path=cache/'prepared'/case['id']/'reference'/binding['role']/Path(selector['descriptor'][1:-1]+'.java')
                             original_source=original_path.read_text(encoding='utf-8')
                         for fragment in executable_sources:
                             pattern=r'(?m)^([ \t]*(?:public|private|protected|static|final|strictfp|synchronized|\s)+(?:void|int|long|float|double|boolean|byte|short|char|(?:java\.lang\.)?String|[\w.$]+(?:\[\])*)\s+'+re.escape(fragment['name'])+r'\s*\([^)]*\)\s*)\{'
@@ -258,7 +260,7 @@ def run_public(root, cache, spec, manifest, case_ids=None,representation=None,jo
     return report
 
 
-def _catalog(root, assets, identity,field_kind=None):
+def _catalog(root, assets, identity,field_kind=None,role=None):
     from e2e import PreparationError, load
     by_path={a['path']:a for a in assets.values()}
     def checked(asset):
@@ -280,7 +282,12 @@ def _catalog(root, assets, identity,field_kind=None):
             declaration={**declaration,'enclosing_scope':projected['enclosing_scope']}
         api_declarations.append(declaration)
     declarations=list(api_declarations)
-    source_declarations=list(catalog['source_classfiles'].values())
+    source_entries=list(catalog['source_classfiles'].items())
+    counts={}
+    for _,declaration in source_entries:
+        owner=declaration['descriptor'];counts[owner]=counts.get(owner,0)+1
+    source_declarations=[declaration for path,declaration in source_entries
+                         if counts[declaration['descriptor']]==1 or Path(path).parts[0]==role]
     declarations.extend(source_declarations)
     explicit_entries=[]
     for path in catalog['explicit_facts']:

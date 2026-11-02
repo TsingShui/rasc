@@ -195,6 +195,17 @@ impl<'a> Engine<'a> {
         } else {
             (Vec::new(), None)
         };
+        let emission = if whole_class {
+            crate::pipeline::member_emission::collect(
+                &SchedulePermit { _private: () },
+                &image.index,
+                request.class,
+                &self.catalog,
+                control,
+            )?
+        } else {
+            crate::p8_java::member_emission::Plan::default()
+        };
         let mut members = Vec::new();
         let result = (|| -> Result<(), RequestError> {
             match request.method {
@@ -212,6 +223,7 @@ impl<'a> Engine<'a> {
                             method: id,
                         },
                         &mut diagnostics,
+                        &emission,
                         control,
                     )?;
                     reserve(&mut members, 1, control)?;
@@ -223,15 +235,50 @@ impl<'a> Engine<'a> {
                         MemberSelection::AllMethods,
                         |entry, control| {
                             if let MemberEntry::Method(method) = entry {
-                                let member = self.member(
-                                    &image.index,
-                                    MethodKey {
-                                        class: request.class,
-                                        method: method.method_idx,
-                                    },
-                                    &mut diagnostics,
-                                    control,
-                                )?;
+                                let key = MethodKey {
+                                    class: request.class,
+                                    method: method.method_idx,
+                                };
+                                let member = if let Some(declaration) =
+                                    emission.generated(method.method_idx, control)?
+                                {
+                                    let mut budget = control.method_budget()?;
+                                    let input = image.index.method_input(
+                                        request.class.class_def,
+                                        method.method_idx,
+                                        &mut budget,
+                                    )?;
+                                    let facts = MethodFacts {
+                                        key,
+                                        name: copy_units(input.declaration().name, &mut budget)?,
+                                        prototype: copy_proto(
+                                            &input.declaration().prototype,
+                                            &mut budget,
+                                        )?,
+                                        access_flags: input.access_flags(),
+                                    };
+                                    let original = image.index.debug_method(
+                                        request.class.class_def,
+                                        method.method_idx,
+                                        &mut budget.into_fallback()?,
+                                    )?;
+                                    MethodOutput::Generated {
+                                        facts,
+                                        declaration,
+                                        original,
+                                    }
+                                } else {
+                                    self.member(
+                                        &image.index,
+                                        MethodKey {
+                                            class: request.class,
+                                            method: method.method_idx,
+                                        },
+                                        &mut diagnostics,
+                                        &emission,
+                                        control,
+                                    )?
+                                };
                                 reserve(&mut members, 1, control)?;
                                 members.push(member);
                             }
@@ -337,13 +384,20 @@ impl<'a> Engine<'a> {
         index: &ProgramIndex<'a>,
         key: MethodKey,
         diagnostics: &mut DiagnosticLog,
+        emission: &crate::p8_java::member_emission::Plan,
         control: &mut RunContext<'_>,
     ) -> Result<MethodOutput, RequestError> {
         let candidate = match control.method_budget() {
             Err(error) => Err(error),
             Ok(mut budget) => {
-                let normal =
-                    normal_member(index, key, &self.catalog, self.representation, &mut budget);
+                let normal = normal_member(
+                    index,
+                    key,
+                    &self.catalog,
+                    self.representation,
+                    emission,
+                    &mut budget,
+                );
                 let (facts, cause) = match normal {
                     Ok(NormalMember::Java {
                         facts,
@@ -509,6 +563,7 @@ fn normal_member(
     key: MethodKey,
     catalog: &DeclarationCatalog,
     representation: RepresentationPolicy,
+    emission: &crate::p8_java::member_emission::Plan,
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<NormalMember, RequestError> {
     let input = index.method_input(key.class.class_def, key.method, budget)?;
@@ -518,9 +573,19 @@ fn normal_member(
         prototype: copy_proto(&input.declaration().prototype, budget)?,
         access_flags: input.access_flags(),
     };
-    if let Some(declaration) =
-        crate::p8_java::declaration(&SchedulePermit { _private: () }, &input, budget)?
-    {
+    let signature = crate::p4_calls::raw_signature::collect(
+        &SchedulePermit { _private: () },
+        &input,
+        catalog,
+        budget,
+    )?;
+    if let Some(declaration) = crate::p8_java::declaration(
+        &SchedulePermit { _private: () },
+        &input,
+        catalog,
+        signature.as_ref(),
+        budget,
+    )? {
         return Ok(NormalMember::Declaration { facts, declaration });
     }
     use crate::pipeline::branch::Analysis;
@@ -550,19 +615,20 @@ fn normal_member(
         representation,
         budget,
     )?;
-    let result = if crate::p8_java::source_group_admitted(index, key, &facts, budget)? {
-        crate::p8_java::verify_method(
-            &SchedulePermit { _private: () },
-            &input,
-            catalog,
-            planned,
-            &chain,
-            catalog.environment,
-            budget,
-        )?
-    } else {
-        Outcome::Declined(OutputReason::JavaAnalysisUnavailable)
-    };
+    let result =
+        if crate::p8_java::source_group_admitted(index, key, &facts, Some(emission), budget)? {
+            crate::p8_java::verify_method(
+                &SchedulePermit { _private: () },
+                &input,
+                catalog,
+                planned,
+                &chain,
+                catalog.environment,
+                budget,
+            )?
+        } else {
+            Outcome::Declined(OutputReason::JavaAnalysisUnavailable)
+        };
     let reason = match result {
         Outcome::Ready(declaration) => {
             let source = crate::p9_emit::java(&declaration, budget)?;
