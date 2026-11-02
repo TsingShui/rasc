@@ -6,14 +6,6 @@ pub(crate) enum ScalarType {
     Double,
 }
 impl ScalarType {
-    pub(crate) fn spelling(self) -> &'static str {
-        match self {
-            Self::Int => "int",
-            Self::Long => "long",
-            Self::Float => "float",
-            Self::Double => "double",
-        }
-    }
     pub(crate) fn words(self) -> usize {
         if matches!(self, Self::Long | Self::Double) {
             2

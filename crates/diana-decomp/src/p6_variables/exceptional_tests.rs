@@ -29,7 +29,7 @@ fn storage<'a>(bytes: &'a [u8], method: u32, facts: &str) -> StorageBody<'a> {
         .unwrap();
     crate::pipeline::branch::build(&input, &catalog(facts), &mut budget)
         .unwrap()
-        .storage
+        .into_storage()
         .unwrap_or_else(|| {
             panic!(
                 "missing storage for method {method}, length {}",
@@ -141,6 +141,7 @@ fn t17_old_values_shared_handlers_nested_throw_wide_and_loop_storage() {
 fn t17_certificate_rejects_wrong_source_placement_type_alias_and_ingress() {
     for mutation in 0..11 {
         let mut body = storage(LOOPS, 1, CATALOG);
+        let body = &mut *body;
         let snapshot = &mut body.exceptional.snapshots[0];
         match mutation {
             0 => snapshot.before.0 += 1,
@@ -190,10 +191,8 @@ fn t17_certificate_rejects_wrong_source_placement_type_alias_and_ingress() {
             8 => snapshot.source_block = crate::p2_flow::normal::BlockId(u32::MAX),
             9 => body.exceptional.ingress[0].bind_exception = body.typed.ssa.operations[0].id,
             10 => {
-                body.typed
-                    .initializations
-                    .deferred
-                    .resize(body.typed.ssa.values.len(), None);
+                let count = body.typed.ssa.values.len();
+                body.typed.initializations.deferred.resize(count, None);
                 body.typed.initializations.deferred
                     [usize::try_from(snapshot.copy.source.0).unwrap()] =
                     Some(crate::p5_types::initialization::InitializationId::This);
@@ -252,7 +251,7 @@ fn t17_exception_types_require_catch_hierarchy_evidence() {
         assert!(
             crate::pipeline::branch::build(&input, &catalog, &mut budget)
                 .unwrap()
-                .storage
+                .into_storage()
                 .is_none(),
             "{problem}"
         );
@@ -265,6 +264,7 @@ fn t17_exception_storage_producer_and_replay_enforce_resource_control() {
     for replay in [false, true] {
         for mode in 0..3 {
             let mut body = storage(LOOPS, 1, CATALOG);
+            let body = &mut *body;
             let cancelled = Cell::new(false);
             let check = || cancelled.get();
             let limits = Limits {

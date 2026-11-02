@@ -76,15 +76,20 @@ fn same_expression(
     };
     Ok(match (actual, bound.op) {
         (Expression::Unary(actual, source), Op::Unary(_, original, _)) => {
-            *actual == original && numeric_view(typed, *source, left, required(0)?)?
+            super::numeric_expression::verify_unary(*actual, original)
+                && numeric_view(typed, *source, left, required(0)?)?
         }
         (Expression::ReverseSubtract(actual, source), Op::ReverseSubtract(_, original, _)) => {
             *actual == original && numeric_view(typed, *source, left, Kind::Int)?
         }
-        (Expression::Compare(a, compare, b), Op::Compare(_, _, original, _)) => {
-            numeric_view(typed, *a, left, required(0)?)?
-                && *compare == original
-                && numeric_view(typed, *b, right, required(1)?)?
+        (Expression::Compare(tree), Op::Compare(_, _, original, _)) => {
+            match super::numeric_expression::verify(tree, original)? {
+                Some((a, b)) => {
+                    numeric_view(typed, a, left, required(0)?)?
+                        && numeric_view(typed, b, right, required(1)?)?
+                }
+                None => false,
+            }
         }
         (Expression::Constant(actual), Op::Constant(_, original)) => *actual == original,
         (Expression::ConstantWide(actual), Op::ConstantWide(_, original)) => *actual == original,
@@ -418,6 +423,11 @@ pub(super) fn verify(
     let mut types = Vec::new();
     for (index, local) in body.locals.iter().enumerate() {
         budget.charge_work(1)?;
+        if !super::local_declarations::verify(local, names, budget)? {
+            return Err(RequestError::InternalInvariant(
+                "Java local declaration differs from storage",
+            ));
+        }
         if ix(local.id.0)? != index {
             return Err(RequestError::InternalInvariant(
                 "dispatcher local identity was reused",

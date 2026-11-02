@@ -17,7 +17,13 @@ pub(crate) enum Shape {
     Dispatcher,
     Structured(Region),
 }
-pub(crate) struct PlannedBody<'a> {
+crate::substrate::checked::checked_product!(PlannedBody, PlannedBodyData);
+impl<'a> PlannedBody<'a> {
+    pub(crate) fn into_data(self) -> PlannedBodyData<'a> {
+        self.0
+    }
+}
+pub(crate) struct PlannedBodyData<'a> {
     _sealed: (),
     pub storage: StorageBody<'a>,
     pub shape: Shape,
@@ -111,10 +117,10 @@ pub(crate) fn build<'a>(
             Shape::Dispatcher
         }
     };
-    Ok(PlannedBody {
+    Ok(PlannedBody(PlannedBodyData {
         _sealed: (),
         storage,
         shape,
         switches,
-    })
+    }))
 }

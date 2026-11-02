@@ -103,7 +103,8 @@ pub(crate) struct Local {
     pub kind: Kind,
     pub initializer: Initializer,
 }
-pub(crate) struct StorageBody<'a> {
+crate::substrate::checked::checked_product!(StorageBody, StorageBodyData);
+pub(crate) struct StorageBodyData<'a> {
     _sealed: (),
     pub typed: TypedBody<'a>,
     pub locals: Vec<Local>,
@@ -229,12 +230,14 @@ fn plan_edge(
 pub(crate) fn allocate<'a>(
     typed: TypedBody<'a>,
     budget: &mut MethodBudget<'_, '_>,
-) -> Result<Option<StorageBody<'a>>, RequestError> {
+) -> Result<crate::substrate::outcome::Outcome<StorageBody<'a>>, RequestError> {
     let mut locals = Vec::new();
     for (index, definition) in typed.ssa.values.iter().enumerate() {
         budget.charge_work(1)?;
         let Some(kind) = typed.kinds[index] else {
-            return Ok(None);
+            return Ok(crate::substrate::outcome::Outcome::Declined(
+                crate::OutputReason::JavaAnalysisUnavailable,
+            ));
         };
         let parameter = match definition {
             Definition::Parameter(parameter) => Some(match typed.ssa.frame {
@@ -385,19 +388,23 @@ pub(crate) fn allocate<'a>(
         push(&mut normal, plan, budget)?;
     }
     let Some(exceptional) = super::exceptional::build(&typed, &mut locals, budget)? else {
-        return Ok(None);
+        return Ok(crate::substrate::outcome::Outcome::Declined(
+            crate::OutputReason::JavaAnalysisUnavailable,
+        ));
     };
-    Ok(Some(StorageBody {
-        _sealed: (),
-        exceptional,
-        typed,
-        locals,
-        filled_targets,
-        empty_fills,
-        fresh_fills,
-        object_allocations,
-        constructor_entry,
-        entry,
-        normal,
-    }))
+    Ok(crate::substrate::outcome::Outcome::Ready(StorageBody(
+        StorageBodyData {
+            _sealed: (),
+            exceptional,
+            typed,
+            locals,
+            filled_targets,
+            empty_fills,
+            fresh_fills,
+            object_allocations,
+            constructor_entry,
+            entry,
+            normal,
+        },
+    )))
 }

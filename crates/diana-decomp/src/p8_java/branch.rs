@@ -4,17 +4,17 @@ use crate::pipeline::branch::{BlockId, EdgeId, Op, TypedBody};
 use crate::substrate::owned::reserve;
 use crate::{EnvironmentId, MethodBudget, RequestError, VerifiedJavaMethod};
 
+pub(crate) use super::local_declarations::Local;
 pub(crate) use crate::p6_variables::LocalId;
-pub(crate) use crate::p6_variables::normal::Local;
 pub(crate) enum Right {
     Local(ValueUse),
     Literal(i32),
 }
 pub(crate) enum Expression {
-    Unary(crate::pipeline::scalar::Unary, ValueUse),
+    Unary(super::numeric_expression::Unary, ValueUse),
     ReverseSubtract(i32, ValueUse),
-    Compare(ValueUse, crate::pipeline::scalar::Compare, ValueUse),
-    Binary(ValueUse, crate::pipeline::branch::Arithmetic, Right),
+    Compare(super::numeric_expression::Expression),
+    Binary(ValueUse, crate::substrate::operators::Arithmetic, Right),
     Local(ValueUse),
     Constant(i32),
     ConstantWide(i64),
@@ -49,17 +49,6 @@ fn append<T>(
     items.push(item);
     Ok(())
 }
-pub(super) fn local_declarations(
-    storage: &StorageBody<'_>,
-    budget: &mut MethodBudget<'_, '_>,
-) -> Result<Vec<Local>, RequestError> {
-    let mut locals = Vec::new();
-    for &local in &storage.locals {
-        budget.charge_work(1)?;
-        append(&mut locals, local, budget)?;
-    }
-    Ok(locals)
-}
 pub(super) fn copies(
     storage: &StorageBody<'_>,
     incoming: Option<EdgeId>,
@@ -83,6 +72,7 @@ pub(super) fn copies(
 pub(super) fn operation(
     typed: &TypedBody<'_>,
     op: &crate::pipeline::branch::BoundOp,
+    budget: &mut MethodBudget<'_, '_>,
 ) -> Result<Option<Assignment>, RequestError> {
     use crate::p2_flow::normal::Operand;
     let numeric = |index: usize| -> Result<ValueUse, RequestError> {
@@ -105,9 +95,13 @@ pub(super) fn operation(
         ))
     };
     let expression = match op.op {
-        Op::Unary(_, unary, _) => Expression::Unary(unary, numeric(0)?),
+        Op::Unary(_, unary, _) => {
+            Expression::Unary(super::numeric_expression::unary(unary), numeric(0)?)
+        }
         Op::ReverseSubtract(_, literal, _) => Expression::ReverseSubtract(literal, numeric(0)?),
-        Op::Compare(_, _, compare, _) => Expression::Compare(numeric(0)?, compare, numeric(1)?),
+        Op::Compare(_, _, compare, _) => Expression::Compare(
+            super::numeric_expression::comparison(numeric(0)?, compare, numeric(1)?, budget)?,
+        ),
         Op::LongBinary(_, _, kind, _)
         | Op::DoubleBinary(_, _, kind, _)
         | Op::FloatBinary(_, _, kind, _) => {
@@ -177,26 +171,32 @@ pub(crate) fn verify(
     plan: crate::p7_regions::PlannedBody<'_>,
     environment: EnvironmentId,
     budget: &mut MethodBudget<'_, '_>,
-) -> Result<Option<VerifiedJavaMethod>, RequestError> {
+) -> Result<crate::substrate::outcome::Outcome<VerifiedJavaMethod>, RequestError> {
+    use crate::substrate::outcome::Outcome;
     let storage = &plan.storage;
+    let reason = if storage.typed.ssa.raw.try_byte_range().as_range().is_empty() {
+        crate::OutputReason::BranchJavaUnsupported
+    } else {
+        crate::OutputReason::JavaAnalysisUnavailable
+    };
     if matches!(plan.shape, crate::p7_regions::Shape::Protected(None)) {
-        return Ok(None);
+        return Ok(Outcome::Declined(reason));
     }
     if !super::array_ops::validate(input, catalog, &storage.typed, budget)? {
-        return Ok(None);
+        return Ok(Outcome::Declined(reason));
     }
     if !super::fresh_fill::validate(input, catalog, &storage.typed, budget)? {
-        return Ok(None);
+        return Ok(Outcome::Declined(reason));
     }
     if !super::cast_ops::validate(input, catalog, &storage.typed, budget)? {
-        return Ok(None);
+        return Ok(Outcome::Declined(reason));
     }
     let Some(mut calls) = super::calls::validate_bindings(input, catalog, &storage.typed, budget)?
     else {
-        return Ok(None);
+        return Ok(Outcome::Declined(reason));
     };
     let Some(type_names) = super::types::resolve(input, catalog, storage, budget)? else {
-        return Ok(None);
+        return Ok(Outcome::Declined(reason));
     };
     let method = super::dispatcher::verify(
         input,
@@ -207,8 +207,11 @@ pub(crate) fn verify(
         environment,
         budget,
     )?;
-    Ok(method.map(|mut method| {
-        method.type_names = type_names;
-        method
-    }))
+    Ok(match method {
+        Some(mut method) => {
+            method.type_names = type_names;
+            Outcome::Ready(method)
+        }
+        None => Outcome::Declined(reason),
+    })
 }

@@ -1,3 +1,4 @@
+pub(crate) mod array_literals;
 pub(crate) mod array_ops;
 pub(crate) mod branch;
 pub(crate) use branch::verify as verify_method;
@@ -16,18 +17,22 @@ mod exceptional;
 pub(crate) mod field_ops;
 pub(crate) mod fresh_fill;
 pub(crate) mod initializers;
+pub(crate) mod local_declarations;
 mod method;
 pub use initializers::VerifiedJavaInitializer;
 mod monitor_ops;
 mod natural_control;
+pub(crate) mod numeric_expression;
 pub(crate) mod object_allocation;
 pub(crate) mod protected;
 mod protected_control;
 mod protected_throws;
+mod protection_replay;
 #[cfg(test)]
 mod protection_tests;
 mod receiver_ops;
 pub(crate) mod source_control;
+mod source_replay;
 pub(crate) mod structured;
 pub(crate) mod types;
 pub(crate) mod values;

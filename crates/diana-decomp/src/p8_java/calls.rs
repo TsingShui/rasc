@@ -689,7 +689,7 @@ pub(super) fn operations(
                 },
                 budget,
             )?;
-        } else if let Some(assignment) = super::branch::operation(ssa, op)? {
+        } else if let Some(assignment) = super::branch::operation(ssa, op, budget)? {
             push(&mut output, Statement::Assignment(assignment), budget)?;
         }
     }

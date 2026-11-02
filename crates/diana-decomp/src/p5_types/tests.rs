@@ -1,7 +1,6 @@
 use crate::p2_flow::normal::Arithmetic;
 use crate::p8_java::MethodBody;
 use crate::p8_java::branch::{Expression, Right, ValueUse};
-use crate::pipeline::scalar::{ScalarType, Unary};
 use crate::test_fixture as fixture;
 use crate::*;
 
@@ -88,7 +87,7 @@ fn t10_literal_views_share_bits_without_reinterpreting_nonliteral_storage() {
                 let MethodOutput::Java { declaration, .. } = &members[0] else {
                     panic!("pure literal views were incorrectly unified")
                 };
-                let MethodBody::Dispatcher(body) = &declaration.body else {
+                let MethodBody::Dispatcher(body) = declaration.body() else {
                     panic!("literal views bypassed shared storage");
                 };
                 assert_eq!(body.cases.len(), 1);
@@ -96,8 +95,8 @@ fn t10_literal_views_share_bits_without_reinterpreting_nonliteral_storage() {
                 let mut values = vec![None; body.locals.len()];
                 for local in &body.locals {
                     if matches!(
-                        local.initializer,
-                        crate::p6_variables::normal::Initializer::Parameter(_)
+                        local.value,
+                        crate::p8_java::local_declarations::InitialValue::Parameter(_)
                     ) {
                         values[usize::try_from(local.id.0).unwrap()] = Some(Number::Int(7));
                     }
@@ -124,10 +123,9 @@ fn t10_literal_views_share_bits_without_reinterpreting_nonliteral_storage() {
                             }
                         }
                         Expression::Unary(
-                            Unary::Convert {
-                                from: ScalarType::Float,
-                                to: ScalarType::Int,
-                            },
+                            crate::p8_java::numeric_expression::Unary::Cast(
+                                crate::p8_java::numeric_expression::CastType::Int,
+                            ),
                             source,
                         ) => {
                             let Number::Float(value) = read(source, &values) else {

@@ -2,14 +2,26 @@ use crate::p5_types::initialization::{ChainArgument, ChainKind};
 use crate::p6_variables::normal::StorageBody;
 use crate::{CodeUnitOffset, MethodBudget, RegisterId, RequestError};
 
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub(crate) enum Invocation {
+    This,
+    Super,
+}
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub(crate) enum Argument {
+    Parameter(u32),
+    Int(i32),
+    Long(i64),
+}
 pub(crate) struct PrologueArgument {
-    pub origin: ChainArgument,
+    pub(super) origin: ChainArgument,
+    pub source: Argument,
     pub view: super::branch::ValueUse,
 }
 pub(crate) struct Prologue {
     _sealed: (),
     pub contract: crate::p4_calls::allocation::ConstructorContract,
-    pub kind: ChainKind,
+    pub kind: Invocation,
     pub pc: CodeUnitOffset,
     pub receiver: RegisterId,
     pub arguments: Vec<PrologueArgument>,
@@ -53,6 +65,11 @@ pub(super) fn lower(
             &mut arguments,
             PrologueArgument {
                 origin,
+                source: match origin {
+                    ChainArgument::Parameter(index) => Argument::Parameter(index),
+                    ChainArgument::Literal(value) => Argument::Int(value),
+                    ChainArgument::WideLiteral(value) => Argument::Long(value),
+                },
                 view: super::values::lower(super::branch::LocalId(usage.value.0), usage.conversion),
             },
             budget,
@@ -61,7 +78,10 @@ pub(super) fn lower(
     Ok(Some(Prologue {
         _sealed: (),
         contract,
-        kind: entry.kind,
+        kind: match entry.kind {
+            ChainKind::This => Invocation::This,
+            ChainKind::Super => Invocation::Super,
+        },
         pc: entry.pc,
         receiver: entry.receiver,
         arguments,
@@ -93,8 +113,10 @@ pub(super) fn verify(
     else {
         return Ok(false);
     };
-    if actual.kind != entry.kind
-        || actual.pc != entry.pc
+    if !matches!(
+        (actual.kind, entry.kind),
+        (Invocation::This, ChainKind::This) | (Invocation::Super, ChainKind::Super)
+    ) || actual.pc != entry.pc
         || actual.receiver != entry.receiver
         || actual.contract.reference != entry.reference
         || actual.contract.owner != original.owner
@@ -127,6 +149,9 @@ pub(super) fn verify(
     {
         budget.charge_work(1)?;
         if value.origin != expected
+            || !matches!((value.source,expected),(Argument::Parameter(a),ChainArgument::Parameter(b)) if a==b)
+                && !matches!((value.source,expected),(Argument::Int(a),ChainArgument::Literal(b)) if a==b)
+                && !matches!((value.source,expected),(Argument::Long(a),ChainArgument::WideLiteral(b)) if a==b)
             || !super::dispatcher_verify::call_argument(&storage.typed, value.view, source, formal)?
         {
             return Ok(false);

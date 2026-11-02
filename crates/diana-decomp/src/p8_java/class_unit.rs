@@ -7,11 +7,15 @@ use crate::{ClassKey, EnvironmentId, MethodOutput, RequestError, RunContext};
 /// bindings passed native P8 verification. Rendering uses the report's verified
 /// members; it does not reopen the input or invoke a compiler.
 pub struct VerifiedJavaUnit {
-    pub(crate) header: String,
+    header: String,
     environment: EnvironmentId,
     _binding: crate::p4_calls::class_scope::ClassBindings,
 }
 impl VerifiedJavaUnit {
+    pub(crate) fn source_header(&self) -> &str {
+        &self.header
+    }
+
     pub fn environment(&self) -> EnvironmentId {
         self.environment
     }

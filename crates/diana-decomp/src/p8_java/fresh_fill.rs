@@ -21,7 +21,7 @@ pub(crate) struct Fill {
     pub array: LocalId,
     pub allocation: OpId,
     pub payload: CodeUnitOffset,
-    pub elements: Vec<crate::p5_types::ArrayElement>,
+    pub elements: Vec<super::array_literals::Literal>,
 }
 fn ix(value: u32) -> Result<usize, RequestError> {
     usize::try_from(value).map_err(|_| RequestError::PlatformCapacity)
@@ -197,7 +197,11 @@ pub(super) fn fill(
             .ok_or(RequestError::InternalInvariant(
                 "sealed array element changed representation",
             ))?;
-        crate::substrate::owned::push(&mut elements, element, budget)?;
+        crate::substrate::owned::push(
+            &mut elements,
+            super::array_literals::lower(&element)?,
+            budget,
+        )?;
     }
     Ok(Fill {
         array: LocalId(proof.array.0),

@@ -48,7 +48,7 @@ fn t13_region_certificate_rejects_lost_leaves_edges_wrong_scope_and_duplicates()
     let MethodOutput::Java { declaration, .. } = &members[0] else {
         panic!("ordinary int loop must remain Java");
     };
-    let MethodBody::Dispatcher(storage) = &declaration.body else {
+    let MethodBody::Dispatcher(storage) = declaration.body() else {
         panic!("dispatch mode must retain the normal storage body");
     };
     let flow = super::flow::Flow {

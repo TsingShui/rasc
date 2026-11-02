@@ -38,7 +38,8 @@ impl Kind {
         })
     }
 }
-pub(crate) struct TypedBody<'a> {
+crate::substrate::checked::checked_product!(TypedBody, TypedBodyData);
+pub(crate) struct TypedBodyData<'a> {
     _sealed: (),
     pub ssa: SsaBody<'a>,
     pub roots: super::reference_roots::ReferenceRoots,
@@ -141,7 +142,8 @@ pub(crate) fn solve<'a>(
     input: &crate::input::MethodInput<'_, '_>,
     resolved: crate::p4_calls::normal::ResolvedBody<'a>,
     budget: &mut MethodBudget<'_, '_>,
-) -> Result<Option<TypedBody<'a>>, RequestError> {
+) -> Result<crate::substrate::outcome::Outcome<TypedBody<'a>>, RequestError> {
+    let resolved = resolved.into_data();
     let ssa = resolved.ssa;
     let bindings = resolved.calls;
     let source_throws = resolved.source_throws;
@@ -294,7 +296,9 @@ pub(crate) fn solve<'a>(
                     let Some(component) =
                         array_components.component(input, operation.input(0)?, budget)?
                     else {
-                        return Ok(None);
+                        return Ok(crate::substrate::outcome::Outcome::Declined(
+                            crate::OutputReason::JavaAnalysisUnavailable,
+                        ));
                     };
                     let kind = component.kind();
                     if !element.accepts(component) {
@@ -315,7 +319,11 @@ pub(crate) fn solve<'a>(
                     )
                 }
                 Op::Move(_, _) | Op::MoveWide(_, _) => (0, None, None),
-                Op::Exception(_) => return Ok(None),
+                Op::Exception(_) => {
+                    return Ok(crate::substrate::outcome::Outcome::Declined(
+                        crate::OutputReason::JavaAnalysisUnavailable,
+                    ));
+                }
                 Op::Monitor(..)
                 | Op::Nop
                 | Op::ArrayStore(..)
@@ -346,7 +354,9 @@ pub(crate) fn solve<'a>(
                     }
                 }
                 let Some(kind) = kind else {
-                    return Ok(None);
+                    return Ok(crate::substrate::outcome::Outcome::Declined(
+                        crate::OutputReason::JavaAnalysisUnavailable,
+                    ));
                 };
                 (0, None, Some(kind))
             }
@@ -479,39 +489,59 @@ pub(crate) fn solve<'a>(
         }
     }
     if type_conflict {
-        return Ok(None);
+        return Ok(crate::substrate::outcome::Outcome::Declined(
+            crate::OutputReason::JavaAnalysisUnavailable,
+        ));
     }
     let Some(arrays) = solve_arrays(input, &ssa, &kinds, &integral_bits, budget)? else {
-        return Ok(None);
+        return Ok(crate::substrate::outcome::Outcome::Declined(
+            crate::OutputReason::JavaAnalysisUnavailable,
+        ));
     };
     if !numeric_valid {
-        return Ok(None);
+        return Ok(crate::substrate::outcome::Outcome::Declined(
+            crate::OutputReason::JavaAnalysisUnavailable,
+        ));
     }
     let Some(numeric_uses) = super::numeric::solve(&ssa, &kinds, budget)? else {
-        return Ok(None);
+        return Ok(crate::substrate::outcome::Outcome::Declined(
+            crate::OutputReason::JavaAnalysisUnavailable,
+        ));
     };
     let initializations = super::initialization::solve(&ssa, budget)?;
     let Some(array_uses) = solve_new_arrays(&ssa, &kinds, budget)? else {
-        return Ok(None);
+        return Ok(crate::substrate::outcome::Outcome::Declined(
+            crate::OutputReason::JavaAnalysisUnavailable,
+        ));
     };
     let Some(filled_arrays) = solve_filled_arrays(input, &ssa, &kinds, &integral_bits, budget)?
     else {
-        return Ok(None);
+        return Ok(crate::substrate::outcome::Outcome::Declined(
+            crate::OutputReason::JavaAnalysisUnavailable,
+        ));
     };
     let Some(empty_fills) = solve_empty_fills(&ssa, &kinds, budget)? else {
-        return Ok(None);
+        return Ok(crate::substrate::outcome::Outcome::Declined(
+            crate::OutputReason::JavaAnalysisUnavailable,
+        ));
     };
     let Some(cast_uses) = solve_casts(&ssa, &kinds, budget)? else {
-        return Ok(None);
+        return Ok(crate::substrate::outcome::Outcome::Declined(
+            crate::OutputReason::JavaAnalysisUnavailable,
+        ));
     };
     let Some(field_uses) = solve_fields(&ssa, &field_declarations, &kinds, &integral_bits, budget)?
     else {
-        return Ok(None);
+        return Ok(crate::substrate::outcome::Outcome::Declined(
+            crate::OutputReason::JavaAnalysisUnavailable,
+        ));
     };
     let Some(call_uses) =
         super::calls::solve(&ssa, &bindings, &kinds, &integral_bits, &ranges, budget)?
     else {
-        return Ok(None);
+        return Ok(crate::substrate::outcome::Outcome::Declined(
+            crate::OutputReason::JavaAnalysisUnavailable,
+        ));
     };
     for (index, block) in ssa.blocks.iter().enumerate() {
         budget.charge_work(1)?;
@@ -548,7 +578,7 @@ pub(crate) fn solve<'a>(
             }
         }
     }
-    let mut typed = TypedBody {
+    let mut typed = TypedBody(TypedBodyData {
         source_throws,
         roots,
         _sealed: (),
@@ -571,12 +601,12 @@ pub(crate) fn solve<'a>(
         fresh_fills: array_uses.fills,
         field_declarations,
         field_uses,
-    };
-    for _ in &typed.ssa.values {
+    });
+    for _ in &typed.0.ssa.values {
         budget.charge_work(1)?;
-        push(&mut typed.returned_uses, None, budget)?;
+        push(&mut typed.0.returned_uses, None, budget)?;
     }
-    for (index, block) in typed.ssa.blocks.iter().enumerate() {
+    for (index, block) in typed.0.ssa.blocks.iter().enumerate() {
         budget.charge_work(1)?;
         let thrown = if matches!(block.terminal, crate::p2_flow::normal::Terminal::Throw(_)) {
             let value = typed.ssa.bound[index]
@@ -590,23 +620,27 @@ pub(crate) fn solve<'a>(
             ) {
                 UseConversion::Identity
             } else {
-                return Ok(None);
+                return Ok(crate::substrate::outcome::Outcome::Declined(
+                    crate::OutputReason::JavaAnalysisUnavailable,
+                ));
             })
         } else {
             None
         };
-        push(&mut typed.thrown_uses, thrown, budget)?;
+        push(&mut typed.0.thrown_uses, thrown, budget)?;
         if matches!(block.terminal, crate::p2_flow::normal::Terminal::Return(_)) {
             let value = typed.ssa.bound[index]
                 .terminal
                 .ok_or(RequestError::InternalInvariant("typed return lost value"))?;
             let Some(conversion) = return_use(&typed, value)? else {
-                return Ok(None);
+                return Ok(crate::substrate::outcome::Outcome::Declined(
+                    crate::OutputReason::JavaAnalysisUnavailable,
+                ));
             };
-            typed.returned_uses[ix(value.0)?] = Some(conversion);
+            typed.0.returned_uses[ix(value.0)?] = Some(conversion);
         }
     }
-    Ok(Some(typed))
+    Ok(crate::substrate::outcome::Outcome::Ready(typed))
 }
 fn solve_arrays(
     input: &crate::input::MethodInput<'_, '_>,

@@ -266,4 +266,117 @@ fn t20_constructor_delegation_keeps_the_original_instance_field_in_a_complete_un
         diana_decomp::render(&report, &mut RunContext::new(Limits::default(), &|| false)).unwrap();
     assert!(rendered.source.contains("public int n;"));
     assert_eq!(rendered.spans.len(), 2);
+
+    let mut partial: serde_json::Value =
+        serde_json::from_str(include_str!("../fixtures/initialization/d042-catalog.json")).unwrap();
+    let missing = serde_json::json!(
+        "Ljava/lang/StringBuilder;"
+            .encode_utf16()
+            .collect::<Vec<_>>()
+    );
+    partial["classes"]
+        .as_array_mut()
+        .unwrap()
+        .retain(|class| class["descriptor"] != missing);
+    let partial_report = decompile(
+        include_bytes!("../fixtures/initialization/d042.dex"),
+        &serde_json::to_string(&partial).unwrap(),
+    );
+    assert!(matches!(partial_report.class(), ClassOutput::Mixed { .. }));
+    assert!(
+        matches!(
+            &partial_report.class().members()[0],
+            MethodOutput::Java { .. }
+        ),
+        "a callee's missing body binding erased the available delegating constructor"
+    );
+    assert!(
+        matches!(&partial_report.class().members()[1],MethodOutput::Debug{reason,..} if partial_report.diagnostics()[reason.0].code()==diana_decomp::DiagnosticCode::BindingEvidenceMissing)
+    );
+
+    let original = include_bytes!("../fixtures/initialization/d042.dex");
+    let mut control = RunContext::new(Limits::default(), &|| false);
+    let index = diana_decomp::input::ProgramIndex::open(original, &mut control).unwrap();
+    let mut reference_offset = None;
+    let mut allocation_offset = None;
+    index
+        .class(ClassDefId(0), &mut control)
+        .unwrap()
+        .visit_methods(&mut control, |method, _| {
+            if method.method_idx == diana_decomp::MethodId(1) {
+                let diana_decomp::input::MethodBody::Code(code) = method.body? else {
+                    panic!("delegated constructor lost code");
+                };
+                assert_eq!(code.instructions()[0], 0x70);
+                reference_offset = Some(code.code_byte_range().start.0 + 18);
+                let mut pc=diana_decomp::CodeUnitOffset(0);
+                while pc.0<code.code_units().0 {
+                    let layout=diana_decomp::raw::instruction_layout(code.instructions(),pc,diana_decomp::raw::DexVersion::V035).unwrap();
+                    if matches!(layout.kind(),diana_decomp::raw::LayoutKind::Instruction(spec) if spec.opcode==0x22) {
+                        allocation_offset=Some(code.code_byte_range().start.0+16+usize::try_from(pc.0).unwrap()*2);
+                        break;
+                    }
+                    pc=diana_decomp::CodeUnitOffset(pc.0+layout.width().0);
+                }
+            }
+            Ok(())
+        })
+        .unwrap();
+    let mut damaged = original.to_vec();
+    let allocation = allocation_offset.unwrap();
+    assert_eq!(damaged[allocation], 0x22);
+    assert_eq!(damaged[allocation + 1], 0);
+    damaged[allocation + 1] = 1;
+    let local_failure = decompile(
+        &damaged,
+        include_str!("../fixtures/initialization/d042-catalog.json"),
+    );
+    assert!(
+        matches!(
+            &local_failure.class().members()[0],
+            MethodOutput::Java { .. }
+        ),
+        "a callee's post-super definition failure erased the delegating constructor"
+    );
+    assert_eq!(local_failure.class().fields().len(), 1);
+    let damaged_member = &local_failure.class().members()[1];
+    assert_eq!(damaged_member.key().method, diana_decomp::MethodId(1));
+    let reason = match damaged_member {
+        MethodOutput::Debug { reason, .. } | MethodOutput::Unavailable { reason, .. } => reason,
+        _ => panic!("damaged delegated constructor became Java"),
+    };
+    assert_eq!(
+        local_failure.diagnostics()[reason.0].cause.kind(),
+        FailureKind::Malformed
+    );
+    assert_eq!(
+        local_failure.diagnostics()[reason.0].code(),
+        diana_decomp::DiagnosticCode::UndefinedRegister
+    );
+    let mut cyclic = original.to_vec();
+    let offset = reference_offset.unwrap();
+    cyclic[offset..offset + 2].copy_from_slice(&0u16.to_le_bytes());
+    let rejected = decompile(
+        &cyclic,
+        include_str!("../fixtures/initialization/d042-catalog.json"),
+    );
+    assert!(matches!(rejected.class(), ClassOutput::Mixed { .. }));
+    assert_eq!(rejected.class().fields().len(), 1);
+    assert_eq!(rejected.class().members().len(), 2);
+    for (expected, member) in rejected.class().members().iter().enumerate() {
+        let MethodOutput::Debug { reason, source, .. } = member else {
+            panic!("cyclic delegation lost its classified original member");
+        };
+        assert_eq!(member.key().method.0, u32::try_from(expected).unwrap());
+        assert_eq!(
+            rejected.diagnostics()[reason.0].code(),
+            diana_decomp::DiagnosticCode::InitializationUnavailable
+        );
+        assert_eq!(
+            rejected.diagnostics()[reason.0].cause.kind(),
+            FailureKind::Unsupported
+        );
+        let raw: serde_json::Value = serde_json::from_str(source.source()).unwrap();
+        assert_eq!(raw["complete"], true);
+    }
 }

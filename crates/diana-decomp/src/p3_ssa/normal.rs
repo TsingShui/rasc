@@ -56,7 +56,8 @@ pub(crate) struct BoundBlock {
     pub terminal: Option<ValueId>,
     pub other: Option<ValueId>,
 }
-pub(crate) struct SsaBody<'a> {
+crate::substrate::checked::checked_product!(SsaBody, SsaBodyData);
+pub(crate) struct SsaBodyData<'a> {
     pub object_creations: Vec<crate::p2_flow::normal::ObjectCreation>,
     pub array_creations: Vec<crate::p2_flow::normal::ArrayCreation>,
     pub filled_arrays: Vec<crate::p2_flow::normal::FilledArraySite>,
@@ -583,7 +584,8 @@ pub(crate) fn build<'a>(
             budget,
         )?;
     }
-    let ssa = SsaBody {
+    let flow = flow.into_data();
+    let ssa = SsaBody(SsaBodyData {
         _sealed: (),
         switches: flow.switches,
         calls: flow.calls,
@@ -608,7 +610,7 @@ pub(crate) fn build<'a>(
         values,
         phis,
         bound,
-    };
+    });
     let widths = super::word_ownership::analyze(&ssa, &seeds, &outgoing, &exceptional, budget)?;
     verify(&ssa, &seeds, &widths, budget)?;
     Ok(ssa)

@@ -90,7 +90,7 @@ pub(super) fn entry(
     }
     Ok(follow)
 }
-pub(super) fn blocks(
+pub(crate) fn blocks(
     nodes: &[Node],
     roots: &[NodeId],
     budget: &mut MethodBudget<'_, '_>,

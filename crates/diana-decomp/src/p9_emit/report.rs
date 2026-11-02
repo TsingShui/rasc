@@ -20,7 +20,7 @@ pub fn render(
             members,
             ..
         } => {
-            output.push(&declaration.header, control)?;
+            output.push(declaration.source_header(), control)?;
             for field in fields {
                 control.checkpoint()?;
                 let crate::FieldDeclarationOutput::Java(declaration) = &field.declaration else {

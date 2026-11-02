@@ -13,8 +13,46 @@ struct NamedType {
 pub(crate) struct TypeNames {
     named: Vec<NamedType>,
 }
+#[derive(Clone, Copy)]
+pub(crate) struct SourceType(SourceSpelling);
+#[derive(Clone, Copy)]
+enum SourceSpelling {
+    Builtin(&'static str),
+    Named(usize),
+}
 impl TypeNames {
-    pub(crate) fn name<'a>(
+    pub(super) fn source_type(
+        &self,
+        kind: Kind,
+        budget: &mut MethodBudget<'_, '_>,
+    ) -> Result<SourceType, RequestError> {
+        if let Some(name) = kind.builtin_spelling() {
+            return Ok(SourceType(SourceSpelling::Builtin(name)));
+        }
+        for (index, name) in self.named.iter().enumerate() {
+            budget.charge_work(1)?;
+            if name.original == kind {
+                return Ok(SourceType(SourceSpelling::Named(index)));
+            }
+        }
+        Err(RequestError::InternalInvariant(
+            "source declaration lost type spelling",
+        ))
+    }
+    pub(crate) fn source_name(&self, name: SourceType) -> Result<&str, RequestError> {
+        match name.0 {
+            SourceSpelling::Builtin(name) => Ok(name),
+            SourceSpelling::Named(index) => self
+                .named
+                .get(index)
+                .map(|name| name.source.as_str())
+                .ok_or(RequestError::InternalInvariant(
+                    "source type spelling is foreign",
+                )),
+        }
+    }
+
+    pub(super) fn name<'a>(
         &'a self,
         kind: Kind,
         budget: &mut MethodBudget<'_, '_>,
@@ -32,7 +70,7 @@ impl TypeNames {
             "verified method lost a named source type",
         ))
     }
-    pub(crate) fn declaration<'a>(
+    pub(super) fn declaration<'a>(
         &'a self,
         declaration: DeclarationType,
         budget: &mut MethodBudget<'_, '_>,
@@ -42,7 +80,7 @@ impl TypeNames {
             _ => self.name(declaration.kind(), budget),
         }
     }
-    pub(crate) fn result<'a>(
+    pub(super) fn result<'a>(
         &'a self,
         result: ResultType,
         budget: &mut MethodBudget<'_, '_>,

@@ -1,15 +1,15 @@
 mod array_components;
 mod arrays;
 pub(crate) mod calls;
+mod declaration_types;
 pub(crate) mod initialization;
-mod integral;
 pub(crate) mod normal;
 pub(crate) mod numeric;
 mod primitive_stores;
-pub(crate) use arrays::{ArrayElement, PrimitiveArray};
+pub(crate) use crate::substrate::primitive_types::PrimitiveArray;
+pub(crate) use arrays::ArrayElement;
 pub(crate) mod reference_roots;
 mod references;
-pub(crate) use integral::{IntRange, Narrow};
-pub(crate) use references::BuiltinReference;
+pub(crate) use crate::substrate::primitive_types::{BuiltinReference, IntRange, Narrow};
 #[cfg(test)]
 mod tests;

@@ -203,7 +203,7 @@ fn lower_into(
                     body: inner,
                     catches,
                 } => {
-                    output.marker(Step::Try, budget)?;
+                    output.marker(Step::Try(id), budget)?;
                     push(&mut todo, Work::Step(Step::EndTry), budget)?;
                     for catch in catches.iter().rev() {
                         budget.charge_work(1)?;
@@ -233,5 +233,5 @@ pub(super) fn lower(
     };
     let mut plan = Builder::new();
     lower_into(&input, &mut plan, budget)?;
-    plan.finish(storage, budget)
+    plan.finish(storage, Some(region), names, budget)
 }

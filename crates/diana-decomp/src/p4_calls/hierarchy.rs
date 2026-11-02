@@ -78,7 +78,7 @@ pub(super) fn collect<'a>(
         }
         push(&mut active, class, budget)?;
         push(&mut pending, (class, true), budget)?;
-        let object = crate::p5_types::BuiltinReference::Object.descriptor();
+        let object = crate::substrate::primitive_types::BuiltinReference::Object.descriptor();
         if crate::p0_knowledge::same_units(&class.descriptor, object, budget)? {
             if class.parent.is_some() || !class.interfaces.is_empty() {
                 return Ok(None);

@@ -68,7 +68,7 @@ pub(super) fn write(
                 super::java::value_use(*lock, output, budget)?;
                 output.push(") {\n", budget)?;
             }
-            Step::Try => output.push("try {\n", budget)?,
+            Step::Try(_) => output.push("try {\n", budget)?,
             Step::CloseTryBody => output.push("}", budget)?,
             Step::EndTry => {}
             Step::Catch {

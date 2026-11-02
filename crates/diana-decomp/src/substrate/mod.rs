@@ -1,4 +1,8 @@
+pub(crate) mod checked;
 pub(crate) mod fields;
 pub(crate) mod ids;
+pub(crate) mod operators;
+pub(crate) mod outcome;
 pub(crate) mod owned;
+pub(crate) mod primitive_types;
 pub(crate) mod report;

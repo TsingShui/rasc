@@ -1,5 +1,5 @@
 use crate::input::catalog::{MemberEntry, MemberSelection};
-use crate::input::{DexContainer, InputError, InputProblem, ProgramIndex, RawPrintable};
+use crate::input::{DexContainer, InputError, InputProblem, ProgramIndex};
 use crate::substrate::owned::{copy_proto, copy_units, reserve};
 use crate::substrate::report::*;
 use crate::{
@@ -510,25 +510,24 @@ fn normal_member(
     if let Some(declaration) = crate::p8_java::declaration(&input, budget)? {
         return Ok(NormalMember::Declaration { facts, declaration });
     }
-    let mut reason = if matches!(input.raw(), RawPrintable::Declaration(_)) {
-        OutputReason::JavaDeclarationUnsupported
+    use crate::pipeline::branch::Analysis;
+    use crate::substrate::outcome::Outcome;
+    let (storage, declaration_failure) =
+        match crate::pipeline::branch::build(&input, catalog, budget)? {
+            Analysis::Ready {
+                storage,
+                declaration_failure,
+            } => (storage, declaration_failure),
+            Analysis::Declined(reason) => return Ok(NormalMember::Raw { facts, reason }),
+        };
+    let planned = crate::p7_regions::build(storage, representation, budget)?;
+    let result = if crate::p8_java::source_group_admitted(index, key, &facts, budget)? {
+        crate::p8_java::verify_method(&input, catalog, planned, catalog.environment, budget)?
     } else {
-        OutputReason::JavaAnalysisUnavailable
+        Outcome::Declined(OutputReason::JavaAnalysisUnavailable)
     };
-    let analysis = crate::pipeline::branch::build(&input, catalog, budget)?;
-    if let Some(storage) = analysis.storage {
-        let protected = !storage.typed.ssa.raw.try_byte_range().as_range().is_empty();
-        let planned = crate::p7_regions::build(storage, representation, budget)?;
-        let group_admitted = crate::p8_java::source_group_admitted(index, key, &facts, budget)?;
-        if group_admitted
-            && let Some(declaration) = crate::p8_java::verify_method(
-                &input,
-                catalog,
-                planned,
-                catalog.environment,
-                budget,
-            )?
-        {
+    let reason = match result {
+        Outcome::Ready(declaration) => {
             let source = crate::p9_emit::java(&declaration, budget)?;
             return Ok(NormalMember::Java {
                 facts,
@@ -536,11 +535,8 @@ fn normal_member(
                 source,
             });
         }
-        if group_admitted && !protected {
-            reason = OutputReason::BranchJavaUnsupported;
-        }
-    }
-    let reason = analysis.declaration_failure.unwrap_or(reason);
+        Outcome::Declined(reason) => declaration_failure.unwrap_or(reason),
+    };
     Ok(NormalMember::Raw { facts, reason })
 }
 

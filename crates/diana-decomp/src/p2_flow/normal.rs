@@ -1,5 +1,4 @@
 use crate::input::{MethodInput, RawMethodView, RawPrintable};
-use crate::p5_types::normal::Kind;
 use crate::raw::{LayoutKind, RawLiteral, instruction_layout};
 use crate::substrate::owned::push;
 use crate::{CodeUnitOffset, MethodBudget, RegisterId, RequestError};
@@ -17,12 +16,34 @@ pub(crate) enum DeclarationType {
     Object,
     String,
     Float,
-    PrimitiveArray(crate::p5_types::PrimitiveArray),
+    PrimitiveArray(crate::substrate::primitive_types::PrimitiveArray),
     ObjectArray,
     Nominal(crate::TypeId),
     ReferenceArray(crate::input::TypeProjection),
     ProjectedNominal(crate::input::TypeProjection),
-    Narrow(crate::p5_types::Narrow),
+    Narrow(crate::substrate::primitive_types::Narrow),
+}
+impl<'a> FlowBody<'a> {
+    pub(crate) fn into_data(self) -> FlowBodyData<'a> {
+        self.0
+    }
+}
+impl crate::substrate::primitive_types::PrimitiveArray {
+    pub(crate) fn value_type(self) -> crate::p2_flow::normal::DeclarationType {
+        use crate::p2_flow::normal::DeclarationType;
+        match self {
+            Self::Boolean => DeclarationType::Boolean,
+            Self::Byte => DeclarationType::Narrow(crate::substrate::primitive_types::Narrow::Byte),
+            Self::Short => {
+                DeclarationType::Narrow(crate::substrate::primitive_types::Narrow::Short)
+            }
+            Self::Char => DeclarationType::Narrow(crate::substrate::primitive_types::Narrow::Char),
+            Self::Int => DeclarationType::Int,
+            Self::Float => DeclarationType::Float,
+            Self::Long => DeclarationType::Long,
+            Self::Double => DeclarationType::Double,
+        }
+    }
 }
 impl DeclarationType {
     pub(crate) fn field_offset(self) -> u8 {
@@ -30,9 +51,9 @@ impl DeclarationType {
             Self::Int | Self::Float => 0,
             Self::Long | Self::Double => 1,
             Self::Boolean => 3,
-            Self::Narrow(crate::p5_types::Narrow::Byte) => 4,
-            Self::Narrow(crate::p5_types::Narrow::Char) => 5,
-            Self::Narrow(crate::p5_types::Narrow::Short) => 6,
+            Self::Narrow(crate::substrate::primitive_types::Narrow::Byte) => 4,
+            Self::Narrow(crate::substrate::primitive_types::Narrow::Char) => 5,
+            Self::Narrow(crate::substrate::primitive_types::Narrow::Short) => 6,
             Self::Object
             | Self::String
             | Self::PrimitiveArray(_)
@@ -47,40 +68,6 @@ impl DeclarationType {
             ValueWidth::Two
         } else {
             ValueWidth::One
-        }
-    }
-    pub(crate) fn kind(self) -> Kind {
-        match self {
-            Self::Int | Self::Narrow(_) => Kind::Int,
-            Self::Boolean => Kind::Boolean,
-            Self::Object => Kind::Object,
-            Self::String => Kind::String,
-            Self::Float => Kind::Float,
-            Self::Long => Kind::Long,
-            Self::Double => Kind::Double,
-            Self::PrimitiveArray(kind) => Kind::PrimitiveArray(kind),
-            Self::ObjectArray => Kind::ObjectArray,
-            Self::Nominal(id) => Kind::Nominal(id),
-            Self::ReferenceArray(key) => Kind::ReferenceArray(key),
-            Self::ProjectedNominal(key) => Kind::ProjectedNominal(key),
-        }
-    }
-    pub(crate) fn range(self) -> Option<crate::p5_types::IntRange> {
-        use crate::p5_types::IntRange;
-        match self {
-            Self::Int => Some(IntRange::ALL),
-            Self::Boolean => Some(IntRange::BOOLEAN),
-            Self::Narrow(kind) => Some(kind.range()),
-            Self::Object
-            | Self::String
-            | Self::Float
-            | Self::Long
-            | Self::Double
-            | Self::PrimitiveArray(_)
-            | Self::ObjectArray
-            | Self::Nominal(_)
-            | Self::ReferenceArray(_)
-            | Self::ProjectedNominal(_) => None,
         }
     }
 }
@@ -110,20 +97,7 @@ impl ResultType {
         }
     }
 }
-#[derive(Clone, Copy, Eq, PartialEq)]
-pub(crate) enum Arithmetic {
-    Add,
-    Sub,
-    Mul,
-    And,
-    Div,
-    Rem,
-    Or,
-    Xor,
-    Shl,
-    Shr,
-    Ushr,
-}
+pub(crate) use crate::substrate::operators::Arithmetic;
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub(crate) enum Operand {
     Register(RegisterId),
@@ -198,7 +172,7 @@ pub(crate) struct ObjectCreation {
 }
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub(crate) enum ArrayKind {
-    Primitive(crate::p5_types::PrimitiveArray),
+    Primitive(crate::substrate::primitive_types::PrimitiveArray),
     Object,
     Reference(crate::input::TypeProjection),
 }
@@ -244,9 +218,6 @@ impl ArrayKind {
             Self::Object => DeclarationType::ObjectArray,
             Self::Reference(key) => DeclarationType::ReferenceArray(key),
         }
-    }
-    pub(crate) fn kind(self) -> Kind {
-        self.declaration().kind()
     }
 }
 pub(crate) struct ArrayCreation {
@@ -555,7 +526,8 @@ impl MethodFrame {
         }
     }
 }
-pub(crate) struct FlowBody<'a> {
+crate::substrate::checked::checked_product!(FlowBody, FlowBodyData);
+pub(crate) struct FlowBodyData<'a> {
     pub object_creations: Vec<ObjectCreation>,
     pub array_creations: Vec<ArrayCreation>,
     pub filled_arrays: Vec<FilledArraySite>,
@@ -751,18 +723,20 @@ pub(crate) fn declaration_for_projection(
         return Ok(Some(kind));
     }
     if descriptor.matches_with(
-        crate::p5_types::BuiltinReference::Object.descriptor(),
+        crate::substrate::primitive_types::BuiltinReference::Object.descriptor(),
         budget,
     )? {
         return Ok(Some(DeclarationType::Object));
     }
     if descriptor.matches_with(
-        crate::p5_types::BuiltinReference::String.descriptor(),
+        crate::substrate::primitive_types::BuiltinReference::String.descriptor(),
         budget,
     )? {
         return Ok(Some(DeclarationType::String));
     }
-    if let Some(kind) = crate::p5_types::PrimitiveArray::parse(descriptor, budget)? {
+    if let Some(kind) =
+        crate::substrate::primitive_types::PrimitiveArray::parse(descriptor, budget)?
+    {
         return Ok(Some(DeclarationType::PrimitiveArray(kind)));
     }
     if descriptor.matches_with(ArrayKind::object_descriptor(), budget)? {
@@ -805,9 +779,9 @@ pub(crate) fn primitive_field_type(
         Some(74) => DeclarationType::Long,
         Some(68) => DeclarationType::Double,
         Some(90) => DeclarationType::Boolean,
-        Some(66) => DeclarationType::Narrow(crate::p5_types::Narrow::Byte),
-        Some(83) => DeclarationType::Narrow(crate::p5_types::Narrow::Short),
-        Some(67) => DeclarationType::Narrow(crate::p5_types::Narrow::Char),
+        Some(66) => DeclarationType::Narrow(crate::substrate::primitive_types::Narrow::Byte),
+        Some(83) => DeclarationType::Narrow(crate::substrate::primitive_types::Narrow::Short),
+        Some(67) => DeclarationType::Narrow(crate::substrate::primitive_types::Narrow::Char),
         _ => return Ok(None),
     };
     Ok(if units.next(budget)?.is_none() {
@@ -819,9 +793,11 @@ pub(crate) fn primitive_field_type(
 pub(crate) fn decode<'a>(
     input: &MethodInput<'_, 'a>,
     budget: &mut MethodBudget<'_, '_>,
-) -> Result<Option<FlowBody<'a>>, RequestError> {
+) -> Result<crate::substrate::outcome::Outcome<FlowBody<'a>>, RequestError> {
     let RawPrintable::Method(checked) = input.raw() else {
-        return Ok(None);
+        return Ok(crate::substrate::outcome::Outcome::Declined(
+            crate::OutputReason::JavaDeclarationUnsupported,
+        ));
     };
     let raw = checked.layout().original().clone();
     let protection = crate::input::protection::read(checked.layout(), budget)?;
@@ -875,21 +851,21 @@ pub(crate) fn decode<'a>(
                 .return_type
                 .matches_with(&[66], budget)?
             {
-                DeclarationType::Narrow(crate::p5_types::Narrow::Byte)
+                DeclarationType::Narrow(crate::substrate::primitive_types::Narrow::Byte)
             } else if input
                 .declaration()
                 .prototype
                 .return_type
                 .matches_with(&[83], budget)?
             {
-                DeclarationType::Narrow(crate::p5_types::Narrow::Short)
+                DeclarationType::Narrow(crate::substrate::primitive_types::Narrow::Short)
             } else if input
                 .declaration()
                 .prototype
                 .return_type
                 .matches_with(&[67], budget)?
             {
-                DeclarationType::Narrow(crate::p5_types::Narrow::Char)
+                DeclarationType::Narrow(crate::substrate::primitive_types::Narrow::Char)
             } else if let Some(kind) = reference_type(
                 input,
                 input.declaration().prototype.return_type,
@@ -898,7 +874,9 @@ pub(crate) fn decode<'a>(
             )? {
                 kind
             } else {
-                return Ok(None);
+                return Ok(crate::substrate::outcome::Outcome::Declined(
+                    crate::OutputReason::JavaAnalysisUnavailable,
+                ));
             },
         )
     };
@@ -926,7 +904,9 @@ pub(crate) fn decode<'a>(
                 DeclarationType::Int
             } else if name.matches_with(&[90], budget)? {
                 DeclarationType::Boolean
-            } else if let Some(kind) = crate::p5_types::PrimitiveArray::parse(name, budget)? {
+            } else if let Some(kind) =
+                crate::substrate::primitive_types::PrimitiveArray::parse(name, budget)?
+            {
                 DeclarationType::PrimitiveArray(kind)
             } else if name.matches_with(
                 &[
@@ -943,11 +923,11 @@ pub(crate) fn decode<'a>(
             } else if name.matches_with(&[68], budget)? {
                 DeclarationType::Double
             } else if name.matches_with(&[66], budget)? {
-                DeclarationType::Narrow(crate::p5_types::Narrow::Byte)
+                DeclarationType::Narrow(crate::substrate::primitive_types::Narrow::Byte)
             } else if name.matches_with(&[83], budget)? {
-                DeclarationType::Narrow(crate::p5_types::Narrow::Short)
+                DeclarationType::Narrow(crate::substrate::primitive_types::Narrow::Short)
             } else if name.matches_with(&[67], budget)? {
-                DeclarationType::Narrow(crate::p5_types::Narrow::Char)
+                DeclarationType::Narrow(crate::substrate::primitive_types::Narrow::Char)
             } else if name.matches_with(
                 &[
                     76, 106, 97, 118, 97, 47, 108, 97, 110, 103, 47, 79, 98, 106, 101, 99, 116, 59,
@@ -956,7 +936,7 @@ pub(crate) fn decode<'a>(
             )? {
                 DeclarationType::Object
             } else if name.matches_with(
-                crate::p5_types::BuiltinReference::String.descriptor(),
+                crate::substrate::primitive_types::BuiltinReference::String.descriptor(),
                 budget,
             )? {
                 DeclarationType::String
@@ -970,7 +950,9 @@ pub(crate) fn decode<'a>(
         },
     )?;
     if !supported {
-        return Ok(None);
+        return Ok(crate::substrate::outcome::Outcome::Declined(
+            crate::OutputReason::JavaAnalysisUnavailable,
+        ));
     }
     let mut instructions = Vec::new();
     let mut calls = Vec::new();
@@ -1008,7 +990,9 @@ pub(crate) fn decode<'a>(
             .ok_or(RequestError::PlatformCapacity)?;
         if checked.layout().is_reachable(pc) {
             let LayoutKind::Instruction(spec) = layout.kind() else {
-                return Ok(None);
+                return Ok(crate::substrate::outcome::Outcome::Declined(
+                    crate::OutputReason::JavaAnalysisUnavailable,
+                ));
             };
             let operands =
                 crate::input::operands::instruction_operands(raw.instructions(), pc, layout)
@@ -1252,7 +1236,9 @@ pub(crate) fn decode<'a>(
                         budget,
                     )?
                     else {
-                        return Ok(None);
+                        return Ok(crate::substrate::outcome::Outcome::Declined(
+                            crate::OutputReason::JavaAnalysisUnavailable,
+                        ));
                     };
                     Decoded::Op(match (spec.opcode - 0x52) / 7 {
                         0 => Op::FieldLoad(reg(0)?, reg(1)?, id, kind),
@@ -1292,7 +1278,9 @@ pub(crate) fn decode<'a>(
                         ));
                     };
                     let Some(component) = ArrayKind::parse(input, reference, budget)? else {
-                        return Ok(None);
+                        return Ok(crate::substrate::outcome::Outcome::Declined(
+                            crate::OutputReason::JavaAnalysisUnavailable,
+                        ));
                     };
                     let id = ArrayCreationId(
                         u32::try_from(array_creations.len())
@@ -1318,7 +1306,9 @@ pub(crate) fn decode<'a>(
                         ));
                     };
                     let Some(component) = ArrayKind::parse(input, reference, budget)? else {
-                        return Ok(None);
+                        return Ok(crate::substrate::outcome::Outcome::Declined(
+                            crate::OutputReason::JavaAnalysisUnavailable,
+                        ));
                     };
                     let mut registers = Vec::new();
                     for register in operands.registers().iter() {
@@ -1423,7 +1413,9 @@ pub(crate) fn decode<'a>(
                     };
                     let descriptor = input.type_name(reference, budget)?;
                     let Some(kind) = reference_type(input, descriptor, reference, budget)? else {
-                        return Ok(None);
+                        return Ok(crate::substrate::outcome::Outcome::Declined(
+                            crate::OutputReason::JavaAnalysisUnavailable,
+                        ));
                     };
                     if spec.opcode == 0x20 {
                         Decoded::Op(Op::InstanceOf(reg(0)?, reg(1)?, reference, kind))
@@ -1585,13 +1577,13 @@ pub(crate) fn decode<'a>(
                         Some(73) => InvokeResult::Word(DeclarationType::Int),
                         Some(90) => InvokeResult::Word(DeclarationType::Boolean),
                         Some(66) => InvokeResult::Word(DeclarationType::Narrow(
-                            crate::p5_types::Narrow::Byte,
+                            crate::substrate::primitive_types::Narrow::Byte,
                         )),
                         Some(83) => InvokeResult::Word(DeclarationType::Narrow(
-                            crate::p5_types::Narrow::Short,
+                            crate::substrate::primitive_types::Narrow::Short,
                         )),
                         Some(67) => InvokeResult::Word(DeclarationType::Narrow(
-                            crate::p5_types::Narrow::Char,
+                            crate::substrate::primitive_types::Narrow::Char,
                         )),
                         Some(70) => InvokeResult::Word(DeclarationType::Float),
                         Some(74) => InvokeResult::Wide(DeclarationType::Long),
@@ -1661,7 +1653,11 @@ pub(crate) fn decode<'a>(
                                 InvokeResult::Wide(_) => {
                                     matches!(result_layout.kind(), LayoutKind::Instruction(spec) if spec.opcode == 0x0b)
                                 }
-                                InvokeResult::Reference(None) => return Ok(None),
+                                InvokeResult::Reference(None) => {
+                                    return Ok(crate::substrate::outcome::Outcome::Declined(
+                                        crate::OutputReason::JavaAnalysisUnavailable,
+                                    ));
+                                }
                                 InvokeResult::Void => false,
                             };
                             if !valid {
@@ -1734,7 +1730,11 @@ pub(crate) fn decode<'a>(
                         next,
                     )
                 }
-                _ => return Ok(None),
+                _ => {
+                    return Ok(crate::substrate::outcome::Outcome::Declined(
+                        crate::OutputReason::JavaAnalysisUnavailable,
+                    ));
+                }
             };
             if let Decoded::Op(op) = decoded {
                 if matches!(op, Op::Monitor(..)) {
@@ -1877,34 +1877,38 @@ pub(crate) fn decode<'a>(
     }
     let Some(exception_edges) = super::protection::build(&protection, &blocks, &edges, budget)?
     else {
-        return Ok(None);
+        return Ok(crate::substrate::outcome::Outcome::Declined(
+            crate::OutputReason::JavaAnalysisUnavailable,
+        ));
     };
     super::protection::verify(&raw, &protection, &blocks, &edges, &exception_edges, budget)?;
-    Ok(Some(FlowBody {
-        object_creations,
-        array_creations,
-        filled_arrays,
-        fresh_fills,
-        empty_fills,
-        casts,
-        strings,
-        frame,
-        method_monitor: if input.access_flags() & 0x20 == 0 {
-            None
-        } else if input.access_flags() & 8 != 0 {
-            Some(MethodMonitor::DeclaringClass)
-        } else {
-            Some(MethodMonitor::This)
+    Ok(crate::substrate::outcome::Outcome::Ready(FlowBody(
+        FlowBodyData {
+            object_creations,
+            array_creations,
+            filled_arrays,
+            fresh_fills,
+            empty_fills,
+            casts,
+            strings,
+            frame,
+            method_monitor: if input.access_flags() & 0x20 == 0 {
+                None
+            } else if input.access_flags() & 8 != 0 {
+                Some(MethodMonitor::DeclaringClass)
+            } else {
+                Some(MethodMonitor::This)
+            },
+            _sealed: (),
+            calls,
+            result,
+            switches,
+            raw,
+            parameters,
+            blocks,
+            edges,
+            protection,
+            exception_edges,
         },
-        _sealed: (),
-        calls,
-        result,
-        switches,
-        raw,
-        parameters,
-        blocks,
-        edges,
-        protection,
-        exception_edges,
-    }))
+    )))
 }

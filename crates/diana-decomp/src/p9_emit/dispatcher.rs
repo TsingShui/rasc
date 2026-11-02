@@ -1,6 +1,5 @@
 use super::java::{assignments, local};
 use crate::p8_java::dispatcher::{Dispatcher, Edge, Transfer};
-use crate::pipeline::branch::Kind;
 use crate::substrate::owned::TextBuffer;
 use crate::{MethodBudget, RequestError};
 
@@ -23,8 +22,8 @@ pub(super) fn locals(
     if let Some(entry) = body.prologue.first() {
         output.push(
             match entry.kind {
-                crate::p5_types::initialization::ChainKind::This => "this(",
-                crate::p5_types::initialization::ChainKind::Super => "super(",
+                crate::p8_java::constructor_entry::Invocation::This => "this(",
+                crate::p8_java::constructor_entry::Invocation::Super => "super(",
             },
             budget,
         )?;
@@ -39,43 +38,21 @@ pub(super) fn locals(
     }
     for declaration in &body.locals {
         budget.charge_work(1)?;
-        output.push(type_names.name(declaration.kind, budget)?, budget)?;
+        output.push(type_names.source_name(declaration.source_type)?, budget)?;
         output.push(" ", budget)?;
         local(declaration.id, output, budget)?;
-        if declaration.initializer == crate::p6_variables::normal::Initializer::ThisAfterChain {
-            output.push(" = this", budget)?;
-        } else if let crate::p6_variables::normal::Initializer::Parameter(parameter) =
-            declaration.initializer
-        {
-            match parameter {
-                crate::p6_variables::normal::Parameter::This => output.push(" = this", budget)?,
-                crate::p6_variables::normal::Parameter::Explicit(index) => {
-                    output.push(" = p", budget)?;
-                    output.unsigned(u64::from(index), budget)?;
-                }
+        use crate::p8_java::local_declarations::InitialValue;
+        match declaration.value {
+            InitialValue::This => output.push(" = this", budget)?,
+            InitialValue::Parameter(index) => {
+                output.push(" = p", budget)?;
+                output.unsigned(u64::from(index), budget)?;
             }
-        } else if declaration.initializer == crate::p6_variables::normal::Initializer::Default {
-            // The SSA/edge definition certificate establishes assignment before
-            // every original read; these DA-only values are never observed.
-            output.push(
-                match declaration.kind {
-                    Kind::Int => " = 0",
-                    Kind::Boolean => " = false",
-                    Kind::Object
-                    | Kind::Throwable
-                    | Kind::Class
-                    | Kind::String
-                    | Kind::PrimitiveArray(_)
-                    | Kind::ObjectArray
-                    | Kind::Nominal(_)
-                    | Kind::ReferenceArray(_)
-                    | Kind::ProjectedNominal(_) => " = null",
-                    Kind::Float => " = 0.0f",
-                    Kind::Long => " = 0L",
-                    Kind::Double => " = 0.0d",
-                },
-                budget,
-            )?;
+            InitialValue::Literal(literal) => {
+                output.push(" = ", budget)?;
+                output.push(literal, budget)?;
+            }
+            InitialValue::Absent => {}
         }
         output.push(";\n", budget)?;
     }

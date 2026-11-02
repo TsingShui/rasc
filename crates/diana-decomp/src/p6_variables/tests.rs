@@ -64,7 +64,7 @@ fn t09_two_entry_dispatcher_preserves_edges_and_never_reads_da_defaults() {
     use crate::p8_java::MethodBody;
     use crate::p8_java::branch::{Assignment, Expression, Right};
     use crate::p8_java::dispatcher::{Dispatcher, Transfer};
-    use crate::pipeline::branch::Arithmetic;
+    use crate::substrate::operators::Arithmetic;
     use crate::{
         ByteOffset, ClassDefId, ClassKey, DeclarationCatalog, DexId, DexImage, Engine,
         EnvironmentId, ImageOrigin, InputId, MethodOutput, MethodSelector, Options, Request,
@@ -78,7 +78,7 @@ fn t09_two_entry_dispatcher_preserves_edges_and_never_reads_da_defaults() {
                 Expression::ConstantWide(..)
                 | Expression::Unary(..)
                 | Expression::ReverseSubtract(..)
-                | Expression::Compare(_, _, _) => {
+                | Expression::Compare(_) => {
                     panic!("operation outside the existing int-cycle interpretation")
                 }
                 Expression::Local(view) => read(values, view.value()),
@@ -104,13 +104,10 @@ fn t09_two_entry_dispatcher_preserves_edges_and_never_reads_da_defaults() {
     fn execute(body: &Dispatcher, argument: i32) -> i32 {
         let mut values = vec![None; body.locals.len()];
         for local in &body.locals {
-            if let crate::p6_variables::normal::Initializer::Parameter(parameter) =
-                local.initializer
+            if let crate::p8_java::local_declarations::InitialValue::Parameter(parameter) =
+                local.value
             {
-                assert_eq!(
-                    parameter,
-                    crate::p6_variables::normal::Parameter::Explicit(0)
-                );
+                assert_eq!(parameter, 0);
                 values[usize::try_from(local.id.0).unwrap()] = Some(argument);
             }
         }
@@ -244,7 +241,7 @@ fn t09_two_entry_dispatcher_preserves_edges_and_never_reads_da_defaults() {
     let MethodOutput::Java { declaration, .. } = &members[0] else {
         panic!("ordinary two-entry cycle was rejected")
     };
-    let MethodBody::Dispatcher(body) = &declaration.body else {
+    let MethodBody::Dispatcher(body) = declaration.body() else {
         panic!("two-entry cycle must not be treated as a diamond")
     };
     for (argument, expected) in [(-1, 21), (0, 21), (1, 12), (5, 12)] {

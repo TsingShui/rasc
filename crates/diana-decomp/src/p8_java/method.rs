@@ -10,11 +10,11 @@ pub enum CompilationContract {
 /// type names. It contains no input or analysis-arena borrows. Verification does
 /// not invoke a Java compiler.
 pub struct VerifiedJavaMethod {
-    pub(crate) header: String,
-    pub(crate) syntax: super::initializers::MemberSyntax,
-    pub(crate) body: MethodBody,
+    pub(super) header: String,
+    pub(super) syntax: super::initializers::MemberSyntax,
+    pub(super) body: MethodBody,
     environment: EnvironmentId,
-    pub(crate) type_names: super::types::TypeNames,
+    pub(super) type_names: super::types::TypeNames,
 }
 pub(crate) enum MethodBody {
     Protected(super::protected::ProtectedBody),
@@ -22,6 +22,19 @@ pub(crate) enum MethodBody {
     Dispatcher(super::dispatcher::Dispatcher),
 }
 impl VerifiedJavaMethod {
+    pub(crate) fn source_header(&self) -> &str {
+        &self.header
+    }
+    pub(crate) fn syntax(&self) -> super::initializers::MemberSyntax {
+        self.syntax
+    }
+    pub(crate) fn body(&self) -> &MethodBody {
+        &self.body
+    }
+    pub(crate) fn type_names(&self) -> &super::types::TypeNames {
+        &self.type_names
+    }
+
     pub(super) fn structured(
         header: String,
         body: super::structured::StructuredBody,

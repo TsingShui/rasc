@@ -98,6 +98,7 @@ pub(super) fn verify(
     environment: EnvironmentId,
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<Option<VerifiedJavaMethod>, RequestError> {
+    let plan = plan.into_data();
     let storage = &plan.storage;
     let placements = super::exceptional::obligations(storage, budget)?;
     if !placements.is_empty() && !matches!(plan.shape, crate::p7_regions::Shape::Protected(Some(_)))
@@ -207,7 +208,7 @@ pub(super) fn verify(
     if let Some(entry) = super::constructor_entry::lower(storage, calls, budget)? {
         push(&mut prologue, entry, budget)?;
     }
-    let locals = super::branch::local_declarations(storage, budget)?;
+    let locals = super::local_declarations::lower(storage, type_names, budget)?;
     let mut entry = Vec::new();
     copies(storage, None, BlockId(0), &mut entry, budget)?;
     let mut cases = Vec::new();

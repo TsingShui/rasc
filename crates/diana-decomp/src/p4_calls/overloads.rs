@@ -165,7 +165,7 @@ fn widens(
             if from.first() == Some(&91) {
                 if crate::p0_knowledge::same_units(
                     to,
-                    crate::p5_types::BuiltinReference::Object.descriptor(),
+                    crate::substrate::primitive_types::BuiltinReference::Object.descriptor(),
                     budget,
                 )? {
                     Some(true)

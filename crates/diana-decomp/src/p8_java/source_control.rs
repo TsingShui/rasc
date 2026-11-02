@@ -4,11 +4,16 @@ use crate::pipeline::branch::{BlockId, EdgeId};
 use crate::substrate::owned::push;
 use crate::{MethodBudget, RequestError};
 
+#[cfg(test)]
+#[path = "source_control_tests.rs"]
+mod tests;
+
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub(crate) enum Label {
     Loop0,
     Nearest,
 }
+#[cfg_attr(test, derive(Clone))]
 pub(crate) enum Step {
     Statements(BlockId),
     Copies {
@@ -27,7 +32,7 @@ pub(crate) enum Step {
     Throw(ValueUse),
     Rethrow(BlockId),
     Synchronized(ValueUse),
-    Try,
+    Try(crate::p7_regions::protection::NodeId),
     CloseTryBody,
     EndTry,
     Catch {
@@ -110,6 +115,8 @@ impl Builder {
     pub(super) fn finish(
         self,
         storage: &Dispatcher,
+        protection: Option<&crate::p7_regions::protection::Protection>,
+        names: &[super::protected::CatchName],
         budget: &mut MethodBudget<'_, '_>,
     ) -> Result<Plan, RequestError> {
         enum Scope {
@@ -217,7 +224,7 @@ impl Builder {
                     }
                 }
                 Step::Synchronized(_) => push(&mut scopes, Scope::Synchronized, budget)?,
-                Step::Try => push(&mut scopes, Scope::Try, budget)?,
+                Step::Try(_) => push(&mut scopes, Scope::Try, budget)?,
                 Step::CloseTryBody => {
                     let scope = scopes
                         .last_mut()
@@ -266,6 +273,7 @@ impl Builder {
                 "source control has unclosed scopes",
             ));
         }
+        super::source_replay::verify(&self.steps, storage, protection, names, budget)?;
         Ok(Plan { steps: self.steps })
     }
 }

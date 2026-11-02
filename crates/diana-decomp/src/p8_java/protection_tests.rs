@@ -31,7 +31,7 @@ fn storage<'a>(bytes: &'a [u8], method: u32, json: &str) -> StorageBody<'a> {
         .unwrap();
     crate::pipeline::branch::build(&input, &catalog(json), &mut budget)
         .unwrap()
-        .storage
+        .into_storage()
         .unwrap()
 }
 #[test]
@@ -155,7 +155,7 @@ fn t18_snapshot_placement_and_precise_rethrow_use_checked_storage() {
     let catalog = catalog(CATALOG);
     let storage = crate::pipeline::branch::build(&input, &catalog, &mut budget)
         .unwrap()
-        .storage
+        .into_storage()
         .unwrap();
     let mut calls = super::calls::validate_bindings(&input, &catalog, &storage.typed, &mut budget)
         .unwrap()

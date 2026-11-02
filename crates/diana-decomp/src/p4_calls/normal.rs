@@ -37,7 +37,8 @@ impl CallEvidence {
         }
     }
 }
-pub(crate) struct ResolvedBody<'a> {
+crate::substrate::checked::checked_product!(ResolvedBody, ResolvedBodyData);
+pub(crate) struct ResolvedBodyData<'a> {
     _sealed: (),
     pub ssa: SsaBody<'a>,
     pub calls: Vec<CallEvidence>,
@@ -45,6 +46,11 @@ pub(crate) struct ResolvedBody<'a> {
     pub fields: Vec<Option<FieldEvidence>>,
     pub source_throws: Option<SourceThrows>,
     pub decline_reason: Option<crate::OutputReason>,
+}
+impl<'a> ResolvedBody<'a> {
+    pub(crate) fn into_data(self) -> ResolvedBodyData<'a> {
+        self.0
+    }
 }
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub(crate) enum FieldScope {
@@ -201,7 +207,7 @@ pub(crate) fn collect<'a>(
         )?;
     }
     let exceptions = super::exceptions::collect(input, catalog, &ssa, budget)?;
-    Ok(ResolvedBody {
+    Ok(ResolvedBody(ResolvedBodyData {
         _sealed: (),
         source_throws,
         decline_reason,
@@ -209,7 +215,7 @@ pub(crate) fn collect<'a>(
         ssa,
         calls,
         fields,
-    })
+    }))
 }
 pub(crate) fn binding_available(
     input: &MethodInput<'_, '_>,

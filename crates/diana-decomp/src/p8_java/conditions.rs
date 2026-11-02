@@ -213,7 +213,7 @@ mod tests {
             .unwrap();
         let storage = crate::pipeline::branch::build(&input, &catalog, &mut budget)
             .unwrap()
-            .storage
+            .into_storage()
             .unwrap();
         let typed = &storage.typed;
         let block = &typed.ssa.blocks[0];

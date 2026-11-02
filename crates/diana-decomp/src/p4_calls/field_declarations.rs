@@ -28,7 +28,10 @@ pub(crate) fn bind(
         [74] => "long",
         [70] => "float",
         [68] => "double",
-        descriptor if descriptor == crate::p5_types::BuiltinReference::String.descriptor() => {
+        descriptor
+            if descriptor
+                == crate::substrate::primitive_types::BuiltinReference::String.descriptor() =>
+        {
             if !string_scope(index, key, catalog, control)? {
                 return Ok(None);
             }
@@ -99,7 +102,7 @@ fn string_scope(
             None => {
                 return Ok(crate::p0_knowledge::same_units(
                     &current.descriptor,
-                    crate::p5_types::BuiltinReference::Object.descriptor(),
+                    crate::substrate::primitive_types::BuiltinReference::Object.descriptor(),
                     control,
                 )?);
             }

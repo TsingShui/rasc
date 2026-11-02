@@ -10,15 +10,15 @@ pub(crate) enum CallFormal {
     Numeric(crate::pipeline::scalar::ScalarType),
     Int,
     Boolean,
-    Narrow(crate::p5_types::Narrow),
-    Reference(crate::p5_types::BuiltinReference),
+    Narrow(crate::substrate::primitive_types::Narrow),
+    Reference(crate::substrate::primitive_types::BuiltinReference),
 }
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub(crate) enum StaticResult {
     /// The exact non-builtin class result is retained in the sealed prototype.
     Nominal,
     Array,
-    Reference(crate::p5_types::BuiltinReference),
+    Reference(crate::substrate::primitive_types::BuiltinReference),
     Int,
     Boolean,
     Numeric,
@@ -301,15 +301,15 @@ pub(super) fn collect_static(
     {
         StaticResult::Boolean
     } else if reference.declaration.prototype.return_type.matches_with(
-        crate::p5_types::BuiltinReference::String.descriptor(),
+        crate::substrate::primitive_types::BuiltinReference::String.descriptor(),
         budget,
     )? {
-        StaticResult::Reference(crate::p5_types::BuiltinReference::String)
+        StaticResult::Reference(crate::substrate::primitive_types::BuiltinReference::String)
     } else if reference.declaration.prototype.return_type.matches_with(
-        crate::p5_types::BuiltinReference::Object.descriptor(),
+        crate::substrate::primitive_types::BuiltinReference::Object.descriptor(),
         budget,
     )? {
-        StaticResult::Reference(crate::p5_types::BuiltinReference::Object)
+        StaticResult::Reference(crate::substrate::primitive_types::BuiltinReference::Object)
     } else if reference
         .declaration
         .prototype
@@ -386,7 +386,7 @@ pub(super) fn original_formals(
     reference.declaration.prototype.visit_parameter_types(
         budget,
         |name, budget| -> Result<(), RequestError> {
-            use crate::p5_types::Narrow;
+            use crate::substrate::primitive_types::Narrow;
             let formal = if name.matches_with(&[73], budget)? {
                 CallFormal::Int
             } else if name.matches_with(&[74], budget)? {
@@ -404,15 +404,15 @@ pub(super) fn original_formals(
             } else if name.matches_with(&[67], budget)? {
                 CallFormal::Narrow(Narrow::Char)
             } else if name.matches_with(
-                crate::p5_types::BuiltinReference::Object.descriptor(),
+                crate::substrate::primitive_types::BuiltinReference::Object.descriptor(),
                 budget,
             )? {
-                CallFormal::Reference(crate::p5_types::BuiltinReference::Object)
+                CallFormal::Reference(crate::substrate::primitive_types::BuiltinReference::Object)
             } else if name.matches_with(
-                crate::p5_types::BuiltinReference::String.descriptor(),
+                crate::substrate::primitive_types::BuiltinReference::String.descriptor(),
                 budget,
             )? {
-                CallFormal::Reference(crate::p5_types::BuiltinReference::String)
+                CallFormal::Reference(crate::substrate::primitive_types::BuiltinReference::String)
             } else {
                 supported = false;
                 return Ok(());

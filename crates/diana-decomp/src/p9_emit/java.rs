@@ -8,27 +8,29 @@ pub(crate) fn java(
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<String, RequestError> {
     let mut output = TextBuffer::method(budget);
-    output.push(&method.header, budget)?;
+    output.push(method.source_header(), budget)?;
     output.push(" {\n", budget)?;
-    if let crate::p8_java::initializers::MemberSyntax::Initializer { always_abrupt } = method.syntax
+    if let crate::p8_java::initializers::MemberSyntax::Initializer { always_abrupt } =
+        method.syntax()
     {
         output.push("initExit: {\n", budget)?;
         if always_abrupt {
             output.push("if (true) {\n", budget)?;
         }
     }
-    match &method.body {
+    match method.body() {
         MethodBody::Protected(body) => {
-            super::protected::write(body, &method.type_names, &mut output, budget)?
+            super::protected::write(body, method.type_names(), &mut output, budget)?
         }
         MethodBody::Structured(body) => {
-            super::structured::write(body, &method.type_names, &mut output, budget)?
+            super::structured::write(body, method.type_names(), &mut output, budget)?
         }
         MethodBody::Dispatcher(body) => {
-            super::dispatcher::write(body, &method.type_names, &mut output, budget)?
+            super::dispatcher::write(body, method.type_names(), &mut output, budget)?
         }
     }
-    if let crate::p8_java::initializers::MemberSyntax::Initializer { always_abrupt } = method.syntax
+    if let crate::p8_java::initializers::MemberSyntax::Initializer { always_abrupt } =
+        method.syntax()
     {
         if always_abrupt {
             output.push("}\n", budget)?;
@@ -85,15 +87,15 @@ pub(super) fn chain_argument(
         argument.view,
         output,
         budget,
-        |_, output, budget| match argument.origin {
-            crate::p5_types::initialization::ChainArgument::Parameter(index) => {
+        |_, output, budget| match argument.source {
+            crate::p8_java::constructor_entry::Argument::Parameter(index) => {
                 output.push("p", budget)?;
                 output.unsigned(u64::from(index), budget)
             }
-            crate::p5_types::initialization::ChainArgument::Literal(value) => {
+            crate::p8_java::constructor_entry::Argument::Int(value) => {
                 output.arguments(format_args!("{value}"), budget)
             }
-            crate::p5_types::initialization::ChainArgument::WideLiteral(value) => {
+            crate::p8_java::constructor_entry::Argument::Long(value) => {
                 output.arguments(format_args!("{value}L"), budget)
             }
         },
@@ -169,21 +171,13 @@ pub(super) fn assignments(
         output.push(" = ", budget)?;
         match statement.expression {
             BranchExpression::Unary(unary, source) => {
-                use crate::pipeline::scalar::Unary;
+                use crate::p8_java::numeric_expression::Unary;
                 match unary {
-                    Unary::Neg | Unary::NegLong | Unary::NegFloat | Unary::NegDouble => {
-                        output.push("-", budget)?
-                    }
-                    Unary::Not | Unary::NotLong => output.push("~", budget)?,
-                    _ => {
-                        let kind = match unary {
-                            Unary::Byte => "byte",
-                            Unary::Char => "char",
-                            Unary::Short => "short",
-                            _ => unary.signature().1.spelling(),
-                        };
+                    Unary::Negate => output.push("-", budget)?,
+                    Unary::Complement => output.push("~", budget)?,
+                    Unary::Cast(kind) => {
                         output.push("(", budget)?;
-                        output.push(kind, budget)?;
+                        output.push(kind.spelling(), budget)?;
                         output.push(") ", budget)?;
                     }
                 }
@@ -195,27 +189,22 @@ pub(super) fn assignments(
                 output.arguments(format_args!("{literal} - "), budget)?;
                 value_use(source, output, budget)?;
             }
-            BranchExpression::Compare(a, compare, b) => super::comparison::write(
-                compare,
-                |right, output, budget| value_use(if right { b } else { a }, output, budget),
-                output,
-                budget,
-            )?,
+            BranchExpression::Compare(ref tree) => super::comparison::write(tree, output, budget)?,
             BranchExpression::Binary(left, kind, ref right) => {
                 value_use(left, output, budget)?;
                 output.push(
                     match kind {
-                        crate::pipeline::branch::Arithmetic::Add => " + ",
-                        crate::pipeline::branch::Arithmetic::Sub => " - ",
-                        crate::pipeline::branch::Arithmetic::Mul => " * ",
-                        crate::pipeline::branch::Arithmetic::And => " & ",
-                        crate::pipeline::branch::Arithmetic::Or => " | ",
-                        crate::pipeline::branch::Arithmetic::Xor => " ^ ",
-                        crate::pipeline::branch::Arithmetic::Div => " / ",
-                        crate::pipeline::branch::Arithmetic::Rem => " % ",
-                        crate::pipeline::branch::Arithmetic::Shl => " << ",
-                        crate::pipeline::branch::Arithmetic::Shr => " >> ",
-                        crate::pipeline::branch::Arithmetic::Ushr => " >>> ",
+                        crate::substrate::operators::Arithmetic::Add => " + ",
+                        crate::substrate::operators::Arithmetic::Sub => " - ",
+                        crate::substrate::operators::Arithmetic::Mul => " * ",
+                        crate::substrate::operators::Arithmetic::And => " & ",
+                        crate::substrate::operators::Arithmetic::Or => " | ",
+                        crate::substrate::operators::Arithmetic::Xor => " ^ ",
+                        crate::substrate::operators::Arithmetic::Div => " / ",
+                        crate::substrate::operators::Arithmetic::Rem => " % ",
+                        crate::substrate::operators::Arithmetic::Shl => " << ",
+                        crate::substrate::operators::Arithmetic::Shr => " >> ",
+                        crate::substrate::operators::Arithmetic::Ushr => " >>> ",
                     },
                     budget,
                 )?;

@@ -281,5 +281,5 @@ pub(super) fn lower(
 ) -> Result<Plan, RequestError> {
     let mut plan = Builder::new();
     lower_into(storage, region, &mut plan, budget)?;
-    plan.finish(storage, budget)
+    plan.finish(storage, None, &[], budget)
 }

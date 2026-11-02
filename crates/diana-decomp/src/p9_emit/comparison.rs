@@ -1,30 +1,50 @@
-use crate::pipeline::scalar::Compare;
-use crate::substrate::owned::TextBuffer;
+use crate::p8_java::conditions::Comparison;
+use crate::p8_java::numeric_expression::{ExprId, Expression, Node};
+use crate::substrate::owned::{TextBuffer, push};
 use crate::{MethodBudget, RequestError};
+enum Work {
+    Node(ExprId),
+    Text(&'static str),
+}
 pub(super) fn write(
-    compare: Compare,
-    mut operand: impl FnMut(
-        bool,
-        &mut TextBuffer,
-        &mut MethodBudget<'_, '_>,
-    ) -> Result<(), RequestError>,
+    tree: &Expression,
     output: &mut TextBuffer,
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<(), RequestError> {
-    operand(false, output, budget)?;
-    output.push(" < ", budget)?;
-    operand(true, output, budget)?;
-    output.push(" ? -1 : ", budget)?;
-    operand(false, output, budget)?;
-    output.push(" > ", budget)?;
-    operand(true, output, budget)?;
-    output.push(" ? 1 : ", budget)?;
-    if let Some(bias) = compare.bias() {
-        operand(false, output, budget)?;
-        output.push(" == ", budget)?;
-        operand(true, output, budget)?;
-        output.arguments(format_args!(" ? 0 : {bias}"), budget)
-    } else {
-        output.push("0", budget)
+    let mut todo = Vec::new();
+    push(&mut todo, Work::Node(tree.root()), budget)?;
+    while let Some(work) = todo.pop() {
+        budget.charge_work(1)?;
+        match work {
+            Work::Text(text) => output.push(text, budget)?,
+            Work::Node(id) => match tree.node(id)? {
+                Node::Value(value) => super::java::value_use(value, output, budget)?,
+                Node::Literal(value) => output.arguments(format_args!("{value}"), budget)?,
+                Node::Test(operator, left, right) => {
+                    push(&mut todo, Work::Node(right), budget)?;
+                    push(
+                        &mut todo,
+                        Work::Text(match operator {
+                            Comparison::Equal => " == ",
+                            Comparison::NotEqual => " != ",
+                            Comparison::Less => " < ",
+                            Comparison::Greater => " > ",
+                            Comparison::LessEqual => " <= ",
+                            Comparison::GreaterEqual => " >= ",
+                        }),
+                        budget,
+                    )?;
+                    push(&mut todo, Work::Node(left), budget)?;
+                }
+                Node::Conditional(condition, yes, no) => {
+                    push(&mut todo, Work::Node(no), budget)?;
+                    push(&mut todo, Work::Text(" : "), budget)?;
+                    push(&mut todo, Work::Node(yes), budget)?;
+                    push(&mut todo, Work::Text(" ? "), budget)?;
+                    push(&mut todo, Work::Node(condition), budget)?;
+                }
+            },
+        }
     }
+    Ok(())
 }
