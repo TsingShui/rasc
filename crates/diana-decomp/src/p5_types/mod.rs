@@ -2,6 +2,7 @@ mod array_components;
 mod arrays;
 pub(crate) mod calls;
 mod declaration_types;
+pub(crate) mod entry_initialization;
 pub(crate) mod initialization;
 pub(crate) mod normal;
 pub(crate) mod numeric;

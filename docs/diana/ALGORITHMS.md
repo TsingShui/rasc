@@ -1410,6 +1410,42 @@ assigning null to uninit. Inheritance, access, ctor overload and checked throws 
 by the same binding rules. T22 has separate rules for outer capture, and a general pre-super
 reordering MUST NOT be opened.
 
+#### First-entry initialization evidence
+
+A constructor-delegation query needs the first initialization link, not a successful
+analysis of the callee's remaining body. P1 supplies a distinct method envelope
+with checked declaration and code ranges; it does not interpret register values or
+claim complete instruction/metadata validity. P2 produces an entry window through
+the first direct constructor invocation using the ordinary local-operation and
+call-site decoders. The window admits contiguous nop, move and numeric-literal
+operations; another operation or control transfer before the invocation leaves the
+link unproved. The entry-window profile rejects try metadata. P2 checks the
+window's register ranges, parameter words and original invoke operands before use.
+It does not decode instructions after the window endpoint.
+
+P3 binds the window with the ordinary parameter-seeding, read-binding and
+definition-writing operations. Its sealed entry SSA describes first activation
+from the original parameters; it contains no fabricated terminator, CFG or full
+method-success claim. Independent replay checks original literals, word ownership,
+latest definitions and invoke word order. Ordinary constructor proofs use the same
+SSA-origin query, with only a unique EntrySeed permitted through a full-method
+entry Phi; the full-method back-edge restrictions remain unchanged.
+
+P4 records original formal families and this/parent scope plus constructor
+binding candidates. P5 follows SSA definitions rather than maintaining register
+roots. It checks that the receiver originates at UninitThis, that move families
+and argument word/reference/wide families agree, and that a reference argument is
+not UninitThis. The graph consumer discharges the recorded binding and checks
+acyclic this-delegation until the original parent link. Missing evidence or a cycle
+leaves initialization unproved; it never supplies a default link.
+
+P8 MUST consume the graph certificate before sealing a delegating constructor.
+Contributors MUST NOT use an entry product to admit the callee body as Java or to
+bypass that body's ordinary P1–P9 chain. A failure after the entry endpoint does
+not erase the checked link or change the callee's own classified result. The query
+uses the selected method's existing budget and cancellation control; it is not a
+retry from the raw-output exit.
+
 ### 9.3 uninit is a state of the use position, not one globally changed ValueType
 
 An AllocationId marks a static allocation site; whether initialization succeeded varies with the

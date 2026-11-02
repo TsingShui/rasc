@@ -149,6 +149,20 @@ pub(super) fn analyze(
     Ok(WidthFacts { widths, broken })
 }
 impl WidthFacts {
+    pub(super) fn entry(
+        source: &[ValueWidth],
+        budget: &mut MethodBudget<'_, '_>,
+    ) -> Result<Self, RequestError> {
+        let mut widths = Vec::new();
+        let mut broken = Vec::new();
+        for &width in source {
+            budget.charge_work(1)?;
+            push(&mut widths, Fact::Known(width), budget)?;
+            push(&mut broken, false, budget)?;
+        }
+        Ok(Self { widths, broken })
+    }
+
     pub(super) fn read(
         &self,
         env: &[(RegisterId, Sym)],

@@ -1,8 +1,11 @@
+use super::entry as entry_ssa;
 use super::normal::{self, Definition, Incoming, Sym};
 use crate::input::ProgramIndex;
 use crate::p2_flow::normal::{self as flow, Op};
 use crate::p2_flow::protection::{CatchRank, ExceptionEdgeId};
-use crate::{ClassDefId, CodeUnitOffset, Limits, MethodId, RegisterId, RequestError, RunContext};
+use crate::{
+    ClassDefId, CodeUnitOffset, FailureKind, Limits, MethodId, RegisterId, RequestError, RunContext,
+};
 
 #[test]
 fn t16_throwing_result_commits_only_normally_across_pure_result_boundaries() {
@@ -126,5 +129,124 @@ fn t16_throwing_result_commits_only_normally_across_pure_result_boundaries() {
             ),
             Err(RequestError::InternalInvariant(_))
         ));
+    }
+}
+
+const ENTRY_INITIALIZATION: &[u8] = include_bytes!("../../tests/fixtures/initialization/d042.dex");
+
+#[test]
+fn entry_replay_rejects_changed_definitions_word_order_and_missing_initialization() {
+    let mut control = RunContext::new(Limits::default(), &|| false);
+    let index = crate::input::ProgramIndex::open(ENTRY_INITIALIZATION, &mut control).unwrap();
+    let mut budget = control.method_budget().unwrap();
+    for mutation in [
+        "input",
+        "literal",
+        "arguments",
+        "width",
+        "missing",
+        "parameter",
+    ] {
+        let flow = crate::p2_flow::entry::decode(&index, ClassDefId(0), MethodId(0), &mut budget)
+            .unwrap()
+            .unwrap();
+        let mut entry = entry_ssa::build(flow, &mut budget).unwrap();
+        entry_ssa::verify(&entry, &mut budget).unwrap();
+        match mutation {
+            "input" => entry.operations.last_mut().unwrap().inputs.swap(0, 1),
+            "literal" => {
+                let op = &mut entry.operations[0];
+                let Op::Constant(register, value) = op.op else {
+                    panic!("fixed prologue lost constant");
+                };
+                op.op = Op::Constant(register, value + 1);
+            }
+            "arguments" => entry.flow.calls[0].arguments.swap(0, 1),
+            "width" => entry.flow.calls[0].widths[0] = flow::ValueWidth::Two,
+            "missing" => {
+                entry.operations.pop();
+            }
+            "parameter" => entry.values[0] = Definition::Parameter(99),
+            _ => unreachable!(),
+        }
+        assert_eq!(
+            entry_ssa::verify(&entry, &mut budget).unwrap_err().kind(),
+            FailureKind::InternalInvariant,
+            "{mutation}"
+        );
+    }
+}
+#[test]
+fn partial_entry_producers_and_replay_observe_the_method_ledger() {
+    enum Stage {
+        Decode,
+        Bind,
+        Replay,
+        Prove,
+    }
+    for (stage, work, allocation, cancel) in [
+        (Stage::Decode, Some(0), None, false),
+        (Stage::Decode, None, Some(0), false),
+        (Stage::Decode, None, None, true),
+        (Stage::Bind, None, Some(0), false),
+        (Stage::Bind, None, None, true),
+        (Stage::Replay, Some(0), None, false),
+        (Stage::Replay, None, Some(0), false),
+        (Stage::Replay, None, None, true),
+        (Stage::Prove, Some(0), None, false),
+        (Stage::Prove, None, None, true),
+    ] {
+        let mut setup = RunContext::new(Limits::default(), &|| false);
+        let index = crate::input::ProgramIndex::open(ENTRY_INITIALIZATION, &mut setup).unwrap();
+        let mut setup_budget = setup.method_budget().unwrap();
+        let flow =
+            crate::p2_flow::entry::decode(&index, ClassDefId(0), MethodId(0), &mut setup_budget)
+                .unwrap()
+                .unwrap();
+        let cancelled = std::cell::Cell::new(false);
+        let check = || cancelled.get();
+        let mut control = RunContext::new(
+            Limits {
+                max_work_steps: work,
+                max_method_allocation_bytes: allocation,
+                ..Limits::default()
+            },
+            &check,
+        );
+        let mut budget = control.method_budget().unwrap();
+        let result = match stage {
+            Stage::Decode => {
+                cancelled.set(cancel);
+                crate::p2_flow::entry::decode(&index, ClassDefId(0), MethodId(0), &mut budget)
+                    .map(|_| ())
+            }
+            Stage::Bind => {
+                cancelled.set(cancel);
+                entry_ssa::build(flow, &mut budget).map(|_| ())
+            }
+            Stage::Replay | Stage::Prove => {
+                let entry = entry_ssa::build(flow, &mut setup_budget).unwrap();
+                cancelled.set(cancel);
+                match stage {
+                    Stage::Replay => entry_ssa::verify(&entry, &mut budget),
+                    Stage::Prove => crate::p5_types::entry_initialization::prove(
+                        &entry,
+                        &[crate::p2_flow::entry::ParameterFamily::Word],
+                        Some(crate::p4_calls::allocation::ConstructorUse::This),
+                        &mut budget,
+                    )
+                    .map(|_| ()),
+                    _ => unreachable!(),
+                }
+            }
+        };
+        assert_eq!(
+            result.unwrap_err().kind(),
+            if cancel {
+                FailureKind::Cancelled
+            } else {
+                FailureKind::BudgetExceeded
+            }
+        );
     }
 }

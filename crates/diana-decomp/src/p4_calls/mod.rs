@@ -2,6 +2,7 @@ pub(crate) mod allocation;
 pub(crate) mod class_scope;
 pub(crate) mod constructor_evidence;
 mod contracts;
+pub(crate) mod entry_declarations;
 pub(crate) mod exceptions;
 pub(crate) mod normal;
 pub(crate) use contracts::qualifier_available;

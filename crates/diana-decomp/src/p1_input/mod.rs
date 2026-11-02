@@ -2,9 +2,7 @@
 //! validate variable items, instruction semantics or Java representability.
 
 pub(crate) mod annotations;
-mod constructor;
 mod throws;
-pub(crate) use constructor::{ConstructorLink, ConstructorLinkKind};
 pub(crate) use throws::ThrowsMetadata;
 mod binding;
 pub(crate) mod catalog;
@@ -16,6 +14,7 @@ mod error;
 pub(crate) mod formats;
 mod header;
 mod method;
+pub(crate) mod method_envelope;
 pub(crate) mod protection;
 mod type_projection;
 pub(crate) use type_projection::TypeProjection;

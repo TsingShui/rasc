@@ -169,11 +169,13 @@ pub(crate) fn verify(
     input: &MethodInput<'_, '_>,
     catalog: &crate::DeclarationCatalog,
     plan: crate::p7_regions::PlannedBody<'_>,
+    chain: &super::constructor_graph::Proof<'_, '_, '_>,
     environment: EnvironmentId,
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<crate::substrate::outcome::Outcome<VerifiedJavaMethod>, RequestError> {
     use crate::substrate::outcome::Outcome;
     let storage = &plan.storage;
+    chain.check(input, storage, budget)?;
     let reason = if storage.typed.ssa.raw.try_byte_range().as_range().is_empty() {
         crate::OutputReason::BranchJavaUnsupported
     } else {

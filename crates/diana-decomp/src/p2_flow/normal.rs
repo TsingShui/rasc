@@ -1020,8 +1020,23 @@ pub(crate) fn decode<'a>(
                     "checked branch target overflowed",
                 ))
             };
+            let local = super::local_ops::local(spec, operands)?;
+            let initialization = super::local_ops::initialization(
+                input.program(),
+                pc,
+                spec,
+                layout,
+                operands,
+                &mut calls,
+                budget,
+            )?;
             let decoded = match spec.opcode {
-                0 => Decoded::Op(Op::Nop),
+                0 | 1..=9 | 0x12..=0x19 => Decoded::Op(local.ok_or(
+                    RequestError::InternalInvariant("local opcode lost shared operation"),
+                )?),
+                0x70 | 0x76 if initialization.is_some() => Decoded::Op(initialization.ok_or(
+                    RequestError::InternalInvariant("constructor opcode lost shared operation"),
+                )?),
                 0x0d => Decoded::Op(Op::Exception(reg(0)?)),
                 0x1c => {
                     let Some(reference) = layout.references()[0] else {
@@ -1045,32 +1060,6 @@ pub(crate) fn decode<'a>(
                     reg(0)?,
                 )),
                 0x27 => Decoded::Throw(reg(0)?),
-                4..=6 => Decoded::Op(Op::MoveWide(reg(0)?, reg(1)?)),
-                0x16..=0x19 => Decoded::Op(Op::ConstantWide(
-                    reg(0)?,
-                    match operands.literal() {
-                        Some(RawLiteral::Bits64(value)) => i64::from_le_bytes(value.to_le_bytes()),
-                        Some(RawLiteral::Signed16(value)) => i64::from(value),
-                        Some(RawLiteral::Bits32(value)) => {
-                            i64::from(i32::from_le_bytes(value.to_le_bytes()))
-                        }
-                        _ => {
-                            return Err(RequestError::InternalInvariant(
-                                "wide literal lost raw bits",
-                            ));
-                        }
-                    },
-                )),
-                1..=3 | 7..=9 => Decoded::Op(Op::Move(reg(0)?, reg(1)?)),
-                0x12..=0x15 => Decoded::Op(Op::Constant(
-                    reg(0)?,
-                    match operands.literal() {
-                        Some(RawLiteral::Bits32(v)) => i32::from_le_bytes(v.to_le_bytes()),
-                        Some(RawLiteral::Signed16(v)) => i32::from(v),
-                        Some(RawLiteral::Signed8(v)) => i32::from(v),
-                        _ => return Err(RequestError::InternalInvariant("scalar constant absent")),
-                    },
-                )),
                 0x7b..=0x8f => {
                     let unary = match spec.opcode {
                         0x7b => crate::pipeline::scalar::Unary::Neg,
@@ -1554,22 +1543,6 @@ pub(crate) fn decode<'a>(
                         .matches_with(&[60, 105, 110, 105, 116, 62], budget)?;
                     let kind = InvokeKind::from_opcode(spec.opcode)
                         .ok_or(RequestError::InternalInvariant("invoke lost its kind"))?;
-                    let mut widths = Vec::new();
-                    if kind != InvokeKind::Static {
-                        push(&mut widths, ValueWidth::One, budget)?;
-                    }
-                    method.declaration.prototype.visit_parameter_types(
-                        budget,
-                        |descriptor, budget| {
-                            let mut units = descriptor.reader()?;
-                            let width = if matches!(units.next(budget)?, Some(74 | 68)) {
-                                ValueWidth::Two
-                            } else {
-                                ValueWidth::One
-                            };
-                            push(&mut widths, width, budget)
-                        },
-                    )?;
                     let descriptor = method.declaration.prototype.return_type;
                     let mut units = descriptor.reader()?;
                     let result = match units.next(budget)? {
@@ -1600,41 +1573,6 @@ pub(crate) fn decode<'a>(
                             ));
                         }
                     };
-                    let mut registers = Vec::new();
-                    for register in operands.registers().iter() {
-                        budget.charge_work(1)?;
-                        push(&mut registers, register, budget)?;
-                    }
-                    let mut arguments = Vec::new();
-                    let mut word = 0usize;
-                    for width in &widths {
-                        budget.charge_work(1)?;
-                        let low = *registers.get(word).ok_or(RequestError::InternalInvariant(
-                            "invoke lost argument words",
-                        ))?;
-                        push(&mut arguments, low, budget)?;
-                        if *width == ValueWidth::Two
-                            && word
-                                .checked_add(1)
-                                .and_then(|index| registers.get(index))
-                                .map(|high| high.0)
-                                != low.0.checked_add(1)
-                        {
-                            return Err(RequestError::InternalInvariant(
-                                "invoke wide words lost adjacency",
-                            ));
-                        }
-                        word = word
-                            .checked_add(if *width == crate::p2_flow::normal::ValueWidth::Two {
-                                2
-                            } else {
-                                1
-                            })
-                            .ok_or(RequestError::PlatformCapacity)?;
-                    }
-                    if word != registers.len() {
-                        return Err(RequestError::InternalInvariant("invoke has surplus words"));
-                    }
                     let mut destination = None;
                     let mut result_pc = None;
                     if next.0 < raw.code_units().0 {
@@ -1680,29 +1618,20 @@ pub(crate) fn decode<'a>(
                                 .ok_or(RequestError::PlatformCapacity)?;
                         }
                     }
+                    let mut site = super::local_ops::call(
+                        input.program(),
+                        pc,
+                        kind,
+                        reference,
+                        result,
+                        operands,
+                        budget,
+                    )?;
+                    site.result_pc = result_pc;
                     let call = CallId(
                         u32::try_from(calls.len()).map_err(|_| RequestError::PlatformCapacity)?,
                     );
-                    push(
-                        &mut calls,
-                        CallSite {
-                            target: if constructor {
-                                CallTarget::Constructor
-                            } else {
-                                CallTarget::Method
-                            },
-                            owner: method.owner_type,
-                            kind,
-                            reference,
-                            result,
-                            registers,
-                            arguments,
-                            widths,
-                            pc,
-                            result_pc,
-                        },
-                        budget,
-                    )?;
+                    push(&mut calls, site, budget)?;
                     if constructor {
                         Decoded::Op(Op::Initialize(call))
                     } else {

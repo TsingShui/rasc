@@ -299,6 +299,8 @@ fn t20_constructor_delegation_keeps_the_original_instance_field_in_a_complete_un
     let index = diana_decomp::input::ProgramIndex::open(original, &mut control).unwrap();
     let mut reference_offset = None;
     let mut allocation_offset = None;
+    let mut foreign_constructor = None;
+    let mut return_offset = None;
     index
         .class(ClassDefId(0), &mut control)
         .unwrap()
@@ -309,11 +311,17 @@ fn t20_constructor_delegation_keeps_the_original_instance_field_in_a_complete_un
                 };
                 assert_eq!(code.instructions()[0], 0x70);
                 reference_offset = Some(code.code_byte_range().start.0 + 18);
+                return_offset = Some(code.code_byte_range().end.0-2);
                 let mut pc=diana_decomp::CodeUnitOffset(0);
                 while pc.0<code.code_units().0 {
                     let layout=diana_decomp::raw::instruction_layout(code.instructions(),pc,diana_decomp::raw::DexVersion::V035).unwrap();
                     if matches!(layout.kind(),diana_decomp::raw::LayoutKind::Instruction(spec) if spec.opcode==0x22) {
                         allocation_offset=Some(code.code_byte_range().start.0+16+usize::try_from(pc.0).unwrap()*2);
+                        let next=diana_decomp::CodeUnitOffset(pc.0+layout.width().0);
+                        let init=diana_decomp::raw::instruction_layout(code.instructions(),next,diana_decomp::raw::DexVersion::V035).unwrap();
+                        assert!(matches!(init.kind(),diana_decomp::raw::LayoutKind::Instruction(spec) if matches!(spec.opcode,0x70|0x76)));
+                        let Some(diana_decomp::raw::OperandReference::Method(reference))=init.references()[0].map(|reference|reference.target) else {panic!("fixed allocation lost constructor reference");};
+                        foreign_constructor=Some(reference);
                         break;
                     }
                     pc=diana_decomp::CodeUnitOffset(pc.0+layout.width().0);
@@ -322,36 +330,91 @@ fn t20_constructor_delegation_keeps_the_original_instance_field_in_a_complete_un
             Ok(())
         })
         .unwrap();
-    let mut damaged = original.to_vec();
     let allocation = allocation_offset.unwrap();
-    assert_eq!(damaged[allocation], 0x22);
-    assert_eq!(damaged[allocation + 1], 0);
-    damaged[allocation + 1] = 1;
-    let local_failure = decompile(
-        &damaged,
+    for failure in ["definition", "reference", "encoding", "return"] {
+        let mut damaged = original.to_vec();
+        let (kind, code) = match failure {
+            "definition" => {
+                assert_eq!(&damaged[allocation..allocation + 2], &[0x22, 0]);
+                damaged[allocation + 1] = 1;
+                (
+                    FailureKind::Malformed,
+                    diana_decomp::DiagnosticCode::UndefinedRegister,
+                )
+            }
+            "reference" => {
+                damaged[allocation + 2..allocation + 4].copy_from_slice(&u16::MAX.to_le_bytes());
+                (
+                    FailureKind::Malformed,
+                    diana_decomp::DiagnosticCode::ReferenceOutOfBounds,
+                )
+            }
+            "encoding" => {
+                damaged[allocation] = 0x73;
+                (
+                    FailureKind::Unsupported,
+                    diana_decomp::DiagnosticCode::UnknownInstructionWidth,
+                )
+            }
+            "return" => {
+                let at = return_offset.unwrap();
+                assert_eq!(damaged[at], 0x0e);
+                damaged[at] = 0x0f;
+                (
+                    FailureKind::Malformed,
+                    diana_decomp::DiagnosticCode::MethodMalformed(
+                        diana_decomp::input::MethodProblem::InvalidResultKind,
+                    ),
+                )
+            }
+            _ => unreachable!(),
+        };
+        let local_failure = decompile(
+            &damaged,
+            include_str!("../fixtures/initialization/d042-catalog.json"),
+        );
+        assert!(
+            matches!(
+                &local_failure.class().members()[0],
+                MethodOutput::Java { .. }
+            ),
+            "{failure}: a post-init failure erased the delegating constructor"
+        );
+        assert!(matches!(local_failure.class(), ClassOutput::Mixed { .. }));
+        assert_eq!(local_failure.class().fields().len(), 1);
+        let damaged_member = &local_failure.class().members()[1];
+        assert_eq!(damaged_member.key().method, diana_decomp::MethodId(1));
+        let reason = match damaged_member {
+            MethodOutput::Debug { reason, .. } | MethodOutput::Unavailable { reason, .. } => reason,
+            _ => panic!("{failure}: damaged constructor became Java"),
+        };
+        assert_eq!(
+            local_failure.diagnostics()[reason.0].cause.kind(),
+            kind,
+            "{failure}"
+        );
+        assert_eq!(
+            local_failure.diagnostics()[reason.0].code(),
+            code,
+            "{failure}"
+        );
+    }
+    let foreign_constructor = foreign_constructor.unwrap();
+    let mut unrelated = original.to_vec();
+    let offset = reference_offset.unwrap();
+    unrelated[offset..offset + 2]
+        .copy_from_slice(&u16::try_from(foreign_constructor.0).unwrap().to_le_bytes());
+    let rejected_parent = decompile(
+        &unrelated,
         include_str!("../fixtures/initialization/d042-catalog.json"),
     );
-    assert!(
-        matches!(
-            &local_failure.class().members()[0],
-            MethodOutput::Java { .. }
-        ),
-        "a callee's post-super definition failure erased the delegating constructor"
-    );
-    assert_eq!(local_failure.class().fields().len(), 1);
-    let damaged_member = &local_failure.class().members()[1];
-    assert_eq!(damaged_member.key().method, diana_decomp::MethodId(1));
-    let reason = match damaged_member {
+    let parent_issue = match &rejected_parent.class().members()[0] {
         MethodOutput::Debug { reason, .. } | MethodOutput::Unavailable { reason, .. } => reason,
-        _ => panic!("damaged delegated constructor became Java"),
+        _ => panic!("unrelated constructor owner proved an initialization link"),
     };
     assert_eq!(
-        local_failure.diagnostics()[reason.0].cause.kind(),
-        FailureKind::Malformed
-    );
-    assert_eq!(
-        local_failure.diagnostics()[reason.0].code(),
-        diana_decomp::DiagnosticCode::UndefinedRegister
+        rejected_parent.diagnostics()[parent_issue.0].code(),
+        diana_decomp::DiagnosticCode::InitializationUnavailable
     );
     let mut cyclic = original.to_vec();
     let offset = reference_offset.unwrap();

@@ -520,9 +520,17 @@ fn normal_member(
             } => (storage, declaration_failure),
             Analysis::Declined(reason) => return Ok(NormalMember::Raw { facts, reason }),
         };
+    let chain = crate::pipeline::constructor_chain::verify(&input, catalog, &storage, budget)?;
     let planned = crate::p7_regions::build(storage, representation, budget)?;
     let result = if crate::p8_java::source_group_admitted(index, key, &facts, budget)? {
-        crate::p8_java::verify_method(&input, catalog, planned, catalog.environment, budget)?
+        crate::p8_java::verify_method(
+            &input,
+            catalog,
+            planned,
+            &chain,
+            catalog.environment,
+            budget,
+        )?
     } else {
         Outcome::Declined(OutputReason::JavaAnalysisUnavailable)
     };

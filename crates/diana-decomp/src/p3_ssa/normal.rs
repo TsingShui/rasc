@@ -167,7 +167,7 @@ pub(super) fn value(
         Sym::Bad => Err(RequestError::UndefinedRegister { register, pc }),
     }
 }
-fn commit(
+pub(super) fn commit(
     env: &mut Vec<(RegisterId, Sym)>,
     register: RegisterId,
     value: ValueId,
@@ -241,6 +241,96 @@ fn capture_exceptional(
         }
     }
     Ok(())
+}
+pub(super) struct EntrySeeds {
+    pub values: Vec<Definition>,
+    pub env: Vec<(RegisterId, Sym)>,
+}
+pub(super) fn seed_parameters(
+    count: usize,
+    width: impl Fn(usize) -> crate::p2_flow::normal::ValueWidth,
+    registers: u16,
+    budget: &mut MethodBudget<'_, '_>,
+) -> Result<EntrySeeds, RequestError> {
+    let mut words = 0u32;
+    for i in 0..count {
+        budget.charge_work(1)?;
+        words = words
+            .checked_add(width(i).words())
+            .ok_or(RequestError::PlatformCapacity)?;
+    }
+    let mut register = RegisterId(
+        u32::from(registers)
+            .checked_sub(words)
+            .ok_or(RequestError::InternalInvariant("parameter frame underflow"))?,
+    );
+    let mut values = Vec::new();
+    let mut seeds = Vec::new();
+    for i in 0..count {
+        budget.charge_work(1)?;
+        let id = ValueId(u32::try_from(values.len()).map_err(|_| RequestError::PlatformCapacity)?);
+        push(
+            &mut values,
+            Definition::Parameter(u32::try_from(i).map_err(|_| RequestError::PlatformCapacity)?),
+            budget,
+        )?;
+        commit(&mut seeds, register, id, width(i), budget)?;
+        register = RegisterId(
+            register
+                .0
+                .checked_add(width(i).words())
+                .ok_or(RequestError::PlatformCapacity)?,
+        );
+    }
+    Ok(EntrySeeds { values, env: seeds })
+}
+pub(super) fn bind_inputs(
+    operation: crate::p2_flow::normal::Operation,
+    calls: &[CallSite],
+    filled: &[crate::p2_flow::normal::FilledArraySite],
+    env: &[(RegisterId, Sym)],
+    budget: &mut MethodBudget<'_, '_>,
+) -> Result<Vec<ValueId>, RequestError> {
+    let mut inputs = Vec::new();
+    for register in operation.kind.reads(calls, filled)? {
+        budget.charge_work(1)?;
+        push(
+            &mut inputs,
+            value(lookup(env, register, budget)?, register, operation.pc)?,
+            budget,
+        )?;
+    }
+    Ok(inputs)
+}
+pub(super) fn define_result(
+    operation: crate::p2_flow::normal::Operation,
+    calls: &[CallSite],
+    env: &mut Vec<(RegisterId, Sym)>,
+    values: &mut Vec<Definition>,
+    budget: &mut MethodBudget<'_, '_>,
+) -> Result<Option<ValueId>, RequestError> {
+    if let Some(register) = destination(operation.kind) {
+        let id = ValueId(u32::try_from(values.len()).map_err(|_| RequestError::PlatformCapacity)?);
+        push(
+            values,
+            if matches!(operation.kind, Op::Exception(_)) {
+                Definition::ExceptionAt(operation.id)
+            } else {
+                Definition::OpResult(operation.id)
+            },
+            budget,
+        )?;
+        commit(
+            env,
+            register,
+            id,
+            operation.kind.result_width(calls)?,
+            budget,
+        )?;
+        Ok(Some(id))
+    } else {
+        Ok(None)
+    }
 }
 pub(crate) fn build<'a>(
     flow: FlowBody<'a>,
@@ -329,38 +419,15 @@ pub(crate) fn build<'a>(
             break;
         }
     }
-    let mut values = Vec::new();
-    let mut seeds = Vec::new();
-    let mut parameter_words = 0u32;
-    for parameter in &flow.parameters {
-        budget.charge_work(1)?;
-        parameter_words = parameter_words
-            .checked_add(parameter.width().words())
-            .ok_or(RequestError::PlatformCapacity)?;
-    }
-    let mut register = RegisterId(
-        u32::from(flow.raw.registers_size())
-            .checked_sub(parameter_words)
-            .ok_or(RequestError::InternalInvariant("parameter frame underflow"))?,
-    );
-    for (index, parameter) in flow.parameters.iter().enumerate() {
-        budget.charge_work(1)?;
-        let id = ValueId(u32::try_from(values.len()).map_err(|_| RequestError::PlatformCapacity)?);
-        push(
-            &mut values,
-            Definition::Parameter(
-                u32::try_from(index).map_err(|_| RequestError::PlatformCapacity)?,
-            ),
-            budget,
-        )?;
-        commit(&mut seeds, register, id, parameter.width(), budget)?;
-        register = RegisterId(
-            register
-                .0
-                .checked_add(parameter.width().words())
-                .ok_or(RequestError::PlatformCapacity)?,
-        );
-    }
+    let EntrySeeds {
+        mut values,
+        env: seeds,
+    } = seed_parameters(
+        flow.parameters.len(),
+        |i| flow.parameters[i].width(),
+        flow.raw.registers_size(),
+        budget,
+    )?;
     let mut phis = Vec::new();
     for (index, registers) in live.iter().enumerate() {
         for &register in registers {
@@ -414,15 +481,7 @@ pub(crate) fn build<'a>(
                     "flow operation identity changed",
                 ));
             }
-            let mut inputs = Vec::new();
-            for register in operation.kind.reads(&flow.calls, &flow.filled_arrays)? {
-                budget.charge_work(1)?;
-                push(
-                    &mut inputs,
-                    value(lookup(&env, register, budget)?, register, operation.pc)?,
-                    budget,
-                )?;
-            }
+            let inputs = bind_inputs(*operation, &flow.calls, &flow.filled_arrays, &env, budget)?;
             capture_exceptional(
                 &flow,
                 &live,
@@ -432,27 +491,7 @@ pub(crate) fn build<'a>(
                 &mut exceptional,
                 budget,
             )?;
-            let result = if let Some(register) = destination(operation.kind) {
-                let id = ValueId(
-                    u32::try_from(values.len()).map_err(|_| RequestError::PlatformCapacity)?,
-                );
-                let definition = if matches!(operation.kind, Op::Exception(_)) {
-                    Definition::ExceptionAt(operation.id)
-                } else {
-                    Definition::OpResult(operation.id)
-                };
-                push(&mut values, definition, budget)?;
-                commit(
-                    &mut env,
-                    register,
-                    id,
-                    operation.kind.result_width(&flow.calls)?,
-                    budget,
-                )?;
-                Some(id)
-            } else {
-                None
-            };
+            let result = define_result(*operation, &flow.calls, &mut env, &mut values, budget)?;
             if let Op::Call(call, _) | Op::Initialize(call) = operation.kind {
                 let recorded = call_ops
                     .get_mut(ix(call.0)?)
@@ -875,29 +914,11 @@ pub(super) fn verify_exceptional_inputs(
     }
     Ok(())
 }
-fn verify_call(
-    ssa: &SsaBody<'_>,
-    pc: CodeUnitOffset,
-    call: CallId,
-    destination: Option<RegisterId>,
+pub(super) fn verify_call_words(
+    site: &CallSite,
+    original_operands: crate::raw::RawOperands,
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<(), RequestError> {
-    let site = ssa
-        .calls
-        .get(ix(call.0)?)
-        .ok_or(RequestError::InternalInvariant("call has foreign identity"))?;
-    let original = instruction_layout(ssa.raw.instructions(), pc, ssa.raw.version())
-        .map_err(crate::input::MethodError::Decode)?;
-    if !matches!(original.kind(),LayoutKind::Instruction(spec) if crate::p2_flow::normal::InvokeKind::from_opcode(spec.opcode) == Some(site.kind))
-        || !matches!(original.references()[0],Some(reference) if reference.target==crate::raw::OperandReference::Method(site.reference))
-    {
-        return Err(RequestError::InternalInvariant(
-            "call changed its original invoke or method reference",
-        ));
-    }
-    let original_operands =
-        crate::input::operands::instruction_operands(ssa.raw.instructions(), pc, original)
-            .map_err(crate::input::MethodError::Decode)?;
     let mut original_registers = original_operands.registers().iter();
     for &register in &site.registers {
         budget.charge_work(1)?;
@@ -945,6 +966,32 @@ fn verify_call(
             "call dropped wide argument words",
         ));
     }
+    Ok(())
+}
+fn verify_call(
+    ssa: &SsaBody<'_>,
+    pc: CodeUnitOffset,
+    call: CallId,
+    destination: Option<RegisterId>,
+    budget: &mut MethodBudget<'_, '_>,
+) -> Result<(), RequestError> {
+    let site = ssa
+        .calls
+        .get(ix(call.0)?)
+        .ok_or(RequestError::InternalInvariant("call has foreign identity"))?;
+    let original = instruction_layout(ssa.raw.instructions(), pc, ssa.raw.version())
+        .map_err(crate::input::MethodError::Decode)?;
+    if !matches!(original.kind(),LayoutKind::Instruction(spec) if crate::p2_flow::normal::InvokeKind::from_opcode(spec.opcode) == Some(site.kind))
+        || !matches!(original.references()[0],Some(reference) if reference.target==crate::raw::OperandReference::Method(site.reference))
+    {
+        return Err(RequestError::InternalInvariant(
+            "call changed its original invoke or method reference",
+        ));
+    }
+    let original_operands =
+        crate::input::operands::instruction_operands(ssa.raw.instructions(), pc, original)
+            .map_err(crate::input::MethodError::Decode)?;
+    verify_call_words(site, original_operands, budget)?;
     if let Some(result_pc) = site.result_pc {
         if pc.checked_advance(original.width()) != Some(result_pc) {
             return Err(RequestError::InternalInvariant(

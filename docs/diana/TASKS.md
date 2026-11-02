@@ -1716,13 +1716,22 @@ invoke-custom or bootstrap Java semantics, an all-platform catalog.
 adds checked class/interface ancestry, constructor overload selection and
 covariant receiver/bridge proofs. D033 now passes source-JVM E2E without changing
 allocation/init order. Missing or cyclic ancestors, uncertain bridges/generics
-and real return-only collisions remain rejected.
+and real return-only collisions remain rejected. The
+[entry initialization batch](batches/t12-entry-initialization-facts.md) replaces
+the P1 register-prefix interpreter with shared P2 decoding, P3 definition/use
+binding, P4 declarations and P5 initialization-link evidence. Delegation checks
+retain caller Java across a callee's post-init definition, reference, encoding or
+return-shape failure; cycles and unrelated constructor owners remain rejected.
 
-**Dependencies**: T11. **Phase**: P3/P4/P5/P8. **References**: DX-09, DX-02
+**Dependencies**: T11. **Phase**: P2/P3/P4/P5/P6/P8. **References**: DX-09, DX-02
 RecoverConstructors.
 
-**Files**: `src/p4_calls/allocation.rs`, `src/p3_ssa/{inputs,verify}.rs`,
-`src/p5_types/lattice.rs`, `src/p8_java/declarations.rs`.
+**Files**: `src/p1_input/method_envelope.rs`,
+`src/p2_flow/{local_ops,entry}.rs`, `src/p3_ssa/{normal,entry}.rs`,
+`src/p4_calls/{allocation,entry_declarations}.rs`,
+`src/p5_types/{entry_initialization,initialization/chain}.rs`,
+`src/pipeline/constructor_chain.rs`,
+`src/p8_java/{branch,constructor_entry,constructor_graph}.rs`.
 
 **Input→output**: An adjacent new-instance and invoke-direct init → allocation
 evidence and a legal Java `new`; the UninitThis of `<init>` → a single legal

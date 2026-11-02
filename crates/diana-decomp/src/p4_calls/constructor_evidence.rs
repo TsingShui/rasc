@@ -43,19 +43,7 @@ pub(crate) fn collect(
         } else {
             ConstructorUse::Super
         };
-        let result = super::allocation::resolve(input, catalog, invocation, &owner, kind, budget)
-            .and_then(|contract| {
-                if kind == ConstructorUse::This {
-                    super::allocation::prove_this_chain(
-                        input,
-                        catalog,
-                        invocation.reference,
-                        invocation.pc,
-                        budget,
-                    )?;
-                }
-                Ok(contract)
-            });
+        let result = super::allocation::resolve(input, catalog, invocation, &owner, kind, budget);
         Some((kind, candidate(result)?))
     } else {
         None

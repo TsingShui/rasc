@@ -7,6 +7,7 @@ pub(crate) mod cast_ops;
 pub(crate) mod class_unit;
 pub(crate) mod conditions;
 pub(crate) mod constructor_entry;
+pub(crate) mod constructor_graph;
 mod declarations;
 pub(crate) mod field_declarations;
 pub use class_unit::VerifiedJavaUnit;

@@ -87,6 +87,10 @@ pub struct MethodInput<'i, 'a> {
 }
 
 impl<'i, 'a> MethodInput<'i, 'a> {
+    pub(crate) fn program(&self) -> &'i ProgramIndex<'a> {
+        self.index
+    }
+
     pub(crate) fn type_projection(
         &self,
         id: crate::TypeId,
@@ -242,13 +246,6 @@ impl<'i, 'a> MethodInput<'i, 'a> {
             }),
             None => ReferencedFieldMetadata::Absent,
         })
-    }
-    pub(crate) fn constructor_link(
-        &self,
-        method: MethodId,
-        budget: &mut MethodBudget<'_, '_>,
-    ) -> Result<Option<super::ConstructorLink>, crate::RequestError> {
-        self.index.constructor_link(self.class_id, method, budget)
     }
     pub(crate) fn type_name(
         &self,

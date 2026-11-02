@@ -1,3 +1,4 @@
+pub(crate) mod entry;
 #[cfg(test)]
 mod handler_tests;
 pub(crate) mod normal;

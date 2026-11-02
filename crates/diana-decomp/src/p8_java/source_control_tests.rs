@@ -104,16 +104,25 @@ fn final_control_replay_rejects_wrong_exits_missing_coverage_and_lock_operands()
         } else {
             Vec::new()
         };
+        let chain =
+            crate::pipeline::constructor_chain::verify(&input, &catalog, &storage, &mut budget)
+                .unwrap();
         let planned = crate::p7_regions::build(
             storage,
             crate::RepresentationPolicy::StructuredThenDispatch,
             &mut budget,
         )
         .unwrap();
-        let method =
-            crate::p8_java::verify_method(&input, &catalog, planned, EnvironmentId(0), &mut budget)
-                .unwrap()
-                .unwrap();
+        let method = crate::p8_java::verify_method(
+            &input,
+            &catalog,
+            planned,
+            &chain,
+            EnvironmentId(0),
+            &mut budget,
+        )
+        .unwrap()
+        .unwrap();
         let (body, source) = match &method.body {
             MethodBody::Structured(body) => (&body.storage, &body.source),
             MethodBody::Protected(body) => (&body.storage, &body.source),

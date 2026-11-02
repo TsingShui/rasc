@@ -1,6 +1,6 @@
 use super::contracts::plain;
 use crate::input::MethodInput;
-use crate::substrate::owned::{copy_proto, copy_units, reserve};
+use crate::substrate::owned::{copy_proto, copy_units};
 use crate::{CodeUnitOffset, DeclarationCatalog, MethodBudget, MethodId, RequestError};
 
 pub(crate) struct ConstructorContract {
@@ -156,65 +156,4 @@ impl ConstructorContract {
 
 fn unavailable<T>(pc: CodeUnitOffset) -> Result<T, RequestError> {
     Err(RequestError::InitializationUnavailable { pc })
-}
-pub(crate) fn prove_this_chain(
-    input: &MethodInput<'_, '_>,
-    catalog: &DeclarationCatalog,
-    target: MethodId,
-    origin: CodeUnitOffset,
-    budget: &mut MethodBudget<'_, '_>,
-) -> Result<(), RequestError> {
-    let mut seen = Vec::new();
-    reserve(&mut seen, 1, budget)?;
-    seen.push(input.method_id());
-    let mut current = target;
-    let owner = copy_units(input.owner(), budget)?;
-    loop {
-        budget.charge_work(1)?;
-        for &method in &seen {
-            budget.charge_work(1)?;
-            if method == current {
-                return unavailable(origin);
-            }
-        }
-        reserve(&mut seen, 1, budget)?;
-        seen.push(current);
-        let Some(link) = input.constructor_link(current, budget)? else {
-            return unavailable(origin);
-        };
-        match link.kind {
-            crate::input::ConstructorLinkKind::This => {
-                let _contract = resolve(
-                    input,
-                    catalog,
-                    &super::throws::Invocation {
-                        reference: link.target,
-                        pc: link.pc,
-                        protection: None,
-                    },
-                    &owner,
-                    ConstructorUse::This,
-                    budget,
-                )?;
-                current = link.target;
-            }
-            crate::input::ConstructorLinkKind::Super => {
-                let parent =
-                    copy_units(input.method_reference(link.target, budget)?.owner, budget)?;
-                let _contract = resolve(
-                    input,
-                    catalog,
-                    &super::throws::Invocation {
-                        reference: link.target,
-                        pc: link.pc,
-                        protection: None,
-                    },
-                    &parent,
-                    ConstructorUse::Super,
-                    budget,
-                )?;
-                return Ok(());
-            }
-        }
-    }
 }

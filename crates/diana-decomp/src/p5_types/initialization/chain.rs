@@ -10,54 +10,26 @@ fn ix(value: u32) -> Result<usize, RequestError> {
 fn argument(
     ssa: &SsaBody<'_>,
     phis: &[Option<usize>],
-    mut value: ValueId,
+    value: ValueId,
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<Option<ChainArgument>, RequestError> {
-    for _ in &ssa.values {
-        budget.charge_work(1)?;
-        let index = ix(value.0)?;
-        match ssa.values[index] {
-            Definition::Parameter(parameter) if parameter > 0 => {
-                return Ok(Some(ChainArgument::Parameter(
-                    parameter
-                        .checked_sub(1)
-                        .ok_or(RequestError::InternalInvariant(
-                            "constructor parameter underflow",
-                        ))?,
-                )));
+    let graph = crate::p3_ssa::entry::Graph::Method { ssa, phis };
+    Ok(
+        match crate::p5_types::entry_initialization::origin(&graph, value, budget)? {
+            Some(crate::p5_types::entry_initialization::Origin::Parameter(index)) if index > 0 => {
+                Some(ChainArgument::Parameter(index - 1))
             }
-            Definition::OpResult(id) => {
-                let op = ssa.operation(id)?;
-                match op.op {
-                    Op::Constant(_, literal) => return Ok(Some(ChainArgument::Literal(literal))),
-                    Op::ConstantWide(_, literal) => {
-                        return Ok(Some(ChainArgument::WideLiteral(literal)));
-                    }
-                    Op::Move(..) | Op::MoveWide(..) => value = op.input(0)?,
-                    _ => return Ok(None),
-                }
+            Some(crate::p5_types::entry_initialization::Origin::Word(bits)) => {
+                Some(ChainArgument::Literal(bits))
             }
-            Definition::Phi => {
-                let Some(phi) = phis[index] else {
-                    return Err(RequestError::InternalInvariant("chain argument lost Phi"));
-                };
-                let inputs = &ssa.phis[phi].inputs;
-                if inputs.len() != 1 {
-                    return Ok(None);
-                }
-                let (crate::p3_ssa::normal::Incoming::EntrySeed, Sym::Value(source)) = inputs[0]
-                else {
-                    return Ok(None);
-                };
-                value = source;
+            Some(crate::p5_types::entry_initialization::Origin::Wide(bits)) => {
+                Some(ChainArgument::WideLiteral(bits))
             }
-            _ => return Ok(None),
-        }
-    }
-    Err(RequestError::InternalInvariant(
-        "cyclic constructor argument origin",
-    ))
+            _ => None,
+        },
+    )
 }
+
 pub(super) fn solve(
     ssa: &SsaBody<'_>,
     deferred: &mut [Option<InitializationId>],
@@ -120,6 +92,11 @@ pub(super) fn solve(
                 let site = &ssa.calls[ix(call.0)?];
                 if site.target != CallTarget::Constructor
                     || deferred[ix(op.input(0)?.0)?] != Some(InitializationId::This)
+                    || crate::p5_types::entry_initialization::origin(
+                        &crate::p3_ssa::entry::Graph::Method { ssa, phis: &phis },
+                        op.input(0)?,
+                        budget,
+                    )? != Some(crate::p5_types::entry_initialization::Origin::Parameter(0))
                 {
                     return Err(unavailable(op.pc));
                 }

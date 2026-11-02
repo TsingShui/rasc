@@ -81,7 +81,9 @@ fallback was added to the proposed shared-chain replacement.
 Required next decision: approve the contract and owning producer for shared
 partial initialization facts that survive an unrelated body failure, then replace
 the prefix interpreter without adding a second register tracker or requiring
-complete callee Java/type/storage success. This architecture finding is open.
+complete callee Java/type/storage success. The follow-up contract and repair are recorded in
+[T12 entry initialization facts](t12-entry-initialization-facts.md). TASKS T12 owns
+current progress.
 
 ## Verification
 
