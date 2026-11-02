@@ -7,8 +7,10 @@
 
 pub mod apk;
 pub mod archive;
+pub mod axml;
 pub mod dex;
 pub mod input;
+pub mod manifest;
 pub mod query;
 pub mod request;
 mod runner;

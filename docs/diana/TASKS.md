@@ -2681,7 +2681,11 @@ read-only P1 facts (`DexString::units`, `Prototype::visit_parameters`,
 cancellation and original identity. The [xref batch](batches/h03-xref.md) adds
 instruction-level `string/type/method/field` sites with a `use` mnemonic column and
 the direct `--extends`/`--implements`/`--subinterface`/`--kind` filters on
-`classes`. `manifest` and the CLI layer remain.
+`classes`. The [AXML batch](batches/h03-axml.md) adds a bounded binary-manifest
+reader and last-physical-entry selection. It is validated on self-made fixtures
+and five authorized local APKs whose element sets, attribute names and attribute
+values match an independent chunk decoder. The CLI layer and its columns/exit
+codes remain.
 
 **Dependencies**: H02. **Scope**: the existing non-decompilation CLI capability.
 

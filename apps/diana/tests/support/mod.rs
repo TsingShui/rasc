@@ -127,3 +127,67 @@ pub fn dex(payload: u8) -> Vec<u8> {
     bytes.extend_from_slice(&[payload; 16]);
     bytes
 }
+
+/// Minimal UTF-16 AXML `AndroidManifest.xml` with one `manifest` element that
+/// carries the `package` attribute. Self-made fixture, not product output.
+pub fn axml_manifest(package: &str) -> Vec<u8> {
+    fn chunk(kind: u16, header: u16, body: &[u8]) -> Vec<u8> {
+        let mut out = Vec::new();
+        out.extend_from_slice(&kind.to_le_bytes());
+        out.extend_from_slice(&header.to_le_bytes());
+        out.extend_from_slice(&u32::try_from(8 + body.len()).unwrap().to_le_bytes());
+        out.extend_from_slice(body);
+        out
+    }
+    let strings = ["package", "manifest", package];
+    let mut offsets = Vec::new();
+    let mut data = Vec::new();
+    for entry in &strings {
+        offsets.extend_from_slice(&u32::try_from(data.len()).unwrap().to_le_bytes());
+        let units: Vec<u16> = entry.encode_utf16().collect();
+        data.extend_from_slice(&u16::try_from(units.len()).unwrap().to_le_bytes());
+        for unit in units {
+            data.extend_from_slice(&unit.to_le_bytes());
+        }
+        data.extend_from_slice(&[0, 0]);
+    }
+    let strings_start = 28 + offsets.len();
+    let mut pool = Vec::new();
+    pool.extend_from_slice(&u32::try_from(strings.len()).unwrap().to_le_bytes());
+    pool.extend_from_slice(&0u32.to_le_bytes());
+    pool.extend_from_slice(&0u32.to_le_bytes());
+    pool.extend_from_slice(&u32::try_from(strings_start).unwrap().to_le_bytes());
+    pool.extend_from_slice(&0u32.to_le_bytes());
+    pool.extend_from_slice(&offsets);
+    pool.extend_from_slice(&data);
+
+    let mut element = Vec::new();
+    element.extend_from_slice(&1u32.to_le_bytes());
+    element.extend_from_slice(&u32::MAX.to_le_bytes());
+    element.extend_from_slice(&u32::MAX.to_le_bytes());
+    element.extend_from_slice(&1u32.to_le_bytes());
+    element.extend_from_slice(&20u16.to_le_bytes());
+    element.extend_from_slice(&20u16.to_le_bytes());
+    element.extend_from_slice(&1u16.to_le_bytes());
+    element.extend_from_slice(&0u16.to_le_bytes());
+    element.extend_from_slice(&0u16.to_le_bytes());
+    element.extend_from_slice(&0u16.to_le_bytes());
+    element.extend_from_slice(&u32::MAX.to_le_bytes());
+    element.extend_from_slice(&0u32.to_le_bytes());
+    element.extend_from_slice(&u32::MAX.to_le_bytes());
+    element.extend_from_slice(&8u16.to_le_bytes());
+    element.push(0);
+    element.push(0x03);
+    element.extend_from_slice(&2u32.to_le_bytes());
+
+    let mut end = Vec::new();
+    end.extend_from_slice(&1u32.to_le_bytes());
+    end.extend_from_slice(&u32::MAX.to_le_bytes());
+    end.extend_from_slice(&u32::MAX.to_le_bytes());
+    end.extend_from_slice(&1u32.to_le_bytes());
+
+    let mut body = chunk(0x0001, 28, &pool);
+    body.extend_from_slice(&chunk(0x0102, 16, &element));
+    body.extend_from_slice(&chunk(0x0103, 16, &end));
+    chunk(0x0003, 8, &body)
+}

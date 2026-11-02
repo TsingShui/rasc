@@ -992,3 +992,87 @@ mod h03_xref {
         );
     }
 }
+
+mod h03_manifest {
+    use diana::analysis::axml::ManifestLimits;
+    use diana::analysis::input::{InputLimits, InputOptions};
+    use diana::analysis::manifest::{self, ManifestSelectionError};
+    use diana::analysis::request::RequestScope;
+
+    use super::support::{TempDir, axml_manifest, dex, stored_entry, zip};
+
+    fn options() -> InputOptions {
+        InputOptions {
+            limits: InputLimits::default(),
+            allowed_root: None,
+        }
+    }
+
+    #[test]
+    fn h03_manifest_uses_the_last_physical_entry_and_keeps_classified_failures() {
+        let dir = TempDir::new("h03-manifest");
+        let first = axml_manifest("first.pkg");
+        let second = axml_manifest("second.pkg");
+        let path = dir.file(
+            "dup.apk",
+            &zip(&[
+                stored_entry("AndroidManifest.xml", &first),
+                stored_entry("classes.dex", &dex(0x91)),
+                stored_entry("AndroidManifest.xml", &second),
+            ]),
+        );
+        let scope = RequestScope::open(&path, &options()).unwrap();
+        let manifest = manifest::read(&scope, ManifestLimits::default()).unwrap();
+        assert_eq!(manifest.entry().index().0, 2);
+        assert!(manifest.xml().contains("package=\"second.pkg\""));
+
+        let missing = dir.file(
+            "no-manifest.apk",
+            &zip(&[stored_entry("classes.dex", &dex(0x92))]),
+        );
+        let missing_scope = RequestScope::open(&missing, &options()).unwrap();
+        assert!(matches!(
+            manifest::read(&missing_scope, ManifestLimits::default()),
+            Err(ManifestSelectionError::Missing)
+        ));
+
+        let bare = dir.file("bare.dex", &dex(0x93));
+        let bare_scope = RequestScope::open(&bare, &options()).unwrap();
+        assert!(matches!(
+            manifest::read(&bare_scope, ManifestLimits::default()),
+            Err(ManifestSelectionError::NotArchive)
+        ));
+
+        let damaged = axml_manifest("broken.pkg");
+        let path = dir.file(
+            "damaged.apk",
+            &zip(&[stored_entry(
+                "AndroidManifest.xml",
+                &damaged[..damaged.len() - 3],
+            )]),
+        );
+        let damaged_scope = RequestScope::open(&path, &options()).unwrap();
+        assert!(matches!(
+            manifest::read(&damaged_scope, ManifestLimits::default()),
+            Err(ManifestSelectionError::Decode(_))
+        ));
+
+        let mut compressor = libdeflater::Compressor::new(libdeflater::CompressionLvl::default());
+        let mut compressed = vec![0u8; compressor.deflate_compress_bound(second.len())];
+        let written = compressor
+            .deflate_compress(&second, &mut compressed)
+            .unwrap();
+        compressed.truncate(written);
+        let path = dir.file(
+            "deflated.apk",
+            &zip(&[super::support::ZipEntry {
+                method: 8,
+                compressed: Some(&compressed),
+                ..stored_entry("AndroidManifest.xml", &second)
+            }]),
+        );
+        let deflated = RequestScope::open(&path, &options()).unwrap();
+        let manifest = manifest::read(&deflated, ManifestLimits::default()).unwrap();
+        assert!(manifest.xml().contains("package=\"second.pkg\""));
+    }
+}
