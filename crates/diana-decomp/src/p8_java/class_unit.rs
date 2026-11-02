@@ -9,11 +9,16 @@ use crate::{ClassKey, EnvironmentId, MethodOutput, RequestError, RunContext};
 pub struct VerifiedJavaUnit {
     header: String,
     environment: EnvironmentId,
+    preparation: String,
     _binding: crate::p4_calls::class_scope::ClassBindings,
 }
 impl VerifiedJavaUnit {
     pub(crate) fn source_header(&self) -> &str {
         &self.header
+    }
+
+    pub(crate) fn preparation(&self) -> &str {
+        &self.preparation
     }
 
     pub fn environment(&self) -> EnvironmentId {
@@ -63,6 +68,7 @@ fn verify_impl(
     if !interfaces.is_empty() || context.annotations_offset != crate::ByteOffset(0) {
         return Ok(None);
     }
+    let mut preparation = TextBuffer::new();
     let mut field_position = 0usize;
     let mut fields_admitted = true;
     class.visit_members_with(
@@ -94,10 +100,53 @@ fn verify_impl(
                 || actual.storage != storage
                 || !declaration.name.matches_with(&facts.name, control)?
                 || !declaration.field_type.matches_with(&facts.descriptor, control)?
-                || !matches!(&actual.declaration, crate::FieldDeclarationOutput::Java(field) if field.default_preparation)
+                || !matches!(&actual.declaration, crate::FieldDeclarationOutput::Java(field) if field.default_preparation || field.preparation().is_some() || field.initial_expression.is_some())
                 || matches!(actual.initial, crate::FieldInitialValue::Unavailable(_))
             {
                 fields_admitted = false;
+            }
+            if field.access_flags & (8 | 16) == (8 | 16) {
+                let mut assigned = false;
+                for member in members {
+                    control.charge_work(1)?;
+                    if let MethodOutput::JavaInitializer { declaration, .. } = member
+                        && let Some(proof) = declaration.final_assignments()
+                        && proof.covers(field.field_idx, control)? {
+                        assigned = true;
+                    }
+                }
+                let crate::FieldDeclarationOutput::Java(declaration) = &actual.declaration else { fields_admitted = false; return Ok(()) };
+                if assigned {
+                    if !declaration.default_preparation { fields_admitted = false; }
+                } else if let Some(expression) = &declaration.initial_expression {
+                    preparation.push("static { ", control)?;
+                    for &unit in &facts.name {
+                        control.charge_work(1)?;
+                        preparation.character(char::from_u32(u32::from(unit)).ok_or(RequestError::InternalInvariant("verified final name lost scalar"))?, control)?;
+                    }
+                    preparation.push(" = ", control)?;
+                    preparation.push(expression, control)?;
+                    preparation.push("; }\n", control)?;
+                } else { fields_admitted = false; }
+            } else if field.access_flags & 16 != 0 {
+                let mut constructors = 0usize;
+                for member in members {
+                    control.charge_work(1)?;
+                    let MethodOutput::Java { facts, .. } = member else { continue };
+                    if facts.name == [60, 105, 110, 105, 116, 62] {
+                        constructors = constructors.checked_add(1).ok_or(RequestError::PlatformCapacity)?;
+                        if !super::final_delegation::assigned(members, facts.key.method, field.field_idx, control)? {
+                            fields_admitted = false;
+                        }
+                    }
+                }
+                if constructors == 0 { fields_admitted = false; }
+            }
+            if field.access_flags & 16 == 0
+                && let crate::FieldDeclarationOutput::Java(declaration) = &actual.declaration
+                && let Some(block) = declaration.preparation() {
+                preparation.push(block, control)?;
+                preparation.push("\n", control)?;
             }
             for other in &fields[..field_position - 1] {
                 control.checkpoint()?;
@@ -223,6 +272,7 @@ fn verify_impl(
     Ok(Some(VerifiedJavaUnit {
         header: header.finish(),
         environment,
+        preparation: preparation.finish(),
         _binding: binding,
     }))
 }

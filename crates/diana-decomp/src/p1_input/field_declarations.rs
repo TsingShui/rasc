@@ -8,6 +8,16 @@ use crate::{
     StaticFieldOrdinal,
 };
 
+pub(crate) enum PreparationValue {
+    Signed(i64),
+    Unsigned(u64),
+    Float(u32),
+    Double(u64),
+    Boolean(bool),
+    Null,
+    String(Vec<u16>),
+}
+
 pub(crate) struct FieldInput {
     _sealed: (),
     pub key: FieldKey,
@@ -16,6 +26,7 @@ pub(crate) struct FieldInput {
     pub facts: Result<FieldFacts, RequestError>,
     pub initial: Option<FieldInitialValue>,
     pub default_preparation: bool,
+    pub value: Option<PreparationValue>,
 }
 
 pub(crate) struct FieldDirectory {
@@ -71,6 +82,7 @@ pub(crate) fn collect(
                     facts,
                     initial,
                     default_preparation: false,
+                    value: None,
                 },
                 control,
             )?;
@@ -161,6 +173,27 @@ pub(crate) fn collect(
             field.default_preparation = match field.facts.as_ref() {
                 Ok(facts) => default_value(&facts.descriptor, value.tag, &value.kind),
                 Err(_) => false,
+            };
+            field.value = match &value.kind {
+                EncodedKind::Signed(value) => Some(PreparationValue::Signed(*value)),
+                EncodedKind::Unsigned(value) => Some(PreparationValue::Unsigned(*value)),
+                EncodedKind::Bits { bits, .. } if value.tag == 0x10 => {
+                    Some(PreparationValue::Float(u32::try_from(*bits).map_err(
+                        |_| RequestError::InternalInvariant("float preparation lost width"),
+                    )?))
+                }
+                EncodedKind::Bits { bits, .. } if value.tag == 0x11 => {
+                    Some(PreparationValue::Double(*bits))
+                }
+                EncodedKind::Boolean(value) => Some(PreparationValue::Boolean(*value)),
+                EncodedKind::Null => Some(PreparationValue::Null),
+                EncodedKind::Reference(crate::raw::OperandReference::String(id)) => {
+                    Some(PreparationValue::String(copy_units(
+                        index.string_with(*id, control)?,
+                        control,
+                    )?))
+                }
+                _ => None,
             };
             field.initial = Some(FieldInitialValue::Encoded {
                 tag: value.tag,

@@ -1,12 +1,12 @@
 # Diana tasks and acceptance
 
-**Status: B01–B04 preparation is accepted on macOS arm64. T01 request resource
-control, method normal/raw reservations and cancellation are implemented;
-T02 typed reader, declaration-index and code-range tests pass. T03 instruction
-layout, whole-method structure and 035 invoke prototype/result tests pass.
-T04 original debug-program and encoded-value snapshot tests pass. T15 and T16
-remain pending; the current heap contract review records remaining array-
-construction obligations. EngineCoreRC is not accepted. The frozen draft-7 specification holds 86 required cases and 177 must-run invocation scenarios.**
+**Status: B01–B04 preparation is accepted on macOS arm64. The ordinary method
+chain includes checked heap operations, exception SSA/storage, protected Java,
+monitor scopes and T20 initialization. T20's supported source profile and fixed
+D041–D047/D079 obligations pass; unproved initialization remains classified
+Debug/Mixed. Complete source declarations in T21–T23 and core/application rollup
+remain open. EngineCoreRC is not accepted. The frozen draft-7 specification holds
+86 required cases and 177 must-run invocation scenarios.**
 This page owns the workflow, preparation, task cards and verification. Read
 [DESIGN.md](DESIGN.md) for interfaces and data, [ALGORITHMS.md](ALGORITHMS.md) for
 algorithms, and [SOURCE_MAP.md](SOURCE_MAP.md) for sources.
@@ -2156,12 +2156,21 @@ state, removing "redundant" locks, dynamic verification in a production run.
 **Progress**: The [initialization batch](batches/t20-initialization.md) adds
 original field results, explicit/implicit default preparation, checked source
 superclasses and ordinary-chain Java initializer bodies. D041/D042/D044/D046/D047
-pass full-unit source-JVM acceptance; D043 remains passed. Final path-count and
-delegation proofs, non-default preparation emission and D079 joint recovery
-remain pending. The [phase-boundary repair](batches/phase-boundary-repair.md)
+pass full-unit source-JVM acceptance; D043 remains passed. The
+[boolean preparation slice](batches/t20-boolean-preparation.md) admits non-final
+static BOOLEAN(true) preparation with independent Java8 compilation and JVM
+evidence. The [own final-int slice](batches/t20-final-int.md) verifies D045's
+non-delegating natural-diamond constructor with exactly one write on each normal
+path. The [static/delegation acceptance](batches/t20-static-delegation.md) adds checked
+scalar/String preparation, own-clinit static-final writes, no-repeat this-chain
+composition and independently recovered D079 units. T20's supported source
+profile passes its fixed and supplemental obligations; unproved initialization
+shapes retain classified rejection. The [phase-boundary repair](batches/phase-boundary-repair.md)
 collects receiver/constructor declarations in P4 and seals source conditions in
 P8 before further initialization work. FinalAssignmentUnproved preserves the field identity and final
-modifier in the original facts; D045/D079 are not accepted.
+modifier in the original facts; D045 passes its fixed JavaUnit/JVM obligations,
+and D079 passes independent related-unit compilation and class-init/getstatic
+observations.
 
 **Dependencies**: T19, T15. **Phase**: P1/P4/P8. **References**: DX-08/09
 (initialization).

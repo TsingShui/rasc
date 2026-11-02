@@ -8,10 +8,19 @@ use crate::{FieldFacts, FieldStorage, RequestError};
 pub struct VerifiedJavaField {
     source: String,
     pub(crate) default_preparation: bool,
+    preparation: Option<String>,
+    pub(super) initial_expression: Option<String>,
 }
 impl VerifiedJavaField {
     pub fn source(&self) -> &str {
         &self.source
+    }
+
+    /// A checked static preparation block emitted after all field declarations
+    /// and before original initializer bodies. None does not certify preparation;
+    /// whole-unit admission separately rejects unsupported encoded values.
+    pub(crate) fn preparation(&self) -> Option<&str> {
+        self.preparation.as_deref()
     }
 }
 pub(crate) fn verify(
@@ -38,7 +47,10 @@ fn verify_impl(
     {
         return Ok(None);
     }
-    if flags & 16 != 0 {
+    if flags & 16 != 0
+        && matches!(field.storage, FieldStorage::Instance)
+        && facts.descriptor != [73]
+    {
         return Err(RequestError::FinalAssignmentUnproved { field: field.key });
     }
     if !super::declarations::identifier(&facts.name, control)? {
@@ -52,6 +64,7 @@ fn verify_impl(
         (2, "private "),
         (4, "protected "),
         (8, "static "),
+        (16, "final "),
         (64, "volatile "),
         (128, "transient "),
     ] {
@@ -71,9 +84,51 @@ fn verify_impl(
         )?;
     }
     source.push(";", control)?;
+    let initial_expression = if matches!(field.storage, FieldStorage::Static(_)) {
+        super::preparation::expression(
+            &facts.descriptor,
+            field.value.as_ref(),
+            field.default_preparation,
+            control,
+        )?
+    } else {
+        None
+    };
+    let preparation = if flags & 16 == 0
+        && !field.default_preparation
+        && matches!(field.storage, FieldStorage::Static(_))
+        && initial_expression.is_some()
+    {
+        let mut preparation = TextBuffer::new();
+        preparation.push("static { ", control)?;
+        for &unit in &facts.name {
+            control.charge_work(1)?;
+            preparation.character(
+                char::from_u32(u32::from(unit)).ok_or(RequestError::InternalInvariant(
+                    "verified preparation name lost scalar",
+                ))?,
+                control,
+            )?;
+        }
+        preparation.push(" = ", control)?;
+        preparation.push(
+            initial_expression
+                .as_deref()
+                .ok_or(RequestError::InternalInvariant(
+                    "preparation expression disappeared",
+                ))?,
+            control,
+        )?;
+        preparation.push("; }", control)?;
+        Some(preparation.finish())
+    } else {
+        None
+    };
     Ok(Some(VerifiedJavaField {
         source: source.finish(),
         default_preparation: matches!(field.storage, FieldStorage::Instance)
             || field.default_preparation,
+        preparation,
+        initial_expression,
     }))
 }

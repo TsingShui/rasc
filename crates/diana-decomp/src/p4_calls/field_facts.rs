@@ -13,7 +13,13 @@ pub(crate) enum FieldStorage {
     Instance,
     Static,
 }
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub(crate) enum AssignmentObligation {
+    Ordinary,
+    OwnFinalInitialization,
+}
 pub(crate) struct FieldAccess {
+    pub assignment: AssignmentObligation,
     pub kind: crate::p2_flow::DeclarationType,
     pub storage: FieldStorage,
     _sealed: (),
@@ -53,11 +59,20 @@ pub(crate) fn collect_field(
     else {
         return Err(missing());
     };
+    let final_initialization = usage == FieldUse::Write
+        && evidence.access_flags & 16 != 0
+        && storage == FieldStorage::Static
+        && input.access_flags() == 0x10008
+        && input
+            .declaration()
+            .name
+            .matches_with(&[60, 99, 108, 105, 110, 105, 116, 62], budget)?
+        && input.own_field_metadata(reference, budget)?.is_some();
     if (evidence.access_flags & 8 != 0) != (storage == FieldStorage::Static)
         || evidence.access_flags & 7 != 1
         || evidence.access_flags & !(1 | 8 | 16 | 64 | 128 | 0x1000) != 0
         || evidence.access_flags & (16 | 64) == (16 | 64)
-        || usage == FieldUse::Write && evidence.access_flags & 16 != 0
+        || usage == FieldUse::Write && evidence.access_flags & 16 != 0 && !final_initialization
     {
         return Err(missing());
     }
@@ -96,6 +111,11 @@ pub(crate) fn collect_field(
         return Err(missing());
     }
     Ok(FieldAccess {
+        assignment: if final_initialization {
+            AssignmentObligation::OwnFinalInitialization
+        } else {
+            AssignmentObligation::Ordinary
+        },
         kind,
         storage,
         _sealed: (),
@@ -124,6 +144,11 @@ pub(crate) fn collect_own_write(
                 "own field lost native declaration",
             ))?;
     Ok(FieldAccess {
+        assignment: if native.access_flags & 16 != 0 {
+            AssignmentObligation::OwnFinalInitialization
+        } else {
+            AssignmentObligation::Ordinary
+        },
         kind: crate::p2_flow::DeclarationType::Int,
         _sealed: (),
         storage: FieldStorage::Instance,

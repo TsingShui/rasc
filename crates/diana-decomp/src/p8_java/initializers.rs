@@ -28,6 +28,9 @@ impl VerifiedJavaInitializer {
     pub fn calls(&self) -> impl Iterator<Item = super::JavaCallSite<'_>> {
         self.method.calls()
     }
+    pub(super) fn final_assignments(&self) -> Option<&super::final_assignment::Certificate> {
+        self.method.final_assignments.as_ref()
+    }
     pub(crate) fn seal(method: super::VerifiedJavaMethod) -> JavaMember {
         if matches!(method.syntax, MemberSyntax::Initializer { .. }) {
             JavaMember::Initializer(Self { method })

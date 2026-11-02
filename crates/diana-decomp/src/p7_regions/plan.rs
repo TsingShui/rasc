@@ -3,12 +3,13 @@ use super::{
     flow::{Flow, Transfer},
     normal, verify,
 };
-use crate::p2_flow::{BlockId, MethodFrame, Op, Terminal};
+use crate::p2_flow::{BlockId, Op, Terminal};
 use crate::p6_variables::StorageBody;
 use crate::substrate::owned::push;
 use crate::{MethodBudget, RepresentationPolicy, RequestError};
 
 pub(crate) enum Region {
+    Sequence(BlockId),
     Loop(NaturalLoop),
     Diamond(super::branch::Diamond),
 }
@@ -35,16 +36,10 @@ fn diamond(
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<Option<super::branch::Diamond>, RequestError> {
     let ssa = &storage.typed.ssa;
-    if flow.cases.len() != 4 || ssa.edges.len() != 4 || !matches!(ssa.frame, MethodFrame::Static) {
+    if flow.cases.len() != 4 || ssa.edges.len() != 4 {
         return Ok(None);
     }
-    for op in &ssa.operations {
-        budget.charge_work(1)?;
-        if op.op.effects().observable() {
-            return Ok(None);
-        }
-    }
-    let Terminal::Test { other: None, .. } = ssa.blocks[0].terminal else {
+    let Terminal::Test { .. } = ssa.blocks[0].terminal else {
         return Ok(None);
     };
     let Transfer::Branch { yes, no } = &flow.cases[0].transfer else {
@@ -69,18 +64,10 @@ fn diamond(
             ssa.blocks
                 [usize::try_from(diamond.join.0).map_err(|_| RequestError::PlatformCapacity)?]
             .terminal,
-            Terminal::Return(_)
+            Terminal::Return(_) | Terminal::ReturnVoid
         )
     {
         return Ok(None);
-    }
-    for &id in
-        &ssa.bound[usize::try_from(diamond.join.0).map_err(|_| RequestError::PlatformCapacity)?].ops
-    {
-        budget.charge_work(1)?;
-        if !matches!(ssa.operation(id)?.op, Op::Nop) {
-            return Ok(None);
-        }
     }
     Ok(Some(diamond))
 }
@@ -118,7 +105,20 @@ fn build_impl<'a>(
         Shape::Dispatcher
     } else {
         let flow = Flow::build(&storage, budget)?;
-        if let Some(diamond) = diamond(&storage, &flow, budget)? {
+        let mut initialization = matches!(
+            storage.typed.ssa.frame,
+            crate::p2_flow::MethodFrame::Constructor(_)
+        );
+        for evidence in storage.typed.field_declarations.iter().flatten() {
+            budget.charge_work(1)?;
+            initialization |= matches!(&evidence.declaration, crate::p4_calls::FieldDeclaration::Known(access) if access.assignment == crate::p4_calls::field_facts::AssignmentObligation::OwnFinalInitialization);
+        }
+        if initialization
+            && flow.cases.len() == 1
+            && matches!(flow.cases[0].transfer, Transfer::Return)
+        {
+            Shape::Structured(Region::Sequence(BlockId(0)))
+        } else if let Some(diamond) = diamond(&storage, &flow, budget)? {
             Shape::Structured(Region::Diamond(diamond))
         } else if let Some(candidate) = normal::plan(&flow, budget)? {
             Shape::Structured(Region::Loop(verify::verify(&flow, candidate, budget)?))

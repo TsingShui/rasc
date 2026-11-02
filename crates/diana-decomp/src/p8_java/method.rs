@@ -13,6 +13,7 @@ pub struct VerifiedJavaMethod {
     pub(super) header: String,
     pub(super) syntax: super::initializers::MemberSyntax,
     pub(super) body: MethodBody,
+    pub(super) final_assignments: Option<super::final_assignment::Certificate>,
     environment: EnvironmentId,
     pub(super) type_names: super::types::TypeNames,
 }
@@ -44,6 +45,7 @@ impl VerifiedJavaMethod {
         Self {
             header,
             body: MethodBody::Structured(body),
+            final_assignments: None,
             syntax,
             environment,
             type_names: super::types::TypeNames::default(),
@@ -131,6 +133,7 @@ impl VerifiedJavaMethod {
         Self {
             header,
             body: MethodBody::Protected(body),
+            final_assignments: None,
             syntax,
             environment,
             type_names: super::types::TypeNames::default(),
@@ -145,6 +148,7 @@ impl VerifiedJavaMethod {
         Self {
             header,
             body: MethodBody::Dispatcher(body),
+            final_assignments: None,
             syntax,
             environment,
             type_names: super::types::TypeNames::default(),

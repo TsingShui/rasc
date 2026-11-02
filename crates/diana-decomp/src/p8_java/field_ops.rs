@@ -8,7 +8,9 @@ use crate::{FieldId, MethodBudget, RequestError};
 
 pub(crate) enum Receiver {
     Instance(LocalId),
+    This(LocalId),
     Static(String),
+    OwnStatic(String),
 }
 pub(crate) enum Statement {
     Load {
@@ -83,12 +85,35 @@ pub(crate) fn lower(
         return Ok(None);
     };
     let receiver = match declaration.storage {
-        FieldStorage::Instance => Receiver::Instance(LocalId(op.input(0)?.0)),
+        FieldStorage::Instance => {
+            let local = LocalId(op.input(0)?.0);
+            if declaration.assignment
+                == crate::p4_calls::field_facts::AssignmentObligation::OwnFinalInitialization
+            {
+                Receiver::This(local)
+            } else {
+                Receiver::Instance(local)
+            }
+        }
         FieldStorage::Static => {
             let Some(name) = qualifier(&declaration.owner, budget)? else {
                 return Ok(None);
             };
-            Receiver::Static(name)
+            if declaration.assignment
+                == crate::p4_calls::field_facts::AssignmentObligation::OwnFinalInitialization
+            {
+                if declaration.name.first() == Some(&118)
+                    && declaration.name.len() > 1
+                    && declaration.name[1..]
+                        .iter()
+                        .all(|unit| (48..=57).contains(unit))
+                {
+                    return Ok(None);
+                }
+                Receiver::OwnStatic(name)
+            } else {
+                Receiver::Static(name)
+            }
         }
     };
     let index = usize::try_from(op.id.0).map_err(|_| RequestError::PlatformCapacity)?;
@@ -221,11 +246,31 @@ pub(crate) fn verify(
     }
     match (receiver, declaration.storage, op.op) {
         (
-            Receiver::Instance(receiver),
+            Receiver::Instance(receiver) | Receiver::This(receiver),
             FieldStorage::Instance,
             Op::FieldLoad(..) | Op::FieldStore(..),
         ) => {
-            if receiver.0 != op.input(0)?.0
+            let final_write = declaration.assignment
+                == crate::p4_calls::field_facts::AssignmentObligation::OwnFinalInitialization;
+            if matches!(
+                actual,
+                Statement::Store {
+                    receiver: Receiver::This(_),
+                    ..
+                }
+            ) != final_write
+                || final_write
+                    && !matches!(
+                        typed
+                            .field_uses
+                            .get(
+                                usize::try_from(op.id.0)
+                                    .map_err(|_| RequestError::PlatformCapacity)?
+                            )
+                            .and_then(Option::as_ref),
+                        Some(TypedFieldUse::WriteThis(_))
+                    )
+                || receiver.0 != op.input(0)?.0
                 || typed.kinds
                     [usize::try_from(receiver.0).map_err(|_| RequestError::PlatformCapacity)?]
                     != Some(Kind::Nominal(declaration.owner_type))
@@ -234,11 +279,15 @@ pub(crate) fn verify(
             }
         }
         (
-            Receiver::Static(actual),
+            Receiver::Static(actual) | Receiver::OwnStatic(actual),
             FieldStorage::Static,
             Op::StaticLoad(..) | Op::StaticStore(..),
         ) => {
-            if qualifier(&declaration.owner, budget)?.as_ref() != Some(actual) {
+            let final_write = declaration.assignment
+                == crate::p4_calls::field_facts::AssignmentObligation::OwnFinalInitialization;
+            if matches!(receiver, Receiver::OwnStatic(_)) != final_write
+                || qualifier(&declaration.owner, budget)?.as_ref() != Some(actual)
+            {
                 return Ok(false);
             }
         }

@@ -51,6 +51,7 @@ fn t20_field_preparation_preserves_explicit_defaults_and_never_turns_damage_into
         "explicit",
         "implicit",
         "nondefault",
+        "unsupported_int",
         "bad_count",
         "bad_last_tag",
     ] {
@@ -58,6 +59,7 @@ fn t20_field_preparation_preserves_explicit_defaults_and_never_turns_damage_into
         match variant {
             "implicit" => bytes[264..268].copy_from_slice(&0u32.to_le_bytes()),
             "nondefault" => bytes[409] = 0x3f,
+            "unsupported_int" => bytes[411] = 1,
             "bad_count" => bytes[408] = 4,
             "bad_last_tag" => bytes[412] = 0x0f,
             _ => {}
@@ -65,7 +67,10 @@ fn t20_field_preparation_preserves_explicit_defaults_and_never_turns_damage_into
         let report = decompile(&bytes, CATALOG);
         assert_eq!(
             matches!(report.class(), ClassOutput::JavaUnit { .. }),
-            matches!(variant, "explicit" | "implicit"),
+            matches!(
+                variant,
+                "explicit" | "implicit" | "nondefault" | "unsupported_int"
+            ),
             "{variant}"
         );
         assert_eq!(report.class().fields().len(), 3);
@@ -119,7 +124,10 @@ fn t20_field_preparation_preserves_explicit_defaults_and_never_turns_damage_into
             diana_decomp::render(&report, &mut RunContext::new(Limits::default(), &|| false))
                 .unwrap();
         assert_eq!(rendered.spans.len(), 1);
-        if matches!(variant, "explicit" | "implicit") {
+        if matches!(
+            variant,
+            "explicit" | "implicit" | "nondefault" | "unsupported_int"
+        ) {
             assert!(rendered.source.contains("public static boolean b;"));
             assert!(rendered.source.contains("public static int i;"));
             assert!(
@@ -127,6 +135,17 @@ fn t20_field_preparation_preserves_explicit_defaults_and_never_turns_damage_into
                     .source
                     .contains("public static java.lang.String s;")
             );
+            if variant == "nondefault" {
+                let preparation = rendered.source.find("static { b = true; }").unwrap();
+                let last_field = rendered
+                    .source
+                    .find("public static java.lang.String s;")
+                    .unwrap();
+                assert!(last_field < preparation);
+                assert!(preparation < rendered.spans[0].start.0);
+            } else {
+                assert!(!rendered.source.contains("static { b = true; }"));
+            }
         }
     }
 }
@@ -229,6 +248,148 @@ fn t20_initializers_keep_original_keys_and_normal_or_abrupt_completion() {
         assert_eq!(&rendered.source[span.start.0..span.end.0], source);
     }
 }
+#[test]
+fn t20_final_assignment_preserves_join_value_and_rejects_unproved_writes() {
+    let original = include_bytes!("../fixtures/final-assignment/d045.dex");
+    let catalog = include_str!("../fixtures/final-assignment/d045-catalog.json");
+    // The independent D045 projection fixes code units at byte 264 and iput at PC 8.
+    assert_eq!(&original[280..284], &[0x59, 0x01, 0, 0]);
+    for variant in ["join", "missing", "multiple", "wrong_receiver"] {
+        let mut bytes = original.to_vec();
+        match variant {
+            "missing" => bytes[280..284].fill(0),
+            "multiple" => bytes[274..278].copy_from_slice(&[0x59, 0x01, 0, 0]),
+            "wrong_receiver" => bytes[281] = 0x11,
+            _ => {}
+        }
+        let report = decompile(&bytes, catalog);
+        let field = &report.class().fields()[0];
+        assert_eq!(field.key.field.0, 0);
+        assert_eq!(field.access_flags, 17);
+        assert_eq!(field.facts.as_ref().unwrap().name, [120]);
+        assert_eq!(report.class().members().len(), 1);
+        assert_eq!(
+            matches!(report.class(), ClassOutput::JavaUnit { .. }),
+            variant == "join"
+        );
+        let rendered =
+            diana_decomp::render(&report, &mut RunContext::new(Limits::default(), &|| false))
+                .unwrap();
+        if variant == "join" {
+            assert!(rendered.source.contains("public final int x;"));
+            assert!(rendered.source.contains("this.x = "));
+            assert!(!rendered.source.contains("while (true)"));
+        } else if variant == "missing" {
+            assert!(matches!(
+                report.class().members()[0],
+                MethodOutput::Java { .. }
+            ));
+        } else {
+            let MethodOutput::Debug { reason, .. } = &report.class().members()[0] else {
+                panic!("unproved final write became Java: {variant}")
+            };
+            assert_eq!(
+                report.diagnostics()[reason.0].cause.kind(),
+                FailureKind::Unsupported
+            );
+        }
+    }
+}
+
+#[test]
+fn t20_static_preparation_and_delegated_finals_keep_original_units() {
+    for (bytes, catalog) in [
+        (
+            include_bytes!("../fixtures/final-assignment/delegated.dex").as_slice(),
+            include_str!("../fixtures/final-assignment/delegated-catalog.json"),
+        ),
+        (
+            include_bytes!("../fixtures/final-assignment/preparation.dex").as_slice(),
+            include_str!("../fixtures/final-assignment/preparation-catalog.json"),
+        ),
+    ] {
+        let report = decompile(bytes, catalog);
+        assert!(matches!(report.class(), ClassOutput::JavaUnit { .. }));
+        assert!(report.diagnostics().is_empty());
+        let rendered =
+            diana_decomp::render(&report, &mut RunContext::new(Limits::default(), &|| false))
+                .unwrap();
+        if report.class().fields().len() == 1 {
+            assert!(rendered.source.contains("this(7);"));
+            assert_eq!(rendered.source.matches("this.x = ").count(), 1);
+        } else {
+            assert_eq!(report.class().fields().len(), 10);
+            assert!(rendered.source.contains("static { N = 7; }"));
+            assert!(rendered.source.contains("static { Z = false; }"));
+            assert!(rendered.source.contains("static { f = -0.0f; }"));
+            assert!(
+                rendered
+                    .source
+                    .contains("static { j = -9223372036854775808L; }")
+            );
+            assert!(!rendered.source.contains("final int N ="));
+        }
+    }
+}
+
+#[test]
+fn t20_static_final_write_and_delegation_failures_preserve_other_members() {
+    let catalog = include_str!("../fixtures/final-assignment/delegated-catalog.json");
+    let report = decompile(
+        include_bytes!("../fixtures/final-assignment/repeated.dex"),
+        catalog,
+    );
+    assert!(matches!(report.class(), ClassOutput::Mixed { .. }));
+    assert_eq!(report.class().members().len(), 2);
+    assert!(matches!(
+        report.class().members()[0],
+        MethodOutput::Debug { .. }
+    ));
+    assert!(matches!(
+        report.class().members()[1],
+        MethodOutput::Java { .. }
+    ));
+    let conflict = decompile(
+        include_bytes!("../fixtures/final-assignment/conflict.dex"),
+        include_str!("../fixtures/final-assignment/conflict-catalog.json"),
+    );
+    assert!(matches!(conflict.class(), ClassOutput::Mixed { .. }));
+    assert_eq!(conflict.class().fields()[0].access_flags, 25);
+    assert!(matches!(
+        conflict.class().members()[1],
+        MethodOutput::Java { .. }
+    ));
+    let original = include_bytes!("../fixtures/final-assignment/d079.dex");
+    assert_eq!(&original[586..590], &[0x67, 0, 0, 0]);
+    for variant in ["original", "missing", "duplicate"] {
+        let mut bytes = original.to_vec();
+        match variant {
+            "missing" => bytes[586..590].fill(0),
+            "duplicate" => bytes[598..602].copy_from_slice(&[0x67, 0, 0, 0]),
+            _ => {}
+        }
+        let report = decompile(
+            &bytes,
+            include_str!("../fixtures/final-assignment/d079-catalog.json"),
+        );
+        assert_eq!(
+            matches!(report.class(), ClassOutput::JavaUnit { .. }),
+            variant != "duplicate"
+        );
+        assert_eq!(report.class().members().len(), 2);
+        assert!(matches!(
+            report.class().members()[1],
+            MethodOutput::Java { .. }
+        ));
+        if variant == "missing" {
+            let rendered =
+                diana_decomp::render(&report, &mut RunContext::new(Limits::default(), &|| false))
+                    .unwrap();
+            assert!(rendered.source.contains("static { N = 0; }"));
+        }
+    }
+}
+
 #[test]
 fn t20_superclass_declaration_keeps_the_verified_super_call_context() {
     let report = decompile_at(

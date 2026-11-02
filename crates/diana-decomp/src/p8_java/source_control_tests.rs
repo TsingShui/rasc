@@ -11,6 +11,150 @@ struct Facts {
 }
 
 #[test]
+fn final_assignment_checks_charge_shared_graph_traversal_and_allocation() {
+    #[derive(serde::Deserialize)]
+    struct FinalFacts {
+        methods: Vec<crate::ExternalMethodSignature>,
+        classes: Vec<crate::ExternalClassDeclaration>,
+        fields: Vec<crate::ExternalFieldEvidence>,
+    }
+    let facts: FinalFacts = serde_json::from_str(include_str!(
+        "../../tests/fixtures/final-assignment/d045-catalog.json"
+    ))
+    .unwrap();
+    let catalog =
+        DeclarationCatalog::with_declarations(EnvironmentId(0), facts.methods, facts.classes)
+            .with_field_evidence(facts.fields);
+    let mut control = RunContext::new(Limits::default(), &|| false);
+    let index = crate::input::ProgramIndex::open(
+        include_bytes!("../../tests/fixtures/final-assignment/d045.dex"),
+        &mut control,
+    )
+    .unwrap();
+    let mut budget = control.method_budget().unwrap();
+    let input = index
+        .method_input(ClassDefId(0), MethodId(0), &mut budget)
+        .unwrap();
+    let permit = crate::engine::SchedulePermit::for_test();
+    let storage = crate::pipeline::branch::build(&permit, &input, &catalog, &mut budget)
+        .unwrap()
+        .into_storage()
+        .unwrap();
+    let plan = crate::p7_regions::build(
+        &permit,
+        storage,
+        crate::RepresentationPolicy::StructuredThenDispatch,
+        &mut budget,
+    )
+    .unwrap()
+    .into_data();
+    let proof = crate::p8_java::final_assignment::verify(&plan.storage, &plan.shape, &mut budget)
+        .unwrap()
+        .unwrap();
+    assert!(proof.covers(crate::FieldId(0), &mut budget).unwrap());
+    for (limits, cancelled, expected) in [
+        (
+            Limits {
+                max_work_steps: Some(0),
+                ..Limits::default()
+            },
+            false,
+            FailureKind::BudgetExceeded,
+        ),
+        (
+            Limits {
+                max_method_allocation_bytes: Some(0),
+                ..Limits::default()
+            },
+            false,
+            FailureKind::BudgetExceeded,
+        ),
+        (Limits::default(), true, FailureKind::Cancelled),
+    ] {
+        let armed = std::cell::Cell::new(false);
+        let cancel = || armed.get() && cancelled;
+        let mut limited = RunContext::new(limits, &cancel);
+        let mut budget = limited.method_budget().unwrap();
+        armed.set(true);
+        let result =
+            crate::p8_java::final_assignment::verify(&plan.storage, &plan.shape, &mut budget);
+        let Err(error) = result else {
+            panic!("final assignment bypassed resource control")
+        };
+        assert_eq!(error.kind(), expected);
+    }
+    drop(budget);
+    let report = crate::Engine::open(
+        vec![crate::DexImage {
+            bytes: include_bytes!("../../tests/fixtures/final-assignment/delegated.dex"),
+            header_offset: crate::ByteOffset(0),
+            origin: crate::ImageOrigin {
+                input: crate::InputId(0),
+            },
+        }],
+        crate::Options::default(),
+        {
+            let facts: FinalFacts = serde_json::from_str(include_str!(
+                "../../tests/fixtures/final-assignment/delegated-catalog.json"
+            ))
+            .unwrap();
+            DeclarationCatalog::with_declarations(EnvironmentId(0), facts.methods, facts.classes)
+                .with_field_evidence(facts.fields)
+        },
+        &mut control,
+    )
+    .unwrap()
+    .decompile(
+        crate::Request {
+            class: crate::ClassKey {
+                dex: crate::DexId(0),
+                class_def: ClassDefId(0),
+            },
+            method: None,
+        },
+        &mut control,
+    )
+    .unwrap();
+    for limits in [
+        Limits {
+            max_request_work_steps: Some(0),
+            ..Limits::default()
+        },
+        Limits {
+            max_request_allocation_bytes: Some(0),
+            ..Limits::default()
+        },
+    ] {
+        let mut limited = RunContext::new(limits, &|| false);
+        assert_eq!(
+            crate::p8_java::final_delegation::assigned(
+                report.class().members(),
+                MethodId(0),
+                crate::FieldId(0),
+                &mut limited
+            )
+            .unwrap_err()
+            .kind(),
+            FailureKind::BudgetExceeded
+        );
+        let mut limited = RunContext::new(limits, &|| false);
+        assert_eq!(
+            crate::p8_java::preparation::expression(
+                &[73],
+                Some(&crate::input::field_declarations::PreparationValue::Signed(
+                    7
+                )),
+                false,
+                &mut limited
+            )
+            .unwrap_err()
+            .kind(),
+            FailureKind::BudgetExceeded
+        );
+    }
+}
+
+#[test]
 fn final_control_replay_rejects_wrong_exits_missing_coverage_and_lock_operands() {
     let fixture = crate::test_fixture::with_code(crate::test_fixture::CodeRecipe {
         instructions: &[

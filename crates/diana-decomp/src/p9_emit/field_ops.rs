@@ -9,7 +9,9 @@ fn write_receiver(
 ) -> Result<(), RequestError> {
     match receiver {
         Receiver::Instance(local) => super::java::local(*local, output, budget),
+        Receiver::This(_) => output.push("this", budget),
         Receiver::Static(qualifier) => output.push(qualifier, budget),
+        Receiver::OwnStatic(_) => Ok(()),
     }
 }
 pub(super) fn write(
@@ -37,7 +39,9 @@ pub(super) fn write(
             ..
         } => {
             write_receiver(receiver, output, budget)?;
-            output.push(".", budget)?;
+            if !matches!(receiver, Receiver::OwnStatic(_)) {
+                output.push(".", budget)?;
+            }
             output.push(name, budget)?;
             output.push(" = ", budget)?;
             super::java::value_use(*value, output, budget)?;

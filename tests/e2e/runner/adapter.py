@@ -71,7 +71,36 @@ def run_public(root, cache, spec, manifest, case_ids=None,representation=None,jo
         cert = certified[(case['id'],invocation['id'])]
         work = output/case['id']/invocation['id']/seam
         try:
-            if seam not in {'decompile-method','decompile-class','decompile-and-render','open-or-decompile','engine-original-view'}:
+            if seam == 'decompile-related-classes':
+                sources=[]; members=[]; diagnostics=[]; reports=[]
+                for binding in cert['bindings']:
+                    selector,origin=binding['selector'],binding['origin']
+                    if selector['kind']!='class':raise PreparationError('related recovery requires class selectors')
+                    asset=assets[origin['asset_id']];path=root/asset['path']
+                    if not path.is_file() or path.stat().st_size!=asset['size']:raise PreparationError('missing/changed certified input')
+                    owner_work=work/binding['role']
+                    catalog_path=owner_work/'method-signatures.json'
+                    save(catalog_path,_catalog(root,assets,cert['catalog']['asset_id']))
+                    public_path=owner_work/'public.json'
+                    control_path=owner_work/'controls.json'
+                    controls={key:invocation['input'][key] for key in ('limits','cancellation') if key in invocation['input']}
+                    if representation is not None:controls['representation']=representation
+                    save(control_path,controls)
+                    run([executable,path,str(origin['header_offset']),str(selector['class_def_idx']),'--control',control_path,'--catalog',catalog_path,'--output',public_path],root,owner_work/'library.log')
+                    actual=load(public_path)
+                    groups=_artifacts(actual,{**cert,'bindings':[binding]})
+                    if actual['status']!='java_unit':raise ValueError('related owner is not a complete JavaUnit: '+selector['descriptor'])
+                    source_path=owner_work/'unit'/Path(selector['descriptor'][1:-1]+'.java')
+                    source_path.parent.mkdir(parents=True,exist_ok=True)
+                    source_path.write_text(actual['text'],encoding='utf-8')
+                    sources.append({'path':relative(source_path)})
+                    members.extend(groups['outcome']['members']);diagnostics.extend(actual['diagnostics']);reports.append(relative(public_path))
+                groups={'outcome':{'outcome':'java','status':'java_unit','selected':cert['bindings'],'members':members,'diagnostics':diagnostics,'report':{'available':True},'published_success':False},'java_input':{'sources':sources}}
+                for group,value in groups.items():
+                    path=work/(group+'.json');save(path,value);record['artifacts'][group]={'path':relative(path)}
+                record['execution']='completed'
+                record['owner_reports']=reports
+            elif seam not in {'decompile-method','decompile-class','decompile-and-render','open-or-decompile','engine-original-view'}:
                 record['reason'] = 'the public Engine adapter does not implement this seam'
             elif len(cert['bindings']) != 1:
                 record['reason'] = 'multi-target public requests are not implemented'
@@ -110,7 +139,6 @@ def run_public(root, cache, spec, manifest, case_ids=None,representation=None,jo
                     public_path.unlink(missing_ok=True)
                     argv.extend(['--output',public_path])
                     run(argv,root,work/'library.log')
-                    from e2e import load
                     actual=load(public_path)
                     calls=invocation['input'].get('calls',[]) if case['validationScope']=='method-in-known-context' else []
                     requested=list(dict.fromkeys(call['method'] for call in calls))

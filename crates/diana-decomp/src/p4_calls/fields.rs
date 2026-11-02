@@ -36,7 +36,8 @@ pub(crate) fn bind_own_int_write(
     };
     if native.same_named_fields != 1
         || native.access_flags != evidence.access_flags
-        || native.access_flags & (8 | 16) != 0
+        || native.access_flags & 8 != 0
+        || native.access_flags & (16 | 64) == (16 | 64)
     {
         return Err(missing());
     }

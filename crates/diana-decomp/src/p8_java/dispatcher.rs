@@ -101,6 +101,10 @@ pub(super) fn verify(
 ) -> Result<Option<VerifiedJavaMethod>, RequestError> {
     let plan = plan.into_data();
     let storage = &plan.storage;
+    let Some(final_assignments) = super::final_assignment::verify(storage, &plan.shape, budget)?
+    else {
+        return Ok(None);
+    };
     let placements = super::exceptional::obligations(storage, budget)?;
     if !placements.is_empty() && !matches!(plan.shape, crate::p7_regions::Shape::Protected(Some(_)))
     {
@@ -476,7 +480,7 @@ pub(super) fn verify(
     }
     if let crate::p7_regions::Shape::Structured(region) = plan.shape {
         let source = super::natural_control::lower(&body, &region, budget)?;
-        return Ok(Some(VerifiedJavaMethod::structured(
+        let mut method = VerifiedJavaMethod::structured(
             header.finish(),
             super::structured::StructuredBody {
                 storage: body,
@@ -484,12 +488,11 @@ pub(super) fn verify(
             },
             syntax,
             environment,
-        )));
+        );
+        method.final_assignments = Some(final_assignments);
+        return Ok(Some(method));
     }
-    Ok(Some(VerifiedJavaMethod::dispatcher(
-        header.finish(),
-        body,
-        syntax,
-        environment,
-    )))
+    let mut method = VerifiedJavaMethod::dispatcher(header.finish(), body, syntax, environment);
+    method.final_assignments = Some(final_assignments);
+    Ok(Some(method))
 }

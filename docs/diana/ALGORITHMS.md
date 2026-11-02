@@ -1738,6 +1738,41 @@ needs; P9 MUST NOT change their names in a way that invalidates that binding evi
   A known clinit without code needs no method; initialization exceptions are not wrapped and are
   handled by the target VM's class-initialization rules.
 
+#### Checked source initialization profile
+
+P1 field preparation retains decoded scalar bits or String UTF-16 units alongside
+original encoded ranges/tags and bytes. A failed suffix remains partial and never
+acquires an implicit default. P8 selects a source expression only for a matching
+supported descriptor/value form; noncanonical NaN preparation remains Unsupported.
+Finite FP and signed zero use exact hexadecimal or zero literals; infinity uses
+constant division. String preparation checks modified UTF-8 target limits before
+escaping original UTF-16 units.
+
+P4 records own constructor/clinit final writes as initialization obligations,
+not ordinary field-write permission. P5 WriteThis supplies constructor receiver
+provenance. P8 consumes shared checked operations, storage and normal edges to
+check the finite path-count set. The supported source graph is an unprotected
+single-block Sequence or exclusive acyclic Diamond; affected explicit field reads,
+cycles, switches and unsupported completion shapes reject this profile. P7 builds
+these regions from the same P6 products. P8 replays final lexical control and
+original field operations before publishing the method certificate.
+
+A delegating constructor with no own final writes retains its checked original
+target in the P8 certificate. Unit verification follows only certificates from
+already-recovered original constructors, rejecting missing/non-constructor targets,
+cycles and an own write combined with delegation. It does not analyze a callee
+again. Missing assignments leave the unit Mixed without withdrawing independently
+available methods.
+
+P8 unit assembly emits preparation blocks in original field order after all
+field declarations. A static final with checked original writes requires default
+preparation and exactly one normal-path write; without such a write, unit assembly
+emits the supported encoded or implicit default once. Non-default preparation
+combined with a later final write rejects the unit. Static final assignments use
+an already checked unqualified own-field form; fields colliding with synthetic
+local spellings are rejected rather than rebound. P9 prints the sealed unit
+preparation and original initializer bodies without decoding or choosing values.
+
 ### 12.3 A generated member is not DeclarationOnly
 
 Bridges, the values/valueOf of enums, hidden constructor parameters and inner outer-capture are

@@ -31,6 +31,7 @@ pub fn render(
                 output.push(declaration.source(), control)?;
                 output.push("\n", control)?;
             }
+            output.push(declaration.preparation(), control)?;
             for member in members {
                 control.checkpoint()?;
                 let source = match member {

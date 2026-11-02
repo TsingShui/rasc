@@ -114,6 +114,7 @@ fn lower_into(
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<(), RequestError> {
     match region {
+        crate::p7_regions::Region::Sequence(block) => trace(storage, &[*block], output, budget),
         crate::p7_regions::Region::Loop(region) => write_loop(storage, region, output, budget),
         crate::p7_regions::Region::Diamond(region) => {
             let header = case(storage, region.block)?;
