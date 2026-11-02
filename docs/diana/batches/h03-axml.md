@@ -39,8 +39,8 @@ Decisions that keep the output faithful:
 - Content-affecting warnings are repeated **in place** as XML comments so a
   consumer that reads only stdout still sees them; naming substitutions keep no
   per-attribute comment because the value is retained. Observed on a real
-  `res/xml` sample: `<!-- diana: byte 248: text record skipped ... -->` sits
-  between the elements where the text was, and the result still parses as XML.
+  `res/xml` sample after the text change shows the original `;` text between the
+  elements, and the result still parses as XML.
 
 `analysis/manifest.rs` selects the **last physical** `AndroidManifest.xml` entry in
 directory order, reads it through the shared archive reader (stored or deflate) and
@@ -128,11 +128,10 @@ With the warning semantics in place, the same five manifests still decode with
 elements, attribute names and values. A `res/xml` document with a text node yields
 balanced XML plus one `SkippedText` warning instead of failing.
 
-Known limitations, recorded rather than hidden: text/CDATA content is skipped with
-a warning rather than rendered, and DTD records are unknown records; string-pool
-style spans are bounds-checked but not interpreted; the resource map is validated
-but not used for naming; attributes whose original names are not legal XML names
-are dropped with a warning instead of being renamed.
+Known limitations, recorded rather than hidden: DTD records are unknown records;
+string-pool style spans are bounds-checked but not interpreted; attributes whose
+original names are not legal XML names are rewritten with a warning rather than
+dropped.
 
 ## Gates
 

@@ -772,7 +772,7 @@ public Android attribute table for those ids and MUST otherwise emit the id itse
 warning, never a silent change.
 
 Manifest decoding is allowed to deliver a **balanced partial** document. A record
-that cannot be decoded, a text node that is not rendered, an out-of-pool name, an
+that cannot be decoded, an unreadable text node, an out-of-pool name, an
 unsupported typed value, a repeated attribute or a damaged tail MUST be reported
 as a warning with its original byte offset, and the reader MUST close the elements
 that are still open, so the emitted text stays well-formed XML. A warning that
@@ -782,7 +782,9 @@ comment at that position, because an agent that reads only stdout would otherwis
 receive a shorter document without noticing. A naming substitution that keeps the
 value (a resolved resource id, or a name rewritten into the XML name production)
 is recorded in the warning list but MUST NOT emit a comment per attribute, so the
-text stays proportional to the input. All warnings appear in the `warnings` array
+text stays proportional to the input. A text/CDATA record is rendered in place as
+escaped character data; string-pool style spans are not rendered, and that
+limitation is recorded rather than hidden. All warnings appear in the `warnings` array
 of the JSON result and on stderr; they MUST NOT be silently dropped, and a
 warning-only result exits 0 because the request and its display completed. Where
 the strict policy is requested, a warning makes the exit non-zero. A non-AXML container, an unreadable or encrypted entry, an

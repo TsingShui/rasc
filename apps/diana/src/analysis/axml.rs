@@ -398,7 +398,7 @@ pub enum ManifestWarningKind {
     TruncatedChunk,
     /// A record kind outside the supported set was skipped.
     UnknownRecord(u16),
-    /// A text/CDATA record was skipped; text nodes are not rendered yet.
+    /// A text/CDATA record could not be resolved; its string was empty or invalid.
     SkippedText,
     /// A string index was outside the pool; an empty value was used.
     InvalidString(u32),
@@ -665,9 +665,17 @@ impl Decoder<'_> {
                 }
                 RES_XML_CDATA_TYPE => {
                     if self.skip.is_none() {
-                        self.comment(offset, ManifestWarningKind::SkippedText)?;
-                    } else {
-                        self.warning(offset, ManifestWarningKind::SkippedText)?;
+                        // ResXMLTree_cdataExt: the text is a string-pool index at
+                        // +16; style spans are not rendered yet.
+                        let index = u32_at(self.bytes, offset + 16)?;
+                        let text = self.text(offset, index)?;
+                        if !text.is_empty() {
+                            self.budget.nodes()?;
+                            let depth = self.open.len();
+                            self.budget.indent(depth)?;
+                            self.budget.write_escaped(&text)?;
+                            self.budget.write("\n")?;
+                        }
                     }
                 }
                 other => {
@@ -1223,20 +1231,24 @@ mod tests {
         assert!(warnings(&decoded).contains(&&ManifestWarningKind::UnknownRecord(0x0999)));
         assert!(balanced(decoded.xml()));
 
-        // Text nodes are skipped with a warning instead of failing the document.
+        // Text records are rendered in place; their content is not lost.
         let mut text = document(
-            &["name", "manifest", "pkg", "android", "http://x"],
+            &["name", "manifest", "pkg", "android", "http://x", "hello"],
             false,
             false,
         );
-        let body = chunk(0x0104, 16, &[0u8; 12]);
+        let mut body = Vec::new();
+        body.extend_from_slice(&1u32.to_le_bytes());
+        body.extend_from_slice(&u32::MAX.to_le_bytes());
+        body.extend_from_slice(&5u32.to_le_bytes());
+        body.extend_from_slice(&[0u8; 8]);
         let insert = text.len() - 24;
-        text.splice(insert..insert, body);
+        text.splice(insert..insert, chunk(0x0104, 16, &body));
         let size = u32::try_from(text.len()).unwrap();
         text[4..8].copy_from_slice(&size.to_le_bytes());
         let decoded = decode(&text, ManifestLimits::default()).unwrap();
-        assert!(warnings(&decoded).contains(&&ManifestWarningKind::SkippedText));
-        assert!(!decoded.xml().is_empty());
+        assert!(decoded.xml().contains("hello"), "{}", decoded.xml());
+        assert!(warnings(&decoded).is_empty(), "{:?}", decoded.warnings());
 
         // A repeated attribute keeps the first value and reports the second.
         let mut duplicate = pool(&["root", "a", "b"], false, false);
