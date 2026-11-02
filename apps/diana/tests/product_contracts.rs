@@ -11,6 +11,7 @@ use diana::analysis::input::{
     ArchiveProblem, BytesSource, EntryIndex, InputError, InputKind, InputLimit, InputLimits,
     InputOptions, open_input,
 };
+use diana::analysis::request::RequestScope;
 
 static COUNTER: AtomicU32 = AtomicU32::new(0);
 
@@ -209,6 +210,34 @@ fn h02_ordinary_file_bare_dex_and_stored_archive_share_one_lease_model() {
     assert!(!apk::is_root_name("classes0.dex"));
     assert!(!apk::is_root_name("classes1.dex"));
     assert!(!apk::is_root_name("assets/classes3.dex"));
+}
+
+#[test]
+fn h02_a_request_scope_owns_the_lease_and_releases_it_without_touching_the_input() {
+    let dir = TempDir::new("scope");
+    let payload = dex(0x35);
+    let archive = zip(&[
+        stored_entry("classes.dex", &payload),
+        stored_entry("classes2.dex", &dex(0x36)),
+    ]);
+    let path = dir.file("scope.apk", &archive);
+    {
+        let scope = RequestScope::open(&path, &options(InputLimits::default())).unwrap();
+        assert_eq!(scope.input().kind(), InputKind::Archive);
+        let roots = scope.roots().unwrap();
+        assert_eq!(roots.len(), 2);
+        assert_eq!(roots[0].bytes(), payload.as_slice());
+        assert_eq!(roots[0].entry().unwrap().name(), "classes.dex");
+    }
+    // After the request scope is dropped the input is untouched and a later
+    // request observes the file's current content instead of a cached snapshot.
+    assert_eq!(fs::read(&path).unwrap(), archive);
+    fs::write(&path, zip(&[stored_entry("classes.dex", &dex(0x37))])).unwrap();
+    let scope = RequestScope::open(&path, &options(InputLimits::default())).unwrap();
+    assert_eq!(scope.roots().unwrap()[0].bytes(), dex(0x37).as_slice());
+    drop(scope);
+    fs::remove_file(&path).unwrap();
+    assert!(!path.exists());
 }
 
 #[test]

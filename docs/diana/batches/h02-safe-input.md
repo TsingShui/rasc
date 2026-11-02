@@ -14,7 +14,8 @@ metadata. `BytesSource` lets a consumer borrow either the lease or an entry view
 without letting a borrow escape its owner. `analysis/archive.rs` reads the ZIP
 end-of-central-directory and central-directory records, slices stored payloads
 and inflates deflate payloads on demand; `analysis/apk.rs` selects root DEX
-images in physical directory order.
+images in physical directory order, and `analysis/request.rs` holds one request's
+lease and hands out only borrowed roots inside that lifetime.
 
 `unsafe_code = "forbid"` stays in force, so the snapshot uses no mmap and no
 `'static` extension. Non-regular files are rejected from metadata before any
@@ -42,7 +43,7 @@ H10.
 
 ## Evidence
 
-`cargo test -p diana --test product_contracts h02_` runs seven public cases:
+`cargo test -p diana --test product_contracts h02_` runs eight public cases:
 
 - Ordinary file, bare DEX and stored archive leases, including entry metadata
   (`name`, method, sizes, CRC), `EntryView` payloads, root selection order and
@@ -68,6 +69,9 @@ H10.
   `DecompressionFailed`/`DamagedEntry`.
 - Truncated archives at three cut points never publish a partial directory; an
   empty file is opaque.
+- Request scope: opening a scope yields borrowed roots, dropping it leaves the
+  input file byte-identical, a later scope observes replaced content instead of a
+  cached snapshot, and the file can be removed once no scope exists.
 
 A unit test in `input.rs` drives the snapshot reader with a short source and
 expects `Changed`; the complete-length control succeeds.
@@ -83,7 +87,7 @@ performance against a mapped or lazily read input, and it defines no threshold.
 
 - `cargo fmt --all -- --check`, strict workspace Clippy and the locked release
   build pass.
-- `cargo nextest run --workspace --all-features --locked` passes 200 tests with
+- `cargo nextest run --workspace --all-features --locked` passes 201 tests with
   zero skips, including the new `h02_` cases and every engine regression.
 - The engine, its fixtures and the E2E specification are untouched by this
   batch, so no E2E count changes; `python3 tools/e2e.py run` is not re-run here.

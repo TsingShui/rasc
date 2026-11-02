@@ -2621,9 +2621,9 @@ replacement.
 
 **Progress**: The [safe-input batch](batches/h02-safe-input.md) implements the
 immutable input lease, restricted ZIP entry metadata, stored and deflate payload
-reads under explicit bounds, and root DEX selection with path, budget, damage and
-snapshot-isolation evidence. The request surface and `extract` publication remain
-with H05/H10.
+reads under explicit bounds, root DEX selection with path, budget, damage and
+snapshot-isolation evidence, and the per-request scope that owns the lease. The CLI
+argument surface and `extract` publication remain with H05/H10.
 
 **Dependencies**: H01. **Scope**: root input lifetime.
 
