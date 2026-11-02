@@ -60,12 +60,21 @@ about 9k to 20k, manifests from 89 KB to 823 KB of XML output. Every decode
 completed with exit 0 in 22–110 ms including the input lease, and one sample was a
 truncated archive whose manifest still decoded.
 
-An independent Python chunk decoder (written for this check, not derived from the
-Rust reader) then compared structure and values against the produced XML:
+Two comparisons ran. The first used a Python chunk decoder written for this check;
+the second used the third-party `androguard` 4.1.4 `AXMLPrinter`, installed in a
+temporary virtual environment outside the repository, so the result does not
+depend on a reader authored here. Element paths, attribute names and semantic
+values were compared after normalizing hex/reference spelling, numeric and
+dimension formatting:
 
-| APK samples | elements | attribute names | attribute values |
-|---|---:|---|---|
-| 5 | identical (649–5348 each) | identical | all equal |
+| Comparison | APK samples | elements | attribute names | semantic values |
+|---|---|---:|---|---|
+| self-written chunk decoder | 5 | identical | identical | all equal |
+| `androguard` 4.1.4 | 5 | identical | identical | all equal |
+
+`androguard` prints dimensions as `1.000000dip` where Diana prints `1dip`, and
+spells references as `@7F120167`; those are presentation differences, not value
+differences. After normalizing them no semantic difference remained.
 
 Differences found and fixed during this validation:
 
