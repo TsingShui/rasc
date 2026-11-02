@@ -45,14 +45,15 @@ revision. Failed Java retains checked original instructions, references and cove
 for analysis; it does not promise standard-Smali output or reassembly. TASKS §3
 owns revision-specific acceptance and bounded self-test authorization.
 The frozen JSON retains its draft metadata rather than acting as a progress counter.
-Windows/Linux and ART are not-run.
+Windows/Linux behavior and ART execution are not-run.
 
 For implementation, read DESIGN, then the relevant section of ALGORITHMS, then
 the current TASKS card. Consult SOURCE_MAP when checking evidence. Every authored
 Diana document MUST follow [WRITING.md](WRITING.md); read it before editing any
 document in this directory or an AGENTS/README file. The application
 is only `apps/diana/`; the engine is only `crates/diana-decomp/`. The reference
-fork is read-only and is not automatically built or tested. GUI and Web remain
+tree was removed from the working tree at commit 5cb156c and is not built or
+tested. GUI and Web remain
 README-only placeholders; MCP is deferred. See the root [AGENTS.md](../../AGENTS.md)
 for the remaining hard constraints.
 
