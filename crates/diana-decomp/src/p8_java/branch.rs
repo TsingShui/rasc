@@ -172,10 +172,18 @@ pub(crate) fn verify(
     catalog: &crate::DeclarationCatalog,
     plan: crate::p7_regions::PlannedBody<'_>,
     chain: &super::constructor_graph::Proof<'_, '_, '_>,
-    environment: EnvironmentId,
+    nested_context: bool,
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<crate::substrate::outcome::Outcome<VerifiedJavaMethod>, RequestError> {
-    verify_impl(input, catalog, plan, chain, environment, budget)
+    verify_impl(
+        input,
+        catalog,
+        plan,
+        chain,
+        catalog.environment,
+        nested_context,
+        budget,
+    )
 }
 
 fn verify_impl(
@@ -184,11 +192,29 @@ fn verify_impl(
     plan: crate::p7_regions::PlannedBody<'_>,
     chain: &super::constructor_graph::Proof<'_, '_, '_>,
     environment: EnvironmentId,
+    nested_context: bool,
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<crate::substrate::outcome::Outcome<VerifiedJavaMethod>, RequestError> {
     use crate::substrate::outcome::Outcome;
     let storage = &plan.storage;
     chain.check(input, storage, budget)?;
+    let capture_field = storage
+        .typed
+        .capture
+        .as_ref()
+        .map(|capture| capture.field());
+    let mut capture_dependent = capture_field.is_some();
+    for evidence in storage.typed.field_declarations.iter().flatten() {
+        budget.charge_work(1)?;
+        if let crate::p4_calls::FieldDeclaration::Known(access) = &evidence.declaration {
+            capture_dependent |= access.outer_capture.is_some();
+        }
+    }
+    if !nested_context && capture_dependent {
+        return Ok(Outcome::Declined(
+            crate::OutputReason::JavaAnalysisUnavailable,
+        ));
+    }
     let reason = if storage.typed.ssa.raw.try_byte_range().as_range().is_empty() {
         crate::OutputReason::BranchJavaUnsupported
     } else {
@@ -225,6 +251,7 @@ fn verify_impl(
     Ok(match method {
         Some(mut method) => {
             method.type_names = type_names;
+            method.capture_field = capture_field;
             Outcome::Ready(method)
         }
         None => Outcome::Declined(reason),

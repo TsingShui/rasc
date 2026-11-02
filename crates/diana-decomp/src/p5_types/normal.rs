@@ -56,6 +56,7 @@ pub(crate) struct TypedBodyData<'a> {
     pub returned_uses: Vec<Option<UseConversion>>,
     pub thrown_uses: Vec<Option<UseConversion>>,
     pub initializations: super::initialization::Initializations,
+    pub capture: Option<super::capture::CaptureUse>,
     pub empty_fills: Vec<PrimitiveFillUse>,
     pub array_lengths: Vec<crate::p5_types::calls::TypedUse>,
     pub filled_arrays: Vec<FilledArrayUse>,
@@ -142,18 +143,24 @@ pub(crate) fn solve<'a>(
     _schedule: &crate::engine::SchedulePermit,
     input: &crate::input::MethodInput<'_, '_>,
     resolved: crate::p4_calls::ResolvedBody<'a>,
+    capture: Option<&crate::CaptureCertificate>,
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<crate::substrate::outcome::Outcome<TypedBody<'a>>, RequestError> {
-    solve_impl(input, resolved, budget)
+    solve_impl(input, resolved, capture, budget)
 }
 
 fn solve_impl<'a>(
     input: &crate::input::MethodInput<'_, '_>,
     resolved: crate::p4_calls::ResolvedBody<'a>,
+    capture: Option<&crate::CaptureCertificate>,
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<crate::substrate::outcome::Outcome<TypedBody<'a>>, RequestError> {
     let resolved = resolved.into_data();
     let ssa = resolved.ssa;
+    if let Some(certificate) = capture {
+        certificate.check(input, budget)?;
+    }
+    let capture = super::capture::prove(&ssa, capture, budget)?;
     let bindings = resolved.calls;
     let source_throws = resolved.source_throws;
     let exceptions = resolved.exceptions;
@@ -517,7 +524,7 @@ fn solve_impl<'a>(
             crate::OutputReason::JavaAnalysisUnavailable,
         ));
     };
-    let initializations = super::initialization::solve(&ssa, budget)?;
+    let initializations = super::initialization::solve(&ssa, capture.as_ref(), budget)?;
     let Some(array_uses) = solve_new_arrays(&ssa, &kinds, budget)? else {
         return Ok(crate::substrate::outcome::Outcome::Declined(
             crate::OutputReason::JavaAnalysisUnavailable,
@@ -588,6 +595,7 @@ fn solve_impl<'a>(
         }
     }
     let mut typed = TypedBody(TypedBodyData {
+        capture,
         source_throws,
         roots,
         _sealed: (),

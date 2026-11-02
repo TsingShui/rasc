@@ -33,7 +33,18 @@ fn named_type(
     let Some(class) = catalog.class(descriptor, budget)? else {
         return Ok(false);
     };
-    if !directory(class, &caller, budget)?
+    let nested = super::nested_scope::collect(input.program(), input.class_id(), catalog, budget)?;
+    let mut lexical = nested
+        .as_ref()
+        .is_some_and(|scope| scope.owner() == descriptor || scope.outer() == descriptor);
+    if descriptor == caller && class.enclosing_scope {
+        let ownership = crate::input::ownership::collect(input.program(), budget)?;
+        for entry in ownership.nested() {
+            budget.charge_work(1)?;
+            lexical |= entry.enclosing() == input.class_id();
+        }
+    }
+    if !lexical && !directory(class, &caller, budget)?
         || class.access_flags & 1 == 0
         || class.access_flags & 0x2000 != 0
         || !allow_interface && class.access_flags & 0x200 != 0

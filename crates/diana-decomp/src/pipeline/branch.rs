@@ -31,9 +31,26 @@ pub(crate) fn build<'a>(
         Outcome::Declined(reason) => return Ok(Analysis::Declined(reason)),
     };
     let ssa = crate::p3_ssa::build(schedule, flow, budget)?;
-    let resolved = crate::p4_calls::collect(schedule, input, catalog, ssa, budget)?;
+    let capture = if input.access_flags() & 0x10008 == 0x10000
+        && ssa
+            .operations
+            .first()
+            .is_some_and(|op| matches!(op.op, crate::p2_flow::Op::FieldStore(..)))
+    {
+        let ownership = crate::input::ownership::collect(input.program(), budget)?;
+        match crate::p4_calls::capture::collect(schedule, input, &ownership, catalog, budget)? {
+            Some(declaration) => {
+                crate::p8_java::capture::verify(schedule, input, &declaration, budget)?
+            }
+            None => None,
+        }
+    } else {
+        None
+    };
+    let resolved =
+        crate::p4_calls::collect(schedule, input, catalog, ssa, capture.as_ref(), budget)?;
     let declaration_failure = resolved.decline_reason;
-    let typed = match crate::p5_types::solve(schedule, input, resolved, budget)? {
+    let typed = match crate::p5_types::solve(schedule, input, resolved, capture.as_ref(), budget)? {
         Outcome::Ready(typed) => typed,
         Outcome::Declined(reason) => {
             return Ok(Analysis::Declined(declaration_failure.unwrap_or(reason)));

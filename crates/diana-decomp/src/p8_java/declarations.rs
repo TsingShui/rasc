@@ -96,11 +96,10 @@ fn declaration_impl(
         return Ok(None);
     }
     output.push(" ", budget)?;
-    for unit in name {
+    for scalar in char::decode_utf16(name.iter().copied()) {
         output.character(
-            char::from_u32(u32::from(unit)).ok_or(RequestError::InternalInvariant(
-                "checked Java name is not scalar",
-            ))?,
+            scalar
+                .map_err(|_| RequestError::InternalInvariant("checked Java name is not scalar"))?,
             budget,
         )?;
     }
@@ -303,18 +302,32 @@ pub(super) fn identifier(
         return Ok(false);
     }
     let mut ascii = TextBuffer::new();
-    for (position, &unit) in name.iter().enumerate() {
+    for (position, scalar) in char::decode_utf16(name.iter().copied()).enumerate() {
         budget.charge_work(1)?;
-        let Ok(byte) = u8::try_from(unit) else {
+        let Ok(scalar) = scalar else {
             return Ok(false);
         };
-        if !(byte.is_ascii_alphabetic()
-            || matches!(byte, b'_' | b'$')
-            || (position != 0 && byte.is_ascii_digit()))
-        {
+        use unicode_general_category::{GeneralCategory as G, get_general_category};
+        let category = get_general_category(scalar);
+        let start = matches!(
+            category,
+            G::UppercaseLetter
+                | G::LowercaseLetter
+                | G::TitlecaseLetter
+                | G::ModifierLetter
+                | G::OtherLetter
+                | G::LetterNumber
+                | G::CurrencySymbol
+                | G::ConnectorPunctuation
+        );
+        let continuation = matches!(
+            category,
+            G::DecimalNumber | G::NonspacingMark | G::SpacingMark
+        );
+        if !start && !(position != 0 && continuation) {
             return Ok(false);
         }
-        ascii.character(char::from(byte), budget)?;
+        ascii.character(scalar, budget)?;
     }
     let text = ascii.finish();
     Ok(!matches!(

@@ -23,6 +23,9 @@ mod test_fixture;
 pub use engine::{
     DexImage, Engine, MethodSelector, Options, RecoveryPolicy, RepresentationPolicy, Request,
 };
+pub use input::ownership::{NestedClass, Ownership};
+pub use p8_java::CaptureCertificate;
+pub use p8_java::nested_plan::GeneratedCaptureField;
 pub use p8_java::{
     CompilationContract, GeneratedBridge, JavaCallSite, JavaInvokeKind, JavaMethodDecl,
     VerifiedJavaField, VerifiedJavaInitializer, VerifiedJavaMethod, VerifiedJavaUnit,
@@ -33,9 +36,11 @@ pub use substrate::fields::{
     FieldDeclarationOutput, FieldFacts, FieldInitialValue, FieldKey, FieldOutput, FieldStorage,
     StaticFieldOrdinal,
 };
+pub use substrate::report::NestedReport;
 pub use substrate::report::{
-    ClassOutput, DeclarationOutput, Diagnostic, DiagnosticCause, ImageFact, ImageOrigin,
-    MethodFacts, MethodOutput, OriginSpan, OutputReason, RenderedReport, Report, SourceLanguage,
+    ClassOriginSpan, ClassOutput, DeclarationOutput, Diagnostic, DiagnosticCause, ImageFact,
+    ImageOrigin, MethodFacts, MethodOutput, OriginSpan, OutputReason, RenderedReport, Report,
+    SourceLanguage,
 };
 mod pipeline;
 

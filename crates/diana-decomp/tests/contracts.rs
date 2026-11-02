@@ -22,6 +22,8 @@ mod initialization;
 mod invoke;
 #[path = "input/layout.rs"]
 mod layout;
+#[path = "pipeline/nested.rs"]
+mod nested;
 #[path = "input/operands.rs"]
 mod operands;
 #[path = "input/reader.rs"]

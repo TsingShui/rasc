@@ -203,6 +203,9 @@ pub(super) enum Scope<'a> {
         same_class: bool,
     },
     Static,
+    EnclosingStatic {
+        same_class: bool,
+    },
     Receiver {
         source: &'a ExternalClassDeclaration,
         direct: bool,
@@ -310,10 +313,12 @@ pub(super) fn unique_target(
     {
         return Ok(false);
     }
-    let is_static = matches!(scope, Scope::Static);
+    let is_static = matches!(scope, Scope::Static | Scope::EnclosingStatic { .. });
     let same_class = matches!(
         scope,
-        Scope::Constructor { same_class: true } | Scope::Receiver { direct: true, .. }
+        Scope::Constructor { same_class: true }
+            | Scope::Receiver { direct: true, .. }
+            | Scope::EnclosingStatic { same_class: true }
     );
     let hierarchy;
     let declared = [class];
@@ -333,7 +338,7 @@ pub(super) fn unique_target(
             }
             &declared
         }
-        Scope::Static => &declared,
+        Scope::Static | Scope::EnclosingStatic { .. } => &declared,
     };
     let mut owner_present = false;
     for owner in classes {
@@ -381,7 +386,10 @@ pub(super) fn unique_target(
                     || !super::raw_signature::object_identity(method, budget)?)
                 || method.access_flags & 0x80 != 0
                 || (method.access_flags & 8 != 0) != is_static
-                || method.access_flags & 1 == 0 && !(same_class && std::ptr::eq(*owner, class))
+                || method.access_flags & 1 == 0
+                    && !(same_class && std::ptr::eq(*owner, class)
+                        || matches!(scope, Scope::EnclosingStatic { .. })
+                            && method.access_flags & 7 == 0)
             {
                 return Ok(false);
             }

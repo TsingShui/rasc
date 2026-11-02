@@ -161,6 +161,54 @@ impl<'a> Engine<'a> {
         })
     }
 
+    /// Reads checked named nested ownership in the selected logical DEX.
+    /// Malformed ownership and input/resource errors remain classified; every
+    /// metadata traversal checks the supplied request limits and cancellation.
+    /// This does not run method analysis or certify a nested Java unit.
+    pub fn ownership(
+        &self,
+        dex: crate::DexId,
+        control: &mut RunContext<'_>,
+    ) -> Result<crate::input::ownership::Ownership, RequestError> {
+        let position = usize::try_from(dex.0).map_err(|_| RequestError::UnknownDex)?;
+        let image = self.images.get(position).ok_or(RequestError::UnknownDex)?;
+        crate::input::ownership::collect(&image.index, control)
+    }
+
+    /// Checks the canonical compiler-owned outer capture prefix for a named
+    /// inner constructor. None means this source profile is unproved; errors
+    /// preserve malformed/resource/cancellation classification. This does not
+    /// certify the remaining constructor or a complete nested Java unit.
+    pub fn capture(
+        &self,
+        key: MethodKey,
+        control: &mut RunContext<'_>,
+    ) -> Result<Option<crate::CaptureCertificate>, RequestError> {
+        let position = usize::try_from(key.class.dex.0).map_err(|_| RequestError::UnknownDex)?;
+        let image = self.images.get(position).ok_or(RequestError::UnknownDex)?;
+        let ownership = crate::input::ownership::collect(&image.index, control)?;
+        let permit = SchedulePermit { _private: () };
+        let mut budget = control.method_budget()?;
+        let input = image
+            .index
+            .method_input(key.class.class_def, key.method, &mut budget)?;
+        let Some(declaration) = crate::p4_calls::capture::collect(
+            &permit,
+            &input,
+            &ownership,
+            &self.catalog,
+            &mut budget,
+        )?
+        else {
+            return Ok(None);
+        };
+        let result = crate::p8_java::capture::verify(&permit, &input, &declaration, &mut budget)?;
+        if let Some(proof) = &result {
+            proof.check(&input, &mut budget)?;
+        }
+        Ok(result)
+    }
+
     /// Retrieves one full-prototype method or all members of a class. A local
     /// method failure retains its classified reason and any original snapshot;
     /// cancellation and exhausted request resources stop the request. Java is
@@ -170,6 +218,181 @@ impl<'a> Engine<'a> {
     pub fn decompile(
         &self,
         request: Request,
+        control: &mut RunContext<'_>,
+    ) -> Result<Report, RequestError> {
+        if request.method.is_some() {
+            return self.decompile_leaf(request, false, control);
+        }
+        let root = request.class;
+        let position = usize::try_from(root.dex.0).map_err(|_| RequestError::UnknownDex)?;
+        let image = self.images.get(position).ok_or(RequestError::UnknownDex)?;
+        let permit = SchedulePermit { _private: () };
+        let closure =
+            match crate::p8_java::nested_plan::closure(&permit, &image.index, root, control) {
+                Ok(closure) => closure,
+                Err(error)
+                    if matches!(
+                        error.kind(),
+                        FailureKind::Cancelled
+                            | FailureKind::BudgetExceeded
+                            | FailureKind::InternalInvariant
+                    ) =>
+                {
+                    return Err(error);
+                }
+                Err(error) => {
+                    let mut report = self.decompile_leaf(request, false, control)?;
+                    demote(&mut report, DiagnosticCause::Request(error), control)?;
+                    return Ok(report);
+                }
+            };
+        let nested_context = !closure.fragment() && !closure.classes().is_empty();
+        let mut report = self.decompile_leaf(request, nested_context, control)?;
+        for node in closure.classes() {
+            let key = node.class;
+            let ownership = crate::input::ownership::collect(&image.index, control)?;
+            let mut instance = false;
+            for entry in ownership.nested() {
+                control.charge_work(1)?;
+                if entry.class() == key.class_def {
+                    instance = entry.access_flags() & 8 == 0;
+                }
+            }
+            let mut constructor_captures = Vec::new();
+            if instance {
+                let check = image
+                    .index
+                    .class_with(key.class_def, control)?
+                    .visit_members_with(
+                        control,
+                        MemberSelection::AllHeaders,
+                        |entry, control| -> Result<(), RequestError> {
+                            if let MemberEntry::MethodHeader {
+                                method_idx,
+                                declaration,
+                                ..
+                            } = entry
+                                && declaration?
+                                    .name
+                                    .matches_with(&[60, 105, 110, 105, 116, 62], control)?
+                            {
+                                let proof = match self.capture(
+                                    MethodKey {
+                                        class: key,
+                                        method: method_idx,
+                                    },
+                                    control,
+                                ) {
+                                    Err(error)
+                                        if matches!(
+                                            error.kind(),
+                                            FailureKind::Cancelled
+                                                | FailureKind::BudgetExceeded
+                                                | FailureKind::InternalInvariant
+                                        ) =>
+                                    {
+                                        return Err(error);
+                                    }
+                                    other => other,
+                                };
+                                reserve(&mut constructor_captures, 1, control)?;
+                                constructor_captures.push(proof);
+                            }
+                            Ok(())
+                        },
+                    );
+                if let Err(error) = check {
+                    if matches!(
+                        error.kind(),
+                        FailureKind::Cancelled
+                            | FailureKind::BudgetExceeded
+                            | FailureKind::InternalInvariant
+                    ) {
+                        return Err(error);
+                    }
+                    reserve(&mut constructor_captures, 1, control)?;
+                    constructor_captures.push(Err(error));
+                }
+            }
+            let admitted = crate::p8_java::nested_plan::admit(
+                &permit,
+                &image.index,
+                key,
+                &constructor_captures,
+                control,
+            )?;
+            let mut child = self.decompile_leaf(
+                Request {
+                    class: key,
+                    method: None,
+                },
+                nested_context && admitted,
+                control,
+            )?;
+            for proof in constructor_captures {
+                if let Err(error) = proof {
+                    demote(&mut child, DiagnosticCause::Request(error), control)?;
+                }
+            }
+            let plan = match crate::p8_java::nested_plan::verify(
+                &permit,
+                &image.index,
+                key,
+                &self.catalog,
+                child.class.fields(),
+                child.class.members(),
+                control,
+            ) {
+                Ok(plan) => plan,
+                Err(error)
+                    if matches!(
+                        error.kind(),
+                        FailureKind::Cancelled
+                            | FailureKind::BudgetExceeded
+                            | FailureKind::InternalInvariant
+                    ) =>
+                {
+                    return Err(error);
+                }
+                Err(error) => {
+                    demote(&mut child, DiagnosticCause::Request(error), control)?;
+                    None
+                }
+            };
+            if let Some(generated) = plan.as_ref().and_then(|plan| plan.generated_capture()) {
+                match &mut child.class {
+                    ClassOutput::JavaUnit { fields, .. } | ClassOutput::Mixed { fields, .. } => {
+                        for field in fields {
+                            if field.key == generated.field() {
+                                field.declaration =
+                                    crate::FieldDeclarationOutput::Generated(generated);
+                            }
+                        }
+                    }
+                }
+            }
+            reserve(&mut report.nested, 1, control)?;
+            report.nested.push(crate::NestedReport {
+                depth: node.depth,
+                class: child.class,
+                diagnostics: child.diagnostics,
+                plan,
+            });
+        }
+        if closure.fragment() || report.nested.iter().any(|child| child.plan.is_none()) {
+            demote(
+                &mut report,
+                DiagnosticCause::Unsupported(OutputReason::ClassAssemblyUnavailable),
+                control,
+            )?;
+        }
+        Ok(report)
+    }
+
+    fn decompile_leaf(
+        &self,
+        request: Request,
+        nested_context: bool,
         control: &mut RunContext<'_>,
     ) -> Result<Report, RequestError> {
         control.checkpoint()?;
@@ -224,6 +447,7 @@ impl<'a> Engine<'a> {
                         },
                         &mut diagnostics,
                         &emission,
+                        nested_context,
                         control,
                     )?;
                     reserve(&mut members, 1, control)?;
@@ -276,6 +500,7 @@ impl<'a> Engine<'a> {
                                         },
                                         &mut diagnostics,
                                         &emission,
+                                        nested_context,
                                         control,
                                     )?
                                 };
@@ -368,6 +593,7 @@ impl<'a> Engine<'a> {
         };
         Ok(Report {
             class,
+            nested: Vec::new(),
             diagnostics: diagnostics.values,
             stats: control.usage(),
             image: ImageFact {
@@ -385,6 +611,7 @@ impl<'a> Engine<'a> {
         key: MethodKey,
         diagnostics: &mut DiagnosticLog,
         emission: &crate::p8_java::member_emission::Plan,
+        nested_context: bool,
         control: &mut RunContext<'_>,
     ) -> Result<MethodOutput, RequestError> {
         let candidate = match control.method_budget() {
@@ -396,6 +623,7 @@ impl<'a> Engine<'a> {
                     &self.catalog,
                     self.representation,
                     emission,
+                    nested_context,
                     &mut budget,
                 );
                 let (facts, cause) = match normal {
@@ -539,6 +767,38 @@ impl<'a> Engine<'a> {
     }
 }
 
+fn demote(
+    report: &mut Report,
+    cause: DiagnosticCause,
+    control: &mut RunContext<'_>,
+) -> Result<(), RequestError> {
+    reserve(&mut report.diagnostics, 1, control)?;
+    let id = crate::DiagnosticId(report.diagnostics.len());
+    report.diagnostics.push(Diagnostic {
+        method: None,
+        cause,
+    });
+    if let ClassOutput::JavaUnit {
+        key,
+        descriptor,
+        access_flags,
+        fields,
+        members,
+        ..
+    } = &mut report.class
+    {
+        report.class = ClassOutput::Mixed {
+            key: *key,
+            descriptor: std::mem::take(descriptor),
+            access_flags: *access_flags,
+            fields: std::mem::take(fields),
+            members: std::mem::take(members),
+            shell: DeclarationOutput::Unavailable(id),
+        };
+    }
+    Ok(())
+}
+
 // This transient result is consumed directly, not stored in a collection;
 // boxing its owned AST would add another fallible allocation.
 #[allow(clippy::large_enum_variant)]
@@ -564,6 +824,7 @@ fn normal_member(
     catalog: &DeclarationCatalog,
     representation: RepresentationPolicy,
     emission: &crate::p8_java::member_emission::Plan,
+    nested_context: bool,
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<NormalMember, RequestError> {
     let input = index.method_input(key.class.class_def, key.method, budget)?;
@@ -623,7 +884,7 @@ fn normal_member(
                 catalog,
                 planned,
                 &chain,
-                catalog.environment,
+                nested_context,
                 budget,
             )?
         } else {

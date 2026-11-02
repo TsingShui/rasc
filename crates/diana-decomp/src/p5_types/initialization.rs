@@ -67,6 +67,7 @@ fn ix(value: u32) -> Result<usize, RequestError> {
 }
 pub(super) fn solve(
     ssa: &SsaBody<'_>,
+    capture: Option<&super::capture::CaptureUse>,
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<Initializations, RequestError> {
     if ssa.object_creations.is_empty()
@@ -96,7 +97,7 @@ pub(super) fn solve(
         budget.charge_work(1)?;
         push(&mut calls, None, budget)?;
     }
-    let chain = chain::solve(ssa, &mut deferred, &mut calls, budget)?;
+    let chain = chain::solve(ssa, capture, &mut deferred, &mut calls, budget)?;
     let mut plans = Vec::new();
     for allocation in &ssa.operations {
         budget.charge_work(1)?;

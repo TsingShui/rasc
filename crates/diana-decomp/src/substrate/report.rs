@@ -165,7 +165,8 @@ fn request_code(error: &crate::RequestError) -> crate::DiagnosticCode {
         RequestError::MonitorScopeUnproved { .. } => Code::MonitorScopeUnproved,
         RequestError::FinalAssignmentUnproved { .. } => Code::FinalAssignmentUnproved,
         RequestError::JavaTargetLimit { .. } => Code::JavaTargetLimit,
-        RequestError::BindingEvidenceMissing { .. }
+        RequestError::SourceNameUnproved { .. }
+        | RequestError::BindingEvidenceMissing { .. }
         | RequestError::FieldBindingEvidenceMissing { .. } => Code::BindingEvidenceMissing,
         RequestError::JavaConstantFieldRead { .. } => Code::JavaConstantFieldRead,
         RequestError::ArrayFillShape { .. } => Code::ArrayFillShape,
@@ -266,9 +267,27 @@ impl ClassOutput {
     }
 }
 
+/// Original nested-class result with local diagnostics and fragment context.
+/// Complete-unit qualification belongs to the enclosing report, not this shell.
+pub struct NestedReport {
+    pub(crate) depth: crate::p8_java::nested_plan::NestingDepth,
+    pub(crate) class: ClassOutput,
+    pub(crate) diagnostics: Vec<Diagnostic>,
+    pub(crate) plan: Option<crate::p8_java::nested_plan::Plan>,
+}
+impl NestedReport {
+    pub fn class(&self) -> &ClassOutput {
+        &self.class
+    }
+    pub fn diagnostics(&self) -> &[Diagnostic] {
+        &self.diagnostics
+    }
+}
+
 /// Owns presentation facts and original sources, never a borrowed input or
 /// analysis arena. Only the engine constructs a report with linked diagnostics.
 pub struct Report {
+    pub(crate) nested: Vec<NestedReport>,
     pub(crate) class: ClassOutput,
     pub(crate) diagnostics: Vec<Diagnostic>,
     pub(crate) stats: ResourceUsage,
@@ -276,6 +295,10 @@ pub struct Report {
     pub(crate) environment: EnvironmentId,
 }
 impl Report {
+    /// Original nested members of the checked owner closure, without recursive reports.
+    pub fn nested(&self) -> &[NestedReport] {
+        &self.nested
+    }
     pub fn class(&self) -> &ClassOutput {
         &self.class
     }
@@ -309,7 +332,16 @@ pub struct OriginSpan {
     pub language: SourceLanguage,
 }
 
+/// UTF-8 source range retaining the original class identity, including nested owners.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ClassOriginSpan {
+    pub class: ClassKey,
+    pub start: SourceByteOffset,
+    pub end: SourceByteOffset,
+}
+
 pub struct RenderedReport {
+    pub class_spans: Vec<ClassOriginSpan>,
     pub source: String,
     pub spans: Vec<OriginSpan>,
 }

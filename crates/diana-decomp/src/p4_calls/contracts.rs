@@ -26,8 +26,14 @@ pub(crate) enum StaticResult {
 }
 /// An exact non-generic static declaration contract. Source expression binding
 /// still requires typed argument views and a checked source qualifier.
+#[derive(Clone, Copy)]
+pub(crate) enum StaticAccess {
+    Public,
+    Enclosing,
+}
 pub(crate) struct StaticContract {
     _sealed: (),
+    access: StaticAccess,
     pub reference: MethodId,
     pub owner: Vec<u16>,
     pub name: Vec<u16>,
@@ -77,7 +83,11 @@ pub(super) fn plain(
 ) -> Result<bool, RequestError> {
     Ok(
         super::interface_scope::catalog_plain(catalog, class, budget)?
-            && directory(class, caller, budget)?,
+            && (directory(class, caller, budget)?
+                || class.descriptor == caller
+                    && class.enclosing_scope
+                    && matches!(class.coverage, DeclarationCoverage::AllDeclarations)
+                    && !class.generic),
     )
 }
 fn push<T>(
@@ -174,10 +184,12 @@ pub(super) fn collect_static(
     let Some(caller_class) = catalog.class(&caller, budget)? else {
         return Ok(None);
     };
-    if !input.plain_owner_scope(caller_class.parent.as_deref(), budget)? {
+    if !super::nested_scope::plain_owner(input, catalog, caller_class.parent.as_deref(), budget)? {
         return Ok(None);
     }
-    if !directory(target_class, &caller, budget)?
+    let enclosing = super::nested_scope::same_nest(input, &owner, budget)?;
+    if !(directory(target_class, &caller, budget)?
+        || enclosing && member_directory(target_class, &caller, budget)?)
         || target_class.access_flags & 1 == 0
         || target_class.access_flags & 0x200 != 0
     {
@@ -199,7 +211,9 @@ pub(super) fn collect_static(
         return Ok(None);
     };
     if !crate::p0_knowledge::same_units(&target.prototype, &prototype, budget)?
-        || target.access_flags & 9 != 9
+        || target.access_flags & 8 == 0
+        || target.access_flags & 1 == 0
+            && !(enclosing && (target.access_flags & 7 == 0 || owner == caller))
         || target.access_flags & (0x40 | 0x80) != 0
         || !super::raw_signature::object_identity(target, budget)?
         || target.throws.is_none()
@@ -211,7 +225,7 @@ pub(super) fn collect_static(
         let class_mask = 1 | 0x10 | 0x200 | 0x400 | 0x1000 | 0x2000 | 0x4000;
         if original.access_flags & method_mask != target.access_flags & method_mask
             || original.owner_access_flags & class_mask != target_class.access_flags & class_mask
-            || !original.plain_scope
+            || !original.plain_scope && !enclosing
         {
             return Ok(None);
         }
@@ -247,7 +261,9 @@ pub(super) fn collect_static(
         let Some(class) = catalog.class(current, budget)? else {
             return Ok(None);
         };
-        if !directory(class, &caller, budget)? {
+        if !(directory(class, &caller, budget)?
+            || enclosing && current == owner && member_directory(class, &caller, budget)?)
+        {
             return Ok(None);
         }
         if !crate::p0_knowledge::same_units(current, &owner, budget)? {
@@ -370,6 +386,11 @@ pub(super) fn collect_static(
     }
     Ok(Some(StaticContract {
         _sealed: (),
+        access: if target.access_flags & 1 != 0 {
+            StaticAccess::Public
+        } else {
+            StaticAccess::Enclosing
+        },
         reference: id,
         owner,
         name,
@@ -446,7 +467,12 @@ pub(super) fn binding_available(
         &caller,
         &contract.name,
         &contract.prototype,
-        super::overloads::Scope::Static,
+        match contract.access {
+            StaticAccess::Public => super::overloads::Scope::Static,
+            StaticAccess::Enclosing => super::overloads::Scope::EnclosingStatic {
+                same_class: caller == contract.owner,
+            },
+        },
         budget,
     )? && super::throws::compatible(
         input,

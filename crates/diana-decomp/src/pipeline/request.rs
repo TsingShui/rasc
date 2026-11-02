@@ -65,6 +65,8 @@ pub enum RequestError {
         reference: crate::FieldId,
         pc: crate::CodeUnitOffset,
     },
+    #[error("nested source-name binding is unproved in class {class:?}")]
+    SourceNameUnproved { class: crate::ClassDefId },
     #[error("requested DEX identity does not exist")]
     UnknownDex,
     #[error("JavaTargetLimit: {item:?} uses {actual}, maximum {maximum}")]
@@ -96,6 +98,7 @@ impl RequestError {
             | Self::InitializationUnavailable { .. }
             | Self::BindingEvidenceMissing { .. }
             | Self::FieldBindingEvidenceMissing { .. }
+            | Self::SourceNameUnproved { .. }
             | Self::JavaConstantFieldRead { .. } => FailureKind::Unsupported,
             Self::InternalInvariant(_) => FailureKind::InternalInvariant,
         }

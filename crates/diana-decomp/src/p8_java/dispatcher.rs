@@ -168,14 +168,25 @@ pub(super) fn verify(
         } else if initializer {
             false
         } else {
-            flags & !0x2083f != 0
+            flags & !0x2183f != 0 || flags & 0x1000 != 0 && flags & 8 == 0
         }
         || (flags & 7).count_ones() > 1
         || input.owner_access_flags() & 0x200 != 0
     {
         return Ok(None);
     }
-    let name = if constructor {
+    let nested_scope =
+        crate::p4_calls::nested_scope::collect(input.program(), input.class_id(), catalog, budget)?;
+    let name = if constructor && nested_scope.is_some() {
+        let Some(scope) = &nested_scope else {
+            return Ok(None);
+        };
+        let mut name = Vec::new();
+        for &unit in scope.name() {
+            crate::substrate::owned::push(&mut name, unit, budget)?;
+        }
+        name
+    } else if constructor {
         let owner = copy_units(input.owner(), budget)?;
         if owner.len() < 3 {
             return Err(RequestError::InternalInvariant(
@@ -410,11 +421,11 @@ pub(super) fn verify(
             header.push(type_names.result(ssa.ssa.result, budget)?, budget)?;
             header.push(" ", budget)?;
         }
-        for unit in name {
+        for scalar in char::decode_utf16(name.iter().copied()) {
             header.character(
-                char::from_u32(u32::from(unit)).ok_or(RequestError::InternalInvariant(
-                    "checked dispatcher identifier is not scalar",
-                ))?,
+                scalar.map_err(|_| {
+                    RequestError::InternalInvariant("checked dispatcher identifier is not scalar")
+                })?,
                 budget,
             )?;
         }
@@ -423,7 +434,7 @@ pub(super) fn verify(
             .ssa
             .parameters
             .iter()
-            .skip(ssa.ssa.frame.implicit_words())
+            .skip(ssa.ssa.frame.implicit_words() + usize::from(storage.typed.capture.is_some()))
             .enumerate()
         {
             budget.charge_work(1)?;

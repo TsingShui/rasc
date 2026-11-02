@@ -5,6 +5,76 @@ use crate::p6_variables::StorageBody;
 use crate::substrate::owned::{TextBuffer, copy_units, push};
 use crate::{DeclarationCatalog, MethodBudget, RequestError};
 
+fn nested_name(
+    input: &MethodInput<'_, '_>,
+    catalog: &DeclarationCatalog,
+    descriptor: &[u16],
+    budget: &mut MethodBudget<'_, '_>,
+) -> Result<Option<String>, RequestError> {
+    let ownership = crate::input::ownership::collect(input.program(), budget)?;
+    let mut components: Vec<String> = Vec::new();
+    let mut current = Vec::new();
+    for &unit in descriptor {
+        push(&mut current, unit, budget)?;
+    }
+    for _ in 0..=ownership.nested().len() {
+        budget.charge_work(1)?;
+        let mut found = None;
+        for entry in ownership.nested() {
+            budget.charge_work(1)?;
+            if input
+                .program()
+                .class_with(entry.class(), budget)?
+                .descriptor
+                .matches_with(&current, budget)?
+            {
+                found = Some(entry);
+                break;
+            }
+        }
+        let Some(entry) = found else {
+            if components.is_empty() {
+                return Ok(None);
+            }
+            let Some(base) = super::calls::type_name(&current, budget)? else {
+                return Err(RequestError::SourceNameUnproved {
+                    class: input.class_id(),
+                });
+            };
+            let mut source = TextBuffer::new();
+            source.push(&base, budget)?;
+            for component in components.iter().rev() {
+                source.push(".", budget)?;
+                source.push(component, budget)?;
+            }
+            return Ok(Some(source.finish()));
+        };
+        let Some(scope) = crate::p4_calls::nested_scope::collect(
+            input.program(),
+            entry.class(),
+            catalog,
+            budget,
+        )?
+        else {
+            return Err(RequestError::SourceNameUnproved {
+                class: input.class_id(),
+            });
+        };
+        let Some(component) = super::calls::identifier_text(scope.name(), budget)? else {
+            return Err(RequestError::SourceNameUnproved {
+                class: input.class_id(),
+            });
+        };
+        push(&mut components, component, budget)?;
+        current.clear();
+        for &unit in scope.outer() {
+            push(&mut current, unit, budget)?;
+        }
+    }
+    Err(RequestError::InternalInvariant(
+        "checked ownership name chain did not terminate",
+    ))
+}
 struct NamedType {
     original: Kind,
     source: String,
@@ -114,6 +184,17 @@ impl TypeNames {
             _ => return Err(RequestError::InternalInvariant("named type lost identity")),
         };
         let descriptor = copy_units(name, budget)?;
+        if let Some(source) = nested_name(input, catalog, &descriptor, budget)? {
+            push(
+                &mut self.named,
+                NamedType {
+                    original: kind,
+                    source,
+                },
+                budget,
+            )?;
+            return Ok(true);
+        }
         let mut dimensions = 0usize;
         while descriptor.get(dimensions) == Some(&91) {
             budget.charge_work(1)?;

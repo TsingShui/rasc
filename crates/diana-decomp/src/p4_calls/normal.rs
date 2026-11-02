@@ -74,15 +74,17 @@ pub(crate) fn collect<'a>(
     input: &MethodInput<'_, '_>,
     catalog: &DeclarationCatalog,
     ssa: SsaBody<'a>,
+    capture: Option<&crate::CaptureCertificate>,
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<ResolvedBody<'a>, RequestError> {
-    collect_impl(input, catalog, ssa, budget)
+    collect_impl(input, catalog, ssa, capture, budget)
 }
 
 fn collect_impl<'a>(
     input: &MethodInput<'_, '_>,
     catalog: &DeclarationCatalog,
     ssa: SsaBody<'a>,
+    capture: Option<&crate::CaptureCertificate>,
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<ResolvedBody<'a>, RequestError> {
     let source_throws = super::throws::source_throws(input, catalog, budget)?;
@@ -192,7 +194,10 @@ fn collect_impl<'a>(
         } else {
             FieldScope::Instance
         };
-        let result = if scope == FieldScope::ConstructorThis {
+        let result = if matches!(capture, Some(proof) if proof.field() == reference && op.pc == crate::CodeUnitOffset(0))
+        {
+            super::field_facts::collect_capture(input, catalog, reference, op.pc, budget)
+        } else if scope == FieldScope::ConstructorThis {
             super::field_facts::collect_own_write(input, catalog, reference, op.pc, budget)
         } else {
             super::field_facts::collect_field(

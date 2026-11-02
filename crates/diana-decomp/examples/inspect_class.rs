@@ -165,8 +165,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             );
         }
     };
-    let members: Vec<Value> = match report.class() {
-        ClassOutput::Mixed { members, .. } | ClassOutput::JavaUnit { members, .. } => members.iter().map(|member| {
+    let mut diagnostics: Vec<Value> = report.diagnostics().iter().map(diagnostic_value).collect();
+    let mut classes = vec![(report.class(), 0usize)];
+    for child in report.nested() {
+        let base = diagnostics.len();
+        if matches!(report.class(), ClassOutput::Mixed { .. }) {
+            diagnostics.extend(child.diagnostics().iter().map(diagnostic_value));
+        }
+        classes.push((child.class(), base));
+    }
+    let members: Vec<Value> = classes.into_iter().flat_map(|(class, base)| class.members().iter().map(move |member| (class, member, base))).map(|(class, member, base)| {
+            let owner = match class { ClassOutput::JavaUnit { descriptor, .. } | ClassOutput::Mixed { descriptor, .. } => descriptor };
             let key = member.key();
             let (status, facts, reason) = match member {
                 MethodOutput::Generated { facts, .. } => ("generated", Some(facts), None),
@@ -175,18 +184,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 MethodOutput::Debug { facts, reason, .. } => ("debug", facts.as_ref(), Some(reason.0)),
                 MethodOutput::Unavailable { facts, reason, .. } => ("unavailable", facts.as_ref(), Some(reason.0)),
             };
+            let reason = reason.map(|index| base + index);
             let span = rendered.spans.iter().find(|span| span.method == key);
             let source = span.and_then(|span| rendered.source.get(span.start.0..span.end.0));
-            json!({"method_id_idx":key.method.0,"member_kind":if matches!(member,MethodOutput::JavaInitializer { .. }) {"initializer"} else {"method"},"status":status,"name_units":facts.map(|v| &v.name),"proto_units":facts.map(|v| &v.prototype),"access_flags":facts.map(|v| v.access_flags),"evidence":match member { MethodOutput::Java { declaration, .. } => Some(java_evidence(declaration.environment(), declaration.compilation_contract(), declaration.calls())), MethodOutput::JavaInitializer { declaration, .. } => Some(java_evidence(declaration.environment(), declaration.compilation_contract(), declaration.calls())), _ => None },"reason":reason,"source":source,"language":span.map(|span|language(span.language))})
-        }).collect(),
-    };
-    let diagnostics: Vec<Value> = report.diagnostics().iter().map(diagnostic_value).collect();
+            json!({"class_def_idx":key.class.class_def.0,"owner_units":owner,"method_id_idx":key.method.0,"member_kind":if matches!(member,MethodOutput::JavaInitializer { .. }) {"initializer"} else {"method"},"status":status,"name_units":facts.map(|v| &v.name),"proto_units":facts.map(|v| &v.prototype),"access_flags":facts.map(|v| v.access_flags),"evidence":match member { MethodOutput::Java { declaration, .. } => Some(java_evidence(declaration.environment(), declaration.compilation_contract(), declaration.calls())), MethodOutput::JavaInitializer { declaration, .. } => Some(java_evidence(declaration.environment(), declaration.compilation_contract(), declaration.calls())), _ => None },"reason":reason,"source":source,"language":span.map(|span|language(span.language))})
+        }).collect();
     let spans: Vec<Value> = rendered
         .spans
         .iter()
         .map(|span| {
             json!({
-                "method_id_idx":span.method.method.0,"start":span.start.0,"end":span.end.0,
+                "class_def_idx":span.method.class.class_def.0,"method_id_idx":span.method.method.0,"start":span.start.0,"end":span.end.0,
                 "language":language(span.language),
             })
         })
@@ -206,6 +214,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let fields: Vec<Value> = report.class().fields().iter().map(|field| {
         let (status, source, reason) = match &field.declaration {
             diana_decomp::FieldDeclarationOutput::Java(declaration) => ("java", Some(declaration.source()), None),
+            diana_decomp::FieldDeclarationOutput::Generated(_) => ("generated", None, None),
             diana_decomp::FieldDeclarationOutput::Unavailable(reason) => ("unavailable", None, Some(reason.0)),
         };
         let initial = match &field.initial {
@@ -216,7 +225,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         };
         json!({"field_id_idx":field.key.field.0,"access_flags":field.access_flags,"static_ordinal":match field.storage {diana_decomp::FieldStorage::Static(ordinal)=>Some(ordinal.0),diana_decomp::FieldStorage::Instance=>None},"name_units":field.facts.as_ref().map(|facts|&facts.name),"type_units":field.facts.as_ref().map(|facts|&facts.descriptor),"initial":initial,"status":status,"source":source,"reason":reason})
     }).collect();
-    let value = json!({"schema":"diana.inspect/1","fields":fields,"status":status,"header_offset":report.image().header_offset.0,"class_def_idx":class_def.0,"descriptor_units":descriptor,"access_flags":access_flags,"members":members,"diagnostics":diagnostics,"text":rendered.source,"spans":spans});
+    let class_spans: Vec<Value> = rendered.class_spans.iter().map(|span| json!({"class_def_idx":span.class.class_def.0,"dex_id":span.class.dex.0,"start":span.start.0,"end":span.end.0})).collect();
+    let value = json!({"schema":"diana.inspect/1","class_spans":class_spans,"fields":fields,"status":status,"header_offset":report.image().header_offset.0,"class_def_idx":class_def.0,"descriptor_units":descriptor,"access_flags":access_flags,"members":members,"diagnostics":diagnostics,"text":rendered.source,"spans":spans});
     write_value(value, output)
 }
 

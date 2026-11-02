@@ -1,9 +1,11 @@
 # Diana Design and Implementation
 
-The Diana packages remain scaffolds. B01–B04 preparation is accepted on macOS
-arm64: self-made inputs, locked tools, independent certificates and the comparator
-are executable. The Engine is not implemented; preparation is not engine acceptance.
-See [preparation evidence](batches/b02-b04-preparation.md).
+Diana has a native ordinary-method engine with checked input, SSA/types/storage,
+structured/dispatcher Java, protected methods and initialization. T21 generic/bridge
+and T22 named-nested source profiles have recorded acceptance. Package versions
+retain their scaffold markers; EngineCoreRC is not accepted. [TASKS.md](TASKS.md)
+owns current capability and acceptance status. B01–B04 preparation is accepted on
+macOS arm64; see [preparation evidence](batches/b02-b04-preparation.md).
 
 Diana is a decompiler: it displays recovered code by default. A failed method is
 shown in its original position with its reason and analyzable original DEX debug information; a Mixed
@@ -38,9 +40,8 @@ revision. Failed Java retains checked original instructions, references and cove
 for analysis; it does not promise standard-Smali output or reassembly. TASKS §3
 owns revision-specific acceptance and bounded self-test authorization.
 The frozen JSON retains its draft metadata rather than acting as a progress counter.
-Windows/Linux and ART are not-run. Next is I0: T01 resource/cancellation control,
-T02–T04 safe input/raw/metadata and T05 real-library integration, then D009 Java
-recovery before D001 and D002/D003.
+Windows/Linux and ART are not-run. T23 and the core/application rollup remain
+open under the task-specific acceptance gates in TASKS.
 
 For implementation, read DESIGN, then the relevant section of ALGORITHMS, then
 the current TASKS card. Consult SOURCE_MAP when checking evidence. Every authored

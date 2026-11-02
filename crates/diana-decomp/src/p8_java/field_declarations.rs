@@ -74,12 +74,11 @@ fn verify_impl(
     }
     source.push(ty.spelling(), control)?;
     source.push(" ", control)?;
-    for &unit in &facts.name {
+    for scalar in char::decode_utf16(facts.name.iter().copied()) {
         control.charge_work(1)?;
         source.character(
-            char::from_u32(u32::from(unit)).ok_or(RequestError::InternalInvariant(
-                "verified field name lost scalar",
-            ))?,
+            scalar
+                .map_err(|_| RequestError::InternalInvariant("verified field name lost scalar"))?,
             control,
         )?;
     }
@@ -101,12 +100,12 @@ fn verify_impl(
     {
         let mut preparation = TextBuffer::new();
         preparation.push("static { ", control)?;
-        for &unit in &facts.name {
+        for scalar in char::decode_utf16(facts.name.iter().copied()) {
             control.charge_work(1)?;
             preparation.character(
-                char::from_u32(u32::from(unit)).ok_or(RequestError::InternalInvariant(
-                    "verified preparation name lost scalar",
-                ))?,
+                scalar.map_err(|_| {
+                    RequestError::InternalInvariant("verified preparation name lost scalar")
+                })?,
                 control,
             )?;
         }

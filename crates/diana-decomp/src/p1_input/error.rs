@@ -1,6 +1,6 @@
 use thiserror::Error;
 
-use crate::{ByteLength, ByteOffset, ControlError, FailureKind};
+use crate::{ByteLength, ByteOffset, ControlError, FailureKind, TypeId};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum InputProblem {
@@ -36,6 +36,8 @@ pub enum UnsupportedInput {
     ReverseEndian,
     MapType(u16),
     EncodedValueTag(u8),
+    OwnershipEvidenceMissing(TypeId),
+    AnonymousOwnership,
 }
 
 /// Errors retain physical byte coordinates without allocating diagnostic strings.

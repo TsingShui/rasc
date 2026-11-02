@@ -35,7 +35,16 @@ pub(super) fn read<'a>(
             ],
             budget,
         )? {
-            result.other_annotations = true;
+            let parameters = visibility == 2
+                && index.type_name(ty, budget)?.matches_with(
+                    &[
+                        76, 100, 97, 108, 118, 105, 107, 47, 97, 110, 110, 111, 116, 97, 116, 105,
+                        111, 110, 47, 77, 101, 116, 104, 111, 100, 80, 97, 114, 97, 109, 101, 116,
+                        101, 114, 115, 59,
+                    ],
+                    budget,
+                )?;
+            result.other_annotations |= !parameters;
             while values.next(index, budget)?.is_some() {}
             continue;
         }

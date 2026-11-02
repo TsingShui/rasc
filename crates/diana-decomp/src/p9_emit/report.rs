@@ -13,7 +13,48 @@ pub fn render(
 ) -> Result<RenderedReport, RequestError> {
     let mut output = TextBuffer::report(control);
     let mut spans = Vec::new();
-    match &report.class {
+    let mut class_spans = Vec::new();
+    render_class(
+        &report.class,
+        report.diagnostics(),
+        report.nested(),
+        &mut output,
+        &mut spans,
+        &mut class_spans,
+        control,
+    )?;
+    if matches!(report.class(), ClassOutput::Mixed { .. }) {
+        for child in report.nested() {
+            render_class(
+                &child.class,
+                child.diagnostics(),
+                &[],
+                &mut output,
+                &mut spans,
+                &mut class_spans,
+                control,
+            )?;
+        }
+    }
+    control.checkpoint()?;
+    Ok(RenderedReport {
+        source: output.finish(),
+        spans,
+        class_spans,
+    })
+}
+
+fn render_class(
+    class: &ClassOutput,
+    diagnostics: &[crate::Diagnostic],
+    nested: &[crate::NestedReport],
+    output: &mut TextBuffer,
+    spans: &mut Vec<OriginSpan>,
+    class_spans: &mut Vec<crate::ClassOriginSpan>,
+    control: &mut RunContext<'_>,
+) -> Result<(), RequestError> {
+    let class_start = SourceByteOffset(output.len());
+    match class {
         ClassOutput::JavaUnit {
             declaration,
             fields,
@@ -32,58 +73,57 @@ pub fn render(
                 output.push("\n", control)?;
             }
             output.push(declaration.preparation(), control)?;
-            for member in members {
+            write_java_members(members, output, spans, control)?;
+            let mut open = Vec::new();
+            for nested in nested {
                 control.checkpoint()?;
-                if matches!(member, MethodOutput::Generated { .. }) {
-                    continue;
+                while open.len() >= nested.depth.0 {
+                    let span: usize = open.pop().ok_or(RequestError::InternalInvariant(
+                        "nested source depth is zero",
+                    ))?;
+                    output.push("}\n", control)?;
+                    class_spans[span].end = SourceByteOffset(output.len());
                 }
-                let source = match member {
-                    MethodOutput::Java { source, .. }
-                    | MethodOutput::JavaInitializer { source, .. } => source.as_str(),
-                    MethodOutput::DeclarationOnly { declaration, .. } => declaration.source(),
-                    _ => {
-                        return Err(RequestError::InternalInvariant(
-                            "JavaUnit contains an unverified member",
-                        ));
-                    }
-                };
+                if open.len().checked_add(1) != Some(nested.depth.0) {
+                    return Err(RequestError::InternalInvariant(
+                        "nested source depth has a gap",
+                    ));
+                }
+                let plan = nested
+                    .plan
+                    .as_ref()
+                    .ok_or(RequestError::InternalInvariant("JavaUnit lost nested plan"))?;
                 let start = SourceByteOffset(output.len());
-                output.push(source, control)?;
-                let end = SourceByteOffset(output.len());
-                reserve(&mut spans, 1, control)?;
-                spans.push(OriginSpan {
-                    method: member.key(),
-                    start,
-                    end,
-                    language: SourceLanguage::Java,
-                });
-                output.push("\n", control)?;
-            }
-            for member in members {
-                control.checkpoint()?;
-                if let MethodOutput::Generated { declaration, .. } = member {
-                    let target = members
-                        .iter()
-                        .find(|member| member.key().method == declaration.target())
-                        .ok_or(RequestError::InternalInvariant(
-                            "generated bridge lost owner",
-                        ))?;
-                    let span = spans
-                        .iter()
-                        .find(|span| span.method == target.key())
-                        .ok_or(RequestError::InternalInvariant(
-                            "generated bridge lost owner span",
-                        ))?;
-                    let start = span.start;
-                    let end = span.end;
-                    reserve(&mut spans, 1, control)?;
-                    spans.push(OriginSpan {
-                        method: member.key(),
-                        start,
-                        end,
-                        language: SourceLanguage::Java,
-                    });
+                output.push(plan.header(), control)?;
+                for field in nested.class.fields() {
+                    control.checkpoint()?;
+                    if Some(field.key.field) == plan.capture_field() {
+                        continue;
+                    }
+                    let crate::FieldDeclarationOutput::Java(declaration) = &field.declaration
+                    else {
+                        return Err(RequestError::InternalInvariant("nested field lost source"));
+                    };
+                    output.push(declaration.source(), control)?;
+                    output.push("\n", control)?;
                 }
+                output.push(plan.preparation(), control)?;
+                write_java_members(nested.class.members(), output, spans, control)?;
+                let key = match &nested.class {
+                    ClassOutput::JavaUnit { key, .. } | ClassOutput::Mixed { key, .. } => *key,
+                };
+                reserve(&mut open, 1, control)?;
+                open.push(class_spans.len());
+                reserve(class_spans, 1, control)?;
+                class_spans.push(crate::ClassOriginSpan {
+                    class: key,
+                    start,
+                    end: SourceByteOffset(output.len()),
+                });
+            }
+            while let Some(span) = open.pop() {
+                output.push("}\n", control)?;
+                class_spans[span].end = SourceByteOffset(output.len());
             }
             output.push("}\n", control)?;
         }
@@ -110,11 +150,11 @@ pub fn render(
             }
             output.push("\n", control)?;
             for field in fields {
-                write_field(report, field, &mut output, control)?;
+                write_field(diagnostics, field, output, control)?;
             }
             match shell {
                 DeclarationOutput::Unavailable(id) => {
-                    write_reason(report, *id, &mut output, control)?
+                    write_reason(diagnostics, *id, output, control)?
                 }
             }
             for member in members {
@@ -139,13 +179,13 @@ pub fn render(
                         (Some(declaration.source()), SourceLanguage::Java)
                     }
                     MethodOutput::Debug { source, reason, .. } => {
-                        write_reason(report, *reason, &mut output, control)?;
+                        write_reason(diagnostics, *reason, output, control)?;
                         (Some(source.source()), SourceLanguage::DexDebug)
                     }
                     MethodOutput::Unavailable {
                         excerpt, reason, ..
                     } => {
-                        write_reason(report, *reason, &mut output, control)?;
+                        write_reason(diagnostics, *reason, output, control)?;
                         let language = match excerpt.as_ref().map(|source| source.kind()) {
                             Some(DebugSourceKind::WordExcerpt) => SourceLanguage::OriginalExcerpt,
                             Some(DebugSourceKind::Snapshot) => SourceLanguage::DexDebug,
@@ -163,7 +203,7 @@ pub fn render(
                     )?,
                 }
                 let end = SourceByteOffset(output.len());
-                reserve(&mut spans, 1, control)?;
+                reserve(spans, 1, control)?;
                 spans.push(OriginSpan {
                     method: key,
                     start,
@@ -174,15 +214,83 @@ pub fn render(
             }
         }
     }
-    control.checkpoint()?;
-    Ok(RenderedReport {
-        source: output.finish(),
-        spans,
-    })
+    let key = match class {
+        ClassOutput::JavaUnit { key, .. } | ClassOutput::Mixed { key, .. } => *key,
+    };
+    reserve(class_spans, 1, control)?;
+    class_spans.push(crate::ClassOriginSpan {
+        class: key,
+        start: class_start,
+        end: SourceByteOffset(output.len()),
+    });
+    Ok(())
+}
+
+fn write_java_members(
+    members: &[MethodOutput],
+    output: &mut TextBuffer,
+    spans: &mut Vec<OriginSpan>,
+    control: &mut RunContext<'_>,
+) -> Result<(), RequestError> {
+    for member in members {
+        control.checkpoint()?;
+        if matches!(member, MethodOutput::Generated { .. }) {
+            continue;
+        }
+        let source = match member {
+            MethodOutput::Java { source, .. } | MethodOutput::JavaInitializer { source, .. } => {
+                source.as_str()
+            }
+            MethodOutput::DeclarationOnly { declaration, .. } => declaration.source(),
+            _ => {
+                return Err(RequestError::InternalInvariant(
+                    "JavaUnit contains an unverified member",
+                ));
+            }
+        };
+        let start = SourceByteOffset(output.len());
+        output.push(source, control)?;
+        let end = SourceByteOffset(output.len());
+        reserve(spans, 1, control)?;
+        spans.push(OriginSpan {
+            method: member.key(),
+            start,
+            end,
+            language: SourceLanguage::Java,
+        });
+        output.push("\n", control)?;
+    }
+    for member in members {
+        control.checkpoint()?;
+        if let MethodOutput::Generated { declaration, .. } = member {
+            let target = members
+                .iter()
+                .find(|member| member.key().method == declaration.target())
+                .ok_or(RequestError::InternalInvariant(
+                    "generated bridge lost owner",
+                ))?;
+            let span = spans
+                .iter()
+                .find(|span| span.method == target.key())
+                .ok_or(RequestError::InternalInvariant(
+                    "generated bridge lost owner span",
+                ))?;
+            let start = span.start;
+            let end = span.end;
+            reserve(spans, 1, control)?;
+            spans.push(OriginSpan {
+                method: member.key(),
+                start,
+                end,
+                language: SourceLanguage::Java,
+            });
+        }
+    }
+    Ok(())
 }
 
 fn write_field(
-    report: &Report,
+    report: &[crate::Diagnostic],
     field: &crate::FieldOutput,
     output: &mut TextBuffer,
     control: &mut RunContext<'_>,
@@ -237,6 +345,9 @@ fn write_field(
         }
     }
     match &field.declaration {
+        crate::FieldDeclarationOutput::Generated(_) => {
+            output.push("Generated: nested outer capture\n", control)?
+        }
         crate::FieldDeclarationOutput::Java(declaration) => {
             output.push(declaration.source(), control)?;
             output.push("\n", control)?;
@@ -249,17 +360,14 @@ fn write_field(
 }
 
 fn write_reason(
-    report: &Report,
+    report: &[crate::Diagnostic],
     id: DiagnosticId,
     output: &mut TextBuffer,
     control: &mut RunContext<'_>,
 ) -> Result<(), RequestError> {
-    let diagnostic = report
-        .diagnostics
-        .get(id.0)
-        .ok_or(RequestError::InternalInvariant(
-            "result diagnostic is absent",
-        ))?;
+    let diagnostic = report.get(id.0).ok_or(RequestError::InternalInvariant(
+        "result diagnostic is absent",
+    ))?;
     if diagnostic.cause.kind() == crate::FailureKind::Cancelled {
         return Err(RequestError::InternalInvariant(
             "cancelled report reached rendering",

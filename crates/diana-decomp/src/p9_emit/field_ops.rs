@@ -12,6 +12,10 @@ fn write_receiver(
         Receiver::This(_) => output.push("this", budget),
         Receiver::Static(qualifier) => output.push(qualifier, budget),
         Receiver::OwnStatic(_) => Ok(()),
+        Receiver::Outer(name, _) => {
+            output.push(name, budget)?;
+            output.push(".this", budget)
+        }
     }
 }
 pub(super) fn write(
@@ -29,8 +33,10 @@ pub(super) fn write(
             super::java::local(*result, output, budget)?;
             output.push(" = ", budget)?;
             write_receiver(receiver, output, budget)?;
-            output.push(".", budget)?;
-            output.push(name, budget)?;
+            if !matches!(receiver, Receiver::Outer(..)) {
+                output.push(".", budget)?;
+                output.push(name, budget)?;
+            }
         }
         Statement::Store {
             receiver,

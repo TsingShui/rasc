@@ -274,7 +274,7 @@ fn final_control_replay_rejects_wrong_exits_missing_coverage_and_lock_operands()
             &catalog,
             planned,
             &chain,
-            EnvironmentId(0),
+            false,
             &mut budget,
         )
         .unwrap()

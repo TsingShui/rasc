@@ -11,6 +11,7 @@ pub(crate) enum Receiver {
     This(LocalId),
     Static(String),
     OwnStatic(String),
+    Outer(String, LocalId),
 }
 pub(crate) enum Statement {
     Load {
@@ -27,6 +28,43 @@ pub(crate) enum Statement {
         flags: u32,
         value: ValueUse,
     },
+}
+fn entry_this(
+    typed: &TypedBody<'_>,
+    value: crate::p3_ssa::ValueId,
+    budget: &mut MethodBudget<'_, '_>,
+) -> Result<bool, RequestError> {
+    use crate::p3_ssa::{Definition, Incoming, Sym};
+    if matches!(typed.ssa.frame, crate::p2_flow::MethodFrame::Static) {
+        return Ok(false);
+    }
+    budget.charge_work(1)?;
+    let definition = typed
+        .ssa
+        .values
+        .get(usize::try_from(value.0).map_err(|_| RequestError::PlatformCapacity)?);
+    match definition {
+        Some(Definition::Parameter(0)) => Ok(true),
+        Some(Definition::Phi) => {
+            for phi in &typed.ssa.phis {
+                budget.charge_work(1)?;
+                if phi.result == value {
+                    if let [(Incoming::EntrySeed, Sym::Value(seed))] = phi.inputs.as_slice() {
+                        return Ok(matches!(
+                            typed.ssa.values.get(
+                                usize::try_from(seed.0)
+                                    .map_err(|_| RequestError::PlatformCapacity)?
+                            ),
+                            Some(Definition::Parameter(0))
+                        ));
+                    }
+                    return Ok(false);
+                }
+            }
+            Ok(false)
+        }
+        _ => Ok(false),
+    }
 }
 fn qualifier(
     owner: &[u16],
@@ -77,6 +115,7 @@ fn declaration<'a>(
 }
 pub(crate) fn lower(
     typed: &TypedBody<'_>,
+    names: &super::types::TypeNames,
     op: &BoundOp,
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<Option<Statement>, RequestError> {
@@ -122,7 +161,16 @@ pub(crate) fn lower(
     )?;
     Ok(Some(match (op.op, usage) {
         (Op::FieldLoad(..) | Op::StaticLoad(..), TypedFieldUse::Read) => Statement::Load {
-            receiver,
+            receiver: if declaration.outer_capture.is_some() {
+                if !entry_this(typed, op.input(0)?, budget)? {
+                    return Ok(None);
+                }
+                let mut name = crate::substrate::owned::TextBuffer::new();
+                name.push(names.name(declaration.kind.kind(), budget)?, budget)?;
+                Receiver::Outer(name.finish(), LocalId(op.input(0)?.0))
+            } else {
+                receiver
+            },
             name,
             reference: declaration.reference,
             flags: declaration.flags,
@@ -157,6 +205,7 @@ pub(crate) fn lower(
 }
 pub(crate) fn verify(
     typed: &TypedBody<'_>,
+    names: &super::types::TypeNames,
     op: &BoundOp,
     actual: &Statement,
     budget: &mut MethodBudget<'_, '_>,
@@ -245,6 +294,17 @@ pub(crate) fn verify(
         return Ok(false);
     }
     match (receiver, declaration.storage, op.op) {
+        (Receiver::Outer(name, source), FieldStorage::Instance, Op::FieldLoad(..)) => {
+            if declaration.outer_capture.is_none() {
+                return Ok(false);
+            }
+            if names.name(declaration.kind.kind(), budget)? != name
+                || source.0 != op.input(0)?.0
+                || !entry_this(typed, op.input(0)?, budget)?
+            {
+                return Ok(false);
+            }
+        }
         (
             Receiver::Instance(receiver) | Receiver::This(receiver),
             FieldStorage::Instance,

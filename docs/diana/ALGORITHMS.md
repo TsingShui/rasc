@@ -1798,6 +1798,7 @@ Concretely, only the following rules are accepted:
   canonical assignment match, express it with `Outer.this` and `outer.new Inner(args)`; that hidden
   assignment is owned by javac, and a general pre-super field write MUST NOT be opened. Any other
   capture/effect mismatch means no anonymous/lambda or helper is generated.
+
 - Enum: constant static fields and order, hidden name/ordinal parameters, unique private storage,
   values copying and the valueOf call MUST be the canonical pattern; the hidden storage has no
   actual reference outside that pattern. Emit only the Java enum constants and user members and
@@ -1805,6 +1806,38 @@ Concretely, only the following rules are accepted:
 - Annotation: interface element return/default legality, runtime retention and complete value
   preservation; arrays and Strings are output per UTF16/original bits, and class/enum values use the
   exact descriptor. System metadata MUST NOT be fabricated as a Java annotation.
+
+The native named-member profile checks reciprocal ownership before source-name
+resolution. P8 MUST preserve the original binary identity of the source owner/name chain;
+metadata that would require external renaming is not source-admitted. P8 rejects
+an inner simple name equal to an enclosing type name. Static public nested classes
+consume ordinary member/unit verification. The instance profile accepts a public
+inner with one synthetic final outer field and a constructor whose sole explicit
+DEX parameter is that outer. Its original prefix is the outer assignment followed
+by Object initialization; later writes or capture-field references in that
+constructor reject the certificate. Other instance field/constructor layouts keep
+Mixed and original facts rather than receiving an inferred capture scheme.
+
+P4 records the exact capture declaration. P5 proves receiver/parameter SSA origins;
+P6 and P8 independently replay the omitted entry operation. Capture-dependent
+source requires certificates for the original constructors before lowering.
+A capture read becomes `Outer.this` only for a proved entry receiver; reading
+another object's capture field is not interchangeable with that expression.
+The generated field product retains its original FieldKey and constructor
+MethodKey. Non-public static calls to the top-level enclosing owner require
+complete same-nest declarations and matching native access. Existing synthetic
+static accessors remain Explicit with their original names and ordinary verified
+bodies; no new accessor is synthesized and no cross-class private DEX access is
+granted by lexical ownership alone.
+
+P8 supplies a flat owner preorder with checked depths and sealed nested emission
+plans. P9 MUST render those plans without inferring hidden fields from flags or
+splitting binary names. Original class and method spans use final UTF-8 byte
+coordinates, including nested descendants inside their owner spans. Closure work,
+depth-stack allocation and output consume request budgets; no numeric default cap
+or recursive report tree is introduced. A rejected nested unit makes the owner
+Mixed while retaining available original nested results. A single inner fragment
+is not an independent JavaUnit.
 
 The native covariant profile accepts a no-argument Object-returning bridge to
 the same owner's String-returning instance override. P4 requires the original

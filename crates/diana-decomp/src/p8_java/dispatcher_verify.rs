@@ -531,6 +531,19 @@ pub(super) fn verify(
                 &mut statement,
                 budget,
             )?;
+            if let Some(capture) = &ssa.capture
+                && capture.operation() == id
+            {
+                if !matches!(bound.op, Op::FieldStore(_, _, field, _) if field == capture.field())
+                    || bound.pc != crate::CodeUnitOffset(0)
+                    || !matches!(storage.constructor_entry.as_ref(), Some(entry) if entry.pc == capture.initialization())
+                {
+                    return Err(RequestError::InternalInvariant(
+                        "capture source omission lost shared certificate",
+                    ));
+                }
+                continue;
+            }
             if matches!(bound.op, Op::Nop) {
                 continue;
             }
@@ -671,7 +684,7 @@ pub(super) fn verify(
                     }
                 }
                 super::calls::Statement::Field(actual) => {
-                    super::field_ops::verify(ssa, bound, actual, budget)?
+                    super::field_ops::verify(ssa, names, bound, actual, budget)?
                 }
                 super::calls::Statement::Array(actual) => {
                     super::array_ops::verify(input, ssa, bound, actual, budget)?

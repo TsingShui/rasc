@@ -52,6 +52,12 @@ pub(super) fn locals(
                 output.push(" = ", budget)?;
                 output.push(literal, budget)?;
             }
+            InitialValue::Outer => {
+                output.push(" = ", budget)?;
+                let name = type_names.source_name(declaration.source_type)?;
+                output.push(name, budget)?;
+                output.push(".this", budget)?;
+            }
             InitialValue::Absent => {}
         }
         output.push(";\n", budget)?;

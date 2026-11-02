@@ -38,6 +38,7 @@ pub enum FieldInitialValue {
 
 pub enum FieldDeclarationOutput {
     Java(crate::VerifiedJavaField),
+    Generated(crate::GeneratedCaptureField),
     Unavailable(DiagnosticId),
 }
 

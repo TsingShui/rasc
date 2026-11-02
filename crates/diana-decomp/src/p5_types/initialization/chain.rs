@@ -32,6 +32,7 @@ fn argument(
 
 pub(super) fn solve(
     ssa: &SsaBody<'_>,
+    capture: Option<&crate::p5_types::capture::CaptureUse>,
     deferred: &mut [Option<InitializationId>],
     calls: &mut [Option<InitializationId>],
     budget: &mut MethodBudget<'_, '_>,
@@ -87,6 +88,8 @@ pub(super) fn solve(
                     push(&mut aliases, UninitAlias(result), budget)?;
                 }
             }
+            Op::FieldStore(..) if matches!(capture, Some(proof) if proof.operation() == op.id && proof.initialization().0 > op.pc.0) =>
+                {}
             Op::Initialize(call) => {
                 let site = &ssa.calls[ix(call.0)?];
                 if site.target != CallTarget::Constructor

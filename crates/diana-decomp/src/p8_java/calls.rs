@@ -131,12 +131,12 @@ fn text(
         return Ok(None);
     }
     let mut output = TextBuffer::new();
-    for &unit in units {
+    for scalar in char::decode_utf16(units.iter().copied()) {
         budget.charge_work(1)?;
         output.character(
-            char::from_u32(u32::from(unit)).ok_or(RequestError::InternalInvariant(
-                "checked identifier lost its scalar",
-            ))?,
+            scalar.map_err(|_| {
+                RequestError::InternalInvariant("checked identifier lost its scalar")
+            })?,
             budget,
         )?;
     }
@@ -461,6 +461,9 @@ pub(super) fn operations(
     for &id in &ssa.ssa.bound[ix(block.0)?].ops {
         budget.charge_work(1)?;
         let op = ssa.ssa.operation(id)?;
+        if matches!(&ssa.capture, Some(capture) if capture.operation() == id) {
+            continue;
+        }
         super::exceptional::snapshots(placements, block, op.pc, &mut output, budget)?;
         if matches!(op.op, Op::Monitor(..)) {
             push(&mut output, super::monitor_ops::lower(ssa, id, op)?, budget)?;
@@ -609,7 +612,7 @@ pub(super) fn operations(
             op.op,
             Op::FieldLoad(..) | Op::FieldStore(..) | Op::StaticLoad(..) | Op::StaticStore(..)
         ) {
-            let Some(statement) = super::field_ops::lower(ssa, op, budget)? else {
+            let Some(statement) = super::field_ops::lower(ssa, names, op, budget)? else {
                 return Ok(None);
             };
             push(&mut output, Statement::Field(statement), budget)?;

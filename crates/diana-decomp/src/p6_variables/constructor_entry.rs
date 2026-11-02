@@ -166,6 +166,35 @@ pub(super) fn prove(
         if prefix.pc.0 >= op.pc.0 {
             break;
         }
+        if let Some(capture) = &typed.capture
+            && capture.operation() == prefix.id
+        {
+            if !matches!(prefix.op, Op::FieldStore(_, _, field, _) if field == capture.field())
+                || prefix.pc != crate::CodeUnitOffset(0)
+                || capture.initialization() != op.pc
+            {
+                return Err(broken());
+            }
+            let layout =
+                crate::raw::instruction_layout(raw.instructions(), prefix.pc, raw.version())
+                    .map_err(crate::input::MethodError::Decode)?;
+            let operands =
+                crate::input::operands::instruction_operands(raw.instructions(), prefix.pc, layout)
+                    .map_err(crate::input::MethodError::Decode)?;
+            let first = raw
+                .registers_size()
+                .checked_sub(raw.ins_size())
+                .ok_or_else(broken)?;
+            let mut registers = operands.registers().iter();
+            if raw.ins_size() != 2
+                || !matches!(layout.kind(), crate::raw::LayoutKind::Instruction(spec) if spec.opcode == 0x5b)
+                || registers.next() != Some(crate::RegisterId(u32::from(first) + 1))
+                || registers.next() != Some(crate::RegisterId(u32::from(first)))
+                || registers.next().is_some()
+            {
+                return Err(broken());
+            }
+        }
         if matches!(prefix.op, Op::Move(..) | Op::MoveWide(..)) {
             let result = prefix.result.ok_or_else(broken)?;
             let is_this = typed.initializations.deferred.get(ix(result.0)?)

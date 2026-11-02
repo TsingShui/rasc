@@ -37,13 +37,24 @@ pub(crate) fn verify(
     members: &[MethodOutput],
     control: &mut RunContext<'_>,
 ) -> Result<Option<VerifiedJavaUnit>, RequestError> {
+    verify_impl(index, key, catalog, fields, members, None, control)
+}
+pub(super) fn verify_static_nested(
+    index: &ProgramIndex<'_>,
+    key: ClassKey,
+    catalog: &crate::DeclarationCatalog,
+    fields: &[crate::FieldOutput],
+    members: &[MethodOutput],
+    scope: &crate::p4_calls::nested_scope::Scope,
+    control: &mut RunContext<'_>,
+) -> Result<Option<VerifiedJavaUnit>, RequestError> {
     verify_impl(
         index,
         key,
         catalog,
         fields,
         members,
-        catalog.environment,
+        Some(scope.name()),
         control,
     )
 }
@@ -53,9 +64,10 @@ fn verify_impl(
     catalog: &crate::DeclarationCatalog,
     fields: &[crate::FieldOutput],
     members: &[MethodOutput],
-    environment: EnvironmentId,
+    nested_name: Option<&[u16]>,
     control: &mut RunContext<'_>,
 ) -> Result<Option<VerifiedJavaUnit>, RequestError> {
+    let environment = catalog.environment;
     let mut emission = super::member_emission::Plan::default();
     for member in members {
         control.charge_work(1)?;
@@ -89,8 +101,19 @@ fn verify_impl(
     let interfaces = context.interfaces?;
     context.values_offset?;
     context.superclass?;
+    let ownership = crate::input::ownership::collect(index, control)?;
+    let mut owns_nested = false;
+    for entry in ownership.nested() {
+        control.charge_work(1)?;
+        if entry.class() == key.class_def && nested_name.is_none() {
+            return Ok(None);
+        }
+        owns_nested |= entry.enclosing() == key.class_def;
+    }
     if interface && !interfaces.is_empty()
-        || !index.no_class_annotations(context.annotations_offset, control)?
+        || !((owns_nested || nested_name.is_some())
+            && index.only_ownership_annotations(context.annotations_offset, control)?)
+            && !index.no_class_annotations(context.annotations_offset, control)?
             && crate::input::signature::class(index, key.class_def, control)?.is_none()
     {
         return Ok(None);
@@ -147,9 +170,9 @@ fn verify_impl(
                     if !declaration.default_preparation { fields_admitted = false; }
                 } else if let Some(expression) = &declaration.initial_expression {
                     preparation.push("static { ", control)?;
-                    for &unit in &facts.name {
+                    for scalar in char::decode_utf16(facts.name.iter().copied()) {
                         control.charge_work(1)?;
-                        preparation.character(char::from_u32(u32::from(unit)).ok_or(RequestError::InternalInvariant("verified final name lost scalar"))?, control)?;
+                        preparation.character(scalar.map_err(|_| RequestError::InternalInvariant("verified final name lost scalar"))?, control)?;
                     }
                     preparation.push(" = ", control)?;
                     preparation.push(expression, control)?;
@@ -287,7 +310,23 @@ fn verify_impl(
         return Ok(None);
     };
     let mut header = TextBuffer::new();
-    let simple = if let Some(split) = name.rfind('.') {
+    let nested_text;
+    let simple = if let Some(units) = nested_name {
+        if !super::declarations::identifier(units, control)? {
+            return Ok(None);
+        }
+        let mut text = TextBuffer::new();
+        for scalar in char::decode_utf16(units.iter().copied()) {
+            text.character(
+                scalar.map_err(|_| {
+                    RequestError::InternalInvariant("nested identifier lost scalar")
+                })?,
+                control,
+            )?;
+        }
+        nested_text = text.finish();
+        &nested_text
+    } else if let Some(split) = name.rfind('.') {
         header.push("package ", control)?;
         header.push(&name[..split], control)?;
         header.push(";\n", control)?;
@@ -299,6 +338,9 @@ fn verify_impl(
         if class.access_flags & bit != 0 && !(interface && bit == 0x400) {
             header.push(word, control)?;
         }
+    }
+    if nested_name.is_some() {
+        header.push("static ", control)?;
     }
     header.push(if interface { "interface " } else { "class " }, control)?;
     header.push(simple, control)?;

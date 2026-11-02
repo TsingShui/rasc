@@ -372,7 +372,7 @@ def _artifacts(actual, cert,requested=()):
         mid=member['method_id_idx']
         if mid in identities:raise ValueError('duplicate original method')
         identities[mid]=(name,proto)
-        members.append({'owner':owner,'name':name,'proto':proto,'method_id_idx':mid,
+        members.append({'owner':_units(member.get('owner_units',actual['descriptor_units'])),'name':name,'proto':proto,'method_id_idx':mid,
                         'language':language,'source':source,'status':member['status']})
     if selector['kind'] in {'method','request'}:
         if selector['kind']=='method' and (set(identities)!={selector['method_id_idx']} or identities[selector['method_id_idx']] not in {(None,None),(selector['name'],selector['proto'])}):
@@ -397,7 +397,8 @@ def _artifacts(actual, cert,requested=()):
         name,proto=identities[span['method_id_idx']]
         if name is None and selector['kind']=='method' and span['method_id_idx']==selector['method_id_idx']:
             name,proto=selector['name'],selector['proto']
-        value={**span,'owner':owner,'method':None if name is None else name+proto,
+        span_owner=next(m['owner'] for m in members if m['method_id_idx']==span['method_id_idx'])
+        value={**span,'owner':span_owner,'method':None if name is None else name+proto,
                'failure':next(m for m in actual['members'] if m['method_id_idx']==span['method_id_idx'])['reason'] is not None}
         spans.append(value)
         if span['language']=='original_excerpt':excerpts.append(value)

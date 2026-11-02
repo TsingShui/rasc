@@ -240,7 +240,7 @@ pub(super) fn owner(
     parent: Option<&[u16]>,
     budget: &mut crate::MethodBudget<'_, '_>,
 ) -> Result<bool, RequestError> {
-    if input.plain_owner_scope(parent, budget)? {
+    if super::nested_scope::plain_owner(input, catalog, parent, budget)? {
         return Ok(true);
     }
     let Some(_) = collect(input.program(), input.class_id(), catalog, budget)? else {

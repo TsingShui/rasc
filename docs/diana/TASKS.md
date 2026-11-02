@@ -4,8 +4,8 @@
 chain includes checked heap operations, exception SSA/storage, protected Java,
 monitor scopes and T20 initialization. T20's supported source profile and fixed
 D041–D047/D079 obligations pass; unproved initialization remains classified
-Debug/Mixed. Remaining source declarations in T22–T23 and core/application rollup
-remain open. EngineCoreRC is not accepted. The frozen draft-7 specification holds
+Debug/Mixed. T21 generic/bridge declarations and T22 named ownership pass their
+recorded source profiles. T23 and core/application rollup remain open. EngineCoreRC is not accepted. The frozen draft-7 specification holds
 86 required cases and 177 must-run invocation scenarios.**
 This page owns the workflow, preparation, task cards and verification. Read
 [DESIGN.md](DESIGN.md) for interfaces and data, [ALGORITHMS.md](ALGORITHMS.md) for
@@ -2290,6 +2290,13 @@ renaming.
 
 ## T22 — Named nested classes, capture and unit ownership
 
+**Progress**: Accepted for the [named ownership profile](batches/t22-ownership.md).
+F22/U07 and both D049 source-JVM invocations pass. Public regressions cover static
+and captured inner classes, multilevel same-name ownership, Unicode spans,
+private access through the original accessor, metadata/capture mutations and
+configured resource failures. Original class/method/field identities remain
+traceable; a standalone inner fragment stays Mixed.
+
 **Dependencies**: T21, T12. **Phase**: P1/P4/P8. **References**: DX-09/12,
 RG-04.
 
@@ -2328,9 +2335,6 @@ with a real classpath compile of the whole unit and a capture trace.
 B(F22) plus native ownership and span mutation tests. **Completion**: The
 top-level unit is legal, the original identity mapping is complete, and the
 single-fragment status is correct.
-
-**Not in scope**: Anonymous inline or lambda recovery, guessing an inner class
-from a name without metadata, public external member remapping.
 
 ## T23 — Restricted enum/annotation and complete shell classification
 

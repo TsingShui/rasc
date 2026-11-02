@@ -7,6 +7,7 @@ use crate::{MethodBudget, RequestError};
 pub(crate) enum InitialValue {
     This,
     Parameter(u32),
+    Outer,
     Literal(&'static str),
     Absent,
 }
@@ -29,7 +30,13 @@ pub(super) fn lower(
             Initializer::ThisAfterChain | Initializer::Parameter(Parameter::This) => {
                 InitialValue::This
             }
-            Initializer::Parameter(Parameter::Explicit(index)) => InitialValue::Parameter(index),
+            Initializer::Parameter(Parameter::Explicit(index)) => {
+                if storage.typed.capture.is_some() && index == 0 {
+                    InitialValue::Outer
+                } else {
+                    InitialValue::Parameter(index)
+                }
+            }
             Initializer::Deferred(_) => InitialValue::Absent,
             Initializer::Default => InitialValue::Literal(match local.kind {
                 Kind::Int => "0",
@@ -67,6 +74,7 @@ pub(super) fn verify(
             Initializer::ThisAfterChain | Initializer::Parameter(Parameter::This),
             InitialValue::This,
         ) => true,
+        (Initializer::Parameter(Parameter::Explicit(0)), InitialValue::Outer) => true,
         (Initializer::Parameter(Parameter::Explicit(a)), InitialValue::Parameter(b)) => a == b,
         (Initializer::Deferred(_), InitialValue::Absent) => true,
         (Initializer::Default, InitialValue::Literal(literal)) => match local.kind {
