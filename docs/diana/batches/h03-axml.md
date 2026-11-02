@@ -29,9 +29,13 @@ Decisions that keep the output faithful:
   attribute index instead of a fabricated value.
 - A repeated qualified attribute name inside one element is rejected, because the
   result would not be valid XML.
-- A non-AXML container, an unknown record kind, a truncated chunk, an
-  out-of-pool string index and an unbalanced element sequence keep their own
-  classified reasons.
+- A non-AXML container, an exceeded explicit bound and a platform-capacity failure
+  are fatal. Every other defect is recoverable per the operator decision recorded
+  in DESIGN §6.7: the reader skips the damaged record, records a warning with its
+  byte offset, closes the elements that are still open and returns balanced
+  partial XML. A text node, an unknown record kind, an out-of-pool name, an
+  unsupported typed value, a repeated attribute, an XML-invalid name and a
+  truncated tail are warnings, not failures.
 
 `analysis/manifest.rs` selects the **last physical** `AndroidManifest.xml` entry in
 directory order, reads it through the shared archive reader (stored or deflate) and
@@ -104,12 +108,17 @@ mutation never panics and that at least one is rejected. Mutation of payload
 strings legitimately yields a different but valid document, so "accepted" is not
 an error.
 
-Known limitations, recorded rather than hidden: text/CDATA and DTD records are
-rejected as `UnsupportedChunk`; string-pool style spans are bounds-checked but not
-interpreted, so styled text is not rendered; the resource map is validated but not
-used for naming. Attribute values that are dimensions or fractions are formatted
-from the AOSP complex encoding, and a repeated qualified attribute name inside one
-element is rejected.
+With the warning semantics in place, the same five manifests still decode with
+**zero warnings**, and the `androguard` comparison still reports identical
+elements, attribute names and values. A `res/xml` style document from one APK that
+does contain a text node now yields balanced XML plus one `SkippedText` warning
+instead of failing; the attribute set matches the third-party decoder.
+
+Known limitations, recorded rather than hidden: text/CDATA content is skipped with
+a warning rather than rendered, and DTD records are unknown records; string-pool
+style spans are bounds-checked but not interpreted; the resource map is validated
+but not used for naming; attributes whose original names are not legal XML names
+are dropped with a warning instead of being renamed.
 
 ## Gates
 

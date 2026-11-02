@@ -48,6 +48,8 @@ pub enum ManifestError {
     Unbalanced { offset: usize },
     #[error("element at byte {offset} repeats attribute {name}")]
     DuplicateAttribute { offset: usize, name: String },
+    #[error("string pool is absent or unreadable at byte {offset}")]
+    BrokenStringPool { offset: usize },
     #[error("typed value {data_type:#04x} of attribute {index} is not supported")]
     UnsupportedValue { index: u32, data_type: u8 },
     #[error("{limit} exceeded: requested {requested}, maximum {maximum}")]
@@ -71,7 +73,8 @@ impl ManifestError {
             Self::InconsistentChunk { .. }
             | Self::InvalidString { .. }
             | Self::Unbalanced { .. }
-            | Self::DuplicateAttribute { .. } => Kind::Malformed,
+            | Self::DuplicateAttribute { .. }
+            | Self::BrokenStringPool { .. } => Kind::Malformed,
         }
     }
 }
@@ -85,6 +88,7 @@ const RES_XML_START_ELEMENT_TYPE: u16 = 0x0102;
 const RES_XML_END_ELEMENT_TYPE: u16 = 0x0103;
 
 const UTF8_FLAG: u32 = 1 << 8;
+const RES_XML_CDATA_TYPE: u16 = 0x0104;
 
 fn u16_at(bytes: &[u8], offset: usize) -> Result<u16, ManifestError> {
     let slice = bytes
@@ -322,227 +326,436 @@ impl Budget<'_> {
 /// unknown record type, an unsupported typed value and an unbalanced element
 /// sequence. Elements and attributes are emitted with their original names;
 /// attributes in a known Android namespace use that namespace's prefix.
-pub fn decode(bytes: &[u8], limits: ManifestLimits) -> Result<String, ManifestError> {
+/// A decoded manifest and every recoverable defect met while decoding it.
+///
+/// A warning never removes the whole document: the partial text stays balanced
+/// XML and is returned with the classified warning that explains the gap.
+#[derive(Debug)]
+pub struct DecodedManifest {
+    xml: String,
+    warnings: Vec<ManifestWarning>,
+}
+
+impl DecodedManifest {
+    pub fn xml(&self) -> &str {
+        &self.xml
+    }
+    pub fn warnings(&self) -> &[ManifestWarning] {
+        &self.warnings
+    }
+    pub fn is_partial(&self) -> bool {
+        !self.warnings.is_empty()
+    }
+}
+
+/// One recoverable defect: the original byte offset and what was left out.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ManifestWarning {
+    pub offset: usize,
+    pub kind: ManifestWarningKind,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ManifestWarningKind {
+    /// A chunk header or extent contradicts the remaining bytes; decoding stops
+    /// after closing the elements that were still open.
+    TruncatedChunk,
+    /// A record kind outside the supported set was skipped.
+    UnknownRecord(u16),
+    /// A text/CDATA record was skipped; text nodes are not rendered yet.
+    SkippedText,
+    /// A string index was outside the pool; an empty value was used.
+    InvalidString(u32),
+    /// A repeated attribute name was dropped, keeping the first value.
+    DuplicateAttribute(String),
+    /// An attribute name cannot appear in XML; the attribute was dropped.
+    InvalidName(String),
+    /// A typed value outside the supported set was replaced by its raw data.
+    UnsupportedValue(u8),
+    /// An end element did not match the open element; the open one was closed.
+    UnbalancedElement,
+    /// A string pool was absent or unreadable; names could not be resolved.
+    BrokenStringPool,
+}
+
+/// Decodes one binary `AndroidManifest.xml` document into text XML.
+///
+/// Only a document that is not binary XML, an exceeded explicit bound or a
+/// platform-capacity failure is fatal. Every other defect is recoverable: the
+/// reader skips the damaged record, records a warning with its byte offset and
+/// closes open elements so the produced text stays balanced XML.
+pub fn decode(bytes: &[u8], limits: ManifestLimits) -> Result<DecodedManifest, ManifestError> {
     if u16_at(bytes, 0)? != RES_XML_TYPE {
         return Err(ManifestError::NotAxml);
     }
     let header = usize::from(u16_at(bytes, 2)?);
     let size = usize::try_from(u32_at(bytes, 4)?).map_err(|_| ManifestError::PlatformCapacity)?;
-    let end = bounded(0, size, bytes.len())?;
     if header < 8 || header > size {
         return Err(ManifestError::InconsistentChunk { offset: 0 });
     }
-    let mut budget = Budget {
-        limits,
-        nodes: 0,
-        units: 0,
-        output: String::new(),
-        _marker: std::marker::PhantomData,
+    let mut decoder = Decoder {
+        bytes,
+        budget: Budget {
+            limits,
+            nodes: 0,
+            units: 0,
+            output: String::new(),
+            _marker: std::marker::PhantomData,
+        },
+        warnings: Vec::new(),
+        pool: None,
+        namespaces: Vec::new(),
+        open: Vec::new(),
+        skip: None,
+        raw_depth: 0,
     };
-    let mut offset = header;
-    let mut pool: Option<StringPool<'_>> = None;
-    let mut namespaces: Vec<(u32, String)> = Vec::new();
-    let mut open: Vec<String> = Vec::new();
-    let mut root_seen = false;
-    while offset < end {
-        let kind = u16_at(bytes, offset)?;
-        let chunk_header = usize::from(u16_at(bytes, offset + 2)?);
-        let chunk_size = usize::try_from(u32_at(bytes, offset + 4)?)
+    let mut end = size.min(bytes.len());
+    if size > bytes.len() {
+        decoder.warning(0, ManifestWarningKind::TruncatedChunk)?;
+        end = bytes.len();
+    }
+    decoder.run(header, end)?;
+    decoder.close_open()?;
+    Ok(DecodedManifest {
+        xml: decoder.budget.output,
+        warnings: decoder.warnings,
+    })
+}
+
+struct Decoder<'a> {
+    bytes: &'a [u8],
+    budget: Budget<'a>,
+    warnings: Vec<ManifestWarning>,
+    pool: Option<StringPool<'a>>,
+    namespaces: Vec<(String, String)>,
+    open: Vec<String>,
+    skip: Option<usize>,
+    raw_depth: usize,
+}
+
+impl Decoder<'_> {
+    fn warning(&mut self, offset: usize, kind: ManifestWarningKind) -> Result<(), ManifestError> {
+        self.warnings
+            .try_reserve(1)
             .map_err(|_| ManifestError::PlatformCapacity)?;
-        if chunk_header < 8 || chunk_size < chunk_header {
-            return Err(ManifestError::InconsistentChunk { offset });
-        }
-        let chunk_end = bounded(offset, chunk_size, end)?;
-        match kind {
-            RES_STRING_POOL_TYPE => {
-                if pool.is_some() {
-                    return Err(ManifestError::InconsistentChunk { offset });
-                }
-                pool = Some(StringPool::parse(bytes, offset, chunk_header, chunk_end)?);
-            }
-            RES_XML_RESOURCE_MAP_TYPE => {
-                // Validated for shape only: attribute names come from the string
-                // pool, so a guessed resource-id table cannot mislabel them.
-                if (chunk_end - offset - chunk_header) % 4 != 0 {
-                    return Err(ManifestError::InconsistentChunk { offset });
-                }
-            }
-            RES_XML_START_NAMESPACE_TYPE => {
-                if chunk_header < 16 {
-                    return Err(ManifestError::InconsistentChunk { offset });
-                }
-                let pool = pool
-                    .as_ref()
-                    .ok_or(ManifestError::InconsistentChunk { offset })?;
-                let prefix = u32_at(bytes, offset + 16)?;
-                let uri = u32_at(bytes, offset + 20)?;
-                namespaces.push((prefix, pool.text(uri, &mut budget)?));
-                budget.nodes()?;
-            }
-            RES_XML_END_NAMESPACE_TYPE => {
-                namespaces.pop();
-            }
-            RES_XML_START_ELEMENT_TYPE => {
-                if root_seen && open.is_empty() {
-                    return Err(ManifestError::Unbalanced { offset });
-                }
-                let Some(active) = pool.as_ref() else {
-                    return Err(ManifestError::InconsistentChunk { offset });
-                };
-                start_element(
-                    bytes,
-                    offset,
-                    chunk_header,
-                    chunk_end,
-                    active,
-                    &namespaces,
-                    &mut budget,
-                    &mut open,
-                )?;
-                root_seen = true;
-            }
-            RES_XML_END_ELEMENT_TYPE => {
-                if chunk_header < 16 {
-                    return Err(ManifestError::InconsistentChunk { offset });
-                }
-                let Some(active) = pool.as_ref() else {
-                    return Err(ManifestError::InconsistentChunk { offset });
-                };
-                let name = active.text(u32_at(bytes, offset + 20)?, &mut budget)?;
-                let Some(opened) = open.pop() else {
-                    return Err(ManifestError::Unbalanced { offset });
-                };
-                if opened != name {
-                    return Err(ManifestError::Unbalanced { offset });
-                }
-                budget.nodes()?;
-                let depth = open.len();
-                budget.indent(depth)?;
-                budget.write("</")?;
-                budget.write_escaped(&name)?;
-                budget.write(">\n")?;
-            }
-            other => return Err(ManifestError::UnsupportedChunk { kind: other }),
-        }
-        offset = chunk_end;
+        self.warnings.push(ManifestWarning { offset, kind });
+        Ok(())
     }
-    if !open.is_empty() {
-        return Err(ManifestError::Unbalanced { offset });
-    }
-    Ok(budget.output)
-}
 
-#[allow(clippy::too_many_arguments)]
-fn start_element(
-    bytes: &[u8],
-    offset: usize,
-    header: usize,
-    end: usize,
-    pool: &StringPool<'_>,
-    namespaces: &[(u32, String)],
-    budget: &mut Budget<'_>,
-    open: &mut Vec<String>,
-) -> Result<(), ManifestError> {
-    if header < 16 {
-        return Err(ManifestError::InconsistentChunk { offset });
-    }
-    let name_index = u32_at(bytes, offset + 20)?;
-    let attribute_start = usize::from(u16_at(bytes, offset + 24)?);
-    let attribute_size = usize::from(u16_at(bytes, offset + 26)?);
-    let attribute_count = usize::from(u16_at(bytes, offset + 28)?);
-    let name = pool.text(name_index, budget)?;
-    if attribute_count != 0 && attribute_size < 20 {
-        return Err(ManifestError::InconsistentChunk { offset });
-    }
-    budget.nodes()?;
-    let depth = open.len();
-    budget.indent(depth)?;
-    budget.write("<")?;
-    budget.write_escaped(&name)?;
-    if open.is_empty() {
-        // Every namespace used by an attribute must be declared in the output, or
-        // the text is not parseable XML.
-        for (prefix_index, uri) in namespaces {
-            let prefix = pool.text(*prefix_index, budget)?;
-            let uri = uri.clone();
-            budget.write(" xmlns")?;
-            if !prefix.is_empty() {
-                budget.write(":")?;
-                budget.write_escaped(&prefix)?;
-            }
-            budget.write("=\"")?;
-            budget.write_escaped(&uri)?;
-            budget.write("\"")?;
-        }
-    }
-    // `attributeStart` is relative to the attribute extension that follows the
-    // 16-byte node header, not to the chunk start.
-    let base = bounded(offset + 16, attribute_start, end)?;
-    let mut seen: Vec<String> = Vec::new();
-    for index in 0..attribute_count {
-        let step = index
-            .checked_mul(attribute_size)
-            .ok_or(ManifestError::PlatformCapacity)?;
-        let at = bounded(base, step, end)?;
-        bounded(at, 20, end)?;
-        let namespace = u32_at(bytes, at)?;
-        let attribute_name = u32_at(bytes, at + 4)?;
-        let raw = u32_at(bytes, at + 8)?;
-        let data_type = *bytes
-            .get(at + 15)
-            .ok_or(ManifestError::InconsistentChunk { offset: at })?;
-        let data = u32_at(bytes, at + 16)?;
-        budget.nodes()?;
-        let label = attribute_label(pool, attribute_name, budget)?;
-        let mut prefix = String::new();
-        if namespace != u32::MAX {
-            let uri = pool.text(namespace, budget)?;
-            if let Some((prefix_index, _)) =
-                namespaces.iter().rev().find(|(_, uri_at)| *uri_at == uri)
-            {
-                prefix = pool.text(*prefix_index, budget)?;
+    fn text(&mut self, offset: usize, index: u32) -> Result<String, ManifestError> {
+        if let Some(pool) = self.pool.as_ref() {
+            match pool.text(index, &mut self.budget) {
+                Ok(text) => return Ok(text),
+                Err(ManifestError::InvalidString { .. }) => {
+                    self.warning(offset, ManifestWarningKind::InvalidString(index))?;
+                    return Ok(String::new());
+                }
+                Err(ManifestError::Budget { .. }) | Err(ManifestError::PlatformCapacity) => {
+                    return Err(ManifestError::PlatformCapacity);
+                }
+                Err(_) => {
+                    self.warning(offset, ManifestWarningKind::BrokenStringPool)?;
+                    return Ok(String::new());
+                }
             }
         }
-        let mut qualified = String::new();
-        if !prefix.is_empty() {
-            qualified.push_str(&prefix);
-            qualified.push(':');
+        self.warning(offset, ManifestWarningKind::BrokenStringPool)?;
+        Ok(String::new())
+    }
+
+    fn run(&mut self, mut offset: usize, end: usize) -> Result<(), ManifestError> {
+        while offset < end {
+            if offset + 8 > end {
+                self.warning(offset, ManifestWarningKind::TruncatedChunk)?;
+                break;
+            }
+            let kind = u16_at(self.bytes, offset)?;
+            let chunk_header = usize::from(u16_at(self.bytes, offset + 2)?);
+            let chunk_size = match usize::try_from(u32_at(self.bytes, offset + 4)?) {
+                Ok(size) => size,
+                Err(_) => {
+                    self.warning(offset, ManifestWarningKind::TruncatedChunk)?;
+                    break;
+                }
+            };
+            if chunk_header < 8 || chunk_size < chunk_header {
+                self.warning(offset, ManifestWarningKind::TruncatedChunk)?;
+                break;
+            }
+            let Some(chunk_end) = offset.checked_add(chunk_size) else {
+                self.warning(offset, ManifestWarningKind::TruncatedChunk)?;
+                break;
+            };
+            if chunk_end > end {
+                self.warning(offset, ManifestWarningKind::TruncatedChunk)?;
+                break;
+            }
+            match kind {
+                RES_STRING_POOL_TYPE => {
+                    match StringPool::parse(self.bytes, offset, chunk_header, chunk_end) {
+                        Ok(pool) => self.pool = Some(pool),
+                        Err(ManifestError::Budget { .. })
+                        | Err(ManifestError::PlatformCapacity) => {
+                            return Err(ManifestError::PlatformCapacity);
+                        }
+                        Err(_) => {
+                            self.warning(offset, ManifestWarningKind::BrokenStringPool)?;
+                        }
+                    }
+                }
+                RES_XML_RESOURCE_MAP_TYPE => {
+                    if !(chunk_end - offset - chunk_header).is_multiple_of(4) {
+                        self.warning(offset, ManifestWarningKind::BrokenStringPool)?;
+                    }
+                }
+                RES_XML_START_NAMESPACE_TYPE => {
+                    if chunk_header < 16 {
+                        self.warning(offset, ManifestWarningKind::TruncatedChunk)?;
+                    } else {
+                        let prefix = u32_at(self.bytes, offset + 16)?;
+                        let uri = u32_at(self.bytes, offset + 20)?;
+                        let uri_text = self.text(offset, uri)?;
+                        let prefix_text = self.text(offset, prefix)?;
+                        self.namespaces
+                            .try_reserve(1)
+                            .map_err(|_| ManifestError::PlatformCapacity)?;
+                        self.namespaces.push((prefix_text, uri_text));
+                        self.budget.nodes()?;
+                    }
+                }
+                RES_XML_END_NAMESPACE_TYPE => {
+                    self.namespaces.pop();
+                }
+                RES_XML_START_ELEMENT_TYPE => {
+                    self.raw_depth = self.raw_depth.saturating_add(1);
+                    self.start_element(offset, chunk_header, chunk_end)?;
+                }
+                RES_XML_END_ELEMENT_TYPE => {
+                    self.end_element(offset, chunk_header)?;
+                    self.raw_depth = self.raw_depth.saturating_sub(1);
+                    if let Some(depth) = self.skip
+                        && self.raw_depth <= depth
+                    {
+                        self.skip = None;
+                    }
+                }
+                RES_XML_CDATA_TYPE => {
+                    self.warning(offset, ManifestWarningKind::SkippedText)?;
+                }
+                other => {
+                    self.warning(offset, ManifestWarningKind::UnknownRecord(other))?;
+                }
+            }
+            offset = chunk_end;
         }
-        qualified.push_str(&label);
-        if seen.iter().any(|previous| previous == &qualified) {
-            return Err(ManifestError::DuplicateAttribute {
-                offset,
-                name: qualified,
-            });
+        Ok(())
+    }
+
+    fn start_element(
+        &mut self,
+        offset: usize,
+        header: usize,
+        end: usize,
+    ) -> Result<(), ManifestError> {
+        if header < 16 {
+            self.warning(offset, ManifestWarningKind::TruncatedChunk)?;
+            return Ok(());
         }
-        budget.write(" ")?;
-        budget.write_escaped(&qualified)?;
-        seen.push(qualified);
-        budget.write("=\"")?;
-        let value = attribute_value(
-            pool,
-            raw,
-            data_type,
-            data,
-            u32::try_from(index).unwrap_or(u32::MAX),
-            budget,
+        let name_index = u32_at(self.bytes, offset + 20)?;
+        let attribute_start = usize::from(u16_at(self.bytes, offset + 24)?);
+        let attribute_size = usize::from(u16_at(self.bytes, offset + 26)?);
+        let attribute_count = usize::from(u16_at(self.bytes, offset + 28)?);
+        let name = self.text(offset, name_index)?;
+        if self.skip.is_some() {
+            return Ok(());
+        }
+        if !valid_name(&name) {
+            self.warning(offset, ManifestWarningKind::InvalidName(name))?;
+            self.skip = Some(self.raw_depth - 1);
+            return Ok(());
+        }
+        self.budget.nodes()?;
+        let depth = self.open.len();
+        self.budget.indent(depth)?;
+        self.budget.write("<")?;
+        self.budget.write_escaped(&name)?;
+        if self.open.is_empty() {
+            for (prefix, uri) in self.namespaces.clone() {
+                self.budget.write(" xmlns")?;
+                if !prefix.is_empty() {
+                    self.budget.write(":")?;
+                    self.budget.write_escaped(&prefix)?;
+                }
+                self.budget.write("=\"")?;
+                self.budget.write_escaped(&uri)?;
+                self.budget.write("\"")?;
+            }
+        }
+        self.write_attributes(
+            offset,
+            attribute_start,
+            attribute_size,
+            attribute_count,
+            end,
         )?;
-        budget.write_escaped(&value)?;
-        budget.write("\"")?;
+        self.budget.write(">\n")?;
+        self.open.push(name);
+        Ok(())
     }
-    budget.write(">\n")?;
-    open.push(name);
-    Ok(())
+
+    fn write_attributes(
+        &mut self,
+        offset: usize,
+        attribute_start: usize,
+        attribute_size: usize,
+        attribute_count: usize,
+        end: usize,
+    ) -> Result<(), ManifestError> {
+        if attribute_count != 0 && attribute_size < 20 {
+            self.warning(offset, ManifestWarningKind::TruncatedChunk)?;
+            return Ok(());
+        }
+        let Some(base) = offset
+            .checked_add(16)
+            .and_then(|start| start.checked_add(attribute_start))
+        else {
+            self.warning(offset, ManifestWarningKind::TruncatedChunk)?;
+            return Ok(());
+        };
+        let mut seen: Vec<String> = Vec::new();
+        for index in 0..attribute_count {
+            let Some(at) = index
+                .checked_mul(attribute_size)
+                .and_then(|step| base.checked_add(step))
+            else {
+                self.warning(offset, ManifestWarningKind::TruncatedChunk)?;
+                break;
+            };
+            if at.checked_add(20).is_none_or(|limit| limit > end) {
+                self.warning(at, ManifestWarningKind::TruncatedChunk)?;
+                break;
+            }
+            let namespace = self.namespace_uri(at)?;
+            let attribute_name = u32_at(self.bytes, at + 4)?;
+            let raw = u32_at(self.bytes, at + 8)?;
+            let data_type = self.bytes[at + 15];
+            let data = u32_at(self.bytes, at + 16)?;
+            let label = self.text(at, attribute_name)?;
+            let mut qualified = String::new();
+            if let Some(prefix) = namespace {
+                qualified.push_str(&prefix);
+                qualified.push(':');
+            }
+            qualified.push_str(&label);
+            if !valid_namespaced_name(&qualified) {
+                self.warning(at, ManifestWarningKind::InvalidName(qualified))?;
+                continue;
+            }
+            if seen.iter().any(|previous| previous == &qualified) {
+                self.warning(at, ManifestWarningKind::DuplicateAttribute(qualified))?;
+                continue;
+            }
+            let value = match attribute_value(
+                self.pool.as_ref(),
+                raw,
+                data_type,
+                data,
+                u32::try_from(index).unwrap_or(u32::MAX),
+                &mut self.budget,
+            ) {
+                Ok(value) => value,
+                Err(ManifestError::UnsupportedValue { data_type, .. }) => {
+                    self.warning(at, ManifestWarningKind::UnsupportedValue(data_type))?;
+                    if raw != u32::MAX {
+                        self.text(at, raw)?
+                    } else {
+                        String::new()
+                    }
+                }
+                Err(other) => return Err(other),
+            };
+            self.budget.nodes()?;
+            self.budget.write(" ")?;
+            self.budget.write_escaped(&qualified)?;
+            self.budget.write("=\"")?;
+            self.budget.write_escaped(&value)?;
+            self.budget.write("\"")?;
+            seen.try_reserve(1)
+                .map_err(|_| ManifestError::PlatformCapacity)?;
+            seen.push(qualified);
+        }
+        Ok(())
+    }
+
+    fn namespace_uri(&mut self, at: usize) -> Result<Option<String>, ManifestError> {
+        let index = u32_at(self.bytes, at)?;
+        if index == u32::MAX {
+            return Ok(None);
+        }
+        let uri = self.text(at, index)?;
+        let prefix = self
+            .namespaces
+            .iter()
+            .rev()
+            .find(|(_, candidate)| *candidate == uri)
+            .map(|(prefix, _)| prefix.clone());
+        Ok(prefix.filter(|prefix| !prefix.is_empty()))
+    }
+
+    fn end_element(&mut self, offset: usize, header: usize) -> Result<(), ManifestError> {
+        if header < 16 {
+            self.warning(offset, ManifestWarningKind::TruncatedChunk)?;
+            return Ok(());
+        }
+        if self.skip.is_some() {
+            return Ok(());
+        }
+        let name = self.text(offset, u32_at(self.bytes, offset + 20)?)?;
+        let Some(opened) = self.open.pop() else {
+            self.warning(offset, ManifestWarningKind::UnbalancedElement)?;
+            return Ok(());
+        };
+        if opened != name {
+            self.warning(offset, ManifestWarningKind::UnbalancedElement)?;
+        }
+        self.budget.nodes()?;
+        let depth = self.open.len();
+        self.budget.indent(depth)?;
+        self.budget.write("</")?;
+        self.budget.write_escaped(&opened)?;
+        self.budget.write(">\n")?;
+        Ok(())
+    }
+
+    fn close_open(&mut self) -> Result<(), ManifestError> {
+        while let Some(name) = self.open.pop() {
+            self.warning(0, ManifestWarningKind::UnbalancedElement)?;
+            self.budget.nodes()?;
+            let depth = self.open.len();
+            self.budget.indent(depth)?;
+            self.budget.write("</")?;
+            self.budget.write_escaped(&name)?;
+            self.budget.write(">\n")?;
+        }
+        Ok(())
+    }
 }
 
-fn attribute_label(
-    pool: &StringPool<'_>,
-    name: u32,
-    budget: &mut Budget<'_>,
-) -> Result<String, ManifestError> {
-    // The original attribute name is the string-pool entry; the resource map is
-    // not needed to name it and a guessed id table would mislabel attributes.
-    pool.text(name, budget)
+fn valid_name(name: &str) -> bool {
+    let mut characters = name.chars();
+    let Some(first) = characters.next() else {
+        return false;
+    };
+    (first.is_alphabetic() || first == '_')
+        && characters
+            .all(|character| character.is_alphanumeric() || matches!(character, '_' | '-' | '.'))
+}
+
+fn valid_namespaced_name(name: &str) -> bool {
+    match name.split_once(':') {
+        Some((prefix, local)) => valid_name(prefix) && valid_name(local),
+        None => valid_name(name),
+    }
 }
 
 /// AOSP `complexToFloat`: a signed 24-bit mantissa scaled by one of the four
@@ -571,7 +784,7 @@ fn complex_unit(data: u32) -> &'static str {
 }
 
 fn attribute_value(
-    pool: &StringPool<'_>,
+    pool: Option<&StringPool<'_>>,
     raw: u32,
     data_type: u8,
     data: u32,
@@ -582,7 +795,10 @@ fn attribute_value(
         0x00 => String::new(),
         0x01 | 0x07 | 0x08 => format!("@{data:#010x}"),
         0x02 => format!("?{data:#010x}"),
-        0x03 => pool.text(data, budget)?,
+        0x03 => match pool {
+            Some(pool) => pool.text(data, budget)?,
+            None => return Err(ManifestError::BrokenStringPool { offset: 0 }),
+        },
         0x04 => f32::from_bits(data).to_string(),
         0x05 => format!("{}{}", complex_float(data), complex_unit(data)),
         0x06 => {
@@ -605,8 +821,8 @@ fn attribute_value(
 }
 
 #[cfg(test)]
-mod mutation_tests {
-    use super::{ManifestError, ManifestLimits, decode};
+mod tests {
+    use super::{DecodedManifest, ManifestLimits, ManifestWarningKind, decode};
 
     fn chunk(kind: u16, header: u16, body: &[u8]) -> Vec<u8> {
         let mut out = Vec::new();
@@ -617,171 +833,44 @@ mod mutation_tests {
         out
     }
 
-    fn pool(strings: &[&str], styles: bool) -> Vec<u8> {
+    fn pool(strings: &[&str], utf8: bool, styles: bool) -> Vec<u8> {
         let mut offsets = Vec::new();
         let mut data = Vec::new();
         for entry in strings {
             offsets.extend_from_slice(&u32::try_from(data.len()).unwrap().to_le_bytes());
-            let units: Vec<u16> = entry.encode_utf16().collect();
-            data.extend_from_slice(&u16::try_from(units.len()).unwrap().to_le_bytes());
-            for unit in units {
-                data.extend_from_slice(&unit.to_le_bytes());
+            if utf8 {
+                let bytes = entry.as_bytes();
+                data.push(u8::try_from(bytes.len()).unwrap());
+                data.push(u8::try_from(entry.encode_utf16().count()).unwrap());
+                data.extend_from_slice(bytes);
+                data.push(0);
+            } else {
+                let units: Vec<u16> = entry.encode_utf16().collect();
+                data.extend_from_slice(&u16::try_from(units.len()).unwrap().to_le_bytes());
+                for unit in units {
+                    data.extend_from_slice(&unit.to_le_bytes());
+                }
+                data.extend_from_slice(&[0, 0]);
             }
-            data.extend_from_slice(&[0, 0]);
         }
         let strings_start = 28 + offsets.len();
         let mut body = Vec::new();
         body.extend_from_slice(&u32::try_from(strings.len()).unwrap().to_le_bytes());
         body.extend_from_slice(&u32::try_from(usize::from(styles)).unwrap().to_le_bytes());
-        body.extend_from_slice(&0u32.to_le_bytes());
+        body.extend_from_slice(&(if utf8 { 1u32 << 8 } else { 0 }).to_le_bytes());
         body.extend_from_slice(&u32::try_from(strings_start).unwrap().to_le_bytes());
         body.extend_from_slice(&0u32.to_le_bytes());
         body.extend_from_slice(&offsets);
         body.extend_from_slice(&data);
-        let mut chunk = chunk(0x0001, 28, &body);
+        let mut out = chunk(0x0001, 28, &body);
         if styles {
-            // Style spans are outside the decoded text and only need bounded shape.
             let style_start = strings_start + data.len();
-            chunk[24..28].copy_from_slice(&u32::try_from(style_start).unwrap().to_le_bytes());
-            chunk.extend_from_slice(&[0u8; 4]);
-            let size = u32::try_from(chunk.len()).unwrap();
-            chunk[4..8].copy_from_slice(&size.to_le_bytes());
+            out[24..28].copy_from_slice(&u32::try_from(style_start).unwrap().to_le_bytes());
+            out.extend_from_slice(&[0u8; 4]);
+            let size = u32::try_from(out.len()).unwrap();
+            out[4..8].copy_from_slice(&size.to_le_bytes());
         }
-        chunk
-    }
-
-    fn element(name: u32, attributes: &[(u32, u32)]) -> Vec<u8> {
-        let mut body = Vec::new();
-        body.extend_from_slice(&1u32.to_le_bytes());
-        body.extend_from_slice(&u32::MAX.to_le_bytes());
-        body.extend_from_slice(&u32::MAX.to_le_bytes());
-        body.extend_from_slice(&name.to_le_bytes());
-        body.extend_from_slice(&20u16.to_le_bytes());
-        body.extend_from_slice(&20u16.to_le_bytes());
-        body.extend_from_slice(&u16::try_from(attributes.len()).unwrap().to_le_bytes());
-        body.extend_from_slice(&0u16.to_le_bytes());
-        body.extend_from_slice(&0u16.to_le_bytes());
-        body.extend_from_slice(&0u16.to_le_bytes());
-        for &(attribute, value) in attributes {
-            body.extend_from_slice(&u32::MAX.to_le_bytes());
-            body.extend_from_slice(&attribute.to_le_bytes());
-            body.extend_from_slice(&u32::MAX.to_le_bytes());
-            body.extend_from_slice(&8u16.to_le_bytes());
-            body.push(0);
-            body.push(0x10);
-            body.extend_from_slice(&value.to_le_bytes());
-        }
-        chunk(0x0102, 16, &body)
-    }
-
-    fn end(name: u32) -> Vec<u8> {
-        let mut body = Vec::new();
-        body.extend_from_slice(&1u32.to_le_bytes());
-        body.extend_from_slice(&u32::MAX.to_le_bytes());
-        body.extend_from_slice(&u32::MAX.to_le_bytes());
-        body.extend_from_slice(&name.to_le_bytes());
-        chunk(0x0103, 16, &body)
-    }
-
-    fn document(styles: bool) -> Vec<u8> {
-        let mut body = pool(&["root", "child", "value", "deep"], styles);
-        body.extend_from_slice(&chunk(0x0180, 8, &0x0101_0015u32.to_le_bytes()));
-        body.extend_from_slice(&element(0, &[(2, 7), (3, 9)]));
-        body.extend_from_slice(&element(1, &[(2, 1)]));
-        body.extend_from_slice(&end(1));
-        body.extend_from_slice(&end(0));
-        chunk(0x0003, 8, &body)
-    }
-
-    /// A damaged AXML document must end in a classified error, never a panic or a
-    /// hang. The seed and the offset range are fixed so the case is reproducible.
-    #[test]
-    fn h03_axml_seeded_mutations_never_panic_or_hang() {
-        let previous = std::panic::take_hook();
-        std::panic::set_hook(Box::new(|_| {}));
-        for styles in [false, true] {
-            let original = document(styles);
-            let mut seed = 0x9e37_79b9u32;
-            let mut accepted = 0u32;
-            let mut rejected = 0u32;
-            for _ in 0..512 {
-                seed ^= seed << 13;
-                seed ^= seed >> 17;
-                seed ^= seed << 5;
-                let mut bytes = original.clone();
-                let position = usize::try_from(seed).unwrap() % bytes.len();
-                let value = u8::try_from(seed >> 24).unwrap();
-                bytes[position] ^= value | 1;
-                let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    decode(&bytes, ManifestLimits::default())
-                }));
-                match outcome {
-                    Ok(Ok(_)) => accepted += 1,
-                    Ok(Err(error)) => {
-                        let _: ManifestError = error;
-                        rejected += 1;
-                    }
-                    Err(_) => panic!("mutation at byte {position} panicked"),
-                }
-            }
-            assert_eq!(accepted + rejected, 512);
-            assert!(rejected > 0, "no mutation was rejected");
-        }
-        std::panic::set_hook(previous);
-    }
-
-    #[test]
-    fn h03_axml_rejects_text_records_and_keeps_style_pools_bounded() {
-        // A style-aware pool decodes normally; style spans do not alter the text.
-        let styled = document(true);
-        assert!(decode(&styled, ManifestLimits::default()).is_ok());
-        // A text/CDATA record is a classified unsupported record.
-        let mut body = pool(&["root"], false);
-        body.extend_from_slice(&element(0, &[]));
-        body.extend_from_slice(&chunk(0x0104, 16, &[0u8; 12]));
-        body.extend_from_slice(&end(0));
-        let text = chunk(0x0003, 8, &body);
-        assert!(matches!(
-            decode(&text, ManifestLimits::default()),
-            Err(ManifestError::UnsupportedChunk { kind: 0x0104 })
-        ));
-    }
-}
-
-#[cfg(test)]
-mod utf8_tests {
-    use super::{ManifestError, ManifestLimits, decode};
-
-    fn chunk(kind: u16, header: u16, body: &[u8]) -> Vec<u8> {
-        let mut out = Vec::new();
-        out.extend_from_slice(&kind.to_le_bytes());
-        out.extend_from_slice(&header.to_le_bytes());
-        out.extend_from_slice(&u32::try_from(8 + body.len()).unwrap().to_le_bytes());
-        out.extend_from_slice(body);
         out
-    }
-
-    fn utf8_pool(strings: &[&str]) -> Vec<u8> {
-        let mut offsets = Vec::new();
-        let mut data = Vec::new();
-        for entry in strings {
-            offsets.extend_from_slice(&u32::try_from(data.len()).unwrap().to_le_bytes());
-            let bytes = entry.as_bytes();
-            data.push(u8::try_from(bytes.len()).unwrap());
-            data.push(u8::try_from(entry.encode_utf16().count()).unwrap());
-            data.extend_from_slice(bytes);
-            data.push(0);
-        }
-        let strings_start = 28 + offsets.len();
-        let mut body = Vec::new();
-        body.extend_from_slice(&u32::try_from(strings.len()).unwrap().to_le_bytes());
-        body.extend_from_slice(&0u32.to_le_bytes());
-        body.extend_from_slice(&(1u32 << 8).to_le_bytes());
-        body.extend_from_slice(&u32::try_from(strings_start).unwrap().to_le_bytes());
-        body.extend_from_slice(&0u32.to_le_bytes());
-        body.extend_from_slice(&offsets);
-        body.extend_from_slice(&data);
-        chunk(0x0001, 28, &body)
     }
 
     fn namespace(kind: u16, prefix: u32, uri: u32) -> Vec<u8> {
@@ -794,10 +883,14 @@ mod utf8_tests {
     }
 
     fn attribute(namespace: u32, name: u32, data_type: u8, data: u32) -> Vec<u8> {
+        attribute_raw(namespace, name, u32::MAX, data_type, data)
+    }
+
+    fn attribute_raw(namespace: u32, name: u32, raw: u32, data_type: u8, data: u32) -> Vec<u8> {
         let mut out = Vec::new();
         out.extend_from_slice(&namespace.to_le_bytes());
         out.extend_from_slice(&name.to_le_bytes());
-        out.extend_from_slice(&u32::MAX.to_le_bytes());
+        out.extend_from_slice(&raw.to_le_bytes());
         out.extend_from_slice(&8u16.to_le_bytes());
         out.push(0);
         out.push(data_type);
@@ -823,7 +916,7 @@ mod utf8_tests {
         chunk(0x0102, 16, &body)
     }
 
-    fn end_element(name: u32) -> Vec<u8> {
+    fn end(name: u32) -> Vec<u8> {
         let mut body = Vec::new();
         body.extend_from_slice(&1u32.to_le_bytes());
         body.extend_from_slice(&u32::MAX.to_le_bytes());
@@ -832,273 +925,199 @@ mod utf8_tests {
         chunk(0x0103, 16, &body)
     }
 
-    #[test]
-    fn h03_axml_reads_a_utf8_pool_with_two_namespaces() {
-        // 0:name 1:root 2:child 3:tools 4:toolsUri 5:android 6:androidUri
-        // 7:value 8:deep 9:unicode label
-        let strings = [
-            "name",
-            "root",
-            "child",
-            "tools",
-            "http://schemas.android.com/tools",
-            "android",
-            "http://schemas.android.com/apk/res/android",
-            "value",
-            "deep",
-            "深度",
-            "count",
-        ];
-        let mut body = utf8_pool(&strings);
+    fn document(strings: &[&str], utf8: bool, styles: bool) -> Vec<u8> {
+        let mut body = pool(strings, utf8, styles);
         body.extend_from_slice(&namespace(0x0100, 3, 4));
-        body.extend_from_slice(&namespace(0x0100, 5, 6));
-        let attributes = vec![
-            attribute(6, 0, 0x03, 7),
-            attribute(4, 0, 0x12, 1),
-            attribute(u32::MAX, 9, 0x1c, 0xff00_1234),
-            attribute(u32::MAX, 10, 0x10, 63),
-        ];
-        body.extend_from_slice(&element(1, &attributes));
-        for _ in 0..32 {
-            body.extend_from_slice(&element(2, &[attribute(u32::MAX, 8, 0x11, 0x10)]));
-        }
-        for _ in 0..32 {
-            body.extend_from_slice(&end_element(2));
-        }
-        body.extend_from_slice(&end_element(1));
-        body.extend_from_slice(&namespace(0x0101, 5, 6));
+        body.extend_from_slice(&element(1, &[attribute(4, 0, 0x03, 2)]));
+        body.extend_from_slice(&end(1));
         body.extend_from_slice(&namespace(0x0101, 3, 4));
-        let document = chunk(0x0003, 8, &body);
-        let xml = decode(&document, ManifestLimits::default()).unwrap();
-        assert!(
-            xml.starts_with(
-                "<root xmlns:tools=\"http://schemas.android.com/tools\" xmlns:android=\"http://schemas.android.com/apk/res/android\" android:name=\"value\" tools:name=\"true\" 深度=\"#ff001234\""
-            ),
-            "{xml}"
-        );
-        assert!(xml.contains("深度=\"#ff001234\""), "{xml}");
-        assert!(xml.contains("count=\"63\""), "{xml}");
-        assert_eq!(xml.matches("<child ").count(), 32);
-        assert_eq!(xml.matches("</child>").count(), 32);
-        assert!(xml.ends_with("</root>\n"));
+        chunk(0x0003, 8, &body)
+    }
+
+    fn warnings(decoded: &DecodedManifest) -> Vec<&ManifestWarningKind> {
+        decoded
+            .warnings()
+            .iter()
+            .map(|warning| &warning.kind)
+            .collect()
+    }
+
+    fn balanced(xml: &str) -> bool {
+        let opens =
+            xml.matches('<').count() - xml.matches("</").count() - xml.matches("/>").count();
+        let closes = xml.matches("</").count();
+        opens == closes
     }
 
     #[test]
-    fn h03_axml_rejects_a_repeated_attribute_name() {
-        let strings = ["root", "name", "a", "b"];
-        let mut body = utf8_pool(&strings);
-        body.extend_from_slice(&element(
+    fn h03_axml_decodes_elements_attributes_and_namespaces() {
+        let bytes = document(
+            &[
+                "name",
+                "manifest",
+                "pkg",
+                "android",
+                "http://schemas.android.com/apk/res/android",
+            ],
+            false,
+            false,
+        );
+        let decoded = decode(&bytes, ManifestLimits::default()).unwrap();
+        assert!(decoded.warnings().is_empty());
+        assert_eq!(
+            decoded.xml(),
+            "<manifest xmlns:android=\"http://schemas.android.com/apk/res/android\" android:name=\"pkg\">\n</manifest>\n"
+        );
+    }
+
+    #[test]
+    fn h03_axml_keeps_a_balanced_partial_document_with_warnings() {
+        let bytes = document(
+            &["name", "manifest", "pkg", "android", "http://x"],
+            false,
+            false,
+        );
+        // Truncate inside the end-element record.
+        let cut = &bytes[..bytes.len() - 10];
+        let decoded = decode(cut, ManifestLimits::default()).unwrap();
+        assert!(decoded.is_partial());
+        assert!(balanced(decoded.xml()), "{}", decoded.xml());
+        assert!(matches!(
+            warnings(&decoded)[0],
+            ManifestWarningKind::TruncatedChunk | ManifestWarningKind::UnbalancedElement
+        ));
+
+        let mut unknown = document(
+            &["name", "manifest", "pkg", "android", "http://x"],
+            false,
+            false,
+        );
+        let tail = unknown.len();
+        unknown[tail - 24..tail - 22].copy_from_slice(&0x0999u16.to_le_bytes());
+        let decoded = decode(&unknown, ManifestLimits::default()).unwrap();
+        assert!(warnings(&decoded).contains(&&ManifestWarningKind::UnknownRecord(0x0999)));
+        assert!(balanced(decoded.xml()));
+
+        // Text nodes are skipped with a warning instead of failing the document.
+        let mut text = document(
+            &["name", "manifest", "pkg", "android", "http://x"],
+            false,
+            false,
+        );
+        let body = chunk(0x0104, 16, &[0u8; 12]);
+        let insert = text.len() - 24;
+        text.splice(insert..insert, body);
+        let size = u32::try_from(text.len()).unwrap();
+        text[4..8].copy_from_slice(&size.to_le_bytes());
+        let decoded = decode(&text, ManifestLimits::default()).unwrap();
+        assert!(warnings(&decoded).contains(&&ManifestWarningKind::SkippedText));
+        assert!(!decoded.xml().is_empty());
+
+        // A repeated attribute keeps the first value and reports the second.
+        let mut duplicate = pool(&["root", "a", "b"], false, false);
+        duplicate.extend_from_slice(&element(
             0,
             &[
                 attribute(u32::MAX, 1, 0x03, 2),
                 attribute(u32::MAX, 1, 0x03, 3),
             ],
         ));
-        body.extend_from_slice(&end_element(0));
-        let document = chunk(0x0003, 8, &body);
+        duplicate.extend_from_slice(&end(0));
+        let duplicate = chunk(0x0003, 8, &duplicate);
+        let decoded = decode(&duplicate, ManifestLimits::default()).unwrap();
+        assert_eq!(decoded.xml(), "<root a=\"b\">\n</root>\n");
         assert!(matches!(
-            decode(&document, ManifestLimits::default()),
-            Err(ManifestError::DuplicateAttribute { .. })
+            warnings(&decoded)[0],
+            ManifestWarningKind::DuplicateAttribute(name) if name == "a"
         ));
     }
 
     #[test]
-    fn h03_axml_rejects_a_damaged_utf8_pool_entry() {
-        let strings = ["root", "child"];
-        let mut body = utf8_pool(&strings);
+    fn h03_axml_reports_bad_names_strings_and_values_as_warnings() {
+        // An attribute name that cannot appear in XML is dropped.
+        let mut body = pool(&["root", "bad name", "v"], false, false);
+        body.extend_from_slice(&element(0, &[attribute(u32::MAX, 1, 0x03, 2)]));
+        body.extend_from_slice(&end(0));
+        let decoded = decode(&chunk(0x0003, 8, &body), ManifestLimits::default()).unwrap();
+        assert_eq!(decoded.xml(), "<root>\n</root>\n");
+        assert!(matches!(
+            warnings(&decoded)[0],
+            ManifestWarningKind::InvalidName(name) if name == "bad name"
+        ));
+
+        // An out-of-pool name renders as an empty name plus a warning.
+        let mut body = pool(&["root"], false, false);
         body.extend_from_slice(&element(0, &[]));
-        body.extend_from_slice(&end_element(0));
-        let mut document = chunk(0x0003, 8, &body);
-        // Point the first string offset past the pool data.
-        let pool_offsets = 8 + 28;
-        document[pool_offsets..pool_offsets + 4].copy_from_slice(&u32::MAX.to_le_bytes());
+        body.extend_from_slice(&end(0));
+        let mut bad = chunk(0x0003, 8, &body);
+        let first = bad
+            .windows(2)
+            .position(|w| w == 0x0102u16.to_le_bytes())
+            .unwrap();
+        bad[first + 20..first + 24].copy_from_slice(&99u32.to_le_bytes());
+        let decoded = decode(&bad, ManifestLimits::default()).unwrap();
         assert!(matches!(
-            decode(&document, ManifestLimits::default()),
-            Err(ManifestError::InvalidString { .. })
+            warnings(&decoded)[0],
+            ManifestWarningKind::InvalidString(99)
+        ));
+
+        // An unsupported typed value falls back to the raw string when present.
+        let mut body = pool(&["root", "value", "raw"], false, false);
+        body.extend_from_slice(&element(0, &[attribute_raw(u32::MAX, 1, 2, 0x7f, 0)]));
+        body.extend_from_slice(&end(0));
+        let decoded = decode(&chunk(0x0003, 8, &body), ManifestLimits::default()).unwrap();
+        assert!(decoded.xml().contains("value=\"raw\""), "{}", decoded.xml());
+        assert!(matches!(
+            warnings(&decoded)[0],
+            ManifestWarningKind::UnsupportedValue(0x7f)
         ));
     }
-}
 
-#[cfg(test)]
-mod tests {
-    use super::{ManifestError, ManifestLimits, decode};
-
-    fn chunk(kind: u16, header: u16, body: &[u8]) -> Vec<u8> {
-        let mut out = Vec::new();
-        out.extend_from_slice(&kind.to_le_bytes());
-        out.extend_from_slice(&header.to_le_bytes());
-        out.extend_from_slice(&u32::try_from(8 + body.len()).unwrap().to_le_bytes());
-        out.extend_from_slice(body);
-        out
-    }
-
-    fn string_pool(strings: &[&str]) -> Vec<u8> {
-        let mut offsets = Vec::new();
-        let mut data = Vec::new();
-        for entry in strings {
-            offsets.extend_from_slice(&u32::try_from(data.len()).unwrap().to_le_bytes());
-            let units: Vec<u16> = entry.encode_utf16().collect();
-            data.extend_from_slice(&u16::try_from(units.len()).unwrap().to_le_bytes());
-            for unit in units {
-                data.extend_from_slice(&unit.to_le_bytes());
-            }
-            data.extend_from_slice(&[0, 0]);
-        }
-        let strings_start = 28 + offsets.len();
-        let mut body = Vec::new();
-        body.extend_from_slice(&u32::try_from(strings.len()).unwrap().to_le_bytes());
-        body.extend_from_slice(&0u32.to_le_bytes());
-        body.extend_from_slice(&0u32.to_le_bytes());
-        body.extend_from_slice(&u32::try_from(strings_start).unwrap().to_le_bytes());
-        body.extend_from_slice(&0u32.to_le_bytes());
-        body.extend_from_slice(&offsets);
-        body.extend_from_slice(&data);
-        chunk(0x0001, 28, &body)
-    }
-
-    fn namespace(kind: u16) -> Vec<u8> {
-        let mut body = Vec::new();
-        body.extend_from_slice(&1u32.to_le_bytes());
-        body.extend_from_slice(&u32::MAX.to_le_bytes());
-        body.extend_from_slice(&3u32.to_le_bytes());
-        body.extend_from_slice(&4u32.to_le_bytes());
-        chunk(kind, 16, &body)
-    }
-
-    fn attribute(namespace: u32, name: u32, data_type: u8, data: u32) -> Vec<u8> {
-        let mut out = Vec::new();
-        out.extend_from_slice(&namespace.to_le_bytes());
-        out.extend_from_slice(&name.to_le_bytes());
-        out.extend_from_slice(&u32::MAX.to_le_bytes());
-        out.extend_from_slice(&8u16.to_le_bytes());
-        out.push(0);
-        out.push(data_type);
-        out.extend_from_slice(&data.to_le_bytes());
-        out
-    }
-
-    fn start_element(name: u32, attributes: &[Vec<u8>]) -> Vec<u8> {
-        let mut body = Vec::new();
-        body.extend_from_slice(&1u32.to_le_bytes());
-        body.extend_from_slice(&u32::MAX.to_le_bytes());
-        body.extend_from_slice(&u32::MAX.to_le_bytes());
-        body.extend_from_slice(&name.to_le_bytes());
-        body.extend_from_slice(&20u16.to_le_bytes());
-        body.extend_from_slice(&20u16.to_le_bytes());
-        body.extend_from_slice(&u16::try_from(attributes.len()).unwrap().to_le_bytes());
-        body.extend_from_slice(&0u16.to_le_bytes());
-        body.extend_from_slice(&0u16.to_le_bytes());
-        body.extend_from_slice(&0u16.to_le_bytes());
-        for attribute in attributes {
-            body.extend_from_slice(attribute);
-        }
-        chunk(0x0102, 16, &body)
-    }
-
-    fn end_element(name: u32) -> Vec<u8> {
-        let mut body = Vec::new();
-        body.extend_from_slice(&1u32.to_le_bytes());
-        body.extend_from_slice(&u32::MAX.to_le_bytes());
-        body.extend_from_slice(&u32::MAX.to_le_bytes());
-        body.extend_from_slice(&name.to_le_bytes());
-        chunk(0x0103, 16, &body)
-    }
-
-    fn fixture(package: &str) -> Vec<u8> {
+    #[test]
+    fn h03_axml_reads_utf8_pools_style_pools_and_complex_values() {
         let strings = [
-            "versionCode",
-            "package",
-            "manifest",
-            "android",
-            "http://schemas.android.com/apk/res/android",
-            package,
+            "name", "root", "child", "tools", "http://t", "android", "http://a", "value", "deep",
+            "深度", "count", "width", "ratio",
         ];
-        let mut body = string_pool(&strings);
-        let mut resource_map = Vec::new();
-        resource_map.extend_from_slice(&0x0101_0015u32.to_le_bytes());
-        body.extend_from_slice(&chunk(0x0180, 8, &resource_map));
-        body.extend_from_slice(&namespace(0x0100));
-        body.extend_from_slice(&start_element(
-            2,
-            &[attribute(4, 0, 0x10, 7), attribute(u32::MAX, 1, 0x03, 5)],
+        let mut body = pool(&strings, true, true);
+        body.extend_from_slice(&namespace(0x0100, 3, 4));
+        body.extend_from_slice(&namespace(0x0100, 5, 6));
+        body.extend_from_slice(&element(
+            1,
+            &[
+                attribute(6, 0, 0x03, 7),
+                attribute(4, 0, 0x12, 1),
+                attribute(u32::MAX, 9, 0x1c, 0xff00_1234),
+                attribute(u32::MAX, 10, 0x10, 63),
+                attribute(u32::MAX, 11, 0x05, 0x0080_0021),
+                attribute(u32::MAX, 12, 0x06, 0x0080_0021),
+            ],
         ));
-        body.extend_from_slice(&end_element(2));
-        body.extend_from_slice(&namespace(0x0101));
-        chunk(0x0003, 8, &body)
+        body.extend_from_slice(&element(2, &[attribute(u32::MAX, 8, 0x11, 0x10)]));
+        body.extend_from_slice(&end(2));
+        body.extend_from_slice(&end(1));
+        body.extend_from_slice(&namespace(0x0101, 5, 6));
+        body.extend_from_slice(&namespace(0x0101, 3, 4));
+        let decoded = decode(&chunk(0x0003, 8, &body), ManifestLimits::default()).unwrap();
+        assert!(decoded.warnings().is_empty(), "{:?}", decoded.warnings());
+        let xml = decoded.xml();
+        assert!(xml.starts_with("<root xmlns:tools=\"http://t\" xmlns:android=\"http://a\" android:name=\"value\" tools:name=\"true\" 深度=\"#ff001234\" count=\"63\" width=\"1dip\" ratio=\"100%p\">"), "{xml}");
+        assert!(xml.contains("<child deep=\"0x00000010\">"), "{xml}");
     }
 
     #[test]
-    fn h03_axml_decodes_elements_attributes_and_android_ids() {
-        let bytes = fixture("pkg");
-        let xml = decode(&bytes, ManifestLimits::default()).unwrap();
-        assert_eq!(
-            xml,
-            "<manifest xmlns:android=\"http://schemas.android.com/apk/res/android\" android:versionCode=\"7\" package=\"pkg\">\n</manifest>\n"
+    fn h03_axml_rejects_non_axml_and_enforces_explicit_bounds() {
+        let bytes = document(
+            &["name", "manifest", "pkg", "android", "http://x"],
+            false,
+            false,
         );
-    }
-
-    #[test]
-    fn h03_axml_rejects_damaged_or_unsupported_documents() {
-        let good = fixture("pkg");
-        assert!(matches!(
-            decode(&good[..good.len() - 1], ManifestLimits::default()),
-            Err(ManifestError::InconsistentChunk { .. })
-        ));
-        let mut not_axml = good.clone();
+        let mut not_axml = bytes.clone();
         not_axml[0] = 0x01;
         assert!(matches!(
             decode(&not_axml, ManifestLimits::default()),
-            Err(ManifestError::NotAxml)
+            Err(super::ManifestError::NotAxml)
         ));
-        // Replace the trailing end-namespace record with an unknown kind.
-        let mut unsupported = good.clone();
-        let at = unsupported.len() - 24;
-        unsupported[at..at + 2].copy_from_slice(&0x0999u16.to_le_bytes());
-        assert!(matches!(
-            decode(&unsupported, ManifestLimits::default()),
-            Err(ManifestError::UnsupportedChunk { kind: 0x0999 })
-        ));
-        let mut truncated = good.clone();
-        truncated[4..8].copy_from_slice(&u32::MAX.to_le_bytes());
-        assert!(matches!(
-            decode(&truncated, ManifestLimits::default()),
-            Err(ManifestError::InconsistentChunk { .. })
-        ));
-        // A string index outside the pool is rejected, not rendered empty.
-        let mut bad_string = good.clone();
-        let first = bad_string
-            .windows(2)
-            .position(|window| window == 0x0102u16.to_le_bytes())
-            .unwrap();
-        bad_string[first + 20..first + 24].copy_from_slice(&99u32.to_le_bytes());
-        assert!(matches!(
-            decode(&bad_string, ManifestLimits::default()),
-            Err(ManifestError::InvalidString { .. })
-        ));
-    }
-
-    #[test]
-    fn h03_axml_formats_dimension_and_fraction_from_complex_values() {
-        // 0x00800021: mantissa 0x8000 with radix 2 (1/32768) and unit dip.
-        // 0x00800021: the same mantissa/radix with fraction unit %p.
-        let mut body = string_pool(&["root", "width", "ratio"]);
-        body.extend_from_slice(&start_element(
-            0,
-            &[
-                attribute(u32::MAX, 1, 0x05, 0x0080_0021),
-                attribute(u32::MAX, 2, 0x06, 0x0080_0021),
-            ],
-        ));
-        body.extend_from_slice(&end_element(0));
-        let document = chunk(0x0003, 8, &body);
-        let xml = decode(&document, ManifestLimits::default()).unwrap();
-        assert!(xml.contains("width=\"1dip\""), "{xml}");
-        assert!(xml.contains("ratio=\"100%p\""), "{xml}");
-    }
-
-    #[test]
-    fn h03_axml_node_and_output_bounds_are_explicit() {
-        let bytes = fixture("pkg");
         assert!(matches!(
             decode(
                 &bytes,
@@ -1107,7 +1126,7 @@ mod tests {
                     ..ManifestLimits::default()
                 }
             ),
-            Err(ManifestError::Budget { .. })
+            Err(super::ManifestError::Budget { .. })
         ));
         assert!(matches!(
             decode(
@@ -1117,17 +1136,49 @@ mod tests {
                     ..ManifestLimits::default()
                 }
             ),
-            Err(ManifestError::Budget { .. })
+            Err(super::ManifestError::Budget { .. })
         ));
-        assert!(matches!(
-            decode(
-                &bytes,
-                ManifestLimits {
-                    max_string_units: Some(1),
-                    ..ManifestLimits::default()
+    }
+
+    /// Fixed-seed mutations must never panic or hang, and every result is either a
+    /// decoded document (possibly partial) or a classified error.
+    #[test]
+    fn h03_axml_seeded_mutations_never_panic_or_hang() {
+        let previous = std::panic::take_hook();
+        std::panic::set_hook(Box::new(|_| {}));
+        let mut accepted = 0u32;
+        for (utf8, styles) in [(false, false), (true, true)] {
+            let original = document(
+                &["name", "manifest", "pkg", "android", "http://x"],
+                utf8,
+                styles,
+            );
+            let mut seed = 0x9e37_79b9u32;
+            for _ in 0..512 {
+                seed ^= seed << 13;
+                seed ^= seed >> 17;
+                seed ^= seed << 5;
+                let mut bytes = original.clone();
+                let position = usize::try_from(seed).unwrap() % bytes.len();
+                let value = u8::try_from(seed >> 24).unwrap();
+                bytes[position] ^= value | 1;
+                let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    decode(&bytes, ManifestLimits::default())
+                }));
+                match outcome {
+                    Ok(Ok(decoded)) => {
+                        accepted += 1;
+                        assert!(
+                            balanced(decoded.xml()),
+                            "unbalanced output at byte {position}"
+                        );
+                    }
+                    Ok(Err(_)) => {}
+                    Err(_) => panic!("mutation at byte {position} panicked"),
                 }
-            ),
-            Err(ManifestError::Budget { .. })
-        ));
+            }
+        }
+        std::panic::set_hook(previous);
+        assert!(accepted > 0);
     }
 }

@@ -1,5 +1,5 @@
 use super::archive::{EntryRecord, read_entry};
-use super::axml::{ManifestError, ManifestLimits, decode};
+use super::axml::{DecodedManifest, ManifestError, ManifestLimits, decode};
 use super::input::{ArchiveProblem, InputError, InputKind};
 use super::request::RequestScope;
 
@@ -51,7 +51,7 @@ fn manifest_entry_kind(problem: &ArchiveProblem) -> diana_decomp::FailureKind {
 #[derive(Debug)]
 pub struct Manifest {
     entry: EntryRecord,
-    xml: String,
+    decoded: DecodedManifest,
 }
 
 impl Manifest {
@@ -59,7 +59,15 @@ impl Manifest {
         &self.entry
     }
     pub fn xml(&self) -> &str {
-        &self.xml
+        self.decoded.xml()
+    }
+    /// Recoverable defects. A non-empty list means the text is partial: it stays
+    /// balanced XML, but the named records were skipped or replaced.
+    pub fn warnings(&self) -> &[super::axml::ManifestWarning] {
+        self.decoded.warnings()
+    }
+    pub fn is_partial(&self) -> bool {
+        self.decoded.is_partial()
     }
 }
 
@@ -92,6 +100,6 @@ pub fn read(
     };
     let payload = read_entry(scope.input().bytes(), &entry, scope.input().limits())
         .map_err(ManifestSelectionError::Entry)?;
-    let xml = decode(payload.bytes(), limits)?;
-    Ok(Manifest { entry, xml })
+    let decoded = decode(payload.bytes(), limits)?;
+    Ok(Manifest { entry, decoded })
 }

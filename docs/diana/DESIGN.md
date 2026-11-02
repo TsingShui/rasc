@@ -763,7 +763,18 @@ extract MUST report an unsupported compression method, encryption and a bad rang
 
 `diana manifest <apk-or-zip> [-o file] [--format text|json]`.
 
-By default Diana outputs the complete decoded `AndroidManifest.xml`; the original binary AXML bytes are obtained with extract. The original project's rule of selecting the last physical entry with that name is retained (based on directory order, not on worker completion order), so the manifest selection does not change because of unordered display. A missing manifest exits 3, a bad AXML or an exceeded budget exits 1; a bare DEX or an ordinary JAR without a manifest is an input error.
+By default Diana outputs the decoded `AndroidManifest.xml`; the original binary AXML bytes are obtained with extract. The original project's rule of selecting the last physical entry with that name is retained (based on directory order, not on worker completion order), so the manifest selection does not change because of unordered display. A missing manifest exits 3; a bare DEX or an ordinary JAR without a manifest is an input error.
+
+Manifest decoding is allowed to deliver a **balanced partial** document. A record
+that cannot be decoded, a text node that is not rendered, an out-of-pool name, an
+unsupported typed value, a repeated attribute or a damaged tail MUST be reported
+as a warning with its original byte offset, and the reader MUST close the elements
+that are still open, so the emitted text stays well-formed XML. Warnings appear on
+stderr for text and in the `warnings` array of the JSON result; they MUST NOT be
+silently dropped, and a warning-only result exits 0 because the request and its
+display completed. A non-AXML container, an unreadable or encrypted entry, an
+exceeded explicit budget, cancellation and I/O remain hard failures with a
+non-zero exit; the reader MUST NOT invent records to hide those.
 
 text is XML; json is `{ "xml": "..." }` with no fake Java status. The application
 uses a reviewed native AXML reader through the checked contract of ALGORITHMS

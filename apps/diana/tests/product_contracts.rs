@@ -1043,6 +1043,8 @@ mod h03_manifest {
             Err(ManifestSelectionError::NotArchive)
         ));
 
+        // Damaged records no longer fail the request: the text stays balanced XML
+        // and the gap is reported as a warning.
         let damaged = axml_manifest("broken.pkg");
         let path = dir.file(
             "damaged.apk",
@@ -1052,10 +1054,10 @@ mod h03_manifest {
             )]),
         );
         let damaged_scope = RequestScope::open(&path, &options()).unwrap();
-        assert!(matches!(
-            manifest::read(&damaged_scope, ManifestLimits::default()),
-            Err(ManifestSelectionError::Decode(_))
-        ));
+        let partial = manifest::read(&damaged_scope, ManifestLimits::default()).unwrap();
+        assert!(partial.is_partial());
+        assert!(partial.xml().contains("<manifest"));
+        assert!(partial.xml().trim_end().ends_with("</manifest>"));
 
         let mut compressor = libdeflater::Compressor::new(libdeflater::CompressionLvl::default());
         let mut compressed = vec![0u8; compressor.deflate_compress_bound(second.len())];

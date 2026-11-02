@@ -2686,8 +2686,9 @@ reader and last-physical-entry selection. It is validated on self-made fixtures
 and five authorized local APKs whose element sets, attribute names and attribute
 values match both a self-written chunk decoder and `androguard` 4.1.4. A seeded
 mutation campaign (6000 runs, no panic or hang) and committed mutation/style/text
-regressions cover structural robustness. The CLI layer and its columns/exit codes
-remain.
+regressions cover structural robustness. Damaged documents now return balanced
+partial XML with byte-offset warnings, as DESIGN §6.7 records. The CLI layer and
+its columns/exit codes remain.
 
 **Dependencies**: H02. **Scope**: the existing non-decompilation CLI capability.
 
