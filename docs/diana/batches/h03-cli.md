@@ -49,9 +49,31 @@ exercised manually on authorized local APKs:
   without the entry reports exit 3.
 - No `.diana-*.tmp` file remained after any run.
 
+## Query commands
+
+`classes`, `fields`, `methods` and `strings` reuse `analysis::query` and print the
+canonical `at` locator of DESIGN §6.3: `e<entry>:l0:c<class_def>::<descriptor>`
+for a class, with `:m<method>` or `:f<field>` and the complete `owner->name(proto)`
+or `owner->name:type` suffix, and `e<entry>:l0:s<string>` for a string. A bare DEX
+is `e0`. `fields`/`methods` accept `--class` as a descriptor or dotted name,
+`--filter` is a case-insensitive literal over the semantic part of the row,
+`strings` prints `at, value, entry` where `entry` is the physical entry label, and
+`classes` accepts `--extends`, `--implements`, `--subinterface` and `--kind`.
+`--jobs` defaults to `min(8, available_parallelism)`, zero is rejected with exit 2,
+and the four commands share the bounded completion-order runner, so a slow image
+does not block other images' rows.
+
+TSV fields are escaped (`\\`, `\t`, `\r`, `\n`, `\0`, lone surrogate as
+`\uXXXX`); JSON is `{schema_version, command, items:[{column: value}]}`.
+
+Manual run on a 152 MB, ten-DEX APK with eight workers: 90646 class definitions,
+689338 defined methods and 918458 string values were listed, and the JSON `items`
+length equalled the TSV row count for the same selection. `--filter ONCREATE`
+matched `onCreate` records, `--class` with an absent class returned the header
+only, `-o` wrote the same payload with no leftover temporary file, and piping into
+`head` ended with exit 0.
+
 ## Remaining work
 
-`classes`, `fields`, `methods`, `strings` and `xref` still need their CLI
-presentation (`at` columns, JSON rows, `--filter`, `--class`, the hierarchy
-options and the four xref columns). They reuse the already-tested query and xref
-modules, so that slice is presentation plus exit-code mapping.
+`xref` stays with H09 (four columns), `extract` with H10, and `manifest` is
+complete for this card. `get-class`/`get-method` belong to H05.

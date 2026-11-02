@@ -2688,9 +2688,11 @@ values match both a self-written chunk decoder and `androguard` 4.1.4. A seeded
 mutation campaign (6000 runs, no panic or hang) and committed mutation/style/text
 regressions cover structural robustness. Damaged documents now return balanced
 partial XML with byte-offset warnings, as DESIGN §6.7 records. The
-[CLI slice](batches/h03-cli.md) wires `entries` and `manifest` with their columns,
-JSON shapes, exit codes, `-o` atomic publication and warning channels; the
-remaining query and xref commands still need their presentation.
+[CLI batch](batches/h03-cli.md) wires `entries`, `manifest`, `classes`, `fields`,
+`methods` and `strings` with their columns, canonical `at`, JSON shapes, exit
+codes, `-o` atomic publication and warning channels; `xref` belongs to H09 and
+`extract` to H10, so this card's query, manifest and presentation obligations are
+complete.
 
 **Dependencies**: H02. **Scope**: the existing non-decompilation CLI capability.
 

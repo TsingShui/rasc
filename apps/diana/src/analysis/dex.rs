@@ -23,6 +23,8 @@ pub struct ClassRow {
 pub struct MethodRow {
     pub image: ImageIndex,
     pub class_def: ClassDefId,
+    /// Original owner descriptor, needed for the canonical `at` locator.
+    pub class_descriptor: Vec<u16>,
     pub method: MethodId,
     pub name: Vec<u16>,
     pub prototype: Vec<u16>,
@@ -34,6 +36,8 @@ pub struct MethodRow {
 pub struct FieldRow {
     pub image: ImageIndex,
     pub class_def: ClassDefId,
+    /// Original owner descriptor, needed for the canonical `at` locator.
+    pub class_descriptor: Vec<u16>,
     pub field: FieldId,
     pub name: Vec<u16>,
     pub field_type: Vec<u16>,
@@ -205,11 +209,12 @@ pub(super) fn methods(
             {
                 return Ok(());
             }
+            let class_descriptor = class.descriptor.units(control)?;
             class.visit_methods(control, |method, control| {
                 let declaration = method.declaration?;
                 let name = declaration.name.units(control)?;
                 if let Some(needle) = filter
-                    && !contains(&name, needle)
+                    && !contains_ignore_case(&name, needle)
                 {
                     return Ok(());
                 }
@@ -226,6 +231,7 @@ pub(super) fn methods(
                 forward(Row::Method(MethodRow {
                     image,
                     class_def,
+                    class_descriptor: class_descriptor.clone(),
                     method: method.method_idx,
                     name,
                     prototype,
@@ -265,17 +271,19 @@ pub(super) fn fields(
             {
                 return Ok(());
             }
+            let class_descriptor = class.descriptor.units(control)?;
             class.visit_fields(control, |field, control| {
                 let declaration = field.declaration?;
                 let name = declaration.name.units(control)?;
                 if let Some(needle) = filter
-                    && !contains(&name, needle)
+                    && !contains_ignore_case(&name, needle)
                 {
                     return Ok(());
                 }
                 forward(Row::Field(FieldRow {
                     image,
                     class_def,
+                    class_descriptor: class_descriptor.clone(),
                     field: field.field_idx,
                     name,
                     field_type: declaration.field_type.units(control)?,
@@ -312,7 +320,7 @@ pub(super) fn strings(
         let string = StringId(ordinal);
         let units = index.string(string, control)?.units(control)?;
         if let Some(needle) = filter
-            && !contains(&units, needle)
+            && !contains_ignore_case(&units, needle)
         {
             continue;
         }
@@ -346,6 +354,36 @@ pub fn class_descriptor(text: &str) -> Vec<u16> {
     }
     descriptor.push(u16::from(b';'));
     descriptor
+}
+
+/// Case-insensitive literal UTF-16 substring match for `--filter`.
+pub fn contains_ignore_case(haystack: &[u16], needle: &[u16]) -> bool {
+    if needle.is_empty() {
+        return true;
+    }
+    if needle.len() > haystack.len() {
+        return false;
+    }
+    haystack.windows(needle.len()).any(|window| {
+        window
+            .iter()
+            .zip(needle)
+            .all(|(left, right)| unit_eq_ignore_case(*left, *right))
+    })
+}
+
+/// Compares two UTF-16 units ignoring case; surrogate units compare as units.
+fn unit_eq_ignore_case(left: u16, right: u16) -> bool {
+    if left == right {
+        return true;
+    }
+    match (
+        char::from_u32(u32::from(left)),
+        char::from_u32(u32::from(right)),
+    ) {
+        (Some(left), Some(right)) => left.to_lowercase().eq(right.to_lowercase()),
+        _ => false,
+    }
 }
 
 /// Literal UTF-16 substring match over the primary column text.

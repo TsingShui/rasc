@@ -78,6 +78,7 @@ pub fn publish(output: Option<&Path>, bytes: &[u8], format: Format) -> Result<()
                 });
             }
             if format == Format::Text
+                && !bytes.ends_with(b"\n")
                 && let Err(error) = stdout.write_all(b"\n")
                 && !broken(&error)
             {
