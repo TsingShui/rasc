@@ -4,6 +4,7 @@
 //! path. Output is written as a complete artifact: a temporary file in the target
 //! directory is renamed into place, so a failed run never leaves a half file.
 
+mod extract_cli;
 mod get;
 mod output;
 mod table;
@@ -153,6 +154,24 @@ enum Command {
         #[arg(short, long)]
         output: Option<PathBuf>,
     },
+    /// Extract one physical entry
+    Extract {
+        input: PathBuf,
+        entry: String,
+        #[arg(long)]
+        entry_index: Option<usize>,
+        #[arg(short, long)]
+        output: PathBuf,
+        /// Keep the original payload bytes even for binary XML
+        #[arg(long)]
+        raw: bool,
+        /// Replace an existing ordinary output file
+        #[arg(long)]
+        force: bool,
+        /// Exit non-zero when a decoded document is partial
+        #[arg(long)]
+        strict: bool,
+    },
     /// Find original reference sites
     Xref {
         input: PathBuf,
@@ -227,6 +246,24 @@ pub fn run() -> std::process::ExitCode {
             get::Kind::Method,
             format,
             output.as_deref(),
+            limits,
+        ),
+        Command::Extract {
+            input,
+            entry,
+            entry_index,
+            output,
+            raw,
+            force,
+            strict,
+        } => extract_cli::run(
+            &input,
+            &entry,
+            entry_index,
+            &output,
+            raw,
+            force,
+            strict,
             limits,
         ),
         Command::Xref {

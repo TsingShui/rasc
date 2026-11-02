@@ -12,6 +12,7 @@ mod attr_names;
 pub mod axml;
 pub mod decompile;
 pub mod dex;
+pub mod extract;
 pub mod images;
 pub mod input;
 pub mod limits;

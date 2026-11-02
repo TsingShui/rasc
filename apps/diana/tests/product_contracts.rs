@@ -1826,3 +1826,130 @@ mod h09 {
         }));
     }
 }
+
+mod h10 {
+    use std::path::Path;
+
+    use diana::analysis::axml::ManifestLimits;
+    use diana::analysis::extract::{self, ExtractError, Request};
+    use diana::analysis::input::{InputLimits, InputOptions};
+    use diana::analysis::request::RequestScope;
+
+    use super::support::{TempDir, axml_manifest, dex, stored_entry, zip};
+
+    fn options() -> InputOptions {
+        InputOptions {
+            limits: InputLimits::default(),
+            allowed_root: None,
+        }
+    }
+
+    fn request(name: &str, index: Option<usize>, raw: bool) -> Request<'_> {
+        Request {
+            name,
+            index,
+            raw,
+            limits: ManifestLimits::default(),
+        }
+    }
+
+    #[test]
+    fn h10_selection_is_exact_and_duplicates_are_ambiguous() {
+        let dir = TempDir::new("h10-select");
+        let path = dir.file(
+            "dup.apk",
+            &zip(&[
+                stored_entry("classes.dex", &dex(0x31)),
+                stored_entry("dup.txt", b"one"),
+                stored_entry("dup.txt", b"two"),
+            ]),
+        );
+        let scope = RequestScope::open(&path, &options()).unwrap();
+        let error = extract::prepare(&scope, &request("dup.txt", None, false)).unwrap_err();
+        assert!(matches!(error, ExtractError::Ambiguous { .. }));
+        assert_eq!(error.code(), 4);
+        let extracted = extract::prepare(&scope, &request("dup.txt", Some(2), false)).unwrap();
+        assert_eq!(extracted.bytes, b"two");
+        assert!(matches!(
+            extract::prepare(&scope, &request("dup.txt", Some(0), false)).unwrap_err(),
+            ExtractError::IndexMismatch { .. }
+        ));
+        assert!(matches!(
+            extract::prepare(&scope, &request("absent", None, false)).unwrap_err(),
+            ExtractError::Missing(_)
+        ));
+    }
+
+    #[test]
+    fn h10_binary_xml_is_decoded_by_default_and_raw_keeps_the_payload() {
+        let dir = TempDir::new("h10-xml");
+        let manifest = axml_manifest("pkg");
+        let path = dir.file(
+            "app.apk",
+            &zip(&[
+                stored_entry("AndroidManifest.xml", &manifest),
+                stored_entry("classes.dex", &dex(0x32)),
+            ]),
+        );
+        let scope = RequestScope::open(&path, &options()).unwrap();
+        let decoded =
+            extract::prepare(&scope, &request("AndroidManifest.xml", None, false)).unwrap();
+        assert!(decoded.decoded);
+        let text = String::from_utf8(decoded.bytes.clone()).unwrap();
+        assert!(text.contains("<manifest"), "{text}");
+        assert!(text.contains("package=\"pkg\""));
+        let raw = extract::prepare(&scope, &request("AndroidManifest.xml", None, true)).unwrap();
+        assert!(!raw.decoded);
+        assert_eq!(raw.bytes, manifest);
+        // A non-binary-XML entry is always byte for byte.
+        let dex_entry = extract::prepare(&scope, &request("classes.dex", None, false)).unwrap();
+        assert!(!dex_entry.decoded);
+        assert_eq!(dex_entry.bytes, dex(0x32));
+    }
+
+    #[test]
+    fn h10_publish_is_atomic_and_rejects_unsafe_targets() {
+        let dir = TempDir::new("h10-publish");
+        let apk = dir.file("app.apk", &zip(&[stored_entry("dup.txt", b"payload")]));
+        let scope = RequestScope::open(&apk, &options()).unwrap();
+        let extracted = extract::prepare(&scope, &request("dup.txt", None, false)).unwrap();
+
+        let target = dir.path().join("out.bin");
+        std::fs::write(&target, b"old").unwrap();
+        assert!(matches!(
+            extract::publish(&extracted, &target, &apk, false).unwrap_err(),
+            ExtractError::TargetExists
+        ));
+        assert_eq!(std::fs::read(&target).unwrap(), b"old");
+        extract::publish(&extracted, &target, &apk, true).unwrap();
+        assert_eq!(std::fs::read(&target).unwrap(), b"payload");
+
+        // A directory, a symbolic link and the input itself are unsafe targets.
+        assert!(matches!(
+            extract::publish(&extracted, dir.path(), &apk, true).unwrap_err(),
+            ExtractError::UnsafeTarget
+        ));
+        assert!(matches!(
+            extract::publish(&extracted, &apk, &apk, true).unwrap_err(),
+            ExtractError::UnsafeTarget
+        ));
+        #[cfg(unix)]
+        {
+            let link = dir.path().join("link.bin");
+            std::os::unix::fs::symlink(&target, &link).unwrap();
+            assert!(matches!(
+                extract::publish(&extracted, &link, &apk, true).unwrap_err(),
+                ExtractError::UnsafeTarget
+            ));
+        }
+        // No private temporary file survives a completed or rejected run.
+        let leftovers: Vec<_> = std::fs::read_dir(dir.path())
+            .unwrap()
+            .filter_map(|entry| entry.ok())
+            .map(|entry| entry.file_name().to_string_lossy().into_owned())
+            .filter(|name| name.starts_with(".diana-extract-"))
+            .collect();
+        assert!(leftovers.is_empty(), "{leftovers:?}");
+        assert!(Path::new(&target).is_file());
+    }
+}

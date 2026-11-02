@@ -3121,6 +3121,11 @@ default columns.
 
 ## H10 — extract: original entry bytes and safe atomic files
 
+**Progress**: The [extract batch](batches/h10-extract.md) selects one physical
+record exactly, validates its payload, decodes binary XML by default with `--raw` as
+the byte-for-byte alternative, and publishes atomically while refusing unsafe
+targets.
+
 **Dependencies**: H02. **Scope**: single physical-entry extraction, with no
 batch unpacking.
 
