@@ -5,8 +5,10 @@ chain includes checked heap operations, exception SSA/storage, protected Java,
 monitor scopes and T20 initialization. T20's supported source profile and fixed
 D041–D047/D079 obligations pass; unproved initialization remains classified
 Debug/Mixed. T21 generic/bridge declarations and T22 named ownership pass their
-recorded source profiles. T23's restricted enum/annotation profile passes its
-recorded acceptance. Core/application rollup remains open. EngineCoreRC is not accepted. The frozen draft-7 specification holds
+recorded source profiles. T23's restricted enum/annotation profile and T25's
+engine gate pass their recorded acceptance, so EngineCoreRC is accepted for
+`darwin-aarch64` at b39805f. Core/application rollup remains open. The frozen
+draft-7 specification holds
 86 required cases and 177 must-run invocation scenarios.**
 This page owns the workflow, preparation, task cards and verification. Read
 [DESIGN.md](DESIGN.md) for interfaces and data, [ALGORITHMS.md](ALGORITHMS.md) for
@@ -2458,9 +2460,12 @@ worker counts and hash seeds without identity/status regressions. Polymorphic
 invocations now check the prototype reference and stay raw-only with a specific
 reason. The [engine-gate rollup](batches/t25-core-rc.md) records 156/156 required
 engine seams accepted, the known-unsupported raw coverage, the seeded mutation
-matrix and the source/license review; its evidence comes from a working tree, so
-EngineCoreRC stays unaccepted until a clean-revision repetition. ProductRC remains
-open for the application seams.
+matrix and the source/license review. At commit b39805f the clean revision accepts
+156/156 required engine seams across 80 cases, so EngineCoreRC is accepted for the
+`darwin-aarch64` self-made suite. ProductRC remains open for the application seams.
+
+**Completion**: EngineCoreRC accepted at b39805f; the card's remaining work is the
+application-owned ProductRC rollup in H08, not an engine obligation.
 
 **Dependencies**: T23, T14. **Phase**: all/verification. T24 is optional
 beautification and is not a prerequisite of this card. **References**: KU-04/08,

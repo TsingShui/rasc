@@ -4,8 +4,9 @@ Diana has a native ordinary-method engine with checked input, SSA/types/storage,
 structured/dispatcher Java, protected methods and initialization. T21 generic/bridge
 and T22 named-nested source profiles have recorded acceptance. T23's restricted
 enum/annotation definitions, runtime uses and defaults also pass their recorded
-acceptance. Package versions
-retain their scaffold markers; EngineCoreRC is not accepted. [TASKS.md](TASKS.md)
+acceptance. The engine gate accepts every required engine invocation at b39805f,
+so EngineCoreRC is accepted for `darwin-aarch64`; ProductRC remains open. Package
+versions retain their scaffold markers. [TASKS.md](TASKS.md)
 owns current capability and acceptance status. B01–B04 preparation is accepted on
 macOS arm64; see [preparation evidence](batches/b02-b04-preparation.md).
 

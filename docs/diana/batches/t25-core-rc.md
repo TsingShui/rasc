@@ -89,9 +89,25 @@ fixtures are self-made. The polymorphic fixture is hand-written Smali assembled 
 locked smali 2.5.2; D085's is a self-made builder; annotation sources and bytecode
 come from the locked JDK and D8.
 
-Unproven: this rollup was produced from a working tree based on f0aef75, and the
-run record marks that tree dirty. A clean-revision repetition of the same commands
-is required before EngineCoreRC is declared; committing is an operator decision.
+## Clean-revision acceptance
+
+Commit b39805f was built and run without further edits. The run record reports
+`working_tree_dirty: false` and that commit as its engine revision.
+
+- `cargo fmt --all -- --check`, strict workspace Clippy and the locked release
+  build pass; workspace nextest passes 192 tests with zero skips.
+- `python3 tools/e2e.py run` selects the full required set from the JSON: 86
+  cases, 177 invocations, 181 seams. Engine-gate seams accepted 156/156 across
+  80 cases, with no failing engine seam. All required seams accepted 158/181 and
+  whole passing cases 79; the 23 unaccepted seams are the application-owned
+  entries listed above.
+- Fixed-case D085 engine rendering, D075–D078 target/declaration boundaries,
+  D086 default-versus-explicit limits, D055/D059 rejection and the mutation,
+  replay and license evidence in this and the two preceding batch records all
+  pass at this revision.
+
+Acceptance: EngineCoreRC for the `darwin-aarch64` profile on this self-made suite
+is accepted at b39805f. ProductRC is not accepted; no application seam was
+emulated to reach this count, and no required Java answer was replaced by Debug.
 Not run: Windows, Linux, ART, representative APK/corpus performance and any
-opt-in private corpus. This record therefore reports an engine gate that is green
-on this tree, not an accepted EngineCoreRC.
+opt-in private corpus.
