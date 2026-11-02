@@ -88,6 +88,7 @@ const RES_XML_START_ELEMENT_TYPE: u16 = 0x0102;
 const RES_XML_END_ELEMENT_TYPE: u16 = 0x0103;
 
 const UTF8_FLAG: u32 = 1 << 8;
+const ANDROID_NAMESPACE: &str = "http://schemas.android.com/apk/res/android";
 const RES_XML_CDATA_TYPE: u16 = 0x0104;
 
 fn u16_at(bytes: &[u8], offset: usize) -> Result<u16, ManifestError> {
@@ -368,7 +369,16 @@ pub enum ManifestWarningKind {
     InvalidString(u32),
     /// A repeated attribute name was dropped, keeping the first value.
     DuplicateAttribute(String),
-    /// An attribute name cannot appear in XML; the attribute was dropped.
+    /// An attribute or element name was rewritten to a legal XML name. The value
+    /// is kept, so the document stays usable and the change stays explicit.
+    RenamedName { original: String, emitted: String },
+    /// The attribute name string was empty, so the public resource id identifies
+    /// the attribute; the emitted name comes from the Android attribute table.
+    ResolvedAttribute { resource: u32, emitted: String },
+    /// The attribute name string was empty and the resource id is not a known
+    /// Android attribute; the id itself is emitted instead of a guessed name.
+    IdentifiedAttribute { resource: u32 },
+    /// An element name could not be represented; its subtree was skipped.
     InvalidName(String),
     /// A typed value outside the supported set was replaced by its raw data.
     UnsupportedValue(u8),
@@ -405,6 +415,9 @@ pub fn decode(bytes: &[u8], limits: ManifestLimits) -> Result<DecodedManifest, M
         warnings: Vec::new(),
         pool: None,
         namespaces: Vec::new(),
+        resource_map: Vec::new(),
+        needs_android_namespace: false,
+        declared_android_namespace: false,
         open: Vec::new(),
         skip: None,
         raw_depth: 0,
@@ -416,8 +429,18 @@ pub fn decode(bytes: &[u8], limits: ManifestLimits) -> Result<DecodedManifest, M
     }
     decoder.run(header, end)?;
     decoder.close_open()?;
+    let mut xml = decoder.budget.output;
+    if decoder.needs_android_namespace && !decoder.declared_android_namespace {
+        // Attributes named through the Android table need the bound prefix, or the
+        // text is not parseable XML.
+        if let Some(line_end) = xml.find('\n')
+            && let Some(position) = xml[..line_end].rfind('>')
+        {
+            xml.insert_str(position, &format!(" xmlns:android=\"{ANDROID_NAMESPACE}\""));
+        }
+    }
     Ok(DecodedManifest {
-        xml: decoder.budget.output,
+        xml,
         warnings: decoder.warnings,
     })
 }
@@ -428,6 +451,9 @@ struct Decoder<'a> {
     warnings: Vec<ManifestWarning>,
     pool: Option<StringPool<'a>>,
     namespaces: Vec<(String, String)>,
+    resource_map: Vec<u32>,
+    needs_android_namespace: bool,
+    declared_android_namespace: bool,
     open: Vec<String>,
     skip: Option<usize>,
     raw_depth: usize,
@@ -506,6 +532,15 @@ impl Decoder<'_> {
                 RES_XML_RESOURCE_MAP_TYPE => {
                     if !(chunk_end - offset - chunk_header).is_multiple_of(4) {
                         self.warning(offset, ManifestWarningKind::BrokenStringPool)?;
+                    } else {
+                        let start = offset + chunk_header;
+                        for at in (start..chunk_end).step_by(4) {
+                            let value = u32_at(self.bytes, at)?;
+                            self.resource_map
+                                .try_reserve(1)
+                                .map_err(|_| ManifestError::PlatformCapacity)?;
+                            self.resource_map.push(value);
+                        }
                     }
                 }
                 RES_XML_START_NAMESPACE_TYPE => {
@@ -581,6 +616,14 @@ impl Decoder<'_> {
         self.budget.write_escaped(&name)?;
         if self.open.is_empty() {
             for (prefix, uri) in self.namespaces.clone() {
+                if uri.is_empty() {
+                    // An empty namespace declaration would undeclare the default
+                    // namespace and carries no information here.
+                    continue;
+                }
+                if prefix == "android" || uri == ANDROID_NAMESPACE {
+                    self.declared_android_namespace = true;
+                }
                 self.budget.write(" xmlns")?;
                 if !prefix.is_empty() {
                     self.budget.write(":")?;
@@ -640,16 +683,26 @@ impl Decoder<'_> {
             let raw = u32_at(self.bytes, at + 8)?;
             let data_type = self.bytes[at + 15];
             let data = u32_at(self.bytes, at + 16)?;
-            let label = self.text(at, attribute_name)?;
+            let (label, synthetic_android) = self.attribute_label(at, attribute_name)?;
             let mut qualified = String::new();
             if let Some(prefix) = namespace {
                 qualified.push_str(&prefix);
                 qualified.push(':');
+            } else if synthetic_android {
+                qualified.push_str("android:");
+                self.needs_android_namespace = true;
             }
             qualified.push_str(&label);
             if !valid_namespaced_name(&qualified) {
-                self.warning(at, ManifestWarningKind::InvalidName(qualified))?;
-                continue;
+                let emitted = sanitize_name(&qualified);
+                self.warning(
+                    at,
+                    ManifestWarningKind::RenamedName {
+                        original: qualified,
+                        emitted: emitted.clone(),
+                    },
+                )?;
+                qualified = emitted;
             }
             if seen.iter().any(|previous| previous == &qualified) {
                 self.warning(at, ManifestWarningKind::DuplicateAttribute(qualified))?;
@@ -685,6 +738,38 @@ impl Decoder<'_> {
             seen.push(qualified);
         }
         Ok(())
+    }
+
+    /// Resolves one attribute name. A non-empty legal string-pool name wins; an
+    /// empty or illegal one is resolved through the resource map, first to the
+    /// public Android attribute name and otherwise to the id itself.
+    fn attribute_label(
+        &mut self,
+        at: usize,
+        name_index: u32,
+    ) -> Result<(String, bool), ManifestError> {
+        let text = self.text(at, name_index)?;
+        if valid_name(&text) {
+            return Ok((text, false));
+        }
+        let resource = usize::try_from(name_index)
+            .ok()
+            .and_then(|index| self.resource_map.get(index).copied());
+        if let Some(resource) = resource {
+            if let Some(name) = super::attr_names::android_attribute(resource) {
+                self.warning(
+                    at,
+                    ManifestWarningKind::ResolvedAttribute {
+                        resource,
+                        emitted: name.to_owned(),
+                    },
+                )?;
+                return Ok((name.to_owned(), true));
+            }
+            self.warning(at, ManifestWarningKind::IdentifiedAttribute { resource })?;
+            return Ok((format!("attr_{resource:#010x}"), false));
+        }
+        Ok((text, false))
     }
 
     fn namespace_uri(&mut self, at: usize) -> Result<Option<String>, ManifestError> {
@@ -749,6 +834,28 @@ fn valid_name(name: &str) -> bool {
     (first.is_alphabetic() || first == '_')
         && characters
             .all(|character| character.is_alphanumeric() || matches!(character, '_' | '-' | '.'))
+}
+
+/// Rewrites one name into the XML name production without dropping the value.
+fn sanitize_name(name: &str) -> String {
+    let mut emitted = String::with_capacity(name.len());
+    for (position, character) in name.chars().enumerate() {
+        let accepted = if position == 0 {
+            character.is_alphabetic() || character == '_'
+        } else {
+            character.is_alphanumeric() || matches!(character, '_' | '-' | '.')
+        };
+        emitted.push(if accepted { character } else { '_' });
+    }
+    if emitted.is_empty()
+        || emitted
+            .chars()
+            .next()
+            .is_some_and(|first| !(first.is_alphabetic() || first == '_'))
+    {
+        emitted.insert(0, '_');
+    }
+    emitted
 }
 
 fn valid_namespaced_name(name: &str) -> bool {
@@ -1039,10 +1146,11 @@ mod tests {
         body.extend_from_slice(&element(0, &[attribute(u32::MAX, 1, 0x03, 2)]));
         body.extend_from_slice(&end(0));
         let decoded = decode(&chunk(0x0003, 8, &body), ManifestLimits::default()).unwrap();
-        assert_eq!(decoded.xml(), "<root>\n</root>\n");
+        assert_eq!(decoded.xml(), "<root bad_name=\"v\">\n</root>\n");
         assert!(matches!(
             warnings(&decoded)[0],
-            ManifestWarningKind::InvalidName(name) if name == "bad name"
+            ManifestWarningKind::RenamedName { original, emitted }
+                if original == "bad name" && emitted == "bad_name"
         ));
 
         // An out-of-pool name renders as an empty name plus a warning.
@@ -1071,6 +1179,50 @@ mod tests {
             warnings(&decoded)[0],
             ManifestWarningKind::UnsupportedValue(0x7f)
         ));
+    }
+
+    #[test]
+    fn h03_axml_resolves_obfuscated_attribute_names_from_the_resource_map() {
+        // The name strings are empty; the resource map carries the Android id of
+        // `android:name` (16842755) and an unknown id.
+        let empty = "";
+        let strings = [empty, "root", "value", empty];
+        let mut body = pool(&strings, false, false);
+        let mut resource_map = Vec::new();
+        resource_map.extend_from_slice(&16_842_755u32.to_le_bytes()); // android:name
+        resource_map.extend_from_slice(&0u32.to_le_bytes());
+        resource_map.extend_from_slice(&0u32.to_le_bytes());
+        resource_map.extend_from_slice(&0x7f01_0001u32.to_le_bytes()); // app attribute
+        body.extend_from_slice(&chunk(0x0180, 8, &resource_map));
+        body.extend_from_slice(&element(
+            1,
+            &[
+                attribute(u32::MAX, 0, 0x03, 2),
+                attribute(u32::MAX, 3, 0x03, 2),
+            ],
+        ));
+        body.extend_from_slice(&end(1));
+        let decoded = decode(&chunk(0x0003, 8, &body), ManifestLimits::default()).unwrap();
+        let xml = decoded.xml();
+        assert!(
+            xml.contains(" xmlns:android=\"http://schemas.android.com/apk/res/android\""),
+            "{xml}"
+        );
+        assert!(xml.contains("android:name=\"value\""), "{xml}");
+        assert!(xml.contains("attr_0x7f010001=\"value\""), "{xml}");
+        assert!(warnings(&decoded).iter().any(|kind| matches!(
+            kind,
+            ManifestWarningKind::ResolvedAttribute {
+                resource: 16_842_755,
+                ..
+            }
+        )));
+        assert!(warnings(&decoded).iter().any(|kind| matches!(
+            kind,
+            ManifestWarningKind::IdentifiedAttribute {
+                resource: 0x7f01_0001
+            }
+        )));
     }
 
     #[test]

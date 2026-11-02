@@ -765,6 +765,12 @@ extract MUST report an unsupported compression method, encryption and a bad rang
 
 By default Diana outputs the decoded `AndroidManifest.xml`; the original binary AXML bytes are obtained with extract. The original project's rule of selecting the last physical entry with that name is retained (based on directory order, not on worker completion order), so the manifest selection does not change because of unordered display. A missing manifest exits 3; a bare DEX or an ordinary JAR without a manifest is an input error.
 
+Attribute names come from the original string pool. When a file leaves them empty
+and identifies attributes only through `RES_XML_RESOURCE_MAP`, Diana MUST use the
+public Android attribute table for those ids and MUST otherwise emit the id itself
+(`attr_0x...`), declaring the Android namespace it needs. A rewritten name is a
+warning, never a silent change.
+
 Manifest decoding is allowed to deliver a **balanced partial** document. A record
 that cannot be decoded, a text node that is not rendered, an out-of-pool name, an
 unsupported typed value, a repeated attribute or a damaged tail MUST be reported

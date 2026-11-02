@@ -112,6 +112,13 @@ not recovered output or downloaded programs. Reference papers and tools stay in
 ignored `.cache/references/` and are used as specifications and assertions, not as
 oracles or copied fixtures.
 
+One generated data asset exists: `apps/diana/src/analysis/attr_names.rs` maps public
+Android attribute resource ids to their names. It was generated offline from
+`android/R$attr.class` static constants in the platform `android.jar` of the
+locally installed Android SDK; only factual id/name pairs are embedded, no AOSP or
+SDK implementation code. It is compiled data, not a build- or runtime-time
+dependency, and it is used only when a manifest leaves an attribute name empty.
+
 This register records the observed repository state for the accepted batches. It
 does not grant permission to copy from RG, and it does not certify any future
 focused extraction; such a change requires a new record with source, commit,

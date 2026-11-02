@@ -7,6 +7,7 @@
 
 pub mod apk;
 pub mod archive;
+mod attr_names;
 pub mod axml;
 pub mod dex;
 pub mod input;

@@ -108,11 +108,20 @@ mutation never panics and that at least one is rejected. Mutation of payload
 strings legitimately yields a different but valid document, so "accepted" is not
 an error.
 
+A sweep over every binary XML inside the five APKs showed one more real defect: in
+resource-obfuscated packages the attribute **name strings are empty** and the real
+identity lives in `RES_XML_RESOURCE_MAP`. Discarding those names dropped hundreds of
+thousands of attributes (with warnings) in `res/xml`. The reader now resolves such
+names through a generated public-Android-attribute table and otherwise emits
+`attr_0x...`, adding the Android namespace declaration when needed. After that
+change one obfuscated sample's 18530 binary XML files decode with 0 hard failures, 485381
+names resolved from resource ids and 80258 identified by id instead of being
+dropped.
+
 With the warning semantics in place, the same five manifests still decode with
 **zero warnings**, and the `androguard` comparison still reports identical
-elements, attribute names and values. A `res/xml` style document from one APK that
-does contain a text node now yields balanced XML plus one `SkippedText` warning
-instead of failing; the attribute set matches the third-party decoder.
+elements, attribute names and values. A `res/xml` document with a text node yields
+balanced XML plus one `SkippedText` warning instead of failing.
 
 Known limitations, recorded rather than hidden: text/CDATA content is skipped with
 a warning rather than rendered, and DTD records are unknown records; string-pool
