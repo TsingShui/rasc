@@ -2687,8 +2687,10 @@ and five authorized local APKs whose element sets, attribute names and attribute
 values match both a self-written chunk decoder and `androguard` 4.1.4. A seeded
 mutation campaign (6000 runs, no panic or hang) and committed mutation/style/text
 regressions cover structural robustness. Damaged documents now return balanced
-partial XML with byte-offset warnings, as DESIGN §6.7 records. The CLI layer and
-its columns/exit codes remain.
+partial XML with byte-offset warnings, as DESIGN §6.7 records. The
+[CLI slice](batches/h03-cli.md) wires `entries` and `manifest` with their columns,
+JSON shapes, exit codes, `-o` atomic publication and warning channels; the
+remaining query and xref commands still need their presentation.
 
 **Dependencies**: H02. **Scope**: the existing non-decompilation CLI capability.
 

@@ -4,3 +4,4 @@
 //! Rust with no external process or runtime dependency.
 
 pub mod analysis;
+pub mod cli;

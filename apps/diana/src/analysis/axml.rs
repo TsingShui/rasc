@@ -356,6 +356,31 @@ impl Budget<'_> {
     }
 }
 
+impl ManifestWarningKind {
+    /// Human-readable explanation used by text output and JSON details.
+    pub fn describe(&self) -> String {
+        describe(self)
+    }
+
+    /// Stable code used by the JSON result and by diagnostics.
+    pub fn code(&self) -> &'static str {
+        match self {
+            Self::TruncatedChunk => "truncated_chunk",
+            Self::UnknownRecord(_) => "unknown_record",
+            Self::SkippedText => "text_unavailable",
+            Self::InvalidString(_) => "invalid_string",
+            Self::DuplicateAttribute(_) => "duplicate_attribute",
+            Self::RenamedName { .. } => "renamed_name",
+            Self::ResolvedAttribute { .. } => "resolved_attribute",
+            Self::IdentifiedAttribute { .. } => "identified_attribute",
+            Self::UnsupportedValue(_) => "unsupported_value",
+            Self::UnbalancedElement => "unbalanced_element",
+            Self::BrokenStringPool => "broken_string_pool",
+            Self::InvalidName(_) => "invalid_name",
+        }
+    }
+}
+
 /// Decodes one binary `AndroidManifest.xml` document into text XML.
 ///
 /// The reader rejects a non-AXML container, a truncated or inconsistent chunk, an

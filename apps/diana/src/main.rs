@@ -1,8 +1,5 @@
-//! Diana's separate binary target. No analysis commands are implemented yet.
+//! Diana binary entry point: argument parsing and classified exit codes.
 
-use std::process::ExitCode;
-
-fn main() -> ExitCode {
-    eprintln!("diana: project scaffold only; CLI and decompiler are not implemented");
-    ExitCode::FAILURE
+fn main() -> std::process::ExitCode {
+    diana::cli::run()
 }
