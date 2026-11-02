@@ -23,6 +23,10 @@ mod test_fixture;
 pub use engine::{
     DexImage, Engine, MethodSelector, Options, RecoveryPolicy, RepresentationPolicy, Request,
 };
+pub use input::annotation_facts::{
+    AnnotationExtent, AnnotationLocation, AnnotationParameterIndex, AnnotationPrefix,
+    AnnotationRecord, AnnotationToken, AnnotationValue, AnnotationValueKind, OriginalAnnotations,
+};
 pub use input::ownership::{NestedClass, Ownership};
 pub use p8_java::CaptureCertificate;
 pub use p8_java::enums::{EnumFieldRole, EnumMemberRole, GeneratedEnumField, GeneratedEnumMember};
@@ -39,6 +43,7 @@ pub use substrate::fields::{
     GeneratedField, StaticFieldOrdinal,
 };
 pub use substrate::report::NestedReport;
+pub use substrate::report::{AnnotationStatus, ClassAnnotations};
 pub use substrate::report::{
     ClassOriginSpan, ClassOutput, DeclarationOutput, Diagnostic, DiagnosticCause, ImageFact,
     ImageOrigin, MethodFacts, MethodOutput, OriginSpan, OutputReason, RenderedReport, Report,

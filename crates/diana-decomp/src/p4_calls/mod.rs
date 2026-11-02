@@ -1,4 +1,5 @@
 pub(crate) mod allocation;
+pub(crate) mod annotations;
 pub(crate) mod capture;
 pub(crate) mod class_scope;
 pub(crate) mod constructor_evidence;

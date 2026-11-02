@@ -5,7 +5,8 @@ chain includes checked heap operations, exception SSA/storage, protected Java,
 monitor scopes and T20 initialization. T20's supported source profile and fixed
 D041–D047/D079 obligations pass; unproved initialization remains classified
 Debug/Mixed. T21 generic/bridge declarations and T22 named ownership pass their
-recorded source profiles. T23 and core/application rollup remain open. EngineCoreRC is not accepted. The frozen draft-7 specification holds
+recorded source profiles. T23's restricted enum/annotation profile passes its
+recorded acceptance. Core/application rollup remains open. EngineCoreRC is not accepted. The frozen draft-7 specification holds
 86 required cases and 177 must-run invocation scenarios.**
 This page owns the workflow, preparation, task cards and verification. Read
 [DESIGN.md](DESIGN.md) for interfaces and data, [ALGORITHMS.md](ALGORITHMS.md) for
@@ -2338,11 +2339,17 @@ single-fragment status is correct.
 
 ## T23 — Restricted enum/annotation and complete shell classification
 
-**Progress**: The approved [canonical enum slice](batches/t23-enum.md) passes
-D050 and public generation/order/clone/valueOf/escape/custom-body regressions.
-Generated members retain original facts, raw snapshots and checked class-owner
-spans. T23 remains open for annotation declarations, defaults, retention/target
-and runtime literals, including D051.
+**Progress**: The restricted profile passes its recorded acceptance. The
+[canonical enum batch](batches/t23-enum.md) passes D050 and public
+generation/order/clone/valueOf/escape/custom-body regressions. Generated members
+retain original facts, raw snapshots and checked class-owner spans. The approved
+[annotation batch](batches/t23-annotations.md) passes D051, annotation interface
+source and checked defaults, including independent reflection/array/UTF-16
+observations on recovered definitions and uses. Its original class/member/parameter
+metadata sidecar retains local damage without discarding independent code;
+unrepresented metadata prevents a complete unit. G0 passes with 187 real tests
+and zero skips. Full E2E is 79/86 cases and 156/181 seams; the existing application
+failures remain open and are not an EngineCoreRC pass.
 
 **Dependencies**: T22, T20. **Phase**: P1/P4/P8/P9. **References**: DX-08/09,
 RG-09.

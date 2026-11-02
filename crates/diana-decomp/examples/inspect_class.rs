@@ -167,8 +167,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
     let mut diagnostics: Vec<Value> = report.diagnostics().iter().map(diagnostic_value).collect();
     let mut classes = vec![(report.class(), 0usize)];
+    let mut nested_annotations = Vec::new();
     for child in report.nested() {
         let base = diagnostics.len();
+        nested_annotations.push(annotation_facts(child.annotations(), base));
         if matches!(report.class(), ClassOutput::Mixed { .. }) {
             diagnostics.extend(child.diagnostics().iter().map(diagnostic_value));
         }
@@ -226,8 +228,54 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         json!({"field_id_idx":field.key.field.0,"access_flags":field.access_flags,"static_ordinal":match field.storage {diana_decomp::FieldStorage::Static(ordinal)=>Some(ordinal.0),diana_decomp::FieldStorage::Instance=>None},"name_units":field.facts.as_ref().map(|facts|&facts.name),"type_units":field.facts.as_ref().map(|facts|&facts.descriptor),"initial":initial,"status":status,"source":source,"reason":reason})
     }).collect();
     let class_spans: Vec<Value> = rendered.class_spans.iter().map(|span| json!({"class_def_idx":span.class.class_def.0,"dex_id":span.class.dex.0,"start":span.start.0,"end":span.end.0})).collect();
-    let value = json!({"schema":"diana.inspect/1","class_spans":class_spans,"fields":fields,"status":status,"header_offset":report.image().header_offset.0,"class_def_idx":class_def.0,"descriptor_units":descriptor,"access_flags":access_flags,"members":members,"diagnostics":diagnostics,"text":rendered.source,"spans":spans});
+    let annotations = annotation_facts(report.annotations(), 0);
+    let value = json!({"schema":"diana.inspect/1","annotations":annotations,"nested_annotations":nested_annotations,"class_spans":class_spans,"fields":fields,"status":status,"header_offset":report.image().header_offset.0,"class_def_idx":class_def.0,"descriptor_units":descriptor,"access_flags":access_flags,"members":members,"diagnostics":diagnostics,"text":rendered.source,"spans":spans});
     write_value(value, output)
+}
+
+fn annotation_reference(reference: diana_decomp::raw::OperandReference) -> Value {
+    use diana_decomp::raw::OperandReference as R;
+    let (kind, index) = match reference {
+        R::String(id) => ("string", id.0),
+        R::Type(id) => ("type", id.0),
+        R::Field(id) => ("field", id.0),
+        R::Method(id) => ("method", id.0),
+        R::Proto(id) => ("proto", id.0),
+        R::CallSite(id) => ("call_site", id.0),
+        R::MethodHandle(id) => ("method_handle", id.0),
+    };
+    json!({"kind":kind,"index":index})
+}
+fn annotation_facts(annotations: &diana_decomp::ClassAnnotations, base: usize) -> Value {
+    use diana_decomp::{
+        AnnotationLocation as L, AnnotationStatus as S, AnnotationToken as T,
+        AnnotationValueKind as K,
+    };
+    let (status, reason) = match annotations.status() {
+        S::Complete => ("complete", None),
+        S::Partial(id) => ("partial", Some(base + id.0)),
+        S::Unavailable(id) => ("unavailable", Some(base + id.0)),
+    };
+    let original = annotations.original();
+    let records: Vec<_> = original.records().iter().map(|record| {
+        let location = match record.location() { L::Class => json!({"kind":"class"}), L::Field(id) => json!({"kind":"field","field_id_idx":id.0}), L::Method(id) => json!({"kind":"method","method_id_idx":id.0}), L::Parameter { method, parameter } => json!({"kind":"parameter","method_id_idx":method.0,"parameter_index":parameter.0}) };
+        let values: Vec<_> = record.tokens().iter().map(|token| match token {
+            T::EndContainer => json!({"kind":"end_container"}),
+            T::Value(value) => {
+                let kind = match value.kind() {
+                    K::Signed(value) => json!({"kind":"signed","value":value.to_string()}), K::Unsigned(value) => json!({"kind":"unsigned","value":value.to_string()}),
+                    K::Bits { width, bits } => json!({"kind":"bits","width":width.0,"bits":format!("{bits:016x}")}),
+                    K::String { reference, units } => json!({"kind":"string","string_id_idx":reference.0,"units":units}),
+                    K::Reference(reference) => json!({"kind":"reference","reference":annotation_reference(*reference)}),
+                    K::Null => json!({"kind":"null"}), K::Boolean(value) => json!({"kind":"boolean","value":value}),
+                    K::Array { count } => json!({"kind":"array","count":count}), K::Annotation { type_id, count } => json!({"kind":"annotation","type_id_idx":type_id.0,"count":count}),
+                };
+                json!({"kind":"value","tag":value.tag(),"value_arg":value.value_arg(),"name_id_idx":value.name_id().map(|id|id.0),"name_units":value.name(),"file_byte_start":value.range().start.0,"file_byte_end":value.range().end.0,"value":kind})
+            }
+        }).collect();
+        json!({"location":location,"visibility":record.visibility(),"type_id_idx":record.type_id().0,"descriptor_units":record.descriptor(),"extent":format!("{:?}",record.extent()),"file_byte_start":record.range().start.0,"file_byte_end":record.range().end.0,"bytes":record.bytes(),"values":values})
+    }).collect();
+    json!({"status":status,"reason":reason,"dex_id":original.owner().dex.0,"class_def_idx":original.owner().class_def.0,"directory_offset":original.directory().0,"records":records,"unavailable_prefix":original.unavailable_prefix().map(|prefix|json!({"file_byte_start":prefix.range().start.0,"file_byte_end":prefix.range().end.0,"bytes":prefix.bytes()}))})
 }
 
 fn java_evidence<'a>(

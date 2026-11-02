@@ -13,14 +13,36 @@ pub struct VerifiedJavaUnit {
     _binding: Binding,
 }
 enum Binding {
+    Annotation {
+        binding: super::annotations::VerifiedDefinition,
+    },
     Class {
         _binding: crate::p4_calls::class_scope::ClassBindings,
+        _annotations: Option<super::annotations::VerifiedUses>,
     },
     Enum {
         _binding: super::enums::Binding,
     },
 }
 impl VerifiedJavaUnit {
+    pub(super) fn annotation(
+        header: String,
+        environment: EnvironmentId,
+        binding: super::annotations::VerifiedDefinition,
+    ) -> Self {
+        Self {
+            header,
+            environment,
+            preparation: String::new(),
+            _binding: Binding::Annotation { binding },
+        }
+    }
+    pub(crate) fn annotation_element_source(&self, method: crate::MethodId) -> Option<&str> {
+        match &self._binding {
+            Binding::Annotation { binding } => binding.element_source(method),
+            _ => None,
+        }
+    }
     pub(super) fn enumeration(
         header: String,
         environment: EnvironmentId,
@@ -48,16 +70,21 @@ impl VerifiedJavaUnit {
         super::CompilationContract::Java8
     }
 }
+pub(crate) struct Members<'a> {
+    pub(crate) fields: &'a [crate::FieldOutput],
+    pub(crate) methods: &'a [MethodOutput],
+    pub(crate) annotations: Option<&'a crate::p4_calls::annotations::Bindings>,
+}
+
 pub(crate) fn verify(
     _schedule: &crate::engine::SchedulePermit,
     index: &ProgramIndex<'_>,
     key: ClassKey,
     catalog: &crate::DeclarationCatalog,
-    fields: &[crate::FieldOutput],
-    members: &[MethodOutput],
+    members: Members<'_>,
     control: &mut RunContext<'_>,
 ) -> Result<Option<VerifiedJavaUnit>, RequestError> {
-    verify_impl(index, key, catalog, fields, members, None, control)
+    verify_impl(index, key, catalog, members, None, control)
 }
 pub(super) fn verify_static_nested(
     index: &ProgramIndex<'_>,
@@ -72,8 +99,11 @@ pub(super) fn verify_static_nested(
         index,
         key,
         catalog,
-        fields,
-        members,
+        Members {
+            fields,
+            methods: members,
+            annotations: None,
+        },
         Some(scope.name()),
         control,
     )
@@ -82,12 +112,37 @@ fn verify_impl(
     index: &ProgramIndex<'_>,
     key: ClassKey,
     catalog: &crate::DeclarationCatalog,
-    fields: &[crate::FieldOutput],
-    members: &[MethodOutput],
+    members: Members<'_>,
     nested_name: Option<&[u16]>,
     control: &mut RunContext<'_>,
 ) -> Result<Option<VerifiedJavaUnit>, RequestError> {
     let environment = catalog.environment;
+    if let Some(bindings) = members.annotations
+        && bindings.definition().is_some()
+    {
+        if nested_name.is_some() {
+            return Ok(None);
+        }
+        return super::annotations::definition(
+            bindings,
+            key,
+            environment,
+            members.fields,
+            members.methods,
+            control,
+        );
+    }
+    let annotations = if let Some(bindings) = members.annotations {
+        let Some(verified) = super::annotations::verify(bindings, key, environment, control)?
+        else {
+            return Ok(None);
+        };
+        Some(verified)
+    } else {
+        None
+    };
+    let fields = members.fields;
+    let members = members.methods;
     let mut emission = super::member_emission::Plan::default();
     for member in members {
         control.charge_work(1)?;
@@ -123,6 +178,16 @@ fn verify_impl(
     }
     let context = index.class_context(key.class_def, control)?;
     let interfaces = context.interfaces?;
+    if context.annotations_offset.0 != 0
+        && index
+            .annotation_directory(context.annotations_offset, control)?
+            .fields
+            .remaining_byte()
+            .0
+            != 0
+    {
+        return Ok(None);
+    }
     context.values_offset?;
     context.superclass?;
     let ownership = crate::input::ownership::collect(index, control)?;
@@ -135,8 +200,9 @@ fn verify_impl(
         owns_nested |= entry.enclosing() == key.class_def;
     }
     if interface && !interfaces.is_empty()
-        || !((owns_nested || nested_name.is_some())
-            && index.only_ownership_annotations(context.annotations_offset, control)?)
+        || annotations.is_none()
+            && !((owns_nested || nested_name.is_some())
+                && index.only_ownership_annotations(context.annotations_offset, control)?)
             && !index.no_class_annotations(context.annotations_offset, control)?
             && crate::input::signature::class(index, key.class_def, control)?.is_none()
     {
@@ -359,6 +425,9 @@ fn verify_impl(
     } else {
         &name
     };
+    if let Some(annotations) = &annotations {
+        header.push(annotations.source(), control)?;
+    }
     for (bit, word) in [(1, "public "), (0x10, "final "), (0x400, "abstract ")] {
         if class.access_flags & bit != 0 && !(interface && bit == 0x400) {
             header.push(word, control)?;
@@ -406,6 +475,9 @@ fn verify_impl(
         header: header.finish(),
         environment,
         preparation: preparation.finish(),
-        _binding: Binding::Class { _binding: binding },
+        _binding: Binding::Class {
+            _binding: binding,
+            _annotations: annotations,
+        },
     }))
 }

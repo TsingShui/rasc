@@ -1,3 +1,5 @@
+#[path = "pipeline/annotations.rs"]
+mod annotation_source;
 #[path = "input/annotations.rs"]
 mod annotations;
 #[path = "pipeline/bridge.rs"]

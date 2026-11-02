@@ -5,6 +5,7 @@ use crate::{JavaTargetItem, MethodBudget, RequestError};
 
 /// A no-code Java declaration admitted by the native declaration verifier.
 /// This is a fragment, not a JavaUnit or an executable recovered body.
+/// Class-owned annotation defaults are supplied by the verified unit, not this fragment.
 pub struct JavaMethodDecl {
     source: String,
     signature: Option<Vec<u16>>,
@@ -24,15 +25,17 @@ pub(crate) fn declaration(
     input: &MethodInput<'_, '_>,
     catalog: &crate::DeclarationCatalog,
     signature: Option<&crate::p4_calls::raw_signature::RawSignature>,
+    annotations: Option<&crate::p4_calls::annotations::Bindings>,
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<Option<JavaMethodDecl>, RequestError> {
-    declaration_impl(input, catalog, signature, budget)
+    declaration_impl(input, catalog, signature, annotations, budget)
 }
 
 fn declaration_impl(
     input: &MethodInput<'_, '_>,
     catalog: &crate::DeclarationCatalog,
     signature: Option<&crate::p4_calls::raw_signature::RawSignature>,
+    annotations: Option<&crate::p4_calls::annotations::Bindings>,
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<Option<JavaMethodDecl>, RequestError> {
     check_target(input, budget)?;
@@ -85,7 +88,35 @@ fn declaration_impl(
             output.push(word, budget)?;
         }
     }
-    if !declaration_type(
+    let mut annotation_string = false;
+    if let Some(bindings) = annotations
+        && bindings.environment() == catalog.environment
+        && bindings.owner().class_def == input.class_id()
+        && let Some(definition) = bindings.definition()
+        && input
+            .owner()
+            .matches_with(definition.descriptor(), budget)?
+    {
+        for element in definition.elements() {
+            budget.charge_work(1)?;
+            if element.method() == input.method_id()
+                && element.prototype().get(2) == Some(&76)
+                && input
+                    .declaration()
+                    .prototype
+                    .matches_with(element.prototype(), budget)?
+                && input
+                    .declaration()
+                    .name
+                    .matches_with(element.name(), budget)?
+            {
+                annotation_string = true;
+            }
+        }
+    }
+    if annotation_string {
+        output.push("java.lang.String", budget)?;
+    } else if !declaration_type(
         input,
         input.declaration().prototype.return_type,
         raw_generic,

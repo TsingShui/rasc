@@ -169,6 +169,17 @@ fn verify_impl(
     )? {
         return Ok(None);
     }
+    let context = index.class_context(key.class_def, control)?;
+    if context.annotations_offset.0 != 0
+        && index
+            .annotation_directory(context.annotations_offset, control)?
+            .fields
+            .remaining_byte()
+            .0
+            != 0
+    {
+        return Ok(None);
+    }
     if scope.flags() & !(1 | 8) != 0 {
         return Ok(None);
     }

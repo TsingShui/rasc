@@ -18,6 +18,7 @@ pub(crate) mod method_envelope;
 pub(crate) mod protection;
 mod type_projection;
 pub(crate) use type_projection::TypeProjection;
+pub(crate) mod annotation_facts;
 pub(crate) mod field_declarations;
 pub(crate) mod operands;
 pub(crate) mod ownership;

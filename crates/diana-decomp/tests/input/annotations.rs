@@ -38,6 +38,58 @@ fn t04_annotations_bind_class_members_and_parameters_without_reading_other_code(
         items[0]["entries"][0]["reference"]["units"],
         json!([0xd800, 0, 0xdc00])
     );
+    let mut control = RunContext::new(Limits::default(), &|| false);
+    let report = diana_decomp::Engine::open(
+        vec![diana_decomp::DexImage {
+            bytes: &fixture.bytes,
+            header_offset: diana_decomp::ByteOffset(0),
+            origin: diana_decomp::ImageOrigin {
+                input: diana_decomp::InputId(0),
+            },
+        }],
+        diana_decomp::Options::default(),
+        diana_decomp::DeclarationCatalog::empty(diana_decomp::EnvironmentId(0)),
+        &mut control,
+    )
+    .unwrap()
+    .decompile(
+        diana_decomp::Request {
+            class: diana_decomp::ClassKey {
+                dex: diana_decomp::DexId(0),
+                class_def: ClassDefId(0),
+            },
+            method: None,
+        },
+        &mut control,
+    )
+    .unwrap();
+    assert_eq!(
+        report.annotations().status(),
+        diana_decomp::AnnotationStatus::Complete
+    );
+    let owned = report.annotations().original();
+    for location in [
+        diana_decomp::AnnotationLocation::Class,
+        diana_decomp::AnnotationLocation::Field(diana_decomp::FieldId(0)),
+        diana_decomp::AnnotationLocation::Method(MethodId(0)),
+        diana_decomp::AnnotationLocation::Parameter {
+            method: MethodId(0),
+            parameter: diana_decomp::AnnotationParameterIndex(0),
+        },
+    ] {
+        let records: Vec<_> = owned
+            .records()
+            .iter()
+            .filter(|record| record.location() == location)
+            .collect();
+        assert_eq!(records.len(), 3);
+        assert!(
+            records
+                .iter()
+                .all(|record| record.extent() == diana_decomp::AnnotationExtent::Complete)
+        );
+        assert!(records[0].tokens().iter().any(|token| matches!(token, diana_decomp::AnnotationToken::Value(value) if matches!(value.kind(), diana_decomp::AnnotationValueKind::String { units, .. } if units == &[0xd800,0,0xdc00]))));
+    }
     assert_eq!(directory["fields"][0]["field_id_idx"], 0);
     assert_eq!(directory["methods"][0]["method_id_idx"], 0);
     assert_eq!(directory["methods"][1]["annotations"]["items"], json!([]));

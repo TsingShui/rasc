@@ -16,6 +16,7 @@ JDK_FIXTURE_TYPES = [
     'java/lang/Object','java/lang/String','java/lang/StringBuilder','java/lang/Class',
     'java/lang/Enum','java/lang/Exception','java/lang/RuntimeException',
     'java/lang/Throwable','java/lang/Thread','java/lang/annotation/ElementType',
+    'java/lang/annotation/Annotation','java/lang/annotation/Retention','java/lang/annotation/Target',
     'java/lang/annotation/RetentionPolicy','java/util/ArrayList','java/util/List',
     'java/lang/invoke/CallSite','java/lang/invoke/MethodHandles$Lookup','java/lang/invoke/MethodType',
 ]
@@ -174,6 +175,8 @@ def build_manifest(root,cache,tools,spec,certificates):
                 'argument_arrays':[],'description':'Independent layout/dexlib2/classfile/requirement aggregation; the corresponding source helper and original input are content-locked.',
                 'recipe_path':relative(source/'recipe.json')}
         for p in sorted(work.rglob('*')):
+            if p == work/'catalog.json':
+                continue
             if p.is_file() and p.suffix in {'.class','.dex','.zip','.json','.java'} and 'logs' not in p.parts and not p.name.endswith('.command.json'):
                 producing=[]
                 name=relative(p)

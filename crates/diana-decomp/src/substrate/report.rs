@@ -267,15 +267,41 @@ impl ClassOutput {
     }
 }
 
+/// Coverage of owned original annotation facts, with a local diagnostic on failure.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum AnnotationStatus {
+    Complete,
+    Partial(DiagnosticId),
+    Unavailable(DiagnosticId),
+}
+
+/// Original class annotation facts; source eligibility is a separate P8 decision.
+pub struct ClassAnnotations {
+    pub(crate) original: crate::OriginalAnnotations,
+    pub(crate) status: AnnotationStatus,
+}
+impl ClassAnnotations {
+    pub fn original(&self) -> &crate::OriginalAnnotations {
+        &self.original
+    }
+    pub fn status(&self) -> AnnotationStatus {
+        self.status
+    }
+}
+
 /// Original nested-class result with local diagnostics and fragment context.
 /// Complete-unit qualification belongs to the enclosing report, not this shell.
 pub struct NestedReport {
+    pub(crate) annotations: ClassAnnotations,
     pub(crate) depth: crate::p8_java::nested_plan::NestingDepth,
     pub(crate) class: ClassOutput,
     pub(crate) diagnostics: Vec<Diagnostic>,
     pub(crate) plan: Option<crate::p8_java::nested_plan::Plan>,
 }
 impl NestedReport {
+    pub fn annotations(&self) -> &ClassAnnotations {
+        &self.annotations
+    }
     pub fn class(&self) -> &ClassOutput {
         &self.class
     }
@@ -287,6 +313,7 @@ impl NestedReport {
 /// Owns presentation facts and original sources, never a borrowed input or
 /// analysis arena. Only the engine constructs a report with linked diagnostics.
 pub struct Report {
+    pub(crate) annotations: ClassAnnotations,
     pub(crate) nested: Vec<NestedReport>,
     pub(crate) class: ClassOutput,
     pub(crate) diagnostics: Vec<Diagnostic>,
@@ -295,6 +322,9 @@ pub struct Report {
     pub(crate) environment: EnvironmentId,
 }
 impl Report {
+    pub fn annotations(&self) -> &ClassAnnotations {
+        &self.annotations
+    }
     /// Original nested members of the checked owner closure, without recursive reports.
     pub fn nested(&self) -> &[NestedReport] {
         &self.nested

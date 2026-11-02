@@ -15,7 +15,10 @@ pub fn render(
     let mut spans = Vec::new();
     let mut class_spans = Vec::new();
     render_class(
-        &report.class,
+        ClassSource {
+            class: &report.class,
+            annotations: report.annotations(),
+        },
         report.diagnostics(),
         report.nested(),
         &mut output,
@@ -26,7 +29,10 @@ pub fn render(
     if matches!(report.class(), ClassOutput::Mixed { .. }) {
         for child in report.nested() {
             render_class(
-                &child.class,
+                ClassSource {
+                    class: &child.class,
+                    annotations: child.annotations(),
+                },
                 child.diagnostics(),
                 &[],
                 &mut output,
@@ -44,8 +50,13 @@ pub fn render(
     })
 }
 
+struct ClassSource<'a> {
+    class: &'a ClassOutput,
+    annotations: &'a crate::ClassAnnotations,
+}
+
 fn render_class(
-    class: &ClassOutput,
+    source: ClassSource<'_>,
     diagnostics: &[crate::Diagnostic],
     nested: &[crate::NestedReport],
     output: &mut TextBuffer,
@@ -53,6 +64,7 @@ fn render_class(
     class_spans: &mut Vec<crate::ClassOriginSpan>,
     control: &mut RunContext<'_>,
 ) -> Result<(), RequestError> {
+    let class = source.class;
     let class_start = SourceByteOffset(output.len());
     match class {
         ClassOutput::JavaUnit {
@@ -79,7 +91,7 @@ fn render_class(
                 output.push("\n", control)?;
             }
             output.push(declaration.preparation(), control)?;
-            write_java_members(members, output, spans, control)?;
+            write_java_members(members, Some(declaration), output, spans, control)?;
             let mut open = Vec::new();
             for nested in nested {
                 control.checkpoint()?;
@@ -114,7 +126,7 @@ fn render_class(
                     output.push("\n", control)?;
                 }
                 output.push(plan.preparation(), control)?;
-                write_java_members(nested.class.members(), output, spans, control)?;
+                write_java_members(nested.class.members(), None, output, spans, control)?;
                 let key = match &nested.class {
                     ClassOutput::JavaUnit { key, .. } | ClassOutput::Mixed { key, .. } => *key,
                 };
@@ -155,6 +167,45 @@ fn render_class(
                 )?;
             }
             output.push("\n", control)?;
+            let key = match class {
+                ClassOutput::JavaUnit { key, .. } | ClassOutput::Mixed { key, .. } => *key,
+            };
+            if source.annotations.original().owner() != key {
+                return Err(RequestError::InternalInvariant(
+                    "class annotation facts lost owner",
+                ));
+            }
+            match source.annotations.status() {
+                crate::AnnotationStatus::Complete => {}
+                crate::AnnotationStatus::Partial(reason)
+                | crate::AnnotationStatus::Unavailable(reason) => {
+                    write_reason(diagnostics, reason, output, control)?
+                }
+            }
+            for annotation in source.annotations.original().records() {
+                control.checkpoint()?;
+                output.arguments(
+                    format_args!(
+                        "Original annotation {:?} {:?} visibility={} {:?} {:?}\n",
+                        annotation.location(),
+                        annotation.type_id(),
+                        annotation.visibility(),
+                        annotation.extent(),
+                        annotation.tokens()
+                    ),
+                    control,
+                )?;
+            }
+            if let Some(prefix) = source.annotations.original().unavailable_prefix() {
+                output.arguments(
+                    format_args!(
+                        "Original annotation pointer {:?}: {:?}\n",
+                        prefix.range(),
+                        prefix.bytes()
+                    ),
+                    control,
+                )?;
+            }
             for field in fields {
                 write_field(diagnostics, field, output, control)?;
             }
@@ -257,6 +308,7 @@ fn render_class(
 
 fn write_java_members(
     members: &[MethodOutput],
+    unit: Option<&crate::VerifiedJavaUnit>,
     output: &mut TextBuffer,
     spans: &mut Vec<OriginSpan>,
     control: &mut RunContext<'_>,
@@ -270,7 +322,9 @@ fn write_java_members(
             MethodOutput::Java { source, .. } | MethodOutput::JavaInitializer { source, .. } => {
                 source.as_str()
             }
-            MethodOutput::DeclarationOnly { declaration, .. } => declaration.source(),
+            MethodOutput::DeclarationOnly { declaration, .. } => unit
+                .and_then(|unit| unit.annotation_element_source(member.key().method))
+                .unwrap_or(declaration.source()),
             _ => {
                 return Err(RequestError::InternalInvariant(
                     "JavaUnit contains an unverified member",

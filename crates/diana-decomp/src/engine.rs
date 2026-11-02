@@ -374,6 +374,7 @@ impl<'a> Engine<'a> {
             }
             reserve(&mut report.nested, 1, control)?;
             report.nested.push(crate::NestedReport {
+                annotations: child.annotations,
                 depth: node.depth,
                 class: child.class,
                 diagnostics: child.diagnostics,
@@ -408,6 +409,65 @@ impl<'a> Engine<'a> {
             primary: None,
         };
         let whole_class = request.method.is_none();
+        let annotation_read =
+            crate::input::annotation_facts::collect(&image.index, request.class, control)?;
+        let annotation_status = if let Some(error) = annotation_read.issue {
+            let reason = add_diagnostic(
+                &mut diagnostics,
+                Diagnostic {
+                    method: None,
+                    cause: DiagnosticCause::Request(error),
+                },
+                control,
+            )?;
+            if annotation_read.facts.records().is_empty() {
+                crate::AnnotationStatus::Unavailable(reason)
+            } else {
+                crate::AnnotationStatus::Partial(reason)
+            }
+        } else {
+            crate::AnnotationStatus::Complete
+        };
+        let annotations = crate::ClassAnnotations {
+            original: annotation_read.facts,
+            status: annotation_status,
+        };
+        let mut annotation_failure = annotation_status != crate::AnnotationStatus::Complete;
+        let annotation_bindings = if whole_class && !annotation_failure {
+            match crate::p4_calls::annotations::collect(
+                &SchedulePermit { _private: () },
+                &image.index,
+                annotations.original(),
+                &self.catalog,
+                control,
+            ) {
+                Ok(bindings) => bindings,
+                Err(error)
+                    if matches!(
+                        error.kind(),
+                        FailureKind::Cancelled
+                            | FailureKind::BudgetExceeded
+                            | FailureKind::InternalInvariant
+                    ) =>
+                {
+                    return Err(error);
+                }
+                Err(error) => {
+                    add_diagnostic(
+                        &mut diagnostics,
+                        Diagnostic {
+                            method: None,
+                            cause: DiagnosticCause::Request(error),
+                        },
+                        control,
+                    )?;
+                    annotation_failure = true;
+                    None
+                }
+            }
+        } else {
+            None
+        };
         let mut emission = if whole_class {
             crate::pipeline::member_emission::collect(
                 &SchedulePermit { _private: () },
@@ -449,7 +509,10 @@ impl<'a> Engine<'a> {
                         },
                         &mut diagnostics,
                         &emission,
-                        nested_context,
+                        MemberInputs {
+                            nested: nested_context,
+                            annotations: annotation_bindings.as_ref(),
+                        },
                         control,
                     )?;
                     reserve(&mut members, 1, control)?;
@@ -502,7 +565,10 @@ impl<'a> Engine<'a> {
                                         },
                                         &mut diagnostics,
                                         &emission,
-                                        nested_context,
+                                        MemberInputs {
+                                            nested: nested_context,
+                                            annotations: annotation_bindings.as_ref(),
+                                        },
                                         control,
                                     )?
                                 };
@@ -544,7 +610,7 @@ impl<'a> Engine<'a> {
             DiagnosticCause::Unsupported(OutputReason::ClassAssemblyUnavailable),
             DiagnosticCause::Request,
         );
-        let unit = if source_rejected {
+        let unit = if source_rejected || annotation_failure {
             None
         } else if let Some(proof) = emission.enumeration() {
             crate::p8_java::enums::unit(
@@ -561,15 +627,20 @@ impl<'a> Engine<'a> {
                 &image.index,
                 request.class,
                 &self.catalog,
-                &fields,
-                &members,
+                crate::p8_java::UnitMembers {
+                    fields: &fields,
+                    methods: &members,
+                    annotations: annotation_bindings.as_ref(),
+                },
                 control,
             ) {
                 Ok(unit) => unit,
                 Err(error)
                     if matches!(
                         error.kind(),
-                        FailureKind::Cancelled | FailureKind::BudgetExceeded
+                        FailureKind::Cancelled
+                            | FailureKind::BudgetExceeded
+                            | FailureKind::InternalInvariant
                     ) =>
                 {
                     return Err(diagnostics.preserve(error));
@@ -610,6 +681,7 @@ impl<'a> Engine<'a> {
             }
         };
         Ok(Report {
+            annotations,
             class,
             nested: Vec::new(),
             diagnostics: diagnostics.values,
@@ -629,7 +701,7 @@ impl<'a> Engine<'a> {
         key: MethodKey,
         diagnostics: &mut DiagnosticLog,
         emission: &crate::p8_java::member_emission::Plan,
-        nested_context: bool,
+        inputs: MemberInputs<'_>,
         control: &mut RunContext<'_>,
     ) -> Result<MethodOutput, RequestError> {
         let candidate = match control.method_budget() {
@@ -641,7 +713,7 @@ impl<'a> Engine<'a> {
                     &self.catalog,
                     self.representation,
                     emission,
-                    nested_context,
+                    inputs,
                     &mut budget,
                 );
                 let (facts, cause) = match normal {
@@ -836,13 +908,18 @@ enum NormalMember {
     },
 }
 
+#[derive(Clone, Copy)]
+struct MemberInputs<'a> {
+    nested: bool,
+    annotations: Option<&'a crate::p4_calls::annotations::Bindings>,
+}
 fn normal_member(
     index: &ProgramIndex<'_>,
     key: MethodKey,
     catalog: &DeclarationCatalog,
     representation: RepresentationPolicy,
     emission: &crate::p8_java::member_emission::Plan,
-    nested_context: bool,
+    inputs: MemberInputs<'_>,
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<NormalMember, RequestError> {
     let input = index.method_input(key.class.class_def, key.method, budget)?;
@@ -863,6 +940,7 @@ fn normal_member(
         &input,
         catalog,
         signature.as_ref(),
+        inputs.annotations,
         budget,
     )? {
         return Ok(NormalMember::Declaration { facts, declaration });
@@ -902,7 +980,7 @@ fn normal_member(
                 catalog,
                 planned,
                 &chain,
-                nested_context,
+                inputs.nested,
                 budget,
             )?
         } else {
