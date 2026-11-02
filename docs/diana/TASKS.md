@@ -2999,10 +2999,12 @@ agent configuration, a global old-brand license or history rewrite, a release.
 
 ## H08 — CLIProductRC and the old-code retirement list
 
-**Progress**: The [product-rollup record](batches/h08-product-rc.md) wires the
-application query, xref and default-text seams through new development callers; the
-required set now stands at 164/181 seams and 83/86 cases. The remaining 17 seams are
-the D068–D070 `extract-entry` fixtures.
+**Progress**: The [product-rollup record](batches/h08-product-rc.md) completes the
+application query, xref, default-text, 041 original-view and extract seams through
+development callers. `python3 tools/e2e.py run` accepts the full required set:
+181/181 seams and 86/86 cases. The retirement review found no active reference,
+dexdec or MCP dependency and no publication path. Windows, ART and representative
+performance remain not-run.
 
 **Dependencies**: H07, T25, T14. **Scope**: overall acceptance and release
 configuration preparation; MCP stays deferred.

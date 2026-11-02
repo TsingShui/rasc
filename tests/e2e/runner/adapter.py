@@ -58,10 +58,11 @@ def run_public(root, cache, spec, manifest, case_ids=None,representation=None,jo
     scheduled = sorted(runs,key=lambda item: -durations.get((item[0]['id'],item[1]['id'],item[2]),0))
     output = Path(tempfile.mkdtemp(prefix='run-',dir=base))
     run(['cargo','build','-p','diana-decomp','--release','--example','inspect_class','--locked'], root, output/'build.log', timeout=180)
-    run(['cargo','build','-p','diana','--release','--example','app_query','--example','app_decompile','--locked'], root, output/'build-app.log', timeout=180)
+    run(['cargo','build','-p','diana','--release','--example','app_query','--example','app_decompile','--example','app_extract','--locked'], root, output/'build-app.log', timeout=180)
     executable = root/'target/release/examples'/('inspect_class.exe' if os.name=='nt' else 'inspect_class')
     app_query = root/'target/release/examples'/('app_query.exe' if os.name=='nt' else 'app_query')
     app_decompile = root/'target/release/examples'/('app_decompile.exe' if os.name=='nt' else 'app_decompile')
+    app_extract = root/'target/release/examples'/('app_extract.exe' if os.name=='nt' else 'app_extract')
     revision=run(['git','rev-parse','HEAD'],root,output/'revision.log').strip()
     dirty=bool(run(['git','status','--porcelain','--untracked-files=no','--','Cargo.toml','Cargo.lock','apps/diana','crates/diana-decomp','tests/e2e','docs/diana/e2e_cases.json','tools/e2e.py'],root,output/'working-tree.log').strip())
     def execute(item):
@@ -103,6 +104,32 @@ def run_public(root, cache, spec, manifest, case_ids=None,representation=None,jo
                     path=work/(group+'.json');save(path,value);record['artifacts'][group]={'path':relative(path)}
                 record['execution']='completed'
                 record['owner_reports']=reports
+            elif seam == 'extract-entry':
+                binding = cert['bindings'][0]
+                origin = binding['origin']
+                asset = assets[origin['asset_id']]
+                archive = root/asset['path']
+                if not archive.is_file() or archive.stat().st_size != asset['size']:
+                    raise PreparationError('missing/changed certified input')
+                work.mkdir(parents=True,exist_ok=True)
+                target_dir = work/'target'
+                target_dir.mkdir(exist_ok=True)
+                observe_dir = work/'observed'
+                observe_dir.mkdir(exist_ok=True)
+                record_data = extract_observations(app_extract, archive, invocation['input'], target_dir, observe_dir, work)
+                filesystem_path = work/'filesystem.json'
+                save(filesystem_path, record_data)
+                record['artifacts']['filesystem']={'path':relative(filesystem_path)}
+                outcome_path = work/'outcome.json'
+                success = record_data.get('outcome')=='success'
+                if record_data.get('publishers'):
+                    success = any(publisher['outcome']=='success' for publisher in record_data['publishers'])
+                save(outcome_path,{'outcome':'data' if success else 'error','status':'data' if success else 'request_error',
+                                   'selected':cert['bindings'],'members':[],
+                                   'diagnostics':([] if success else [{'kind':record_data.get('error_kind','io')}]),
+                                   'report':{'available':True},'published_success':success})
+                record['artifacts']['outcome']={'path':relative(outcome_path)}
+                record['execution']='completed'
             elif seam in {'application-default-text','application-original-view'}:
                 binding = cert['bindings'][0]
                 selector, origin = binding['selector'], binding['origin']
@@ -507,6 +534,145 @@ def _artifacts(actual, cert,requested=()):
         if any(not part.isidentifier() for part in (package.split('.') if package else [])+[name]):raise ValueError('unsupported known Java context name')
         groups['declaration_source']={'name':name,'package':package,'source':actual['members'][0]['source'],'abstract':bool(actual['access_flags']&0x400)}
     return groups
+
+
+
+def _entry_payload(archive, name, ordinal):
+    """Independent stdlib read of one physical entry payload by record index."""
+    import zipfile
+    from e2e import PreparationError
+    with zipfile.ZipFile(archive) as zf:
+        infos=zf.infolist()
+        if ordinal is None or ordinal>=len(infos):raise PreparationError('entry ordinal missing')
+        info=infos[ordinal]
+        if info.filename!=name:raise PreparationError('entry name does not match its record index')
+        return zf.read(info)
+
+
+def _zip_names(archive):
+    import zipfile
+    with zipfile.ZipFile(archive) as zf:
+        return [info.filename for info in zf.infolist()]
+
+
+def extract_observations(app_extract, archive, spec, target_dir, observe_dir, work):
+    """Builds the D068-D070 target/observer fixtures and runs one extraction."""
+    import subprocess
+    from e2e import relative
+    def rel(path):
+        return relative(Path(path))
+    target_spec = spec.get('target') or {}
+    if isinstance(target_spec,str):
+        target_spec={'kind':target_spec}
+    kind = target_spec.get('kind','absent')
+    target = target_dir/'out.bin'
+    originals=[]
+    def observe(path):
+        info=Path(path).stat()
+        return {'path':str(Path(path)),'identity_before':[info.st_dev,info.st_ino],
+                'held_identity':[info.st_dev,info.st_ino]}
+    originals.append(observe(archive))
+    if kind=='regular':
+        target.write_bytes(bytes(target_spec['bytes']))
+        originals.append(observe(target))
+    elif kind=='symlink':
+        referent=target_dir/'sentinel'
+        referent.write_bytes(b'KEEP')
+        target.symlink_to(referent.name)
+        originals.append(observe(referent))
+    elif kind=='input-path':
+        target=archive
+        originals.append(observe(archive))
+    elif kind=='input-hardlink':
+        import os
+        os.link(archive,target)
+        originals.append(observe(archive))
+    elif kind=='directory':
+        target.mkdir()
+    elif kind!='absent':
+        raise PreparationError('unknown target kind '+kind)
+    originals_out=[]
+    for index,original in enumerate(originals):
+        source=Path(original['path'])
+        before=observe_dir/('original-%d-before.bin'%index)
+        held=observe_dir/('original-%d-held.bin'%index)
+        before.write_bytes(source.read_bytes())
+        held.write_bytes(before.read_bytes())
+        originals_out.append({**original,'before_bytes':rel(before),'held_final_bytes':rel(held)})
+    force=bool(spec.get('force'))
+    inflated=spec.get('inflateBudgetBytes')
+    def command(entry_name, ordinal, out_path):
+        argv=[app_extract,archive,entry_name]
+        if ordinal is not None:argv.extend(['--entry-index',str(ordinal)])
+        argv.extend(['-o',str(out_path)])
+        if force:argv.append('--force')
+        if inflated is not None:argv.extend(['--max-inflated-bytes',str(inflated)])
+        return argv
+    scratch=observe_dir/'tmp'
+    scratch.mkdir(exist_ok=True)
+    record={'target_path':rel(target),'temporary_directory':rel(scratch),'observations':[]}
+    names=_zip_names(archive)
+    publishers_spec=spec.get('publishers')
+    if publishers_spec:
+        record['observations']=[None]
+        processes=[]
+        payloads=[]
+        for entry_spec in publishers_spec:
+            ordinal=entry_spec['entryOrdinal']
+            data_path=observe_dir/('publisher-%d.bin'%ordinal)
+            data_path.write_bytes(_entry_payload(archive,names[ordinal],ordinal))
+            payloads.append((ordinal,data_path))
+            processes.append(subprocess.Popen(command(names[ordinal],ordinal,target),
+                                              stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True))
+        outcomes=[]
+        for (ordinal,data_path),process in zip(payloads,processes):
+            out,_=process.communicate(timeout=120)
+            try:parsed=json.loads(out)
+            except ValueError:parsed={'outcome':'error','error_kind':'io'}
+            outcomes.append({'outcome':parsed['outcome'],'error_kind':parsed.get('error_kind'),
+                             'payload_path':rel(data_path)})
+        record['publishers']=outcomes
+        final=observe_dir/'final.bin'
+        final.write_bytes(target.read_bytes() if target.is_file() else b'')
+        record['observations'].append({'bytes_path':rel(final)})
+        winners=[entry for entry in outcomes if entry['outcome']=='success']
+        if len(winners)==1:
+            selected=observe_dir/'winning.bin'
+            selected.write_bytes(target.read_bytes())
+            record['selected_payload_path']=rel(selected)
+        else:
+            record['error_kind']='target_exists'
+        return record
+    entry_spec=spec.get('entry') or {}
+    name=entry_spec.get('name')
+    ordinal=entry_spec.get('ordinal')
+    if 'entryOrdinal' in spec:
+        ordinal=spec['entryOrdinal']
+        name=names[ordinal]
+        if target.is_file():
+            before=observe_dir/'before.bin'
+            before.write_bytes(target.read_bytes())
+            record['observations'].append({'bytes_path':rel(before)})
+    completed=subprocess.run(command(name,ordinal,target),stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,timeout=120)
+    try:parsed=json.loads(completed.stdout)
+    except ValueError:parsed={'outcome':'error','error_kind':'io'}
+    if name and ordinal is not None and parsed['outcome']=='success':
+        selected=observe_dir/'selected.bin'
+        selected.write_bytes(_entry_payload(archive,name,ordinal))
+        record['selected_payload_path']=rel(selected)
+    if target_spec.get('role')=='explicit-safe-output':
+        record['safe_output_path']=rel(target)
+        record['created_paths']=[rel(target)]
+        record['escape_path']=rel(work/'escape')
+    record['outcome']=parsed['outcome']
+    if parsed['outcome']!='success':
+        record['error_kind']=parsed.get('error_kind','io')
+    record['originals']=originals_out
+    if target.is_file():
+        final=observe_dir/'final.bin'
+        final.write_bytes(target.read_bytes())
+        record['observations'].append({'bytes_path':rel(final)})
+    return record
 
 
 def run_unimplemented(spec):

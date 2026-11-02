@@ -5,7 +5,9 @@ structured/dispatcher Java, protected methods and initialization. T21 generic/br
 and T22 named-nested source profiles have recorded acceptance. T23's restricted
 enum/annotation definitions, runtime uses and defaults also pass their recorded
 acceptance. The engine gate accepts every required engine invocation at b39805f,
-so EngineCoreRC is accepted for `darwin-aarch64`; ProductRC remains open. Package
+so EngineCoreRC is accepted for `darwin-aarch64`. The application seams are also
+accepted, so CLIProductRC holds for the same profile; Windows, ART and
+representative-input performance remain not-run. Package
 versions retain their scaffold markers. [TASKS.md](TASKS.md)
 owns current capability and acceptance status. B01–B04 preparation is accepted on
 macOS arm64; see [preparation evidence](batches/b02-b04-preparation.md).
@@ -43,8 +45,7 @@ revision. Failed Java retains checked original instructions, references and cove
 for analysis; it does not promise standard-Smali output or reassembly. TASKS §3
 owns revision-specific acceptance and bounded self-test authorization.
 The frozen JSON retains its draft metadata rather than acting as a progress counter.
-Windows/Linux and ART are not-run. The core/application rollup remains open
-under the task-specific acceptance gates in TASKS.
+Windows/Linux and ART are not-run.
 
 For implementation, read DESIGN, then the relevant section of ALGORITHMS, then
 the current TASKS card. Consult SOURCE_MAP when checking evidence. Every authored

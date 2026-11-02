@@ -30,27 +30,43 @@ rewritten, and never an engine-generated fragment.
 
 ## Current ledger
 
-`python3 tools/e2e.py run` with this working tree selects 86 cases and 181 seams.
-Result: 164 seams and 83 whole cases accepted. The only remaining seam is
-`extract-entry`: D068 (5 invocations), D069 (4) and D070 (8), 17 in total. Earlier
-records listed `application-original-view`, `application-default-text`,
-`query-defined-symbols` and `query-reference-sites` as unimplemented; they now pass
-against the existing independent expectations.
+`python3 tools/e2e.py run` selects the full required set from the JSON: 86 cases,
+177 invocations, 181 seams. Result: **181/181 seams and 86/86 whole cases
+accepted**, with no failing seam and no member regression.
+
+The last seams to land were the 17 `extract-entry` invocations. The adapter now
+builds the D068–D070 archive, target and observer fixtures, drives
+`analysis::extract` through a development caller, and records the observations the
+comparator asserts: exact payload bytes for stored/deflated/duplicate records, the
+ambiguous duplicate, CRC/budget/compression/encryption rejections, existing target
+without force, symlink, input path, input hardlink and directory targets, the
+traversal-shaped entry name with an explicit safe output, two concurrent publishers
+where exactly one wins with `target_exists` for the other, and the atomic
+replacement sequence that only observes the old and the complete new payload.
 
 Gates: formatting, strict workspace Clippy and the locked release build pass;
 `cargo nextest run --workspace --all-features --locked` passes 234 tests with zero
 skips. The E2E adapter change adds no product test and no CLI black-box check.
 
-## Remaining work
+## Retirement review
 
-The 17 `extract-entry` invocations need an adapter path that builds the archive,
-target and observer fixtures for D068–D070, drives `analysis::extract`, and records
-the file-safety observations the comparator already asserts. H08 stays open until
-those seams are accepted and the retirement review below is recorded.
+Reviewed by reading the workspace manifests, the source tree and the CI file:
 
-## Retirement review (pending completion of the seams)
+- `Cargo.toml` lists only `apps/diana` and `crates/diana-decomp` as members and
+  default members, and excludes `ref-fork/rasc`, which keeps its own workspace and
+  lockfile.
+- Both packages keep `publish = false` and the `0.0.0` scaffold marker; no tag,
+  release workflow or publication step runs for this branch.
+- No active target, module or test references `ref-fork`, dexdec, rusty-dex or the
+  old MCP surface; those names appear only in documentation statements about
+  independence and in the archived tree. The earlier `skill`/MCP command was not
+  restored, and no adapter for MCP was designed.
+- `.github/workflows/diana.yml` runs the Diana-only gates and states that ref-fork is
+  never built or tested.
+- The reference tree remains complete and outside every root gate; nothing in it
+  was deleted or rewritten by this branch.
 
-- `Cargo.toml` excludes `ref-fork/rasc` and lists only `apps/diana` and
-  `crates/diana-decomp`; both packages keep `publish = false` and the `0.0.0`
-  scaffold marker, and no active target or script references rasc, dexdec or MCP.
-- The archived reference stays complete and outside every root gate.
+## Remaining obligations
+
+The Windows binary target, ART execution and representative-input performance
+measurement are not run and are not claimed. MCP stays deferred.
