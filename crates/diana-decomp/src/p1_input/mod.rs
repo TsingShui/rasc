@@ -28,7 +28,10 @@ mod strings;
 mod structure;
 pub(crate) mod values;
 
-pub use catalog::{ClassView, MethodDeclaration, MethodEntry, ProgramIndex, Prototype};
+pub use catalog::{
+    ClassView, FieldDeclaration, FieldEntry, FieldStorage, MethodDeclaration, MethodEntry,
+    ProgramIndex, Prototype,
+};
 pub use code::{MethodBody, RawMethodView};
 pub use container::DexContainer;
 pub use cursor::{Cursor, checked_range};

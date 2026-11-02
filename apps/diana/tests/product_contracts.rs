@@ -2,8 +2,7 @@
 //! selection, path policy, budgets and classified damage.
 
 use std::fs;
-use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::path::Path;
 
 use diana::analysis::apk;
 use diana::analysis::archive::{EntryView, crc32};
@@ -13,119 +12,9 @@ use diana::analysis::input::{
 };
 use diana::analysis::request::RequestScope;
 
-static COUNTER: AtomicU32 = AtomicU32::new(0);
+mod support;
 
-struct TempDir {
-    path: PathBuf,
-}
-
-impl TempDir {
-    fn new(label: &str) -> Self {
-        let mut path = std::env::temp_dir();
-        path.push(format!(
-            "diana-h02-{label}-{}-{}",
-            std::process::id(),
-            COUNTER.fetch_add(1, Ordering::SeqCst)
-        ));
-        fs::create_dir_all(&path).unwrap();
-        Self { path }
-    }
-    fn path(&self) -> &Path {
-        &self.path
-    }
-    fn file(&self, name: &str, bytes: &[u8]) -> PathBuf {
-        let path = self.path.join(name);
-        fs::write(&path, bytes).unwrap();
-        path
-    }
-}
-
-impl Drop for TempDir {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.path);
-    }
-}
-
-struct ZipEntry<'a> {
-    name: &'a str,
-    /// Uncompressed payload; it determines the CRC and declared size.
-    data: &'a [u8],
-    /// Bytes actually stored in the entry; defaults to `data` for stored records.
-    compressed: Option<&'a [u8]>,
-    method: u16,
-    flags: u16,
-    crc: Option<u32>,
-}
-
-fn stored_entry<'a>(name: &'a str, data: &'a [u8]) -> ZipEntry<'a> {
-    ZipEntry {
-        name,
-        data,
-        compressed: None,
-        method: 0,
-        flags: 0,
-        crc: None,
-    }
-}
-
-fn zip(entries: &[ZipEntry<'_>]) -> Vec<u8> {
-    let mut out = Vec::new();
-    let mut central = Vec::new();
-    for entry in entries {
-        let offset = u32::try_from(out.len()).unwrap();
-        let name = entry.name.as_bytes();
-        let crc = entry.crc.unwrap_or_else(|| crc32(entry.data));
-        let stored = entry.compressed.unwrap_or(entry.data);
-        let size = u32::try_from(stored.len()).unwrap();
-        let uncompressed = u32::try_from(entry.data.len()).unwrap();
-        let mut local = Vec::new();
-        local.extend_from_slice(b"PK\x03\x04");
-        local.extend_from_slice(&20u16.to_le_bytes());
-        local.extend_from_slice(&entry.flags.to_le_bytes());
-        local.extend_from_slice(&entry.method.to_le_bytes());
-        local.extend_from_slice(&0u16.to_le_bytes());
-        local.extend_from_slice(&0u16.to_le_bytes());
-        local.extend_from_slice(&crc.to_le_bytes());
-        local.extend_from_slice(&size.to_le_bytes());
-        local.extend_from_slice(&uncompressed.to_le_bytes());
-        local.extend_from_slice(&u16::try_from(name.len()).unwrap().to_le_bytes());
-        local.extend_from_slice(&0u16.to_le_bytes());
-        local.extend_from_slice(name);
-        local.extend_from_slice(stored);
-        out.extend_from_slice(&local);
-
-        central.extend_from_slice(b"PK\x01\x02");
-        central.extend_from_slice(&20u16.to_le_bytes());
-        central.extend_from_slice(&20u16.to_le_bytes());
-        central.extend_from_slice(&entry.flags.to_le_bytes());
-        central.extend_from_slice(&entry.method.to_le_bytes());
-        central.extend_from_slice(&0u16.to_le_bytes());
-        central.extend_from_slice(&0u16.to_le_bytes());
-        central.extend_from_slice(&crc.to_le_bytes());
-        central.extend_from_slice(&size.to_le_bytes());
-        central.extend_from_slice(&uncompressed.to_le_bytes());
-        central.extend_from_slice(&u16::try_from(name.len()).unwrap().to_le_bytes());
-        central.extend_from_slice(&0u16.to_le_bytes());
-        central.extend_from_slice(&0u16.to_le_bytes());
-        central.extend_from_slice(&0u16.to_le_bytes());
-        central.extend_from_slice(&0u16.to_le_bytes());
-        central.extend_from_slice(&0u32.to_le_bytes());
-        central.extend_from_slice(&offset.to_le_bytes());
-        central.extend_from_slice(name);
-    }
-    let directory_offset = u32::try_from(out.len()).unwrap();
-    out.extend_from_slice(&central);
-    let directory_size = u32::try_from(central.len()).unwrap();
-    out.extend_from_slice(b"PK\x05\x06");
-    out.extend_from_slice(&0u16.to_le_bytes());
-    out.extend_from_slice(&0u16.to_le_bytes());
-    out.extend_from_slice(&u16::try_from(entries.len()).unwrap().to_le_bytes());
-    out.extend_from_slice(&u16::try_from(entries.len()).unwrap().to_le_bytes());
-    out.extend_from_slice(&directory_size.to_le_bytes());
-    out.extend_from_slice(&directory_offset.to_le_bytes());
-    out.extend_from_slice(&0u16.to_le_bytes());
-    out
-}
+use support::{TempDir, ZipEntry, dex, stored_entry, zip};
 
 fn archive_payload(lease: &diana::analysis::input::InputLease, index: EntryIndex) -> &[u8] {
     let entry = &lease.archive().unwrap().entries()[index.0];
@@ -137,12 +26,6 @@ fn options(limits: InputLimits) -> InputOptions {
         limits,
         allowed_root: None,
     }
-}
-
-fn dex(payload: u8) -> Vec<u8> {
-    let mut bytes = b"dex\n035\0".to_vec();
-    bytes.extend_from_slice(&[payload; 16]);
-    bytes
 }
 
 #[test]
@@ -550,4 +433,319 @@ fn h02_truncated_or_replaced_archives_never_publish_a_partial_directory() {
     let lease = open_input(&empty, &options(InputLimits::default())).unwrap();
     assert_eq!(lease.kind(), InputKind::Opaque);
     assert!(matches!(apk::roots(&lease), Err(InputError::NotDex)));
+}
+
+mod h03 {
+    use std::sync::atomic::AtomicBool;
+
+    use diana::analysis::input::{InputLimits, InputOptions};
+    use diana::analysis::query::{
+        Query, QueryError, QueryKind, QueryLimit, QueryLimits, QueryPlan, Row,
+    };
+    use diana::analysis::request::RequestScope;
+
+    use super::support::{TempDir, dex, stored_entry, zip};
+
+    const FIELD_DEX: &[u8] =
+        include_bytes!("../../../crates/diana-decomp/tests/fixtures/annotations/field.dex");
+    const POLY_DEX: &[u8] =
+        include_bytes!("../../../crates/diana-decomp/tests/fixtures/dynamic/poly.dex");
+    const TEXT_DEX: &[u8] =
+        include_bytes!("../../../crates/diana-decomp/tests/fixtures/annotations/text.dex");
+
+    fn options() -> InputOptions {
+        InputOptions {
+            limits: InputLimits::default(),
+            allowed_root: None,
+        }
+    }
+
+    fn plan_for(kind: QueryKind, jobs: usize) -> QueryPlan {
+        QueryPlan {
+            kind,
+            filter: None,
+            class: None,
+            limits: QueryLimits::default(),
+            jobs,
+        }
+    }
+
+    fn collect(scope: &RequestScope, plan: QueryPlan) -> Vec<Row> {
+        let query = Query::new(scope, plan).unwrap();
+        let cancel = AtomicBool::new(false);
+        let mut rows = Vec::new();
+        query
+            .run(&cancel, &mut |row| {
+                rows.push(row);
+                Ok(())
+            })
+            .unwrap();
+        rows
+    }
+
+    fn text(units: &[u16]) -> String {
+        String::from_utf16(units).unwrap()
+    }
+
+    #[test]
+    fn h03_defined_members_and_strings_keep_their_original_identity() {
+        let dir = TempDir::new("h03-members");
+        let path = dir.file("field.dex", FIELD_DEX);
+        let scope = RequestScope::open(&path, &options()).unwrap();
+
+        let classes = collect(&scope, plan_for(QueryKind::Classes, 1));
+        let mut descriptors: Vec<String> = classes
+            .iter()
+            .map(|row| match row {
+                Row::Class(row) => text(&row.descriptor),
+                _ => panic!("classes returned a foreign row"),
+            })
+            .collect();
+        descriptors.sort();
+        assert_eq!(descriptors, ["Lfixtures/Field;", "Lfixtures/Mark;"]);
+
+        let methods = collect(&scope, plan_for(QueryKind::Methods, 1));
+        let defined: Vec<(u32, String, String)> = methods
+            .iter()
+            .map(|row| match row {
+                Row::Method(row) => (row.class_def.0, text(&row.name), text(&row.prototype)),
+                _ => panic!("methods returned a foreign row"),
+            })
+            .collect();
+        // Only class_data definitions are listed; external method_ids references
+        // such as Object.<init> never appear as definitions.
+        assert_eq!(defined.len(), 4, "{defined:?}");
+        assert!(defined.contains(&(0, "read".to_owned(), "()I".to_owned())));
+        assert!(defined.contains(&(0, "<init>".to_owned().to_owned(), "()V".to_owned())));
+        assert!(defined.contains(&(1, "nums".to_owned(), "()[I".to_owned())));
+        assert!(defined.contains(&(1, "value".to_owned(), "()Ljava/lang/String;".to_owned())));
+
+        let fields = collect(&scope, plan_for(QueryKind::Fields, 1));
+        assert_eq!(fields.len(), 1);
+        match &fields[0] {
+            Row::Field(row) => {
+                assert_eq!(row.class_def.0, 0);
+                assert_eq!(text(&row.name), "n");
+                assert_eq!(text(&row.field_type), "I");
+                assert_eq!(row.access_flags & 1, 1);
+                assert!(matches!(
+                    row.storage,
+                    diana_decomp::input::FieldStorage::Instance
+                ));
+            }
+            _ => panic!("fields returned a foreign row"),
+        }
+
+        let strings = collect(&scope, plan_for(QueryKind::Strings, 1));
+        let values: Vec<String> = strings
+            .iter()
+            .map(|row| match row {
+                Row::String(row) => text(&row.units),
+                _ => panic!("strings returned a foreign row"),
+            })
+            .collect();
+        assert!(values.contains(&"read".to_owned()));
+        assert!(values.contains(&"n".to_owned()));
+        // Every row carries the original string_ids index exactly once.
+        let indices: Vec<u32> = strings
+            .iter()
+            .map(|row| match row {
+                Row::String(row) => row.string.0,
+                _ => panic!("strings returned a foreign row"),
+            })
+            .collect();
+        assert_eq!(
+            indices,
+            (0..u32::try_from(indices.len()).unwrap()).collect::<Vec<_>>()
+        );
+
+        let text_path = dir.file("text.dex", TEXT_DEX);
+        let text_scope = RequestScope::open(&text_path, &options()).unwrap();
+        let text_rows = collect(&text_scope, plan_for(QueryKind::Strings, 1));
+        assert!(text_rows.iter().any(|row| match row {
+            Row::String(row) => row.units == [0, 55296, 65, 56320, 92, 117, 48, 48, 48, 97],
+            _ => false,
+        }));
+    }
+
+    #[test]
+    fn h03_filters_match_every_record_without_changing_original_identity() {
+        let dir = TempDir::new("h03-filter");
+        let path = dir.file("field.dex", FIELD_DEX);
+        let scope = RequestScope::open(&path, &options()).unwrap();
+        let unfiltered = collect(&scope, plan_for(QueryKind::Methods, 1));
+        let reference = unfiltered
+            .iter()
+            .find_map(|row| match row {
+                Row::Method(row) if text(&row.name) == "read" => Some((row.class_def, row.method)),
+                _ => None,
+            })
+            .unwrap();
+        let mut plan = plan_for(QueryKind::Methods, 1);
+        plan.filter = Some("rea".encode_utf16().collect());
+        let rows = collect(&scope, plan);
+        assert_eq!(rows.len(), 1);
+        match &rows[0] {
+            Row::Method(row) => {
+                assert_eq!(text(&row.name), "read");
+                // The filtered row keeps the same original identity as the
+                // unfiltered enumeration of the same input.
+                assert_eq!((row.class_def, row.method), reference);
+            }
+            _ => panic!("filter returned a foreign row"),
+        }
+
+        let mut plan = plan_for(QueryKind::Fields, 1);
+        plan.class = Some(diana::analysis::dex::class_descriptor("fixtures.Mark"));
+        assert!(collect(&scope, plan).is_empty());
+
+        let mut plan = plan_for(QueryKind::Fields, 1);
+        plan.class = Some(diana::analysis::dex::class_descriptor("fixtures.Field"));
+        assert_eq!(collect(&scope, plan).len(), 1);
+
+        let mut plan = plan_for(QueryKind::Classes, 1);
+        plan.filter = Some("Mark".encode_utf16().collect());
+        let rows = collect(&scope, plan);
+        assert_eq!(rows.len(), 1);
+        assert!(matches!(&rows[0], Row::Class(row) if row.class_def.0 == 1));
+
+        // A supplementary-plane literal must match as UTF-16 units, not bytes.
+        let text_path = dir.file("text.dex", TEXT_DEX);
+        let text_scope = RequestScope::open(&text_path, &options()).unwrap();
+        let mut plan = plan_for(QueryKind::Strings, 1);
+        plan.filter = Some(vec![0xd800, 0x0041, 0xdc00]);
+        let rows = collect(&text_scope, plan);
+        assert_eq!(rows.len(), 1);
+        assert!(
+            matches!(&rows[0], Row::String(row) if row.units == [0, 55296, 65, 56320, 92, 117, 48, 48, 48, 97])
+        );
+    }
+
+    #[test]
+    fn h03_entries_list_physical_records_and_reject_a_bare_dex() {
+        let dir = TempDir::new("h03-entries");
+        let archive = zip(&[
+            stored_entry("classes.dex", &dex(0x11)),
+            stored_entry("assets/a.txt", b"a"),
+            stored_entry("classes.dex", &dex(0x12)),
+        ]);
+        let path = dir.file("dup.apk", &archive);
+        let scope = RequestScope::open(&path, &options()).unwrap();
+        let rows = collect(&scope, plan_for(QueryKind::Entries, 1));
+        let listed: Vec<(usize, String, u16)> = rows
+            .iter()
+            .map(|row| match row {
+                Row::Entry(row) => (row.entry.0, row.name.clone(), row.method),
+                _ => panic!("entries returned a foreign row"),
+            })
+            .collect();
+        assert_eq!(
+            listed,
+            [
+                (0, "classes.dex".to_owned(), 0),
+                (1, "assets/a.txt".to_owned(), 0),
+                (2, "classes.dex".to_owned(), 0),
+            ]
+        );
+
+        let bare = dir.file("bare.dex", FIELD_DEX);
+        let bare_scope = RequestScope::open(&bare, &options()).unwrap();
+        let query = Query::new(&bare_scope, plan_for(QueryKind::Entries, 1)).unwrap();
+        let cancel = AtomicBool::new(false);
+        assert!(matches!(
+            query.run(&cancel, &mut |_row| Ok(())),
+            Err(QueryError::NotArchive)
+        ));
+    }
+
+    #[test]
+    fn h03_multi_image_rows_are_complete_regardless_of_completion_order() {
+        let dir = TempDir::new("h03-images");
+        let archive = zip(&[
+            stored_entry("classes.dex", FIELD_DEX),
+            stored_entry("classes2.dex", POLY_DEX),
+        ]);
+        let path = dir.file("two.apk", &archive);
+        let scope = RequestScope::open(&path, &options()).unwrap();
+
+        let serial = collect(&scope, plan_for(QueryKind::Methods, 1));
+        let parallel = collect(&scope, plan_for(QueryKind::Methods, 4));
+        let identity = |rows: &[Row]| {
+            let mut keys: Vec<(usize, u32, u32)> = rows
+                .iter()
+                .map(|row| match row {
+                    Row::Method(row) => (row.image.0, row.class_def.0, row.method.0),
+                    _ => panic!("methods returned a foreign row"),
+                })
+                .collect();
+            keys.sort();
+            keys
+        };
+        assert_eq!(identity(&serial), identity(&parallel));
+        assert_eq!(serial.len(), 4 + 3);
+        assert_eq!(identity(&serial).len(), 7);
+
+        let query = Query::new(&scope, plan_for(QueryKind::Methods, 2)).unwrap();
+        assert_eq!(query.images().len(), 2);
+        assert_eq!(query.images()[0].label, "classes.dex");
+        assert_eq!(query.images()[1].label, "classes2.dex");
+        assert_eq!(query.images()[0].index.0, 0);
+        assert_eq!(query.images()[1].index.0, 1);
+    }
+
+    #[test]
+    fn h03_explicit_row_bound_and_cancellation_stop_without_a_successful_prefix() {
+        let dir = TempDir::new("h03-bounds");
+        let path = dir.file("field.dex", FIELD_DEX);
+        let scope = RequestScope::open(&path, &options()).unwrap();
+
+        let mut plan = plan_for(QueryKind::Strings, 1);
+        plan.limits = QueryLimits {
+            max_rows: Some(1),
+            max_batch_rows: Some(1),
+        };
+        let query = Query::new(&scope, plan).unwrap();
+        let cancel = AtomicBool::new(false);
+        let mut delivered = 0u64;
+        let result = query.run(&cancel, &mut |_row| {
+            delivered += 1;
+            Ok(())
+        });
+        assert!(matches!(
+            result,
+            Err(QueryError::Budget {
+                limit: QueryLimit::Rows,
+                maximum: 1,
+                ..
+            })
+        ));
+        assert!(delivered <= 2, "a bounded query published {delivered} rows");
+
+        let plan = plan_for(QueryKind::Strings, 1);
+        let query = Query::new(&scope, plan).unwrap();
+        let cancel = AtomicBool::new(true);
+        assert!(matches!(
+            query.run(&cancel, &mut |_row| Ok(())),
+            Err(QueryError::Cancelled)
+        ));
+
+        let mut plan = plan_for(QueryKind::Strings, 1);
+        plan.limits = QueryLimits {
+            max_rows: None,
+            max_batch_rows: Some(1),
+        };
+        let rows = collect(&scope, plan);
+        assert!(rows.len() > 1);
+        let mut distinct = rows.clone();
+        distinct.sort_by_key(|row| match row {
+            Row::String(row) => row.string.0,
+            _ => u32::MAX,
+        });
+        distinct.dedup();
+        assert_eq!(
+            distinct.len(),
+            rows.len(),
+            "a batched query duplicated a row"
+        );
+    }
 }

@@ -158,6 +158,12 @@ impl<'a> ProgramIndex<'a> {
         })
     }
 
+    /// Number of original ``string_ids`` entries, not the count of strings that
+    /// appear in code.
+    pub fn string_ids_len(&self) -> u32 {
+        self.header.string_ids.count
+    }
+
     /// Visits original class_def identities independently. Malformed class
     /// metadata is delivered locally; cancellation/resources stop the request.
     pub fn visit_classes(
@@ -807,6 +813,15 @@ impl<'a> Prototype<'_, 'a> {
         self.visit_parameter_type_ids(control, |_, name, control| visit(name, control))
     }
 
+    /// Visits the original parameter descriptors in declaration order.
+    pub fn visit_parameters(
+        &self,
+        control: &mut RunContext<'_>,
+        mut visit: impl FnMut(DexString<'a>, &mut RunContext<'_>) -> Result<(), InputError>,
+    ) -> Result<(), InputError> {
+        self.visit_parameter_types(control, |name, control| visit(name, control))
+    }
+
     /// Compares a complete DEX descriptor, including the return type.
     pub fn matches(
         &self,
@@ -845,18 +860,19 @@ impl<'a> Prototype<'_, 'a> {
     }
 }
 
-pub(crate) struct FieldDeclaration<'a> {
+pub struct FieldDeclaration<'a> {
     pub name: DexString<'a>,
     pub field_type: DexString<'a>,
     pub field_type_idx: TypeId,
 }
 
-pub(crate) enum FieldStorage {
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum FieldStorage {
     Static { ordinal: u32 },
     Instance,
 }
 
-pub(crate) struct FieldEntry<'a> {
+pub struct FieldEntry<'a> {
     pub field_idx: FieldId,
     pub access_flags: u32,
     pub storage: FieldStorage,
@@ -889,6 +905,26 @@ pub struct MethodEntry<'i, 'a> {
 }
 
 impl<'i, 'a> ClassView<'i, 'a> {
+    /// Visits original field definitions only, in class-data order. External
+    /// ``field_ids`` references are not definitions. A boundary error returns
+    /// after the delivered prefix; callers retain that prefix.
+    pub fn visit_fields(
+        &self,
+        control: &mut RunContext<'_>,
+        mut visit: impl FnMut(FieldEntry<'a>, &mut RunContext<'_>) -> Result<(), InputError>,
+    ) -> Result<(), InputError> {
+        self.visit_members_with(
+            control,
+            MemberSelection::Fields,
+            |entry, control| match entry {
+                MemberEntry::Field(field) => visit(field, control),
+                _ => Err(InputError::InternalInvariant(
+                    "field traversal delivered a method",
+                )),
+            },
+        )
+    }
+
     /// Per-member failures retain their original IDs. A class-data boundary
     /// error returns after the delivered prefix; callers retain that prefix.
     pub fn visit_methods(

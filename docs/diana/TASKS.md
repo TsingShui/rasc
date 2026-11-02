@@ -2674,6 +2674,12 @@ all-platform file database, rewriting the ZIP codec for the snapshot.
 
 ## H03 — Lightweight query, manifest and completion-order output
 
+**Progress**: The [query-core batch](batches/h03-query.md) adds the approved
+read-only P1 facts (`DexString::units`, `Prototype::visit_parameters`,
+`ClassView::visit_fields`, `string_ids_len`) and streams `entries`/`classes`/
+`methods`/`fields`/`strings` rows in completion order with explicit bounds,
+cancellation and original identity. `xref` and `manifest`/CLI columns remain.
+
 **Dependencies**: H02. **Scope**: the existing non-decompilation CLI capability.
 
 **Files**: `src/analysis/{apk,archive,query,manifest}.rs`, `src/analysis/dex/`,

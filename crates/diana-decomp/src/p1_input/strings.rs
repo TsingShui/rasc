@@ -43,6 +43,40 @@ impl<'a> DexString<'a> {
         })
     }
 
+    /// Copies the complete original UTF-16 value under the request ledger.
+    ///
+    /// The copy is owned so a caller can display or match a name without holding
+    /// the borrow; surrogate units are preserved exactly. Allocation and work are
+    /// charged before the copy grows.
+    pub fn units(&self, control: &mut RunContext<'_>) -> Result<Vec<u16>, InputError> {
+        control.checkpoint()?;
+        let length =
+            usize::try_from(self.utf16_len.0).map_err(|_| InputError::PlatformCapacity {
+                offset_byte: self.start_byte,
+            })?;
+        let mut units = Vec::new();
+        units
+            .try_reserve_exact(length)
+            .map_err(|_| InputError::Allocation {
+                offset_byte: self.start_byte,
+            })?;
+        control.charge_allocation(u64::try_from(length).map_err(|_| {
+            InputError::PlatformCapacity {
+                offset_byte: self.start_byte,
+            }
+        })?)?;
+        let mut reader = self.reader()?;
+        while let Some(unit) = reader.next(control)? {
+            units.push(unit);
+        }
+        if units.len() != length {
+            return Err(InputError::InternalInvariant(
+                "checked UTF-16 length disagrees with its reader",
+            ));
+        }
+        Ok(units)
+    }
+
     pub fn matches(&self, units: &[u16], control: &mut RunContext<'_>) -> Result<bool, InputError> {
         self.matches_with(units, control)
     }

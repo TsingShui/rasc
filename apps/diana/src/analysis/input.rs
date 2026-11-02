@@ -111,6 +111,42 @@ pub enum InputError {
     NotDex,
 }
 
+impl InputError {
+    /// One failure kind for callers that must classify an input-side error.
+    /// I/O, path policy and an unsupported container are `Unsupported`; damaged
+    /// archive records are `Malformed`; an exceeded configured bound or an actual
+    /// allocation failure is `BudgetExceeded`.
+    pub fn kind(&self) -> diana_decomp::FailureKind {
+        use diana_decomp::FailureKind as Kind;
+        match self {
+            Self::BudgetExceeded { .. } | Self::PlatformCapacity | Self::Allocation(_) => {
+                Kind::BudgetExceeded
+            }
+            Self::Io(_)
+            | Self::NotRegularFile(_)
+            | Self::OutsideRoot(_)
+            | Self::Changed
+            | Self::NotDex => Kind::Unsupported,
+            Self::MalformedArchive(problem) => match problem {
+                ArchiveProblem::EntryCountExceeded { .. }
+                | ArchiveProblem::TotalEntryBytesExceeded { .. }
+                | ArchiveProblem::InflatedBytesExceeded { .. }
+                | ArchiveProblem::Allocation(_) => Kind::BudgetExceeded,
+                ArchiveProblem::UnsupportedCompression(_)
+                | ArchiveProblem::EncryptedEntry
+                | ArchiveProblem::UnsupportedZip64
+                | ArchiveProblem::NameEncoding => Kind::Unsupported,
+                ArchiveProblem::MissingDirectory
+                | ArchiveProblem::InconsistentDirectory
+                | ArchiveProblem::OutOfRange
+                | ArchiveProblem::UnknownEntry
+                | ArchiveProblem::DamagedEntry
+                | ArchiveProblem::DecompressionFailed => Kind::Malformed,
+            },
+        }
+    }
+}
+
 impl From<std::io::Error> for InputError {
     fn from(error: std::io::Error) -> Self {
         Self::Io(error)
