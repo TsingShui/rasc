@@ -2,6 +2,7 @@
 //! selection, path policy, budgets and classified damage.
 
 use std::fs;
+#[cfg(unix)]
 use std::path::Path;
 
 use diana::analysis::apk;
@@ -1292,10 +1293,8 @@ mod h04_native {
     }
 
     fn container() -> Vec<u8> {
-        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../.cache/e2e/prepared/D065/container.dex");
-        std::fs::read(&path)
-            .expect("prepare the certified D065 container with tools/e2e.py before core tests")
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/container.dex");
+        std::fs::read(&path).expect("the certified two-member container fixture is readable")
     }
 
     #[test]
