@@ -207,12 +207,12 @@ pub enum MethodOutput {
     },
     JavaInitializer {
         facts: MethodFacts,
-        declaration: crate::VerifiedJavaInitializer,
+        declaration: crate::JavaInitializer,
         source: String,
     },
     Java {
         facts: MethodFacts,
-        declaration: crate::VerifiedJavaMethod,
+        declaration: crate::JavaMethod,
         source: String,
     },
     DeclarationOnly {
@@ -233,6 +233,15 @@ pub enum MethodOutput {
     },
 }
 impl MethodOutput {
+    /// Native source-check completion is independent of readable availability.
+    pub fn verification(&self) -> Option<crate::JavaVerification> {
+        match self {
+            Self::Java { declaration, .. } => Some(declaration.verification()),
+            Self::JavaInitializer { declaration, .. } => Some(declaration.verification()),
+            _ => None,
+        }
+    }
+
     pub fn key(&self) -> MethodKey {
         match self {
             Self::Generated { facts, .. }

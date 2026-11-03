@@ -4,7 +4,7 @@ use crate::p4_types::TypedBody;
 use crate::substrate::owned::{TextBuffer, reserve};
 use crate::{CodeUnitOffset, MethodBudget, MethodId, RequestError};
 
-/// Original invocation kind retained by verified source binding.
+/// Original invocation kind retained by the readable reconstruction.
 #[derive(Clone, Copy, Debug)]
 pub enum JavaInvokeKind {
     Super,
@@ -13,7 +13,7 @@ pub enum JavaInvokeKind {
     Virtual,
     Interface,
 }
-/// Borrowed original call identity in an owned verified method AST.
+/// Borrowed original call identity in an owned readable method AST.
 pub struct JavaCallSite<'a> {
     pub reference: MethodId,
     pub receiver: Option<crate::RegisterId>,
@@ -181,6 +181,7 @@ pub(super) fn validate_bindings(
     input: &crate::input::MethodInput<'_, '_>,
     catalog: &crate::context::Context,
     ssa: &TypedBody<'_>,
+    uncertainties: &mut Vec<crate::OutputReason>,
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<Option<SourceCalls>, RequestError> {
     let Some(throws) = &ssa.source_throws else {
@@ -191,6 +192,16 @@ pub(super) fn validate_bindings(
     let mut constructors = Vec::new();
     for (index, site) in ssa.ssa.calls.iter().enumerate() {
         budget.charge_work(1)?;
+        let original = input.method_reference(site.reference, budget)?;
+        let owner = crate::substrate::owned::copy_units(original.owner, budget)?;
+        if catalog.class(&owner, budget)?.is_none() {
+            super::method::note(
+                uncertainties,
+                "call_declaration_unknown",
+                Some(site.pc),
+                budget,
+            )?;
+        }
         let id = CallId(u32::try_from(index).map_err(|_| RequestError::PlatformCapacity)?);
         let invocation = crate::p4_types::declarations::throws::Invocation {
             reference: site.reference,
@@ -372,10 +383,12 @@ pub(super) fn validate_bindings(
                     &invocation,
                     budget,
                 )? {
-                    return Err(RequestError::BindingEvidenceMissing {
-                        reference: site.reference,
-                        pc: site.pc,
-                    });
+                    super::method::note(
+                        uncertainties,
+                        "call_source_binding",
+                        Some(site.pc),
+                        budget,
+                    )?;
                 }
                 (None, bound.inputs.as_slice())
             }

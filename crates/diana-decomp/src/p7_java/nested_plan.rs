@@ -114,6 +114,12 @@ fn verify_impl(
     members: &[MethodOutput],
     control: &mut RunContext<'_>,
 ) -> Result<Option<Plan>, RequestError> {
+    for member in members {
+        control.charge_work(1)?;
+        if member.verification() == Some(crate::JavaVerification::Incomplete) {
+            return Ok(None);
+        }
+    }
     let Some(scope) = crate::p4_types::declarations::nested_scope::collect(
         index,
         key.class_def,

@@ -253,10 +253,9 @@ impl<'a> Engine<'a> {
 
     /// Retrieves one full-prototype method or all members of a class. A local
     /// method failure retains its classified reason and any original snapshot;
-    /// cancellation and exhausted request resources stop the request. Java is
-    /// admitted for closed static scalar sequence/diamond/dispatcher profiles;
-    /// other members
-    /// retain original output, never a fabricated body.
+    /// cancellation and exhausted request resources stop the request. Readable
+    /// Java retains native-check completion and material uncertainty separately.
+    /// Missing analysis or representation products retain original output.
     pub fn decompile(
         &self,
         request: Request,
@@ -777,7 +776,17 @@ impl<'a> Engine<'a> {
                         declaration,
                         source,
                     }) => {
-                        return Ok(match crate::VerifiedJavaInitializer::seal(declaration) {
+                        for &uncertainty in declaration.uncertainties() {
+                            add_diagnostic(
+                                diagnostics,
+                                Diagnostic {
+                                    method: Some(key),
+                                    cause: DiagnosticCause::Unsupported(uncertainty),
+                                },
+                                &mut budget,
+                            )?;
+                        }
+                        return Ok(match crate::JavaInitializer::seal(declaration) {
                             crate::p7_java::initializers::JavaMember::Initializer(declaration) => {
                                 MethodOutput::JavaInitializer {
                                     facts,
@@ -950,7 +959,7 @@ fn demote(
 enum NormalMember {
     Java {
         facts: MethodFacts,
-        declaration: crate::VerifiedJavaMethod,
+        declaration: crate::JavaMethod,
         source: String,
     },
     Declaration {
@@ -1029,7 +1038,7 @@ fn normal_member(
     let _p8 = crate::pipeline::phase_span("p7_java");
     // Source collision with a sibling overload blocks class-unit assembly, not
     // this member's readable body; class_unit::verify retains that check.
-    let result = crate::p7_java::verify_method(
+    let result = crate::p7_java::reconstruct_method(
         &SchedulePermit { _private: () },
         &input,
         catalog,
@@ -1215,7 +1224,7 @@ impl DiagnosticLog {
 fn add_diagnostic(
     diagnostics: &mut DiagnosticLog,
     value: Diagnostic,
-    control: &mut RunContext<'_>,
+    control: &mut impl crate::pipeline::control::InputControl,
 ) -> Result<DiagnosticId, RequestError> {
     let rank = severity(value.cause.kind());
     if let Err(error) = reserve(&mut diagnostics.values, 1, control) {

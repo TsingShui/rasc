@@ -8,24 +8,30 @@ pub(crate) enum MemberSyntax {
 }
 
 pub(crate) enum JavaMember {
-    Method(super::VerifiedJavaMethod),
-    Initializer(VerifiedJavaInitializer),
+    Method(super::JavaMethod),
+    Initializer(JavaInitializer),
 }
 
-/// A verified original class-initialization body rendered as a Java static
-/// initializer, not a callable method. The report preserves its original key.
-/// Unit admission still requires preparation and final-field proofs.
-pub struct VerifiedJavaInitializer {
-    method: super::VerifiedJavaMethod,
+/// An original class-initialization body rendered as a readable Java static
+/// initializer, not a callable method. Native checks and uncertainty are retained
+/// separately; unit admission still requires preparation and final-field evidence.
+pub struct JavaInitializer {
+    method: super::JavaMethod,
 }
-impl VerifiedJavaInitializer {
+impl JavaInitializer {
+    pub fn verification(&self) -> super::JavaVerification {
+        self.method.verification()
+    }
+    pub fn uncertainties(&self) -> &[crate::OutputReason] {
+        self.method.uncertainties()
+    }
     pub fn calls(&self) -> impl Iterator<Item = super::JavaCallSite<'_>> {
         self.method.calls()
     }
     pub(super) fn final_assignments(&self) -> Option<&super::final_assignment::Certificate> {
         self.method.final_assignments.as_ref()
     }
-    pub(crate) fn seal(method: super::VerifiedJavaMethod) -> JavaMember {
+    pub(crate) fn seal(method: super::JavaMethod) -> JavaMember {
         if matches!(method.syntax, MemberSyntax::Initializer { .. }) {
             JavaMember::Initializer(Self { method })
         } else {

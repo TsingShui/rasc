@@ -19,6 +19,7 @@ pub(super) fn names(
     storage: &StorageBody<'_>,
     region: &Protection,
     calls: &super::calls::SourceCalls,
+    uncertainties: &mut Vec<crate::OutputReason>,
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<Option<Vec<CatchName>>, RequestError> {
     crate::p6_regions::protection::verify(storage, region, budget)?;
@@ -50,27 +51,25 @@ pub(super) fn names(
                     &descriptor,
                     budget,
                 )? {
-                    return Ok(None);
+                    super::method::note(uncertainties, "catch_type_evidence", None, budget)?;
                 }
                 if !crate::p4_types::declarations::throws::unrestricted_catch(
                     catalog,
                     &descriptor,
                     budget,
                 )? {
-                    let super::protected_throws::Bounds::Known(bounds) =
-                        super::protected_throws::handler_bounds(
-                            input,
-                            catalog,
-                            &storage.typed,
-                            calls,
-                            clause.handler,
-                            budget,
-                        )?
-                    else {
-                        return Ok(None);
-                    };
-                    if bounds.is_empty() {
-                        return Ok(None);
+                    match super::protected_throws::handler_bounds(
+                        input,
+                        catalog,
+                        &storage.typed,
+                        calls,
+                        clause.handler,
+                        budget,
+                    )? {
+                        super::protected_throws::Bounds::Known(bounds) if !bounds.is_empty() => {}
+                        _ => {
+                            super::method::note(uncertainties, "catch_reachability", None, budget)?
+                        }
                     }
                 }
                 for earlier in &previous {
@@ -82,7 +81,7 @@ pub(super) fn names(
                         budget,
                     )? != Some(false)
                     {
-                        return Ok(None);
+                        super::method::note(uncertainties, "catch_order_evidence", None, budget)?;
                     }
                 }
                 if catch.clauses.len() > 1 {
@@ -102,7 +101,12 @@ pub(super) fn names(
                             budget,
                         )? != Some(false)
                         {
-                            return Ok(None);
+                            super::method::note(
+                                uncertainties,
+                                "multi_catch_type_evidence",
+                                None,
+                                budget,
+                            )?;
                         }
                     }
                 }

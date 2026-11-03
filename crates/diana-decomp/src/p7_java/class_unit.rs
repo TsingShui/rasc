@@ -125,6 +125,12 @@ fn verify_impl(
     };
     let fields = members.fields;
     let members = members.methods;
+    for member in members {
+        control.charge_work(1)?;
+        if member.verification() == Some(crate::JavaVerification::Incomplete) {
+            return Ok(None);
+        }
+    }
     let mut emission = super::member_emission::Plan::default();
     for member in members {
         control.charge_work(1)?;

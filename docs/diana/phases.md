@@ -22,9 +22,9 @@ P2–P5 chain through `engine/method_chain.rs`, then P6 and P7. P8 renders the r
 product. Declaration-only and generated members have their own phase-owned
 checks. A declined method currently goes to the classified raw exit.
 
-The product direction is readable output with explicit uncertainty. The current
-engine still declines many methods when declaration or representation evidence
-is missing; the revised behavior is not implemented yet.
+The product direction is readable output with explicit uncertainty. P7 retains
+renderable methods when catch/source checks or final-assignment evidence remain
+incomplete. Missing analysis or representation products still decline to debug.
 
 The [stage chapters](README.md) describe each phase. Reconciling older
 verification-only gates with readable output remains in progress; do not infer

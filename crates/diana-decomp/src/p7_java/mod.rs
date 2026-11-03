@@ -1,7 +1,7 @@
 pub(crate) mod array_literals;
 pub(crate) mod array_ops;
 mod branch;
-pub(crate) use branch::{Assignment, Expression, Right, verify as verify_method};
+pub(crate) use branch::{Assignment, Expression, Right, reconstruct as reconstruct_method};
 pub(crate) use values::ValueUse;
 mod annotations;
 pub(crate) mod calls;
@@ -30,7 +30,7 @@ pub(crate) mod initializers;
 pub(crate) mod local_declarations;
 pub(crate) mod member_emission;
 mod method;
-pub use initializers::VerifiedJavaInitializer;
+pub use initializers::JavaInitializer;
 pub use member_emission::GeneratedBridge;
 mod monitor_ops;
 mod natural_control;
@@ -49,7 +49,7 @@ pub(crate) mod types;
 pub(crate) mod values;
 pub use calls::{JavaCallSite, JavaInvokeKind};
 pub(crate) use method::MethodBody;
-pub use method::VerifiedJavaMethod;
+pub use method::{JavaMethod, JavaVerification};
 
 pub use declarations::JavaMethodDecl;
 pub(crate) use declarations::declaration;

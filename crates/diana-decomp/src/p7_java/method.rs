@@ -1,22 +1,62 @@
 use crate::RequestError;
 
-/// An owned method AST admitted by the P8 verifier, including validated source
-/// type names. It contains no input or analysis-arena borrows. Verification does
-/// not invoke a Java compiler.
-pub struct VerifiedJavaMethod {
+/// An owned readable reconstruction produced by P7 from shared analysis facts.
+/// Native source checks are separate from availability; an incomplete check is
+/// retained as uncertainty, not a claim of compilability or semantic equivalence.
+pub struct JavaMethod {
     pub(super) header: String,
     pub(super) syntax: super::initializers::MemberSyntax,
     pub(super) body: MethodBody,
     pub(super) final_assignments: Option<super::final_assignment::Certificate>,
     pub(super) capture_field: Option<crate::FieldId>,
     pub(super) type_names: super::types::TypeNames,
+    pub(super) uncertainties: Vec<crate::OutputReason>,
 }
 pub(crate) enum MethodBody {
     Protected(super::protected::ProtectedBody),
     Structured(super::structured::StructuredBody),
     Dispatcher(super::dispatcher::Dispatcher),
 }
-impl VerifiedJavaMethod {
+/// Completion of the native source checks, not a compiler or equivalence certificate.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum JavaVerification {
+    NativeChecksComplete,
+    Incomplete,
+}
+
+pub(super) fn note(
+    uncertainties: &mut Vec<crate::OutputReason>,
+    check: &'static str,
+    pc: Option<crate::CodeUnitOffset>,
+    budget: &mut crate::MethodBudget<'_, '_>,
+) -> Result<(), RequestError> {
+    let reason = crate::OutputReason::JavaCheckFailed {
+        code: crate::DiagnosticCode::JavaAnalysisUnavailable,
+        phase: "P7",
+        check,
+        pc,
+    };
+    for existing in uncertainties.iter() {
+        budget.charge_work(1)?;
+        if *existing == reason {
+            return Ok(());
+        }
+    }
+    crate::substrate::owned::push(uncertainties, reason, budget)
+}
+
+impl JavaMethod {
+    pub fn verification(&self) -> JavaVerification {
+        if self.uncertainties.is_empty() {
+            JavaVerification::NativeChecksComplete
+        } else {
+            JavaVerification::Incomplete
+        }
+    }
+    pub fn uncertainties(&self) -> &[crate::OutputReason] {
+        &self.uncertainties
+    }
+
     pub(crate) fn source_header(&self) -> &str {
         &self.header
     }
@@ -42,9 +82,10 @@ impl VerifiedJavaMethod {
             capture_field: None,
             syntax,
             type_names: super::types::TypeNames::default(),
+            uncertainties: Vec::new(),
         }
     }
-    /// Iterates already verified original call identities without allocation.
+    /// Iterates retained original call identities without allocation.
     /// Returned slices borrow only this AST, not the engine or input bytes.
     pub fn calls(&self) -> impl Iterator<Item = super::JavaCallSite<'_>> {
         let cases = match &self.body {
@@ -135,6 +176,7 @@ impl VerifiedJavaMethod {
             capture_field: None,
             syntax,
             type_names: super::types::TypeNames::default(),
+            uncertainties: Vec::new(),
         }
     }
     pub(super) fn dispatcher(
@@ -149,6 +191,7 @@ impl VerifiedJavaMethod {
             capture_field: None,
             syntax,
             type_names: super::types::TypeNames::default(),
+            uncertainties: Vec::new(),
         }
     }
 }

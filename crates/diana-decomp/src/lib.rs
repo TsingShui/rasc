@@ -29,8 +29,8 @@ pub use p7_java::enums::{EnumFieldRole, EnumMemberRole, GeneratedEnumField, Gene
 pub use p7_java::member_emission::GeneratedMember;
 pub use p7_java::nested_plan::GeneratedCaptureField;
 pub use p7_java::{
-    GeneratedBridge, JavaCallSite, JavaInvokeKind, JavaMethodDecl, VerifiedJavaField,
-    VerifiedJavaInitializer, VerifiedJavaMethod, VerifiedJavaUnit,
+    GeneratedBridge, JavaCallSite, JavaInitializer, JavaInvokeKind, JavaMethod, JavaMethodDecl,
+    JavaVerification, VerifiedJavaField, VerifiedJavaUnit,
 };
 pub use p8_emit::render;
 pub use pipeline::request::{JavaTargetItem, RequestError};

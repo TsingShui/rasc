@@ -4,7 +4,7 @@ use crate::p2_flow::{BlockId, EdgeId, Terminal};
 use crate::p4_types::Kind;
 use crate::p5_variables::StorageBody;
 use crate::substrate::owned::{TextBuffer, copy_units, reserve};
-use crate::{MethodBudget, RequestError, VerifiedJavaMethod};
+use crate::{JavaMethod, MethodBudget, RequestError};
 
 pub(crate) struct Edge {
     pub source: BlockId,
@@ -90,26 +90,31 @@ fn edge(
     })
 }
 
-pub(super) fn verify(
+#[derive(Default)]
+pub(super) struct LoweringChecks {
+    pub refused: Option<&'static str>,
+    pub uncertainties: Vec<crate::OutputReason>,
+}
+
+pub(super) fn lower(
     input: &MethodInput<'_, '_>,
     catalog: &crate::context::Context,
     plan: crate::p6_regions::PlannedBody<'_>,
     type_names: &super::types::TypeNames,
     calls: &mut super::calls::SourceCalls,
     budget: &mut MethodBudget<'_, '_>,
-    refused: &mut Option<&'static str>,
-) -> Result<Option<VerifiedJavaMethod>, RequestError> {
+    checks: &mut LoweringChecks,
+) -> Result<Option<JavaMethod>, RequestError> {
     let plan = plan.into_data();
     let storage = &plan.storage;
-    let Some(final_assignments) = super::final_assignment::verify(storage, &plan.shape, budget)?
-    else {
-        *refused = Some("final_assignment");
-        return Ok(None);
-    };
+    let final_assignments = super::final_assignment::verify(storage, &plan.shape, budget)?;
+    if final_assignments.is_none() {
+        super::method::note(&mut checks.uncertainties, "final_assignment", None, budget)?;
+    }
     let placements = super::exceptional::obligations(storage, budget)?;
     if !placements.is_empty() && !matches!(plan.shape, crate::p6_regions::Shape::Protected(Some(_)))
     {
-        *refused = Some("placements_without_protected");
+        checks.refused = Some("placements_without_protected");
         return Ok(None);
     }
     let ssa = &storage.typed;
@@ -126,7 +131,7 @@ pub(super) fn verify(
         .is_empty()
         && !matches!(plan.shape, crate::p6_regions::Shape::Protected(Some(_)))
     {
-        *refused = Some("abrupt_initializer");
+        checks.refused = Some("abrupt_initializer");
         return Ok(None);
     }
     if !std::ptr::eq(
@@ -144,7 +149,7 @@ pub(super) fn verify(
         && (!super::initializers::header_admitted(input, budget)?
             || !calls.throws.descriptors.is_empty())
     {
-        *refused = Some("initializer_header");
+        checks.refused = Some("initializer_header");
         return Ok(None);
     }
     let expected_monitor = if flags & 0x20 == 0 {
@@ -180,7 +185,7 @@ pub(super) fn verify(
         }
         || !crate::substrate::flags::visibility_valid(flags)
     {
-        *refused = Some("method_flags");
+        checks.refused = Some("method_flags");
         return Ok(None);
     }
     // Ownership metadata is only needed for nested classes.
@@ -197,7 +202,7 @@ pub(super) fn verify(
     };
     let name = if constructor && nested_scope.is_some() {
         let Some(scope) = &nested_scope else {
-            *refused = Some("nested_scope_name");
+            checks.refused = Some("nested_scope_name");
             return Ok(None);
         };
         let mut name = Vec::new();
@@ -226,14 +231,22 @@ pub(super) fn verify(
         copy_units(input.declaration().name, budget)?
     };
     if !initializer && !super::declarations::identifier(&name, budget)? {
-        *refused = Some("identifier_name");
+        checks.refused = Some("identifier_name");
         return Ok(None);
     }
     let mut catch_names = Vec::new();
     if let crate::p6_regions::Shape::Protected(Some(region)) = &plan.shape {
-        let Some(names) = super::protected::names(input, catalog, storage, region, calls, budget)?
+        let Some(names) = super::protected::names(
+            input,
+            catalog,
+            storage,
+            region,
+            calls,
+            &mut checks.uncertainties,
+            budget,
+        )?
         else {
-            *refused = Some("catch_names");
+            checks.refused = Some("catch_names");
             return Ok(None);
         };
         catch_names = names;
@@ -263,7 +276,7 @@ pub(super) fn verify(
         let Some(statements) =
             super::calls::operations(storage, key, calls, type_names, &placements, budget)?
         else {
-            *refused = Some("call_operations");
+            checks.refused = Some("call_operations");
             return Ok(None);
         };
         let bound = &ssa.ssa.bound[index];
@@ -332,7 +345,7 @@ pub(super) fn verify(
                             .0,
                     );
                     if locals[ix(value.0)?].kind != Kind::Int {
-                        *refused = Some("dispatcher_value_kind");
+                        checks.refused = Some("dispatcher_value_kind");
                         return Ok(None);
                     }
                     let mut cases = Vec::new();
@@ -376,7 +389,7 @@ pub(super) fn verify(
                             .0,
                     );
                     let Some(value) = super::branch::returned(ssa, value)? else {
-                        *refused = Some("returned_use");
+                        checks.refused = Some("returned_use");
                         return Ok(None);
                     };
                     Transfer::Return(value)
@@ -398,7 +411,7 @@ pub(super) fn verify(
                     let Some(condition) =
                         super::conditions::lower(ssa, bound, block.terminal, budget)?
                     else {
-                        *refused = Some("condition_lowering");
+                        checks.refused = Some("condition_lowering");
                         return Ok(None);
                     };
                     Transfer::Branch {
@@ -477,7 +490,7 @@ pub(super) fn verify(
         for (index, descriptor) in calls.throws.descriptors.iter().enumerate() {
             budget.charge_work(1)?;
             let Some(name) = super::calls::type_name(descriptor, budget)? else {
-                *refused = Some("throws_type_name");
+                checks.refused = Some("throws_type_name");
                 return Ok(None);
             };
             header.push(if index == 0 { " throws " } else { ", " }, budget)?;
@@ -505,7 +518,7 @@ pub(super) fn verify(
     };
     if let crate::p6_regions::Shape::Protected(Some(region)) = plan.shape {
         let source = super::protected_control::lower(&body, &region, &catch_names, budget)?;
-        return Ok(Some(VerifiedJavaMethod::protected(
+        return Ok(Some(JavaMethod::protected(
             header.finish(),
             super::protected::ProtectedBody {
                 storage: body,
@@ -516,7 +529,7 @@ pub(super) fn verify(
     }
     if let crate::p6_regions::Shape::Structured(region) = plan.shape {
         let source = super::natural_control::lower(&body, &region, budget)?;
-        let mut method = VerifiedJavaMethod::structured(
+        let mut method = JavaMethod::structured(
             header.finish(),
             super::structured::StructuredBody {
                 storage: body,
@@ -524,10 +537,10 @@ pub(super) fn verify(
             },
             syntax,
         );
-        method.final_assignments = Some(final_assignments);
+        method.final_assignments = final_assignments;
         return Ok(Some(method));
     }
-    let mut method = VerifiedJavaMethod::dispatcher(header.finish(), body, syntax);
-    method.final_assignments = Some(final_assignments);
+    let mut method = JavaMethod::dispatcher(header.finish(), body, syntax);
+    method.final_assignments = final_assignments;
     Ok(Some(method))
 }

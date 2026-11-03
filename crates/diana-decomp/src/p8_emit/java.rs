@@ -2,10 +2,10 @@ use crate::p5_variables::LocalId;
 use crate::p7_java::MethodBody;
 use crate::p7_java::{Assignment, Expression as BranchExpression};
 use crate::substrate::owned::TextBuffer;
-use crate::{MethodBudget, RequestError, VerifiedJavaMethod};
+use crate::{JavaMethod, MethodBudget, RequestError};
 
 pub(crate) fn java(
-    method: &VerifiedJavaMethod,
+    method: &JavaMethod,
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<String, RequestError> {
     let mut output = TextBuffer::method(budget);

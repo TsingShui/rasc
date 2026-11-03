@@ -42,10 +42,10 @@ identify material uncertainty and retain original member identity and available
 DEX facts. A local failure MUST NOT discard other members. A readable result is
 not a claim that source compiles or is semantically equivalent.
 
-The current engine does not yet implement that entire behavior. In particular,
-`engine.rs::normal_member` sends a declined method to original-fact debug output
-rather than retaining an unverified Java reconstruction. Text and JSON present
-the same underlying report; neither is a capability switch.
+P7 retains a renderable `JavaMethod` independently of native source-check
+completion. Missing analysis or representation products still use original-fact
+debug output. Text and JSON present the same underlying report; neither is a
+capability switch. Current coverage is maintained in the documentation README.
 
 ## Boundary and failure behavior
 

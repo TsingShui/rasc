@@ -2,9 +2,11 @@
 
 Diana is a native APK/DEX decompiler. The analysed input is its only source of
 decompilation facts; external declarations are not consulted. Its product contract
-favors readable code with material uncertainty and original DEX facts explicit. The current engine
-still gates many Java results on stricter checks; the revised readable-output
-contract is not yet implemented.
+favors readable code with material uncertainty and original DEX facts explicit.
+Ordinary methods now use `JavaMethod` with independent native-check completion.
+Catch declaration/reachability checks and final-assignment evidence can remain
+incomplete without hiding the body. Other missing analysis or lowering products
+still use the classified debug exit.
 
 | Document | Responsibility |
 |---|---|

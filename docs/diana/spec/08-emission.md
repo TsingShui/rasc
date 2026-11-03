@@ -15,6 +15,11 @@ complete result.
 
 ## Result presentation
 
+Readable Java carries native check completion separately from availability.
+P8 MUST render `JavaMethod` and `JavaInitializer` without requiring
+`NativeChecksComplete`. An `Incomplete` member keeps the class Mixed and retains
+its body. Detailed uncertainty presentation follows the `--verbose` rules below.
+
 Readable Java keeps material uncertainties in the report. The default presentation
 does not print them: no uncertainty line in text and no `uncertainties` member in
 JSON. `--verbose` adds those annotations without changing members, sources,

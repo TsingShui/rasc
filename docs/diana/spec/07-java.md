@@ -1,7 +1,7 @@
 # 07 — Java reconstruction
 
 Code: `crates/diana-decomp/src/p7_java/`; ordinary-method entry:
-`branch.rs::verify`. Class assembly is in `class_unit.rs`.
+`branch.rs::reconstruct`. Class assembly is in `class_unit.rs`.
 
 P7 consumes the planned method, storage, types, original input and available
 declaration facts. It constructs method and class representations and handles
@@ -13,18 +13,18 @@ never by suppressing the readable member. A local failure MUST NOT hide other me
 Neither readable Java nor a class-shaped output alone claims compilability or
 semantic equivalence.
 
-The current implementation still requires `VerifiedJavaMethod` for ordinary
-method output. Failed checks decline to Debug/Unavailable rather than returning
-a readable draft. P7 diagnostic checks can distinguish call source binding,
-storage type naming, casts, array operations and other rejection points; their
-category alone need not identify the root cause.
+P7 produces an owned `JavaMethod` or `JavaInitializer`. Availability is separate
+from `JavaVerification`: `NativeChecksComplete` records completion of applicable
+native checks; `Incomplete` retains material unknowns or failed source checks.
+Neither state establishes compilation or semantic equivalence. The engine MUST
+retain a renderable reconstruction when source evidence is incomplete. A missing
+representation still uses the classified Debug/Unavailable exit.
 
 Each method runs exactly one analysis chain and selects a result by the following conditions:
 
 1. Cancellation stops the request immediately and MUST NOT continue raw per method.
 2. A proven Malformed yields Unavailable with any safe original debug excerpt; it never becomes a normal success. An abstract, native or interface member with no code yields Java with `body: declaration` when its declaration is readable; otherwise its available declaration facts remain visible as Debug or Unavailable.
-3. When all Java checks pass, the result is Java; a failing method does not print its unvalidated
-   half AST, and other completed methods are not discarded.
+3. P7 MUST retain a complete renderable reconstruction independently of native source-check completion. It MUST NOT fabricate a missing operation or suppress other completed members. Exact operation, value, copy and control correspondence remain checked against the shared products; an InternalInvariant remains a BUG.
 4. When verification declines, P7 MAY retain an available readable reconstruction as Java with explicit uncertainty reasons and original identity. It MUST distinguish unknown facts from established facts and MUST NOT claim verified semantics or compilation. If no readable reconstruction is available, Unsupported enters the debug exit once. BudgetExceeded retains its classified failure and enters the debug exit only if resources remain. Read only facts whose original ranges/widths are checked, retain their coverage and mark unavailable regions. Any further read uses the same request resources and explicit fallback quota. A confirmed Malformed MUST NOT be revoked by re-reading.
 5. When a decoded debug view cannot be produced safely within available resources, the result is Unavailable with any safe excerpt. When raw
    newly discovers definite damage, keep the Malformed fact; InternalInvariant keeps its BUG

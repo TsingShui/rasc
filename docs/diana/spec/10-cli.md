@@ -178,6 +178,7 @@ unconstrained.
 | Report `diagnostics` | Array of Diagnostic records, including class and hard-error reasons retained for display |
 | Report `spans` | Array of Span records whose ranges refer to Report.source |
 | Method `at` / `status` | Canonical original method locator / one of the method statuses above |
+| Method `verification` | `native_checks_complete` or `incomplete` for reconstructed Java bodies; null for declaration-only, Generated, Debug and Unavailable. This records native check completion, not compilation or semantic equivalence, and MUST NOT gate source display. |
 | Method `body` | `code` or `declaration`; `declaration` is allowed only for an original body-less member |
 | Method `uncertainties` | Present only under `--verbose`; array of Diagnostic records for material unknowns in a readable Java member |
 | Method `emission` | `explicit`, `generated` or null; non-null only for Java, with Generated checked per §3.6 |

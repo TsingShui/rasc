@@ -3,7 +3,7 @@ use crate::p2_flow::{BlockId, EdgeId, Op};
 use crate::p4_types::TypedBody;
 use crate::p5_variables::StorageBody;
 use crate::substrate::owned::reserve;
-use crate::{MethodBudget, RequestError, VerifiedJavaMethod};
+use crate::{JavaMethod, MethodBudget, RequestError};
 
 pub(crate) use super::local_declarations::Local;
 pub(crate) use crate::p5_variables::LocalId;
@@ -167,7 +167,7 @@ pub(super) fn operation(
         expression,
     }))
 }
-pub(crate) fn verify(
+pub(crate) fn reconstruct(
     _schedule: &crate::engine::SchedulePermit,
     input: &MethodInput<'_, '_>,
     catalog: &crate::context::Context,
@@ -175,18 +175,18 @@ pub(crate) fn verify(
     chain: &super::constructor_graph::Proof<'_, '_, '_>,
     nested_context: bool,
     budget: &mut MethodBudget<'_, '_>,
-) -> Result<crate::substrate::outcome::Outcome<VerifiedJavaMethod>, RequestError> {
-    verify_impl(input, catalog, plan, chain, nested_context, budget)
+) -> Result<crate::substrate::outcome::Outcome<JavaMethod>, RequestError> {
+    reconstruct_impl(input, catalog, plan, chain, nested_context, budget)
 }
 
-fn verify_impl(
+fn reconstruct_impl(
     input: &MethodInput<'_, '_>,
     catalog: &crate::context::Context,
     plan: crate::p6_regions::PlannedBody<'_>,
     chain: &super::constructor_graph::Proof<'_, '_, '_>,
     nested_context: bool,
     budget: &mut MethodBudget<'_, '_>,
-) -> Result<crate::substrate::outcome::Outcome<VerifiedJavaMethod>, RequestError> {
+) -> Result<crate::substrate::outcome::Outcome<JavaMethod>, RequestError> {
     use crate::substrate::outcome::Outcome;
     let storage = &plan.storage;
     chain.check(input, storage, budget)?;
@@ -224,17 +224,29 @@ fn verify_impl(
     if matches!(plan.shape, crate::p6_regions::Shape::Protected(None)) {
         return Ok(Outcome::Declined(reason("protected_region_plan")));
     }
+    let mut checks = super::dispatcher::LoweringChecks::default();
     if !super::array_ops::validate(input, catalog, &storage.typed, budget)? {
-        return Ok(Outcome::Declined(reason("array_operation_binding")));
+        super::method::note(
+            &mut checks.uncertainties,
+            "array_operation_binding",
+            None,
+            budget,
+        )?;
     }
     if !super::fresh_fill::validate(input, catalog, &storage.typed, budget)? {
         return Ok(Outcome::Declined(reason("fresh_array_fill")));
     }
     if !super::cast_ops::validate(input, catalog, &storage.typed, budget)? {
-        return Ok(Outcome::Declined(reason("cast_binding")));
+        super::method::note(&mut checks.uncertainties, "cast_binding", None, budget)?;
     }
     let _bind = crate::pipeline::phase_span("p8_bindings");
-    let Some(mut calls) = super::calls::validate_bindings(input, catalog, &storage.typed, budget)?
+    let Some(mut calls) = super::calls::validate_bindings(
+        input,
+        catalog,
+        &storage.typed,
+        &mut checks.uncertainties,
+        budget,
+    )?
     else {
         return Ok(Outcome::Declined(reason("call_source_binding")));
     };
@@ -245,23 +257,25 @@ fn verify_impl(
     };
     drop(_types);
     let _low = crate::pipeline::phase_span("p8_lowering");
-    let mut refused = None;
-    let method = super::dispatcher::verify(
+    let method = super::dispatcher::lower(
         input,
         catalog,
         plan,
         &type_names,
         &mut calls,
         budget,
-        &mut refused,
+        &mut checks,
     )?;
     Ok(match method {
         Some(mut method) => {
             method.type_names = type_names;
             method.capture_field = capture_field;
+            method.uncertainties = checks.uncertainties;
             Outcome::Ready(method)
         }
-        None => Outcome::Declined(reason(refused.unwrap_or("java_lowering_or_verification"))),
+        None => Outcome::Declined(reason(
+            checks.refused.unwrap_or("java_lowering_or_verification"),
+        )),
     })
 }
 
