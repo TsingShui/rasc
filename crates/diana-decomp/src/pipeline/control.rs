@@ -1,4 +1,6 @@
+use super::parallel_control::SharedRequest;
 use std::fmt;
+use std::sync::Arc;
 
 use thiserror::Error;
 
@@ -94,16 +96,20 @@ pub enum ControlError {
     InvalidReservation { resource: RequestLimit },
 }
 
-/// One ledger shared sequentially by input, analysis and rendering for a request.
+/// A cumulative request ledger for input, analysis and rendering. Parallel
+/// method workers share bounded quotas and cancellation; unbounded worker usage
+/// is merged after joining.
 /// An observed cancellation remains terminal even if the callback later returns false.
 /// Callers retain this context across failures so consumed quota cannot be refunded.
 pub struct RunContext<'c> {
-    limits: Limits,
-    work: Quota,
-    allocation: Quota,
-    metadata: Quota,
+    pub(super) limits: Limits,
+    pub(super) work: Quota,
+    pub(super) allocation: Quota,
+    pub(super) metadata: Quota,
     is_cancelled: &'c dyn Fn() -> bool,
-    cancelled: bool,
+    pub(super) cancelled: bool,
+    pub(super) parallel_callback: Option<&'c (dyn Fn() -> bool + Sync)>,
+    pub(super) shared: Option<Arc<SharedRequest>>,
 }
 
 impl<'c> RunContext<'c> {
@@ -115,13 +121,34 @@ impl<'c> RunContext<'c> {
             limits,
             is_cancelled,
             cancelled: false,
+            parallel_callback: None,
+            shared: None,
         }
+    }
+
+    /// Creates a context whose cancellation callback can be checked by Rayon
+    /// workers. Limits remain cumulative across the request.
+    pub fn new_parallel(limits: Limits, callback: &'c (dyn Fn() -> bool + Sync)) -> Self {
+        let mut control = Self::new(limits, callback);
+        control.parallel_callback = Some(callback);
+        control
     }
 
     /// Returns `Cancelled` once cancellation has been observed for this request.
     pub fn checkpoint(&mut self) -> Result<(), ControlError> {
+        if let Some(shared) = &self.shared {
+            let callback = self
+                .parallel_callback
+                .ok_or(ControlError::InvalidReservation {
+                    resource: RequestLimit::MaxRequestWorkSteps,
+                })?;
+            return shared.checkpoint(callback);
+        }
         if !self.cancelled && (self.is_cancelled)() {
             self.cancelled = true;
+            if let Some(shared) = &self.shared {
+                shared.latch_cancelled();
+            }
         }
         if self.cancelled {
             Err(ControlError::Cancelled)
@@ -134,7 +161,16 @@ impl<'c> RunContext<'c> {
     /// Returns cancellation, the exceeded limit, or accounting overflow.
     pub fn charge_work(&mut self, steps: u64) -> Result<(), ControlError> {
         self.checkpoint()?;
-        self.work = self.work.spend(steps, RequestLimit::MaxRequestWorkSteps)?;
+        let work = self.work.spend(steps, RequestLimit::MaxRequestWorkSteps)?;
+        if let Some(shared) = &self.shared
+            && shared.bounded()
+        {
+            shared.update(|state| {
+                state.work = state.work.spend(steps, RequestLimit::MaxRequestWorkSteps)?;
+                Ok(())
+            })?;
+        }
+        self.work = work;
         Ok(())
     }
 
@@ -143,9 +179,20 @@ impl<'c> RunContext<'c> {
     /// Callers check platform capacity and use `try_reserve` after this charge.
     pub fn charge_allocation(&mut self, bytes: u64) -> Result<(), ControlError> {
         self.checkpoint()?;
-        self.allocation = self
+        let allocation = self
             .allocation
             .spend(bytes, RequestLimit::MaxRequestAllocationBytes)?;
+        if let Some(shared) = &self.shared
+            && shared.bounded()
+        {
+            shared.update(|state| {
+                state.allocation = state
+                    .allocation
+                    .spend(bytes, RequestLimit::MaxRequestAllocationBytes)?;
+                Ok(())
+            })?;
+        }
+        self.allocation = allocation;
         Ok(())
     }
 
@@ -175,7 +222,18 @@ impl<'c> RunContext<'c> {
 
     pub(crate) fn charge_metadata(&mut self, items: u64) -> Result<(), ControlError> {
         self.checkpoint()?;
-        self.metadata = self.metadata.spend(items, RequestLimit::MaxMetadataItems)?;
+        let metadata = self.metadata.spend(items, RequestLimit::MaxMetadataItems)?;
+        if let Some(shared) = &self.shared
+            && shared.bounded()
+        {
+            shared.update(|state| {
+                state.metadata = state
+                    .metadata
+                    .spend(items, RequestLimit::MaxMetadataItems)?;
+                Ok(())
+            })?;
+        }
+        self.metadata = metadata;
         Ok(())
     }
 
@@ -201,6 +259,23 @@ impl<'c> RunContext<'c> {
         let raw_work = Quota::new(raw_work);
         let raw_allocation = Quota::new(raw_allocation);
         let raw_output = Quota::new(self.limits.fallback_output_bytes);
+        if let Some(shared) = &self.shared
+            && shared.bounded()
+        {
+            shared.update(|state| {
+                let work = state.work.claim(
+                    raw_work.limit.unwrap_or(0),
+                    RequestLimit::MaxRequestWorkSteps,
+                )?;
+                let allocation = state.allocation.claim(
+                    raw_allocation.limit.unwrap_or(0),
+                    RequestLimit::MaxRequestAllocationBytes,
+                )?;
+                state.work = work;
+                state.allocation = allocation;
+                Ok(())
+            })?;
+        }
         self.work = request_work;
         self.allocation = request_allocation;
         Ok(MethodBudget {
@@ -421,6 +496,22 @@ impl MethodLedger<'_, '_> {
                 )?,
             ),
         };
+        if let Some(shared) = &self.context.shared
+            && shared.bounded()
+        {
+            shared.update(|state| {
+                state.work = state.work.spend_from(
+                    steps,
+                    match path {
+                        ChargePath::Normal => QuotaSource::Unreserved,
+                        ChargePath::Raw if self.raw_work.limit.is_some() => QuotaSource::Held,
+                        ChargePath::Raw => QuotaSource::Unreserved,
+                    },
+                    RequestLimit::MaxRequestWorkSteps,
+                )?;
+                Ok(())
+            })?;
+        }
         match path {
             ChargePath::Normal => self.normal_work = method,
             ChargePath::Raw => self.raw_work = method,
@@ -449,6 +540,18 @@ impl MethodLedger<'_, '_> {
             source,
             RequestLimit::MaxRequestAllocationBytes,
         )?;
+        if let Some(shared) = &self.context.shared
+            && shared.bounded()
+        {
+            shared.update(|state| {
+                state.allocation = state.allocation.spend_from(
+                    bytes,
+                    source,
+                    RequestLimit::MaxRequestAllocationBytes,
+                )?;
+                Ok(())
+            })?;
+        }
         self.raw_allocation = raw;
         self.allocation = method;
         self.context.allocation = request;
@@ -458,21 +561,31 @@ impl MethodLedger<'_, '_> {
 
 impl Drop for MethodLedger<'_, '_> {
     fn drop(&mut self) {
-        // Exclusive context ownership and atomic charges preserve these exact holds.
+        if let Some(shared) = &self.context.shared
+            && shared.bounded()
+        {
+            let mut state = shared
+                .state
+                .lock()
+                .unwrap_or_else(|poison| poison.into_inner());
+            state.work.held -= self.raw_work.unspent_reservation();
+            state.allocation.held -= self.raw_allocation.unspent_reservation();
+        }
+        // Method holds are released after all normal/raw charges complete.
         self.context.work.held -= self.raw_work.unspent_reservation();
         self.context.allocation.held -= self.raw_allocation.unspent_reservation();
     }
 }
 
 #[derive(Clone, Copy)]
-struct Quota {
+pub(super) struct Quota {
     limit: Option<u64>,
-    used: u64,
-    held: u64,
+    pub(super) used: u64,
+    pub(super) held: u64,
 }
 
 impl Quota {
-    fn new(limit: Option<u64>) -> Self {
+    pub(super) fn new(limit: Option<u64>) -> Self {
         Self {
             limit,
             used: 0,
@@ -501,7 +614,11 @@ impl Quota {
         Ok(())
     }
 
-    fn spend(mut self, requested: u64, resource: RequestLimit) -> Result<Self, ControlError> {
+    pub(super) fn spend(
+        mut self,
+        requested: u64,
+        resource: RequestLimit,
+    ) -> Result<Self, ControlError> {
         self.checked_total(requested, resource)?;
         self.used += requested;
         Ok(self)

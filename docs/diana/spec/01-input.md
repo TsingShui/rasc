@@ -37,6 +37,17 @@ annotations, debug information, references and raw instruction coverage remain
 available without pretending an incomplete decode is complete. A local damaged
 member MUST NOT erase independently available members.
 
+`ProgramIndex` lazily caches class-def locations by original TypeId within its
+selected logical DEX. Missing and duplicate definitions remain distinct; a
+location does not validate declaration contents. Field and method queries reuse
+these locations while retaining their declaration checks.
+
+Ownership consumers reuse one checked ownership result per index. Successful
+results and deterministic malformed/unsupported input errors are cached;
+allocation, quota and cancellation failures are not cached. Cache queries still
+check request control. Ownership construction indexes type relationships and
+checks parent cycles with a finite traversal without reordering original members.
+
 The application file and archive contracts remain in 10-cli. These contracts do not authorize a second DEX decoder in the application.
 
 ## Reader, format tables and raw instructions
@@ -512,7 +523,12 @@ application starts at most N workers and no more than the independent physical
 inputs available. Failure to create a needed worker is a resource failure, not
 silent clamping. A worker scans the 041 logical members of its admitted physical
 image under that image's lease; the pool is not recreated per member or method.
-Decompilation runs sequentially on the calling thread and has no `--jobs` option.
+Class decompilation uses Rayon for independent methods when the context has a
+thread-safe cancellation callback and more than one worker is selected. Methods
+share cumulative request quotas; per-method normal/raw budgets remain separate.
+Class setup, member diagnostic linking, assembly and final publication occur
+after joining. `get-method` runs one method. Input/declaration caches use
+thread-safe initialization; failed resource/cancellation initialization is not cached.
 
 Admission holds at most one input per worker, and each worker has at most one
 pending complete output row; it waits for that row to be consumed before queuing

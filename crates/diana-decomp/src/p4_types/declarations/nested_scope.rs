@@ -30,7 +30,7 @@ pub(crate) fn collect(
     catalog: &Context,
     control: &mut impl InputControl,
 ) -> Result<Option<Scope>, RequestError> {
-    let ownership = crate::input::ownership::collect(index, control)?;
+    let ownership = index.ownership_cached(control)?;
     for entry in ownership.nested() {
         control.charge_work(1)?;
         if entry.class() != id {
@@ -95,7 +95,7 @@ pub(super) fn same_nest(
     target: &[u16],
     budget: &mut crate::MethodBudget<'_, '_>,
 ) -> Result<bool, RequestError> {
-    let ownership = crate::input::ownership::collect(input.program(), budget)?;
+    let ownership = input.program().ownership_cached(budget)?;
     let mut owner = None;
     for entry in ownership.nested() {
         for class in [entry.class(), entry.enclosing()] {
@@ -154,7 +154,7 @@ pub(super) fn plain_owner(
     if input.plain_owner_scope(parent, budget)? {
         return Ok(true);
     }
-    let ownership = crate::input::ownership::collect(input.program(), budget)?;
+    let ownership = input.program().ownership_cached(budget)?;
     let mut related = false;
     for entry in ownership.nested() {
         budget.charge_work(1)?;

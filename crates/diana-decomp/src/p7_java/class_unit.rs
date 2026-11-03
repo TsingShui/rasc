@@ -179,7 +179,7 @@ fn verify_impl(
     }
     context.values_offset?;
     context.superclass?;
-    let ownership = crate::input::ownership::collect(index, control)?;
+    let ownership = index.ownership_cached(control)?;
     let mut owns_nested = false;
     for entry in ownership.nested() {
         control.charge_work(1)?;

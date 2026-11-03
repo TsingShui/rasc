@@ -584,7 +584,7 @@ fn source_scope(
     if crate::context::same_units(simple, &caller[caller_start..caller.len() - 1], control)? {
         return Ok(false);
     }
-    let ownership = crate::input::ownership::collect(index, control)?;
+    let ownership = index.ownership_cached(control)?;
     for nested in ownership.nested() {
         control.charge_work(1)?;
         if nested.enclosing() == owner.class_def
@@ -804,7 +804,7 @@ fn collect_impl(
                 "Ldalvik/annotation/MemberClasses;",
                 control,
             )? {
-                crate::input::ownership::collect(index, control)?;
+                index.ownership_cached(control)?;
             } else {
                 return Ok(None);
             }

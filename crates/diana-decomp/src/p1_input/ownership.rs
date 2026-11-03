@@ -1,7 +1,7 @@
 use super::values::{EncodedKind, ValueStep};
 use super::{InputProblem, ProgramIndex, malformed};
 use crate::pipeline::control::InputControl;
-use crate::substrate::owned::{copy_units, push};
+use crate::substrate::owned::{copy_units, push, reserve};
 use crate::{ByteOffset, ClassDefId, RequestError, TypeId};
 
 /// Original named nested-class metadata with checked reciprocal owner membership.
@@ -81,6 +81,24 @@ pub(crate) fn collect(
         push(&mut metadata, facts, control)?;
     }
     let bad = || RequestError::Input(malformed(InputProblem::InvalidEncodedValue, ByteOffset(0)));
+    let type_count =
+        usize::try_from(index.header.type_ids.count).map_err(|_| RequestError::PlatformCapacity)?;
+    let mut by_type = Vec::new();
+    let mut previous_same_type = Vec::new();
+    let mut member_owner = Vec::new();
+    reserve(&mut by_type, type_count, control)?;
+    reserve(&mut member_owner, type_count, control)?;
+    for _ in 0..type_count {
+        control.charge_work(1)?;
+        by_type.push(None);
+        member_owner.push(None);
+    }
+    for (position, facts) in metadata.iter().enumerate() {
+        control.charge_work(1)?;
+        let ty = usize::try_from(facts.ty.0).map_err(|_| RequestError::PlatformCapacity)?;
+        push(&mut previous_same_type, by_type[ty], control)?;
+        by_type[ty] = Some(position);
+    }
     let mut nested = Vec::new();
     for facts in &metadata {
         control.charge_work(1)?;
@@ -93,13 +111,13 @@ pub(crate) fn collect(
             continue;
         }
         if let Some(enclosing) = facts.enclosing {
-            let mut parent = None;
-            for other in &metadata {
-                control.charge_work(1)?;
-                if other.ty == enclosing {
-                    parent = Some(other);
-                }
-            }
+            let enclosing_index =
+                usize::try_from(enclosing.0).map_err(|_| RequestError::PlatformCapacity)?;
+            let parent = by_type
+                .get(enclosing_index)
+                .copied()
+                .flatten()
+                .map(|position| &metadata[position]);
             let Some(parent) = parent else {
                 return Err(super::InputError::Unsupported {
                     reason: super::UnsupportedInput::OwnershipEvidenceMissing(enclosing),
@@ -131,20 +149,22 @@ pub(crate) fn collect(
                 control,
             )?;
         }
-        for (at, &member) in facts.members.iter().enumerate() {
+        for &member in &facts.members {
             control.charge_work(1)?;
-            for &old in &facts.members[..at] {
-                control.charge_work(1)?;
-                if old == member {
-                    return Err(bad());
-                }
+            let member_index =
+                usize::try_from(member.0).map_err(|_| RequestError::PlatformCapacity)?;
+            let seen = member_owner.get_mut(member_index).ok_or_else(bad)?;
+            if *seen == Some(facts.class) {
+                return Err(bad());
             }
-            let mut present = false;
+            *seen = Some(facts.class);
+            let mut position = by_type[member_index];
+            let present = position.is_some();
             let mut reciprocal = false;
-            for other in &metadata {
+            while let Some(at) = position {
                 control.charge_work(1)?;
-                present |= other.ty == member;
-                reciprocal |= other.ty == member && other.enclosing == Some(facts.ty);
+                reciprocal |= metadata[at].enclosing == Some(facts.ty);
+                position = previous_same_type[at];
             }
             if !present {
                 return Err(super::InputError::Unsupported {
@@ -158,22 +178,38 @@ pub(crate) fn collect(
             }
         }
     }
+    let mut parents = Vec::new();
+    let mut states = Vec::new();
+    reserve(&mut parents, metadata.len(), control)?;
+    reserve(&mut states, metadata.len(), control)?;
+    for _ in &metadata {
+        control.charge_work(1)?;
+        parents.push(None);
+        states.push(0u8);
+    }
     for facts in &nested {
-        let mut current = facts.enclosing;
-        for _ in 0..nested.len() {
+        control.charge_work(1)?;
+        parents[usize::try_from(facts.class.0).map_err(|_| RequestError::PlatformCapacity)?] =
+            Some(facts.enclosing);
+    }
+    let mut path = Vec::new();
+    for facts in &nested {
+        let mut current = Some(facts.class);
+        while let Some(class) = current {
             control.charge_work(1)?;
-            if current == facts.class {
-                return Err(bad());
+            let position = usize::try_from(class.0).map_err(|_| RequestError::PlatformCapacity)?;
+            match states[position] {
+                1 => return Err(bad()),
+                2 => break,
+                _ => {}
             }
-            let mut next = None;
-            for candidate in &nested {
-                control.charge_work(1)?;
-                if candidate.class == current {
-                    next = Some(candidate.enclosing);
-                }
-            }
-            let Some(parent) = next else { break };
-            current = parent;
+            states[position] = 1;
+            push(&mut path, position, control)?;
+            current = parents[position];
+        }
+        while let Some(position) = path.pop() {
+            control.charge_work(1)?;
+            states[position] = 2;
         }
     }
     Ok(Ownership { nested })

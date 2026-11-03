@@ -48,6 +48,12 @@ are overwritten.
 The sources correspond to the reviewed local correspondence with Boissinot Out-of-SSA and DX;
 their coalescing and relaxed casts are not copied.
 
+The copy verifier records each specified destination once, replays sequential
+steps and compares all original local values with the simultaneous assignment.
+Duplicate destinations, uninitialized temporary reads and changed literal views
+remain classified invariant failures. An empty copy set with no steps or
+temporaries needs only a cancellation check; it does not allocate a replay arena.
+
 The Definition check replays from EntrySeed along each block's entry copies, local writes and uses;
 every path obeys the inductive relation “entry Phi assigned → Op reads old value then commits →
 edge parallel copy”. The 0/null that Java requires for DA is allowed only on ordinary locals for

@@ -1,6 +1,7 @@
 pub(crate) mod constructor_chain;
 pub(crate) mod member_emission;
 mod method_chain;
+mod parallel_methods;
 
 use crate::context::Context;
 use crate::input::catalog::{MemberEntry, MemberSelection};
@@ -73,6 +74,8 @@ pub struct Engine<'a> {
     options: Options,
     representation: RepresentationPolicy,
     catalog: Context<'a>,
+    method_jobs: usize,
+    method_pool: std::sync::OnceLock<Result<rayon::ThreadPool, String>>,
 }
 
 impl<'a> Engine<'a> {
@@ -82,6 +85,15 @@ impl<'a> Engine<'a> {
         self.representation = representation;
         self
     }
+    /// Sets the number of Rayon workers for class member analysis. A value of
+    /// one runs sequentially; zero is treated as one. Parallel execution requires
+    /// a RunContext created with `new_parallel`.
+    pub fn with_method_jobs(mut self, jobs: usize) -> Self {
+        self.method_jobs = jobs.max(1);
+        self.method_pool = std::sync::OnceLock::new();
+        self
+    }
+
     /// Admits physical bytes and selected logical catalogs. The same physical
     /// slice's header chain is checked once. Conflicting origins, duplicate
     /// logical identities, malformed input and allocation/control failures are
@@ -181,6 +193,8 @@ impl<'a> Engine<'a> {
             options,
             representation: RepresentationPolicy::default(),
             catalog: facts,
+            method_jobs: 1,
+            method_pool: std::sync::OnceLock::new(),
         })
     }
 
@@ -209,7 +223,7 @@ impl<'a> Engine<'a> {
     ) -> Result<Option<crate::CaptureCertificate>, RequestError> {
         let position = usize::try_from(key.class.dex.0).map_err(|_| RequestError::UnknownDex)?;
         let image = self.images.get(position).ok_or(RequestError::UnknownDex)?;
-        let ownership = crate::input::ownership::collect(&image.index, control)?;
+        let ownership = image.index.ownership_cached(control)?;
         let permit = SchedulePermit { _private: () };
         let mut budget = control.method_budget()?;
         let input = image
@@ -218,7 +232,7 @@ impl<'a> Engine<'a> {
         let Some(declaration) = crate::p4_types::declarations::capture::collect(
             &permit,
             &input,
-            &ownership,
+            ownership,
             &self.catalog,
             &mut budget,
         )?
@@ -278,7 +292,7 @@ impl<'a> Engine<'a> {
         let mut report = self.decompile_leaf(request, nested_context, control)?;
         for node in closure.classes() {
             let key = node.class;
-            let ownership = crate::input::ownership::collect(&image.index, control)?;
+            let ownership = image.index.ownership_cached(control)?;
             let mut instance = false;
             for entry in ownership.nested() {
                 control.charge_work(1)?;
@@ -548,6 +562,20 @@ impl<'a> Engine<'a> {
                     members.push(member);
                 }
                 None => {
+                    if let Some(parallel) = self.parallel_members(
+                        &image.index,
+                        request.class,
+                        &emission,
+                        MemberInputs {
+                            nested: nested_context,
+                            annotations: annotation_bindings.as_ref(),
+                        },
+                        &mut diagnostics,
+                        control,
+                    )? {
+                        members = parallel;
+                        return Ok(());
+                    }
                     let visit: Result<(), RequestError> = class.visit_members_with(
                         control,
                         MemberSelection::AllMethods,
@@ -557,50 +585,17 @@ impl<'a> Engine<'a> {
                                     class: request.class,
                                     method: method.method_idx,
                                 };
-                                let member = if let Some(declaration) =
-                                    emission.generated(method.method_idx, control)?
-                                {
-                                    let mut budget = control.method_budget()?;
-                                    let input = image.index.method_input(
-                                        request.class.class_def,
-                                        method.method_idx,
-                                        &mut budget,
-                                    )?;
-                                    let facts = MethodFacts {
-                                        key,
-                                        name: copy_units(input.declaration().name, &mut budget)?,
-                                        prototype: copy_proto(
-                                            &input.declaration().prototype,
-                                            &mut budget,
-                                        )?,
-                                        access_flags: input.access_flags(),
-                                    };
-                                    let original = image.index.debug_method(
-                                        request.class.class_def,
-                                        method.method_idx,
-                                        &mut budget.into_fallback()?,
-                                    )?;
-                                    MethodOutput::Generated {
-                                        facts,
-                                        declaration,
-                                        original,
-                                    }
-                                } else {
-                                    self.member(
-                                        &image.index,
-                                        MethodKey {
-                                            class: request.class,
-                                            method: method.method_idx,
-                                        },
-                                        &mut diagnostics,
-                                        &emission,
-                                        MemberInputs {
-                                            nested: nested_context,
-                                            annotations: annotation_bindings.as_ref(),
-                                        },
-                                        control,
-                                    )?
-                                };
+                                let member = self.member_with_generated(
+                                    &image.index,
+                                    key,
+                                    &mut diagnostics,
+                                    &emission,
+                                    MemberInputs {
+                                        nested: nested_context,
+                                        annotations: annotation_bindings.as_ref(),
+                                    },
+                                    control,
+                                )?;
                                 reserve(&mut members, 1, control)?;
                                 members.push(member);
                             }
@@ -720,6 +715,39 @@ impl<'a> Engine<'a> {
                 header_offset: image.image.header_offset,
             },
         })
+    }
+
+    fn member_with_generated(
+        &self,
+        index: &ProgramIndex<'a>,
+        key: MethodKey,
+        diagnostics: &mut DiagnosticLog,
+        emission: &crate::p7_java::member_emission::Plan,
+        inputs: MemberInputs<'_>,
+        control: &mut RunContext<'_>,
+    ) -> Result<MethodOutput, RequestError> {
+        if let Some(declaration) = emission.generated(key.method, control)? {
+            let mut budget = control.method_budget()?;
+            let input = index.method_input(key.class.class_def, key.method, &mut budget)?;
+            let facts = MethodFacts {
+                key,
+                name: copy_units(input.declaration().name, &mut budget)?,
+                prototype: copy_proto(&input.declaration().prototype, &mut budget)?,
+                access_flags: input.access_flags(),
+            };
+            let original = index.debug_method(
+                key.class.class_def,
+                key.method,
+                &mut budget.into_fallback()?,
+            )?;
+            Ok(MethodOutput::Generated {
+                facts,
+                declaration,
+                original,
+            })
+        } else {
+            self.member(index, key, diagnostics, emission, inputs, control)
+        }
     }
 
     fn member(

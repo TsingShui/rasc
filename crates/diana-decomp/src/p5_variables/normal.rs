@@ -223,6 +223,13 @@ fn plan_edge(
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<CopyPlan, RequestError> {
     let copies = parallel(typed, incoming, target, budget)?;
+    if copies.is_empty() {
+        budget.checkpoint()?;
+        return Ok(CopyPlan {
+            steps: Vec::new(),
+            temporaries: Vec::new(),
+        });
+    }
     let mut types = Vec::new();
     for local in locals.iter() {
         budget.charge_work(1)?;

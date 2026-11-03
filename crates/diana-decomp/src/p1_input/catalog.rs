@@ -23,7 +23,9 @@ struct Section {
 /// on demand; it owns neither a decoded string pool nor method result buffers.
 pub struct ProgramIndex<'a> {
     pub(super) bytes: &'a [u8],
-    ownership: std::cell::OnceCell<Option<crate::input::ownership::Ownership>>,
+    ownership: std::sync::OnceLock<Result<crate::input::ownership::Ownership, InputError>>,
+    cache_build: std::sync::Mutex<()>,
+    class_locations: std::sync::OnceLock<super::class_locations::ClassLocations>,
     pub(crate) header: DexHeader,
     container: DexContainer<'a>,
     sections: [Option<Section>; SUPPORTED_MAP_KINDS],
@@ -39,14 +41,69 @@ impl<'a> ProgramIndex<'a> {
     pub(crate) fn ownership_cached(
         &self,
         control: &mut impl InputControl,
-    ) -> Result<Option<&crate::input::ownership::Ownership>, crate::RequestError> {
-        if let Some(cached) = self.ownership.get() {
-            return Ok(cached.as_ref());
+    ) -> Result<&crate::input::ownership::Ownership, crate::RequestError> {
+        control.charge_work(1)?;
+        if self.ownership.get().is_none() {
+            let _lock = self.cache_build.lock().map_err(|_| {
+                crate::RequestError::InternalInvariant("input cache construction poisoned")
+            })?;
+            if let Some(result) = self.ownership.get() {
+                return result.as_ref().map_err(|error| (*error).into());
+            }
+            let result = match crate::input::ownership::collect(self, control) {
+                Ok(ownership) => Ok(ownership),
+                Err(crate::RequestError::Input(error))
+                    if matches!(
+                        error.kind(),
+                        FailureKind::Malformed | FailureKind::Unsupported
+                    ) =>
+                {
+                    Err(error)
+                }
+                Err(error) => return Err(error),
+            };
+            let _ = self.ownership.set(result);
         }
-        match crate::input::ownership::collect(self, control) {
-            Ok(ownership) => Ok(self.ownership.get_or_init(|| Some(ownership)).as_ref()),
-            Err(error) => Err(error),
+        match self.ownership.get() {
+            Some(Ok(ownership)) => Ok(ownership),
+            Some(Err(error)) => Err((*error).into()),
+            None => Err(crate::RequestError::InternalInvariant(
+                "ownership cache was not initialized",
+            )),
         }
+    }
+
+    pub(super) fn class_type_id(
+        &self,
+        class: ClassDefId,
+        control: &mut impl InputControl,
+    ) -> Result<TypeId, InputError> {
+        let mut record = self.table(TableKey::Class(class), control)?;
+        Ok(TypeId(record.read_u32_with(control)?))
+    }
+
+    fn class_location(
+        &self,
+        ty: TypeId,
+        control: &mut impl InputControl,
+    ) -> Result<Option<ClassDefId>, InputError> {
+        if self.class_locations.get().is_none() {
+            let _lock = self
+                .cache_build
+                .lock()
+                .map_err(|_| InputError::InternalInvariant("input cache construction poisoned"))?;
+            if let Some(locations) = self.class_locations.get() {
+                return locations.get(ty, self, control);
+            }
+            let locations = super::class_locations::ClassLocations::build(self, control)?;
+            let _ = self.class_locations.set(locations);
+        }
+        self.class_locations
+            .get()
+            .ok_or(InputError::InternalInvariant(
+                "class location cache was not initialized",
+            ))?
+            .get(ty, self, control)
     }
 
     pub fn open(bytes: &'a [u8], control: &mut RunContext<'_>) -> Result<Self, InputError> {
@@ -112,7 +169,9 @@ impl<'a> ProgramIndex<'a> {
         }
         Ok(Self {
             bytes,
-            ownership: std::cell::OnceCell::new(),
+            ownership: std::sync::OnceLock::new(),
+            cache_build: std::sync::Mutex::new(()),
+            class_locations: std::sync::OnceLock::new(),
             header,
             container,
             sections: by_kind,
@@ -463,22 +522,7 @@ impl<'a> ProgramIndex<'a> {
     ) -> Result<Option<ClassDefId>, InputError> {
         let mut field = self.table(TableKey::Field(id), control)?;
         let owner = TypeId(u32::from(field.read_u16_with(control)?));
-        let mut found = None;
-        for index in 0..self.header.class_defs.count {
-            control.charge_work(1)?;
-            let id = ClassDefId(index);
-            let mut class = self.table(TableKey::Class(id), control)?;
-            if TypeId(class.read_u32_with(control)?) == owner {
-                if found.is_some() {
-                    return Err(malformed(
-                        InputProblem::InvalidClassData,
-                        self.header.class_defs.offset_byte,
-                    ));
-                }
-                found = Some(id);
-            }
-        }
-        Ok(found)
+        self.class_location(owner, control)
     }
     pub(crate) fn local_field_flags(
         &self,
@@ -487,45 +531,32 @@ impl<'a> ProgramIndex<'a> {
     ) -> Result<Option<u32>, InputError> {
         let mut record = self.table(TableKey::Field(field_id), control)?;
         let owner = TypeId(u32::from(record.read_u16_with(control)?));
-        let mut owner_found = false;
+        let Some(class_id) = self.class_location(owner, control)? else {
+            return Ok(None);
+        };
         let mut found = None;
-        for index in 0..self.header.class_defs.count {
-            control.charge_work(1)?;
-            let mut definition = self.table(TableKey::Class(ClassDefId(index)), control)?;
-            if TypeId(definition.read_u32_with(control)?) != owner {
-                continue;
-            }
-            if owner_found {
-                return Err(malformed(
-                    InputProblem::InvalidClassData,
-                    self.header.class_defs.offset_byte,
-                ));
-            }
-            owner_found = true;
-            self.class_with(ClassDefId(index), control)?
-                .visit_members_with(
-                    control,
-                    MemberSelection::Fields,
-                    |entry, _| -> Result<(), InputError> {
-                        let MemberEntry::Field(field) = entry else {
-                            return Err(InputError::InternalInvariant(
-                                "local field lookup acquired another member",
-                            ));
-                        };
-                        if field.field_idx == field_id {
-                            field.declaration?;
-                            if found.is_some() {
-                                return Err(malformed(
-                                    InputProblem::InvalidClassData,
-                                    self.header.class_defs.offset_byte,
-                                ));
-                            }
-                            found = Some(field.access_flags);
-                        }
-                        Ok(())
-                    },
-                )?;
-        }
+        self.class_with(class_id, control)?.visit_members_with(
+            control,
+            MemberSelection::Fields,
+            |entry, _| -> Result<(), InputError> {
+                let MemberEntry::Field(field) = entry else {
+                    return Err(InputError::InternalInvariant(
+                        "local field lookup acquired another member",
+                    ));
+                };
+                if field.field_idx == field_id {
+                    field.declaration?;
+                    if found.is_some() {
+                        return Err(malformed(
+                            InputProblem::InvalidClassData,
+                            self.header.class_defs.offset_byte,
+                        ));
+                    }
+                    found = Some(field.access_flags);
+                }
+                Ok(())
+            },
+        )?;
         Ok(found)
     }
     pub(crate) fn local_method(
@@ -535,50 +566,37 @@ impl<'a> ProgramIndex<'a> {
     ) -> Result<Option<LocalMethod<'a>>, InputError> {
         let mut method = self.table(TableKey::Method(method_id), control)?;
         let owner = TypeId(u32::from(method.read_u16_with(control)?));
+        let Some(class_id) = self.class_location(owner, control)? else {
+            return Ok(None);
+        };
         let mut found = None;
-        let mut owner_found = false;
-        for index in 0..self.header.class_defs.count {
-            let mut definition = self.table(TableKey::Class(ClassDefId(index)), control)?;
-            if TypeId(definition.read_u32_with(control)?) != owner {
-                continue;
-            }
-            if owner_found {
-                return Err(malformed(
-                    InputProblem::InvalidClassData,
-                    self.header.class_defs.offset_byte,
-                ));
-            }
-            owner_found = true;
-            self.class_with(ClassDefId(index), control)?
-                .visit_members_with(
-                    control,
-                    MemberSelection::Header(method_id),
-                    |entry, control| -> Result<(), InputError> {
-                        if let MemberEntry::MethodHeader {
-                            method_idx,
+        self.class_with(class_id, control)?.visit_members_with(
+            control,
+            MemberSelection::Header(method_id),
+            |entry, control| -> Result<(), InputError> {
+                if let MemberEntry::MethodHeader {
+                    method_idx,
+                    access_flags,
+                    declaration,
+                } = entry
+                {
+                    declaration?;
+                    if method_idx == method_id {
+                        let class = self.class_with(class_id, control)?;
+                        let context = self.class_context(class_id, control)?;
+                        found = Some(LocalMethod {
                             access_flags,
-                            declaration,
-                        } = entry
-                        {
-                            declaration?;
-                            if method_idx == method_id {
-                                let class = self.class_with(ClassDefId(index), control)?;
-                                let context = self.class_context(ClassDefId(index), control)?;
-                                found = Some(LocalMethod {
-                                    access_flags,
-                                    owner_access_flags: class.access_flags,
-                                    parent: context.superclass?,
-                                    plain_scope: self.no_class_annotations(
-                                        context.annotations_offset,
-                                        control,
-                                    )? && context.interfaces?.is_empty(),
-                                });
-                            }
-                        }
-                        Ok(())
-                    },
-                )?;
-        }
+                            owner_access_flags: class.access_flags,
+                            parent: context.superclass?,
+                            plain_scope: self
+                                .no_class_annotations(context.annotations_offset, control)?
+                                && context.interfaces?.is_empty(),
+                        });
+                    }
+                }
+                Ok(())
+            },
+        )?;
         Ok(found)
     }
 

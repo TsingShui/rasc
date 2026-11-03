@@ -59,7 +59,7 @@ pub(crate) fn admit(
     captures: &[Result<Option<crate::CaptureCertificate>, RequestError>],
     control: &mut RunContext<'_>,
 ) -> Result<bool, RequestError> {
-    let ownership = crate::input::ownership::collect(index, control)?;
+    let ownership = index.ownership_cached(control)?;
     for entry in ownership.nested() {
         control.charge_work(1)?;
         if entry.class() != key.class_def {
@@ -123,7 +123,7 @@ fn verify_impl(
     else {
         return Ok(None);
     };
-    let ownership = crate::input::ownership::collect(index, control)?;
+    let ownership = index.ownership_cached(control)?;
     let mut enclosing = None;
     for entry in ownership.nested() {
         control.charge_work(1)?;
@@ -334,7 +334,7 @@ pub(crate) fn closure(
     root: ClassKey,
     control: &mut RunContext<'_>,
 ) -> Result<Closure, RequestError> {
-    let ownership = crate::input::ownership::collect(index, control)?;
+    let ownership = index.ownership_cached(control)?;
     let mut classes = Vec::new();
     let mut pending = Vec::new();
     push(

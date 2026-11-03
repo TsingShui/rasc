@@ -1,5 +1,5 @@
-use std::cell::OnceCell;
 use std::collections::HashMap;
+use std::sync::{Mutex, OnceLock};
 
 use crate::input::{DexString, InputError};
 use crate::pipeline::control::InputControl;
@@ -27,7 +27,8 @@ struct DeclarationLocation<'a> {
     bytes: &'a [u8],
     header_offset: ByteOffset,
     class_def: ClassDefId,
-    full: OnceCell<Option<crate::input::InputClassDeclaration>>,
+    build: Mutex<()>,
+    full: OnceLock<Option<crate::input::InputClassDeclaration>>,
 }
 
 /// Declaration facts derived from the analysed input. Construction scans the
@@ -88,7 +89,8 @@ impl<'a> Context<'a> {
             bytes,
             header_offset,
             class_def,
-            full: OnceCell::new(),
+            full: OnceLock::new(),
+            build: Mutex::new(()),
         });
     }
 
@@ -139,6 +141,12 @@ impl<'a> Context<'a> {
         };
         let entry = &self.entries[position];
         if entry.full.get().is_none() {
+            let _lock = entry.build.lock().map_err(|_| {
+                InputError::InternalInvariant("declaration cache construction poisoned")
+            })?;
+            if let Some(full) = entry.full.get() {
+                return Ok(full.as_ref());
+            }
             let materialized = crate::input::declaration_facts::materialize(
                 entry.bytes,
                 entry.header_offset,

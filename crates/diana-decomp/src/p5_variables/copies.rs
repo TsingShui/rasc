@@ -210,6 +210,10 @@ pub(crate) fn verify(
     plan: &CopyPlan,
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<(), RequestError> {
+    if parallel.is_empty() && plan.steps.is_empty() && plan.temporaries.is_empty() {
+        budget.checkpoint()?;
+        return Ok(());
+    }
     let total = types
         .len()
         .checked_add(plan.temporaries.len())
@@ -258,32 +262,34 @@ pub(crate) fn verify(
             ))?;
         *target = Some(value);
     }
+    let mut expected = Vec::new();
+    reserve(&mut expected, types.len(), budget)?;
+    for _ in types {
+        budget.charge_work(1)?;
+        expected.push(None);
+    }
+    for copy in parallel {
+        budget.charge_work(1)?;
+        let target = ix(copy.target)?;
+        if copy.source.local().is_some_and(|local| {
+            usize::try_from(local.0).map_or(true, |index| index >= types.len())
+        }) || target >= types.len()
+            || source_kind(copy.source, types, &[])? != types[target]
+        {
+            return Err(RequestError::InternalInvariant(
+                "parallel specification has invalid typed locals",
+            ));
+        }
+        if expected[target].replace(copy.source).is_some() {
+            return Err(RequestError::InternalInvariant(
+                "parallel specification has duplicate destinations",
+            ));
+        }
+    }
     for (index, actual) in state.iter().enumerate().take(types.len()) {
         budget.charge_work(1)?;
         let local = LocalId(u32::try_from(index).map_err(|_| RequestError::PlatformCapacity)?);
-        let mut expected = CopySource::Local(local);
-        let mut supplied = false;
-        for copy in parallel {
-            budget.charge_work(1)?;
-            if copy.source.local().is_some_and(|local| {
-                usize::try_from(local.0).map_or(true, |index| index >= types.len())
-            }) || ix(copy.target)? >= types.len()
-                || source_kind(copy.source, types, &[])? != types[ix(copy.target)?]
-            {
-                return Err(RequestError::InternalInvariant(
-                    "parallel specification has invalid typed locals",
-                ));
-            }
-            if copy.target == local {
-                if supplied {
-                    return Err(RequestError::InternalInvariant(
-                        "parallel specification has duplicate destinations",
-                    ));
-                }
-                supplied = true;
-                expected = copy.source;
-            }
-        }
+        let expected = expected[index].unwrap_or(CopySource::Local(local));
         if *actual != Some(expected) {
             return Err(RequestError::InternalInvariant(
                 "copy plan changes simultaneous assignment semantics",

@@ -19,9 +19,6 @@ impl NestedIndex {
     ) -> Result<Option<Self>, RequestError> {
         let ownership = input.program().ownership_cached(budget)?;
         let mut entries = std::collections::HashMap::new();
-        let Some(ownership) = ownership else {
-            return Ok(None);
-        };
         for entry in ownership.nested() {
             budget.charge_work(1)?;
             let descriptor = copy_units(

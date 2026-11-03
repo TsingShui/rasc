@@ -75,6 +75,17 @@ pub fn run_with_catalog(
     selector: &Selector,
     control: &mut RunContext<'_>,
 ) -> Result<Decompiled, DecompileError> {
+    run_with_jobs(scope, selector, control, 1)
+}
+
+/// Runs class member analysis with the selected Rayon worker count. A parallel
+/// RunContext shares cumulative limits and cancellation between methods.
+pub fn run_with_jobs(
+    scope: &RequestScope,
+    selector: &Selector,
+    control: &mut RunContext<'_>,
+    jobs: usize,
+) -> Result<Decompiled, DecompileError> {
     let images = ImageSet::open(scope)?;
     let selection = resolve(scope, &images, selector, control)?;
     let mut dex_images = Vec::new();
@@ -90,8 +101,9 @@ pub fn run_with_catalog(
             },
         });
     }
-    let engine =
-        Engine::open(dex_images, Options::default(), control).map_err(DecompileError::Engine)?;
+    let engine = Engine::open(dex_images, Options::default(), control)
+        .map_err(DecompileError::Engine)?
+        .with_method_jobs(jobs);
     let class = ClassKey {
         dex: selection.image.dex,
         class_def: selection.class_def,

@@ -33,9 +33,9 @@ pub(crate) fn build<'a>(
             .first()
             .is_some_and(|op| matches!(op.op, crate::p2_flow::Op::FieldStore(..)))
     {
-        let ownership = crate::input::ownership::collect(input.program(), budget)?;
+        let ownership = input.program().ownership_cached(budget)?;
         match crate::p4_types::declarations::capture::collect(
-            schedule, input, &ownership, catalog, budget,
+            schedule, input, ownership, catalog, budget,
         )? {
             Some(declaration) => {
                 crate::p4_types::capture_certificate::verify(schedule, input, &declaration, budget)?

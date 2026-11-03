@@ -15,7 +15,7 @@ use crate::analysis::selector::{self, Selector};
 
 /// Which object the command selects.
 pub enum Kind {
-    Class,
+    Class { jobs: usize },
     Method,
 }
 
@@ -29,7 +29,7 @@ pub fn run(
     limits: crate::analysis::limits::RequestLimits,
 ) -> Result<(), Failure> {
     let selector = match kind {
-        Kind::Class => Selector::Class(selector::class(text).map_err(|error| Failure {
+        Kind::Class { .. } => Selector::Class(selector::class(text).map_err(|error| Failure {
             code: error.code(),
             message: error.to_string(),
         })?),
@@ -39,11 +39,18 @@ pub fn run(
         })?),
     };
     let scope = RequestScope::open(input, &super::options(limits)).map_err(Failure::input)?;
-    let mut control = diana_decomp::RunContext::new(diana_decomp::Limits::default(), &|| false);
-    let decompiled = decompile::run(&scope, &selector, &mut control).map_err(|error| Failure {
-        code: error.code(),
-        message: error.to_string(),
-    })?;
+    let mut control = diana_decomp::RunContext::new_parallel(limits.engine(), &|| false);
+    let jobs = match kind {
+        Kind::Class { jobs } => jobs,
+        Kind::Method => 1,
+    };
+    let decompiled =
+        decompile::run_with_jobs(&scope, &selector, &mut control, jobs).map_err(|error| {
+            Failure {
+                code: error.code(),
+                message: error.to_string(),
+            }
+        })?;
     let payload = match format {
         Format::Text => text_payload(&decompiled, verbose),
         Format::Json => json_payload(&decompiled, verbose),

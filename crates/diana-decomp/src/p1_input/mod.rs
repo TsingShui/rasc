@@ -6,6 +6,7 @@ mod throws;
 pub(crate) use throws::ThrowsMetadata;
 mod binding;
 pub(crate) mod catalog;
+mod class_locations;
 mod code;
 mod container;
 mod cursor;

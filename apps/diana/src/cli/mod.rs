@@ -205,6 +205,9 @@ enum Command {
         #[arg(short, long)]
         /// Write the result to this file instead of stdout
         output: Option<PathBuf>,
+        /// Parallel workers for independent method analysis
+        #[arg(long, value_parser = clap::value_parser!(u32).range(1..))]
+        jobs: Option<u32>,
     },
     /// Decompile one method
     #[command(
@@ -323,10 +326,15 @@ pub fn run() -> std::process::ExitCode {
             selector,
             format,
             output,
+            jobs,
         } => get::run(
             &input,
             &selector,
-            get::Kind::Class,
+            get::Kind::Class {
+                jobs: jobs.map_or_else(default_jobs, |jobs| {
+                    usize::try_from(jobs).unwrap_or(usize::MAX)
+                }),
+            },
             format,
             output.as_deref(),
             verbose,

@@ -1,5 +1,6 @@
 pub(crate) mod control;
 pub(crate) mod diagnostics;
+mod parallel_control;
 pub(crate) mod request;
 
 /// Opens a compute-stage span when the `perf` feature is enabled. The engine
