@@ -204,23 +204,15 @@ fn read(
             index.next_annotation(&mut offsets, &mut last, control)?;
         let descriptor = copy_units(index.type_name(ty, control)?, control)?;
         let kind = if descriptor
-            == [
-                76, 100, 97, 108, 118, 105, 107, 47, 97, 110, 110, 111, 116, 97, 116, 105, 111,
-                110, 47, 69, 110, 99, 108, 111, 115, 105, 110, 103, 67, 108, 97, 115, 115, 59,
-            ] {
+            == const { crate::substrate::owned::ascii_units(*b"Ldalvik/annotation/EnclosingClass;") }
+        {
             1
         } else if descriptor
-            == [
-                76, 100, 97, 108, 118, 105, 107, 47, 97, 110, 110, 111, 116, 97, 116, 105, 111,
-                110, 47, 73, 110, 110, 101, 114, 67, 108, 97, 115, 115, 59,
-            ]
+            == const { crate::substrate::owned::ascii_units(*b"Ldalvik/annotation/InnerClass;") }
         {
             2
         } else if descriptor
-            == [
-                76, 100, 97, 108, 118, 105, 107, 47, 97, 110, 110, 111, 116, 97, 116, 105, 111,
-                110, 47, 77, 101, 109, 98, 101, 114, 67, 108, 97, 115, 115, 101, 115, 59,
-            ]
+            == const { crate::substrate::owned::ascii_units(*b"Ldalvik/annotation/MemberClasses;") }
         {
             3
         } else {

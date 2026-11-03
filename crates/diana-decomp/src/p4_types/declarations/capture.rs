@@ -75,7 +75,9 @@ fn collect_impl(
     let mut object_constructor = false;
     for method in &object.methods {
         budget.charge_work(1)?;
-        if method.name == [60, 105, 110, 105, 116, 62] && method.prototype == [40, 41, 86] {
+        if method.name == const { crate::substrate::owned::ascii_units(*b"<init>") }
+            && method.prototype == const { crate::substrate::owned::ascii_units(*b"()V") }
+        {
             if object_constructor
                 || method.access_flags != crate::substrate::flags::PUBLIC
                 || method.generic
@@ -112,18 +114,20 @@ fn collect_impl(
     }
     push(&mut prototype, 41, budget)?;
     push(&mut prototype, 86, budget)?;
-    if !input
-        .declaration()
-        .name
-        .matches_with(&[60, 105, 110, 105, 116, 62], budget)?
-        || crate::substrate::owned::copy_proto(&input.declaration().prototype, budget)? != prototype
+    if !input.declaration().name.matches_with(
+        &const { crate::substrate::owned::ascii_units(*b"<init>") },
+        budget,
+    )? || crate::substrate::owned::copy_proto(&input.declaration().prototype, budget)?
+        != prototype
     {
         return Ok(None);
     }
     let mut constructors = 0usize;
     for method in &class.methods {
         budget.charge_work(1)?;
-        if method.name == [60, 105, 110, 105, 116, 62] && method.prototype == prototype {
+        if method.name == const { crate::substrate::owned::ascii_units(*b"<init>") }
+            && method.prototype == prototype
+        {
             if method.generic
                 || method.access_flags
                     & (crate::substrate::flags::PUBLIC

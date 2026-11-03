@@ -83,11 +83,11 @@ pub(crate) fn collect(
             };
             if !crate::context::same_units(
                 signature,
-                &[
-                    60, 84, 58, 76, 106, 97, 118, 97, 47, 108, 97, 110, 103, 47, 79, 98, 106, 101,
-                    99, 116, 59, 62, 76, 106, 97, 118, 97, 47, 108, 97, 110, 103, 47, 79, 98, 106,
-                    101, 99, 116, 59,
-                ],
+                &const {
+                    crate::substrate::owned::ascii_units(
+                        *b"<T:Ljava/lang/Object;>Ljava/lang/Object;",
+                    )
+                },
                 control,
             )? {
                 return Ok(None);
@@ -96,7 +96,8 @@ pub(crate) fn collect(
         for method in &interface.methods {
             control.charge_work(1)?;
             let specialized = specialization
-                && method.signature.as_deref() == Some(&[40, 84, 84, 59, 41, 84, 84, 59]);
+                && method.signature.as_deref()
+                    == Some(&const { crate::substrate::owned::ascii_units(*b"(TT;)TT;") });
             if !crate::substrate::flags::interface_method(method.access_flags)
                 || method.generic
                 || method.signature.is_some() && !specialized
@@ -146,18 +147,13 @@ pub(crate) fn collect(
             return Ok(None);
         }
         let mut expected = Vec::new();
-        for &unit in &[
-            76, 106, 97, 118, 97, 47, 108, 97, 110, 103, 47, 79, 98, 106, 101, 99, 116, 59,
-        ] {
+        for &unit in &const { crate::substrate::owned::ascii_units(*b"Ljava/lang/Object;") } {
             push(&mut expected, unit, control)?;
         }
         for &unit in &names[0][..names[0].len() - 1] {
             push(&mut expected, unit, control)?;
         }
-        for &unit in &[
-            60, 76, 106, 97, 118, 97, 47, 108, 97, 110, 103, 47, 83, 116, 114, 105, 110, 103, 59,
-            62, 59,
-        ] {
+        for &unit in &const { crate::substrate::owned::ascii_units(*b"<Ljava/lang/String;>;") } {
             push(&mut expected, unit, control)?;
         }
         if signature.as_ref().map(|signature| signature.units()) != Some(expected.as_slice()) {
@@ -171,10 +167,7 @@ pub(crate) fn collect(
 }
 
 pub(super) fn string_identity() -> &'static [u16] {
-    &[
-        40, 76, 106, 97, 118, 97, 47, 108, 97, 110, 103, 47, 83, 116, 114, 105, 110, 103, 59, 41,
-        76, 106, 97, 118, 97, 47, 108, 97, 110, 103, 47, 83, 116, 114, 105, 110, 103, 59,
-    ]
+    &const { crate::substrate::owned::ascii_units(*b"(Ljava/lang/String;)Ljava/lang/String;") }
 }
 
 pub(super) fn catalog_plain(
@@ -205,11 +198,11 @@ pub(super) fn catalog_plain(
             };
             if !crate::context::same_units(
                 signature,
-                &[
-                    60, 84, 58, 76, 106, 97, 118, 97, 47, 108, 97, 110, 103, 47, 79, 98, 106, 101,
-                    99, 116, 59, 62, 76, 106, 97, 118, 97, 47, 108, 97, 110, 103, 47, 79, 98, 106,
-                    101, 99, 116, 59,
-                ],
+                &const {
+                    crate::substrate::owned::ascii_units(
+                        *b"<T:Ljava/lang/Object;>Ljava/lang/Object;",
+                    )
+                },
                 budget,
             )? {
                 return Ok(false);
@@ -218,7 +211,7 @@ pub(super) fn catalog_plain(
         for method in &interface.methods {
             budget.charge_work(1)?;
             let specialized = method.signature.as_deref()
-                == Some(&[40, 84, 84, 59, 41, 84, 84, 59])
+                == Some(&const { crate::substrate::owned::ascii_units(*b"(TT;)TT;") })
                 && class.signature.is_some();
             if method.generic
                 || method.signature.is_some() && !specialized

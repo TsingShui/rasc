@@ -101,12 +101,11 @@ fn verify_impl(
     if !target.owner.matches_with(
         crate::p4_types::BuiltinReference::Object.descriptor(),
         budget,
-    )? || !target
-        .declaration
-        .name
-        .matches_with(&[60, 105, 110, 105, 116, 62], budget)?
-        || crate::substrate::owned::copy_proto(&target.declaration.prototype, budget)?
-            != [40, 41, 86]
+    )? || !target.declaration.name.matches_with(
+        &const { crate::substrate::owned::ascii_units(*b"<init>") },
+        budget,
+    )? || crate::substrate::owned::copy_proto(&target.declaration.prototype, budget)?
+        != const { crate::substrate::owned::ascii_units(*b"()V") }
     {
         return Ok(None);
     }
@@ -198,12 +197,11 @@ fn replay(
     if !target.owner.matches_with(
         crate::p4_types::BuiltinReference::Object.descriptor(),
         budget,
-    )? || !target
-        .declaration
-        .name
-        .matches_with(&[60, 105, 110, 105, 116, 62], budget)?
-        || crate::substrate::owned::copy_proto(&target.declaration.prototype, budget)?
-            != [40, 41, 86]
+    )? || !target.declaration.name.matches_with(
+        &const { crate::substrate::owned::ascii_units(*b"<init>") },
+        budget,
+    )? || crate::substrate::owned::copy_proto(&target.declaration.prototype, budget)?
+        != const { crate::substrate::owned::ascii_units(*b"()V") }
     {
         return Err(RequestError::InitializationUnavailable {
             pc: proof.initialization,

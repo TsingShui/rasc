@@ -3,19 +3,12 @@ use crate::input::MethodInput;
 use crate::substrate::owned::{copy_units, reserve};
 use crate::{MethodBudget, RequestError};
 
-const OBJECT: &[u16] = &[
-    76, 106, 97, 118, 97, 47, 108, 97, 110, 103, 47, 79, 98, 106, 101, 99, 116, 59,
-];
-const THROWABLE: &[u16] = &[
-    76, 106, 97, 118, 97, 47, 108, 97, 110, 103, 47, 84, 104, 114, 111, 119, 97, 98, 108, 101, 59,
-];
-const RUNTIME: &[u16] = &[
-    76, 106, 97, 118, 97, 47, 108, 97, 110, 103, 47, 82, 117, 110, 116, 105, 109, 101, 69, 120, 99,
-    101, 112, 116, 105, 111, 110, 59,
-];
-const ERROR: &[u16] = &[
-    76, 106, 97, 118, 97, 47, 108, 97, 110, 103, 47, 69, 114, 114, 111, 114, 59,
-];
+const OBJECT: &[u16] = &const { crate::substrate::owned::ascii_units(*b"Ljava/lang/Object;") };
+const THROWABLE: &[u16] =
+    &const { crate::substrate::owned::ascii_units(*b"Ljava/lang/Throwable;") };
+const RUNTIME: &[u16] =
+    &const { crate::substrate::owned::ascii_units(*b"Ljava/lang/RuntimeException;") };
+const ERROR: &[u16] = &const { crate::substrate::owned::ascii_units(*b"Ljava/lang/Error;") };
 fn same(a: &[u16], b: &[u16], budget: &mut MethodBudget<'_, '_>) -> Result<bool, RequestError> {
     Ok(crate::context::same_units(a, b, budget)?)
 }

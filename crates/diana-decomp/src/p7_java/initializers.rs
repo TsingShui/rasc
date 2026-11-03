@@ -38,10 +38,10 @@ pub(super) fn is_initializer(
     input: &MethodInput<'_, '_>,
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<bool, RequestError> {
-    Ok(input
-        .declaration()
-        .name
-        .matches_with(&[60, 99, 108, 105, 110, 105, 116, 62], budget)?)
+    Ok(input.declaration().name.matches_with(
+        &const { crate::substrate::owned::ascii_units(*b"<clinit>") },
+        budget,
+    )?)
 }
 pub(super) fn header_admitted(
     input: &MethodInput<'_, '_>,
@@ -50,8 +50,8 @@ pub(super) fn header_admitted(
     let flags = input.access_flags();
     Ok(is_initializer(input, budget)?
         && crate::substrate::flags::class_initializer(flags)
-        && input
-            .declaration()
-            .prototype
-            .matches_with(&[40, 41, 86], budget)?)
+        && input.declaration().prototype.matches_with(
+            &const { crate::substrate::owned::ascii_units(*b"()V") },
+            budget,
+        )?)
 }

@@ -269,7 +269,7 @@ fn verify_impl(
                 {
                     admitted = false;
                 }
-                if facts.name == [60, 105, 110, 105, 116, 62]
+                if facts.name == const { crate::substrate::owned::ascii_units(*b"<init>") }
                     && declaration.capture_field != Some(field.key.field)
                 {
                     admitted = false;

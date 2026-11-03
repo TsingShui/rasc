@@ -261,3 +261,14 @@ impl TextBuffer {
         self.text
     }
 }
+
+/// Converts an ASCII source literal to exact UTF-16 units at compile time.
+pub(crate) const fn ascii_units<const N: usize>(bytes: [u8; N]) -> [u16; N] {
+    let mut units = [0; N];
+    let mut index = 0;
+    while index < N {
+        units[index] = bytes[index] as u16;
+        index += 1;
+    }
+    units
+}

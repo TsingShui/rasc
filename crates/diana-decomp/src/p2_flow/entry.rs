@@ -50,10 +50,10 @@ fn decode_impl<'a>(
     if envelope.access_flags
         & (crate::substrate::flags::STATIC | crate::substrate::flags::CONSTRUCTOR)
         != 0x10000
-        || !envelope
-            .declaration
-            .name
-            .matches_with(&[60, 105, 110, 105, 116, 62], budget)?
+        || !envelope.declaration.name.matches_with(
+            &const { crate::substrate::owned::ascii_units(*b"<init>") },
+            budget,
+        )?
         || !envelope
             .declaration
             .prototype

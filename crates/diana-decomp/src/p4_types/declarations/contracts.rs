@@ -81,7 +81,7 @@ fn push<T>(
     Ok(())
 }
 fn generated_name(prefix: &[u16]) -> bool {
-    if prefix == [112, 99] {
+    if prefix == const { crate::substrate::owned::ascii_units(*b"pc") } {
         return true;
     }
     matches!(prefix.first(), Some(112 | 118 | 99))
@@ -112,7 +112,10 @@ pub(super) fn clear_scope(
         let Some(class) = catalog.class(at, budget)? else {
             return Ok(false);
         };
-        if !plain(catalog, class, caller, budget)? {
+        if !matches!(
+            class.coverage,
+            crate::input::DeclarationCoverage::AllDeclarations
+        ) {
             return Ok(false);
         }
         for name in &class.field_names {
@@ -123,13 +126,7 @@ pub(super) fn clear_scope(
         }
         match &class.parent {
             Some(parent) => at = parent,
-            None => {
-                return Ok(class.descriptor
-                    == [
-                        76, 106, 97, 118, 97, 47, 108, 97, 110, 103, 47, 79, 98, 106, 101, 99, 116,
-                        59,
-                    ]);
-            }
+            None => return Ok(true),
         }
     }
 }

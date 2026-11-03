@@ -23,9 +23,7 @@ pub(crate) fn erases_to(
         if colon == 1 {
             return Ok(false);
         }
-        let bound = [
-            76, 106, 97, 118, 97, 47, 108, 97, 110, 103, 47, 79, 98, 106, 101, 99, 116, 59,
-        ];
+        let bound = const { crate::substrate::owned::ascii_units(*b"Ljava/lang/Object;") };
         let end = colon
             .checked_add(1)
             .and_then(|at| at.checked_add(bound.len()))
@@ -134,10 +132,7 @@ pub(super) fn raw_class(
     let Some(signature) = &class.signature else {
         return Ok(false);
     };
-    let prefix = [
-        60, 84, 58, 76, 106, 97, 118, 97, 47, 108, 97, 110, 103, 47, 79, 98, 106, 101, 99, 116, 59,
-        62,
-    ];
+    let prefix = const { crate::substrate::owned::ascii_units(*b"<T:Ljava/lang/Object;>") };
     let Some(parent) = &class.parent else {
         return Ok(false);
     };
@@ -175,10 +170,7 @@ pub(super) fn object_identity(
         return Ok(false);
     };
     if method.prototype.as_slice()
-        != [
-            40, 76, 106, 97, 118, 97, 47, 108, 97, 110, 103, 47, 79, 98, 106, 101, 99, 116, 59, 41,
-            76, 106, 97, 118, 97, 47, 108, 97, 110, 103, 47, 79, 98, 106, 101, 99, 116, 59,
-        ]
+        != const { crate::substrate::owned::ascii_units(*b"(Ljava/lang/Object;)Ljava/lang/Object;") }
     {
         return Ok(false);
     }

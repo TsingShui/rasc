@@ -262,7 +262,7 @@ fn verify_impl(
                 for member in members {
                     control.charge_work(1)?;
                     let MethodOutput::Java { facts, .. } = member else { continue };
-                    if facts.name == [60, 105, 110, 105, 116, 62] {
+                    if facts.name == const { crate::substrate::owned::ascii_units(*b"<init>") } {
                         constructors = constructors.checked_add(1).ok_or(RequestError::PlatformCapacity)?;
                         if !super::final_delegation::assigned(members, facts.key.method, field.field_idx, control)? {
                             fields_admitted = false;
@@ -349,7 +349,7 @@ fn verify_impl(
                     {
                         admitted = false;
                     }
-                    constructor |= facts.name == [60, 105, 110, 105, 116, 62];
+                    constructor |= facts.name == const { crate::substrate::owned::ascii_units(*b"<init>") };
                 }
                 MemberEntry::Method(_) => {
                     return Err(RequestError::InternalInvariant(

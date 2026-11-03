@@ -27,10 +27,7 @@ pub(super) fn read<'a>(
         let (offset, visibility, ty, mut values) =
             index.next_annotation(&mut offsets, &mut last, budget)?;
         if !index.type_name(ty, budget)?.matches_with(
-            &[
-                76, 100, 97, 108, 118, 105, 107, 47, 97, 110, 110, 111, 116, 97, 116, 105, 111,
-                110, 47, 84, 104, 114, 111, 119, 115, 59,
-            ],
+            &const { crate::substrate::owned::ascii_units(*b"Ldalvik/annotation/Throws;") },
             budget,
         )? {
             while values.next(index, budget)?.is_some() {}

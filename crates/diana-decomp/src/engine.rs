@@ -300,9 +300,10 @@ impl<'a> Engine<'a> {
                                 declaration,
                                 ..
                             } = entry
-                                && declaration?
-                                    .name
-                                    .matches_with(&[60, 105, 110, 105, 116, 62], control)?
+                                && declaration?.name.matches_with(
+                                    &const { crate::substrate::owned::ascii_units(*b"<init>") },
+                                    control,
+                                )?
                             {
                                 let proof = match self.capture(
                                     MethodKey {

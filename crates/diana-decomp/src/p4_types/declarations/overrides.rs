@@ -48,22 +48,11 @@ fn collect_impl(
     }
     // This no-argument covariant profile preserves the exact erased Object result.
     let argument_bridge = bridge.as_slice()
-        == [
-            40, 76, 106, 97, 118, 97, 47, 108, 97, 110, 103, 47, 79, 98, 106, 101, 99, 116, 59, 41,
-            76, 106, 97, 118, 97, 47, 108, 97, 110, 103, 47, 79, 98, 106, 101, 99, 116, 59,
-        ];
+        == const { crate::substrate::owned::ascii_units(*b"(Ljava/lang/Object;)Ljava/lang/Object;") };
     if !argument_bridge
-        && bridge
-            != [
-                40, 41, 76, 106, 97, 118, 97, 47, 108, 97, 110, 103, 47, 79, 98, 106, 101, 99, 116,
-                59,
-            ]
+        && bridge != const { crate::substrate::owned::ascii_units(*b"()Ljava/lang/Object;") }
         || prototype != super::interface_scope::string_identity()
-            && prototype
-                != [
-                    40, 41, 76, 106, 97, 118, 97, 47, 108, 97, 110, 103, 47, 83, 116, 114, 105,
-                    110, 103, 59,
-                ]
+            && prototype != const { crate::substrate::owned::ascii_units(*b"()Ljava/lang/String;") }
     {
         return Ok(None);
     }
@@ -140,7 +129,8 @@ fn collect_impl(
                 budget.charge_work(1)?;
                 if method.name == name
                     && method.prototype == bridge
-                    && method.signature.as_deref() == Some(&[40, 84, 84, 59, 41, 84, 84, 59])
+                    && method.signature.as_deref()
+                        == Some(&const { crate::substrate::owned::ascii_units(*b"(TT;)TT;") })
                 {
                     return Ok(Some(CovariantOverride {
                         target,

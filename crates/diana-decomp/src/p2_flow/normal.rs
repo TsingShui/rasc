@@ -943,9 +943,7 @@ fn decode_impl<'a>(
             } else if name.matches_with(&[67], budget)? {
                 DeclarationType::Narrow(crate::substrate::primitive_types::Narrow::Char)
             } else if name.matches_with(
-                &[
-                    76, 106, 97, 118, 97, 47, 108, 97, 110, 103, 47, 79, 98, 106, 101, 99, 116, 59,
-                ],
+                &const { crate::substrate::owned::ascii_units(*b"Ljava/lang/Object;") },
                 budget,
             )? {
                 DeclarationType::Object
@@ -1581,10 +1579,10 @@ fn decode_impl<'a>(
                         ));
                     };
                     let method = input.method_reference(reference, budget)?;
-                    let constructor = method
-                        .declaration
-                        .name
-                        .matches_with(&[60, 105, 110, 105, 116, 62], budget)?;
+                    let constructor = method.declaration.name.matches_with(
+                        &const { crate::substrate::owned::ascii_units(*b"<init>") },
+                        budget,
+                    )?;
                     let kind = InvokeKind::from_opcode(spec.opcode)
                         .ok_or(RequestError::InternalInvariant("invoke lost its kind"))?;
                     let descriptor = method.declaration.prototype.return_type;

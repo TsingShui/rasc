@@ -93,7 +93,7 @@ pub(crate) fn collect(
             {
                 let declaration = declaration?;
                 let name = copy_units(declaration.name, control)?;
-                if name == [60, 105, 110, 105, 116, 62] {
+                if name == const { crate::substrate::owned::ascii_units(*b"<init>") } {
                     return Ok(());
                 }
                 let prototype = copy_proto(&declaration.prototype, control)?;
@@ -136,15 +136,9 @@ pub(crate) fn collect(
                             }
                             let exact_override = source_override && prototype == inherited.prototype;
                             let covariant = source_override && inherited.prototype[end + 1..]
-                                == [
-                                    76, 106, 97, 118, 97, 47, 108, 97, 110, 103, 47, 79, 98, 106,
-                                    101, 99, 116, 59,
-                                ]
+                                == const { crate::substrate::owned::ascii_units(*b"Ljava/lang/Object;") }
                                 && prototype[close + 1..]
-                                    == [
-                                        76, 106, 97, 118, 97, 47, 108, 97, 110, 103, 47, 83, 116,
-                                        114, 105, 110, 103, 59,
-                                    ]
+                                    == const { crate::substrate::owned::ascii_units(*b"Ljava/lang/String;") }
                                 && inherited.access_flags & (1 |crate::substrate::flags::STATIC | crate::substrate::flags::FINAL) ==crate::substrate::flags::PUBLIC;
                             let bridge_declaration = crate::substrate::flags::bridge(access_flags)
                                 && prototype == inherited.prototype

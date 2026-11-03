@@ -103,10 +103,10 @@ pub(super) fn call(
     if word != registers.len() {
         return Err(RequestError::InternalInvariant("invoke has surplus words"));
     }
-    let constructor = method
-        .declaration
-        .name
-        .matches_with(&[60, 105, 110, 105, 116, 62], budget)?;
+    let constructor = method.declaration.name.matches_with(
+        &const { crate::substrate::owned::ascii_units(*b"<init>") },
+        budget,
+    )?;
     let input_formals = super::call_facts::from_reference(&method.declaration.prototype, budget)?;
     Ok(CallSite {
         formals: input_formals,
@@ -145,11 +145,10 @@ pub(super) fn initialization(
         ));
     };
     let method = index.method_reference(reference, budget)?;
-    if !method
-        .declaration
-        .name
-        .matches_with(&[60, 105, 110, 105, 116, 62], budget)?
-    {
+    if !method.declaration.name.matches_with(
+        &const { crate::substrate::owned::ascii_units(*b"<init>") },
+        budget,
+    )? {
         return Ok(None);
     }
     if !method

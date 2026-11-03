@@ -67,11 +67,7 @@ fn read(
         if method_parameters
             && visibility == 2
             && descriptor.matches_with(
-                &[
-                    76, 100, 97, 108, 118, 105, 107, 47, 97, 110, 110, 111, 116, 97, 116, 105, 111,
-                    110, 47, 77, 101, 116, 104, 111, 100, 80, 97, 114, 97, 109, 101, 116, 101, 114,
-                    115, 59,
-                ],
+                &const { crate::substrate::owned::ascii_units(*b"Ldalvik/annotation/MethodParameters;") },
                 control,
             )?
         {
@@ -79,10 +75,7 @@ fn read(
             continue;
         }
         if !descriptor.matches_with(
-            &[
-                76, 100, 97, 108, 118, 105, 107, 47, 97, 110, 110, 111, 116, 97, 116, 105, 111,
-                110, 47, 83, 105, 103, 110, 97, 116, 117, 114, 101, 59,
-            ],
+            &const { crate::substrate::owned::ascii_units(*b"Ldalvik/annotation/Signature;") },
             control,
         )? {
             return Ok(None);

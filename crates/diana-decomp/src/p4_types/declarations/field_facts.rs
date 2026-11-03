@@ -64,10 +64,10 @@ pub(crate) fn collect_field(
         && evidence.access_flags & crate::substrate::flags::FINAL != 0
         && storage == FieldStorage::Static
         && crate::substrate::flags::class_initializer(input.access_flags())
-        && input
-            .declaration()
-            .name
-            .matches_with(&[60, 99, 108, 105, 110, 105, 116, 62], budget)?
+        && input.declaration().name.matches_with(
+            &const { crate::substrate::owned::ascii_units(*b"<clinit>") },
+            budget,
+        )?
         && input.own_field_metadata(reference, budget)?.is_some();
     let nested = super::nested_scope::collect(input.program(), input.class_id(), catalog, budget)?;
     let capture_outer = if let Some(scope) = &nested {

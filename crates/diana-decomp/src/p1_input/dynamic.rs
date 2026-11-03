@@ -68,15 +68,15 @@ impl<'a> ProgramIndex<'a> {
             OperandReference::Field(FieldId(target))
         } else {
             let method = self.method_reference(MethodId(target), control)?;
-            let constructor = method
-                .declaration
-                .name
-                .matches_with(&[60, 105, 110, 105, 116, 62], control)?;
+            let constructor = method.declaration.name.matches_with(
+                &const { crate::substrate::owned::ascii_units(*b"<init>") },
+                control,
+            )?;
             if constructor != (kind == 6)
-                || method
-                    .declaration
-                    .name
-                    .matches_with(&[60, 99, 108, 105, 110, 105, 116, 62], control)?
+                || method.declaration.name.matches_with(
+                    &const { crate::substrate::owned::ascii_units(*b"<clinit>") },
+                    control,
+                )?
                 || constructor
                     && !method
                         .declaration
@@ -124,9 +124,13 @@ impl<'a> ProgramIndex<'a> {
         };
         let name = self.string_with(name_id, control)?;
         name.validate_name(control)?;
-        if name.matches_with(&[60, 105, 110, 105, 116, 62], control)?
-            || name.matches_with(&[60, 99, 108, 105, 110, 105, 116, 62], control)?
-        {
+        if name.matches_with(
+            &const { crate::substrate::owned::ascii_units(*b"<init>") },
+            control,
+        )? || name.matches_with(
+            &const { crate::substrate::owned::ascii_units(*b"<clinit>") },
+            control,
+        )? {
             return Err(invalid(offset).into());
         }
         let Some(ValueStep::Value(proto)) = values.next(self, control)? else {

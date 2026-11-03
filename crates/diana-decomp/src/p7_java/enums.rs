@@ -224,9 +224,7 @@ fn enum_method(
     method(
         input,
         reference,
-        &[
-            76, 106, 97, 118, 97, 47, 108, 97, 110, 103, 47, 69, 110, 117, 109, 59,
-        ],
+        &const { crate::substrate::owned::ascii_units(*b"Ljava/lang/Enum;") },
         name,
         proto,
         budget,
@@ -267,7 +265,7 @@ fn common(
         let Some(signature) = crate::input::signature::method(input, budget)? else {
             return Ok(false);
         };
-        return Ok(signature.units() == [40, 41, 86]);
+        return Ok(signature.units() == const { crate::substrate::owned::ascii_units(*b"()V") });
     }
     let metadata = input.throws_metadata(budget)?;
     Ok(metadata.exceptions.is_empty()

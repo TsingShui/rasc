@@ -56,10 +56,10 @@ fn reference_only(
     let pc = invocation.pc;
     let method = input.method_reference(reference, budget)?;
     if !method.owner.matches_with(expected_owner, budget)?
-        || !method
-            .declaration
-            .name
-            .matches_with(&[60, 105, 110, 105, 116, 62], budget)?
+        || !method.declaration.name.matches_with(
+            &const { crate::substrate::owned::ascii_units(*b"<init>") },
+            budget,
+        )?
         || !method
             .declaration
             .prototype

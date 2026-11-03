@@ -348,11 +348,10 @@ impl DeclarationElement {
     }
     pub(crate) fn prototype(&self) -> &[u16] {
         match self.kind {
-            ElementType::String => &[
-                40, 41, 76, 106, 97, 118, 97, 47, 108, 97, 110, 103, 47, 83, 116, 114, 105, 110,
-                103, 59,
-            ],
-            ElementType::IntArray => &[40, 41, 91, 73],
+            ElementType::String => {
+                &const { crate::substrate::owned::ascii_units(*b"()Ljava/lang/String;") }
+            }
+            ElementType::IntArray => &const { crate::substrate::owned::ascii_units(*b"()[I") },
         }
     }
     pub(crate) fn default(&self) -> Option<&Literal> {
