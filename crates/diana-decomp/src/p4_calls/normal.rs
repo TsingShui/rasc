@@ -275,6 +275,6 @@ pub(crate) fn source_reference_type(
     catalog: &DeclarationCatalog,
     descriptor: &[u16],
     budget: &mut MethodBudget<'_, '_>,
-) -> Result<bool, RequestError> {
+) -> Result<Option<bool>, RequestError> {
     super::reference_types::source_reference_type(input, catalog, descriptor, budget)
 }

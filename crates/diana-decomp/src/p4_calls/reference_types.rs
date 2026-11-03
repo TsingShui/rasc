@@ -8,7 +8,7 @@ pub(crate) fn source_type(
     catalog: &DeclarationCatalog,
     descriptor: &[u16],
     budget: &mut MethodBudget<'_, '_>,
-) -> Result<bool, RequestError> {
+) -> Result<Option<bool>, RequestError> {
     named_type(input, catalog, descriptor, false, budget)
 }
 pub(crate) fn source_reference_type(
@@ -16,7 +16,7 @@ pub(crate) fn source_reference_type(
     catalog: &DeclarationCatalog,
     descriptor: &[u16],
     budget: &mut MethodBudget<'_, '_>,
-) -> Result<bool, RequestError> {
+) -> Result<Option<bool>, RequestError> {
     named_type(input, catalog, descriptor, true, budget)
 }
 fn named_type(
@@ -25,13 +25,13 @@ fn named_type(
     descriptor: &[u16],
     allow_interface: bool,
     budget: &mut MethodBudget<'_, '_>,
-) -> Result<bool, RequestError> {
+) -> Result<Option<bool>, RequestError> {
     if descriptor.len() < 3 || descriptor.first() != Some(&76) || descriptor.last() != Some(&59) {
-        return Ok(false);
+        return Ok(Some(false));
     }
     let caller = copy_units(input.owner(), budget)?;
     let Some(class) = catalog.class(descriptor, budget)? else {
-        return Ok(false);
+        return Ok(None);
     };
     let nested = super::nested_scope::collect(input.program(), input.class_id(), catalog, budget)?;
     let mut lexical = nested
@@ -49,7 +49,7 @@ fn named_type(
         || class.access_flags & 0x2000 != 0
         || !allow_interface && class.access_flags & 0x200 != 0
     {
-        return Ok(false);
+        return Ok(Some(false));
     }
     let mut end = descriptor.len() - 1;
     for (i, &unit) in descriptor[1..descriptor.len() - 1].iter().enumerate() {
@@ -59,8 +59,10 @@ fn named_type(
             break;
         }
     }
-    Ok(!input.qualifier_shadowed(&descriptor[1..end], budget)?
-        && clear_scope(catalog, &caller, &descriptor[1..end], budget)?)
+    Ok(Some(
+        !input.qualifier_shadowed(&descriptor[1..end], budget)?
+            && clear_scope(catalog, &caller, &descriptor[1..end], budget)?,
+    ))
 }
 pub(crate) fn source_subtype(
     input: &MethodInput<'_, '_>,
@@ -69,7 +71,7 @@ pub(crate) fn source_subtype(
     to: &[u16],
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<Option<bool>, RequestError> {
-    if !source_reference_type(input, catalog, from, budget)? {
+    if source_reference_type(input, catalog, from, budget)? != Some(true) {
         return Ok(None);
     }
     super::hierarchy::subtype(catalog, from, to, budget)

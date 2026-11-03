@@ -122,7 +122,9 @@ pub(crate) fn collect_field(
             JavaConstantKind::NonConstant => {}
         }
     }
-    if !lexical && !crate::p4_calls::source_type(input, catalog, &evidence.owner, budget)? {
+    if !lexical
+        && crate::p4_calls::source_type(input, catalog, &evidence.owner, budget)? != Some(true)
+    {
         return Err(missing());
     }
     let Some(owner) = catalog.class(&evidence.owner, budget)? else {

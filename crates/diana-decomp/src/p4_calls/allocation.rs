@@ -83,7 +83,8 @@ pub(crate) fn resolve(
     if !super::contracts::directory(class, &caller, budget)?
         || class.access_flags & 0x6200 != 0
         || (matches!(use_kind, ConstructorUse::Allocation) && class.access_flags & 0x400 != 0)
-        || !super::reference_types::source_type(input, catalog, expected_owner, budget)?
+        || super::reference_types::source_type(input, catalog, expected_owner, budget)?
+            != Some(true)
         || !super::overloads::unique_target(
             catalog,
             class,
