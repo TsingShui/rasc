@@ -250,12 +250,3 @@ pub(crate) fn contract<'a>(
         )),
     }
 }
-
-pub(crate) fn source_reference_type(
-    input: &MethodInput<'_, '_>,
-    catalog: &DeclarationCatalog,
-    descriptor: &[u16],
-    budget: &mut MethodBudget<'_, '_>,
-) -> Result<Option<bool>, RequestError> {
-    super::reference_types::source_reference_type(input, catalog, descriptor, budget)
-}

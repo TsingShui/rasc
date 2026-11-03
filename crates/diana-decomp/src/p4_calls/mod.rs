@@ -15,7 +15,7 @@ mod normal;
 pub(crate) use contracts::qualifier_available;
 pub(crate) use normal::{
     CallEvidence, FieldDeclaration, FieldEvidence, FieldScope, ResolvedBody, SourceThrows,
-    binding_available, collect, contract, source_reference_type,
+    binding_available, collect, contract,
 };
 pub(crate) mod raw_signature;
 mod reference_types;
