@@ -208,13 +208,14 @@ impl ReceiverDeclaration {
             if !crate::p0_knowledge::same_units(parameter, &caller, budget)? {
                 return Ok(None);
             }
-        } else if !super::reference_types::source_subtype(
+        } else if super::reference_types::source_subtype(
             input,
             catalog,
             parameter,
             &target.owner,
             budget,
-        )? {
+        )? != Some(true)
+        {
             return Ok(None);
         }
         // External declaration facts are optional. When the receiver's own owner

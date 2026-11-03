@@ -68,9 +68,9 @@ pub(crate) fn source_subtype(
     from: &[u16],
     to: &[u16],
     budget: &mut MethodBudget<'_, '_>,
-) -> Result<bool, RequestError> {
+) -> Result<Option<bool>, RequestError> {
     if !source_reference_type(input, catalog, from, budget)? {
-        return Ok(false);
+        return Ok(None);
     }
-    Ok(super::hierarchy::subtype(catalog, from, to, budget)? == Some(true))
+    super::hierarchy::subtype(catalog, from, to, budget)
 }
