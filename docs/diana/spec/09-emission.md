@@ -18,7 +18,7 @@ complete result.
 
 P8 decides language eligibility, P9 only reads the existing result, and the application MUST NOT
 refuse to call the renderer because a class is Mixed:
-1. JavaUnit uses the complete Java printer; a single-method Java or DeclarationOnly result prints
+1. A complete class uses the complete Java printer; a single-method Java result prints
    the corresponding declaration or body without an index prefix.
 2. Mixed first states the original class identity and “not a complete Java compilation unit”, and
    keeps the shell/fields according to the real DeclarationOutput. Members are presented

@@ -21,7 +21,7 @@ category alone need not identify the root cause.
 Each method runs exactly one analysis chain and selects a result by the following conditions:
 
 1. Cancellation stops the request immediately and MUST NOT continue raw per method.
-2. A proven Malformed yields Unavailable with any safe original debug excerpt; it never becomes a normal success. abstract/native produce DeclarationOnly only when declaration and target checks pass; otherwise retain their code-free declaration as debug facts or Unavailable.
+2. A proven Malformed yields Unavailable with any safe original debug excerpt; it never becomes a normal success. An abstract, native or interface member with no code yields Java with `body: declaration` when its declaration is readable; otherwise its available declaration facts remain visible as Debug or Unavailable.
 3. When all Java checks pass, the result is Java; a failing method does not print its unvalidated
    half AST, and other completed methods are not discarded.
 4. When verification declines, P8 MAY retain an available readable reconstruction as Java with explicit uncertainty reasons and original identity. It MUST distinguish unknown facts from established facts and MUST NOT claim verified semantics or compilation. If no readable reconstruction is available, Unsupported enters the debug exit once. BudgetExceeded retains its classified failure and enters the debug exit only if resources remain. Read only facts whose original ranges/widths are checked, retain their coverage and mark unavailable regions. Any further read uses the same request resources and explicit fallback quota. A confirmed Malformed MUST NOT be revoked by re-reading.
@@ -168,12 +168,12 @@ an already checked unqualified own-field form; fields colliding with synthetic
 local spellings are rejected rather than rebound. P9 prints the sealed unit
 preparation and original initializer bodies without decoding or choosing values.
 
-### A generated member is not DeclarationOnly
+### A generated member always has code
 
 Bridges, the values/valueOf of enums, hidden constructor parameters and inner outer-capture are
 language-generated shapes.
 P8 uses `MemberEmission::Explicit | Generated(owner-node, rule)`; Generated is still Java member
-evidence with code and is not counted as abstract/native DeclarationOnly. The unit printer emits
+evidence with code and is never a body-less declaration. The unit printer emits
 only the owner syntax and MUST NOT also print duplicate declarations that conflict with
 javac-generated members; the raw identity is still mapped to the actual source spans of that
 owner.

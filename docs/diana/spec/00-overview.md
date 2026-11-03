@@ -153,11 +153,13 @@ pub struct Report {
     pub stats: RunStats,
 }
 pub enum MethodOutput {
-    Java { source: String, spans: Vec<OriginSpan>, uncertainties: Vec<Diagnostic> },
-    DeclarationOnly { declaration: JavaMethodDecl }, // abstract/native, declaration only
+    /// Readable Java. `body` distinguishes a recovered body from a declaration
+    /// that has no body in the original DEX (abstract, native, interface method).
+    Java { source: String, body: JavaBodyKind, spans: Vec<OriginSpan>, uncertainties: Vec<Diagnostic> },
     Debug { source: String, spans: Vec<OriginSpan>, reason: Diagnostic },
     Unavailable { reason: Diagnostic, excerpt: Option<RawExcerpt> },
 }
+pub enum JavaBodyKind { Code, Declaration }
 pub enum ClassOutput {
     JavaUnit { source: String, members: Vec<MethodOutput> },
     Mixed { shell: DeclarationOutput, members: Vec<MethodOutput> },
@@ -194,7 +196,7 @@ P8 produces readable Java from the shared analysis products and records material
 
 Generated members retain original identities and MUST NOT be duplicated in owner syntax. If a member cannot be expressed independently, Diana MUST present its available readable reconstruction or original facts without inventing a wrapper.
 
-JavaUnit denotes a rendered class-shaped result, not a guarantee of compilation or equivalence. Mixed retains available members and their original identities when the class cannot be represented as one unit. Both presentations MUST mark material uncertainties and MUST NOT fill gaps with fake method bodies. File suffixes MUST NOT determine eligibility.
+A class-shaped result is not a guarantee of compilation or equivalence. Members retain their original identities and uncertainty markers; an unavailable shell MUST NOT hide available members. A declaration without a body is permitted only when the original member has no code; Diana MUST NOT fabricate a body to fill a gap. File suffixes MUST NOT determine eligibility.
 
 #### 2.3 Failure kinds and cancellation
 
