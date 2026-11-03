@@ -63,6 +63,9 @@ integration boundaries. Report failures and unrun evidence accurately.
 
 ## Documentation map
 
+- [phases](docs/diana/phases.md): phase map and current scheduling entry.
+- [spec/00–09](docs/diana/README.md): product overview and phase chapters;
+  detailed contracts are still being migrated.
 - [DESIGN](docs/diana/DESIGN.md): product, CLI, stage interfaces and failures.
 - [ALGORITHMS](docs/diana/ALGORITHMS.md): phase algorithms and invariants.
 - [SOURCE_MAP](docs/diana/SOURCE_MAP.md): sources, attribution and reference use.
