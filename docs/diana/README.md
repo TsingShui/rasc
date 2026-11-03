@@ -1,7 +1,8 @@
 # Diana documentation
 
-Diana is a native APK/DEX decompiler. Its product contract favors readable code
-with material uncertainty and original DEX facts explicit. The current engine
+Diana is a native APK/DEX decompiler. The analysed input is its only source of
+decompilation facts; external declarations are not consulted. Its product contract
+favors readable code with material uncertainty and original DEX facts explicit. The current engine
 still gates many Java results on stricter checks; the revised readable-output
 contract is not yet implemented.
 

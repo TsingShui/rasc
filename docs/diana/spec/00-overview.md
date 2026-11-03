@@ -8,6 +8,32 @@ queries. The application owns files, archive handling and presentation; the
 engine borrows DEX bytes and caller-supplied declaration facts. The stage map
 and the current ordinary-method entry are in [phases.md](../phases.md).
 
+## Single source of truth
+
+The analysed input is Diana's only source of decompilation facts. Diana MUST
+derive declarations, references, types, annotations and debug information from
+the APK/DEX bytes it was given, together with caller-provided original identity.
+Diana MUST NOT require, query or parse external declaration sources such as class
+files, `android.jar`, classpaths, symbol databases or network services, and it
+MUST NOT accept an external declaration catalog as a condition for output.
+
+Facts the input does not carry are `Unknown`. `Unknown` is not a failure: the
+result continues with the available facts and records the uncertainty. A method
+or member is denied only when the input cannot be read safely (for example an
+out-of-range structure, an unknown instruction width or a truncated code item) or
+when the input itself is internally inconsistent in a way that no source form can
+express.
+
+Consequences for source recovery:
+
+- Call targets come from the original DEX references and invoke kind.
+- Generic signatures come from DEX `Signature` annotations; external library
+  generics are rendered erased.
+- Access flags, inheritance, overload sets, declared throws and constant-field
+  status are known only for definitions inside the input.
+- Readable output does not claim compilability or semantic equivalence, and
+  strict verification cannot be a gate for producing it.
+
 ## Readable result
 
 The product direction is to display available readable reconstruction by default,

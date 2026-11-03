@@ -11,6 +11,10 @@ package-local `AGENTS.md` before working in either package.
   NOT suppress other members; text and JSON present the same result.
 - Treat APK/DEX bytes as untrusted: check sizes, ranges and arithmetic before
   slicing or allocating. Do not panic, hang or allocate without bounds.
+- The analysed input is the single source of decompilation facts. Do not require
+  or parse external declarations, class files, android.jar, classpaths, symbol
+  databases or network facts; treat absent facts as Unknown and keep the readable
+  result with explicit uncertainty.
 - Preserve effect, instruction, argument, exception, lock and initialization
   order, classified errors, cancellation and backpressure. Numeric quotas are
   opt-in; never silently truncate a successful result.
