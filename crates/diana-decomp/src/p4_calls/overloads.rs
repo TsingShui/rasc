@@ -292,6 +292,7 @@ pub(super) fn unique_target(
     scope: Scope<'_>,
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<bool, RequestError> {
+    let _span = crate::pipeline::phase_span("p4_overloads");
     let Some(fixed) = parameters(target, budget)? else {
         return Ok(false);
     };

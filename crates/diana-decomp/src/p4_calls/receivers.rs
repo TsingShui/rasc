@@ -32,10 +32,7 @@ pub(crate) fn collect_receiver(
     kind: ReceiverKind,
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<Option<ReceiverDeclaration>, RequestError> {
-    let declared = collect_receiver_declared(input, catalog, invocation, kind, budget)?;
-    if declared.is_some() {
-        return Ok(declared);
-    }
+    let _span = crate::pipeline::phase_span("p4_receivers");
     let reference = invocation.reference;
     let method = input.method_reference(reference, budget)?;
     let Some(formals) = super::contracts::original_formals(input, reference, budget)? else {

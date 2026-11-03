@@ -168,10 +168,7 @@ pub(super) fn collect_static(
     id: MethodId,
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<Option<StaticContract>, RequestError> {
-    let declared = collect_static_declared(input, catalog, id, budget)?;
-    if declared.is_some() {
-        return Ok(declared);
-    }
+    let _span = crate::pipeline::phase_span("p4_static");
     let reference = input.method_reference(id, budget)?;
     let owner = copy_units(reference.owner, budget)?;
     if owner.first() != Some(&76) || owner.last() != Some(&59) {

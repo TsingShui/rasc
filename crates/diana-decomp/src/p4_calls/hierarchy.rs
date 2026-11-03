@@ -56,6 +56,7 @@ pub(super) fn collect<'a>(
     root: &'a ExternalClassDeclaration,
     budget: &mut impl InputControl,
 ) -> Result<Option<Hierarchy<'a>>, RequestError> {
+    let _span = crate::pipeline::phase_span("p4_hierarchy");
     let mut pending = Vec::new();
     let mut active = Vec::new();
     let mut complete = Vec::new();
