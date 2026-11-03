@@ -217,6 +217,14 @@ pub(super) fn assignments(
                 }
             }
             BranchExpression::Local(view) => value_use(view, output, budget)?,
+            BranchExpression::CopyLiteral(crate::p5_variables::CopySource::Zero {
+                view, ..
+            }) => output.push(view.spelling(), budget)?,
+            BranchExpression::CopyLiteral(crate::p5_variables::CopySource::Local(_)) => {
+                return Err(RequestError::InternalInvariant(
+                    "local emitted as literal copy",
+                ));
+            }
             BranchExpression::ConstantWide(value) => {
                 output.arguments(format_args!("{value}L"), budget)?
             }

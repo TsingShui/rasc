@@ -180,11 +180,32 @@ fn parallel(
                 "storage Phi lost an available incoming value",
             ));
         };
+        let target_kind = typed.kinds
+            [usize::try_from(phi.result.0).map_err(|_| RequestError::PlatformCapacity)?]
+        .ok_or(RequestError::InternalInvariant("Phi target lost kind"))?;
+        let source_kind = typed.kinds
+            [usize::try_from(source.0).map_err(|_| RequestError::PlatformCapacity)?]
+        .ok_or(RequestError::InternalInvariant("Phi source lost kind"))?;
+        let source = if local_type(source_kind)? == local_type(target_kind)? {
+            crate::p5_variables::CopySource::Local(LocalId(source.0))
+        } else {
+            let evidence = crate::p4_types::zero::evidence(&typed.ssa, source, budget)?.ok_or(
+                RequestError::InternalInvariant("Phi copy lacks zero evidence"),
+            )?;
+            let view = crate::p4_types::zero::view(target_kind).ok_or(
+                RequestError::InternalInvariant("word zero has incompatible storage width"),
+            )?;
+            crate::p5_variables::CopySource::Zero {
+                evidence,
+                view,
+                kind: local_type(target_kind)?,
+            }
+        };
         push(
             &mut copies,
             Copy {
                 target: LocalId(phi.result.0),
-                source: LocalId(source.0),
+                source,
             },
             budget,
         )?;

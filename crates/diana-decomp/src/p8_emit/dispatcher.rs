@@ -77,7 +77,17 @@ pub(super) fn statements(
             crate::p7_java::calls::Statement::Snapshot(snapshot) => {
                 local(snapshot.copy.target, output, budget)?;
                 output.push(" = ", budget)?;
-                local(snapshot.copy.source, output, budget)?;
+                local(
+                    snapshot
+                        .copy
+                        .source
+                        .local()
+                        .ok_or(crate::RequestError::InternalInvariant(
+                            "exception snapshot lost original local",
+                        ))?,
+                    output,
+                    budget,
+                )?;
                 output.push(";\n", budget)?;
             }
             crate::p7_java::calls::Statement::ExceptionBind { handler, target } => {

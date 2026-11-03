@@ -154,8 +154,10 @@ pub(super) fn call_argument(
         );
     }
     Ok(match (view, formal, ssa.kinds[at]) {
-        (ValueUse::Direct(_), CallFormal::Nominal(expected), Some(Kind::Nominal(actual))) => {
-            actual == expected
+        (ValueUse::Direct(_), CallFormal::Nominal(_), Some(kind))
+            if crate::p4_types::reference_roots::reference(kind) =>
+        {
+            !ssa.ssa.is_zero(value)?
         }
         (ValueUse::NullAssignment(_), CallFormal::Nominal(_), _) => ssa.ssa.is_zero(value)?,
         (ValueUse::Null { kind, .. }, CallFormal::Reference(expected), _) => {
@@ -177,6 +179,7 @@ pub(super) fn call_argument(
             Some(
                 Kind::String
                 | Kind::Class
+                | Kind::Throwable
                 | Kind::PrimitiveArray(_)
                 | Kind::ObjectArray
                 | Kind::Nominal(_)
@@ -301,11 +304,30 @@ fn copies(
                     "definition certificate lost an available edge value",
                 ));
             };
+            let target_kind = ssa.kinds[ix(phi.result.0)?]
+                .ok_or(RequestError::InternalInvariant("Phi target lost kind"))?;
+            let source_kind = ssa.kinds[ix(source.0)?]
+                .ok_or(RequestError::InternalInvariant("Phi source lost kind"))?;
+            let source = if ty(source_kind)? == ty(target_kind)? {
+                crate::p5_variables::CopySource::Local(LocalId(source.0))
+            } else {
+                let evidence = crate::p4_types::zero::evidence(&ssa.ssa, source, budget)?.ok_or(
+                    RequestError::InternalInvariant("Phi literal lost zero evidence"),
+                )?;
+                let view = crate::p4_types::zero::view(target_kind).ok_or(
+                    RequestError::InternalInvariant("Phi literal has invalid view"),
+                )?;
+                crate::p5_variables::CopySource::Zero {
+                    evidence,
+                    view,
+                    kind: ty(target_kind)?,
+                }
+            };
             push(
                 &mut parallel,
                 Copy {
                     target: LocalId(phi.result.0),
-                    source: LocalId(source.0),
+                    source,
                 },
                 budget,
             )?;
@@ -328,11 +350,25 @@ fn copies(
     }
     for statement in actual {
         budget.charge_work(1)?;
-        let Expression::Local(super::branch::ValueUse::Direct(source)) = statement.expression
-        else {
-            return Err(RequestError::InternalInvariant(
-                "edge copy evaluates a non-local expression",
-            ));
+        let source = match statement.expression {
+            Expression::Local(super::branch::ValueUse::Direct(local)) => {
+                crate::p5_variables::CopySource::Local(local)
+            }
+            Expression::CopyLiteral(
+                literal @ crate::p5_variables::CopySource::Zero { evidence, .. },
+            ) => {
+                if !crate::p4_types::zero::proven(&ssa.ssa, evidence.value(), budget)? {
+                    return Err(RequestError::InternalInvariant(
+                        "copy literal changed original value",
+                    ));
+                }
+                literal
+            }
+            _ => {
+                return Err(RequestError::InternalInvariant(
+                    "edge copy evaluates a non-copy expression",
+                ));
+            }
         };
         push(
             &mut plan.steps,
@@ -719,7 +755,7 @@ pub(super) fn verify(
                 for copy in &ingress.copies.steps {
                     budget.charge_work(1)?;
                     if !matches!(case.statements.get(statement), Some(super::calls::Statement::Assignment(actual))
-                        if actual.target == copy.target && matches!(actual.expression, Expression::Local(super::branch::ValueUse::Direct(source)) if source == copy.source))
+                        if actual.target == copy.target && matches!(actual.expression, Expression::Local(super::branch::ValueUse::Direct(source)) if Some(source) == copy.source.local()))
                     {
                         return Err(RequestError::InternalInvariant(
                             "handler ingress changed copy or binding position",

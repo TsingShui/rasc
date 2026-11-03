@@ -12,6 +12,7 @@ pub(crate) enum Right {
     Literal(i32),
 }
 pub(crate) enum Expression {
+    CopyLiteral(crate::p5_variables::CopySource),
     Unary(super::numeric_expression::Unary, ValueUse),
     ReverseSubtract(i32, ValueUse),
     Compare(super::numeric_expression::Expression),
@@ -63,7 +64,7 @@ pub(super) fn copies(
             output,
             Assignment {
                 target: copy.target,
-                expression: Expression::Local(ValueUse::Direct(copy.source)),
+                expression: copy_expression(copy.source),
             },
             budget,
         )?;
@@ -262,4 +263,11 @@ fn verify_impl(
         }
         None => Outcome::Declined(reason(refused.unwrap_or("java_lowering_or_verification"))),
     })
+}
+
+pub(crate) fn copy_expression(source: crate::p5_variables::CopySource) -> Expression {
+    match source {
+        crate::p5_variables::CopySource::Local(local) => Expression::Local(ValueUse::Direct(local)),
+        literal @ crate::p5_variables::CopySource::Zero { .. } => Expression::CopyLiteral(literal),
+    }
 }

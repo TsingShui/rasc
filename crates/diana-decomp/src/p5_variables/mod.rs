@@ -8,5 +8,5 @@ pub(crate) use normal::{Initializer, Parameter, StorageBody, allocate, local_typ
 pub(crate) mod object_allocation;
 
 pub(crate) use copies::{
-    Copy, CopyPlan, LocalId, LocalType, LocalTypeId, Temporary, Width, plan, verify,
+    Copy, CopyPlan, CopySource, LocalId, LocalType, LocalTypeId, Temporary, Width, plan, verify,
 };

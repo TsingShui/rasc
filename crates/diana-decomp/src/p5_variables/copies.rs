@@ -32,7 +32,34 @@ impl LocalType {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct Copy {
     pub target: LocalId,
-    pub source: LocalId,
+    pub source: CopySource,
+}
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum CopySource {
+    Local(LocalId),
+    Zero {
+        evidence: crate::p4_types::zero::ZeroEvidence,
+        view: crate::p4_types::zero::ZeroView,
+        kind: LocalType,
+    },
+}
+impl CopySource {
+    pub(crate) fn local(self) -> Option<LocalId> {
+        match self {
+            Self::Local(local) => Some(local),
+            Self::Zero { .. } => None,
+        }
+    }
+}
+fn source_kind(
+    source: CopySource,
+    types: &[LocalType],
+    temps: &[Temporary],
+) -> Result<LocalType, RequestError> {
+    match source {
+        CopySource::Local(local) => kind(local, types, temps),
+        CopySource::Zero { kind, .. } => Ok(kind),
+    }
 }
 pub(crate) struct Temporary {
     pub local: LocalId,
@@ -87,12 +114,16 @@ pub(crate) fn plan(
     let mut pending = Vec::new();
     for (index, copy) in parallel.iter().enumerate() {
         budget.charge_work(1)?;
-        if ix(copy.target)? >= types.len() || ix(copy.source)? >= types.len() {
+        if ix(copy.target)? >= types.len()
+            || copy.source.local().is_some_and(|local| {
+                usize::try_from(local.0).map_or(true, |index| index >= types.len())
+            })
+        {
             return Err(RequestError::InternalInvariant(
                 "parallel copy has a foreign local",
             ));
         }
-        if types[ix(copy.target)?] != types[ix(copy.source)?] {
+        if types[ix(copy.target)?] != source_kind(copy.source, types, &[])? {
             return Err(RequestError::InternalInvariant(
                 "parallel copy requires a conversion",
             ));
@@ -105,7 +136,7 @@ pub(crate) fn plan(
                 ));
             }
         }
-        if copy.target != copy.source {
+        if Some(copy.target) != copy.source.local() {
             push(&mut pending, *copy, budget)?;
         }
     }
@@ -121,7 +152,7 @@ pub(crate) fn plan(
             let mut needed = false;
             for source in &pending {
                 budget.charge_work(1)?;
-                if copy.target == source.source {
+                if Some(copy.target) == source.source.local() {
                     needed = true;
                     break;
                 }
@@ -135,7 +166,9 @@ pub(crate) fn plan(
             push(&mut result.steps, pending.swap_remove(index), budget)?;
             continue;
         }
-        let source = pending[0].source;
+        let source = pending.iter().find_map(|copy| copy.source.local()).ok_or(
+            RequestError::InternalInvariant("copy dependencies have no local source"),
+        )?;
         let index = types
             .len()
             .checked_add(result.temporaries.len())
@@ -154,14 +187,14 @@ pub(crate) fn plan(
             &mut result.steps,
             Copy {
                 target: local,
-                source,
+                source: CopySource::Local(source),
             },
             budget,
         )?;
         for copy in &mut pending {
             budget.charge_work(1)?;
-            if copy.source == source {
-                copy.source = local;
+            if copy.source.local() == Some(source) {
+                copy.source = CopySource::Local(local);
             }
         }
     }
@@ -185,9 +218,9 @@ pub(crate) fn verify(
     reserve(&mut state, total, budget)?;
     for index in 0..types.len() {
         budget.charge_work(1)?;
-        state.push(Some(LocalId(
+        state.push(Some(CopySource::Local(LocalId(
             u32::try_from(index).map_err(|_| RequestError::PlatformCapacity)?,
-        )));
+        ))));
     }
     for (offset, temporary) in plan.temporaries.iter().enumerate() {
         budget.charge_work(1)?;
@@ -204,16 +237,20 @@ pub(crate) fn verify(
     }
     for copy in &plan.steps {
         budget.charge_work(1)?;
-        if kind(copy.source, types, &plan.temporaries)?
+        if source_kind(copy.source, types, &plan.temporaries)?
             != kind(copy.target, types, &plan.temporaries)?
         {
             return Err(RequestError::InternalInvariant(
                 "sequential copy changes type",
             ));
         }
-        let value = state.get(ix(copy.source)?).copied().flatten().ok_or(
-            RequestError::InternalInvariant("copy reads an unassigned temporary"),
-        )?;
+        let value =
+            match copy.source {
+                CopySource::Local(local) => state.get(ix(local)?).copied().flatten().ok_or(
+                    RequestError::InternalInvariant("copy reads an unassigned temporary"),
+                )?,
+                literal @ CopySource::Zero { .. } => literal,
+            };
         let target = state
             .get_mut(ix(copy.target)?)
             .ok_or(RequestError::InternalInvariant(
@@ -224,13 +261,14 @@ pub(crate) fn verify(
     for (index, actual) in state.iter().enumerate().take(types.len()) {
         budget.charge_work(1)?;
         let local = LocalId(u32::try_from(index).map_err(|_| RequestError::PlatformCapacity)?);
-        let mut expected = local;
+        let mut expected = CopySource::Local(local);
         let mut supplied = false;
         for copy in parallel {
             budget.charge_work(1)?;
-            if ix(copy.source)? >= types.len()
-                || ix(copy.target)? >= types.len()
-                || types[ix(copy.source)?] != types[ix(copy.target)?]
+            if copy.source.local().is_some_and(|local| {
+                usize::try_from(local.0).map_or(true, |index| index >= types.len())
+            }) || ix(copy.target)? >= types.len()
+                || source_kind(copy.source, types, &[])? != types[ix(copy.target)?]
             {
                 return Err(RequestError::InternalInvariant(
                     "parallel specification has invalid typed locals",

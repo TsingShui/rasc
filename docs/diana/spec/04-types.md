@@ -15,6 +15,20 @@ The current solver can decline when a type or use conversion is not supported;
 a declined result currently prevents later Java lowering. Readable output under
 uncertainty is a product requirement but is not yet generally implemented.
 
+## Zero constant use views
+
+P4 recognizes a word-zero constant through ordinary move definitions. Phi,
+parameters and runtime computations do not establish zero provenance. A proven
+zero input does not force a Phi with nonzero reference inputs to have an integer
+type. A Phi whose inputs are all proven zeros retains an integer storage view
+when no other type constraint selects its representation.
+
+P4 supplies sealed zero evidence and a typed view: integer `0`, boolean `false`,
+float positive zero, or reference `null`. P5 uses that evidence when a normal-edge
+Phi copy needs a different representation. Nonzero inputs still require compatible
+storage types; the engine MUST NOT reinterpret an arbitrary integer as a reference.
+Zero provenance traversal charges work and checks cancellation.
+
 ## 4. Types and Java expressions (T10/T11/T15)
 
 ### 4.1 Domain, constraints and solving order

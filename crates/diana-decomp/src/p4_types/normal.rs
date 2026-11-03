@@ -527,6 +527,16 @@ fn solve_impl<'a>(
                         "unavailable Phi entered type solving",
                     ));
                 };
+                // A proven word-zero has independent integer/null use views.
+                // It must not constrain a reference Phi to an integer kind.
+                if super::zero::proven(&ssa, source, budget)? {
+                    changed |= merge_range(&mut ranges[index], Some(super::IntRange::literal(0)));
+                    if integral_bits[index] & 1 == 0 {
+                        integral_bits[index] |= 1;
+                        changed = true;
+                    }
+                    continue;
+                }
                 let source = ix(source.0)?;
                 let source_range = ranges[source];
                 changed |= merge_range(&mut ranges[index], source_range);
@@ -538,10 +548,8 @@ fn solve_impl<'a>(
                 if let Some(kind) = kinds[source] {
                     if let Some(old) = kinds[index] {
                         if old != kind {
-                            // Verified DEX code allows one value to reach a merge
-                            // with different source views. Widen references to
-                            // Object and integral views to Int instead of
-                            // discarding the whole method.
+                            // Proven zero inputs were handled separately above.
+                            // Other inputs require a common storage representation.
                             let widened = widen(old, kind);
                             match widened {
                                 Some(kind) if Some(kind) != kinds[index] => {
@@ -561,6 +569,26 @@ fn solve_impl<'a>(
         }
         if !changed {
             break;
+        }
+    }
+    for phi in &ssa.phis {
+        let index = ix(phi.result.0)?;
+        if kinds[index].is_none() {
+            let mut all_zero = !phi.inputs.is_empty();
+            for &(_, input) in &phi.inputs {
+                budget.charge_work(1)?;
+                let Sym::Value(value) = input else {
+                    all_zero = false;
+                    break;
+                };
+                if !super::zero::proven(&ssa, value, budget)? {
+                    all_zero = false;
+                    break;
+                }
+            }
+            if all_zero {
+                kinds[index] = Some(Kind::Int);
+            }
         }
     }
     if type_conflict {

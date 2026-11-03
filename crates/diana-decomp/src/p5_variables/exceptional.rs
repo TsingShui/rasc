@@ -94,7 +94,7 @@ pub(crate) fn build(
                 &mut copies,
                 Copy {
                     target: LocalId(phi.result.0),
-                    source: local,
+                    source: crate::p5_variables::CopySource::Local(local),
                 },
                 budget,
             )?;
@@ -122,7 +122,7 @@ pub(crate) fn build(
                         before: original.pc,
                         copy: Copy {
                             target: local,
-                            source: LocalId(source.0),
+                            source: crate::p5_variables::CopySource::Local(LocalId(source.0)),
                         },
                     },
                     budget,
@@ -319,7 +319,7 @@ pub(crate) fn verify(
                 &mut copies,
                 Copy {
                     target: LocalId(phi.result.0),
-                    source: shadow.local,
+                    source: crate::p5_variables::CopySource::Local(shadow.local),
                 },
                 budget,
             )?;
@@ -361,7 +361,7 @@ pub(crate) fn verify(
                     || snapshot.copy
                         != (Copy {
                             target: shadow.local,
-                            source: LocalId(source.0),
+                            source: crate::p5_variables::CopySource::Local(LocalId(source.0)),
                         })
                     || !available(typed, source, edge.source, edge.pc, budget)?
                     || typed.kinds.get(ix(source.0)?) != typed.kinds.get(ix(phi.result.0)?)

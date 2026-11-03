@@ -23,6 +23,12 @@ For every Phi incoming a `CopySet[IncomingEdge]` is created; EntrySeed copies ar
 method entry (constructors are constrained by the prologue-substitution and post-normal
 materialization rules of §9.2), and the other copies are executed only **after that edge is
 selected**. The type comes from P4, and the source is a materialized local or a pure literal.
+`CopySource::Zero` retains P4 zero evidence, its use view and the target storage
+type. It creates no local or runtime computation. Local sources participate in
+copy dependencies; literal sources do not. A literal destination still waits
+until pending copies have read its old value. The copy verifier replays literal
+and local sources as distinct symbolic values, and Java verification checks
+literal provenance against original SSA definitions.
 
 ```text
 delete self-copies with the same Local and the same type/conversion

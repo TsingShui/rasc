@@ -512,7 +512,7 @@ pub(super) fn operations(
                     &mut output,
                     Statement::Assignment(Assignment {
                         target: copy.target,
-                        expression: super::branch::Expression::Local(ValueUse::Direct(copy.source)),
+                        expression: super::branch::copy_expression(copy.source),
                     }),
                     budget,
                 )?;

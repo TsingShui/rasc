@@ -10,6 +10,7 @@ pub(crate) mod declarations;
 pub(crate) mod entry_initialization;
 pub(crate) mod initialization;
 mod normal;
+pub(crate) mod zero;
 pub(crate) use normal::{
     ArrayEvidence, ArrayReceiver, ArrayUse, FieldUse, Kind, TypedBody, UseConversion, solve,
 };
