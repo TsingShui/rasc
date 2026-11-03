@@ -7,7 +7,6 @@ use crate::{DeclarationCatalog, MethodBudget, OutputReason, RequestError};
 pub(crate) enum Analysis<'a> {
     Ready {
         storage: crate::p6_variables::StorageBody<'a>,
-        declaration_failure: Option<OutputReason>,
     },
     Declined(OutputReason),
 }
@@ -49,18 +48,14 @@ pub(crate) fn build<'a>(
     };
     let resolved =
         crate::p4_calls::collect(schedule, input, catalog, ssa, capture.as_ref(), budget)?;
-    let declaration_failure = resolved.decline_reason;
     let typed = match crate::p5_types::solve(schedule, input, resolved, capture.as_ref(), budget)? {
         Outcome::Ready(typed) => typed,
         Outcome::Declined(reason) => {
-            return Ok(Analysis::Declined(declaration_failure.unwrap_or(reason)));
+            return Ok(Analysis::Declined(reason));
         }
     };
     match crate::p6_variables::allocate(schedule, typed, budget)? {
-        Outcome::Ready(storage) => Ok(Analysis::Ready {
-            storage,
-            declaration_failure,
-        }),
-        Outcome::Declined(reason) => Ok(Analysis::Declined(declaration_failure.unwrap_or(reason))),
+        Outcome::Ready(storage) => Ok(Analysis::Ready { storage }),
+        Outcome::Declined(reason) => Ok(Analysis::Declined(reason)),
     }
 }

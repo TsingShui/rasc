@@ -975,16 +975,13 @@ fn normal_member(
     }
     use crate::pipeline::branch::Analysis;
     use crate::substrate::outcome::Outcome;
-    let (storage, declaration_failure) = match crate::pipeline::branch::build(
+    let storage = match crate::pipeline::branch::build(
         &SchedulePermit { _private: () },
         &input,
         catalog,
         budget,
     )? {
-        Analysis::Ready {
-            storage,
-            declaration_failure,
-        } => (storage, declaration_failure),
+        Analysis::Ready { storage } => storage,
         Analysis::Declined(reason) => return Ok(NormalMember::Raw { facts, reason }),
     };
     let chain = crate::pipeline::constructor_chain::verify(
@@ -1023,7 +1020,7 @@ fn normal_member(
                 source,
             });
         }
-        Outcome::Declined(reason) => declaration_failure.unwrap_or(reason),
+        Outcome::Declined(reason) => reason,
     };
     Ok(NormalMember::Raw { facts, reason })
 }

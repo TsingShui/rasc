@@ -45,7 +45,6 @@ pub(crate) struct ResolvedBodyData<'a> {
     pub exceptions: Vec<super::exceptions::ExceptionBinding>,
     pub fields: Vec<Option<FieldEvidence>>,
     pub source_throws: Option<SourceThrows>,
-    pub decline_reason: Option<crate::OutputReason>,
 }
 impl<'a> ResolvedBody<'a> {
     pub(crate) fn into_data(self) -> ResolvedBodyData<'a> {
@@ -89,7 +88,6 @@ fn collect_impl<'a>(
 ) -> Result<ResolvedBody<'a>, RequestError> {
     let source_throws = super::throws::source_throws(input, catalog, budget)?;
     let mut calls = Vec::new();
-    let mut decline_reason = None;
     for call in &ssa.calls {
         budget.charge_work(1)?;
         let evidence = if call.kind != crate::p2_flow::InvokeKind::Static {
@@ -211,7 +209,6 @@ fn collect_impl<'a>(
     Ok(ResolvedBody(ResolvedBodyData {
         _sealed: (),
         source_throws,
-        decline_reason,
         exceptions,
         ssa,
         calls,

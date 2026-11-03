@@ -1,5 +1,5 @@
 use crate::EnvironmentId;
-use crate::input::{DexString, InputError, Prototype};
+use crate::input::{DexString, InputError};
 use crate::pipeline::control::InputControl;
 
 pub(crate) fn same_units(
@@ -163,37 +163,5 @@ impl DeclarationCatalog {
             }
         }
         Ok(found)
-    }
-
-    pub(crate) fn contains_signature(
-        &self,
-        owner: DexString<'_>,
-        name: DexString<'_>,
-        prototype: &Prototype<'_, '_>,
-        control: &mut impl InputControl,
-    ) -> Result<bool, InputError> {
-        for method in &self.methods {
-            control.charge_work(1)?;
-            if owner.matches_with(&method.owner, control)?
-                && name.matches_with(&method.name, control)?
-                && prototype.matches_with(&method.prototype, control)?
-            {
-                return Ok(true);
-            }
-        }
-        for class in &self.classes {
-            control.charge_work(1)?;
-            if owner.matches_with(&class.descriptor, control)? {
-                for method in &class.methods {
-                    control.charge_work(1)?;
-                    if name.matches_with(&method.name, control)?
-                        && prototype.matches_with(&method.prototype, control)?
-                    {
-                        return Ok(true);
-                    }
-                }
-            }
-        }
-        Ok(false)
     }
 }
