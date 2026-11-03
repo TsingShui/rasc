@@ -49,7 +49,6 @@ pub(crate) mod types;
 pub(crate) mod values;
 pub use calls::{JavaCallSite, JavaInvokeKind};
 pub(crate) use method::MethodBody;
-pub(crate) use method::source_group_admitted;
 pub use method::{CompilationContract, VerifiedJavaMethod};
 
 pub use declarations::JavaMethodDecl;

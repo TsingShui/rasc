@@ -52,7 +52,21 @@ fn conversion(
     }
     if let CallFormal::Nominal(expected) = formal {
         return Ok(match kinds[index] {
+            // Verified DEX code already proves the reference argument is
+            // assignable to the declared formal; source legality does not need
+            // another hierarchy proof to keep the value.
             Some(Kind::Nominal(actual)) if actual == expected => Some(UseConversion::Identity),
+            Some(
+                Kind::Object
+                | Kind::String
+                | Kind::Class
+                | Kind::Throwable
+                | Kind::PrimitiveArray(_)
+                | Kind::ObjectArray
+                | Kind::Nominal(_)
+                | Kind::ReferenceArray(_)
+                | Kind::ProjectedNominal(_),
+            ) if !ssa.is_zero(value)? => Some(UseConversion::Identity),
             _ if ssa.is_zero(value)? => Some(UseConversion::NullAssignment),
             _ => None,
         });
@@ -68,6 +82,7 @@ fn conversion(
                     Some(
                         Kind::String
                         | Kind::Class
+                        | Kind::Throwable
                         | Kind::PrimitiveArray(_)
                         | Kind::ObjectArray
                         | Kind::Nominal(_)

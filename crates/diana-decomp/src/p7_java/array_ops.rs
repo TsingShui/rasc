@@ -22,7 +22,7 @@ pub(crate) enum Statement {
 }
 pub(super) fn validate(
     input: &crate::input::MethodInput<'_, '_>,
-    catalog: &crate::context::Context,
+    _catalog: &crate::context::Context,
     typed: &TypedBody<'_>,
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<bool, RequestError> {
@@ -38,12 +38,7 @@ pub(super) fn validate(
                 ..
             })
         ) {
-            return crate::p4_types::declarations::qualifier_available(
-                input,
-                catalog,
-                &[106, 97, 118, 97],
-                budget,
-            );
+            return Ok(!input.qualifier_shadowed(&[106, 97, 118, 97], budget)?);
         }
     }
     Ok(true)

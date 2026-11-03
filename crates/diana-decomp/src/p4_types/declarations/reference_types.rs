@@ -4,6 +4,7 @@ use crate::input::MethodInput;
 use crate::substrate::owned::copy_units;
 use crate::{MethodBudget, RequestError};
 
+#[allow(dead_code)]
 pub(crate) fn source_type(
     input: &MethodInput<'_, '_>,
     catalog: &Context,

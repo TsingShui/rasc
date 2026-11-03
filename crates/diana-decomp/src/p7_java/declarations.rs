@@ -305,14 +305,7 @@ fn declaration_type(
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<bool, RequestError> {
     let descriptor = copy_units(name, budget)?;
-    if raw
-        && !crate::p4_types::declarations::qualifier_available(
-            input,
-            catalog,
-            &[106, 97, 118, 97],
-            budget,
-        )?
-    {
+    if raw && input.qualifier_shadowed(&[106, 97, 118, 97], budget)? {
         return Ok(false);
     }
     if !raw || descriptor.first() != Some(&76) {

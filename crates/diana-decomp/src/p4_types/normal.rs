@@ -3,6 +3,36 @@ use crate::p3_ssa::{Definition, SsaBody, Sym};
 use crate::substrate::owned::push;
 use crate::{MethodBudget, RequestError};
 
+/// Widest source kind that can hold both views, or None if Java cannot.
+fn widen(a: Kind, b: Kind) -> Option<Kind> {
+    use Kind::*;
+    if a == b {
+        return Some(a);
+    }
+    let reference = |kind: Kind| {
+        matches!(
+            kind,
+            Object
+                | Throwable
+                | Class
+                | String
+                | PrimitiveArray(_)
+                | ObjectArray
+                | Nominal(_)
+                | ReferenceArray(_)
+                | ProjectedNominal(_)
+        )
+    };
+    match (a, b) {
+        (Int, Boolean) | (Boolean, Int) => Some(Int),
+        (Long, Int) | (Int, Long) => Some(Long),
+        (Float, Int) | (Int, Float) => Some(Float),
+        (Double, Int) | (Int, Double) => Some(Double),
+        _ if reference(a) && reference(b) => Some(Object),
+        _ => None,
+    }
+}
+
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub(crate) enum Kind {
     Long,
@@ -315,7 +345,12 @@ fn solve_impl<'a>(
                         array_components.component(input, operation.input(0)?, budget)?
                     else {
                         return Ok(crate::substrate::outcome::Outcome::Declined(
-                            crate::OutputReason::JavaAnalysisUnavailable,
+                            crate::OutputReason::JavaCheckFailed {
+                                code: crate::DiagnosticCode::JavaAnalysisUnavailable,
+                                phase: "P4",
+                                check: "array_component_kind",
+                                pc: None,
+                            },
                         ));
                     };
                     let kind = component.kind();
@@ -339,7 +374,12 @@ fn solve_impl<'a>(
                 Op::Move(_, _) | Op::MoveWide(_, _) => (0, None, None),
                 Op::Exception(_) => {
                     return Ok(crate::substrate::outcome::Outcome::Declined(
-                        crate::OutputReason::JavaAnalysisUnavailable,
+                        crate::OutputReason::JavaCheckFailed {
+                            code: crate::DiagnosticCode::JavaAnalysisUnavailable,
+                            phase: "P4",
+                            check: "exception_definition",
+                            pc: None,
+                        },
                     ));
                 }
                 Op::Monitor(..)
@@ -373,7 +413,12 @@ fn solve_impl<'a>(
                 }
                 let Some(kind) = kind else {
                     return Ok(crate::substrate::outcome::Outcome::Declined(
-                        crate::OutputReason::JavaAnalysisUnavailable,
+                        crate::OutputReason::JavaCheckFailed {
+                            code: crate::DiagnosticCode::JavaAnalysisUnavailable,
+                            phase: "P4",
+                            check: "definition_kind",
+                            pc: None,
+                        },
                     ));
                 };
                 (0, None, Some(kind))
@@ -493,7 +538,19 @@ fn solve_impl<'a>(
                 if let Some(kind) = kinds[source] {
                     if let Some(old) = kinds[index] {
                         if old != kind {
-                            type_conflict = true;
+                            // Verified DEX code allows one value to reach a merge
+                            // with different source views. Widen references to
+                            // Object and integral views to Int instead of
+                            // discarding the whole method.
+                            let widened = widen(old, kind);
+                            match widened {
+                                Some(kind) if Some(kind) != kinds[index] => {
+                                    kinds[index] = Some(kind);
+                                    changed = true;
+                                }
+                                Some(_) => {}
+                                None => type_conflict = true,
+                            }
                         }
                     } else {
                         kinds[index] = Some(kind);
@@ -508,57 +565,107 @@ fn solve_impl<'a>(
     }
     if type_conflict {
         return Ok(crate::substrate::outcome::Outcome::Declined(
-            crate::OutputReason::JavaAnalysisUnavailable,
+            crate::OutputReason::JavaCheckFailed {
+                code: crate::DiagnosticCode::JavaAnalysisUnavailable,
+                phase: "P4",
+                check: "type_conflict",
+                pc: None,
+            },
         ));
     }
     let Some(arrays) = solve_arrays(input, &ssa, &kinds, &integral_bits, budget)? else {
         return Ok(crate::substrate::outcome::Outcome::Declined(
-            crate::OutputReason::JavaAnalysisUnavailable,
+            crate::OutputReason::JavaCheckFailed {
+                code: crate::DiagnosticCode::JavaAnalysisUnavailable,
+                phase: "P4",
+                check: "array_solve",
+                pc: None,
+            },
         ));
     };
     if !numeric_valid {
         return Ok(crate::substrate::outcome::Outcome::Declined(
-            crate::OutputReason::JavaAnalysisUnavailable,
+            crate::OutputReason::JavaCheckFailed {
+                code: crate::DiagnosticCode::JavaAnalysisUnavailable,
+                phase: "P4",
+                check: "numeric_valid",
+                pc: None,
+            },
         ));
     }
     let Some(numeric_uses) = super::numeric::solve(&ssa, &kinds, budget)? else {
         return Ok(crate::substrate::outcome::Outcome::Declined(
-            crate::OutputReason::JavaAnalysisUnavailable,
+            crate::OutputReason::JavaCheckFailed {
+                code: crate::DiagnosticCode::JavaAnalysisUnavailable,
+                phase: "P4",
+                check: "numeric_uses",
+                pc: None,
+            },
         ));
     };
     let initializations = super::initialization::solve(&ssa, capture.as_ref(), budget)?;
     let Some(array_uses) = solve_new_arrays(&ssa, &kinds, budget)? else {
         return Ok(crate::substrate::outcome::Outcome::Declined(
-            crate::OutputReason::JavaAnalysisUnavailable,
+            crate::OutputReason::JavaCheckFailed {
+                code: crate::DiagnosticCode::JavaAnalysisUnavailable,
+                phase: "P4",
+                check: "new_array_solve",
+                pc: None,
+            },
         ));
     };
     let Some(filled_arrays) = solve_filled_arrays(input, &ssa, &kinds, &integral_bits, budget)?
     else {
         return Ok(crate::substrate::outcome::Outcome::Declined(
-            crate::OutputReason::JavaAnalysisUnavailable,
+            crate::OutputReason::JavaCheckFailed {
+                code: crate::DiagnosticCode::JavaAnalysisUnavailable,
+                phase: "P4",
+                check: "filled_array_solve",
+                pc: None,
+            },
         ));
     };
     let Some(empty_fills) = solve_empty_fills(&ssa, &kinds, budget)? else {
         return Ok(crate::substrate::outcome::Outcome::Declined(
-            crate::OutputReason::JavaAnalysisUnavailable,
+            crate::OutputReason::JavaCheckFailed {
+                code: crate::DiagnosticCode::JavaAnalysisUnavailable,
+                phase: "P4",
+                check: "empty_fill_solve",
+                pc: None,
+            },
         ));
     };
     let Some(cast_uses) = solve_casts(&ssa, &kinds, budget)? else {
         return Ok(crate::substrate::outcome::Outcome::Declined(
-            crate::OutputReason::JavaAnalysisUnavailable,
+            crate::OutputReason::JavaCheckFailed {
+                code: crate::DiagnosticCode::JavaAnalysisUnavailable,
+                phase: "P4",
+                check: "cast_uses",
+                pc: None,
+            },
         ));
     };
     let Some(field_uses) = solve_fields(&ssa, &field_declarations, &kinds, &integral_bits, budget)?
     else {
         return Ok(crate::substrate::outcome::Outcome::Declined(
-            crate::OutputReason::JavaAnalysisUnavailable,
+            crate::OutputReason::JavaCheckFailed {
+                code: crate::DiagnosticCode::JavaAnalysisUnavailable,
+                phase: "P4",
+                check: "field_uses",
+                pc: None,
+            },
         ));
     };
     let Some(call_uses) =
         super::calls::solve(&ssa, &bindings, &kinds, &integral_bits, &ranges, budget)?
     else {
         return Ok(crate::substrate::outcome::Outcome::Declined(
-            crate::OutputReason::JavaAnalysisUnavailable,
+            crate::OutputReason::JavaCheckFailed {
+                code: crate::DiagnosticCode::JavaAnalysisUnavailable,
+                phase: "P4",
+                check: "call_uses",
+                pc: None,
+            },
         ));
     };
     for (index, block) in ssa.blocks.iter().enumerate() {
@@ -640,7 +747,12 @@ fn solve_impl<'a>(
                 UseConversion::Identity
             } else {
                 return Ok(crate::substrate::outcome::Outcome::Declined(
-                    crate::OutputReason::JavaAnalysisUnavailable,
+                    crate::OutputReason::JavaCheckFailed {
+                        code: crate::DiagnosticCode::JavaAnalysisUnavailable,
+                        phase: "P4",
+                        check: "thrown_use",
+                        pc: None,
+                    },
                 ));
             })
         } else {
@@ -653,7 +765,12 @@ fn solve_impl<'a>(
                 .ok_or(RequestError::InternalInvariant("typed return lost value"))?;
             let Some(conversion) = return_use(&typed, value)? else {
                 return Ok(crate::substrate::outcome::Outcome::Declined(
-                    crate::OutputReason::JavaAnalysisUnavailable,
+                    crate::OutputReason::JavaCheckFailed {
+                        code: crate::DiagnosticCode::JavaAnalysisUnavailable,
+                        phase: "P4",
+                        check: "return_use",
+                        pc: None,
+                    },
                 ));
             };
             typed.0.returned_uses[ix(value.0)?] = Some(conversion);

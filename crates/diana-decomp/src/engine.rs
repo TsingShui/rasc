@@ -944,7 +944,7 @@ fn normal_member(
     key: MethodKey,
     catalog: &Context,
     representation: RepresentationPolicy,
-    emission: &crate::p7_java::member_emission::Plan,
+    _emission: &crate::p7_java::member_emission::Plan,
     inputs: MemberInputs<'_>,
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<NormalMember, RequestError> {
@@ -998,20 +998,17 @@ fn normal_member(
     )?;
     drop(_p7);
     let _p8 = crate::pipeline::phase_span("p7_java");
-    let result =
-        if crate::p7_java::source_group_admitted(index, key, &facts, Some(emission), budget)? {
-            crate::p7_java::verify_method(
-                &SchedulePermit { _private: () },
-                &input,
-                catalog,
-                planned,
-                &chain,
-                inputs.nested,
-                budget,
-            )?
-        } else {
-            Outcome::Declined(OutputReason::JavaAnalysisUnavailable)
-        };
+    // Source collision with a sibling overload blocks class-unit assembly, not
+    // this member's readable body; class_unit::verify retains that check.
+    let result = crate::p7_java::verify_method(
+        &SchedulePermit { _private: () },
+        &input,
+        catalog,
+        planned,
+        &chain,
+        inputs.nested,
+        budget,
+    )?;
     let reason = match result {
         Outcome::Ready(declaration) => {
             drop(_p8);

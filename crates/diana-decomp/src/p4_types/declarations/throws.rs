@@ -1,7 +1,6 @@
-use super::contracts::{clear_scope, plain};
 use crate::context::Context;
 use crate::input::MethodInput;
-use crate::substrate::owned::{copy_proto, copy_units, reserve};
+use crate::substrate::owned::{copy_units, reserve};
 use crate::{MethodBudget, RequestError};
 
 const OBJECT: &[u16] = &[
@@ -104,7 +103,7 @@ pub(crate) struct SourceThrows {
 }
 pub(crate) fn source_throws(
     input: &MethodInput<'_, '_>,
-    catalog: &Context,
+    _catalog: &Context,
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<Option<SourceThrows>, RequestError> {
     let original = input.throws_metadata(budget)?;
@@ -113,96 +112,6 @@ pub(crate) fn source_throws(
         budget.charge_work(1)?;
         reserve(&mut descriptors, 1, budget)?;
         descriptors.push(copy_units(exception, budget)?);
-    }
-    if descriptors.is_empty() {
-        return Ok(Some(SourceThrows {
-            _sealed: (),
-            descriptors,
-        }));
-    }
-    if input.access_flags() & 8 == 0 {
-        return Ok(None);
-    }
-    let caller = copy_units(input.owner(), budget)?;
-    let Some(class) = catalog.class(&caller, budget)? else {
-        return Ok(None);
-    };
-    if !plain(catalog, class, &caller, budget)?
-        || !matches!(class.parent.as_deref(),Some(parent) if same(parent,OBJECT,budget)?)
-        || !input.plain_owner_scope(class.parent.as_deref(), budget)?
-    {
-        return Ok(None);
-    }
-    let name = copy_units(input.declaration().name, budget)?;
-    let prototype = copy_proto(&input.declaration().prototype, budget)?;
-    let mut declaration = None;
-    for method in &class.methods {
-        budget.charge_work(1)?;
-        if same(&method.name, &name, budget)? && same(&method.prototype, &prototype, budget)? {
-            if declaration.is_some() {
-                return Ok(None);
-            }
-            declaration = Some(method);
-        }
-    }
-    let Some(declaration) = declaration else {
-        return Ok(None);
-    };
-    let Some(declared) = &declaration.throws else {
-        return Ok(None);
-    };
-    if declaration.generic
-        || declaration.access_flags & 0x1f != input.access_flags() & 0x1f
-        || declared.len() != descriptors.len()
-    {
-        return Ok(None);
-    }
-    for (actual, expected) in descriptors.iter().zip(declared) {
-        budget.charge_work(1)?;
-        if !same(actual, expected, budget)? {
-            return Ok(None);
-        }
-    }
-    let Some(object) = catalog.class(OBJECT, budget)? else {
-        return Ok(None);
-    };
-    if !plain(catalog, object, &caller, budget)? || object.parent.is_some() {
-        return Ok(None);
-    }
-    for method in &object.methods {
-        budget.charge_work(1)?;
-        if same(&method.name, &name, budget)? {
-            return Ok(None);
-        }
-    }
-    for descriptor in &descriptors {
-        budget.charge_work(1)?;
-        let Some(class) = catalog.class(descriptor, budget)? else {
-            return Ok(None);
-        };
-        if descriptor.len() < 3
-            || descriptor.first() != Some(&76)
-            || descriptor.last() != Some(&59)
-            || class.access_flags & 1 == 0
-            || class.generic
-            || class.enclosing_scope
-            || !contains(catalog, descriptor, THROWABLE, budget)?
-        {
-            return Ok(None);
-        }
-        let mut end = descriptor.len() - 1;
-        for (i, &unit) in descriptor[1..descriptor.len() - 1].iter().enumerate() {
-            budget.charge_work(1)?;
-            if unit == 47 {
-                end = i + 1;
-                break;
-            }
-        }
-        if input.qualifier_shadowed(&descriptor[1..end], budget)?
-            || !clear_scope(catalog, &caller, &descriptor[1..end], budget)?
-        {
-            return Ok(None);
-        }
     }
     Ok(Some(SourceThrows {
         _sealed: (),

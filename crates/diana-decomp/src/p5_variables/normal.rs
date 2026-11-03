@@ -244,7 +244,12 @@ fn allocate_impl<'a>(
         budget.charge_work(1)?;
         let Some(kind) = typed.kinds[index] else {
             return Ok(crate::substrate::outcome::Outcome::Declined(
-                crate::OutputReason::JavaAnalysisUnavailable,
+                crate::OutputReason::JavaCheckFailed {
+                    code: crate::DiagnosticCode::JavaAnalysisUnavailable,
+                    phase: "P5",
+                    check: "storage_missing_kind",
+                    pc: None,
+                },
             ));
         };
         let parameter = match definition {
@@ -397,7 +402,12 @@ fn allocate_impl<'a>(
     }
     let Some(exceptional) = super::exceptional::build(&typed, &mut locals, budget)? else {
         return Ok(crate::substrate::outcome::Outcome::Declined(
-            crate::OutputReason::JavaAnalysisUnavailable,
+            crate::OutputReason::JavaCheckFailed {
+                code: crate::DiagnosticCode::JavaAnalysisUnavailable,
+                phase: "P5",
+                check: "exceptional_storage",
+                pc: None,
+            },
         ));
     };
     Ok(crate::substrate::outcome::Outcome::Ready(StorageBody(

@@ -12,12 +12,11 @@ pub(crate) mod interface_scope;
 #[allow(dead_code)]
 pub(crate) mod nested_scope;
 
-pub(crate) mod raw_signature;
-mod reference_types;
-pub(crate) use reference_types::source_type;
 pub(crate) mod overrides;
+pub(crate) mod raw_signature;
 #[allow(dead_code)]
 pub(crate) mod receivers;
+mod reference_types;
 pub(crate) mod throws;
 pub(crate) use receivers::{ReceiverContract, ReceiverDeclaration, ReceiverKind};
 pub(crate) mod field_declarations;
