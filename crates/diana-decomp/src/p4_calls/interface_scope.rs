@@ -238,6 +238,7 @@ pub(super) fn catalog_plain(
     Ok(true)
 }
 
+#[allow(dead_code)]
 pub(super) fn owner(
     input: &crate::input::MethodInput<'_, '_>,
     catalog: &DeclarationCatalog,

@@ -297,6 +297,7 @@ impl<'i, 'a> MethodInput<'i, 'a> {
     ) -> Result<DexString<'a>, InputError> {
         self.index.string_with(id, budget)
     }
+    #[allow(dead_code)]
     pub(crate) fn local_method(
         &self,
         id: MethodId,

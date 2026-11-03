@@ -1,4 +1,3 @@
-use super::contracts::plain;
 use crate::input::MethodInput;
 use crate::p0_knowledge::DeclarationCatalog;
 use crate::substrate::owned::{copy_proto, copy_units};

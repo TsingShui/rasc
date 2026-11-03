@@ -850,6 +850,7 @@ pub(crate) struct ClassContext<'a> {
     pub annotations_offset: ByteOffset,
 }
 
+#[allow(dead_code)]
 pub(crate) struct LocalMethod<'a> {
     pub access_flags: u32,
     pub owner_access_flags: u32,
