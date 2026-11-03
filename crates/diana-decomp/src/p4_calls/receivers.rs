@@ -214,7 +214,7 @@ impl ReceiverDeclaration {
             parameter,
             &target.owner,
             budget,
-        )? != Some(true)
+        )? == Some(false)
         {
             return Ok(None);
         }
