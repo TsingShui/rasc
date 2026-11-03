@@ -2,6 +2,8 @@
 mod annotation_source;
 #[path = "input/annotations.rs"]
 mod annotations;
+#[path = "pipeline/anonymous.rs"]
+mod anonymous;
 #[path = "pipeline/bridge.rs"]
 mod bridge;
 #[path = "input/catalog.rs"]

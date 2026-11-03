@@ -3067,6 +3067,30 @@ basic interface gets no additional automated test.
 automatic private-corpus downloads, cache or parallel optimization without
 evidence.
 
+## H11 — Provisional Java and lossy declarations
+
+**Progress**: The [lossy-declaration batch](batches/h11-lossy-declarations.md)
+scopes anonymous ownership per definition and renders reference types from their
+own descriptors. Real-application sampling still produces no complete class; the
+next slice is the provisional emission path.
+
+**Dependencies**: H05, T22. **Scope**: keep verified acceptance intact while
+letting members that fail a proof still emit source.
+
+**Input→output / Interface**: original DEX plus reference facts → verified Java
+where every proof succeeds, provisional Java with classified reasons otherwise.
+
+**Steps**:
+1. A definition with an anonymous `InnerClass` entry keeps its relations and no
+   longer denies ownership for the input.
+2. A reference type without catalog facts renders from its descriptor and keeps
+   the original descriptor in diagnostics.
+3. Verified products, malformed classification, budgets and cancellation stay as
+   they are; no proof is deleted or downgraded.
+
+**Acceptance**: G0 plus the public core cases for anonymous sibling ownership and
+lossy declaration rendering, and a recorded real-application member measurement.
+
 ## H09 — Defined symbol listing and cross-DEX reference sites
 
 **Progress**: The [xref batch](batches/h09-xref-cli.md) wires `xref` with the four

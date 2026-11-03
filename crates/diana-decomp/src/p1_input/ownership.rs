@@ -44,6 +44,7 @@ struct Metadata {
     name: Option<Vec<u16>>,
     flags: Option<u32>,
     members: Vec<TypeId>,
+    anonymous: bool,
 }
 
 pub(crate) fn collect(
@@ -62,11 +63,19 @@ pub(crate) fn collect(
             name: None,
             flags: None,
             members: Vec::new(),
+            anonymous: false,
         };
         if context.annotations_offset != ByteOffset(0) {
             let directory = index.annotation_directory(context.annotations_offset, control)?;
             if directory.class != ByteOffset(0) {
-                read(index, directory.class, &mut facts, control)?;
+                // An anonymous class has no source-level simple name. Keeping its
+                // definition unnamed must not deny ownership facts for every other
+                // class in the same input.
+                if let Err(error) = read(index, directory.class, &mut facts, control)
+                    && !anonymous_ownership(&error)
+                {
+                    return Err(error);
+                }
             }
         }
         push(&mut metadata, facts, control)?;
@@ -75,8 +84,13 @@ pub(crate) fn collect(
     let mut nested = Vec::new();
     for facts in &metadata {
         control.charge_work(1)?;
-        if facts.enclosing.is_some() != (facts.flags.is_some() && facts.name.is_some()) {
+        if !facts.anonymous
+            && facts.enclosing.is_some() != (facts.flags.is_some() && facts.name.is_some())
+        {
             return Err(bad());
+        }
+        if facts.anonymous {
+            continue;
         }
         if let Some(enclosing) = facts.enclosing {
             let mut parent = None;
@@ -165,6 +179,16 @@ pub(crate) fn collect(
     Ok(Ownership { nested })
 }
 
+pub(crate) fn anonymous_ownership(error: &RequestError) -> bool {
+    matches!(
+        error,
+        RequestError::Input(super::InputError::Unsupported {
+            reason: super::UnsupportedInput::AnonymousOwnership,
+            ..
+        })
+    )
+}
+
 fn read(
     index: &ProgramIndex<'_>,
     offset: ByteOffset,
@@ -248,11 +272,8 @@ fn read(
                     }
                 }
                 (2, [110, 97, 109, 101], EncodedKind::Null) => {
-                    return Err(super::InputError::Unsupported {
-                        reason: super::UnsupportedInput::AnonymousOwnership,
-                        offset_byte: offset,
-                    }
-                    .into());
+                    facts.anonymous = true;
+                    return Ok(());
                 }
                 (3, [118, 97, 108, 117, 101], EncodedKind::Array { .. }) => loop {
                     control.charge_work(1)?;

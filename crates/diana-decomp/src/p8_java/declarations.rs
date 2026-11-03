@@ -310,18 +310,42 @@ fn declaration_type(
         return Ok(false);
     }
     if !raw || descriptor.first() != Some(&76) {
-        return primitive_type(name, output, budget);
+        if primitive_type(name, output, budget)? {
+            return Ok(true);
+        }
+        return reference_type(&descriptor, output, budget);
     }
-    let Some(class) = catalog.class(&descriptor, budget)? else {
-        return Ok(false);
-    };
-    if class.access_flags & 1 == 0 || class.enclosing_scope {
+    if let Some(class) = catalog.class(&descriptor, budget)?
+        && (class.access_flags & 1 == 0 || class.enclosing_scope)
+    {
         return Ok(false);
     }
-    let Some(source) = super::calls::type_name(&descriptor, budget)? else {
+    reference_type(&descriptor, output, budget)
+}
+
+/// Renders an object or object-array descriptor from its own name. Missing
+/// catalog facts leave the type unresolved, which is a lossy but usable source
+/// name; the member still reports its original descriptor elsewhere.
+fn reference_type(
+    descriptor: &[u16],
+    output: &mut TextBuffer,
+    budget: &mut MethodBudget<'_, '_>,
+) -> Result<bool, RequestError> {
+    let mut dimensions = 0usize;
+    let mut rest = descriptor;
+    while rest.first() == Some(&u16::from(b'[')) {
+        dimensions = dimensions
+            .checked_add(1)
+            .ok_or(RequestError::PlatformCapacity)?;
+        rest = &rest[1..];
+    }
+    let Some(source) = super::calls::type_name(rest, budget)? else {
         return Ok(false);
     };
     output.push(&source, budget)?;
+    for _ in 0..dimensions {
+        output.push("[]", budget)?;
+    }
     Ok(true)
 }
 
