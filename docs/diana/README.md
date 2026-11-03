@@ -10,6 +10,7 @@ contract is not yet implemented.
 | [DESIGN.md](DESIGN.md) | Product, engine and CLI contracts |
 | [ALGORITHMS.md](ALGORITHMS.md) | Analysis and reconstruction algorithms |
 | [SOURCE_MAP.md](SOURCE_MAP.md) | Source attribution and evidence boundaries |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | Detailed contribution and engineering rules |
 | [WRITING.md](WRITING.md) | Documentation conventions |
 | [e2e_cases.json](e2e_cases.json) | Case inputs and independent expectations |
 
