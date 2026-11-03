@@ -10,7 +10,12 @@ mod code;
 mod container;
 mod cursor;
 pub(crate) mod debug_program;
+pub(crate) mod declaration_facts;
+mod declaration_types;
 mod dynamic;
+pub(crate) use declaration_types::{
+    DeclarationCoverage, InputClassDeclaration, InputMethodDeclaration,
+};
 mod error;
 pub(crate) mod formats;
 mod header;
@@ -21,6 +26,9 @@ mod type_projection;
 pub(crate) use type_projection::TypeProjection;
 pub(crate) mod annotation_facts;
 pub(crate) mod field_declarations;
+mod field_evidence;
+pub(crate) use field_evidence::InputFieldEvidence;
+pub use field_evidence::JavaConstantKind;
 pub(crate) mod operands;
 pub(crate) mod ownership;
 pub(crate) mod signature;

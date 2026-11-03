@@ -34,7 +34,7 @@ Env = sparse map<Slot, Sym>
 ```
 
 Every parameter, OpResult, normal check-cast refinement and handler ExceptionAt is first
-assigned a fixed ValueId. A pure numeric const also has a ValueId and original bits; P8 MAY spell
+assigned a fixed ValueId. A pure numeric const also has a ValueId and original bits; P7 MAY spell
 it per use. `move-exception` defines an independent exception value and is not conflated with the
 ordinary incoming register of the handler. IDs are not reused and are not required to be equal
 across runs.
@@ -106,9 +106,9 @@ Sealing uses two graph propagations instead of a ValueId fixed point:
    cycle, and MUST NOT be filled with a default initial value.
 4. Check that normal inputs are the post-commit state and exception inputs are the old state of
    the corresponding opcode transfer; a normal dominator MUST NOT replace this check. The Java
-   expressibility of typed/uninit values is left to P4/P5 and is not called Undefined.
+   expressibility of typed/uninit values is left to P4/P4 and is not called Undefined.
 5. After validation, release the Env and live work tables; keep the Phi inputs, the bound uses
-   and the necessary edge facts for P5/P6.
+   and the necessary edge facts for P4/P5.
 
 The termination measure is explicit: liveness inserts at most finitely many demands; IDs are
 assigned once; binding happens once per block; connection happens once per edge/Phi; and the
@@ -154,7 +154,7 @@ J:     return r
 The terminator of J first produces live-in(r), which propagates back to L/R and is killed by
 their respective writes, which then produce the demand for a/b.
 A fixed p is created for J/r; L and R bind to the entry parameter Phi and write the fixed dL/dR;
-the two incomings of p are `(L->J,dL)` and `(R->J,dR)`. P6 executes `local(p)=local(dL/dR)` only
+the two incomings of p are `(L->J,dL)` and `(R->J,dR)`. P5 executes `local(p)=local(dL/dR)` only
 on the actual edge that selects L or R. Redundant Phis on the parameter chain are kept and do
 not affect the relation. If both copies were placed at the entry, the later one would overwrite
 the earlier one; if the return read of J were missed, p would not even be created. This shows

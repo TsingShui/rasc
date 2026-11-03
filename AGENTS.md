@@ -21,7 +21,7 @@ package-local `AGENTS.md` before working in either package.
 - Production is native Rust, forbids `unsafe`, and has no external runtime or
   process dependency. The application owns files and ZIPs; the engine borrows
   input bytes and declaration facts.
-- Use the shared P2→P8 method analysis chain. P9 renders existing products and
+- Use the shared P2→P7 method analysis chain. P8 renders existing products and
   original facts; it does not perform analysis or retry reconstruction.
 - Before changing phase access, exports, construction authority or scheduling,
   present the producer/consumer need and obtain operator approval. Never bypass

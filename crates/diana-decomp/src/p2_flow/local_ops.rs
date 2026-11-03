@@ -107,7 +107,9 @@ pub(super) fn call(
         .declaration
         .name
         .matches_with(&[60, 105, 110, 105, 116, 62], budget)?;
+    let input_formals = super::call_facts::from_reference(&method.declaration.prototype, budget)?;
     Ok(CallSite {
+        formals: input_formals,
         target: if constructor {
             CallTarget::Constructor
         } else {

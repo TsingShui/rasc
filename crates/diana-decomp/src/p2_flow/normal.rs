@@ -146,6 +146,7 @@ pub(crate) enum CallTarget {
     Constructor,
 }
 pub(crate) struct CallSite {
+    pub formals: Vec<super::CallFormal>,
     pub target: CallTarget,
     pub owner: crate::TypeId,
     pub kind: InvokeKind,

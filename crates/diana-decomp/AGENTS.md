@@ -5,7 +5,7 @@ changing an engine capability.
 
 - The native library borrows DEX bytes and caller-supplied declaration facts. It
   does not own filesystem, ZIP, CLI, network, process or MCP operations.
-- Keep P1–P9 ownership, sealed products and the shared ordinary-method chain;
+- Keep P1–P8 ownership, sealed products and the shared ordinary-method chain;
   stage visibility and construction authority follow the stage chapters. Preserve raw
   identities, classified failures, available members and effect order.
 - Use `thiserror` major version 2 for typed errors and `rayon` major version 1

@@ -270,11 +270,11 @@ fn partial_entry_producers_and_replay_observe_the_method_ledger() {
                 cancelled.set(cancel);
                 match stage {
                     Stage::Replay => entry_ssa::verify(&entry, &mut budget),
-                    Stage::Prove => crate::p5_types::entry_initialization::prove(
+                    Stage::Prove => crate::p4_types::entry_initialization::prove(
                         &crate::engine::SchedulePermit::for_test(),
                         &entry,
                         &[crate::p2_flow::entry::ParameterFamily::Word],
-                        Some(crate::p4_calls::allocation::ConstructorUse::This),
+                        Some(crate::p4_types::declarations::allocation::ConstructorUse::This),
                         &mut budget,
                     )
                     .map(|_| ()),

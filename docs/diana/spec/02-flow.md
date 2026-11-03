@@ -89,12 +89,12 @@ store, not a conversion added arbitrarily so that a Phi copy “can compile”.
 
 This Op writes the payload into an **existing primitive array** and is always registered as
 may-throw; the implementation MUST NOT delete its check because a third-party opcode table
-misses CAN_THROW. P1 checks the payload range/count/element_width; P5 additionally proves that
+misses CAN_THROW. P1 checks the payload range/count/element_width; P4 additionally proves that
 the component matches the width: Z/B=1, S/C=2, I/F=4, J/D=8. A known reference array does not
 satisfy that DEX constraint; when the information is insufficient, the implementation MUST NOT
 guess int[] or float[] from the width.
 
-P8 constructs only the following two FillPlans; every other case is Unsupported/ArrayFillShape
+P7 constructs only the following two FillPlans; every other case is Unsupported/ArrayFillShape
 and keeps raw:
 
 | Condition | Java expansion |
@@ -235,7 +235,7 @@ The `Effect` table is driven by fixed opcode metadata: heap read/write, call, ma
 - The builder MUST compute the normal/exception live-in requirements first, then allocate a Phi for every live-in slot of every block (a single predecessor is kept as well). A virtual EntrySeed supplies the parameters/this, so the entry back edge also has a correct first value.
 - The builder MUST scan each block once, bind uses from the entry Phi and the earlier Defs of this block, and connect each normal/exception incoming once. An exception MUST use the old environment of the corresponding site, not the successful result.
 - The builder MUST retain the Phi closure from real uses, MUST propagate Bad monotonically along Phi users, and MUST propagate grounded monotonically from parameters/OpResult/ExceptionAt. The builder MUST remove unused Phis and MUST reject an actual missing definition, a partial wide or an unrooted definition cycle explicitly.
-- **The builder MUST NOT eliminate trivial Phis and MUST NOT do alias reduction**. Every state/traversal MUST have a finite measure and be charged; the builder MUST drop the construction Env work table after sealing and MUST NOT carry the R×E matrix all the way to P8.
+- **The builder MUST NOT eliminate trivial Phis and MUST NOT do alias reduction**. Every state/traversal MUST have a finite measure and be charged; the builder MUST drop the construction Env work table after sealing and MUST NOT carry the R×E matrix all the way to P7.
 - The verifier MUST replay the locally latest definition from the raw read/write order and the edge transfer, MUST check the Phi sources, the word width and the old exception state, and MUST NOT trust a builder bool or a normal dominator.
 
 Complex exception SSA is a phase risk; the phase MAY support no handler first, then a single protected invoke, then widen. The phase support matrix MUST explain the degradation reason, and it MUST NOT claim that general SSA is complete while ignoring the exception environment.

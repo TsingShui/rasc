@@ -1,5 +1,5 @@
 use crate::input::{InputError, MethodError};
-use crate::p8_java::JavaMethodDecl;
+use crate::p7_java::JavaMethodDecl;
 use crate::{
     ByteOffset, ClassKey, DebugError, DebugSource, DexId, DiagnosticId, FailureKind, InputId,
     MethodKey, ResourceUsage, SourceByteOffset,
@@ -309,10 +309,10 @@ impl ClassAnnotations {
 /// Complete-unit qualification belongs to the enclosing report, not this shell.
 pub struct NestedReport {
     pub(crate) annotations: ClassAnnotations,
-    pub(crate) depth: crate::p8_java::nested_plan::NestingDepth,
+    pub(crate) depth: crate::p7_java::nested_plan::NestingDepth,
     pub(crate) class: ClassOutput,
     pub(crate) diagnostics: Vec<Diagnostic>,
-    pub(crate) plan: Option<crate::p8_java::nested_plan::Plan>,
+    pub(crate) plan: Option<crate::p7_java::nested_plan::Plan>,
 }
 impl NestedReport {
     pub fn annotations(&self) -> &ClassAnnotations {

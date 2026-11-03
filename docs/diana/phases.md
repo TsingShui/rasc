@@ -2,23 +2,23 @@
 
 Diana separates APK/file handling from the native decompiler. The application in
 `apps/diana/src/analysis/` owns snapshots, archives, input selection and queries.
-The engine in `crates/diana-decomp/src/` borrows DEX bytes and declaration facts.
+The engine in `crates/diana-decomp/src/` borrows DEX bytes and derives declaration
+facts from them.
 
 | Phase | Engine directory | Current responsibility |
 |---|---|---|
-| P0 | `p0_knowledge/` | Declaration facts and request policy |
+| Input context | `context/` | Request-level cross-DEX lookup and lazy caching of P1 declarations |
 | P1 | `p1_input/` | Checked DEX tables, method input and original facts |
 | P2 | `p2_flow/` | Instruction operations, effects and control-flow graph |
 | P3 | `p3_ssa/` | Definitions, uses, Phi and exceptional environments |
-| P4 | `p4_calls/` | Call, field and declaration evidence and obligations |
-| P5 | `p5_types/` | Types, use conversions and initialization facts |
-| P6 | `p6_variables/` | Storage, edge copies and exception snapshots |
-| P7 | `p7_regions/` | Region, protection and monitor plans |
-| P8 | `p8_java/` | Java declarations, method lowering and class assembly |
-| P9 | `p9_emit/` | Render existing Java and original debug facts |
+| P4 | `p4_types/` | Types, declaration constraints, use conversions and initialization facts |
+| P5 | `p5_variables/` | Storage, edge copies and exception snapshots |
+| P6 | `p6_regions/` | Region, protection and monitor plans |
+| P7 | `p7_java/` | Java declarations, method lowering and class assembly |
+| P8 | `p8_emit/` | Render existing Java and original debug facts |
 
 The ordinary-method scheduler is `engine.rs::normal_member`; it invokes the
-P2–P6 chain through `pipeline/branch.rs`, then P7 and P8. P9 renders the resulting
+P2–P5 chain through `engine/method_chain.rs`, then P6 and P7. P8 renders the resulting
 product. Declaration-only and generated members have their own phase-owned
 checks. A declined method currently goes to the classified raw exit.
 
@@ -32,41 +32,46 @@ implementation coverage from a phase name.
 
 ## 4. Phases, products and actual order
 
-The directory layout uses the P0–P9 numbering familiar from Kuna, but Diana defines its own semantics and execution.
+The engine has eight numbered phases. Input context and Engine scheduling are not analysis phases.
 
 | Phase / Module | Owned products | Input and responsibility | Does not own |
 |---|---|---|---|
-| P0 `p0_knowledge` | `RequestFacts`, configuration snapshot, `EnvironmentId` | DEX/catalog fact sources, run profile, trace/catalog metadata | does not generate bytecode facts, does not modify the IR, holds no persistent learning engine |
+| Input context `context` | Cross-DEX descriptor index and lazy declaration cache | locates original logical DEX definitions and caches declarations read by P1 | does not decode declarations or perform method analysis |
 | P1 `p1_input` | `ProgramIndex`, `MethodInput`, `RawMethodView` → `ValidatedRawMethod` | safe container and metadata, UTF-16, raw coverage of the version/opcode format; range checking is graded separately from complete structure validation | does not decide control structure, does not reject a whole legal class because the source is hard to express |
 | P2 `p2_flow` | `FlowBody` | decode, move-result binding, blocks, normal/ordered exceptional edges, effect sites | does not optimize effects, does not structure, does not speculate new call targets |
 | P3 `p3_ssa` | `SsaBody` | input parameters/this, a stable ValueId per definition, normal/exception edge environments, Phi | does not merge source locals, MUST NOT eliminate exception edges |
-| P4 `p4_calls` | `ResolvedBody`, `CallEvidence` | original owner/proto/kind, declaration candidate/access/throws/class-init facts and the Java binding obligations still to be validated; allocation/init constraints | does not restore native calling conventions; MUST NOT become an empty phase merely because the DEX has a proto |
-| P5 `p5_types` | `TypedBody` | primitive/reference/null/raw constant bits, use conversions, Phi join, finite monotonic work queue | does not have to rebuild complete generic source; does not modify CFG topology |
-| P6 `p6_variables` | `StorageBody`, `CopyPlan` | one LocalId per definition, no general coalescing; parallel copies on normal edges, exception shadow slots; DA certificate | does not infer lexical structure, MUST NOT put SSA construction in a Repeat that regenerates identities |
-| P7 `p7_regions` | `RegionPlan`, `ProtectionCertificate` | analyzes normal SCC/SESE, try ranges/handlers and monitors from a read-only StorageBody | does not modify the original CFG, MUST NOT treat catch-all automatically as finally |
-| P8 `p8_java` | readable Java and uncertainty facts | structured/dispatcher lowering, expression legalization, class/constructor/initializer and throws checks | does not guess unparsed bytes, MUST NOT skip a block merely because of a visited set |
-| P9 `p9_emit` | `RenderedReport`, final UTF-8 `OriginSpan` | AST printer, original-fact debug renderer, diagnostic renderer | does not do value/type/control-flow recovery |
+| P4 `p4_types` | `TypedBody`, declaration constraints | primitive/reference/null/raw constant bits, use conversions, Phi join, finite monotonic work queue | does not have to rebuild complete generic source; does not modify CFG topology |
+| P5 `p5_variables` | `StorageBody`, `CopyPlan` | one LocalId per definition, no general coalescing; parallel copies on normal edges, exception shadow slots; DA certificate | does not infer lexical structure, MUST NOT put SSA construction in a Repeat that regenerates identities |
+| P6 `p6_regions` | `RegionPlan`, `ProtectionCertificate` | analyzes normal SCC/SESE, try ranges/handlers and monitors from a read-only StorageBody | does not modify the original CFG, MUST NOT treat catch-all automatically as finally |
+| P7 `p7_java` | readable Java and uncertainty facts | structured/dispatcher lowering, expression legalization, class/constructor/initializer and throws checks | does not guess unparsed bytes, MUST NOT skip a block merely because of a visited set |
+| P8 `p8_emit` | `RenderedReport`, final UTF-8 `OriginSpan` | AST printer, original-fact debug renderer, diagnostic renderer | does not do value/type/control-flow recovery |
 
 **Scheduling order**:
 
 ```text
-ProgramIndex(P1) ──→ RequestFacts(P0, frozen)
-class request: fix owner/MemberEmission first (P8, direct template proof from P1 raw + declaration facts)
+ProgramIndex(P1) ──→ Context(request-level lookup, lazy P1 declarations)
+class request: fix owner/MemberEmission first (P7, direct template proof from P1 raw + declaration facts)
 per Explicit method: ValidatedRawMethod(P1)
   → decode_and_bind(P2) → verify_flow
   → build_ssa(P3)       → verify_ssa
-  → resolve_calls(P4)   → verify_declaration_evidence
-  → solve_types(P5)     → verify_types
-  → allocate_and_copy(P6) → verify_storage
-  → identify_regions(P7)
-  → lower_java(P8)      → record applicable checks and uncertainties
+  → solve_types(P4)     → verify_types
+  → allocate_and_copy(P5) → verify_storage
+  → identify_regions(P6)
+  → lower_java(P7)      → record applicable checks and uncertainties
 Generated member: original code + template evidence → owner syntax and target admission (no independent fake Java body)
-class assembly(P8)     → verify_unit_or_mark_mixed
-render(P9)
-any classified failure ──→ original method + available resources (explicit raw quota if any) ──→ debug / unavailable(P9)
+class assembly(P7)     → verify_unit_or_mark_mixed
+render(P8)
+any classified failure ──→ original method + available resources (explicit raw quota if any) ──→ debug / unavailable(P8)
 ```
 
-The only fixed points are the P3 live-in requirement and the P5 finite-facts closure; P3 uses fixed-entry Phi, one binding per block, one connection per incoming and a finite bad/grounded propagation, and it MUST NOT repeatedly guess ValueIds/aliases. Those fixed points only collect finite facts and MUST NOT create new identities in the loop. The P2 topo normalization MUST collect edits first and apply them once atomically. Pure expression inlining MUST run in P8 per [08-java](spec/08-java.md) and MUST NOT change the SSA/CFG. **Diana MUST NOT put all of P3–P6 into a mutual fixed point**, and MUST NOT force every phase to have the same number of passes.
+P2 retains exact original call formals in `CallSite`. P4 consumes these formals
+independently of source-binding availability. Declaration queries and constraints live in `p4_types/declarations/`. P4 owns
+their products and the capture-prefix certificate; it does not depend on P7.
+P7 consumes those products to check final source uses. Context caches partial
+declaration directories with classified issues; partial directories cannot
+establish member absence or hierarchy-wide uniqueness.
+
+The only fixed points are the P3 live-in requirement and the P4 finite-facts closure; P3 uses fixed-entry Phi, one binding per block, one connection per incoming and a finite bad/grounded propagation, and it MUST NOT repeatedly guess ValueIds/aliases. Those fixed points only collect finite facts and MUST NOT create new identities in the loop. The P2 topo normalization MUST collect edits first and apply them once atomically. Pure expression inlining MUST run in P7 per [07-java](spec/07-java.md) and MUST NOT change the SSA/CFG. **Diana MUST NOT put all of P3–P5 into a mutual fixed point**, and MUST NOT force every phase to have the same number of passes.
 
 Rationale: the ValueRecovery of dexdec depends on a structured Semantic IR [DX-01]; this design does not adopt it and keeps an explicit three-address computation that solves SSA/type/storage on the CFG first, which avoids repeated mutual scheduling of BDD/gated Phi/language syntax. This scheduling does not require DEX to have a natural phase order; explicit locals/copies increase output length in exchange for local verifiability of value provenance and transfer.
 
@@ -101,7 +106,7 @@ or interpretation in the wrong phase.
   access. Consumers MUST NOT treat partial facts as whole-method validation or
   infer guarantees beyond the product's stated scope.
 - The scheduler MUST compose ready products and classified outcomes rather than
-  perform phase-owned SSA, typing, storage or Java-legality analysis. P9 MUST
+  perform phase-owned SSA, typing, storage or Java-legality analysis. P8 MUST
   consume sealed presentation products and original debug facts without starting
   analysis or recovering missing semantics.
 

@@ -53,7 +53,7 @@ Input bytes are untrusted. The application and engine MUST preserve checked
 ranges, explicit resource limits and cancellation. A malformed or unavailable
 input MUST NOT be reported as successful reconstruction. Unknown instruction
 widths MUST NOT be guessed; available original facts and coverage remain explicit.
-P9 renders existing products and MUST NOT perform another analysis or repair
+P8 renders existing products and MUST NOT perform another analysis or repair
 missing semantics.
 
 ## Migration status
@@ -194,7 +194,7 @@ pub enum DeclarationOutput { Java(JavaClassDecl), Debug(String), Unavailable(Dia
 ```
 
 Debug source is an analysis-oriented snapshot of original DEX facts, rendered as
-readable JSON under [09-emission](09-emission.md). It is not Java, standard Smali or a reassembly
+readable JSON under [08-emission](08-emission.md). It is not Java, standard Smali or a reassembly
 promise. It preserves the selected method identity, typed reason, original
 instructions/targets/payloads/handlers/references and explicit coverage. Text and
 JSON expose the same information at the failed member without another request.
@@ -204,7 +204,7 @@ The internal library uses the following interfaces, and cancellation is wired be
 
 ```rust
 Engine::open(images: Vec<DexImage<'a>>, options: Options,
-             catalog: DeclarationCatalog, control: &mut RunContext<'_>)
+             control: &mut RunContext<'_>)
     -> Result<Engine<'a>, InputError>;
 Engine::decompile(&self, request: Request, control: &mut RunContext<'_>)
     -> Result<Report, RequestError>;
@@ -219,9 +219,9 @@ request derives class and member facts for every definition in the input and
 treats owners outside the input as unknown; the strict policy may still accept
 caller-provided declarations for verification tests. A single DEX uses an images vector of length 1; DexIds are allocated within the request and map back to the root physical/logical identity through ImageOrigin, different arrival orders are not required to produce the same numbers, and no extra sorting is done for file names or input order. The catalog MAY be empty; insufficient type/call evidence remains explicit in the local result. The library MUST NOT access disk, processes or the network, and the root request scope holds the byte owner until Engine use ends; an ordinary DEX has header_offset=0; T04 implements native 041 reading, H04 only performs application borrowing and original-identity adaptation, and T25/H04 provide the D065 evidence for their respective sides.
 
-Readable Java MUST identify material unresolved assumptions or failed checks and preserve original method identity, available DEX debug facts and coverage. Its producer MUST use the existing shared analysis chain and available checked input facts; it MUST NOT fabricate instruction widths or claim unknown declaration, type or control-flow facts as proven. If a useful reconstruction cannot be formed, the engine MUST retain Debug or Unavailable. P9 renders the produced result without further analysis. Readable output does not suppress Malformed, BudgetExceeded, Cancelled or InternalInvariant classification.
+Readable Java MUST identify material unresolved assumptions or failed checks and preserve original method identity, available DEX debug facts and coverage. Its producer MUST use the existing shared analysis chain and available checked input facts; it MUST NOT fabricate instruction widths or claim unknown declaration, type or control-flow facts as proven. If a useful reconstruction cannot be formed, the engine MUST retain Debug or Unavailable. P8 renders the produced result without further analysis. Readable output does not suppress Malformed, BudgetExceeded, Cancelled or InternalInvariant classification.
 
-P8 produces readable Java from the shared analysis products and records material uncertainties. Native checks MAY establish additional facts, but completing every check is not a prerequisite for displaying Java. The engine MUST NOT present unknown facts as proven or call javac; independent compilation and behavior checks provide evidence only for their tested environments.
+P7 produces readable Java from the shared analysis products and records material uncertainties. Native checks MAY establish additional facts, but completing every check is not a prerequisite for displaying Java. The engine MUST NOT present unknown facts as proven or call javac; independent compilation and behavior checks provide evidence only for their tested environments.
 
 Generated members retain original identities and MUST NOT be duplicated in owner syntax. If a member cannot be expressed independently, Diana MUST present its available readable reconstruction or original facts without inventing a wrapper.
 
@@ -253,7 +253,7 @@ The engine retains an available readable reconstruction as Java together with it
 Class-level reasons retain their original ClassKey in the enclosing result. Input
 and request errors use the same kind/code distinction. A reason does not claim a
 site when global damage prevents locating it. Typed codes already named in
-[output reasons](08-java.md), such as BindingEvidenceMissing, ArrayFillShape, JavaTargetLimit and
+[output reasons](07-java.md), such as BindingEvidenceMissing, ArrayFillShape, JavaTargetLimit and
 MonitorScopeUnproved, retain those meanings; add a code only with an actual
 failure producer, not a speculative enumeration of every possible rejection.
 
@@ -273,14 +273,14 @@ A phase is an ownership/responsibility split and does not require one file per r
 | Raw format | p1_input/formats.rs, p2_flow/decode.rs; decode/validate_raw | T03/T04 |
 | Flow | p2_flow/{mod,build,effects,results,protection}.rs; decode_and_bind | T06/T16 |
 | SSA | p3_ssa/{mod,inputs,liveness,build,verify}.rs; build_ssa | T06/T07/T16 |
-| Calls | p4_calls/{mod,members,allocation,contracts}.rs; resolve_calls | T11/T12 |
-| Types | p5_types/{mod,constraints,lattice,solve,conversions}.rs; solve_types | T06/T10 |
-| Storage | p6_variables/{mod,locals,copies,exceptional,definitions}.rs; allocate_and_copy | T08/T17 |
-| Regions | p7_regions/{mod,normal,protection,monitors,verify}.rs; identify_regions | T09/T13/T18/T19 |
-| Java | p8_java/{mod,expressions,dispatcher,structured,declarations,initializers,ownership,enums,verify}.rs; lower_method/assemble_class | the respective core capability cards |
-| Emit | p9_emit/{mod,java,debug,literals,spans}.rs; render | T03/T06 |
+| Calls | p4_types/declarations/{mod,members,allocation,contracts}.rs; resolve_calls | T11/T12 |
+| Types | p4_types/{mod,constraints,lattice,solve,conversions}.rs; solve_types | T06/T10 |
+| Storage | p5_variables/{mod,locals,copies,exceptional,definitions}.rs; allocate_and_copy | T08/T17 |
+| Regions | p6_regions/{mod,normal,protection,monitors,verify}.rs; identify_regions | T09/T13/T18/T19 |
+| Java | p7_java/{mod,expressions,dispatcher,structured,declarations,initializers,ownership,enums,verify}.rs; lower_method/assemble_class | the respective core capability cards |
+| Emit | p8_emit/{mod,java,debug,literals,spans}.rs; render | T03/T06 |
 | Control | pipeline/{schedule,control,diagnostics}.rs; direct typed calls and quota checks | T01 |
-| Facts | p0_knowledge/{mod,declarations,policy}.rs; immutable catalog/source policy | T01/T11 |
+| Facts | context/{mod,catalog,input_facts}.rs; cross-DEX lookup and lazy cache of P1 declaration facts | T01/T11 |
 | Data | substrate/{ids,origin,types,cfg,java}.rs; only the containers/IDs currently used | created together with the actual consumer |
 
 Diana MUST NOT create registry.rs, a Pass trait, a scheduling macro, a build.rs generator or a restart framework. An optional trace MUST use only a finite PhaseId and bounded events, and Diana MUST NOT give it its own test suite or platform. tests/support MUST connect only to existing public interfaces and the root tests/e2e assets; a core test MUST be split into files by behavior and MUST NOT construct goldens from private phase invocation counts.
@@ -314,7 +314,7 @@ StorageBody { typed, locals, copies, definition_evidence }
 PlannedBody { storage, regions, protection, monitors }
 ```
 
-raw borrows the original scope; each stage MUST consume the previous owned product. The engine MUST release temporary live/Env/solver worklists at their last consumption point; they need not stay attached to the wrapper permanently. The implementation MUST NOT drop a table early while evidence still references it; after P8 finishes validation, the engine MUST copy the result-required facts into the owned output and MAY release the whole PlannedBody. The implementation MUST NOT use an all-graph Arc<Mutex<_>> or a second mutable MethodArena.
+raw borrows the original scope; each stage MUST consume the previous owned product. The engine MUST release temporary live/Env/solver worklists at their last consumption point; they need not stay attached to the wrapper permanently. The implementation MUST NOT drop a table early while evidence still references it; after P7 finishes validation, the engine MUST copy the result-required facts into the owned output and MAY release the whole PlannedBody. The implementation MUST NOT use an all-graph Arc<Mutex<_>> or a second mutable MethodArena.
 
 ##### 3.3.1 IDs, slots and original origin
 
@@ -370,9 +370,9 @@ FillPlan = LengthOnly | FreshArrayStores(shape_evidence, exact_elements)
 ```
 
 Type solving first closes the descriptor facts, family equality groups and monotonic value facts, then selects the source type once;
-P5 MUST allow ProvenNarrow only when the producer range falls entirely inside the B/S/C target range, and MUST NOT change the word value through an arbitrary primitive cast. P8 MUST generate Java for fill only by the LengthOnly/FreshArrayStores rules of [02-flow](02-flow.md); the fill MUST register may-throw, P8 MUST NOT let a zero-element fill vanish without a statement, and a non-empty expansion MUST prove that the stores cannot fail and that the intermediate writes are unobservable.
-P6 MUST receive the body only once every final use conversion is defined; the printer MAY spell a purely numeric literal per use,
-while the type solver MUST NOT guess a non-literal as a cast between int/float/ref. What P4 hands to P5 is constraints, and only P8 checks the final Java overload/
+P4 MUST allow ProvenNarrow only when the producer range falls entirely inside the B/S/C target range, and MUST NOT change the word value through an arbitrary primitive cast. P7 MUST generate Java for fill only by the LengthOnly/FreshArrayStores rules of [02-flow](02-flow.md); the fill MUST register may-throw, P7 MUST NOT let a zero-element fill vanish without a statement, and a non-empty expansion MUST prove that the stores cannot fail and that the intermediate writes are unobservable.
+P5 MUST receive the body only once every final use conversion is defined; the printer MAY spell a purely numeric literal per use,
+while the type solver MUST NOT guess a non-literal as a cast between int/float/ref. What P4 hands to P4 is constraints, and only P7 checks the final Java overload/
 dispatch/throws; Diana MUST NOT impose a circular requirement that P4 already know the source static types.
 
 #### 3.7 RunContext and budget implementation
@@ -417,20 +417,20 @@ and Diana MUST NOT build a Pass trait, registry, scheduling macro, TOML or resta
 
 RecoveryPolicy controls normal structure and inline_pure. normal structure defaults to
 StructuredThenDispatch; DispatchOnly MUST apply only to dispatcher eligibility. inline_pure defaults to
-false, and when it is true the single pure-expression inlining algorithm of [08-java](08-java.md) runs. The required lowering, type/binding/
+false, and when it is true the single pure-expression inlining algorithm of [07-java](07-java.md) runs. The required lowering, type/binding/
 protection-domain/resource checks have no off switch.
 
 #### 10.2 Explicit invalidation scope
 
 | Change | Retained | Recomputed/invalidated |
 |---|---|---|
-| literal formatting/indent/output names | every verified artifact | P9 text/spans (if a name change affects Java binding, P9 alone is not enough) |
-| normal structured vs dispatcher policy | P1–P6 | P7/P8/P9; only the plan is selected, the CFG is not changed |
-| external declaration/hierarchy catalog | raw input/P2 original semantics | P4–P9; P3 is rebuilt as well if its exception-edge/throws input changed, and the request recomputes the whole method |
+| literal formatting/indent/output names | every verified artifact | P8 text/spans (if a name change affects Java binding, P8 alone is not enough) |
+| normal structured vs dispatcher policy | P1–P5 | P6/P7/P8; only the plan is selected, the CFG is not changed |
+| external declaration/hierarchy catalog | raw input/P2 original semantics | P4–P8; P3 is rebuilt as well if its exception-edge/throws input changed, and the request recomputes the whole method |
 | CFG topology/exception chain | only raw/catalog | everything downstream of P2 is invalidated; the engine MUST NOT reuse old ValueIds/CopyPlans |
 | generic/nested source policy | the value identity reusable by raw/P2–P3 | binding/types/storage/Java after P4; the whole method is recomputed |
 
-The engine MUST re-run the whole method for a new request and MUST NOT cache mutable analysis products; the Engine retains only the immutable ProgramIndex. The in-request `EnvironmentId`/profile identifier can detect a misused artifact; different requests are not required to share numbers or a cross-run canonical fingerprint, and Diana MUST NOT sort fact tables for cache identity. A local worklist modifies only the specified finite facts and enqueues only on an actual change, charging before execution. There is no generic Repeat/Changed scheduling protocol, and Diana MUST NOT create a mechanical test suite for observability.
+The engine MUST re-run the whole method for a new request and MUST NOT cache mutable analysis products; the Engine retains only the immutable ProgramIndex. Requests are not required to share numbers or a cross-run canonical fingerprint, and Diana MUST NOT sort fact tables for cache identity. A local worklist modifies only the specified finite facts and enqueues only on an actual change, charging before execution. There is no generic Repeat/Changed scheduling protocol, and Diana MUST NOT create a mechanical test suite for observability.
 
 #### 10.3 Explicit optional resource limits
 

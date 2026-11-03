@@ -1,8 +1,5 @@
-pub(crate) mod branch;
-pub(crate) mod constructor_chain;
 pub(crate) mod control;
 pub(crate) mod diagnostics;
-pub(crate) mod member_emission;
 pub(crate) mod request;
 
 /// Opens a compute-stage span when the `perf` feature is enabled. The engine
@@ -14,6 +11,14 @@ pub(crate) fn phase_span(name: &'static str) -> Option<fastrace::Span> {
 
 /// No-op span when performance instrumentation is compiled out.
 #[cfg(not(feature = "perf"))]
-pub(crate) fn phase_span(_name: &'static str) -> Option<()> {
+pub(crate) fn phase_span(_name: &'static str) -> Option<DisabledSpan> {
     None
+}
+
+#[cfg(not(feature = "perf"))]
+pub(crate) struct DisabledSpan;
+
+#[cfg(not(feature = "perf"))]
+impl Drop for DisabledSpan {
+    fn drop(&mut self) {}
 }

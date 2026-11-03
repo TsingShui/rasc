@@ -35,7 +35,7 @@ Ordinary code uses the shared CFG → SSA → declaration/type → storage → r
 Java chain. Unit verification distinguishes complete Java from Mixed results;
 independent members and original metadata remain available after local failure.
 P1 checks dynamic call-site/handle encodings and original references; invoke-custom
-retains a classified unsupported exit and a readable original snapshot. P9 renders
+retains a classified unsupported exit and a readable original snapshot. P8 renders
 existing products and maps source slices to original identities. Historical acceptance records are available in git history.
 
 From the repository root:
@@ -49,12 +49,13 @@ cargo nextest run --locked -p diana-decomp --test contracts
 Dependency choices are recorded in the root and package AGENTS.md files; the
 manifest and root lockfile own versions. The engine remains independent of rasc,
 dexdec, rusty-dex, Kuna and radguard implementations. Inputs are borrowed
-DEX bytes and declaration facts provided by `apps/diana/`; file/ZIP loading and
-CLI dispatch do not belong here. Production code stays native Rust, with unsafe
+DEX bytes; the engine derives declaration facts from them and the application
+supplies no external declarations. File/ZIP loading and CLI dispatch do not
+belong here. Production code stays native Rust, with unsafe
 code forbidden and no external runtime/process dependency.
 
 Only create modules when an implemented capability needs them. Do not pre-create
-P0–P9 directories, fake Engine results, pass registries or tests for placeholder
+P1–P8 directories, fake Engine results, pass registries or tests for placeholder
 getters. See the [specification chapters](../../docs/diana/spec/00-overview.md) and the
 case specification.
 

@@ -1,18 +1,17 @@
 //! Native DEX analysis with caller-owned input and request-scoped resource control.
 
+mod context;
 mod engine;
-mod p0_knowledge;
-pub use p0_knowledge::JavaConstantKind;
+pub use input::JavaConstantKind;
 #[path = "p1_input/mod.rs"]
 pub mod input;
 mod p2_flow;
 mod p3_ssa;
-mod p4_calls;
-mod p5_types;
-mod p6_variables;
-mod p7_regions;
-mod p8_java;
-mod p9_emit;
+mod p4_types;
+mod p5_variables;
+mod p6_regions;
+mod p7_java;
+mod p8_emit;
 #[cfg(test)]
 #[allow(dead_code)]
 #[path = "../tests/input/fixture.rs"]
@@ -25,15 +24,15 @@ pub use input::annotation_facts::{
     AnnotationRecord, AnnotationToken, AnnotationValue, AnnotationValueKind, OriginalAnnotations,
 };
 pub use input::ownership::{NestedClass, Ownership};
-pub use p8_java::CaptureCertificate;
-pub use p8_java::enums::{EnumFieldRole, EnumMemberRole, GeneratedEnumField, GeneratedEnumMember};
-pub use p8_java::member_emission::GeneratedMember;
-pub use p8_java::nested_plan::GeneratedCaptureField;
-pub use p8_java::{
+pub use p4_types::CaptureCertificate;
+pub use p7_java::enums::{EnumFieldRole, EnumMemberRole, GeneratedEnumField, GeneratedEnumMember};
+pub use p7_java::member_emission::GeneratedMember;
+pub use p7_java::nested_plan::GeneratedCaptureField;
+pub use p7_java::{
     CompilationContract, GeneratedBridge, JavaCallSite, JavaInvokeKind, JavaMethodDecl,
     VerifiedJavaField, VerifiedJavaInitializer, VerifiedJavaMethod, VerifiedJavaUnit,
 };
-pub use p9_emit::render;
+pub use p8_emit::render;
 pub use pipeline::request::{JavaTargetItem, RequestError};
 pub use substrate::fields::{
     FieldDeclarationOutput, FieldFacts, FieldInitialValue, FieldKey, FieldOutput, FieldStorage,
@@ -48,7 +47,7 @@ pub use substrate::report::{
 };
 mod pipeline;
 
-pub use p9_emit::{
+pub use p8_emit::{
     DebugCoverage, DebugError, DebugIssue, DebugResourceError, DebugSource, DebugSourceKind,
 };
 mod substrate;

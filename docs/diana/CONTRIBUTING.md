@@ -69,8 +69,8 @@ affected change and request a decision rather than weaken the design or add a
 bypass.
 
 - Contributors MUST extend the shared ordinary-method chain: P2 CFG/effects →
-  P3 SSA → P4 declaration constraints/evidence → P5 types/use conversions →
-  P6 storage/copies → P7 regions → P8 Java recovery. P9 MUST render existing
+  P3 SSA → P4 declaration constraints/evidence → P4 types/use conversions →
+  P5 storage/copies → P6 regions → P7 Java recovery. P8 MUST render existing
   products and original facts without further analysis.
 - Contributors MUST follow the stage-authority rules in [phases](phases.md)
   when exposing stage entries, implementation modules and product views. A
@@ -91,16 +91,16 @@ bypass.
   maintain another complete method register/alias tracker.
 - Contributors MUST NOT select recovery paths by hard-coded class/test names or
   whole-method instruction templates. Specification-defined opcode/format checks, local
-  proofs, P7 region patterns and Generated-member rules remain in their owning
+  proofs, P6 region patterns and Generated-member rules remain in their owning
   phases.
 - Contributors MUST NOT organize `engine.rs` as successive whole-method
   builders/verifiers that emit on the first match. Ordinary methods MUST use one
-  analysis chain. P8 MAY retain a marked unverified reconstruction from available
+  analysis chain. P7 MAY retain a marked unverified reconstruction from available
   shared products; the classified read-only raw exit MUST NOT retry analysis or
   reconstruct values.
-- Contributors MUST keep P4 constraints/binding obligations distinct from P5
-  typed uses and final P8 source binding. P7 MUST read P6 storage before Java
-  lowering, not derive its graph from a P8 AST. P9 MUST NOT select types, bindings
+- Contributors MUST keep P4 constraints/binding obligations distinct from P4
+  typed uses and final P7 source binding. P6 MUST read P5 storage before Java
+  lowering, not derive its graph from a P7 AST. P8 MUST NOT select types, bindings
   or recovery semantics.
 - Natural structure and dispatcher MUST consume the same checked operations,
   storage and CopyPlans. Contributors MUST NOT give either representation a

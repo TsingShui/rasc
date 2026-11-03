@@ -1,6 +1,10 @@
+pub(crate) mod constructor_chain;
+pub(crate) mod member_emission;
+mod method_chain;
+
+use crate::context::Context;
 use crate::input::catalog::{MemberEntry, MemberSelection};
 use crate::input::{DexContainer, InputError, InputProblem, ProgramIndex};
-use crate::p0_knowledge::DeclarationCatalog;
 use crate::substrate::owned::{copy_proto, copy_units, reserve};
 use crate::substrate::report::*;
 use crate::{
@@ -68,7 +72,7 @@ pub struct Engine<'a> {
     images: Vec<IndexedImage<'a>>,
     options: Options,
     representation: RepresentationPolicy,
-    catalog: DeclarationCatalog<'a>,
+    catalog: Context<'a>,
 }
 
 impl<'a> Engine<'a> {
@@ -155,20 +159,20 @@ impl<'a> Engine<'a> {
         }
         // Declaration facts come only from the analysed input. Caller-supplied
         // external declarations are not consulted.
-        let mut facts = DeclarationCatalog::empty();
+        let mut facts = Context::empty();
         {
             for image in &indexed {
-                let derived = crate::p0_knowledge::input_facts::from_input(&image.index, control)
+                let derived = crate::context::input_facts::from_input(&image.index, control)
                     .map_err(|error| match error {
-                    crate::RequestError::Input(error) => error,
-                    crate::RequestError::Control(error) => InputError::Control(error),
-                    crate::RequestError::Allocation(_) => InputError::Allocation {
-                        offset_byte: ByteOffset(0),
-                    },
-                    _ => InputError::PlatformCapacity {
-                        offset_byte: ByteOffset(0),
-                    },
-                })?;
+                        crate::RequestError::Input(error) => error,
+                        crate::RequestError::Control(error) => InputError::Control(error),
+                        crate::RequestError::Allocation(_) => InputError::Allocation {
+                            offset_byte: ByteOffset(0),
+                        },
+                        _ => InputError::PlatformCapacity {
+                            offset_byte: ByteOffset(0),
+                        },
+                    })?;
                 facts.extend(derived);
             }
         }
@@ -211,7 +215,7 @@ impl<'a> Engine<'a> {
         let input = image
             .index
             .method_input(key.class.class_def, key.method, &mut budget)?;
-        let Some(declaration) = crate::p4_calls::capture::collect(
+        let Some(declaration) = crate::p4_types::declarations::capture::collect(
             &permit,
             &input,
             &ownership,
@@ -221,7 +225,12 @@ impl<'a> Engine<'a> {
         else {
             return Ok(None);
         };
-        let result = crate::p8_java::capture::verify(&permit, &input, &declaration, &mut budget)?;
+        let result = crate::p4_types::capture_certificate::verify(
+            &permit,
+            &input,
+            &declaration,
+            &mut budget,
+        )?;
         if let Some(proof) = &result {
             proof.check(&input, &mut budget)?;
         }
@@ -247,7 +256,7 @@ impl<'a> Engine<'a> {
         let image = self.images.get(position).ok_or(RequestError::UnknownDex)?;
         let permit = SchedulePermit { _private: () };
         let closure =
-            match crate::p8_java::nested_plan::closure(&permit, &image.index, root, control) {
+            match crate::p7_java::nested_plan::closure(&permit, &image.index, root, control) {
                 Ok(closure) => closure,
                 Err(error)
                     if matches!(
@@ -333,7 +342,7 @@ impl<'a> Engine<'a> {
                     constructor_captures.push(Err(error));
                 }
             }
-            let admitted = crate::p8_java::nested_plan::admit(
+            let admitted = crate::p7_java::nested_plan::admit(
                 &permit,
                 &image.index,
                 key,
@@ -353,7 +362,7 @@ impl<'a> Engine<'a> {
                     demote(&mut child, DiagnosticCause::Request(error), control)?;
                 }
             }
-            let plan = match crate::p8_java::nested_plan::verify(
+            let plan = match crate::p7_java::nested_plan::verify(
                 &permit,
                 &image.index,
                 key,
@@ -453,7 +462,7 @@ impl<'a> Engine<'a> {
         };
         let mut annotation_failure = annotation_status != crate::AnnotationStatus::Complete;
         let annotation_bindings = if whole_class && !annotation_failure {
-            match crate::p4_calls::annotations::collect(
+            match crate::p4_types::declarations::annotations::collect(
                 &SchedulePermit { _private: () },
                 &image.index,
                 annotations.original(),
@@ -488,7 +497,7 @@ impl<'a> Engine<'a> {
             None
         };
         let mut emission = if whole_class {
-            crate::pipeline::member_emission::collect(
+            crate::engine::member_emission::collect(
                 &SchedulePermit { _private: () },
                 &image.index,
                 request.class,
@@ -496,7 +505,7 @@ impl<'a> Engine<'a> {
                 control,
             )?
         } else {
-            crate::p8_java::member_emission::Plan::default()
+            crate::p7_java::member_emission::Plan::default()
         };
         let (fields, field_issue) = if whole_class {
             class_fields(
@@ -632,7 +641,7 @@ impl<'a> Engine<'a> {
         let unit = if source_rejected || annotation_failure {
             None
         } else if let Some(proof) = emission.enumeration() {
-            crate::p8_java::enums::unit(
+            crate::p7_java::enums::unit(
                 &SchedulePermit { _private: () },
                 proof,
                 &fields,
@@ -640,12 +649,12 @@ impl<'a> Engine<'a> {
                 control,
             )?
         } else if whole_class && field_issue.is_none() {
-            match crate::p8_java::verify_unit(
+            match crate::p7_java::verify_unit(
                 &SchedulePermit { _private: () },
                 &image.index,
                 request.class,
                 &self.catalog,
-                crate::p8_java::UnitMembers {
+                crate::p7_java::UnitMembers {
                     fields: &fields,
                     methods: &members,
                     annotations: annotation_bindings.as_ref(),
@@ -717,7 +726,7 @@ impl<'a> Engine<'a> {
         index: &ProgramIndex<'a>,
         key: MethodKey,
         diagnostics: &mut DiagnosticLog,
-        emission: &crate::p8_java::member_emission::Plan,
+        emission: &crate::p7_java::member_emission::Plan,
         inputs: MemberInputs<'_>,
         control: &mut RunContext<'_>,
     ) -> Result<MethodOutput, RequestError> {
@@ -740,14 +749,14 @@ impl<'a> Engine<'a> {
                         source,
                     }) => {
                         return Ok(match crate::VerifiedJavaInitializer::seal(declaration) {
-                            crate::p8_java::initializers::JavaMember::Initializer(declaration) => {
+                            crate::p7_java::initializers::JavaMember::Initializer(declaration) => {
                                 MethodOutput::JavaInitializer {
                                     facts,
                                     declaration,
                                     source,
                                 }
                             }
-                            crate::p8_java::initializers::JavaMember::Method(declaration) => {
+                            crate::p7_java::initializers::JavaMember::Method(declaration) => {
                                 MethodOutput::Java {
                                     facts,
                                     declaration,
@@ -928,14 +937,14 @@ enum NormalMember {
 #[derive(Clone, Copy)]
 struct MemberInputs<'a> {
     nested: bool,
-    annotations: Option<&'a crate::p4_calls::annotations::Bindings>,
+    annotations: Option<&'a crate::p4_types::declarations::annotations::Bindings>,
 }
 fn normal_member(
     index: &ProgramIndex<'_>,
     key: MethodKey,
-    catalog: &DeclarationCatalog,
+    catalog: &Context,
     representation: RepresentationPolicy,
-    emission: &crate::p8_java::member_emission::Plan,
+    emission: &crate::p7_java::member_emission::Plan,
     inputs: MemberInputs<'_>,
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<NormalMember, RequestError> {
@@ -946,13 +955,13 @@ fn normal_member(
         prototype: copy_proto(&input.declaration().prototype, budget)?,
         access_flags: input.access_flags(),
     };
-    let signature = crate::p4_calls::raw_signature::collect(
+    let signature = crate::p4_types::declarations::raw_signature::collect(
         &SchedulePermit { _private: () },
         &input,
         catalog,
         budget,
     )?;
-    if let Some(declaration) = crate::p8_java::declaration(
+    if let Some(declaration) = crate::p7_java::declaration(
         &SchedulePermit { _private: () },
         &input,
         catalog,
@@ -962,9 +971,9 @@ fn normal_member(
     )? {
         return Ok(NormalMember::Declaration { facts, declaration });
     }
-    use crate::pipeline::branch::Analysis;
+    use crate::engine::method_chain::Analysis;
     use crate::substrate::outcome::Outcome;
-    let storage = match crate::pipeline::branch::build(
+    let storage = match crate::engine::method_chain::build(
         &SchedulePermit { _private: () },
         &input,
         catalog,
@@ -973,25 +982,25 @@ fn normal_member(
         Analysis::Ready { storage } => storage,
         Analysis::Declined(reason) => return Ok(NormalMember::Raw { facts, reason }),
     };
-    let chain = crate::pipeline::constructor_chain::verify(
+    let chain = crate::engine::constructor_chain::verify(
         &SchedulePermit { _private: () },
         &input,
         catalog,
         &storage,
         budget,
     )?;
-    let _p7 = crate::pipeline::phase_span("p7_regions");
-    let planned = crate::p7_regions::build(
+    let _p7 = crate::pipeline::phase_span("p6_regions");
+    let planned = crate::p6_regions::build(
         &SchedulePermit { _private: () },
         storage,
         representation,
         budget,
     )?;
     drop(_p7);
-    let _p8 = crate::pipeline::phase_span("p8_java");
+    let _p8 = crate::pipeline::phase_span("p7_java");
     let result =
-        if crate::p8_java::source_group_admitted(index, key, &facts, Some(emission), budget)? {
-            crate::p8_java::verify_method(
+        if crate::p7_java::source_group_admitted(index, key, &facts, Some(emission), budget)? {
+            crate::p7_java::verify_method(
                 &SchedulePermit { _private: () },
                 &input,
                 catalog,
@@ -1006,8 +1015,8 @@ fn normal_member(
     let reason = match result {
         Outcome::Ready(declaration) => {
             drop(_p8);
-            let _p9 = crate::pipeline::phase_span("p9_emit");
-            let source = crate::p9_emit::java(&declaration, budget)?;
+            let _p9 = crate::pipeline::phase_span("p8_emit");
+            let source = crate::p8_emit::java(&declaration, budget)?;
             return Ok(NormalMember::Java {
                 facts,
                 declaration,
@@ -1022,8 +1031,8 @@ fn normal_member(
 fn class_fields(
     index: &ProgramIndex<'_>,
     key: crate::ClassKey,
-    catalog: &DeclarationCatalog,
-    emission: &crate::p8_java::member_emission::Plan,
+    catalog: &Context,
+    emission: &crate::p7_java::member_emission::Plan,
     diagnostics: &mut DiagnosticLog,
     control: &mut RunContext<'_>,
 ) -> Result<(Vec<crate::FieldOutput>, Option<DiagnosticId>), RequestError> {
@@ -1088,9 +1097,10 @@ fn class_fields(
         }
         let declaration = match &field.facts {
             Ok(facts) => {
-                match crate::p4_calls::field_declarations::bind(index, key, catalog, facts, control)
-                {
-                    Ok(Some(ty)) => crate::p8_java::verify_field(
+                match crate::p4_types::declarations::field_declarations::bind(
+                    index, key, catalog, facts, control,
+                ) {
+                    Ok(Some(ty)) => crate::p7_java::verify_field(
                         &SchedulePermit { _private: () },
                         &field,
                         facts,

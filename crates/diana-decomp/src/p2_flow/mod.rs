@@ -1,4 +1,6 @@
+pub(crate) mod call_facts;
 pub(crate) mod entry;
+pub(crate) use call_facts::CallFormal;
 mod local_ops;
 mod normal;
 pub(crate) use normal::{
