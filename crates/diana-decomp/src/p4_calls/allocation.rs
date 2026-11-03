@@ -27,6 +27,17 @@ pub(crate) fn resolve(
 ) -> Result<ConstructorContract, RequestError> {
     let reference = invocation.reference;
     let pc = invocation.pc;
+    // A caller defined in this input has no catalog entry either, so the
+    // declared path cannot establish its own hierarchy. Under the reference
+    // policy the original call reference binds the constructor on its own.
+    if catalog.policy() == crate::EvidencePolicy::TrustedReferences {
+        let caller = copy_units(input.owner(), budget)?;
+        if catalog.class(expected_owner, budget)?.is_none()
+            || catalog.class(&caller, budget)?.is_none()
+        {
+            return reference_only(input, invocation, expected_owner, budget);
+        }
+    }
     let method = input.method_reference(reference, budget)?;
     if !method.owner.matches_with(expected_owner, budget)?
         || !method
@@ -158,6 +169,44 @@ impl ConstructorContract {
             declared_throws: super::throws::retain(Some(&self.declared_throws), budget)?,
         })
     }
+}
+
+/// A constructor call whose owner has no declaration entry. The original
+/// reference still fixes the owner, name and prototype, so the call binds; no
+/// access, hierarchy or throws fact is asserted.
+fn reference_only(
+    input: &MethodInput<'_, '_>,
+    invocation: &super::throws::Invocation<'_>,
+    expected_owner: &[u16],
+    budget: &mut MethodBudget<'_, '_>,
+) -> Result<ConstructorContract, RequestError> {
+    let reference = invocation.reference;
+    let pc = invocation.pc;
+    let method = input.method_reference(reference, budget)?;
+    if !method.owner.matches_with(expected_owner, budget)?
+        || !method
+            .declaration
+            .name
+            .matches_with(&[60, 105, 110, 105, 116, 62], budget)?
+        || !method
+            .declaration
+            .prototype
+            .return_type
+            .matches_with(&[86], budget)?
+    {
+        return unavailable(pc);
+    }
+    let Some(formals) = super::contracts::original_formals(input, reference, budget)? else {
+        return unavailable(pc);
+    };
+    Ok(ConstructorContract {
+        _sealed: (),
+        reference,
+        owner: copy_units(method.owner, budget)?,
+        prototype: copy_proto(&method.declaration.prototype, budget)?,
+        arity: formals.len(),
+        declared_throws: Vec::new(),
+    })
 }
 
 fn unavailable<T>(pc: CodeUnitOffset) -> Result<T, RequestError> {

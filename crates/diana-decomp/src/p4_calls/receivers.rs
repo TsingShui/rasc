@@ -31,6 +31,40 @@ pub(crate) fn collect_receiver(
     kind: ReceiverKind,
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<Option<ReceiverDeclaration>, RequestError> {
+    let declared = collect_receiver_declared(input, catalog, invocation, kind, budget)?;
+    if declared.is_some() || catalog.policy() != crate::EvidencePolicy::TrustedReferences {
+        return Ok(declared);
+    }
+    let reference = invocation.reference;
+    let method = input.method_reference(reference, budget)?;
+    let Some(formals) = super::contracts::original_formals(input, reference, budget)? else {
+        return Ok(None);
+    };
+    let owner = copy_units(method.owner, budget)?;
+    if owner.len() < 3 || owner.first() != Some(&76) || owner.last() != Some(&59) {
+        return Ok(None);
+    }
+    Ok(Some(ReceiverDeclaration {
+        target: ReceiverContract {
+            _sealed: (),
+            reference,
+            owner,
+            name: copy_units(method.declaration.name, budget)?,
+            prototype: copy_proto(&method.declaration.prototype, budget)?,
+            kind,
+            arity: formals.len(),
+            declared_throws: Vec::new(),
+        },
+    }))
+}
+
+fn collect_receiver_declared(
+    input: &MethodInput<'_, '_>,
+    catalog: &DeclarationCatalog,
+    invocation: &super::throws::Invocation<'_>,
+    kind: ReceiverKind,
+    budget: &mut MethodBudget<'_, '_>,
+) -> Result<Option<ReceiverDeclaration>, RequestError> {
     let reference = invocation.reference;
     let method = input.method_reference(reference, budget)?;
     let Some(formals) = super::contracts::original_formals(input, reference, budget)? else {

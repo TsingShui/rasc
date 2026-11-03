@@ -170,6 +170,36 @@ pub(super) fn collect_static(
     id: MethodId,
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<Option<StaticContract>, RequestError> {
+    let declared = collect_static_declared(input, catalog, id, budget)?;
+    if declared.is_some() || catalog.policy() != crate::EvidencePolicy::TrustedReferences {
+        return Ok(declared);
+    }
+    let reference = input.method_reference(id, budget)?;
+    let owner = copy_units(reference.owner, budget)?;
+    if owner.first() != Some(&76) || owner.last() != Some(&59) {
+        return Ok(None);
+    }
+    let Some(formals) = original_formals(input, id, budget)? else {
+        return Ok(None);
+    };
+    Ok(Some(StaticContract {
+        _sealed: (),
+        access: StaticAccess::Public,
+        reference: id,
+        owner,
+        name: copy_units(reference.declaration.name, budget)?,
+        prototype: copy_proto(&reference.declaration.prototype, budget)?,
+        formals,
+        declared_throws: Vec::new(),
+    }))
+}
+
+fn collect_static_declared(
+    input: &MethodInput<'_, '_>,
+    catalog: &DeclarationCatalog,
+    id: MethodId,
+    budget: &mut MethodBudget<'_, '_>,
+) -> Result<Option<StaticContract>, RequestError> {
     let reference = input.method_reference(id, budget)?;
     let owner = copy_units(reference.owner, budget)?;
     let name = copy_units(reference.declaration.name, budget)?;

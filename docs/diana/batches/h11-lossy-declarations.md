@@ -70,5 +70,20 @@ First recorded run on a 22 MB application, 120 sampled classes of 15,753:
 | InputMalformed(InvalidEncodedValue) | 7 |
 
 No class reached `JavaUnit`. Median class time was 238 ms, maximum 5.0 s.
-The next slice addresses the two largest codes, both evidence-driven: reference
-call binding and declaration rendering without verified catalog signatures.
+A reference-evidence experiment then added an opt-in `EvidencePolicy` that binds
+calls from the original DEX reference instead of requiring catalog declarations.
+It is kept behind the policy and stays off by default. Measured on the same
+sample with the policy on:
+
+| Member outcome | Declared | TrustedReferences |
+|---|---|---|
+| debug | 681 | 681 |
+| java | 2 | 2 |
+
+The per-code split explains the null result: `BindingEvidenceMissing` fell from
+416 to 207 and `BranchJavaUnsupported` rose from 141 to 218, so the binding work
+moved straight into structural decline. Declaration rendering (`JavaDeclarationUnsupported`,
+23) is no longer the top cause, and `JavaAnalysisUnavailable` rose from 40 to 155
+because more methods reached the flow decoder. No member reached Java: every
+remaining path ends in a structural, initialization or analysis decline that has
+nothing to do with declaration evidence.

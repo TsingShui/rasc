@@ -3,8 +3,8 @@
 mod engine;
 mod p0_knowledge;
 pub use p0_knowledge::{
-    DeclarationCatalog, DeclarationCoverage, ExternalClassDeclaration, ExternalFieldEvidence,
-    ExternalMethodDeclaration, ExternalMethodSignature, JavaConstantKind,
+    DeclarationCatalog, DeclarationCoverage, EvidencePolicy, ExternalClassDeclaration,
+    ExternalFieldEvidence, ExternalMethodDeclaration, ExternalMethodSignature, JavaConstantKind,
 };
 #[path = "p1_input/mod.rs"]
 pub mod input;

@@ -92,7 +92,10 @@ fn collect_impl<'a>(
     let mut decline_reason = None;
     for call in &ssa.calls {
         budget.charge_work(1)?;
-        if decline_reason.is_none() && input.local_method(call.reference, budget)?.is_none() {
+        if decline_reason.is_none()
+            && catalog.policy() == crate::EvidencePolicy::Declared
+            && input.local_method(call.reference, budget)?.is_none()
+        {
             let original = input.method_reference(call.reference, budget)?;
             if !catalog.contains_signature(
                 original.owner,

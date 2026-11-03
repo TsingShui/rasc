@@ -52,9 +52,11 @@ fn main() {
     let mut diagnostic_codes: BTreeMap<String, u64> = BTreeMap::new();
     let mut durations = Vec::new();
     for (index, class_def, descriptor) in &selected {
-        let image = images.images().get(*index as usize);
+        let image = images.images().get(*index);
         let logical = image.map_or(0, |image| image.logical);
-        let entry = image.and_then(|image| image.entry).and_then(|entry| u32::try_from(entry.0).ok());
+        let entry = image
+            .and_then(|image| image.entry)
+            .and_then(|entry| u32::try_from(entry.0).ok());
         let selector = Selector::Class(ClassSelector {
             entry,
             logical: Some(logical),
@@ -83,6 +85,14 @@ fn main() {
                                 MethodOutput::Unavailable { .. } => "unavailable",
                             };
                             *member_status.entry(name.to_owned()).or_default() += 1;
+                            if let MethodOutput::Debug { reason, .. } = member {
+                                *member_status
+                                    .entry(format!(
+                                        "debug:{:?}",
+                                        result.report.diagnostics()[reason.0].code()
+                                    ))
+                                    .or_default() += 1;
+                            }
                         }
                     }
                 }

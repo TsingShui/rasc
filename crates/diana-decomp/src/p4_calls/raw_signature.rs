@@ -205,6 +205,13 @@ fn collect_impl(
     let Some(signature) = crate::input::signature::method(input, control)? else {
         return Ok(None);
     };
+    if catalog.policy() == crate::EvidencePolicy::TrustedReferences {
+        let mut units = Vec::new();
+        for &unit in signature.units() {
+            push(&mut units, unit, control)?;
+        }
+        return Ok(Some(RawSignature { units }));
+    }
     let owner = crate::substrate::owned::copy_units(input.owner(), control)?;
     let Some(class) = catalog.class(&owner, control)? else {
         return Ok(None);
