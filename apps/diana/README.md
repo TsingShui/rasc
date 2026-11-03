@@ -8,7 +8,7 @@ are rejected as unknown arguments.
 
 The engine lives in [diana-decomp](../../crates/diana-decomp/README.md) and borrows
 DEX bytes supplied by this package. See
-[DESIGN](../../docs/diana/DESIGN.md) for the interface. The `0.0.0` version is an
+[specification](../../docs/diana/spec/00-overview.md) for the interface. The `0.0.0` version is an
 unpublished scaffold marker.
 
 ## Commands

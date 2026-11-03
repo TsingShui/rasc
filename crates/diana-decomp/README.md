@@ -55,8 +55,8 @@ code forbidden and no external runtime/process dependency.
 
 Only create modules when an implemented capability needs them. Do not pre-create
 P0–P9 directories, fake Engine results, pass registries or tests for placeholder
-getters. See [interfaces / data](../../docs/diana/DESIGN.md),
-[algorithms](../../docs/diana/ALGORITHMS.md) and the case specification.
+getters. See the [specification chapters](../../docs/diana/spec/00-overview.md) and the
+case specification.
 
 The `0.0.0` version is an unpublished scaffold marker. rasc and its release
 tooling were removed at commit 5cb156c and remain in git history only. Shared test inputs/oracles live in root

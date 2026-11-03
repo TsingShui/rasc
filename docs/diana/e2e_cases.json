@@ -42,7 +42,7 @@
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "checked-in self-made source only; fixed JDK/R8; no platform SDK",
       "acceptanceGate": "engine",
-      "designRefs": "ALGORITHMS §3、§5–§6",
+      "designRefs": "spec/03-ssa.md",
       "inputRequirements": []
     },
     {
@@ -66,7 +66,7 @@
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "checked-in self-made source only; fixed JDK/R8; no platform SDK",
       "acceptanceGate": "engine",
-      "designRefs": "ALGORITHMS §3、§5–§6",
+      "designRefs": "spec/03-ssa.md",
       "inputRequirements": []
     },
     {
@@ -90,7 +90,7 @@
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "checked-in self-made source only; fixed JDK/R8; no platform SDK",
       "acceptanceGate": "engine",
-      "designRefs": "ALGORITHMS §3、§5–§6",
+      "designRefs": "spec/03-ssa.md",
       "inputRequirements": []
     },
     {
@@ -113,7 +113,7 @@
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "checked-in self-made source only; fixed JDK/R8; no platform SDK",
       "acceptanceGate": "engine",
-      "designRefs": "ALGORITHMS §3、§5–§6",
+      "designRefs": "spec/03-ssa.md",
       "inputRequirements": []
     },
     {
@@ -135,7 +135,7 @@
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "checked-in self-made source only; fixed JDK/R8; no platform SDK",
       "acceptanceGate": "engine",
-      "designRefs": "ALGORITHMS §3、§5–§6",
+      "designRefs": "spec/03-ssa.md",
       "inputRequirements": []
     },
     {
@@ -158,7 +158,7 @@
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "checked-in self-made source only; fixed JDK/R8; no platform SDK",
       "acceptanceGate": "engine",
-      "designRefs": "ALGORITHMS §3、§5–§6",
+      "designRefs": "spec/03-ssa.md",
       "inputRequirements": []
     },
     {
@@ -183,7 +183,7 @@
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "checked-in self-made source only; fixed JDK/R8; no platform SDK",
       "acceptanceGate": "engine",
-      "designRefs": "ALGORITHMS §3、§5–§6",
+      "designRefs": "spec/03-ssa.md",
       "inputRequirements": []
     },
     {
@@ -207,7 +207,7 @@
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "checked-in self-made source only; fixed JDK/R8; no platform SDK",
       "acceptanceGate": "engine",
-      "designRefs": "ALGORITHMS §3、§5–§6",
+      "designRefs": "spec/03-ssa.md",
       "inputRequirements": []
     },
     {
@@ -230,7 +230,7 @@
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "checked-in self-made source only; fixed JDK/R8; no platform SDK",
       "acceptanceGate": "engine",
-      "designRefs": "ALGORITHMS §4",
+      "designRefs": "spec/05-types.md",
       "inputRequirements": []
     },
     {
@@ -253,7 +253,7 @@
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "checked-in self-made source only; fixed JDK/R8; no platform SDK",
       "acceptanceGate": "engine",
-      "designRefs": "ALGORITHMS §4",
+      "designRefs": "spec/05-types.md",
       "inputRequirements": []
     },
     {
@@ -277,7 +277,7 @@
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "checked-in self-made source only; fixed JDK/R8; no platform SDK",
       "acceptanceGate": "engine",
-      "designRefs": "ALGORITHMS §4",
+      "designRefs": "spec/05-types.md",
       "inputRequirements": []
     },
     {
@@ -300,7 +300,7 @@
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "checked-in self-made source only; fixed JDK/R8; no platform SDK",
       "acceptanceGate": "engine",
-      "designRefs": "ALGORITHMS §4",
+      "designRefs": "spec/05-types.md",
       "inputRequirements": []
     },
     {
@@ -325,7 +325,7 @@
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "checked-in self-made source only; fixed JDK/R8; no platform SDK",
       "acceptanceGate": "engine",
-      "designRefs": "ALGORITHMS §4",
+      "designRefs": "spec/05-types.md",
       "inputRequirements": []
     },
     {
@@ -350,7 +350,7 @@
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "checked-in self-made source only; fixed JDK/R8; no platform SDK",
       "acceptanceGate": "engine",
-      "designRefs": "ALGORITHMS §4",
+      "designRefs": "spec/05-types.md",
       "inputRequirements": []
     },
     {
@@ -373,7 +373,7 @@
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "checked-in self-made source only; fixed JDK/R8; no platform SDK",
       "acceptanceGate": "engine",
-      "designRefs": "ALGORITHMS §4",
+      "designRefs": "spec/05-types.md",
       "inputRequirements": [
         "Record independently the actual cmpl/cmpg instruction, branch, operand order and PC; keep the four methods and both NaN positions separately. If the pinned compiler eliminates the tested obligation, preparation blocks and the recipe revision MUST be reviewed; the existing coverage claim MUST NOT be retained."
       ]
@@ -398,7 +398,7 @@
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "checked-in source; JDK Driver uses Float.floatToRawIntBits only as observer, not target call",
       "acceptanceGate": "engine",
-      "designRefs": "ALGORITHMS §4",
+      "designRefs": "spec/05-types.md",
       "inputRequirements": []
     },
     {
@@ -424,7 +424,7 @@
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "checked-in self-made source only; fixed JDK/R8; no platform SDK",
       "acceptanceGate": "engine",
-      "designRefs": "ALGORITHMS §4",
+      "designRefs": "spec/05-types.md",
       "inputRequirements": []
     },
     {
@@ -446,7 +446,7 @@
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "self-made Dep complete declaration catalog, checked-in source",
       "acceptanceGate": "engine",
-      "designRefs": "ALGORITHMS §9",
+      "designRefs": "spec/04-calls.md",
       "inputRequirements": []
     },
     {
@@ -468,7 +468,7 @@
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "self-made Dep complete overload catalog",
       "acceptanceGate": "engine",
-      "designRefs": "ALGORITHMS §9",
+      "designRefs": "spec/04-calls.md",
       "inputRequirements": []
     },
     {
@@ -490,7 +490,7 @@
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "self-made Base/Child complete catalog; adjacent constructor profile",
       "acceptanceGate": "engine",
-      "designRefs": "ALGORITHMS §9",
+      "designRefs": "spec/04-calls.md",
       "inputRequirements": []
     },
     {
@@ -512,7 +512,7 @@
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "self-made Base/Child complete declarations",
       "acceptanceGate": "engine",
-      "designRefs": "ALGORITHMS §9",
+      "designRefs": "spec/04-calls.md",
       "inputRequirements": []
     },
     {
@@ -534,7 +534,7 @@
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "self-made Dep/Error complete declarations",
       "acceptanceGate": "engine",
-      "designRefs": "ALGORITHMS §9",
+      "designRefs": "spec/04-calls.md",
       "inputRequirements": []
     },
     {
@@ -557,7 +557,7 @@
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "self-made I/Impl complete catalog; dependency remains original source",
       "acceptanceGate": "engine",
-      "designRefs": "ALGORITHMS §9",
+      "designRefs": "spec/04-calls.md",
       "inputRequirements": []
     },
     {
@@ -580,7 +580,7 @@
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "self-made Dep complete catalog",
       "acceptanceGate": "engine",
-      "designRefs": "ALGORITHMS §2、§4",
+      "designRefs": "spec/02-flow.md",
       "inputRequirements": []
     },
     {
@@ -605,7 +605,7 @@
       "dependencies": "checked-in self-made source only; fixed JDK/R8; no platform SDK",
       "notes": "B02/B03 MUST confirm generated DEX retains check-cast; if javac removes it create reviewed smali input for same operation. Handwritten runtime needs appropriate oracle lane; do not silently replace test.",
       "acceptanceGate": "engine",
-      "designRefs": "ALGORITHMS §2、§4",
+      "designRefs": "spec/02-flow.md",
       "inputRequirements": [
         "The three inputs request the same original method containing a reachable check-cast; confirm independently that neither javac nor D8 removed the cast and that its result does not affect the return or any effect. If no cast exists, preparation fails; running the source expectation alone is insufficient."
       ]
@@ -631,7 +631,7 @@
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "checked-in self-made source only; fixed JDK/R8; no platform SDK",
       "acceptanceGate": "engine",
-      "designRefs": "ALGORITHMS §2、§4",
+      "designRefs": "spec/02-flow.md",
       "inputRequirements": []
     },
     {
@@ -654,7 +654,7 @@
       "oracle": "dalvik-fill-fresh-array-proof-plus-reference-java-driver",
       "dependencies": "checked-in self-made source only; fixed JDK/R8; no platform SDK",
       "acceptanceGate": "engine",
-      "designRefs": "ALGORITHMS §2、§4",
+      "designRefs": "spec/02-flow.md",
       "inputRequirements": [
         "Record independently the two component/width/count triples, the original payload bits, the single new-array length and the absence of escape or external entry points; the recipe fixes the original form rather than depending on whether D8 selects the payload form.",
         "Under the FreshArray precondition, B03 MUST prove that the single-site bulk fill matches the transfer and observable heap of the reference Java initialization stores, preserving the original allocation order. The mirror is not a JVM execution of the original DEX, and it does not extend to parameter arrays or to elements with effects."
@@ -681,7 +681,7 @@
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "self-made Box complete field declarations",
       "acceptanceGate": "engine",
-      "designRefs": "ALGORITHMS §2、§4",
+      "designRefs": "spec/02-flow.md",
       "inputRequirements": []
     },
     {
@@ -703,7 +703,7 @@
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "self-made Dep/Error complete declarations",
       "acceptanceGate": "engine",
-      "designRefs": "ALGORITHMS §3、§5、§10",
+      "designRefs": "spec/03-ssa.md",
       "inputRequirements": [
         "Record independently the original throw site, the normal result commit and the old value visible to the catch; prove that this input actually requires preserving the pre-failure definition, not merely that the source variable has the same name."
       ]
@@ -728,7 +728,7 @@
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "self-made Dep/Error complete declarations",
       "acceptanceGate": "engine",
-      "designRefs": "ALGORITHMS §3、§5、§10",
+      "designRefs": "spec/03-ssa.md",
       "inputRequirements": [
         "The two throw sites MUST reach the same tested handler and carry the old values 7 and 9 respectively; if the front end duplicates or constant-folds the handler and so eliminates the obligation, preparation fails. Preparation MUST NOT freeze a private SSA form or a shadow count."
       ]
@@ -754,7 +754,7 @@
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "complete self-made Dep/BaseError/SubError catalog",
       "acceptanceGate": "engine",
-      "designRefs": "ALGORITHMS §3、§5、§10",
+      "designRefs": "spec/03-ssa.md",
       "inputRequirements": []
     },
     {
@@ -776,7 +776,7 @@
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "self-made Dep/Error complete catalog",
       "acceptanceGate": "engine",
-      "designRefs": "ALGORITHMS §3、§5、§10",
+      "designRefs": "spec/03-ssa.md",
       "inputRequirements": []
     },
     {
@@ -798,7 +798,7 @@
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "self-made Dep complete catalog",
       "acceptanceGate": "engine",
-      "designRefs": "ALGORITHMS §3、§5、§10",
+      "designRefs": "spec/03-ssa.md",
       "inputRequirements": []
     },
     {
@@ -820,7 +820,7 @@
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "self-made Dep/FinalError complete catalog",
       "acceptanceGate": "engine",
-      "designRefs": "ALGORITHMS §3、§5、§10",
+      "designRefs": "spec/03-ssa.md",
       "inputRequirements": []
     },
     {
@@ -842,7 +842,7 @@
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "self-made Dep/ErrorA/ErrorB complete catalog",
       "acceptanceGate": "engine",
-      "designRefs": "ALGORITHMS §3、§5、§10",
+      "designRefs": "spec/03-ssa.md",
       "inputRequirements": []
     },
     {
@@ -866,7 +866,7 @@
       "dependencies": "JDK Thread.holdsLock audited observer declaration, checked-in catalog",
       "notes": "JVM-only core evidence; no claim of full ART memory-model equivalence.",
       "acceptanceGate": "engine",
-      "designRefs": "ALGORITHMS §11",
+      "designRefs": "spec/07-regions.md",
       "inputRequirements": []
     },
     {
@@ -888,7 +888,7 @@
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "self-made Dep/Error + JDK observer catalog",
       "acceptanceGate": "engine",
-      "designRefs": "ALGORITHMS §11",
+      "designRefs": "spec/07-regions.md",
       "inputRequirements": []
     },
     {
@@ -910,7 +910,7 @@
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "self-made Dep + JDK observer catalog",
       "acceptanceGate": "engine",
-      "designRefs": "ALGORITHMS §11",
+      "designRefs": "spec/07-regions.md",
       "inputRequirements": []
     },
     {
@@ -932,7 +932,7 @@
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "self-made Dep complete catalog",
       "acceptanceGate": "engine",
-      "designRefs": "ALGORITHMS §11",
+      "designRefs": "spec/07-regions.md",
       "inputRequirements": []
     },
     {
@@ -955,7 +955,7 @@
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "JDK observer/type catalog",
       "acceptanceGate": "engine",
-      "designRefs": "ALGORITHMS §11",
+      "designRefs": "spec/07-regions.md",
       "inputRequirements": [
         "Record independently the managed DECLARED_SYNCHRONIZED flag, the actual monitor-enter/exit instructions and the release handlers; the recovered lock MUST follow the actual scope, the raw flags are preserved separately, and no lock is added from that flag alone."
       ],
@@ -980,7 +980,7 @@
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "self-made Base/Dep complete catalog",
       "acceptanceGate": "engine",
-      "designRefs": "ALGORITHMS §9、§12",
+      "designRefs": "spec/04-calls.md",
       "inputRequirements": [
         "Independently record the constructor's original this parameter word, the invoke-direct super constructor site and the following body effect. The recovered Java constructor MUST call super before any local declaration, copy or BODY effect; no private EntrySeed, Phi identity or copy count is asserted."
       ]
@@ -1004,7 +1004,7 @@
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "self-made Dep + complete Case declarations",
       "acceptanceGate": "engine",
-      "designRefs": "ALGORITHMS §9、§12",
+      "designRefs": "spec/04-calls.md",
       "inputRequirements": []
     },
     {
@@ -1026,7 +1026,7 @@
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "self-made Dep/Box complete catalog",
       "acceptanceGate": "engine",
-      "designRefs": "ALGORITHMS §9、§12",
+      "designRefs": "spec/04-calls.md",
       "inputRequirements": []
     },
     {
@@ -1049,7 +1049,7 @@
       "dependencies": "self-made Dep complete catalog",
       "notes": "Driver entry must not load/initialize Case before beginning observation; every case uses fresh JVM.",
       "acceptanceGate": "engine",
-      "designRefs": "ALGORITHMS §12.2",
+      "designRefs": "spec/08-java.md",
       "inputRequirements": []
     },
     {
@@ -1072,7 +1072,7 @@
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "checked-in self-made source only; fixed JDK/R8; no platform SDK",
       "acceptanceGate": "engine",
-      "designRefs": "ALGORITHMS §12.2",
+      "designRefs": "spec/08-java.md",
       "inputRequirements": []
     },
     {
@@ -1094,7 +1094,7 @@
       "oracle": "dex-format-encoded-value-tags-plus-reference-java-default-state",
       "dependencies": "checked-in self-made source only; fixed JDK/R8; no platform SDK",
       "acceptanceGate": "engine",
-      "designRefs": "ALGORITHMS §12.2",
+      "designRefs": "spec/08-java.md",
       "inputRequirements": [
         "The independent projection MUST see both the tag/value of all three explicit encoded_value entries and the complete static_fields binding; a missing static_values_off or a truncated array is a preparation failure. The original fields, constructor and flags stay complete, so an added default constructor cannot accidentally determine the unit state."
       ],
@@ -1119,7 +1119,7 @@
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "self-made Dep/InitError complete catalog",
       "acceptanceGate": "engine",
-      "designRefs": "ALGORITHMS §12.2",
+      "designRefs": "spec/08-java.md",
       "inputRequirements": []
     },
     {
@@ -1141,7 +1141,7 @@
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "self-made Base complete generic/erased contracts",
       "acceptanceGate": "engine",
-      "designRefs": "ALGORITHMS §12.3",
+      "designRefs": "spec/08-java.md",
       "inputRequirements": [
         "Confirm independently one real ACC_BRIDGE|ACC_SYNTHETIC ()Ljava/lang/Object; method whose canonical target is the ()Ljava/lang/String; method on the same receiver; the parent/override catalog is complete, and the restored classfile MUST also generate a bridge with the same descriptor."
       ]
@@ -1166,7 +1166,7 @@
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "checked-in self-made source only; fixed JDK/R8; no platform SDK",
       "acceptanceGate": "engine",
-      "designRefs": "ALGORITHMS §12.3",
+      "designRefs": "spec/08-java.md",
       "inputRequirements": [
         "Request the complete outer unit together with its real Inner ownership closure, not an isolated inner fragment; certify independently the Enclosing/InnerClass attributes, the unique synthetic outer field/hidden ctor parameter and the canonical pre-super assignment."
       ],
@@ -1191,7 +1191,7 @@
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "checked-in self-made source only; fixed JDK/R8; no platform SDK",
       "acceptanceGate": "engine",
-      "designRefs": "ALGORITHMS §12.3",
+      "designRefs": "spec/08-java.md",
       "inputRequirements": [
         "Certify independently the canonical clinit pattern that creates Z(name Z,ordinal0) before A(name A,ordinal1), together with the backing storage, the values clone, valueOf and the hidden ctor; the declaration order MUST NOT be inferred from sorted field_ids."
       ],
@@ -1216,7 +1216,7 @@
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "self-made Mark source + JDK annotation declarations",
       "acceptanceGate": "engine",
-      "designRefs": "ALGORITHMS §12.3",
+      "designRefs": "spec/08-java.md",
       "inputRequirements": []
     },
     {
@@ -1239,7 +1239,7 @@
       "dependencies": "checked-in self-made source only; fixed JDK/R8; no platform SDK",
       "notes": "B02 source generation must safely escape backslash-u and controls; raw DEX string_units certificate verifies the same units before engine.",
       "acceptanceGate": "engine",
-      "designRefs": "ALGORITHMS §1、§4.8",
+      "designRefs": "spec/01-input.md",
       "inputRequirements": []
     },
     {
@@ -1262,7 +1262,7 @@
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "checked-in self-made source only; fixed JDK/R8; no platform SDK",
       "acceptanceGate": "engine",
-      "designRefs": "ALGORITHMS §1、§4.8",
+      "designRefs": "spec/01-input.md",
       "inputRequirements": []
     },
     {
@@ -1284,7 +1284,7 @@
       "oracle": "worked-example-plus-source-jvm-driver",
       "dependencies": "checked-in self-made source only; fixed JDK/R8; no platform SDK",
       "acceptanceGate": "engine",
-      "designRefs": "ALGORITHMS §1、§4.8",
+      "designRefs": "spec/01-input.md",
       "inputRequirements": []
     },
     {
@@ -1307,7 +1307,7 @@
       "oracle": "format-violation-at-known-field",
       "dependencies": "checked-in self-made source only; fixed JDK/R8; no platform SDK",
       "acceptanceGate": "engine",
-      "designRefs": "ALGORITHMS §1、§3",
+      "designRefs": "spec/01-input.md",
       "inputRequirements": [
         "Both independent variants MUST each run. First prove the field overrun from the checked minimum byte count, and do not misclassify it as BudgetExceeded merely because the same count also exceeds an analysis budget. The original field, the patch locations and the rebuilt hash are recorded independently."
       ],
@@ -1332,7 +1332,7 @@
       "oracle": "format-violation-at-known-target",
       "dependencies": "checked-in self-made source only; fixed JDK/R8; no platform SDK",
       "acceptanceGate": "engine",
-      "designRefs": "ALGORITHMS §1、§3",
+      "designRefs": "spec/01-input.md",
       "inputRequirements": []
     },
     {
@@ -1354,7 +1354,7 @@
       "oracle": "reachable-undefined-use-proof",
       "dependencies": "checked-in self-made source only; fixed JDK/R8; no platform SDK",
       "acceptanceGate": "engine",
-      "designRefs": "ALGORITHMS §1、§3",
+      "designRefs": "spec/01-input.md",
       "inputRequirements": []
     },
     {
@@ -1376,7 +1376,7 @@
       "oracle": "wide-pair-invalidated-by-overlapping-write",
       "dependencies": "checked-in self-made source only; fixed JDK/R8; no platform SDK",
       "acceptanceGate": "engine",
-      "designRefs": "ALGORITHMS §1、§3",
+      "designRefs": "spec/01-input.md",
       "inputRequirements": []
     },
     {
@@ -1398,7 +1398,7 @@
       "oracle": "unknown-format-contract",
       "dependencies": "checked-in self-made source only; fixed JDK/R8; no platform SDK",
       "acceptanceGate": "engine",
-      "designRefs": "ALGORITHMS §7–§8、§12",
+      "designRefs": "spec/09-emission.md",
       "inputRequirements": []
     },
     {
@@ -1420,7 +1420,7 @@
       "oracle": "raw-member-identity-and-java-representability",
       "dependencies": "checked-in self-made source only; fixed JDK/R8; no platform SDK",
       "acceptanceGate": "engine",
-      "designRefs": "ALGORITHMS §7–§8、§12",
+      "designRefs": "spec/09-emission.md",
       "inputRequirements": [
         "The complete class contains the canonical constructor, the two f methods differ only in their return descriptor and there is no bridge or synthetic generation pattern; all other shell and catalog facts are legal, so the class does not become Mixed merely through a missing constructor or catalog entry."
       ]
@@ -1444,7 +1444,7 @@
       "oracle": "independent-dexlib2-original-debug-projection",
       "dependencies": "locked smali/dexlib2 plus checked-in class shell; no source-engine oracle",
       "acceptanceGate": "engine",
-      "designRefs": "ALGORITHMS §7–§8、§12",
+      "designRefs": "spec/09-emission.md",
       "inputRequirements": [
         "The input MUST contain one reachable external invoke whose binding catalog is exactly missing, so that the outcome is determined as Unsupported; an incomplete catalog that is never used does not force raw output. Check the complete payload/handlers/UTF16/refs independently."
       ]
@@ -1469,7 +1469,7 @@
       "oracle": "explicit-resource-contract",
       "dependencies": "reviewed self-made raw method; no Java source VM required",
       "acceptanceGate": "engine",
-      "designRefs": "DESIGN §3.7、§10.3；ALGORITHMS §8、§13",
+      "designRefs": "spec/00-overview.md；spec/08-java.md and spec/00-overview.md",
       "inputRequirements": [],
       "revisionReason": "The revision keeps both original expectations, the raw success and the raw failure after the normal failure, and no longer depends on a guessed raw/request budget value; an unconfigured field is explicitly None."
     },
@@ -1492,7 +1492,7 @@
       "oracle": "public-cancellation-contract",
       "dependencies": "finite self-made input; check callback not private scheduler",
       "acceptanceGate": "engine",
-      "designRefs": "DESIGN §3.7、§10.3；ALGORITHMS §8、§13",
+      "designRefs": "spec/00-overview.md；spec/08-java.md and spec/00-overview.md",
       "inputRequirements": [
         "Certify independently that the method is a legal input, finite and with enough work to trigger cancellation, and that the catalog is complete; 64 is the caller cancellation policy, and the requirement asserts nothing about engine-private phases or the total call count."
       ]
@@ -1517,7 +1517,7 @@
       "oracle": "bounded-output-contract",
       "dependencies": "checked-in self-made source only; fixed JDK/R8; no platform SDK",
       "acceptanceGate": "engine",
-      "designRefs": "DESIGN §3.7、§7、§10.3；ALGORITHMS §8、§13",
+      "designRefs": "spec/00-overview.md and spec/01-input.md；spec/08-java.md and spec/00-overview.md",
       "inputRequirements": [
         "Confirm independently that all 8 methods are actually defined with distinct names and protos, and that the input and catalog are legal; the per-member length limit is ample while the ReportCase total MUST exceed the report limit. The diagnosis follows the actual limit projection and asserts nothing about which private phase fails."
       ],
@@ -1544,7 +1544,7 @@
       "dependencies": "checked-in self-made source only; fixed JDK/R8; no platform SDK",
       "notes": "Preparation must implement and independently inspect 041 builder before certifying input; no personal Android SDK sample.",
       "acceptanceGate": "engine-and-application",
-      "designRefs": "ALGORITHMS §1、§14.2",
+      "designRefs": "spec/01-input.md",
       "inputRequirements": [
         "Certify independently the original header_offset and shared section of both logical inputs together with their equal numeric class/method indices; each of the two seams satisfies the same expectation for every invocation, without splitting the ID or counting the case twice."
       ]
@@ -1568,7 +1568,7 @@
       "oracle": "reviewed-input-symbol-manifest",
       "dependencies": "checked-in self-made source only; fixed JDK/R8; no platform SDK",
       "acceptanceGate": "application",
-      "designRefs": "ALGORITHMS §14.2",
+      "designRefs": "spec/01-input.md",
       "inputRequirements": [
         "The independent class_defs/class_data definition list is exactly the two complete protos; the result relates entries to the original scope and member key, the independent result order is ignored, and the comparison is not limited to display names."
       ],
@@ -1593,7 +1593,7 @@
       "oracle": "independent-raw-site-manifest",
       "dependencies": "self-made Dep reference and locked raw decoder certificate",
       "acceptanceGate": "application",
-      "designRefs": "ALGORITHMS §14.2",
+      "designRefs": "spec/01-input.md",
       "inputRequirements": [
         "Certify independently the two actual invoke operand PCs inside the same Case.target()V; the original MethodKey+PC+operand_slot is unique, and the report order is not asserted."
       ]
@@ -1621,7 +1621,7 @@
       "oracle": "literal-payload-bytes",
       "dependencies": "checked-in ZIP recipe and payload; no engine required",
       "acceptanceGate": "application",
-      "designRefs": "ALGORITHMS §14.3",
+      "designRefs": "spec/01-input.md",
       "inputRequirements": [
         "Check independently the ordinal/method/original payload/CRC of the 4 physical entries; a duplicate name MUST NOT be collapsed or silently chosen by default, and the output of the ambiguous call MUST NOT exist."
       ],
@@ -1649,7 +1649,7 @@
       "oracle": "literal-target-and-input-invalidity",
       "dependencies": "self-made temporary directories and ZIP only",
       "acceptanceGate": "application",
-      "designRefs": "ALGORITHMS §14.3",
+      "designRefs": "spec/01-input.md",
       "inputRequirements": [
         "All four targets are safely overwritable and MUST NOT be blocked by TargetExists first; check the header, range, CRC and size of each ZIP independently and identify exactly one rejection reason. An independent reference decompressor MUST verify the plaintext of the BZIP2 stream; the public fixture password MUST decrypt the ZipCrypto entry independently and verify its plaintext, CRC and 12-byte header, and a corrupt file that merely sets the flag MUST NOT substitute for it. Malformed, a decode failure, the wrong rejection type or any other error MUST NOT match the specified expectation."
       ],
@@ -1682,7 +1682,7 @@
       "dependencies": "checked-in self-made source only; fixed JDK/R8; no platform SDK",
       "notes": "Use platform-specific symlink/hardlink capability reports; required unsupported test environment fails preparation for that platform, no CLI subprocess.",
       "acceptanceGate": "application",
-      "designRefs": "ALGORITHMS §14.3",
+      "designRefs": "spec/01-input.md",
       "inputRequirements": [
         "The Windows/symlink/hardlink/atomic-rename capabilities are measured during preparation; a platform lacking a capability fails preparation, and the eight invocations are not merged into one any-error. An observation reads the complete bytes through a single opened handle, and each pattern byte is determined independently as (i*multiplier+add)%256."
       ],
@@ -1698,7 +1698,7 @@
       "required": true,
       "validationScope": "method-in-known-context",
       "acceptanceGate": "engine",
-      "designRefs": "ALGORITHMS §4.9、§5、§9",
+      "designRefs": "spec/05-types.md",
       "inputKind": "self-made-java-to-dex",
       "inputRecipe": "The Case defines b(ZBB)B, s(ZSS)S and c(ZCC)C, each selecting one of two parameters of the corresponding type with if and then returning it; it also defines call(ZBB)I, which selects a byte and then calls Dep.echoByte(B)I from the complete catalog. No explicit int-to-byte/short/char conversion exists; the selected value already falls inside the target range.",
       "inputRequirements": [
@@ -1729,7 +1729,7 @@
       "required": true,
       "validationScope": "method-in-known-context",
       "acceptanceGate": "engine",
-      "designRefs": "ALGORITHMS §4.9",
+      "designRefs": "spec/05-types.md",
       "inputKind": "self-made-java-to-dex",
       "inputRecipe": "static int sum(byte a,byte b){return a+b;} static int mix(boolean p,byte b,char c){int v;if(p)v=b;else v=c;return v;} No original narrowing Op exists.",
       "inputRequirements": [
@@ -1756,7 +1756,7 @@
       "required": true,
       "validationScope": "method-in-known-context",
       "acceptanceGate": "engine",
-      "designRefs": "ALGORITHMS §2.4",
+      "designRefs": "spec/02-flow.md",
       "inputKind": "self-made-smali-with-proved-reference-java",
       "inputRecipe": "A 035 static f([I)V contains only a fill-array-data on p0 with count=0 and element_width=4 payload, then return-void; there is no handler and no other effect. The independent reference Java is f(int[] a){int unused=a.length;}, which Dalvik treats as equivalent to the single-site transfer of this zero fill and the length read: a nonnull array without writes completes normally, and null throws NPE.",
       "inputRequirements": [
@@ -1782,7 +1782,7 @@
       "required": true,
       "validationScope": "raw-method",
       "acceptanceGate": "engine",
-      "designRefs": "ALGORITHMS §2.4、§8",
+      "designRefs": "spec/02-flow.md",
       "inputKind": "self-made-smali",
       "inputRecipe": "Four independent valid original methods: fill the parameter int[] with [7,8]; create new int[1] and fill 2 elements; create new int[n] and fill 2 elements; create new int[2], call Dep.publish(array) and then fill 2 elements. All component/width/ref/target facts are complete, and the catalog contains the exact declaration of publish. Only the Java rejection and the debug-fact comparison are verified, without a simplified VM executing exceptions or partial writes.",
       "inputRequirements": [
@@ -1809,7 +1809,7 @@
       "required": true,
       "validationScope": "method-in-known-context",
       "acceptanceGate": "engine",
-      "designRefs": "ALGORITHMS §12.4、§7",
+      "designRefs": "spec/08-java.md",
       "inputKind": "self-made-dex-builder",
       "inputRecipe": "The ordinary owner keeps the canonical Object constructor, and the abstract variant owner is marked abstract. Construct f(...)I with 255/256 static I parameters and with 254/255 instance I parameters, whose body returns the first int parameter, and whose registers/ins_size match the original proto; also construct code-less declarations with 254/255 instance I parameters. Parameter names are p0.., and deleting an unused parameter or changing the proto is forbidden. The accepted side has an independent legal Java reference, and the rejected side only checks DEX integrity and the debug-fact comparison.",
       "inputRequirements": [
@@ -1839,7 +1839,7 @@
       "required": true,
       "validationScope": "method-in-known-context",
       "acceptanceGate": "engine",
-      "designRefs": "ALGORITHMS §4.8、§12.4",
+      "designRefs": "spec/05-types.md",
       "inputKind": "self-made-dex-builder-with-reference-java",
       "inputRecipe": "The const-string of f()String is built from 32767 NUL units, 32767 NUL units followed by A, and 32768 NUL units, corresponding to MUTF8 lengths 65534/65535/65536; the original DEX string_data is legal. The receiving side's reference Java uses octal NUL escapes and contains no Unicode preprocessing newline.",
       "inputRequirements": [
@@ -1866,7 +1866,7 @@
       "required": true,
       "validationScope": "method-in-known-context",
       "acceptanceGate": "engine",
-      "designRefs": "ALGORITHMS §12.4–§12.5；DESIGN §10.3",
+      "designRefs": "spec/08-java.md",
       "inputKind": "self-made-java-to-dex",
       "inputRecipe": "A static f()V executes 10000 identical Dep.tick()V calls in sequence and then returns, with no loop and no handler; Dep has a static int ticks with the default initial value 0, and tick() only performs ticks++. The Driver calls f once in a new JVM and then reads ticks. The complete self-made dependencies and Object catalog are provided, and the dependencies stay unchanged when the target is recovered. All resource quotas stay None; the code size is not predicted from a per-node cost.",
       "inputRequirements": [
@@ -1893,7 +1893,7 @@
       "required": true,
       "validationScope": "full-unit",
       "acceptanceGate": "engine",
-      "designRefs": "ALGORITHMS §12.4、§12.6；DESIGN §10.3",
+      "designRefs": "spec/08-java.md",
       "inputKind": "self-made-dex-builder-with-reference-java",
       "inputRecipe": "A public interface Case has exactly 2200 distinct abstract declarations m0000..m2199()I, with no constructor, no code and no default method; flags/proto/hierarchy are complete. The reference Java declares these methods one by one, and the complete recovered JavaUnit is compiled directly; all quotas are None, and the pool is not guessed by multiplying a coefficient per declaration/type/descriptor mention.",
       "inputRequirements": [
@@ -1920,7 +1920,7 @@
       "required": true,
       "validationScope": "full-unit-set",
       "acceptanceGate": "engine",
-      "designRefs": "ALGORITHMS §9.1、§12.2",
+      "designRefs": "spec/04-calls.md",
       "inputKind": "self-made-java-to-dex",
       "inputRecipe": "The Case contains a static final int N and a String S, both blank final, which a static block assigns 7 and \"x\" in that order and then logs \"INIT\" through Dep.log. Reader.readInt/readString each log \"READ\" through Dep.log first and then read the Case field. Case and Reader are each recovered as a complete JavaUnit, and only these two recovered sources are compiled together with the unchanged Dep; the Driver calls Reader twice and does not touch Case beforehand. Each invocation runs in its own new JVM, and its two repeated reads share that JVM; the int-read and string-read invocations do not share initialization state.",
       "inputRequirements": [
@@ -1946,7 +1946,7 @@
       "required": true,
       "validationScope": "raw-method",
       "acceptanceGate": "engine",
-      "designRefs": "ALGORITHMS §9.1",
+      "designRefs": "spec/04-calls.md",
       "inputKind": "self-made-smali",
       "inputRecipe": "f()I only runs sget External.C:I and then returns; the external field is public static final. Both catalog variants provide the complete owner/access/type, but their JavaConstantKind is Constant and Unknown respectively. The original DEX ref/metadata is valid.",
       "inputRequirements": [
@@ -1971,7 +1971,7 @@
       "required": true,
       "validationScope": "raw-method",
       "acceptanceGate": "engine",
-      "designRefs": "ALGORITHMS §11",
+      "designRefs": "spec/07-regions.md",
       "inputKind": "self-made-smali",
       "inputRecipe": "f()V sets flag=1; again: new Object into v0 with an adjacent init; when flag is nonzero it runs monitor-enter v0, sets flag=0 and goto again; when flag is 0 it runs monitor-exit v0 and then returns. The second dynamic object comes from the same static allocation site, but it is not the object held earlier. There is no handler, the Object ctor catalog is complete, and every bytecode format/ref/branch is legal.",
       "inputRequirements": [
@@ -1996,7 +1996,7 @@
       "required": true,
       "validationScope": "method-in-known-context",
       "acceptanceGate": "engine",
-      "designRefs": "ALGORITHMS §6、§11",
+      "designRefs": "spec/07-regions.md",
       "inputKind": "self-made-java-to-dex",
       "inputRecipe": "static int f(Object lock,int n){int s=0;for(int i=0;i<n;i++){synchronized(lock){if(Thread.holdsLock(lock))s++;}}return s;} The Driver observes the same lock after normal and abnormal exits. Each enter/exit covers one level, and the root is a non-redefinable parameter, so the presence of a loop alone MUST NOT force raw output.",
       "inputRequirements": [
@@ -2022,7 +2022,7 @@
       "required": true,
       "validationScope": "method-in-known-context",
       "acceptanceGate": "engine",
-      "designRefs": "ALGORITHMS §6、§12.5",
+      "designRefs": "spec/07-regions.md",
       "inputKind": "self-made-java-to-dex",
       "inputRecipe": "static int f(int k){switch(k){case -2147483648:return 1;case 2147483647:return 2;default:return 3;}} Only two keys exist; there is no handler, monitor or uninitialized value. The resource configuration MUST be sufficient for the actual nodes rather than for the span.",
       "inputRequirements": [
@@ -2048,7 +2048,7 @@
       "required": true,
       "validationScope": "full-unit",
       "acceptanceGate": "engine",
-      "designRefs": "ALGORITHMS §9、§12.3",
+      "designRefs": "spec/04-calls.md",
       "inputKind": "self-made-smali",
       "inputRecipe": "The Case extends a complete self-made Base and contains the canonical ctor, a String get() that returns the child, and an Object get() marked bridge|synthetic that first runs Dep.log(\"BRIDGE\") and then invoke-virtual String get on the same receiver and returns. The bridge that a source override would generate automatically does not contain that log, so this member is not a canonical consumable pattern.",
       "inputRequirements": [
@@ -2072,7 +2072,7 @@
       "required": true,
       "validationScope": "rendered-result",
       "acceptanceGate": "engine-and-application",
-      "designRefs": "DESIGN §2.2、§6.5；ALGORITHMS §8.1",
+      "designRefs": "spec/00-overview.md and spec/10-cli.md；spec/09-emission.md",
       "inputKind": "self-made-dex-builder",
       "inputRecipe": "The self-made 038 Case has the canonical Object constructor, a static zAdd(II)I with a real addition body, and a static aDynamic()I. aDynamic first runs const-string (UTF16 [0,55296,42,47,92,117,48,48,48,97]), then runs invoke-custom with zero arguments and the call-site proto ()I, with an adjacent move-result/return. The bootstrap static method_handle, name, method_type and all metadata of the call_site are legal; the bootstrap is declared as the self-made Bootstrap.link(MethodHandles.Lookup,String,MethodType)CallSite, and the external declaration catalog is complete. invoke-custom is known to yield raw only, and zAdd does not depend on it. The same selection is obtained through the public Engine+render and through the default text path of the application's public decompilation Module, without starting the CLI.",
       "inputRequirements": [
@@ -2100,7 +2100,7 @@
       "required": true,
       "validationScope": "method-in-known-context",
       "acceptanceGate": "engine",
-      "designRefs": "DESIGN §3.7、§10.3；ALGORITHMS §1、§7–§8、§13",
+      "designRefs": "spec/00-overview.md；spec/01-input.md, spec/09-emission.md and spec/08-java.md",
       "inputKind": "self-made-dex-builder-with-reference-java",
       "inputRecipe": "A self-made 035 owner has the canonical ctor and a static f()V. The code_item of f contains exactly 131073 code units: the first is return-void and the remaining 131072 are complete nop instructions; registers/ins/outs/tries are all 0, with no branch, payload or handler. Only the return is reachable. The real input range covers all words, and the declaration catalog is complete. The reference Java f returns directly; the established tests-only pure-scalar oracle executes the original entry, without heap, exception or monitor interpretation.",
       "inputRequirements": [

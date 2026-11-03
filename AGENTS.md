@@ -25,8 +25,8 @@ package-local `AGENTS.md` before working in either package.
 
 ## Workflow
 
-- Read [DESIGN](docs/diana/DESIGN.md) and the owning
-  [ALGORITHMS](docs/diana/ALGORITHMS.md) sections before capability changes.
+- Read the owning [stage chapter](docs/diana/README.md) before capability
+  changes.
   Identify consumed facts, guarantees, invariants and classified failure behavior.
   If contracts conflict with the change, stop and request a decision.
 - For detailed architecture, Rust conventions, dependency choices, acceptance,
@@ -66,8 +66,7 @@ integration boundaries. Report failures and unrun evidence accurately.
 - [phases](docs/diana/phases.md): phase map and current scheduling entry.
 - [spec/00–09](docs/diana/README.md): product overview and phase chapters;
   detailed contracts are still being migrated.
-- [DESIGN](docs/diana/DESIGN.md): product, CLI, stage interfaces and failures.
-- [ALGORITHMS](docs/diana/ALGORITHMS.md): phase algorithms and invariants.
+- [spec/00–10](docs/diana/spec/): product, input, phases, CLI and algorithms.
 - [SOURCE_MAP](docs/diana/SOURCE_MAP.md): sources, attribution and reference use.
 - [e2e_cases.json](docs/diana/e2e_cases.json): case inputs and independent expectations.
 - [CONTRIBUTING](docs/diana/CONTRIBUTING.md): detailed contribution rules.

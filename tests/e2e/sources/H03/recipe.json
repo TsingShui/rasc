@@ -5,7 +5,7 @@
   "license": "Apache-2.0",
   "builder": "build_axml.py",
   "outputs": ["AndroidManifest.axml", "manifest.zip"],
-  "contract": "docs/diana/ALGORITHMS.md#144-manifest-decoding-and-axml-safety",
+  "contract": "docs/diana/spec/01-input.md#manifest-decoding-and-axml-safety",
   "formatSource": "https://android.googlesource.com/platform/frameworks/base/+/refs/tags/android-15.0.0_r1/libs/androidfw/include/androidfw/ResourceTypes.h",
   "certification": "Independent AOSP-layout projection versus the original source XML; this is an H03 input artifact, not another D case or engine result."
 }

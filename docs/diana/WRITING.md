@@ -149,7 +149,7 @@ location as independently accessible evidence.
 ## 6. Terminology and prose
 
 Use one preferred term for one concept. Do not interchange distinct concepts to
-satisfy a vocabulary rule. The definitions in [DESIGN.md](DESIGN.md) remain
+satisfy a vocabulary rule. The definitions in [spec/00](spec/00-overview.md) remain
 authoritative; this table guides wording rather than redefining data or interfaces.
 
 | Term | Use it for | Do not use it for |
@@ -173,7 +173,7 @@ authoritative; this table guides wording rather than redefining data or interfac
 | `Quota` | The ledger structure | allowance, bound |
 
 `Malformed`, `Unsupported`, `BudgetExceeded`, `InternalInvariant` and `Cancelled`
-are failure kinds in DESIGN §2.3. `Unavailable` is a result status in DESIGN §2.2,
+are failure kinds in [spec/00](spec/00-overview.md). `Unavailable` is a result status there,
 not a synonym for those failure kinds. Known invalid semantics also belong under
 `Malformed`; the term is not limited to damaged byte structure. Missing evidence
 can cause `Unsupported` without proving that the input is semantically valid.

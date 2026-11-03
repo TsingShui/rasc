@@ -22,7 +22,7 @@ relevant work. Package-local instructions refine their respective scopes.
   build, test, lint, format or release it, and do not add a Diana dependency on
   reference crates.
 
-See `docs/diana/DESIGN.md` §1 for actual paths. Older root-product/src paths in
+See [00-overview](spec/00-overview.md) for actual paths. Older root-product/src paths in
 feature tasks mean the Diana application root `apps/diana/`; historical reference
 paths are resolved against their upstream URL and pinned commit in SOURCE_MAP, not
 by a local copy.
@@ -60,8 +60,7 @@ specification. Do not maintain a separate task or batch-record tree.
 ## Architecture guardrails
 
 Before changing an engine capability, contributors MUST read
-[DESIGN §4](docs/diana/DESIGN.md#4-phases-products-and-actual-order) and the owning
-[ALGORITHMS](docs/diana/ALGORITHMS.md) sections. Contributors MUST identify the owning phase, actual producer/consumer, invariant
+[phases](phases.md) and the owning stage chapter. Contributors MUST identify the owning phase, actual producer/consumer, invariant
 and existing independent evidence before implementation. Before
 implementation, contributors MUST also identify the consumed facts, their full or
 partial guarantees, and the classified failure/resource/cancellation behavior.
@@ -73,7 +72,7 @@ bypass.
   P3 SSA → P4 declaration constraints/evidence → P5 types/use conversions →
   P6 storage/copies → P7 regions → P8 Java recovery. P9 MUST render existing
   products and original facts without further analysis.
-- Contributors MUST follow [DESIGN §4.1](docs/diana/DESIGN.md#41-stage-interface-authority)
+- Contributors MUST follow the stage-authority rules in [phases](phases.md)
   when exposing stage entries, implementation modules and product views. A
   read-only product or a passing behavior test does not establish phase ownership.
 - Before widening a phase's input access, module exports or product-construction
@@ -278,7 +277,7 @@ remain authoritative.
   validated product.
 - Contributors MUST model mutually exclusive states with enums rather than
   independent flags that permit contradictions. Output states and failure kinds
-  remain separate as defined by DESIGN §2. Independent declaration/code results
+  remain separate as defined by [00-overview](spec/00-overview.md). Independent declaration/code results
   and ordinary boolean predicates remain valid when their combinations have
   explicit meanings.
 - Core interfaces MUST propagate classified errors. Contributors MUST NOT turn
@@ -346,7 +345,7 @@ Timeline spans do not replace CPU sampling, benchmarks or resource accounting.
 ## diana-decomp
 
 Before working on files under `crates/diana-decomp/`, contributors MUST read
-and follow [the engine instructions](crates/diana-decomp/AGENTS.md) in addition
+and follow [the engine instructions](../../crates/diana-decomp/AGENTS.md) in addition
 to this file. A link does not automatically load the referenced instructions.
 
 ## Corpus data and sensitive inputs

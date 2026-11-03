@@ -9,4 +9,4 @@ web runtime and integration choices remain open. Do not initialize or implement
 this target without a separate user request.
 
 See [application targets](../README.md) and
-[current scope](../../docs/diana/DESIGN.md#1-product-boundary-and-engineering-scope).
+[current scope](../../docs/diana/spec/00-overview.md).

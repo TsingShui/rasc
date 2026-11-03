@@ -19,4 +19,4 @@ reservations do not mark any capability complete. The archived rasc implementati
 was removed from the tree at commit 5cb156c and stays outside active builds and
 tests; only git history retains it.
 
-See [core design](../docs/diana/DESIGN.md).
+See the [specification chapters](../docs/diana/spec/00-overview.md).

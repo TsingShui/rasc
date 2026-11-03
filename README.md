@@ -63,8 +63,7 @@ methods; Mixed is not a gate that suppresses the whole class. Complete Java-unit
 qualification and hard failures remain separate from readable output.
 
 - [Documentation entry](docs/diana/README.md)
-- [Product / CLI / engine design](docs/diana/DESIGN.md)
-- [Implementation algorithms](docs/diana/ALGORITHMS.md)
+- [Specification chapters](docs/diana/spec/00-overview.md)
 - [Revisioned case specifications and independent expectations](docs/diana/e2e_cases.json)
 - [Sources and reproducibility](docs/diana/SOURCE_MAP.md)
 - Archived reference scope: removed from the tree at commit 5cb156c; see

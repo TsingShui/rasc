@@ -8,4 +8,4 @@ not a member of the Cargo workspace. Do not initialize or implement it without
 a separate user request; framework and integration choices remain open.
 
 See [application targets](../README.md) and
-[current scope](../../docs/diana/DESIGN.md#1-product-boundary-and-engineering-scope).
+[current scope](../../docs/diana/spec/00-overview.md).

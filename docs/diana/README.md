@@ -18,16 +18,15 @@ contract is not yet implemented.
 | [spec/07-regions.md](spec/07-regions.md) | Regions and control structure |
 | [spec/08-java.md](spec/08-java.md) | Java reconstruction |
 | [spec/09-emission.md](spec/09-emission.md) | Emission and presentation |
-| [DESIGN.md](DESIGN.md) | Product, engine and CLI contracts |
-| [ALGORITHMS.md](ALGORITHMS.md) | Analysis and reconstruction algorithms |
+| [spec/10-cli.md](spec/10-cli.md) | CLI and application surface |
 | [SOURCE_MAP.md](SOURCE_MAP.md) | Source attribution and evidence boundaries |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Detailed contribution and engineering rules |
 | [WRITING.md](WRITING.md) | Documentation conventions |
 | [e2e_cases.json](e2e_cases.json) | Case inputs and independent expectations |
 
-The stage chapters map current implementation and product direction. Detailed
-contracts remain in DESIGN and ALGORITHMS while migration and reconciliation of
-older verification-only gates continue.
+The chapters carry the product and algorithm contracts. Older verification-only
+gates survived migration and still conflict with the readable-output direction;
+reconciling them is required before implementing that direction.
 
 Historical plans and batch records are available in git history. The active
 workspace contains `apps/diana` and `crates/diana-decomp`; GUI and web directories
