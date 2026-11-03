@@ -54,8 +54,7 @@ requirement strength or technical meaning.
 
 Technical documents specify supported inputs, algorithms, invariants and failure
 behavior. Current status belongs in README; historical plans and execution records
-are available in git history. Core tests own their fixtures and independent
-expectations. Do not maintain a separate task or batch-record tree.
+are available in git history. Do not maintain a separate task or batch-record tree.
 
 ## Architecture guardrails
 
@@ -117,90 +116,42 @@ bypass.
 
 ## Preparation and acceptance gates
 
-Structure-only work never substitutes for input/reference certification or
-independent comparison evidence. Contributors MUST check current capability and acceptance against
-active code and recorded evidence, not infer them from scaffold version markers
-or historical completion labels.
+Contributors MUST check capabilities against active code and independent evidence,
+not infer them from scaffold markers or historical completion labels. Build and
+lint success does not establish semantic correctness or real-application coverage.
 
-Tests cross public libraries/modules for complex semantic, raw-integrity, malformed
-input and resource/file-safety behavior. Do not add CLI black-box/help/version/
-argument/column/getter/forwarding tests or empty tests to manufacture a pass.
-Contributors MUST retain independent expectations rather than refresh truth from
-engine output. A test pass does not establish real-application coverage or authorize
-an implementation change. Existing legacy tests remain in git history.
-
-## Development setup
-
-Use Rust 1.93 or newer, as declared by the active package manifests. Build from
-the repository root. Root `Cargo.lock` covers only Diana; the reference lockfile
-is independent and MUST NOT be updated by active work.
+Run from the repository root with Rust 1.93 or newer:
 
 ```sh
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
 cargo build --workspace --release --locked
-# Run real Diana core tests; an empty selector is not acceptance
-cargo nextest run --workspace --all-features --locked
 ```
 
-Contributors MUST use cargo-nextest (`cargo nextest run`) for Rust unit and
-integration test execution, not `cargo test`. If cargo-nextest is unavailable,
-report the test run as blocked rather than silently switching runners. Rustdoc
-doctests require a separate `cargo test --doc` command; obtain operator approval
-before running that exception.
+Bare Cargo commands select Diana only. Do not build or release archived reference
+projects to validate this branch. Report failed checks and missing evidence
+accurately. Real APK/ART validation requires explicit opt-in and authorized
+reproducible inputs; no private APKs are committed.
 
-Bare Cargo commands now select Diana only. Do not run old rasc/dexdec tests or
-release preparation to validate this branch. Missing fixture/tools, skipped tests
-or an empty selector are not passes. Real APK/ART validation requires explicit
-opt-in and authorized reproducible inputs; no private APKs are committed.
+## Testing policy
 
-## Test scope: core project code only
+The root [AGENTS.md](../../AGENTS.md) owns the prohibition on unit-test development.
+Existing unit and integration cases, fixtures and test-only helpers are removed
+by operator decision. CI runs format, lint and build checks without test jobs.
+Contributors MUST NOT restore the removed cases or test-only construction paths.
 
-Contributors MUST NOT write tests for any non-core project code. This prohibition
-applies repository-wide, not just to reference downloads, and has no authorization
-exception. Non-core code includes development/maintenance scripts, downloaders,
-documentation/board generators, build/release helpers and other auxiliary tooling.
-A request to implement or improve such code does not permit tests.
+Contributors MUST NOT write tests for non-core code, including maintenance
+scripts, downloaders, documentation generators and build/release helpers.
+Contributors MUST NOT bypass this prohibition with self-tests or automated smoke
+checks, and MUST NOT request an exception.
 
-Do not add unit, integration or CLI tests, test fixtures/harnesses, or CI test
-jobs for non-core code. Do not bypass this rule by calling them self-tests,
-validation scripts or automated smoke checks. Inspect the code and, when useful,
-manually exercise the requested operation; report limitations/failures honestly.
-Existing plans, task cards and historical authorizations for auxiliary-tool or
-comparator/harness self-tests do not override this prohibition. Contributors MUST
-NOT request an exception.
+Production input validation, analysis invariants and semantics-preserving
+transform checks remain required. Removing test cases does not authorize weakening
+those checks or claiming that semantic behavior has been independently established.
 
-The previously agreed tests of Diana core behavior remain in scope: native
-DEX/decompiler semantics, input/query/extraction correctness and resource/file
-safety through public interfaces. Test tooling MAY support those core cases,
-but contributors MUST NOT test the tooling itself. Basic
-CLI/help/getter/forwarding tests remain excluded as described above.
-
-Contributors MUST NOT introduce algorithmically complex test or validation code
-for a capability change. Reuse existing fixtures, Drivers and independent
-expectations; prefer small fixed counterexamples over new interpreters, solvers,
-Cartesian-product generators or comparison frameworks.
-
-Before adding a core test, contributors MUST identify its invariant or regression
-and inspect existing coverage through the relevant public interface. Contributors
-SHOULD extend an existing test with table-driven inputs when the inputs exercise
-the same contract and failure path. A separate test requires a distinct semantic
-obligation, failure path or regression. Contributors MUST NOT duplicate generic
-budget, cancellation, reference-bound or serialization checks unless a different
-producer or control path requires independent coverage. Test consolidation MUST
-preserve unique counterexamples, independent expectations and classified failures;
-reducing the number of test functions alone does not establish deduplication.
-
-Regression review MUST check affected original member identities, Java
-availability and classified failures, not only whole-case totals. Contributors
-MUST distinguish unverified drafts from the accepted baseline and obtain operator
-approval before withdrawing or committing unrelated uncommitted work.
-
-Contributors SHOULD run relevant existing core cases for coherent changes and
-the full required set at integration/final-acceptance boundaries. Cross-cutting
-changes or observed regressions can require another full run; editing another
-file alone is not a reason to repeat it. These scheduling choices MUST NOT turn
-unexecuted required evidence into a pass.
+Regression review checks original member identities, readable availability and
+classified failures. Respect unrelated uncommitted work and obtain operator
+approval before withdrawing or committing it.
 
 Reference downloads do not require checksum verification. Keep source URLs and
 fixed revisions for attribution/lookup, preserve local changes, and never build
@@ -280,7 +231,7 @@ remain authoritative.
 - Contributors MUST use checked arithmetic and checked conversions for untrusted
   ranges and counts. A narrowing `as` conversion or production `unwrap`/`expect`
   MUST have a locally evident invariant proving it safe, independent of an
-  assumption that input is valid. Tests MAY use `unwrap` for required outcomes.
+  assumption that input is valid.
 - Contributors SHOULD use ordinary loops and `match` for stateful algorithms,
   control-flow analysis and multiple failure exits. Use iterator chains for
   simple transformations, not to hide mutation or error propagation.
@@ -302,8 +253,7 @@ remain authoritative.
   guarantees, output guarantees and failure behavior.
 - Contributors MUST use default rustfmt formatting and the established Clippy
   baseline. Broader lint groups SHOULD be enabled selectively rather than all at
-  once. Lint exceptions MUST be local and justified. Core tests MUST exercise
-  meaningful invariants through public interfaces within the existing test scope.
+  once. Lint exceptions MUST be local and justified.
 
 ## Code comments
 
@@ -352,10 +302,8 @@ Prefer small self-made fixtures with documented source/license/recipe.
 
 ## Contribution and releases
 
-Check existing design first; include independent semantic tests for core behavior
-changes within the agreed test scope. Contributors MUST NOT write tests for
-non-core code. Run applicable active-only gates and report blocked
-or not-run evidence.
+Check existing design first and follow the root testing policy. Run applicable
+active-only format, lint and build gates and report blocked or not-run evidence.
 Use Conventional Commit messages. Agents MUST prefix every commit subject with
 `[AUTOMATED] ` before the Conventional Commit type, for example
 `[AUTOMATED] feat: decode original debug programs`. When commits are authorized,

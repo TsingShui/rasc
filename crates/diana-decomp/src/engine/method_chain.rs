@@ -11,8 +11,6 @@ pub(crate) enum Analysis<'a> {
     },
     Declined(OutputReason),
 }
-#[cfg(test)]
-impl<'a> Analysis<'a> {}
 pub(crate) fn build<'a>(
     schedule: &crate::engine::SchedulePermit,
     input: &MethodInput<'_, 'a>,

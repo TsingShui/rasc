@@ -4,7 +4,7 @@ Native Rust APK/DEX decompiler, designed to replace rasc.
 The native engine and CLI are implemented. Source-legality qualification is not
 an output goal; readable reconstruction retains concrete unresolved facts.
 Missing analysis or lowering products still return original DEX information.
-Real-application coverage is not established by the current Rust tests.
+Real-application coverage is not established by build or lint checks.
 
 ## Active project
 
@@ -38,15 +38,14 @@ cargo build --locked
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
 cargo build --workspace --release --locked
-cargo nextest run --workspace --all-features --locked
 ```
 
 Use `-p diana` or `-p diana-decomp` to select one package. Both share the root
 `Cargo.lock`; the archived reference retains its own lockfile. The active
-[Diana CI](.github/workflows/diana.yml) checks only scaffold format/lint/build,
-without publishing or pretending a zero-test run establishes functionality.
-Core tests run through public library interfaces with cargo-nextest. Their input,
-structure, debug and resource evidence does not establish real-application coverage.
+[Diana CI](.github/workflows/diana.yml) checks format, lint and release builds
+without publishing. Test cases and fixtures have been removed; unit-test
+development is prohibited by [AGENTS.md](AGENTS.md). These checks do not establish
+semantic correctness or real-application coverage.
 
 
 ## Local reference material
@@ -56,7 +55,7 @@ public material into ignored `.cache/references/`. Papers/slides are TXT-only;
 existing text is reused. No reference checksum, builds/tests or production
 dependencies. See [sources and download policy](docs/diana/SOURCE_MAP.md).
 
-## Design and test preparation
+## Design
 
 The decompiler contract exposes recovered code by default. A failed method is
 shown as original DEX debug information or an explicit unavailable result alongside other recovered

@@ -305,7 +305,7 @@ uses a reviewed native AXML reader through the checked contract of [01-input](01
 reader requires review of its PATCHES, all reachable reads/allocations and depth
 handling; a patch list or chunk-skeleton check is not a safety certificate. Diana
 MUST NOT depend on the removed archived reader. Independently validate a decoder
-change through the public manifest Module within the agreed core test scope.
+change through the public manifest Module while following the root testing policy.
 
 #### 6.8 Help, errors and exit codes
 

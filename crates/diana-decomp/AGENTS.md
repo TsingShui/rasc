@@ -13,4 +13,6 @@ changing an engine capability.
   alternatives. Preserve concrete public errors and resource/cancellation control.
 - Remain independent of rasc, dexdec, rusty-dex, Kuna and radguard code. Consult
   `docs/diana/SOURCE_MAP.md` before reviewing or reusing reference material.
+- Contributors MUST NOT develop, add or restore unit tests. Follow the root
+  testing policy; preserve production input and analysis invariant checks.
 - Build from the repository root with `cargo build --locked -p diana-decomp`.

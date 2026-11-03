@@ -322,32 +322,3 @@ fn classify(bytes: &[u8]) -> InputKind {
         InputKind::Opaque
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::{InputError, read_snapshot};
-
-    struct ShortFile(u64);
-
-    impl std::io::Read for ShortFile {
-        fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
-            let produced = self.0.min(u64::try_from(buffer.len()).unwrap());
-            for slot in &mut buffer[..usize::try_from(produced).unwrap()] {
-                *slot = 0;
-            }
-            self.0 -= produced;
-            Ok(usize::try_from(produced).unwrap())
-        }
-    }
-
-    #[test]
-    fn h02_a_source_shorter_than_its_recorded_length_is_a_changed_input() {
-        let mut file = ShortFile(4);
-        assert!(matches!(
-            read_snapshot(&mut file, 8),
-            Err(InputError::Changed)
-        ));
-        let mut complete = ShortFile(8);
-        assert_eq!(read_snapshot(&mut complete, 8).unwrap().len(), 8);
-    }
-}

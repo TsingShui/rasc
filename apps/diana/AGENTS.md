@@ -12,6 +12,6 @@ DESIGN and ALGORITHMS sections before changing application behavior.
   libdeflater is approved; active Rust code forbids unsafe.
 - Do not delegate to or depend on rasc, dexdec or rusty-dex. Reuse historical
   input/ZIP ideas only after focused review with compatibility and security evidence.
-- Exercise complex input, query, extraction and safety contracts through public
-  modules. Core fixtures and independent expectations live with the Rust tests.
+- Contributors MUST NOT develop, add or restore unit tests. Follow the root
+  testing policy; preserve production input, query, extraction and safety checks.
 - Build from the repository root with `cargo build --locked -p diana`.

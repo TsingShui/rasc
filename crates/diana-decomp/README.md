@@ -28,8 +28,7 @@ boundaries, reference indices and local lifetimes; a failure retains the decoded
 prefix with partial coverage. Static encoded values retain original tags, signed
 integers, float/double bits, references and nested array/annotation order. Their
 explicit stack uses checked counts and fallback accounting; malformed tails
-retain their checked prefix. Core tests exercise malformed input, UTF16
-integrity, resource limits and cancellation.
+retain their checked prefix.
 Engine exposes class/method requests and owned reports through the public library.
 Ordinary code uses the shared CFG → SSA → declaration/type → storage → region →
 Java chain. Unit verification distinguishes complete Java from Mixed results;
@@ -43,7 +42,6 @@ From the repository root:
 ```sh
 cargo build --locked -p diana-decomp
 cargo clippy --locked -p diana-decomp --all-targets -- -D warnings
-cargo nextest run --locked -p diana-decomp --test contracts
 ```
 
 Dependency choices are recorded in the root and package AGENTS.md files; the
@@ -59,5 +57,5 @@ P1–P8 directories, fake Engine results, pass registries or tests for placehold
 getters. See the [specification chapters](../../docs/diana/spec/00-overview.md).
 
 The `0.0.0` version is an unpublished scaffold marker. rasc and its release
-tooling were removed at commit 5cb156c and remain in git history only. Crate tests
-cross public interfaces and keep their self-made fixtures alongside the tests.
+tooling were removed at commit 5cb156c and remain in git history only. Test cases
+and fixtures have been removed; the root AGENTS.md prohibits unit-test development.

@@ -11,10 +11,6 @@ mod p5_variables;
 mod p6_regions;
 mod p7_java;
 mod p8_emit;
-#[cfg(test)]
-#[allow(dead_code)]
-#[path = "../tests/input/fixture.rs"]
-mod test_fixture;
 pub use engine::{
     DexImage, Engine, MethodSelector, Options, RecoveryPolicy, RepresentationPolicy, Request,
 };

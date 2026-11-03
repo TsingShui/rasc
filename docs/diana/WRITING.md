@@ -134,9 +134,9 @@ artifacts, semantic traces and public results are evidence sources. Mere file
 existence or exit code zero is insufficient when the contract requires semantic
 correctness, completeness or integrity.
 
-Authors MUST preserve the existing test scope. A writing rule does not authorize
-CLI black-box tests, private-phase assertions, getter tests or auxiliary-tool
-self-tests. Independent acceptance values remain independent of engine output.
+Authors MUST follow the testing policy in the root AGENTS.md. Writing rules do
+not authorize prohibited tests or restoring removed cases. Independent acceptance
+values remain independent of engine output.
 
 Batch records MUST use repository-tracked input/test paths, fixed revisions,
 reproduction commands and explicit observed outcomes as their evidence references.
@@ -251,7 +251,7 @@ A prohibition that does not constrain behaviour is a misplaced scope exclusion.
 | Historical plans and execution records | Git history |
 | Current product status and document entry points | README |
 | Agent authorization, repository boundaries and contribution rules | AGENTS |
-| Case inputs and independent expectations | Core test fixtures and assertions |
+| Case inputs and independent expectations | Authorized input evidence and observations |
 | Writing conventions | WRITING |
 
 Avoid duplicated historical narratives, speculative roadmaps and “first/final

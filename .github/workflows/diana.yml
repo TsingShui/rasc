@@ -1,18 +1,15 @@
 name: Diana
 
-# Diana-only gates: format, lint, release build and the core Rust test suite.
+# Diana-only gates: format, lint and release build.
 # `gates` runs the declared minimum toolchain (1.93) on three platforms; `latest`
 # reruns the same gates on current stable so new lints and warnings surface before
-# a toolchain bump. Windows keeps build/lint only because the core
-# suite has no Windows evidence yet. No version preparation, artifact upload, tag
-# or release.
+# a toolchain bump. No version preparation, artifact upload, tag or release.
 
 on:
   push:
     paths:
       - "apps/diana/**"
       - "crates/diana-decomp/**"
-      - "tests/**"
       - "Cargo.toml"
       - "Cargo.lock"
       - ".github/workflows/diana.yml"
@@ -20,7 +17,6 @@ on:
     paths:
       - "apps/diana/**"
       - "crates/diana-decomp/**"
-      - "tests/**"
       - "Cargo.toml"
       - "Cargo.lock"
       - ".github/workflows/diana.yml"
@@ -61,14 +57,6 @@ jobs:
       - name: Build
         run: cargo build --workspace --locked --release
 
-      - name: Install nextest
-        if: runner.os != 'Windows'
-        uses: taiki-e/install-action@nextest
-
-      - name: Tests
-        if: runner.os != 'Windows'
-        run: cargo nextest run --workspace --all-features --locked
-
   latest:
     name: Gates (ubuntu-latest, stable)
     runs-on: ubuntu-latest
@@ -92,9 +80,3 @@ jobs:
 
       - name: Build
         run: cargo build --workspace --locked --release
-
-      - name: Install nextest
-        uses: taiki-e/install-action@nextest
-
-      - name: Tests
-        run: cargo nextest run --workspace --all-features --locked

@@ -47,13 +47,12 @@ package-local `AGENTS.md` before working in either package.
   file verification, corpus handling and reference isolation, read
   [CONTRIBUTING](docs/diana/CONTRIBUTING.md) for the relevant work. Read
   [WRITING](docs/diana/WRITING.md) before editing Diana documentation.
-- Inspect existing coverage before adding core tests. Test semantic and safety
-  behavior through public interfaces with independent expectations. Never add
-  tests, fixtures or CI test jobs for non-core tooling, nor CLI help/argument/
-  getter/forwarding tests. Do not change expected results to match engine output.
-- Use `cargo nextest run` for Rust unit/integration tests, not `cargo test`.
-  If nextest is unavailable, report the run blocked. Rustdoc's `cargo test --doc`
-  exception requires operator approval. Missing or skipped evidence is not a pass.
+- Contributors MUST NOT develop, add or restore any unit tests, including inline
+  `#[test]` functions, `#[cfg(test)]` modules and private-phase test harnesses.
+  Existing test cases and fixtures are removed by operator decision.
+- Contributors MUST NOT add tests, fixtures or CI test jobs for non-core tooling.
+  Production input checks, analysis invariants and semantics-preserving transform
+  checks remain required. Build/lint success does not establish semantic correctness.
 - Respect uncommitted work; obtain approval before withdrawing or committing
   unrelated changes. Do not commit, push, publish or tag unless requested.
   Authorized commit subjects start with `[AUTOMATED] ` and a Conventional type.
@@ -69,11 +68,10 @@ Run from the repository root with Rust 1.93 or newer:
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
 cargo build --workspace --release --locked
-cargo nextest run --workspace --all-features --locked
 ```
 
-Run relevant core cases for focused changes; run the full applicable gates at
-integration boundaries. Report failures and unrun evidence accurately.
+Run applicable format, lint and build checks. Report failures and unrun evidence
+accurately; do not report removed tests or missing semantic evidence as a pass.
 
 ## Documentation map
 

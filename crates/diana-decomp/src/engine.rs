@@ -17,12 +17,6 @@ use crate::{
 pub(crate) struct SchedulePermit {
     _private: (),
 }
-#[cfg(test)]
-impl SchedulePermit {
-    pub(crate) fn for_test() -> Self {
-        Self { _private: () }
-    }
-}
 
 /// Original caller-owned bytes and one logical header selection. The caller
 /// retains the physical owner until this engine is dropped.
