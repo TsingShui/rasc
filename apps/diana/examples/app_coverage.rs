@@ -16,6 +16,13 @@ fn main() {
     let mut args = std::env::args().skip(1);
     let input = args.next().expect("input");
     let sample: usize = args.next().expect("classes").parse().expect("classes");
+    let mut trusted = false;
+    for flag in args {
+        match flag.as_str() {
+            "--trusted" => trusted = true,
+            other => panic!("unknown flag {other}"),
+        }
+    }
     let options = InputOptions {
         limits: InputLimits::default(),
         allowed_root: None,
@@ -64,7 +71,13 @@ fn main() {
             descriptor: descriptor.clone(),
         });
         let started = Instant::now();
-        match decompile::run(&scope, &selector, &mut controls) {
+        let catalog = diana_decomp::DeclarationCatalog::empty(diana_decomp::EnvironmentId(0))
+            .with_policy(if trusted {
+                diana_decomp::EvidencePolicy::TrustedReferences
+            } else {
+                diana_decomp::EvidencePolicy::Declared
+            });
+        match decompile::run_with_catalog(&scope, &selector, catalog, &mut controls) {
             Ok(result) => {
                 durations.push(started.elapsed());
                 *class_status.entry(result.status.to_owned()).or_default() += 1;
@@ -86,12 +99,17 @@ fn main() {
                             };
                             *member_status.entry(name.to_owned()).or_default() += 1;
                             if let MethodOutput::Debug { reason, .. } = member {
+                                let diagnostic = &result.report.diagnostics()[reason.0];
                                 *member_status
-                                    .entry(format!(
-                                        "debug:{:?}",
-                                        result.report.diagnostics()[reason.0].code()
-                                    ))
+                                    .entry(format!("debug:{:?}", diagnostic.code()))
                                     .or_default() += 1;
+                                if let diana_decomp::DiagnosticCause::Unsupported(
+                                    diana_decomp::OutputReason::JavaCheckFailed { check, .. },
+                                ) = &diagnostic.cause
+                                {
+                                    *member_status.entry(format!("check:{check}")).or_default() +=
+                                        1;
+                                }
                             }
                         }
                     }

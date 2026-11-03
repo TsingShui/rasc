@@ -246,7 +246,10 @@ impl TypeNames {
                 }
                 source.push(builtin.spelling(), budget)?;
             } else {
-                if !crate::p4_calls::source_reference_type(input, catalog, base, budget)? {
+                let known = catalog.class(base, budget)?.is_some();
+                if !crate::p4_calls::source_reference_type(input, catalog, base, budget)?
+                    && !(catalog.policy() == crate::EvidencePolicy::TrustedReferences && !known)
+                {
                     return Ok(false);
                 }
                 let Some(base) = super::calls::type_name(base, budget)? else {
