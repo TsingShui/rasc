@@ -1,6 +1,6 @@
 use diana_decomp::{
-    ByteOffset, ClassDefId, ClassKey, DeclarationCatalog, DexId, DexImage, DiagnosticCode, Engine,
-    EnvironmentId, ImageOrigin, InputId, Limits, MethodOutput, Options, Request, RunContext,
+    ByteOffset, ClassDefId, ClassKey, DexId, DexImage, DiagnosticCode, Engine, ImageOrigin,
+    InputId, Limits, MethodOutput, Options, Request, RunContext,
 };
 
 #[test]
@@ -14,7 +14,6 @@ fn t26_anonymous_sibling_does_not_deny_other_members() {
             origin: ImageOrigin { input: InputId(0) },
         }],
         Options::default(),
-        DeclarationCatalog::empty(EnvironmentId(0)),
         &mut control,
     )
     .unwrap();

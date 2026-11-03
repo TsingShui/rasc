@@ -135,14 +135,6 @@ pub(crate) fn blocks(
     Ok(result)
 }
 
-#[cfg(test)]
-pub(crate) fn build_for_test(
-    storage: &crate::p6_variables::StorageBody<'_>,
-    budget: &mut MethodBudget<'_, '_>,
-) -> Result<Option<Protection>, RequestError> {
-    build(storage, budget)
-}
-
 pub(super) fn build(
     storage: &StorageBody<'_>,
     budget: &mut MethodBudget<'_, '_>,

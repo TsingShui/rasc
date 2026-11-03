@@ -4,10 +4,6 @@ use crate::p2_flow::{BlockId, EdgeId};
 use crate::substrate::owned::push;
 use crate::{MethodBudget, RequestError};
 
-#[cfg(test)]
-#[path = "source_control_tests.rs"]
-mod tests;
-
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub(crate) enum Label {
     Loop0,

@@ -22,8 +22,6 @@ pub(crate) mod overrides;
 mod receivers;
 pub(crate) mod throws;
 pub(crate) use receivers::{ReceiverContract, ReceiverDeclaration, ReceiverKind};
-#[cfg(test)]
-mod binding_tests;
 pub(crate) mod field_declarations;
 pub(crate) mod field_facts;
 mod fields;

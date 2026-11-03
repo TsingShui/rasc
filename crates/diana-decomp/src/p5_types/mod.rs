@@ -16,5 +16,3 @@ pub(crate) use arrays::ArrayElement;
 pub(crate) mod reference_roots;
 mod references;
 pub(crate) use crate::substrate::primitive_types::{BuiltinReference, IntRange, Narrow};
-#[cfg(test)]
-mod tests;

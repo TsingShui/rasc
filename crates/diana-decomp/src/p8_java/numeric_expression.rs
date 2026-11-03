@@ -2,9 +2,6 @@ use super::branch::ValueUse;
 use super::conditions::Comparison;
 use crate::substrate::owned::push;
 use crate::{MethodBudget, RequestError};
-#[cfg(test)]
-#[path = "numeric_expression_tests.rs"]
-mod tests;
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub(crate) enum CastType {

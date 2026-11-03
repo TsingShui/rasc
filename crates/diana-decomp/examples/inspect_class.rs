@@ -1,8 +1,7 @@
 use diana_decomp::{
-    ByteOffset, ClassDefId, ClassKey, ClassOutput, DeclarationCatalog, DexId, DexImage,
-    DiagnosticCause, Engine, EnvironmentId, ExternalMethodSignature, FailureKind, ImageOrigin,
-    InputId, JavaTargetItem, Limits, MethodOutput, MethodSelector, Options, Request, RequestError,
-    RunContext, SourceLanguage, render,
+    ByteOffset, ClassDefId, ClassKey, ClassOutput, DexId, DexImage, DiagnosticCause, Engine,
+    EnvironmentId, FailureKind, ImageOrigin, InputId, JavaTargetItem, Limits, MethodOutput,
+    MethodSelector, Options, Request, RequestError, RunContext, SourceLanguage, render,
 };
 use serde_json::{Value, json};
 use std::cell::Cell;
@@ -10,7 +9,6 @@ use std::cell::Cell;
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut arguments: Vec<_> = std::env::args().skip(1).collect();
     let mut output = None;
-    let mut catalog_path = None;
     let mut control_path = None;
     while arguments.len() >= 2 {
         let flag = arguments[arguments.len() - 2].as_str();
@@ -22,7 +20,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let path = arguments.pop().ok_or("missing path")?;
         arguments.pop();
         if catalog_flag {
-            catalog_path = Some(path);
+            // The flag is accepted for older callers; external declarations are
+            // no longer read.
         } else if control_flag {
             control_path = Some(path);
         } else {
@@ -42,26 +41,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         })
     } else {
         None
-    };
-    #[derive(serde::Deserialize)]
-    struct CatalogInput {
-        environment_id: u64,
-        methods: Vec<ExternalMethodSignature>,
-        #[serde(default)]
-        classes: Vec<diana_decomp::ExternalClassDeclaration>,
-        #[serde(default)]
-        fields: Vec<diana_decomp::ExternalFieldEvidence>,
-    }
-    let catalog = if let Some(path) = catalog_path {
-        let facts: CatalogInput = serde_json::from_reader(std::fs::File::open(path)?)?;
-        DeclarationCatalog::with_declarations(
-            EnvironmentId(facts.environment_id),
-            facts.methods,
-            facts.classes,
-        )
-        .with_field_evidence(facts.fields)
-    } else {
-        DeclarationCatalog::empty(EnvironmentId(0))
     };
     #[derive(Default, serde::Deserialize)]
     #[serde(default, deny_unknown_fields)]
@@ -110,7 +89,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             origin: ImageOrigin { input: InputId(0) },
         }],
         Options::default(),
-        catalog,
         &mut control,
     ) {
         Ok(engine) => engine.with_representation(controls.representation),

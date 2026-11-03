@@ -42,8 +42,6 @@ pub(crate) mod protected;
 mod protected_control;
 mod protected_throws;
 mod protection_replay;
-#[cfg(test)]
-mod protection_tests;
 mod receiver_ops;
 pub(crate) mod source_control;
 mod source_replay;

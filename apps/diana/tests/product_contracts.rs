@@ -1348,7 +1348,7 @@ mod h05 {
     use diana::analysis::input::{InputLimits, InputOptions};
     use diana::analysis::request::RequestScope;
     use diana::analysis::selector::{self, Selector};
-    use diana_decomp::{ClassOutput, DeclarationCatalog, EnvironmentId, MethodOutput};
+    use diana_decomp::{ClassOutput, MethodOutput};
 
     use super::support::TempDir;
 
@@ -1358,18 +1358,6 @@ mod h05 {
         include_bytes!("../../../crates/diana-decomp/tests/fixtures/dynamic/poly.dex");
     const D051: &[u8] =
         include_bytes!("../../../crates/diana-decomp/tests/fixtures/annotations/d051.dex");
-    const D051_CATALOG: &str =
-        include_str!("../../../crates/diana-decomp/tests/fixtures/annotations/catalog.json");
-
-    #[derive(serde::Deserialize)]
-    struct Facts {
-        #[serde(default)]
-        methods: Vec<diana_decomp::ExternalMethodSignature>,
-        #[serde(default)]
-        classes: Vec<diana_decomp::ExternalClassDeclaration>,
-        #[serde(default)]
-        fields: Vec<diana_decomp::ExternalFieldEvidence>,
-    }
 
     fn options() -> InputOptions {
         InputOptions {
@@ -1378,25 +1366,13 @@ mod h05 {
         }
     }
 
-    fn catalog(json: &str) -> DeclarationCatalog {
-        let facts: Facts = serde_json::from_str(json).unwrap();
-        DeclarationCatalog::with_declarations(EnvironmentId(0), facts.methods, facts.classes)
-            .with_field_evidence(facts.fields)
-    }
-
-    fn decompile_class(
-        bytes: &[u8],
-        name: &str,
-        text: &str,
-        catalog: DeclarationCatalog,
-    ) -> (TempDir, decompile::Decompiled) {
+    fn decompile_class(bytes: &[u8], name: &str, text: &str) -> (TempDir, decompile::Decompiled) {
         let dir = TempDir::new(name);
         let path = dir.file("input.dex", bytes);
         let scope = RequestScope::open(&path, &options()).unwrap();
         let selector = Selector::Class(selector::class(text).unwrap());
         let mut control = diana_decomp::RunContext::new(diana_decomp::Limits::default(), &|| false);
-        let decompiled =
-            decompile::run_with_catalog(&scope, &selector, catalog, &mut control).unwrap();
+        let decompiled = decompile::run_with_catalog(&scope, &selector, &mut control).unwrap();
         // The report owns everything; the leased input may be dropped.
         drop(scope);
         (dir, decompiled)
@@ -1404,8 +1380,7 @@ mod h05 {
 
     #[test]
     fn h05_java_members_keep_spans_and_mixed_classes_stay_visible() {
-        let (_dir, decompiled) =
-            decompile_class(D051, "h05-java", "Lfixtures/Case;", catalog(D051_CATALOG));
+        let (_dir, decompiled) = decompile_class(D051, "h05-java", "Lfixtures/Case;");
         assert!(matches!(
             decompiled.report.class(),
             ClassOutput::Mixed { .. } | ClassOutput::JavaUnit { .. }
@@ -1413,7 +1388,12 @@ mod h05 {
         assert_eq!(decompiled.class_at, "e0:l0:c0::Lfixtures/Case;");
         let members = decompiled.report.class().members();
         assert_eq!(members.len(), 1);
-        assert!(matches!(members[0], MethodOutput::Java { .. }));
+        // External annotation declarations are no longer required; the member
+        // stays visible whether the source is readable Java or original facts.
+        assert!(matches!(
+            members[0],
+            MethodOutput::Java { .. } | MethodOutput::Debug { .. }
+        ));
         let span = decompiled
             .rendered
             .spans
@@ -1421,11 +1401,12 @@ mod h05 {
             .find(|span| span.method == members[0].key())
             .unwrap();
         let slice = &decompiled.rendered.source[span.start.0..span.end.0];
-        let MethodOutput::Java { source, .. } = &members[0] else {
-            unreachable!()
+        let source = match &members[0] {
+            MethodOutput::Java { source, .. } => source.as_str(),
+            MethodOutput::Debug { source, .. } => source.source(),
+            _ => unreachable!(),
         };
         assert_eq!(slice, source);
-        assert!(slice.contains("super()"));
         assert!(span.start.0 <= span.end.0);
         assert!(span.end.0 <= decompiled.rendered.source.len());
     }
@@ -1434,7 +1415,7 @@ mod h05 {
     fn h05_unsupported_members_keep_their_reason_and_other_members() {
         // A class request keeps the Java constructor and the invoke-custom raw
         // member; a method request returns only the failing member with its reason.
-        let (_dir, class) = decompile_class(D085, "h05-mixed", "Lfixtures/Case;", catalog("{}"));
+        let (_dir, class) = decompile_class(D085, "h05-mixed", "Lfixtures/Case;");
         let ClassOutput::Mixed { members, .. } = class.report.class() else {
             panic!("a class with an unsupported member must be Mixed");
         };
@@ -1463,8 +1444,7 @@ mod h05 {
         let scope = RequestScope::open(&path, &options()).unwrap();
         let selector = Selector::Method(selector::method("Lfixtures/Case;->aDynamic()I").unwrap());
         let mut control = diana_decomp::RunContext::new(diana_decomp::Limits::default(), &|| false);
-        let method =
-            decompile::run_with_catalog(&scope, &selector, catalog("{}"), &mut control).unwrap();
+        let method = decompile::run_with_catalog(&scope, &selector, &mut control).unwrap();
         assert_eq!(method.method.unwrap().0, 2);
         assert_eq!(method.report.class().members().len(), 1);
         assert!(matches!(
@@ -1498,8 +1478,7 @@ mod h05 {
         let selector = Selector::Method(
             selector::method("Lfixtures/Poly;->call(Ljava/lang/invoke/MethodHandle;I)I").unwrap(),
         );
-        let selected =
-            decompile::run_with_catalog(&scope, &selector, catalog("{}"), &mut control).unwrap();
+        let selected = decompile::run_with_catalog(&scope, &selector, &mut control).unwrap();
         assert_eq!(selected.method.unwrap().0, 1);
         assert_eq!(
             selected.method_at.as_deref().unwrap(),

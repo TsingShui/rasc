@@ -12,14 +12,7 @@ pub(crate) enum Analysis<'a> {
     Declined(OutputReason),
 }
 #[cfg(test)]
-impl<'a> Analysis<'a> {
-    pub(crate) fn into_storage(self) -> Option<crate::p6_variables::StorageBody<'a>> {
-        match self {
-            Self::Ready { storage, .. } => Some(storage),
-            Self::Declined(_) => None,
-        }
-    }
-}
+impl<'a> Analysis<'a> {}
 pub(crate) fn build<'a>(
     schedule: &crate::engine::SchedulePermit,
     input: &MethodInput<'_, 'a>,

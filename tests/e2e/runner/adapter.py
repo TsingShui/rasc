@@ -83,14 +83,12 @@ def run_public(root, cache, spec, manifest, case_ids=None,representation=None,jo
                     asset=assets[origin['asset_id']];path=root/asset['path']
                     if not path.is_file() or path.stat().st_size!=asset['size']:raise PreparationError('missing/changed certified input')
                     owner_work=work/binding['role']
-                    catalog_path=owner_work/'method-signatures.json'
-                    save(catalog_path,_catalog(root,assets,cert['catalog']['asset_id']))
                     public_path=owner_work/'public.json'
                     control_path=owner_work/'controls.json'
                     controls={key:invocation['input'][key] for key in ('limits','cancellation') if key in invocation['input']}
                     if representation is not None:controls['representation']=representation
                     save(control_path,controls)
-                    run([executable,path,str(origin['header_offset']),str(selector['class_def_idx']),'--control',control_path,'--catalog',catalog_path,'--output',public_path],root,owner_work/'library.log')
+                    run([executable,path,str(origin['header_offset']),str(selector['class_def_idx']),'--control',control_path,'--output',public_path],root,owner_work/'library.log')
                     actual=load(public_path)
                     groups=_artifacts(actual,{**cert,'bindings':[binding]})
                     if actual['status']!='java_unit':raise ValueError('related owner is not a complete JavaUnit: '+selector['descriptor'])
@@ -242,11 +240,6 @@ def run_public(root, cache, spec, manifest, case_ids=None,representation=None,jo
                     save(control_path,controls)
                     argv.extend(['--control',control_path])
                     record['request_controls']={'path':relative(control_path)}
-                    catalog_path=work/'method-signatures.json'
-                    catalog_started = time.monotonic()
-                    save(catalog_path,_catalog(root,assets,cert['catalog']['asset_id'],invocation['input'].get('javaConstantKind'),binding['role']))
-                    timing['catalog_seconds'] = time.monotonic() - catalog_started
-                    argv.extend(['--catalog',catalog_path])
                     public_path=work/'public.json'
                     relative(public_path)
                     public_path.unlink(missing_ok=True)
@@ -323,7 +316,6 @@ def run_public(root, cache, spec, manifest, case_ids=None,representation=None,jo
                         else:save(path,value)
                         record['artifacts'][group]={'path':relative(path)}
                     record['execution']='completed'
-                    record['catalog']={'asset_id':cert['catalog']['asset_id'],'applied':'signatures and explicitly covered class directories'}
         except (PreparationError,OSError,ValueError,KeyError,TypeError,IndexError) as error:
             record['execution']='failed';record['reason']=str(error)
         timing['adapter_seconds'] = time.monotonic() - started
