@@ -28,7 +28,7 @@
     ],
     "outputDirectory": ".cache/e2e/D086/",
     "format": "dex 035, one class Lfixtures/Case;",
-    "toolSpec": "docs/diana/TASKS.md#45-pinned-tools-and-content-locks",
+    "toolSpec": "https://github.com/TsingShui/rasc/blob/22024f0/docs/diana/TASKS.md#45-pinned-tools-and-content-locks",
     "certification": "Asset hashes and independent input certificates must be produced from the corrected builder by preparation; local draft hashes are not an approved lock."
   },
   "referenceJava": {

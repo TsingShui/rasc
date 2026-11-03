@@ -36,9 +36,7 @@ Java chain. Unit verification distinguishes complete Java from Mixed results;
 independent members and original metadata remain available after local failure.
 P1 checks dynamic call-site/handle encodings and original references; invoke-custom
 retains a classified unsupported exit and a readable original snapshot. P9 renders
-existing products and maps source slices to original identities. Current accepted
-profiles and remaining EngineCoreRC obligations are recorded in
-[TASKS](../../docs/diana/TASKS.md); this package does not claim CoreRC acceptance.
+existing products and maps source slices to original identities. Historical acceptance records are available in git history.
 
 From the repository root:
 
@@ -58,8 +56,7 @@ code forbidden and no external runtime/process dependency.
 Only create modules when an implemented capability needs them. Do not pre-create
 P0–P9 directories, fake Engine results, pass registries or tests for placeholder
 getters. See [interfaces / data](../../docs/diana/DESIGN.md),
-[algorithms](../../docs/diana/ALGORITHMS.md) and
-[preparation / tasks](../../docs/diana/TASKS.md).
+[algorithms](../../docs/diana/ALGORITHMS.md) and the case specification.
 
 The `0.0.0` version is an unpublished scaffold marker. rasc and its release
 tooling were removed at commit 5cb156c and remain in git history only. Shared test inputs/oracles live in root

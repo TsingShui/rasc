@@ -36,13 +36,15 @@ Diana is a decompiler: default class/method retrieval MUST expose available
 code, not require an entirely verified Java unit before showing anything.
 Keep partial Java, original DEX debug information and unavailable reasons explicit; a local failure
 MUST NOT discard other members. Text/JSON are presentations of the same result,
-not capability gates. Preserve hard errors and strict Java/JavaUnit acceptance;
-a readable Mixed result is not permission to count required Java as passed.
+not capability gates. Preserve hard errors and distinguish observed readable output
+from independently established semantic behavior. Product acceptance evaluates
+readability, original facts and uncertainty, not a verified-Java status.
 
 Prioritize core APK/DEX analysis, decompilation and required safety. Keep non-core
 tooling, registry/trace infrastructure and their documentation minimal; do not
-expand them into frameworks or lengthy designs. Fallback is a simple classified
-error/raw-output path, not a separate recovery subsystem or retry pipeline.
+expand them into frameworks or lengthy designs. The shared analysis chain MAY retain a clearly marked unverified readable result
+when verification is incomplete; otherwise fallback is a classified raw-output
+path, not a separate recovery subsystem or retry pipeline.
 
 Every authored Diana document, including this file and the package README/AGENTS
 files, MUST follow `docs/diana/WRITING.md`. Read it before editing documentation.
@@ -51,30 +53,17 @@ document ownership and the rules against duplicated narration and speculative
 roadmaps; those rules are not restated here. A style edit MUST NOT change
 requirement strength or technical meaning.
 
-Technical documents specify one implementation contract: supported/rejected inputs,
-algorithms, invariants and failure behavior. Progress and execution status live in
-README/TASKS, not in a technical specification.
-
-Maintain only docs/diana/{README,DESIGN,ALGORITHMS,TASKS,SOURCE_MAP,WRITING}.md plus
-e2e_cases.json, the single case/input/expected specification. Do not restore
-the HTML board/generator, obsolete redirect documents or split planning
-into more documents. Read `docs/diana/TASKS.md` before starting a batch; it owns
-preparation, the small-batch loop, stop/done criteria and the minimal record. Create
-`docs/diana/batches/<id>.md` only when an actual batch starts; do not duplicate
-expected values or maintain another hand-edited progress counter.
-
-The current baseline keeps the full B01–B04 gate below. Small implementation
-slices are not a per-batch preparation exemption. DESIGN and ALGORITHMS select
-the implementation strategy; TASKS is the single workflow/acceptance source.
-T/H dependencies require the named producer artifact to be ready; final task
-completion still requires its fixed acceptance evidence, never empty scaffolds.
+Technical documents specify supported inputs, algorithms, invariants and failure
+behavior. Current status belongs in README; historical plans and execution records
+are available in git history. `docs/diana/e2e_cases.json` owns the case/input/expected
+specification. Do not maintain a separate task or batch-record tree.
 
 ## Architecture guardrails
 
 Before changing an engine capability, contributors MUST read
 [DESIGN §4](docs/diana/DESIGN.md#4-phases-products-and-actual-order) and the owning
-[ALGORITHMS](docs/diana/ALGORITHMS.md) sections. The batch record MUST identify the owning phase,
-actual producer/consumer, invariant and existing independent evidence. Before
+[ALGORITHMS](docs/diana/ALGORITHMS.md) sections. Contributors MUST identify the owning phase, actual producer/consumer, invariant
+and existing independent evidence before implementation. Before
 implementation, contributors MUST also identify the consumed facts, their full or
 partial guarantees, and the classified failure/resource/cancellation behavior.
 When an implementation would contradict those contracts, contributors MUST stop the
@@ -83,7 +72,7 @@ bypass.
 
 - Contributors MUST extend the shared ordinary-method chain: P2 CFG/effects →
   P3 SSA → P4 declaration constraints/evidence → P5 types/use conversions →
-  P6 storage/copies → P7 regions → P8 Java verification. P9 MUST render existing
+  P6 storage/copies → P7 regions → P8 Java recovery. P9 MUST render existing
   products and original facts without further analysis.
 - Contributors MUST follow [DESIGN §4.1](docs/diana/DESIGN.md#41-stage-interface-authority)
   when exposing stage entries, implementation modules and product views. A
@@ -108,8 +97,9 @@ bypass.
   phases.
 - Contributors MUST NOT organize `engine.rs` as successive whole-method
   builders/verifiers that emit on the first match. Ordinary methods MUST use one
-  analysis chain and one classified read-only raw exit; fallback MUST NOT retry
-  analysis or reconstruct values.
+  analysis chain. P8 MAY retain a marked unverified reconstruction from available
+  shared products; the classified read-only raw exit MUST NOT retry analysis or
+  reconstruct values.
 - Contributors MUST keep P4 constraints/binding obligations distinct from P5
   typed uses and final P8 source binding. P7 MUST read P6 storage before Java
   lowering, not derive its graph from a P8 AST. P9 MUST NOT select types, bindings
@@ -129,10 +119,8 @@ bypass.
 
 ## Preparation and acceptance gates
 
-Contributors MUST retain the full B01–B04 requirements in
-`docs/diana/TASKS.md` §3 for new or revised preparation evidence. Structure-only
-work never substitutes for input/reference certification or comparator
-falsification. Contributors MUST check current capability and acceptance against
+Structure-only work never substitutes for input/reference certification or
+independent comparison evidence. Contributors MUST check current capability and acceptance against
 active code and recorded evidence, not infer them from scaffold version markers
 or historical completion labels.
 

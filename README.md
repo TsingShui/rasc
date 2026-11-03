@@ -1,10 +1,9 @@
 # Diana
 
 Native Rust APK/DEX decompiler, designed to replace rasc.
-**Current state: checked DEX 035 input, instruction structure, original debug
-snapshots and request/method resource control are implemented.** B01–B04
-preparation is accepted on macOS arm64; Engine integration and analysis commands
-remain pending. [TASKS](docs/diana/TASKS.md) owns acceptance evidence.
+The native engine and CLI are implemented. The current engine often returns raw
+DEX information for real applications; the revised readable-output contract is
+not yet implemented.
 
 ## Active project
 
@@ -29,10 +28,8 @@ has been selected.
 
 ## Development
 
-Start with the [core documentation](docs/diana/README.md). The unified
-[TASKS.md](docs/diana/TASKS.md) owns preparation, bounded implementation batches
-and acceptance. The full B01–B04 prerequisite remains in force.
-
+Start with the [core documentation](docs/diana/README.md). Historical plans and
+batch records are available in git history.
 Run from the repository root (Rust 1.93 or newer):
 
 ```sh
@@ -50,9 +47,6 @@ without publishing or pretending a zero-test run establishes functionality.
 Core tests run through public library interfaces with cargo-nextest. Their input,
 structure, debug and resource evidence is distinct from fixed Engine E2E acceptance.
 
-The current `diana` entry point reports “not implemented” to stderr and returns
-failure. It does not delegate to rasc or dexdec. Do not install or release the
-scaffold as a usable decompiler.
 
 ## Local reference material
 
@@ -71,15 +65,11 @@ qualification and hard failures remain separate from readable output.
 - [Documentation entry](docs/diana/README.md)
 - [Product / CLI / engine design](docs/diana/DESIGN.md)
 - [Implementation algorithms](docs/diana/ALGORITHMS.md)
-- [Tasks, preparation and acceptance](docs/diana/TASKS.md)
 - [Revisioned case specifications and independent expectations](docs/diana/e2e_cases.json)
 - [Sources and reproducibility](docs/diana/SOURCE_MAP.md)
 - Archived reference scope: removed from the tree at commit 5cb156c; see
   [SOURCE_MAP](docs/diana/SOURCE_MAP.md) for the pinned upstream anchors
 
-The requested layout work does not mark H01/T01 or B01–B04 complete. Independently
-certify fixtures, expected behavior and the comparator before production feature
-work. MCP is deferred; its old implementation is preserved only in the reference.
 
 ## License
 

@@ -116,7 +116,7 @@ Label unresolved evidence according to what is actually missing. Use
 `Unproven: <missing argument>` for an incomplete proof, `Not run: <execution>` for
 an unperformed check, or `Unknown: <missing fact>` for absent information.
 These are documentation labels, not new production failure kinds or a requirement
-to label every sentence. Keep progress and execution status in README/TASKS;
+to label every sentence. Keep progress and execution status in README;
 keep algorithm assumptions and source-evidence limitations with their technical
 explanations.
 
@@ -231,7 +231,7 @@ A negation is one of two kinds. The kind decides where it lives and how long it 
 | Kind | What it states | Where | Lifetime |
 |---|---|---|---|
 | Behaviour constraint | `MUST NOT` forbids an action, order or access | Beside the behaviour it constrains, in DESIGN or ALGORITHMS | Permanent; removal changes the contract |
-| Scope exclusion | A unit of work is not done | `Not in scope` line of that task in TASKS | Deleted when the task completes |
+| Scope exclusion | A unit of work is not done | the scope of the current change | Deleted when the task completes |
 
 Authors MUST NOT remove a behaviour constraint merely because it describes an absent
 behaviour. Examples: preserving raw bytes, forbidding unsafe code, preserving effect
@@ -242,15 +242,14 @@ exist, so no reader can verify it and an agent can mistake it for a constraint. 
 it to one line, in one place, for the life of the task. Delete it at completion.
 Document history belongs in git.
 
-A prohibition outside TASKS that does not constrain behaviour is a misplaced scope
-exclusion.
+A prohibition that does not constrain behaviour is a misplaced scope exclusion.
 
 | Content | Owning document |
 |---|---|
 | Product/interface boundaries and failure behavior | DESIGN |
 | Algorithm preconditions, invariants and rejection rules | ALGORITHMS |
 | Source attribution, license restrictions and evidence limitations | SOURCE_MAP |
-| Preparation, task dependencies, scope exclusions and acceptance records | TASKS |
+| Historical plans and execution records | Git history |
 | Current product status and document entry points | README |
 | Agent authorization, repository boundaries and contribution rules | AGENTS |
 | Case inputs and independent expectations | e2e_cases.json |
@@ -258,7 +257,7 @@ exclusion.
 
 Avoid duplicated historical narratives, speculative roadmaps and “first/final
 version” qualifiers in technical contracts. State the current supported and
-rejected behavior. README/TASKS still report unimplemented work and blocked or
+rejected behavior. README still report unimplemented work and blocked or
 unperformed checks honestly. Cross-reference the authoritative rule rather than
 copying its full definition into every document.
 

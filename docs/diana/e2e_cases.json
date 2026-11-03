@@ -5,7 +5,7 @@
   "interfacePolicy": "public-library-and-complex-domain-modules-no-cli-blackbox",
   "frozenPolicy": "B01 approves a reviewed revision, not an immutable case count. Preserve existing required problems and valid semantics; revise faulty recipes/oracles with independent evidence and review, append new counterexamples, never refresh from engine output or change required Java to Smali to obtain a pass.",
   "designNotice": "Specifications, not engine results. draft-7 applies the operator-approved analysis-oriented debug fallback: failed Java keeps original DEX facts and readable debug information, without standard-Smali syntax or output reassembly guarantees. Required Java, invocation inputs, behavior, identity, safety and hard errors are unchanged. Preparation evidence is revision-specific; this revision alone is not engine acceptance.",
-  "toolchainSpec": "TASKS.md#45-pinned-tools-and-content-locks",
+  "toolchainSpec": "https://github.com/TsingShui/rasc/blob/22024f0/docs/diana/TASKS.md#45-pinned-tools-and-content-locks",
   "caseCount": 86,
   "targetPolicy": "Case targets bind symbolic roles to independently chosen original input/class/full-method selectors. input_role identifies a self-made recipe output within that case, not a display path. B02 materializes the original table indices and physical/header identity; B03 independently checks both directions. A class-seam method is a Driver entry, not permission to request only that method. Missing assets, indices or certification block preparation rather than authorizing first-match selection.",
   "invocationPolicy": {

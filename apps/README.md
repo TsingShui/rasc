@@ -5,7 +5,7 @@
 
 | Directory | Target | Current state |
 |---|---|---|
-| [diana/](diana/README.md) | Native CLI | Cargo package scaffold; analysis is not implemented |
+| [diana/](diana/README.md) | Native CLI | Native analysis and decompilation CLI |
 | [diana-gui/](diana-gui/README.md) | Future GUI | Documentation placeholder only |
 | [diana-web-ui/](diana-web-ui/README.md) | Future web interface (WASM-based or otherwise undecided) | Documentation placeholder only |
 
@@ -19,5 +19,4 @@ reservations do not mark any capability complete. The archived rasc implementati
 was removed from the tree at commit 5cb156c and stays outside active builds and
 tests; only git history retains it.
 
-See [core design](../docs/diana/DESIGN.md) and
-[preparation / tasks](../docs/diana/TASKS.md).
+See [core design](../docs/diana/DESIGN.md).

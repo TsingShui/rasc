@@ -2,17 +2,16 @@
 
 This document defines product behavior, Module responsibilities, interfaces, data
 structures and resource rules. See [ALGORITHMS.md](ALGORITHMS.md) for algorithms
-and state transitions, and [TASKS.md](TASKS.md) for tasks and validation.
+and state transitions; [e2e_cases.json](e2e_cases.json) defines case expectations.
 
 ## 1. Product boundary and engineering scope
 
 Diana is a native APK/DEX decompiler that by default delivers the real code it can
 recover; a failure in one method does not block the display of other methods. Java
-recovery eligibility, complete JavaUnit eligibility and whether one request
-completed normally are three distinct judgements. Mixed/Debug is the normal exit
-for a local failure; Diana MUST NOT change its product positioning to
-diagnostic-only, and Diana MUST NOT use the permission to degrade to abandon Java
-recovery quality or to turn required Java acceptance into a pass.
+readability, independently established behavior and whether one request
+completed normally are distinct judgments. Diana MUST favor useful readable
+reconstruction while preserving original facts and making uncertainty explicit.
+A local failure MUST NOT discard other members.
 
 - The application Module lives in `apps/diana/` and owns input files, snapshots,
   ZIP, lightweight queries and output. The engine Module lives in
@@ -31,9 +30,9 @@ upstream URL and commit
   Diana MUST return every match from a query, with no offset, limit or cursor.
   Diana MUST preserve the original instruction, evaluation, argument, effect,
   catch, lock and init order unchanged.
-- Diana MUST NOT make correctness configurable off. Where the Java representation
-  constraints cannot be satisfied, the engine MUST return Debug or Unavailable and
-  MUST NOT fabricate a success with an exception stub.
+- Diana MUST expose available readable reconstruction with its uncertainty, or
+  return Debug or Unavailable when reconstruction is not available. Diana MUST
+  NOT fabricate a successful method with an empty body or exception stub.
 
 Application source lives in `apps/diana/src/` and engine source in
 `crates/diana-decomp/src/`. Shared self-made inputs and expected values live in
@@ -64,10 +63,9 @@ not commitments. Diana MUST NOT describe implementation-dependent behavior of
 Java/JVM and ART, such as the exact OOME timing, stack-trace line numbers or GC
 timing, as fully equivalent; the algorithm MUST NOT use that reason to cross
 potentially throwing, allocating or synchronizing operations arbitrarily, and a
-validation report MUST state the limitations of the run environment. Java success
-requires that every value, binding, storage, control, protection-domain and
-declaration check defined in this document passes; Diana MUST NOT change the
-contract dynamically with the current implementation capability.
+validation report MUST state the limitations of the run environment. These are semantic goals, not a prerequisite that every readable result passes
+all native checks. Diana MUST identify missing evidence and known uncertainty;
+readability alone does not establish semantic equivalence.
 
 ### 2.2 Result model
 
@@ -85,13 +83,13 @@ pub struct Report {
     pub stats: RunStats,
 }
 pub enum MethodOutput {
-    Java { declaration: VerifiedJavaMethod, evidence: MethodEvidence },
+    Java { source: String, spans: Vec<OriginSpan>, uncertainties: Vec<Diagnostic> },
     DeclarationOnly { declaration: JavaMethodDecl }, // abstract/native, declaration only
     Debug { source: String, spans: Vec<OriginSpan>, reason: Diagnostic },
     Unavailable { reason: Diagnostic, excerpt: Option<RawExcerpt> },
 }
 pub enum ClassOutput {
-    JavaUnit { unit: VerifiedJavaUnit, members: Vec<MethodOutput> },
+    JavaUnit { source: String, members: Vec<MethodOutput> },
     Mixed { shell: DeclarationOutput, members: Vec<MethodOutput> },
 }
 pub enum DeclarationOutput { Java(JavaClassDecl), Debug(String), Unavailable(Diagnostic) }
@@ -118,13 +116,15 @@ render(report: &Report, control: &mut RunContext<'_>)
 
 The application MUST create one RunContext per request and pass it in sequence through read/index, analysis and printing, and MUST NOT rebuild the context and retry in order to bypass a limit. The Engine MUST NOT store the callback or a mutable control, and it needs no global state or scheduler; open and render likewise MUST check cancellation and return Cancelled/BudgetExceeded, and the engine MUST NOT misreport them as Malformed. Diana MUST NOT store Limits again in Options/Engine. Report owns the declarations, literal UTF16, original identity and evidence summaries that the result requires and MUST NOT borrow a temporary SSA/Env; render MUST NOT require the whole graph to be retained, and it MUST NOT re-analyze or start another recovery route because output failed.
 
-A single DEX uses an images vector of length 1; DexIds are allocated within the request and map back to the root physical/logical identity through ImageOrigin, different arrival orders are not required to produce the same numbers, and no extra sorting is done for file names or input order. The catalog MAY be empty; insufficient type/call evidence degrades locally instead of guessing. The library MUST NOT access disk, processes or the network, and the root request scope holds the byte owner until Engine use ends; an ordinary DEX has header_offset=0; T04 implements native 041 reading, H04 only performs application borrowing and original-identity adaptation, and T25/H04 provide the D065 evidence for their respective sides.
+A single DEX uses an images vector of length 1; DexIds are allocated within the request and map back to the root physical/logical identity through ImageOrigin, different arrival orders are not required to produce the same numbers, and no extra sorting is done for file names or input order. The catalog MAY be empty; insufficient type/call evidence remains explicit in the local result. The library MUST NOT access disk, processes or the network, and the root request scope holds the byte owner until Engine use ends; an ordinary DEX has header_offset=0; T04 implements native 041 reading, H04 only performs application borrowing and original-identity adaptation, and T25/H04 provide the D065 evidence for their respective sides.
 
-The `VerifiedJavaMethod/Unit` fields are private, and the P8 verifier MUST be the only constructor, after the semantics, source rules and directly determinable Java8 target checks pass, see ALGORITHMS §12.4–§12.6; DeclarationOnly likewise checks the declaration boundary. The P8 verifier MUST NOT reject Java by guessing the code, locals, stack, handler or pool size from the AST node count, and an unknown compilation size is not a failure reason. Verified means that those native checks have completed; it does not mean production has compiled the code or proven the final classfile size; actual compilation and classfile format validation belong to V4 acceptance. The evidence MUST record EnvironmentId and the fixed compilation contract; **the production engine MUST NOT call javac**. The external environment MUST satisfy the declaration facts, and a test MUST use a real matching classpath; Diana MUST NOT treat Unknown as Complete.
+Readable Java MUST identify material unresolved assumptions or failed checks and preserve original method identity, available DEX debug facts and coverage. Its producer MUST use the existing shared analysis chain and available checked input facts; it MUST NOT fabricate instruction widths or claim unknown declaration, type or control-flow facts as proven. If a useful reconstruction cannot be formed, the engine MUST retain Debug or Unavailable. P9 renders the produced result without further analysis. Readable output does not suppress Malformed, BudgetExceeded, Cancelled or InternalInvariant classification.
 
-`VerifiedJavaMethod` internally uses `MemberEmission::Explicit | Generated(owner_node, rule)`: Generated is used for members that have code and are proven generated by enum/override/inner syntax, and does not count as DeclarationOnly. The unit printer MUST print only the owner syntax and MUST NOT emit conflicting declarations such as bridge/values a second time. The unit printer MUST map original MethodKeys to owner spans. When a standalone request cannot express a Generated method independently, the engine MUST return the original method as Debug and MUST NOT fabricate a wrapper, see ALGORITHMS §12.
+P8 produces readable Java from the shared analysis products and records material uncertainties. Native checks MAY establish additional facts, but completing every check is not a prerequisite for displaying Java. The engine MUST NOT present unknown facts as proven or call javac; independent compilation and behavior checks provide evidence only for their tested environments.
 
-`JavaUnit` requires a valid class shell, every member being Java (including verified Generated) or DeclarationOnly, and the binding/initialization/constructor constraints passing. If one method is Debug/Unavailable or the shell cannot be expressed, the result is Mixed; this is a result eligibility, not a condition for refusing display by default. The CLI MUST retain the successful methods, the failure location, the original identity and the Debug/unavailable reason in a Mixed presentation, and MUST state at the top that it is not a complete Java compilation unit; it MUST NOT fill gaps with an empty body or an exception stub. Diana MUST NOT let the file suffix decide eligibility and MUST NOT automatically choose a `.java` file name for Mixed; it MUST NOT reject an explicit user `-o` because of its suffix, and MUST still retain the marker. Method-level Java MAY exist inside Mixed, while compilation validation MUST still require a legal context; Diana MUST NOT change dependencies to fabricate a stub.
+Generated members retain original identities and MUST NOT be duplicated in owner syntax. If a member cannot be expressed independently, Diana MUST present its available readable reconstruction or original facts without inventing a wrapper.
+
+JavaUnit denotes a rendered class-shaped result, not a guarantee of compilation or equivalence. Mixed retains available members and their original identities when the class cannot be represented as one unit. Both presentations MUST mark material uncertainties and MUST NOT fill gaps with fake method bodies. File suffixes MUST NOT determine eligibility.
 
 ### 2.3 Failure kinds and cancellation
 
@@ -136,7 +136,7 @@ The `VerifiedJavaMethod/Unit` fields are private, and the P8 verifier MUST be th
 | `InternalInvariant` | identity inconsistency before and after the verifier, certificate missing an edge, algorithm-impossible state | the diagnostic MUST state BUG explicitly and the dev test MUST fail; the request report MAY keep a method-level raw fallback, but the status remains an internal error and MUST NOT count as a normal Unsupported or a Java success |
 | `Cancelled` | the caller's cancellation token | stop the request with RequestError::Cancelled; the engine MUST NOT continue producing per-method debug output after cancellation |
 
-The engine discards the unverified Java AST/text of a failed method and retains the other completed members. Debug information reads only checked original bytes/facts, not the failed Java reconstruction. It includes the original identity, typed reason, decoded instructions and related control/reference facts, with explicit undecoded ranges. Unknown width permits only checked prefix facts and original byte/word excerpts; Diana MUST NOT guess instruction width or claim executable/reassemblable source. A local failure does not change the configuration of other methods.
+The engine retains an available readable reconstruction as Java together with its original identity and explicit uncertainty reasons. Java output is not a claim of compilability or semantic equivalence. The engine retains other completed members independently. Debug information reads only checked original bytes/facts, not the failed Java reconstruction. It includes the original identity, typed reason, decoded instructions and related control/reference facts, with explicit undecoded ranges. Unknown width permits only checked prefix facts and original byte/word excerpts; Diana MUST NOT guess instruction width or claim executable/reassemblable source. A local failure does not change the configuration of other methods.
 
 #### Diagnostic contract
 
@@ -159,7 +159,7 @@ failure producer, not a speculative enumeration of every possible rejection.
 The application MUST compute request success from the failure kinds and delivery
 state under §6.8, not from severity, the presence of raw, or a single code-to-exit
 lookup. A local Unsupported is distinct from a global unsupported input. The
-acceptance adapter compares these typed facts under TASKS §4.3.5; it MUST NOT
+acceptance adapter compares these typed facts against independent expected facts; it MUST NOT
 parse `detail` or stderr to infer the failure category.
 
 ## 3. Modules and data
@@ -323,24 +323,13 @@ P6 MUST select the edge before executing the copies; the exception snapshot MUST
 
 ### 3.6 Java results, Generated and printing
 
-```text
-VerifiedJavaMethod { private method_decl, body_or_generated, ResultFacts, evidence, target_admission }
-TargetAdmission { parameter_words, utf8_lengths, member_counts, compiler_owned_layout }
-// stores only directly verifiable facts; there is no field that predicts compilation cost such as code/pool.
-JavaMemberKind = Method | Constructor | StaticInitializer
-MemberEmission = Explicit(JavaBody) | Generated(owner_node, canonical_rule)
-VerifiedJavaUnit { private class_decl, explicit_members, generated_member_evidence }
-Expr { source_type, origin, kind }
-Stmt = Decl|Assign|ExprStmt|If|While|Switch|Break|Continue|Return|Throw|Try|Synchronized
-```
-
-`Generated` still has its original executable method and is merely generated by enum/override/inner syntax, so it is not DeclarationOnly.
-P8 MUST match the canonical behavior of ALGORITHMS §12 and MUST NOT delete a member based on a missing synthetic marker alone. When a standalone request cannot express a
-Generated method independently, the engine MUST return the original Debug. JavaUnit requires every member or its generation rule and the whole shell to pass validation;
-Diana MAY display Mixed but MUST NOT let it masquerade as a complete compilable unit. Only the owning validator MAY call the private Verified constructors.
-
-P8 MUST emit only a static block for a StaticInitializer and MUST NOT emit a method named <clinit>; return-void and certainly-abrupt
-Java legalization follow ALGORITHMS §12.2, and the printer MUST NOT guess control flow on a temporary basis.
+P8 produces Java member and class representations from the shared analysis
+products. It retains original identities, material uncertainties and available
+original facts. Where structure, bindings, initialization or declaration details
+remain uncertain, P8 may still present a readable reconstruction and MUST mark
+the uncertainty rather than claim it is proven. P8 MUST NOT delete a member based
+on a missing synthetic marker alone or fabricate a replacement body. Generated
+syntax retains the original member identities and MUST NOT duplicate members.
 
 P9 is a pure printer and MUST NOT solve types or structure; its input is already sealed, but it MUST still check budget/cancellation per segment. Java expressions use the
 precedence table: primary/postfix→unary/cast→mul→add→shift→relational→equality→bitwise
@@ -395,7 +384,7 @@ The directory layout uses the P0–P9 numbering familiar from Kuna, but Diana de
 | P5 `p5_types` | `TypedBody` | primitive/reference/null/raw constant bits, use conversions, Phi join, finite monotonic work queue | does not have to rebuild complete generic source; does not modify CFG topology |
 | P6 `p6_variables` | `StorageBody`, `CopyPlan` | one LocalId per definition, no general coalescing; parallel copies on normal edges, exception shadow slots; DA certificate | does not infer lexical structure, MUST NOT put SSA construction in a Repeat that regenerates identities |
 | P7 `p7_regions` | `RegionPlan`, `ProtectionCertificate` | analyzes normal SCC/SESE, try ranges/handlers and monitors from a read-only StorageBody | does not modify the original CFG, MUST NOT treat catch-all automatically as finally |
-| P8 `p8_java` | `VerifiedJavaMethod/Unit` | exact block/edge coverage, structured/dispatcher, expression legalization, class/constructor/initializer and throws validation | does not guess unparsed bytes, MUST NOT skip a block merely because of a visited set |
+| P8 `p8_java` | readable Java and uncertainty facts | structured/dispatcher lowering, expression legalization, class/constructor/initializer and throws checks | does not guess unparsed bytes, MUST NOT skip a block merely because of a visited set |
 | P9 `p9_emit` | `RenderedReport`, final UTF-8 `OriginSpan` | AST printer, original-fact debug renderer, diagnostic renderer | does not do value/type/control-flow recovery |
 
 **Scheduling order**:
@@ -410,7 +399,7 @@ per Explicit method: ValidatedRawMethod(P1)
   → solve_types(P5)     → verify_types
   → allocate_and_copy(P6) → verify_storage
   → identify_regions(P7)
-  → lower_java(P8)      → verify_method
+  → lower_java(P8)      → record applicable checks and uncertainties
 Generated member: original code + template evidence → owner syntax and target admission (no independent fake Java body)
 class assembly(P8)     → verify_unit_or_mark_mixed
 render(P9)
@@ -656,14 +645,14 @@ diana get-method sample.apk 'Lcom/example/App;->check(I)Z'
 diana get-method sample.dex 'e0:l0:c7:m23::Lcom/example/App;->check(I)Z'
 ```
 
-- The CLI MUST display the existing Report directly as default text and MUST NOT use VerifiedJavaUnit as a whole-class switch. When get-class yields a JavaUnit it outputs complete Java; when it yields Mixed it outputs clearly marked decompiled text: the real shell/fields, the recovered Java methods, and the Debug or Unavailable reason annotated per original method. Diana MUST retain every member and MUST NOT discard the other results because one method failed.
-- get-method displays the exactly selected method: Java outputs the validated declaration and body; DeclarationOnly outputs the code-free declaration only, with no body; Debug outputs readable original DEX facts and coverage with the reason; and Unavailable outputs the original identity/reason with the bounded raw excerpt that is available. Diana MUST NOT call debug information executable or reassemblable source and MUST NOT fabricate Java with an empty body or a throwing stub. A method fragment needs its owner context, and Diana MUST NOT claim it compiles on its own.
+- The CLI MUST display the existing Report directly as default text and MUST NOT use VerifiedJavaUnit as a whole-class switch. When get-class yields a JavaUnit it outputs complete Java; when it yields Mixed it outputs clearly marked decompiled text: the real shell/fields, readable members and their uncertainty markers, and the Debug or Unavailable reason annotated per original method. Diana MUST retain every member and MUST NOT discard the other results because one method failed.
+- get-method displays the exactly selected method: Java outputs the readable reconstruction with its uncertainty reasons and original identity; DeclarationOnly outputs the code-free declaration only, with no body; Debug outputs readable original DEX facts and coverage with the reason; and Unavailable outputs the original identity/reason with the bounded raw excerpt that is available. Diana MUST NOT call debug information executable or reassemblable source and MUST NOT fabricate Java with an empty body or a throwing stub. A method fragment needs its owner context, and Diana MUST NOT claim it compiles on its own.
 - text/json only choose the representation of the same result, and they MUST NOT choose the algorithm, the fallback or the recovery threshold; Diana MUST NOT require switching to JSON to see Mixed/raw, and no `--require-java` switch is added. fields/methods remain independent symbol queries, and Diana MUST NOT prefix the source with an index table.
 - When only a local Unsupported is present (including missing catalog, invoke-custom or Java target representation limits), a fully displayed Mixed/Debug/Unavailable result MAY exit0, meaning that the decompilation request and its display completed normally, not that every method was recovered as Java. Malformed, BudgetExceeded, InternalInvariant, Cancelled and I/O still fail per §6.8; a Report that can already be rendered completely MAY be kept for display with a non-zero exit, and Diana MUST NOT use a non-zero code to conceal the error.
 - The top of Mixed and each failed member MUST carry the status/original identity/reason; the language section and OriginSpan can be located exactly. The marker is display metadata, and the CLI MUST NOT add an executable statement to a failed method. Diana MUST write the same display payload for an explicit `-o`; Diana MUST NOT filter out Mixed by suffix and MUST NOT automatically choose a `.java` file name for Mixed; only JavaUnit eligibility means a complete Java compilation unit.
 - JSON uses the local report schema below, not an MCP envelope or serialized AST/arena. Acceptance MUST NOT golden-test format or layout; complex members, retention, raw, UTF16 and original identity/spans are accepted through the public Module interfaces.
 
-The validation threshold for JavaUnit and per-method Java is unchanged, and a required Java case MUST NOT pass because "Debug has already been displayed".
+A required readable-Java case MUST NOT pass solely because Debug was displayed. Semantic cases require independent behavior evidence where specified.
 A successful compilation does not mean semantic equivalence; a readable local failure does not mean that a request error was swallowed, and the application MUST NOT treat it as a reason to re-analyze or to start another engine.
 
 #### Decompilation JSON schema 1
@@ -683,13 +672,13 @@ unconstrained.
 | Report `methods` | Array of Method records; every selected original member occurs once, including Generated and Unavailable |
 | Report `diagnostics` | Array of Diagnostic records, including class and hard-error reasons retained for display |
 | Report `spans` | Array of Span records whose ranges refer to Report.source |
-| Method `at` / `status` | Canonical original method locator / one of the four method statuses above |
+| Method `at` / `status` | Canonical original method locator / one of the method statuses above |
 | Method `emission` | `explicit`, `generated` or null; non-null only for Java, with Generated checked per §3.6 |
 | Method `language` | `java`, `dex_debug`, `raw_excerpt` or `none`; declaration/Generated source is Java, and an excerpt never claims complete decoded coverage |
 | Method `source` | Java declaration/body, code-free declaration, readable JSON debug snapshot, or available raw excerpt; null only for Generated owner syntax or Unavailable without an excerpt |
 | Method `source_range` | Half-open `[start,end]` in Report.source, or null when no source representation exists; Generated points to its owner's syntax and may share a range with other Generated members |
 | Method `spans` | Span array relative to this Method.source; empty when source is null |
-| Method `reason` | Diagnostic for Debug/Unavailable; null for Java/DeclarationOnly |
+| Method `reason` | Diagnostic for Debug/Unavailable; Java includes applicable uncertainty reasons in the report diagnostics |
 | Diagnostic | `{code: string, kind: string, severity: string, method_at: string or null, code_unit: integer or null, phase: string or null, detail: string}`; kind is `malformed`, `unsupported`, `budget_exceeded`, `internal_invariant` or `cancelled`, severity follows §2.3, and a non-null code_unit requires method_at |
 | Span | `{range: [start,end], member_at: string or null, sites: [{method_at: string, code_unit: integer}], synthetic_reason: string or null}`; declaration spans can have no instruction sites |
 
@@ -711,7 +700,7 @@ reason still forces a hard failure. A single-method selection has exactly one
 Method record; a Generated method that cannot stand alone follows the Debug rule,
 not a null successful standalone source. The serializer MUST preserve escaped
 UTF-16 values and charge the final JSON bytes under §7. Test assertions about
-files, behavior and raw integrity come from TASKS §4.3.5, not extra production
+files, behavior and raw integrity come from independent case expectations, not extra production
 JSON fields such as `debugFactsExact` or `tempFilesRemaining`.
 
 ### 6.6 xref
@@ -875,15 +864,14 @@ with cancellation. See ALGORITHMS §14 for input and publication rules.
 
 ## 8. Java representation constraints
 
-The verifier MUST validate value/edge/copy/binding/protection-domain separately, and Diana MUST NOT let structural coverage substitute for value semantics. P8 MUST make the Java AST and declarations satisfy
-the Java8 language constraints, and MUST NOT emit a literal that changes UTF16/FP bits. P8 MUST check parameter words, single-item MUTF8 and the already determined member count
-against the real format bounds; the engine MUST NOT predict the compilation size from node counts, DEX code units or repeated mentions and then reject the source.
-The V4 real compilation and classfile reading MUST validate the actual format limits of code/locals/stack/handler/pool, and Diana MUST NOT present an unperformed
-compilation as a production proof. P8 MUST still reject an unknown generation template whose member semantics cannot be proven, and the engine MUST NOT split a method/class or add helpers
-to bypass a real limit. A method in a known context is not equal to a complete unit;
-the P8 verifier MUST accept a class as JavaUnit only when the shell, every member/Generated rule, the constructors and the initializers all pass.
-Generated has an original executable method and does not count as DeclarationOnly; the engine MUST return the original Debug for a generated method that cannot be expressed independently.
-See ALGORITHMS for the check relationships, and TASKS for public behavior evidence and statistics.
+Diana SHOULD preserve value, edge, copy, binding, exception and lock behavior in
+readable output. When the available facts do not establish a behavior, Diana MUST
+mark the uncertainty; it MUST NOT treat structural coverage as proof of semantics.
+Compilation and behavioral comparisons are independent evidence for their tested
+inputs and environments, not a prerequisite for displaying source. The engine
+MUST preserve original UTF-16 and floating-point facts and MUST NOT silently
+substitute fabricated method bodies or instruction widths. Real format limits,
+resource controls and cancellation remain applicable.
 
 ## 9. Implementation trade-offs
 

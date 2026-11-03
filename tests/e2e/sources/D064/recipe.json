@@ -33,7 +33,7 @@
   "dex": {
     "tool": "com.android.tools:r8:8.3.37",
     "mainClass": "com.android.tools.r8.D8",
-    "toolSpec": "docs/diana/TASKS.md#45-pinned-tools-and-content-locks"
+    "toolSpec": "https://github.com/TsingShui/rasc/blob/22024f0/docs/diana/TASKS.md#45-pinned-tools-and-content-locks"
   },
   "catalog": "complete declaration catalog over Case and ReportCase",
   "driver": null,

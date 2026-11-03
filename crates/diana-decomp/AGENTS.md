@@ -4,11 +4,9 @@ Repository-wide AGENTS.md applies, including the rule that every authored Diana
 document MUST follow ../../docs/diana/WRITING.md. This package is the independent
 native engine library. Every engine capability MUST follow the repository-wide
 [architecture guardrails](../../AGENTS.md#architecture-guardrails).
-Read ../../docs/diana/DESIGN.md, ../../docs/diana/ALGORITHMS.md and
-../../docs/diana/TASKS.md before work.
+Read ../../docs/diana/DESIGN.md and ../../docs/diana/ALGORITHMS.md before work.
 
-- B01–B04 in ../../docs/diana/TASKS.md MUST pass before production engine work. An
-  empty crate that builds is not T01 or E2E acceptance.
+- An empty crate that builds is not semantic or E2E acceptance.
 - Accept borrowed DEX bytes/declaration facts supplied by the application; no
   filesystem/ZIP/CLI loading, external runtime/process or MCP adapter here.
 - Remain independent of rasc, dexdec, rusty-dex, Kuna and radguard code. Consult

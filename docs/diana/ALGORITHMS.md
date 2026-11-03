@@ -2,14 +2,17 @@
 
 This document specifies the algorithms, state transitions and rejection conditions for DEX
 decoding, analysis and Java/debug representation.
-Interfaces and ownership are defined in [DESIGN.md](DESIGN.md); validation rules are in
-[TASKS.md](TASKS.md).
+Interfaces and ownership are defined in [DESIGN.md](DESIGN.md); case expectations are in [e2e_cases.json](e2e_cases.json).
 
 ## 0. Semantic model and correctness conditions
 
 **Rules** define the algorithms; **derivations** state their correctness preconditions.
-Independent execution evidence defined by TASKS MUST NOT be replaced by a derivation.
-The arguments below are not machine-checked proofs.
+Independent execution evidence MUST NOT be replaced by a derivation.
+The arguments below are not machine-checked proofs. They describe conditions for
+semantic preservation, not a prerequisite for showing readable source. When a
+condition or a declaration fact is unknown, Diana MUST retain the uncertainty and
+MAY display the reconstruction without claiming that condition holds. Input
+safety, classified failures and resource/cancellation obligations remain binding.
 
 ### 0.1 Objects and states
 
@@ -1219,7 +1222,7 @@ assembler, another engine or another recovery attempt.
 
 ### 7.1 Facts and coverage
 
-The debug snapshot contains only original facts, never a failed Java AST, guessed
+The debug snapshot contains only original facts, never an unverified Java AST, guessed
 types, invented registers or reconstructed effects. It records:
 
 | Fact | Required information when safely readable |
@@ -1287,7 +1290,7 @@ Each method runs exactly one analysis chain and selects a result by the followin
 2. A proven Malformed yields Unavailable with any safe original debug excerpt; it never becomes a normal success. abstract/native produce DeclarationOnly only when declaration and target checks pass; otherwise retain their code-free declaration as debug facts or Unavailable.
 3. When all Java checks pass, the result is Java; a failing method does not print its unvalidated
    half AST, and other completed methods are not discarded.
-4. Unsupported/BudgetExceeded enter the debug exit once. Read only facts whose original ranges/widths are checked, retain their coverage and mark unavailable regions. Any further read uses the same request resources and explicit fallback quota. A confirmed Malformed MUST NOT be revoked by re-reading.
+4. When verification declines, P8 MAY retain an available readable reconstruction as Java with explicit uncertainty reasons and original identity. It MUST distinguish unknown facts from established facts and MUST NOT claim verified semantics or compilation. If no readable reconstruction is available, Unsupported enters the debug exit once. BudgetExceeded retains its classified failure and enters the debug exit only if resources remain. Read only facts whose original ranges/widths are checked, retain their coverage and mark unavailable regions. Any further read uses the same request resources and explicit fallback quota. A confirmed Malformed MUST NOT be revoked by re-reading.
 5. When a decoded debug view cannot be produced safely within available resources, the result is Unavailable with any safe excerpt. When raw
    newly discovers definite damage, keep the Malformed fact; InternalInvariant keeps its BUG
    status even with raw attached. The implementation MUST NOT rerun normal or change the engine
@@ -1308,7 +1311,7 @@ refuse to call the renderer because a class is Mixed:
 2. Mixed first states the original class identity and “not a complete Java compilation unit”, and
    keeps the shell/fields according to the real DeclarationOutput. Members are presented
    segment by segment according to their original MethodKey: Java keeps the validated declaration
-   or body; Generated references only the proven owner syntax and the original key mapping and
+   or body; Java retains its readable reconstruction and uncertainty reasons without claiming verification; Generated references only the proven owner syntax and the original key mapping and
    MUST NOT fabricate an independent method; Debug keeps the available original facts, their coverage and the reason;
    Unavailable keeps the identity, the reason and any available excerpt. An unexplainable shell is
    marked as such, and available methods MUST NOT be deleted because of it.
