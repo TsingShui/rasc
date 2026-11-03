@@ -102,7 +102,7 @@ fn collect_impl(
     control: &mut RunContext<'_>,
 ) -> Result<Option<Declaration>, RequestError> {
     let original = index.class_with(key.class_def, control)?;
-    if original.access_flags != 0x4011 {
+    if !crate::substrate::flags::enum_constant(original.access_flags) {
         return Ok(None);
     }
     let descriptor = copy_units(original.descriptor, control)?;
@@ -146,7 +146,11 @@ fn collect_impl(
         || !class.interfaces.is_empty()
         || class.enclosing_scope
         || !class.generic
-        || parent.access_flags & (1 | 0x10 | 0x200 | 0x400) != 0x401
+        || parent.access_flags
+            & (1 | crate::substrate::flags::FINAL
+                | crate::substrate::flags::INTERFACE
+                | crate::substrate::flags::ABSTRACT)
+            != 0x401
         || !parent.generic
         || parent.enclosing_scope
         || parent.parent.as_deref() != Some(crate::p4_types::BuiltinReference::Object.descriptor())
@@ -216,14 +220,16 @@ fn collect_impl(
         if names != 1 {
             return Ok(None);
         }
-        if field.access_flags == 0x101a
+        if crate::substrate::flags::enum_values_table(field.access_flags)
             && facts.descriptor == array
             && facts.name == units("$VALUES", control)?
         {
             if storage.replace(field.key.field).is_some() {
                 return Ok(None);
             }
-        } else if field.access_flags == 0x4019 && facts.descriptor == descriptor {
+        } else if crate::substrate::flags::enum_constant(field.access_flags)
+            && facts.descriptor == descriptor
+        {
             push(
                 &mut constants,
                 Constant {
@@ -268,27 +274,29 @@ fn collect_impl(
             let declaration = declaration?;
             let name = copy_units(declaration.name, control)?;
             let proto = copy_proto(&declaration.prototype, control)?;
-            let role = if access_flags == 0x100a
+            let role = if crate::substrate::flags::plain_static_method(access_flags)
                 && proto == array_proto
                 && name == units("$values", control)?
             {
                 Role::Array
-            } else if access_flags == 0x10008
+            } else if crate::substrate::flags::static_initializer(access_flags)
                 && name == units("<clinit>", control)?
                 && proto == units("()V", control)?
             {
                 Role::Initializer
-            } else if access_flags == 0x10002
+            } else if crate::substrate::flags::private_instance_constructor(access_flags)
                 && name == units("<init>", control)?
                 && proto == constructor_proto
             {
                 Role::Constructor
-            } else if access_flags == 9
+            } else if crate::substrate::flags::plain_static_method(access_flags)
                 && name == units("valueOf", control)?
                 && proto == value_proto
             {
                 Role::ValueOf
-            } else if access_flags == 9 && name == units("values", control)? && proto == array_proto
+            } else if crate::substrate::flags::plain_static_method(access_flags)
+                && name == units("values", control)?
+                && proto == array_proto
             {
                 Role::Values
             } else {

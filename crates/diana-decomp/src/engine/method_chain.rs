@@ -27,7 +27,7 @@ pub(crate) fn build<'a>(
     drop(_p2);
     let _p3 = crate::pipeline::phase_span("p3_ssa");
     let ssa = crate::p3_ssa::build(schedule, flow, budget)?;
-    let capture = if input.access_flags() & 0x10008 == 0x10000
+    let capture = if crate::substrate::flags::instance_constructor(input.access_flags())
         && ssa
             .operations
             .first()

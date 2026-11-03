@@ -217,8 +217,13 @@ fn covariant_bridge(
     classes: &[&InputClassDeclaration],
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<bool, RequestError> {
-    if method.access_flags & 0x1041 != 0x1041
-        || method.access_flags & (2 | 4 | 8 | 0x80) != 0
+    if method.access_flags & (crate::substrate::flags::SYNTHETIC | crate::substrate::flags::BRIDGE)
+        != (crate::substrate::flags::SYNTHETIC | crate::substrate::flags::BRIDGE)
+        || method.access_flags
+            & (2 | crate::substrate::flags::PROTECTED
+                | crate::substrate::flags::STATIC
+                | crate::substrate::flags::VARARGS)
+            != 0
         || method.generic
         || owner.generic
     {
@@ -230,8 +235,12 @@ fn covariant_bridge(
     let mut implementations = 0usize;
     for candidate in &owner.methods {
         budget.charge_work(1)?;
-        if candidate.access_flags & (2 | 4 | 8 | 0x1040) != 0
-            || candidate.access_flags & 1 == 0
+        if candidate.access_flags
+            & (2 | crate::substrate::flags::PROTECTED
+                | crate::substrate::flags::STATIC
+                | (crate::substrate::flags::SYNTHETIC | crate::substrate::flags::BRIDGE))
+            != 0
+            || candidate.access_flags & crate::substrate::flags::PUBLIC == 0
             || candidate.generic
             || !crate::context::same_units(&candidate.name, &method.name, budget)?
         {
@@ -261,7 +270,11 @@ fn covariant_bridge(
         }
         for declaration in &ancestor.methods {
             budget.charge_work(1)?;
-            if declaration.access_flags & (1 | 2 | 8 | 0x40) == 1
+            if declaration.access_flags
+                & (1 | crate::substrate::flags::PRIVATE
+                    | crate::substrate::flags::STATIC
+                    | crate::substrate::flags::BRIDGE)
+                == crate::substrate::flags::PUBLIC
                 && !declaration.generic
                 && !ancestor.generic
                 && crate::context::same_units(&declaration.name, &method.name, budget)?
@@ -310,7 +323,9 @@ pub(super) fn unique_target(
         return Ok(false);
     };
     if !super::raw_signature::object_identity(selected, budget)?
-        || selected.access_flags & (0x40 | 0x80) != 0
+        || selected.access_flags
+            & (crate::substrate::flags::BRIDGE | crate::substrate::flags::VARARGS)
+            != 0
     {
         return Ok(false);
     }
@@ -374,7 +389,7 @@ pub(super) fn unique_target(
             if !applicable {
                 continue;
             }
-            if method.access_flags & 0x40 != 0 {
+            if method.access_flags & crate::substrate::flags::BRIDGE != 0 {
                 if !matches!(scope, Scope::Receiver { .. })
                     || !covariant_bridge(catalog, owner, method, classes, budget)?
                 {
@@ -385,18 +400,22 @@ pub(super) fn unique_target(
             if method.generic
                 && (!std::ptr::eq(method, selected)
                     || !super::raw_signature::object_identity(method, budget)?)
-                || method.access_flags & 0x80 != 0
-                || (method.access_flags & 8 != 0) != is_static
-                || method.access_flags & 1 == 0
+                || method.access_flags & crate::substrate::flags::VARARGS != 0
+                || (method.access_flags & crate::substrate::flags::STATIC != 0) != is_static
+                || method.access_flags & crate::substrate::flags::PUBLIC == 0
                     && !(same_class && std::ptr::eq(*owner, class)
                         || matches!(scope, Scope::EnclosingStatic { .. })
-                            && method.access_flags & 7 == 0)
+                            && method.access_flags
+                                & (crate::substrate::flags::PUBLIC
+                                    | crate::substrate::flags::PRIVATE
+                                    | crate::substrate::flags::PROTECTED)
+                                == 0)
             {
                 return Ok(false);
             }
             for earlier in &owner.methods[..position] {
                 budget.charge_work(1)?;
-                if earlier.access_flags & 0x40 != 0
+                if earlier.access_flags & crate::substrate::flags::BRIDGE != 0
                     || !crate::context::same_units(&earlier.name, name, budget)?
                 {
                     continue;
@@ -416,7 +435,7 @@ pub(super) fn unique_target(
             }
             if !matches!(scope, Scope::Receiver { .. })
                 || std::ptr::eq(*owner, class)
-                || method.access_flags & (2 | 8 | 0x10) != 0
+                || method.access_flags & (2 | crate::substrate::flags::STATIC | 0x10) != 0
             {
                 return Ok(false);
             }
@@ -433,7 +452,7 @@ pub(super) fn unique_target(
                 budget,
             )? == Some(true)
             {
-                if selected.access_flags & (2 | 8 | 0x10) != 0
+                if selected.access_flags & (2 | crate::substrate::flags::STATIC | 0x10) != 0
                     || !returns(catalog, candidate.result, fixed.result, budget)?
                 {
                     return Ok(false);

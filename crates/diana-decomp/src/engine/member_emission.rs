@@ -42,7 +42,7 @@ pub(crate) fn collect(
             else {
                 return Ok(());
             };
-            if access_flags != 0x1041 {
+            if !crate::substrate::flags::bridge(access_flags) {
                 return Ok(());
             }
             let result = (|| -> Result<Option<crate::p7_java::GeneratedBridge>, RequestError> {

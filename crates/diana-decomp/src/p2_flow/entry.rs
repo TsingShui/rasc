@@ -47,7 +47,9 @@ fn decode_impl<'a>(
     let Some(envelope) = index.method_envelope(class, method, budget)? else {
         return Ok(None);
     };
-    if envelope.access_flags & 0x10008 != 0x10000
+    if envelope.access_flags
+        & (crate::substrate::flags::STATIC | crate::substrate::flags::CONSTRUCTOR)
+        != 0x10000
         || !envelope
             .declaration
             .name

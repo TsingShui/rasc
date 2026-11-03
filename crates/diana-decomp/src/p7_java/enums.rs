@@ -827,7 +827,7 @@ pub(crate) fn unit(
         if field.key.field == proof.declaration.storage() {
             if facts.name != [36, 86, 65, 76, 85, 69, 83]
                 || facts.descriptor != proof.declaration.array()
-                || field.access_flags != 0x101a
+                || !crate::substrate::flags::enum_values_table(field.access_flags)
             {
                 return Ok(None);
             }
@@ -839,7 +839,7 @@ pub(crate) fn unit(
             }
             if !found
                 || facts.descriptor != proof.declaration.descriptor()
-                || field.access_flags != 0x4019
+                || !crate::substrate::flags::enum_constant(field.access_flags)
             {
                 return Ok(None);
             }

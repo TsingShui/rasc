@@ -156,7 +156,7 @@ fn collect_impl<'a>(
         let original = input.field_reference(reference, budget)?;
         let scope = if storage == source::field_facts::FieldStorage::Static {
             FieldScope::Static
-        } else if input.access_flags() & 0x10000 != 0
+        } else if input.access_flags() & crate::substrate::flags::CONSTRUCTOR != 0
             && usage == source::field_facts::FieldUse::Write
         {
             FieldScope::ConstructorThis

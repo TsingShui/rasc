@@ -38,7 +38,7 @@ pub(crate) fn subtype(
         let Some(class) = catalog.class(current, budget)? else {
             return Ok(None);
         };
-        if class.access_flags & 0x200 != 0 {
+        if class.access_flags & crate::substrate::flags::INTERFACE != 0 {
             return Ok(None);
         }
         if same(current, target, budget)? {

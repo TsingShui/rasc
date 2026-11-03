@@ -61,7 +61,7 @@ pub(crate) fn collect_field(
         return Err(missing());
     };
     let final_initialization = usage == FieldUse::Write
-        && evidence.access_flags & 16 != 0
+        && evidence.access_flags & crate::substrate::flags::FINAL != 0
         && storage == FieldStorage::Static
         && crate::substrate::flags::class_initializer(input.access_flags())
         && input
@@ -72,7 +72,7 @@ pub(crate) fn collect_field(
     let nested = super::nested_scope::collect(input.program(), input.class_id(), catalog, budget)?;
     let capture_outer = if let Some(scope) = &nested {
         if evidence.owner == scope.owner()
-            && evidence.access_flags == 0x1010
+            && crate::substrate::flags::capture_field(evidence.access_flags)
             && original
                 .declaration
                 .field_type
@@ -92,14 +92,34 @@ pub(crate) fn collect_field(
     let lexical = nested
         .as_ref()
         .is_some_and(|scope| evidence.owner == scope.owner() || evidence.owner == scope.outer());
-    let own_private =
-        evidence.access_flags & 7 == 2 && input.owner().matches_with(&evidence.owner, budget)?;
-    if evidence.access_flags & 7 == 2 && !own_private
-        || (evidence.access_flags & 8 != 0) != (storage == FieldStorage::Static)
-        || evidence.access_flags & 7 != 1 && !lexical && !own_private
+    let own_private = evidence.access_flags
+        & (crate::substrate::flags::PUBLIC
+            | crate::substrate::flags::PRIVATE
+            | crate::substrate::flags::PROTECTED)
+        == crate::substrate::flags::PRIVATE
+        && input.owner().matches_with(&evidence.owner, budget)?;
+    if evidence.access_flags
+        & (crate::substrate::flags::PUBLIC
+            | crate::substrate::flags::PRIVATE
+            | crate::substrate::flags::PROTECTED)
+        == crate::substrate::flags::PRIVATE
+        && !own_private
+        || (evidence.access_flags & crate::substrate::flags::STATIC != 0)
+            != (storage == FieldStorage::Static)
+        || evidence.access_flags
+            & (crate::substrate::flags::PUBLIC
+                | crate::substrate::flags::PRIVATE
+                | crate::substrate::flags::PROTECTED)
+            != crate::substrate::flags::PUBLIC
+            && !lexical
+            && !own_private
         || !crate::substrate::flags::field_valid(evidence.access_flags)
-        || evidence.access_flags & (16 | 64) == (16 | 64)
-        || usage == FieldUse::Write && evidence.access_flags & 16 != 0 && !final_initialization
+        || evidence.access_flags
+            & (crate::substrate::flags::FINAL | crate::substrate::flags::VOLATILE)
+            == (crate::substrate::flags::FINAL | crate::substrate::flags::VOLATILE)
+        || usage == FieldUse::Write
+            && evidence.access_flags & crate::substrate::flags::FINAL != 0
+            && !final_initialization
     {
         return Err(missing());
     }
@@ -110,7 +130,7 @@ pub(crate) fn collect_field(
         _ => return Err(missing()),
     }
     if usage == FieldUse::Read
-        && evidence.access_flags & 16 != 0
+        && evidence.access_flags & crate::substrate::flags::FINAL != 0
         && (kind.field_offset() != 2 || kind == crate::p2_flow::DeclarationType::String)
     {
         match evidence.constant_kind {
@@ -181,7 +201,7 @@ pub(crate) fn collect_capture(
     else {
         return Err(RequestError::FieldBindingEvidenceMissing { reference, pc });
     };
-    if evidence.access_flags != 0x1010 {
+    if !crate::substrate::flags::capture_field(evidence.access_flags) {
         return Err(RequestError::FieldBindingEvidenceMissing { reference, pc });
     }
     Ok(FieldAccess {
@@ -216,7 +236,7 @@ pub(crate) fn collect_own_write(
             ))?;
     Ok(FieldAccess {
         outer_capture: None,
-        assignment: if native.access_flags & 16 != 0 {
+        assignment: if native.access_flags & crate::substrate::flags::FINAL != 0 {
             AssignmentObligation::OwnFinalInitialization
         } else {
             AssignmentObligation::Ordinary

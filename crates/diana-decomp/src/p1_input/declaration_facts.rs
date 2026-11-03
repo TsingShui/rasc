@@ -126,7 +126,7 @@ pub(crate) fn materialize(
                 name,
                 field_type: units(declaration.field_type, budget)?,
                 access_flags: field.access_flags,
-                constant_kind: if field.access_flags & 16 == 0 {
+                constant_kind: if field.access_flags & crate::substrate::flags::FINAL == 0 {
                     super::JavaConstantKind::NonConstant
                 } else {
                     super::JavaConstantKind::Unknown

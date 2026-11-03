@@ -1218,7 +1218,9 @@ impl<'i, 'a> ClassView<'i, 'a> {
                             let words = declaration.as_ref().ok().map(|declaration| {
                                 RegisterWordCount(
                                     declaration.prototype.parameter_words.0
-                                        + u64::from(access_flags & 8 == 0),
+                                        + u64::from(
+                                            access_flags & crate::substrate::flags::STATIC == 0,
+                                        ),
                                 )
                             });
                             let body = local(read_code(

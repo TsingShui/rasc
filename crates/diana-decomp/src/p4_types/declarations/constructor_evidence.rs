@@ -37,7 +37,7 @@ pub(crate) fn collect(
         ConstructorUse::Allocation,
         budget,
     ))?;
-    let chain = if input.access_flags() & 0x10008 == 0x10000 {
+    let chain = if crate::substrate::flags::instance_constructor(input.access_flags()) {
         let caller = copy_units(input.owner(), budget)?;
         let kind = if crate::context::same_units(&owner, &caller, budget)? {
             ConstructorUse::This

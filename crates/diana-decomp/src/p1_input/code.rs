@@ -77,7 +77,10 @@ pub(super) fn read_code<'a>(
     expected_words: Option<RegisterWordCount>,
     control: &mut impl InputControl,
 ) -> Result<MethodBody<'a>, InputError> {
-    let offset = match (code_offset, access_flags & (0x100 | 0x400) != 0) {
+    let offset = match (
+        code_offset,
+        access_flags & (crate::substrate::flags::NATIVE | crate::substrate::flags::ABSTRACT) != 0,
+    ) {
         (None, true) => return Ok(MethodBody::DeclarationOnly),
         (Some(offset), false) => offset,
         (None, false) => return Err(malformed(InputProblem::InvalidCode, ByteOffset(0))),

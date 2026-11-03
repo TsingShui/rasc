@@ -205,7 +205,7 @@ pub(super) fn definition(
         };
         if facts.key.class != key
             || facts.key.method != element.method()
-            || facts.access_flags != 0x401
+            || !crate::substrate::flags::interface_method(facts.access_flags)
             || facts.name != element.name()
             || facts.prototype != element.prototype()
             || declaration.signature().is_some()

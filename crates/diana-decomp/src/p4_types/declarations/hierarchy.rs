@@ -100,7 +100,7 @@ pub(super) fn collect<'a>(
         let Some(parent) = lookup(catalog, parent, budget)? else {
             return Ok(None);
         };
-        if parent.access_flags & 0x200 != 0 {
+        if parent.access_flags & crate::substrate::flags::INTERFACE != 0 {
             return Ok(None);
         }
         push(&mut pending, (parent, false), budget)?;
@@ -109,7 +109,7 @@ pub(super) fn collect<'a>(
             let Some(interface) = lookup(catalog, interface, budget)? else {
                 return Ok(None);
             };
-            if interface.access_flags & 0x200 == 0 {
+            if interface.access_flags & crate::substrate::flags::INTERFACE == 0 {
                 return Ok(None);
             }
             push(&mut pending, (interface, false), budget)?;

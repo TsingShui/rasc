@@ -84,7 +84,7 @@ fn collect_impl(
                     && method_idx == target
                 {
                     let declaration = declaration?;
-                    native_target = access_flags == 1
+                    native_target = access_flags == crate::substrate::flags::PUBLIC
                         && declaration.name.matches_with(&name, control)?
                         && crate::substrate::owned::copy_proto(&declaration.prototype, control)?
                             == prototype;
@@ -113,7 +113,7 @@ fn collect_impl(
     for method in &class.methods {
         budget.charge_work(1)?;
         if method.name == name && method.prototype == prototype {
-            if method.access_flags != 1
+            if method.access_flags != crate::substrate::flags::PUBLIC
                 || method.generic
                 || !matches!(&method.throws, Some(throws) if throws.is_empty())
             {
@@ -176,7 +176,9 @@ fn collect_impl(
         for method in &ancestor.methods {
             budget.charge_work(1)?;
             if method.name == name && method.prototype == bridge {
-                if method.access_flags & (1 | 8 | 16) != 1
+                if method.access_flags
+                    & (1 | crate::substrate::flags::STATIC | crate::substrate::flags::FINAL)
+                    != crate::substrate::flags::PUBLIC
                     || method.generic
                     || !matches!(&method.throws, Some(throws) if throws.is_empty())
                 {

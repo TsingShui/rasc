@@ -894,13 +894,13 @@ fn decode_impl<'a>(
             },
         )
     };
-    let frame = if input.access_flags() & 8 != 0 {
+    let frame = if input.access_flags() & crate::substrate::flags::STATIC != 0 {
         MethodFrame::Static
     } else {
         let owner = input
             .method_reference(input.method_id(), budget)?
             .owner_type;
-        if input.access_flags() & 0x10000 != 0 {
+        if input.access_flags() & crate::substrate::flags::CONSTRUCTOR != 0 {
             MethodFrame::Constructor(owner)
         } else {
             MethodFrame::Instance(owner)
@@ -1890,9 +1890,9 @@ fn decode_impl<'a>(
             casts,
             strings,
             frame,
-            method_monitor: if input.access_flags() & 0x20 == 0 {
+            method_monitor: if input.access_flags() & crate::substrate::flags::SYNCHRONIZED == 0 {
                 None
-            } else if input.access_flags() & 8 != 0 {
+            } else if input.access_flags() & crate::substrate::flags::STATIC != 0 {
                 Some(MethodMonitor::DeclaringClass)
             } else {
                 Some(MethodMonitor::This)

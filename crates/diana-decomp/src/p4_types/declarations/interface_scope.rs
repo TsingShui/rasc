@@ -65,7 +65,9 @@ pub(crate) fn collect(
         let Some(interface) = catalog.class(&name, control)? else {
             return Ok(None);
         };
-        if interface.access_flags & (1 | 0x200 | 0x400) != (1 | 0x200 | 0x400)
+        if interface.access_flags
+            & (1 | crate::substrate::flags::INTERFACE | crate::substrate::flags::ABSTRACT)
+            != (1 | crate::substrate::flags::INTERFACE | crate::substrate::flags::ABSTRACT)
             || interface.enclosing_scope
             || !interface.interfaces.is_empty()
             || !matches!(
@@ -95,7 +97,7 @@ pub(crate) fn collect(
             control.charge_work(1)?;
             let specialized = specialization
                 && method.signature.as_deref() == Some(&[40, 84, 84, 59, 41, 84, 84, 59]);
-            if method.access_flags != 0x401
+            if !crate::substrate::flags::interface_method(method.access_flags)
                 || method.generic
                 || method.signature.is_some() && !specialized
                 || !matches!(&method.throws, Some(throws) if throws.is_empty())
@@ -110,7 +112,7 @@ pub(crate) fn collect(
                         || specialized && implementation.prototype == string_identity())
                 {
                     if matched
-                        || implementation.access_flags != 1
+                        || implementation.access_flags != crate::substrate::flags::PUBLIC
                         || implementation.generic
                         || !matches!(&implementation.throws, Some(throws) if throws.is_empty())
                     {
@@ -187,7 +189,9 @@ pub(super) fn catalog_plain(
         };
         if !interface.interfaces.is_empty()
             || interface.enclosing_scope
-            || interface.access_flags & (1 | 0x200 | 0x400) != (1 | 0x200 | 0x400)
+            || interface.access_flags
+                & (1 | crate::substrate::flags::INTERFACE | crate::substrate::flags::ABSTRACT)
+                != (1 | crate::substrate::flags::INTERFACE | crate::substrate::flags::ABSTRACT)
             || !matches!(
                 interface.coverage,
                 crate::input::DeclarationCoverage::AllDeclarations
@@ -218,7 +222,7 @@ pub(super) fn catalog_plain(
                 && class.signature.is_some();
             if method.generic
                 || method.signature.is_some() && !specialized
-                || method.access_flags != 0x401
+                || !crate::substrate::flags::interface_method(method.access_flags)
             {
                 return Ok(false);
             }
@@ -228,7 +232,7 @@ pub(super) fn catalog_plain(
                 found |= own.name == method.name
                     && (own.prototype == method.prototype
                         || specialized && own.prototype == string_identity())
-                    && own.access_flags == 1;
+                    && own.access_flags == crate::substrate::flags::PUBLIC;
             }
             if !found {
                 return Ok(false);

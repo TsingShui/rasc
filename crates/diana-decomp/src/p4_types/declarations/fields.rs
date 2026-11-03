@@ -37,8 +37,10 @@ pub(crate) fn bind_own_int_write(
     };
     if native.same_named_fields != 1
         || native.access_flags != evidence.access_flags
-        || native.access_flags & 8 != 0
-        || native.access_flags & (16 | 64) == (16 | 64)
+        || native.access_flags & crate::substrate::flags::STATIC != 0
+        || native.access_flags
+            & (crate::substrate::flags::FINAL | crate::substrate::flags::VOLATILE)
+            == (crate::substrate::flags::FINAL | crate::substrate::flags::VOLATILE)
     {
         return Err(missing());
     }

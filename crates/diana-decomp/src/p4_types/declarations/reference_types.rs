@@ -53,9 +53,9 @@ fn named_type(
         }
     }
     if !lexical && !directory(class, &caller, budget)?
-        || class.access_flags & 1 == 0
+        || class.access_flags & crate::substrate::flags::PUBLIC == 0
         || class.access_flags & crate::substrate::flags::ANNOTATION != 0
-        || !allow_interface && class.access_flags & 0x200 != 0
+        || !allow_interface && class.access_flags & crate::substrate::flags::INTERFACE != 0
     {
         return Ok(Some(false));
     }

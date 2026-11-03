@@ -54,7 +54,7 @@ fn declaration_impl(
     let abstract_method = flags & 0x400 != 0;
     let interface = input.owner_access_flags() & crate::substrate::flags::INTERFACE != 0;
     if (interface && (native || flags & 7 != 1))
-        || (abstract_method && input.owner_access_flags() & 0x400 == 0)
+        || (abstract_method && input.owner_access_flags() & crate::substrate::flags::ABSTRACT == 0)
     {
         return Ok(None);
     }
@@ -186,7 +186,9 @@ pub(super) fn check_target(
         .prototype
         .parameter_words
         .0
-        .checked_add(u64::from(input.access_flags() & 8 == 0))
+        .checked_add(u64::from(
+            input.access_flags() & crate::substrate::flags::STATIC == 0,
+        ))
         .ok_or(RequestError::PlatformCapacity)?;
     target_limit(JavaTargetItem::ParameterWords, words, 255)?;
     target_limit(
@@ -315,7 +317,7 @@ fn declaration_type(
         return reference_type(&descriptor, output, budget);
     }
     if let Some(class) = catalog.class(&descriptor, budget)?
-        && (class.access_flags & 1 == 0 || class.enclosing_scope)
+        && (class.access_flags & crate::substrate::flags::PUBLIC == 0 || class.enclosing_scope)
     {
         return Ok(false);
     }

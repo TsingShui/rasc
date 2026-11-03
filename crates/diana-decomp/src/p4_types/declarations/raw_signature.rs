@@ -163,7 +163,12 @@ pub(super) fn object_identity(
     if !method.generic {
         return Ok(true);
     }
-    if method.access_flags & (1 | 8 | 0x40 | 0x80) != (1 | 8) {
+    if method.access_flags
+        & (1 | crate::substrate::flags::STATIC
+            | crate::substrate::flags::BRIDGE
+            | crate::substrate::flags::VARARGS)
+        != (1 | crate::substrate::flags::STATIC)
+    {
         return Ok(false);
     }
     let Some(signature) = &method.signature else {

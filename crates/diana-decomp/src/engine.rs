@@ -283,7 +283,7 @@ impl<'a> Engine<'a> {
             for entry in ownership.nested() {
                 control.charge_work(1)?;
                 if entry.class() == key.class_def {
-                    instance = entry.access_flags() & 8 == 0;
+                    instance = entry.access_flags() & crate::substrate::flags::STATIC == 0;
                 }
             }
             let mut constructor_captures = Vec::new();

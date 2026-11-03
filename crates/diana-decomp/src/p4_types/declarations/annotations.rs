@@ -124,7 +124,7 @@ fn meta_contract(
     for method in &class.methods {
         control.charge_work(1)?;
         if same(&method.name, "value", control)? && same(&method.prototype, prototype, control)? {
-            if method.access_flags != 0x401
+            if !crate::substrate::flags::interface_method(method.access_flags)
                 || method.generic
                 || !matches!(&method.throws, Some(throws) if throws.is_empty())
             {
@@ -176,7 +176,9 @@ fn enum_value(
     else {
         return Ok(false);
     };
-    Ok(evidence.access_flags == 0x4019)
+    Ok(crate::substrate::flags::enum_constant(
+        evidence.access_flags,
+    ))
 }
 fn meta(
     index: &crate::input::ProgramIndex<'_>,
@@ -395,7 +397,7 @@ fn declaration(
     };
     let context = index.class_context(id, control)?;
     let marker = "Ljava/lang/annotation/Annotation;";
-    if native.access_flags != 0x2601
+    if !crate::substrate::flags::annotation_interface(native.access_flags)
         || evidence.access_flags & !0x20 != native.access_flags
         || !matches!(
             evidence.coverage,
@@ -467,7 +469,7 @@ fn declaration(
                 valid = false;
                 return Ok(());
             };
-            if access_flags != 0x401 {
+            if !crate::substrate::flags::interface_method(access_flags) {
                 valid = false;
             }
             for parent in [object, annotation_base] {
@@ -475,7 +477,7 @@ fn declaration(
                     control.charge_work(1)?;
                     if inherited.name == name
                         && inherited.prototype.starts_with(&[40, 41])
-                        && inherited.access_flags & (1 | 4) != 0
+                        && inherited.access_flags & (1 | crate::substrate::flags::PROTECTED) != 0
                     {
                         valid = false;
                     }

@@ -148,13 +148,16 @@ fn verify_impl(
                 | crate::substrate::flags::INTERFACE
                 | crate::substrate::flags::ABSTRACT)
             != 0
-            || class.access_flags & 0x400 == 0
+            || class.access_flags & crate::substrate::flags::ABSTRACT == 0
             || !fields.is_empty()
         {
             return Ok(None);
         }
-    } else if class.access_flags & !(1 | 0x10 | 0x400) != 0
-        || class.access_flags & (0x10 | 0x400) == 0x410
+    } else if class.access_flags
+        & !(1 | crate::substrate::flags::FINAL | crate::substrate::flags::ABSTRACT)
+        != 0
+        || class.access_flags & (crate::substrate::flags::FINAL | crate::substrate::flags::ABSTRACT)
+            == 0x410
     {
         return Ok(None);
     }
@@ -235,7 +238,7 @@ fn verify_impl(
             {
                 fields_admitted = false;
             }
-            if field.access_flags & (8 | 16) == (8 | 16) {
+            if field.access_flags & (8 | crate::substrate::flags::FINAL) == (8 | crate::substrate::flags::FINAL) {
                 let mut assigned = false;
                 for member in members {
                     control.charge_work(1)?;
@@ -258,7 +261,7 @@ fn verify_impl(
                     preparation.push(expression, control)?;
                     preparation.push("; }\n", control)?;
                 } else { fields_admitted = false; }
-            } else if field.access_flags & 16 != 0 {
+            } else if field.access_flags & crate::substrate::flags::FINAL != 0 {
                 let mut constructors = 0usize;
                 for member in members {
                     control.charge_work(1)?;
@@ -272,7 +275,7 @@ fn verify_impl(
                 }
                 if constructors == 0 { fields_admitted = false; }
             }
-            if field.access_flags & 16 == 0
+            if field.access_flags & crate::substrate::flags::FINAL == 0
                 && let crate::FieldDeclarationOutput::Java(declaration) = &actual.declaration
                 && let Some(block) = declaration.preparation() {
                 preparation.push(block, control)?;
@@ -419,7 +422,8 @@ fn verify_impl(
         header.push(annotations.source(), control)?;
     }
     for (bit, word) in [(1, "public "), (0x10, "final "), (0x400, "abstract ")] {
-        if class.access_flags & bit != 0 && !(interface && bit == 0x400) {
+        if class.access_flags & bit != 0 && !(interface && bit == crate::substrate::flags::ABSTRACT)
+        {
             header.push(word, control)?;
         }
     }

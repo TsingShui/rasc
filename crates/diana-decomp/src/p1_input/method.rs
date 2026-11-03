@@ -532,7 +532,7 @@ impl<'a> ProgramIndex<'a> {
                             self.method_reference(id, budget)?;
                             if matches!(spec.opcode,0x6e..=0x72|0x74..=0x78)
                                 && let Some(target) = self.local_method(id, budget)?
-                                && (target.access_flags & 8 != 0)
+                                && (target.access_flags & crate::substrate::flags::STATIC != 0)
                                     != matches!(spec.opcode, 0x71 | 0x77)
                             {
                                 return Err(MethodError::Malformed {

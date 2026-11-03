@@ -165,14 +165,18 @@ pub(super) fn verify(
         || if constructor {
             flags & !0x10007 != 0
                 || flags & 0x10000 == 0
-                || input.owner_access_flags() & 0x6200 != 0
+                || input.owner_access_flags()
+                    & (crate::substrate::flags::ENUM
+                        | crate::substrate::flags::ANNOTATION
+                        | crate::substrate::flags::INTERFACE)
+                    != 0
         } else if initializer {
             false
         } else {
             !crate::substrate::flags::method_valid(flags) || flags & 0x1000 != 0 && flags & 8 == 0
         }
         || !crate::substrate::flags::visibility_valid(flags)
-        || input.owner_access_flags() & 0x200 != 0
+        || input.owner_access_flags() & crate::substrate::flags::INTERFACE != 0
     {
         *refused = Some("method_flags");
         return Ok(None);

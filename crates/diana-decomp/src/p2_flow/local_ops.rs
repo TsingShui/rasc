@@ -162,7 +162,7 @@ pub(super) fn initialization(
     }
     index.check_producer_words(pc, spec, layout, operands, budget)?;
     if let Some(local) = index.local_method(reference, budget)?
-        && local.access_flags & 8 != 0
+        && local.access_flags & crate::substrate::flags::STATIC != 0
     {
         return Err(crate::input::MethodError::Malformed {
             pc,

@@ -56,8 +56,12 @@ pub(crate) fn catch_type(
         };
         if class.generic
             || class.enclosing_scope
-            || class.access_flags & 1 == 0
-            || class.access_flags & 0x6200 != 0
+            || class.access_flags & crate::substrate::flags::PUBLIC == 0
+            || class.access_flags
+                & (crate::substrate::flags::ENUM
+                    | crate::substrate::flags::ANNOTATION
+                    | crate::substrate::flags::INTERFACE)
+                != 0
         {
             return Ok(false);
         }

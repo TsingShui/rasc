@@ -46,7 +46,9 @@ fn collect_impl(
     let Some(nested) = nested else {
         return Ok(None);
     };
-    if nested.access_flags() & 8 != 0 || input.access_flags() & 0x10008 != 0x10000 {
+    if nested.access_flags() & crate::substrate::flags::STATIC != 0
+        || !crate::substrate::flags::instance_constructor(input.access_flags())
+    {
         return Ok(None);
     }
     let outer = copy_units(
@@ -75,7 +77,7 @@ fn collect_impl(
         budget.charge_work(1)?;
         if method.name == [60, 105, 110, 105, 116, 62] && method.prototype == [40, 41, 86] {
             if object_constructor
-                || method.access_flags != 1
+                || method.access_flags != crate::substrate::flags::PUBLIC
                 || method.generic
                 || !matches!(&method.throws, Some(throws) if throws.is_empty())
             {
@@ -96,7 +98,9 @@ fn collect_impl(
     ) || class.generic
         || enclosing.generic
         || !class.interfaces.is_empty()
-        || class.access_flags & (1 | 0x10 | 0x400) != input.owner_access_flags()
+        || class.access_flags
+            & (1 | crate::substrate::flags::FINAL | crate::substrate::flags::ABSTRACT)
+            != input.owner_access_flags()
         || !matches!(class.parent.as_deref(), Some(parent) if parent == crate::p4_types::BuiltinReference::Object.descriptor())
     {
         return Ok(None);
@@ -121,7 +125,14 @@ fn collect_impl(
         budget.charge_work(1)?;
         if method.name == [60, 105, 110, 105, 116, 62] && method.prototype == prototype {
             if method.generic
-                || method.access_flags & 7 != input.access_flags() & 7
+                || method.access_flags
+                    & (crate::substrate::flags::PUBLIC
+                        | crate::substrate::flags::PRIVATE
+                        | crate::substrate::flags::PROTECTED)
+                    != input.access_flags()
+                        & (crate::substrate::flags::PUBLIC
+                            | crate::substrate::flags::PRIVATE
+                            | crate::substrate::flags::PROTECTED)
                 || !matches!(&method.throws, Some(throws) if throws.is_empty())
             {
                 return Ok(None);
@@ -149,11 +160,11 @@ fn collect_impl(
                         "capture field visitor returned method",
                     ));
                 };
-                if original.access_flags & 0x1000 == 0 {
+                if original.access_flags & crate::substrate::flags::SYNTHETIC == 0 {
                     return Ok(());
                 }
                 let declaration = original.declaration?;
-                if original.access_flags != 0x1010
+                if !crate::substrate::flags::capture_field(original.access_flags)
                     || !declaration.field_type.matches_with(&outer, budget)?
                     || field.is_some()
                 {

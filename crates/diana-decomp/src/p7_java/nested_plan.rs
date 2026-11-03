@@ -65,7 +65,7 @@ pub(crate) fn admit(
         if entry.class() != key.class_def {
             continue;
         }
-        if entry.access_flags() & 8 != 0 {
+        if entry.access_flags() & crate::substrate::flags::STATIC != 0 {
             return Ok(true);
         }
         if captures.is_empty() {
@@ -188,7 +188,13 @@ fn verify_impl(
         return Ok(None);
     }
     let class = index.class_with(key.class_def, control)?;
-    if class.access_flags != 1 {
+    if class.access_flags & crate::substrate::flags::PUBLIC == 0
+        || class.access_flags
+            & !(crate::substrate::flags::PUBLIC
+                | crate::substrate::flags::FINAL
+                | crate::substrate::flags::SYNTHETIC)
+            != 0
+    {
         return Ok(None);
     }
     if scope.flags() & 8 != 0 {
@@ -211,7 +217,13 @@ fn verify_impl(
     }
     let field = &fields[0];
     if field.key.class != key
-        || field.access_flags != 0x1010
+        || field.access_flags
+            & !(crate::substrate::flags::PRIVATE
+                | crate::substrate::flags::FINAL
+                | crate::substrate::flags::SYNTHETIC)
+            != 0
+        || field.access_flags & (crate::substrate::flags::PRIVATE | crate::substrate::flags::FINAL)
+            != (crate::substrate::flags::PRIVATE | crate::substrate::flags::FINAL)
         || !matches!(&field.facts, Some(facts) if facts.descriptor == scope.outer())
     {
         return Ok(None);

@@ -57,7 +57,11 @@ pub(crate) fn collect(
             || enclosing.generic
             || !class.interfaces.is_empty()
             || !enclosing.interfaces.is_empty()
-            || entry.access_flags() & 7 != 1
+            || entry.access_flags()
+                & (crate::substrate::flags::PUBLIC
+                    | crate::substrate::flags::PRIVATE
+                    | crate::substrate::flags::PROTECTED)
+                != crate::substrate::flags::PUBLIC
         {
             return Ok(None);
         }

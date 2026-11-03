@@ -65,14 +65,18 @@ pub(crate) fn collect(
         if !super::raw_signature::raw_class(parent, control)?
             || parent.enclosing_scope
             || !parent.interfaces.is_empty()
-            || parent.access_flags & (0x10 | 0x200) != 0
+            || parent.access_flags
+                & (crate::substrate::flags::FINAL | crate::substrate::flags::INTERFACE)
+                != 0
         {
             return Ok(None);
         }
-        if parent.access_flags & 0x400 != 0 && class.access_flags & 0x400 == 0 {
+        if parent.access_flags & crate::substrate::flags::ABSTRACT != 0
+            && class.access_flags & crate::substrate::flags::ABSTRACT == 0
+        {
             return Ok(None);
         }
-        if parent.access_flags & 1 == 0 {
+        if parent.access_flags & crate::substrate::flags::PUBLIC == 0 {
             return Ok(None);
         }
     }
@@ -100,7 +104,7 @@ pub(crate) fn collect(
                     control.charge_work(1)?;
                     for inherited in &ancestor.methods {
                         control.charge_work(1)?;
-                        if inherited.access_flags & 2 != 0
+                        if inherited.access_flags &crate::substrate::flags::PRIVATE != 0
                             || !crate::context::same_units(&name, &inherited.name, control)?
                         {
                             continue;
@@ -122,9 +126,9 @@ pub(crate) fn collect(
                                 for method in &own.methods {
                                     control.charge_work(1)?;
                                     if method.name == name && method.prototype == prototype {
-                                        source_override = method.access_flags & 7 == 1
-                                            && inherited.access_flags & (1 | 16) == 1
-                                            && (method.access_flags & 8) == (inherited.access_flags & 8)
+                                        source_override = method.access_flags & (crate::substrate::flags::PUBLIC | crate::substrate::flags::PRIVATE | crate::substrate::flags::PROTECTED) ==crate::substrate::flags::PUBLIC
+                                            && inherited.access_flags & (1 | crate::substrate::flags::FINAL) ==crate::substrate::flags::PUBLIC
+                                            && (method.access_flags &crate::substrate::flags::STATIC) == (inherited.access_flags &crate::substrate::flags::STATIC)
                                             && !method.generic
                                             && matches!(&method.throws, Some(throws) if throws.is_empty());
                                     }
@@ -141,10 +145,10 @@ pub(crate) fn collect(
                                         76, 106, 97, 118, 97, 47, 108, 97, 110, 103, 47, 83, 116,
                                         114, 105, 110, 103, 59,
                                     ]
-                                && inherited.access_flags & (1 | 8 | 16) == 1;
-                            let bridge_declaration = access_flags == 0x1041
+                                && inherited.access_flags & (1 |crate::substrate::flags::STATIC | crate::substrate::flags::FINAL) ==crate::substrate::flags::PUBLIC;
+                            let bridge_declaration = crate::substrate::flags::bridge(access_flags)
                                 && prototype == inherited.prototype
-                                && inherited.access_flags & (1 | 8 | 16) == 1;
+                                && inherited.access_flags & (1 |crate::substrate::flags::STATIC | crate::substrate::flags::FINAL) ==crate::substrate::flags::PUBLIC;
                             if !covariant && !bridge_declaration && !exact_override {
                                 admitted = false;
                             }
