@@ -3,8 +3,8 @@ use crate::input::{DexContainer, InputError, InputProblem, ProgramIndex};
 use crate::substrate::owned::{copy_proto, copy_units, reserve};
 use crate::substrate::report::*;
 use crate::{
-    ByteOffset, ClassKey, DebugSourceKind, DeclarationCatalog, DiagnosticId, EvidencePolicy,
-    FailureKind, MethodBudget, MethodKey, RequestError, RunContext,
+    ByteOffset, ClassKey, DebugSourceKind, DeclarationCatalog, DiagnosticId, FailureKind,
+    MethodBudget, MethodKey, RequestError, RunContext,
 };
 
 // Phase implementations can name the credential, but only the scheduler can construct it.
@@ -84,7 +84,7 @@ impl<'a> Engine<'a> {
     pub fn open(
         images: Vec<DexImage<'a>>,
         options: Options,
-        catalog: DeclarationCatalog,
+        _catalog: DeclarationCatalog,
         control: &mut RunContext<'_>,
     ) -> Result<Self, InputError> {
         control.checkpoint()?;
@@ -153,13 +153,11 @@ impl<'a> Engine<'a> {
                 index,
             });
         }
-        // The product path takes declaration facts from the analysed input
-        // itself. Caller-supplied external declarations remain available only to
-        // the strict verification policy.
-        let environment = catalog.environment;
-        let trusted = catalog.policy() == EvidencePolicy::TrustedReferences;
-        let mut facts = DeclarationCatalog::empty(environment).with_policy(catalog.policy());
-        if trusted {
+        // Declaration facts come only from the analysed input. Caller-supplied
+        // external declarations are not consulted.
+        let environment = _catalog.environment;
+        let mut facts = DeclarationCatalog::empty(environment);
+        {
             for image in &indexed {
                 let derived = crate::p0_knowledge::input_facts::from_input(
                     &image.index,
@@ -178,8 +176,6 @@ impl<'a> Engine<'a> {
                 })?;
                 facts.extend(derived);
             }
-        } else {
-            facts = catalog;
         }
         Ok(Self {
             images: indexed,

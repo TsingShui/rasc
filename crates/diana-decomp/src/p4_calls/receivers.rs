@@ -32,7 +32,7 @@ pub(crate) fn collect_receiver(
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<Option<ReceiverDeclaration>, RequestError> {
     let declared = collect_receiver_declared(input, catalog, invocation, kind, budget)?;
-    if declared.is_some() || catalog.policy() != crate::EvidencePolicy::TrustedReferences {
+    if declared.is_some() {
         return Ok(declared);
     }
     let reference = invocation.reference;
@@ -216,48 +216,6 @@ impl ReceiverDeclaration {
             budget,
         )? == Some(false)
         {
-            return Ok(None);
-        }
-        // External declaration facts are optional. When the receiver's own owner
-        // or its static type has no catalog entry, the original reference still
-        // fixes the call; the missing hierarchy/hiding facts stay unknown.
-        let (Some(class), Some(source)) = (
-            catalog.class(&target.owner, budget)?,
-            catalog.class(parameter, budget)?,
-        ) else {
-            if catalog.policy() == crate::EvidencePolicy::TrustedReferences {
-                return Ok(Some(ReceiverContract {
-                    _sealed: (),
-                    reference: target.reference,
-                    owner: retain(&target.owner, budget)?,
-                    name: retain(&target.name, budget)?,
-                    prototype: retain(&target.prototype, budget)?,
-                    kind: target.kind,
-                    arity: target.arity,
-                    declared_throws: super::throws::retain(Some(&target.declared_throws), budget)?,
-                }));
-            }
-            return Ok(None);
-        };
-        // P4 has checked the referenced declaration group. The final static
-        // receiver type can introduce hiding/overloads, so P8 discharges this
-        // source-binding obligation only after P5 chooses that type.
-        if !super::overloads::unique_target(
-            catalog,
-            class,
-            &caller,
-            &target.name,
-            &target.prototype,
-            super::overloads::Scope::Receiver {
-                source: if target.kind == ReceiverKind::Super {
-                    class
-                } else {
-                    source
-                },
-                direct: target.kind == ReceiverKind::Direct,
-            },
-            budget,
-        )? {
             return Ok(None);
         }
         Ok(Some(ReceiverContract {

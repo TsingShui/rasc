@@ -199,38 +199,12 @@ pub(crate) fn collect(
 }
 fn collect_impl(
     input: &crate::input::MethodInput<'_, '_>,
-    catalog: &crate::DeclarationCatalog,
+    _catalog: &crate::DeclarationCatalog,
     control: &mut impl InputControl,
 ) -> Result<Option<RawSignature>, RequestError> {
     let Some(signature) = crate::input::signature::method(input, control)? else {
         return Ok(None);
     };
-    if catalog.policy() == crate::EvidencePolicy::TrustedReferences {
-        let mut units = Vec::new();
-        for &unit in signature.units() {
-            push(&mut units, unit, control)?;
-        }
-        return Ok(Some(RawSignature { units }));
-    }
-    let owner = crate::substrate::owned::copy_units(input.owner(), control)?;
-    let Some(class) = catalog.class(&owner, control)? else {
-        return Ok(None);
-    };
-    let name = crate::substrate::owned::copy_units(input.declaration().name, control)?;
-    let proto = crate::substrate::owned::copy_proto(&input.declaration().prototype, control)?;
-    let mut found = false;
-    for method in &class.methods {
-        control.charge_work(1)?;
-        if method.name == name
-            && method.prototype == proto
-            && method.signature.as_deref() == Some(signature.units())
-        {
-            found = erases_to(signature.units(), &proto, control)?;
-        }
-    }
-    if !found {
-        return Ok(None);
-    }
     let mut units = Vec::new();
     for &unit in signature.units() {
         push(&mut units, unit, control)?;

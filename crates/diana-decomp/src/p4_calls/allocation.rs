@@ -30,7 +30,7 @@ pub(crate) fn resolve(
     // A caller defined in this input has no catalog entry either, so the
     // declared path cannot establish its own hierarchy. Under the reference
     // policy the original call reference binds the constructor on its own.
-    if catalog.policy() == crate::EvidencePolicy::TrustedReferences {
+    {
         let caller = copy_units(input.owner(), budget)?;
         if catalog.class(expected_owner, budget)?.is_none()
             || catalog.class(&caller, budget)?.is_none()

@@ -171,7 +171,7 @@ pub(super) fn collect_static(
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<Option<StaticContract>, RequestError> {
     let declared = collect_static_declared(input, catalog, id, budget)?;
-    if declared.is_some() || catalog.policy() != crate::EvidencePolicy::TrustedReferences {
+    if declared.is_some() {
         return Ok(declared);
     }
     let reference = input.method_reference(id, budget)?;
@@ -490,7 +490,7 @@ pub(super) fn binding_available(
     let Some(class) = catalog.class(&contract.owner, budget)? else {
         // An unknown external owner does not invalidate the original reference.
         // Without hierarchy/overload facts there is no rival target to reject.
-        return Ok(catalog.policy() == crate::EvidencePolicy::TrustedReferences);
+        return Ok(true);
     };
     let caller = copy_units(input.owner(), budget)?;
     Ok(super::overloads::unique_target(

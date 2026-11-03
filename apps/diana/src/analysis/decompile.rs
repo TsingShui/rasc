@@ -68,8 +68,7 @@ pub fn run(
     run_with_catalog(
         scope,
         selector,
-        DeclarationCatalog::empty(EnvironmentId(0))
-            .with_policy(diana_decomp::EvidencePolicy::TrustedReferences),
+        DeclarationCatalog::empty(EnvironmentId(0)),
         control,
     )
 }

@@ -29,24 +29,11 @@ pub struct ExternalMethodSignature {
     pub prototype: Vec<u16>,
 }
 
-/// How a consumer treats a reference that has no matching declaration entry.
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub enum EvidencePolicy {
-    /// Missing declaration evidence declines the affected Java capability.
-    #[default]
-    Declared,
-    /// The original DEX reference carries the call's owner, name and prototype,
-    /// so it binds the call on its own. Access flags, hierarchy, generic
-    /// signatures and throws remain unknown and are never asserted.
-    TrustedReferences,
-}
-
 /// Immutable declaration evidence for one caller environment. Signatures alone
 /// remain partial; class directories carry explicit coverage. An absent entry
 /// means evidence is missing, never that a method cannot exist.
 pub struct DeclarationCatalog {
     pub(crate) environment: EnvironmentId,
-    policy: EvidencePolicy,
     methods: Vec<ExternalMethodSignature>,
     classes: Vec<super::ExternalClassDeclaration>,
     fields: Vec<super::ExternalFieldEvidence>,
@@ -56,7 +43,6 @@ impl DeclarationCatalog {
     pub fn empty(environment: EnvironmentId) -> Self {
         Self {
             environment,
-            policy: EvidencePolicy::default(),
             methods: Vec::new(),
             classes: Vec::new(),
             fields: Vec::new(),
@@ -72,7 +58,6 @@ impl DeclarationCatalog {
     ) -> Self {
         Self {
             environment,
-            policy: EvidencePolicy::default(),
             methods,
             classes: Vec::new(),
             fields: Vec::new(),
@@ -88,7 +73,6 @@ impl DeclarationCatalog {
     ) -> Self {
         Self {
             environment,
-            policy: EvidencePolicy::default(),
             methods,
             classes,
             fields: Vec::new(),
@@ -97,7 +81,6 @@ impl DeclarationCatalog {
     /// Appends facts derived from another input image of the same request.
     pub(crate) fn extend(&mut self, other: Self) {
         let Self {
-            policy: _,
             methods,
             classes,
             fields,
@@ -106,17 +89,6 @@ impl DeclarationCatalog {
         self.methods.extend(methods);
         self.classes.extend(classes);
         self.fields.extend(fields);
-    }
-
-    /// Selects how an absent declaration entry is treated. The default keeps
-    /// every Java capability gated on declared evidence.
-    pub fn with_policy(mut self, policy: EvidencePolicy) -> Self {
-        self.policy = policy;
-        self
-    }
-
-    pub(crate) fn policy(&self) -> EvidencePolicy {
-        self.policy
     }
 
     /// Takes caller-owned exact field facts. Missing/duplicate entries remain unproven and
