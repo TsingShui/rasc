@@ -12,7 +12,7 @@ apps/diana/             # Diana CLI/application package
 apps/diana-gui/         # Future GUI: documentation placeholder only
 apps/diana-web-ui/      # Future web interface: documentation placeholder only
 crates/diana-decomp/    # Independent native engine library
-docs/diana/            # Core design, algorithms, tasks and E2E specifications
+docs/diana/            # Core design, algorithms and contribution rules
 # The archived rasc tree was removed at commit 5cb156c; it remains in git history only.
 ```
 
@@ -45,7 +45,7 @@ Use `-p diana` or `-p diana-decomp` to select one package. Both share the root
 [Diana CI](.github/workflows/diana.yml) checks only scaffold format/lint/build,
 without publishing or pretending a zero-test run establishes functionality.
 Core tests run through public library interfaces with cargo-nextest. Their input,
-structure, debug and resource evidence is distinct from fixed Engine E2E acceptance.
+structure, debug and resource evidence does not establish real-application coverage.
 
 
 ## Local reference material
@@ -64,7 +64,6 @@ qualification and hard failures remain separate from readable output.
 
 - [Documentation entry](docs/diana/README.md)
 - [Specification chapters](docs/diana/spec/00-overview.md)
-- [Revisioned case specifications and independent expectations](docs/diana/e2e_cases.json)
 - [Sources and reproducibility](docs/diana/SOURCE_MAP.md)
 - Archived reference scope: removed from the tree at commit 5cb156c; see
   [SOURCE_MAP](docs/diana/SOURCE_MAP.md) for the pinned upstream anchors

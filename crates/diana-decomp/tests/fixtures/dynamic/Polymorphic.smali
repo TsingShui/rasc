@@ -1,5 +1,5 @@
 # Self-made 039 source for the invoke-polymorphic raw-profile regression.
-# Assemble with smali 2.5.2 (tests/e2e/toolchain.lock.json) into poly.dex.
+# Assemble with smali 2.5.2 into poly.dex.
 .class public final Lfixtures/Poly;
 .super Ljava/lang/Object;
 

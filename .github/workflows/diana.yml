@@ -3,8 +3,7 @@ name: Diana
 # Diana-only gates: format, lint, release build and the core Rust test suite.
 # `gates` runs the declared minimum toolchain (1.93) on three platforms; `latest`
 # reruns the same gates on current stable so new lints and warnings surface before
-# a toolchain bump. The prepared APK/DEX E2E assets stay untracked, so the E2E
-# runners remain an operator step. Windows keeps build/lint only because the core
+# a toolchain bump. Windows keeps build/lint only because the core
 # suite has no Windows evidence yet. No version preparation, artifact upload, tag
 # or release.
 

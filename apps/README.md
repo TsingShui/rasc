@@ -14,9 +14,8 @@ or CI job. They are not Cargo workspace members. No GUI framework, browser front
 WASM binding or engine portability contract is selected by creating them.
 Implement nothing there until explicitly requested and separately designed.
 
-The current CLI/engine tasks and E2E preparation remain unchanged; these directory
-reservations do not mark any capability complete. The archived rasc implementation
-was removed from the tree at commit 5cb156c and stays outside active builds and
-tests; only git history retains it.
+These directory reservations do not mark any capability complete. The archived
+rasc implementation was removed from the tree at commit 5cb156c and stays outside
+active builds and tests; only git history retains it.
 
 See the [specification chapters](../docs/diana/spec/00-overview.md).

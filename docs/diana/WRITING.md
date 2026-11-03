@@ -1,10 +1,9 @@
 # Diana Documentation Writing Rules
 
 This document governs active Diana documentation: `docs/diana/`, the root and
-application/engine READMEs, and their `AGENTS.md` files. The rules also apply to
-explanatory prose in `e2e_cases.json`. Archived reference material is outside this
-scope. The intended readers are document authors and agents that follow the
-contract.
+application/engine READMEs, and their `AGENTS.md` files. Archived reference material
+is outside this scope. The intended readers are document authors and agents that
+follow the contract.
 
 ## 1. Meaning before sentence shape
 
@@ -252,7 +251,7 @@ A prohibition that does not constrain behaviour is a misplaced scope exclusion.
 | Historical plans and execution records | Git history |
 | Current product status and document entry points | README |
 | Agent authorization, repository boundaries and contribution rules | AGENTS |
-| Case inputs and independent expectations | e2e_cases.json |
+| Case inputs and independent expectations | Core test fixtures and assertions |
 | Writing conventions | WRITING |
 
 Avoid duplicated historical narratives, speculative roadmaps and “first/final

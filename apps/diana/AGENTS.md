@@ -13,5 +13,5 @@ DESIGN and ALGORITHMS sections before changing application behavior.
 - Do not delegate to or depend on rasc, dexdec or rusty-dex. Reuse historical
   input/ZIP ideas only after focused review with compatibility and security evidence.
 - Exercise complex input, query, extraction and safety contracts through public
-  modules. Shared core inputs and independent oracles live under `tests/e2e/`.
+  modules. Core fixtures and independent expectations live with the Rust tests.
 - Build from the repository root with `cargo build --locked -p diana`.

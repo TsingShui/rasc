@@ -131,9 +131,8 @@ upstream URL and commit
   NOT fabricate a successful method with an empty body or exception stub.
 
 Application source lives in `apps/diana/src/` and engine source in
-`crates/diana-decomp/src/`. Shared self-made inputs and expected values live in
-`tests/e2e/`, generated artifacts in `.cache/e2e/`, and reference material in
-`.cache/references/`.
+`crates/diana-decomp/src/`. Self-made fixtures and independent expectations live
+with the Rust tests; reference material lives in `.cache/references/`.
 
 ## 2. Success and degradation are separated in the type system
 
@@ -283,7 +282,7 @@ A phase is an ownership/responsibility split and does not require one file per r
 | Facts | context/{mod,catalog,input_facts}.rs; cross-DEX lookup and lazy cache of P1 declaration facts | T01/T11 |
 | Data | substrate/{ids,origin,types,cfg,java}.rs; only the containers/IDs currently used | created together with the actual consumer |
 
-Diana MUST NOT create registry.rs, a Pass trait, a scheduling macro, a build.rs generator or a restart framework. An optional trace MUST use only a finite PhaseId and bounded events, and Diana MUST NOT give it its own test suite or platform. tests/support MUST connect only to existing public interfaces and the root tests/e2e assets; a core test MUST be split into files by behavior and MUST NOT construct goldens from private phase invocation counts.
+Diana MUST NOT create registry.rs, a Pass trait, a scheduling macro, a build.rs generator or a restart framework. An optional trace MUST use only a finite PhaseId and bounded events, and Diana MUST NOT give it its own test suite or platform. tests/support MUST connect only to existing public interfaces and local core fixtures; a core test MUST be split into files by behavior and MUST NOT construct goldens from private phase invocation counts.
 
 #### 3.2 Public interfaces and lifetime
 

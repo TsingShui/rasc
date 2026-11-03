@@ -79,7 +79,6 @@ integration boundaries. Report failures and unrun evidence accurately.
   detailed contracts are still being migrated.
 - [spec/00–10](docs/diana/spec/): product, input, phases, CLI and algorithms.
 - [SOURCE_MAP](docs/diana/SOURCE_MAP.md): sources, attribution and reference use.
-- [e2e_cases.json](docs/diana/e2e_cases.json): case inputs and independent expectations.
 - [CONTRIBUTING](docs/diana/CONTRIBUTING.md): detailed contribution rules.
 - [WRITING](docs/diana/WRITING.md): documentation conventions.
 

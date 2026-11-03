@@ -11,11 +11,10 @@ relevant work. Package-local instructions refine their respective scopes.
   not initialize/design their frameworks, browser UI or WASM bindings until
   separately requested.
 - `crates/diana-decomp/`: independent native engine and public library.
-- `docs/diana/`: design, algorithms, sources and revisioned E2E specifications.
+- `docs/diana/`: design, algorithms, sources and contribution rules.
 - `tools/audit/`: sensitive-input audit tooling.
 - `tools/fetch_references.py`: explicit reference downloads to ignored
   `.cache/references/`; no checksum checks, reference builds/tests or CI hooks.
-- `tests/e2e/`: shared self-made sources, inputs, independent oracles and core E2E runners.
 - The archived rasc tree (rasc source, dexdec, rusty-dex, patched vendor, old
   tests, skill/docs and release tooling) was removed from the working tree at
   commit 5cb156c. It remains reachable in git history only: do not restore it,
@@ -54,8 +53,8 @@ requirement strength or technical meaning.
 
 Technical documents specify supported inputs, algorithms, invariants and failure
 behavior. Current status belongs in README; historical plans and execution records
-are available in git history. `docs/diana/e2e_cases.json` owns the case/input/expected
-specification. Do not maintain a separate task or batch-record tree.
+are available in git history. Core tests own their fixtures and independent
+expectations. Do not maintain a separate task or batch-record tree.
 
 ## Architecture guardrails
 
@@ -125,15 +124,9 @@ or historical completion labels.
 Tests cross public libraries/modules for complex semantic, raw-integrity, malformed
 input and resource/file-safety behavior. Do not add CLI black-box/help/version/
 argument/column/getter/forwarding tests or empty tests to manufacture a pass.
-B01 freezes a reviewed revision, not an arbitrary case count or faulty format.
-Correct faulty recipes/oracles with independent evidence and recorded review;
-preserve problem IDs and valid semantics, append new counterexamples, and derive
-case/invocation denominators from the specification. Never drop required cases,
-change required Java to debug output to manufacture success or refresh truth
-from engine actual output.
-A specification revision is not B01 approval, fixture certification, production
-implementation permission or authorization for auxiliary-tool self-tests.
-Existing legacy tests remain in the reference but are not Diana acceptance.
+Contributors MUST retain independent expectations rather than refresh truth from
+engine output. A test pass does not establish real-application coverage or authorize
+an implementation change. Existing legacy tests remain in git history.
 
 ## Development setup
 
@@ -178,7 +171,7 @@ NOT request an exception.
 
 The previously agreed tests of Diana core behavior remain in scope: native
 DEX/decompiler semantics, input/query/extraction correctness and resource/file
-safety through public interfaces. Test tooling MAY support those core E2E cases,
+safety through public interfaces. Test tooling MAY support those core cases,
 but contributors MUST NOT test the tooling itself. Basic
 CLI/help/getter/forwarding tests remain excluded as described above.
 
@@ -213,12 +206,11 @@ fixed revisions for attribution/lookup, preserve local changes, and never build
 or test reference projects as part of downloading. Keep PDF-origin papers/slides
 as same-name UTF-8 TXT only: reuse existing text, otherwise convert with Poppler
 (and OCR when needed), and do not retain PDFs after successful conversion. Keep
-the original public URLs for online consultation. This does not change the
-separate core E2E fixture/toolchain integrity requirements.
+the original public URLs for online consultation.
 
 ## File verification
 
-Diana's download, preparation, cache and E2E tooling MUST NOT perform SHA-256
+Diana's download, preparation and cache tooling MUST NOT perform SHA-256
 verification or require it for acceptance. Existing digest records are
 informational provenance only, not gates. Agents MUST NOT restore those checks
 or substitute another content fingerprint without explicit user authorization.
