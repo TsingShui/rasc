@@ -101,7 +101,7 @@ fn candidate_impl(
     input: &MethodInput<'_, '_>,
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<Option<MethodId>, RequestError> {
-    if input.access_flags() != 0x1041 {
+    if !crate::substrate::flags::bridge(input.access_flags()) {
         return Ok(None);
     }
     let RawPrintable::Method(raw) = input.raw() else {

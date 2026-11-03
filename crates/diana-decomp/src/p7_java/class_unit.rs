@@ -141,9 +141,13 @@ fn verify_impl(
         }
     }
     let class = index.class_with(key.class_def, control)?;
-    let interface = class.access_flags & 0x200 != 0;
+    let interface = class.access_flags & crate::substrate::flags::INTERFACE != 0;
     if interface {
-        if class.access_flags & !(1 | 0x200 | 0x400) != 0
+        if class.access_flags
+            & !(crate::substrate::flags::PUBLIC
+                | crate::substrate::flags::INTERFACE
+                | crate::substrate::flags::ABSTRACT)
+            != 0
             || class.access_flags & 0x400 == 0
             || !fields.is_empty()
         {

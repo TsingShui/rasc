@@ -144,6 +144,14 @@ validated against DEX declaration syntax, and the implementation MUST NOT look t
 members after a lossy conversion. Display, Java literals and original identity are three
 different purposes.
 
+## Access flags
+
+Original `access_flags` bits retain their AOSP `dex-format` meaning per kind
+(class, field, method). Engine predicates derive kind validity, visibility and
+constructor shape from those bits; comparing a whole flag word against one
+observed literal is not a supported admission test, because compilers and D8/R8
+differ in optional bits such as `<clinit>` visibility or synthetic markers.
+
 ### Format bit fields and the complete opcode registry
 
 Let `w0..w4` be u16 code units; `a8=w0>>8`, `a4=(w0>>8)&15`, `b4=w0>>12`.

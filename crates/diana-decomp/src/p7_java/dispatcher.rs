@@ -97,16 +97,19 @@ pub(super) fn verify(
     type_names: &super::types::TypeNames,
     calls: &mut super::calls::SourceCalls,
     budget: &mut MethodBudget<'_, '_>,
+    refused: &mut Option<&'static str>,
 ) -> Result<Option<VerifiedJavaMethod>, RequestError> {
     let plan = plan.into_data();
     let storage = &plan.storage;
     let Some(final_assignments) = super::final_assignment::verify(storage, &plan.shape, budget)?
     else {
+        *refused = Some("final_assignment");
         return Ok(None);
     };
     let placements = super::exceptional::obligations(storage, budget)?;
     if !placements.is_empty() && !matches!(plan.shape, crate::p6_regions::Shape::Protected(Some(_)))
     {
+        *refused = Some("placements_without_protected");
         return Ok(None);
     }
     let ssa = &storage.typed;
@@ -123,6 +126,7 @@ pub(super) fn verify(
         .is_empty()
         && !matches!(plan.shape, crate::p6_regions::Shape::Protected(Some(_)))
     {
+        *refused = Some("abrupt_initializer");
         return Ok(None);
     }
     if !std::ptr::eq(
@@ -133,9 +137,6 @@ pub(super) fn verify(
             "dispatcher belongs to another method",
         ));
     }
-    if raw.annotations().parameter_range().is_some() {
-        return Ok(None);
-    }
     super::declarations::check_target(input, budget)?;
     let flags = input.access_flags();
     let initializer = super::initializers::is_initializer(input, budget)?;
@@ -143,6 +144,7 @@ pub(super) fn verify(
         && (!super::initializers::header_admitted(input, budget)?
             || !calls.throws.descriptors.is_empty())
     {
+        *refused = Some("initializer_header");
         return Ok(None);
     }
     let expected_monitor = if flags & 0x20 == 0 {
@@ -167,11 +169,12 @@ pub(super) fn verify(
         } else if initializer {
             false
         } else {
-            flags & !0x2183f != 0 || flags & 0x1000 != 0 && flags & 8 == 0
+            !crate::substrate::flags::method_valid(flags) || flags & 0x1000 != 0 && flags & 8 == 0
         }
-        || (flags & 7).count_ones() > 1
+        || !crate::substrate::flags::visibility_valid(flags)
         || input.owner_access_flags() & 0x200 != 0
     {
+        *refused = Some("method_flags");
         return Ok(None);
     }
     // Ownership metadata is only needed for nested classes.
@@ -188,6 +191,7 @@ pub(super) fn verify(
     };
     let name = if constructor && nested_scope.is_some() {
         let Some(scope) = &nested_scope else {
+            *refused = Some("nested_scope_name");
             return Ok(None);
         };
         let mut name = Vec::new();
@@ -216,12 +220,14 @@ pub(super) fn verify(
         copy_units(input.declaration().name, budget)?
     };
     if !initializer && !super::declarations::identifier(&name, budget)? {
+        *refused = Some("identifier_name");
         return Ok(None);
     }
     let mut catch_names = Vec::new();
     if let crate::p6_regions::Shape::Protected(Some(region)) = &plan.shape {
         let Some(names) = super::protected::names(input, catalog, storage, region, calls, budget)?
         else {
+            *refused = Some("catch_names");
             return Ok(None);
         };
         catch_names = names;
@@ -251,6 +257,7 @@ pub(super) fn verify(
         let Some(statements) =
             super::calls::operations(storage, key, calls, type_names, &placements, budget)?
         else {
+            *refused = Some("call_operations");
             return Ok(None);
         };
         let bound = &ssa.ssa.bound[index];
@@ -319,6 +326,7 @@ pub(super) fn verify(
                             .0,
                     );
                     if locals[ix(value.0)?].kind != Kind::Int {
+                        *refused = Some("dispatcher_value_kind");
                         return Ok(None);
                     }
                     let mut cases = Vec::new();
@@ -362,6 +370,7 @@ pub(super) fn verify(
                             .0,
                     );
                     let Some(value) = super::branch::returned(ssa, value)? else {
+                        *refused = Some("returned_use");
                         return Ok(None);
                     };
                     Transfer::Return(value)
@@ -383,6 +392,7 @@ pub(super) fn verify(
                     let Some(condition) =
                         super::conditions::lower(ssa, bound, block.terminal, budget)?
                     else {
+                        *refused = Some("condition_lowering");
                         return Ok(None);
                     };
                     Transfer::Branch {
@@ -461,6 +471,7 @@ pub(super) fn verify(
         for (index, descriptor) in calls.throws.descriptors.iter().enumerate() {
             budget.charge_work(1)?;
             let Some(name) = super::calls::type_name(descriptor, budget)? else {
+                *refused = Some("throws_type_name");
                 return Ok(None);
             };
             header.push(if index == 0 { " throws " } else { ", " }, budget)?;

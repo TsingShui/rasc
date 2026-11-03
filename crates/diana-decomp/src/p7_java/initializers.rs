@@ -50,8 +50,9 @@ pub(super) fn header_admitted(
     input: &MethodInput<'_, '_>,
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<bool, RequestError> {
+    let flags = input.access_flags();
     Ok(is_initializer(input, budget)?
-        && input.access_flags() == 0x10008
+        && crate::substrate::flags::class_initializer(flags)
         && input
             .declaration()
             .prototype

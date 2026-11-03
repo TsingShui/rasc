@@ -52,7 +52,7 @@ fn declaration_impl(
     let flags = input.access_flags();
     let native = flags & 0x100 != 0;
     let abstract_method = flags & 0x400 != 0;
-    let interface = input.owner_access_flags() & 0x200 != 0;
+    let interface = input.owner_access_flags() & crate::substrate::flags::INTERFACE != 0;
     if (interface && (native || flags & 7 != 1))
         || (abstract_method && input.owner_access_flags() & 0x400 == 0)
     {

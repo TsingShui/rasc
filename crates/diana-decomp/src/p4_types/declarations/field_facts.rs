@@ -63,7 +63,7 @@ pub(crate) fn collect_field(
     let final_initialization = usage == FieldUse::Write
         && evidence.access_flags & 16 != 0
         && storage == FieldStorage::Static
-        && input.access_flags() == 0x10008
+        && crate::substrate::flags::class_initializer(input.access_flags())
         && input
             .declaration()
             .name

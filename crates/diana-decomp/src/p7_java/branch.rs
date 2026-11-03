@@ -244,13 +244,22 @@ fn verify_impl(
     };
     drop(_types);
     let _low = crate::pipeline::phase_span("p8_lowering");
-    let method = super::dispatcher::verify(input, catalog, plan, &type_names, &mut calls, budget)?;
+    let mut refused = None;
+    let method = super::dispatcher::verify(
+        input,
+        catalog,
+        plan,
+        &type_names,
+        &mut calls,
+        budget,
+        &mut refused,
+    )?;
     Ok(match method {
         Some(mut method) => {
             method.type_names = type_names;
             method.capture_field = capture_field;
             Outcome::Ready(method)
         }
-        None => Outcome::Declined(reason("java_lowering_or_verification")),
+        None => Outcome::Declined(reason(refused.unwrap_or("java_lowering_or_verification"))),
     })
 }
