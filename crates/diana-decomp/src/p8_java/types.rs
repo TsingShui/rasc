@@ -17,8 +17,11 @@ impl NestedIndex {
         input: &MethodInput<'_, '_>,
         budget: &mut MethodBudget<'_, '_>,
     ) -> Result<Option<Self>, RequestError> {
-        let ownership = crate::input::ownership::collect(input.program(), budget)?;
+        let ownership = input.program().ownership_cached(budget)?;
         let mut entries = std::collections::HashMap::new();
+        let Some(ownership) = ownership else {
+            return Ok(None);
+        };
         for entry in ownership.nested() {
             budget.charge_work(1)?;
             let descriptor = copy_units(

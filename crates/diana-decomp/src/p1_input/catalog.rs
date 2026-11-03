@@ -23,6 +23,7 @@ struct Section {
 /// on demand; it owns neither a decoded string pool nor method result buffers.
 pub struct ProgramIndex<'a> {
     pub(super) bytes: &'a [u8],
+    ownership: std::cell::OnceCell<Option<crate::input::ownership::Ownership>>,
     pub(crate) header: DexHeader,
     container: DexContainer<'a>,
     sections: [Option<Section>; SUPPORTED_MAP_KINDS],
@@ -32,6 +33,20 @@ impl<'a> ProgramIndex<'a> {
     /// Original physical bytes this index borrows.
     pub(crate) fn bytes(&self) -> &'a [u8] {
         self.bytes
+    }
+
+    /// Ownership metadata is immutable for this image; build it once and reuse.
+    pub(crate) fn ownership_cached(
+        &self,
+        control: &mut impl InputControl,
+    ) -> Result<Option<&crate::input::ownership::Ownership>, crate::RequestError> {
+        if let Some(cached) = self.ownership.get() {
+            return Ok(cached.as_ref());
+        }
+        match crate::input::ownership::collect(self, control) {
+            Ok(ownership) => Ok(self.ownership.get_or_init(|| Some(ownership)).as_ref()),
+            Err(error) => Err(error),
+        }
     }
 
     pub fn open(bytes: &'a [u8], control: &mut RunContext<'_>) -> Result<Self, InputError> {
@@ -97,6 +112,7 @@ impl<'a> ProgramIndex<'a> {
         }
         Ok(Self {
             bytes,
+            ownership: std::cell::OnceCell::new(),
             header,
             container,
             sections: by_kind,
