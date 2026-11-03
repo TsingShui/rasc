@@ -980,12 +980,15 @@ fn normal_member(
         &storage,
         budget,
     )?;
+    let _p7 = crate::pipeline::phase_span("p7_regions");
     let planned = crate::p7_regions::build(
         &SchedulePermit { _private: () },
         storage,
         representation,
         budget,
     )?;
+    drop(_p7);
+    let _p8 = crate::pipeline::phase_span("p8_java");
     let result =
         if crate::p8_java::source_group_admitted(index, key, &facts, Some(emission), budget)? {
             crate::p8_java::verify_method(
@@ -1002,6 +1005,8 @@ fn normal_member(
         };
     let reason = match result {
         Outcome::Ready(declaration) => {
+            drop(_p8);
+            let _p9 = crate::pipeline::phase_span("p9_emit");
             let source = crate::p9_emit::java(&declaration, budget)?;
             return Ok(NormalMember::Java {
                 facts,

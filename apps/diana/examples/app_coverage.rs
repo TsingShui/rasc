@@ -51,6 +51,7 @@ fn main() {
     let mut class_status: BTreeMap<String, u64> = BTreeMap::new();
     let mut diagnostic_codes: BTreeMap<String, u64> = BTreeMap::new();
     let mut durations = Vec::new();
+    let mut slow = Vec::new();
     for (index, class_def, descriptor) in &selected {
         let image = images.images().get(*index);
         let logical = image.map_or(0, |image| image.logical);
@@ -66,7 +67,9 @@ fn main() {
         let started = Instant::now();
         match decompile::run(&scope, &selector, &mut controls) {
             Ok(result) => {
-                durations.push(started.elapsed());
+                let elapsed = started.elapsed();
+                durations.push(elapsed);
+                slow.push((elapsed, result.class_at.clone()));
                 *class_status.entry(result.status.to_owned()).or_default() += 1;
                 for diagnostic in result.report.diagnostics() {
                     *diagnostic_codes
@@ -109,6 +112,10 @@ fn main() {
                     .or_default() += 1;
             }
         }
+    }
+    slow.sort_by_key(|(elapsed, _)| std::cmp::Reverse(*elapsed));
+    for (elapsed, at) in slow.iter().take(5) {
+        eprintln!("slow {:>9.3}s {at}", elapsed.as_secs_f64());
     }
     let mut sorted = durations.clone();
     sorted.sort();

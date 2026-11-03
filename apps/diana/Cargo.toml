@@ -22,3 +22,7 @@ unsafe_code = "forbid"
 
 [features]
 perf = ["dep:fastrace", "fastrace/enable", "diana-decomp/perf"]
+
+[[example]]
+name = "app_profile"
+required-features = ["perf"]
