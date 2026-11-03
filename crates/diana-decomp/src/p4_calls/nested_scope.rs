@@ -1,7 +1,8 @@
 use crate::input::ProgramIndex;
+use crate::p0_knowledge::DeclarationCatalog;
 use crate::pipeline::control::InputControl;
 use crate::substrate::owned::{copy_units, push};
-use crate::{ClassDefId, DeclarationCatalog, RequestError};
+use crate::{ClassDefId, RequestError};
 
 pub(crate) struct Scope {
     owner: Vec<u16>,
@@ -46,12 +47,13 @@ pub(crate) fn collect(
         let Some(enclosing) = catalog.class(&outer, control)? else {
             return Ok(None);
         };
-        if !matches!(class.coverage, crate::DeclarationCoverage::AllDeclarations)
-            || !matches!(
-                enclosing.coverage,
-                crate::DeclarationCoverage::AllDeclarations
-            )
-            || class.generic
+        if !matches!(
+            class.coverage,
+            crate::p0_knowledge::DeclarationCoverage::AllDeclarations
+        ) || !matches!(
+            enclosing.coverage,
+            crate::p0_knowledge::DeclarationCoverage::AllDeclarations
+        ) || class.generic
             || enclosing.generic
             || !class.interfaces.is_empty()
             || !enclosing.interfaces.is_empty()
@@ -161,7 +163,12 @@ pub(super) fn plain_owner(
     let Some(class) = catalog.class(&owner, budget)? else {
         return Ok(false);
     };
-    if class.generic || !matches!(class.coverage, crate::DeclarationCoverage::AllDeclarations) {
+    if class.generic
+        || !matches!(
+            class.coverage,
+            crate::p0_knowledge::DeclarationCoverage::AllDeclarations
+        )
+    {
         return Ok(false);
     }
     let context = input.program().class_context(input.class_id(), budget)?;

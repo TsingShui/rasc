@@ -1,8 +1,9 @@
 use crate::input::{MethodInput, protection::CatchType};
+use crate::p0_knowledge::DeclarationCatalog;
 use crate::p2_flow::{BlockId, Op, OpId};
 use crate::p3_ssa::SsaBody;
 use crate::substrate::owned::{copy_units, push};
-use crate::{DeclarationCatalog, MethodBudget, RequestError, TypeId};
+use crate::{MethodBudget, RequestError, TypeId};
 
 pub(crate) const THROWABLE: &[u16] = &[
     76, 106, 97, 118, 97, 47, 108, 97, 110, 103, 47, 84, 104, 114, 111, 119, 97, 98, 108, 101, 59,

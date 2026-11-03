@@ -1,6 +1,7 @@
+use crate::RequestError;
+use crate::p0_knowledge::{DeclarationCatalog, ExternalClassDeclaration};
 use crate::pipeline::control::InputControl;
 use crate::substrate::owned::push;
-use crate::{DeclarationCatalog, ExternalClassDeclaration, RequestError};
 
 fn lookup<'a>(
     catalog: &'a DeclarationCatalog,

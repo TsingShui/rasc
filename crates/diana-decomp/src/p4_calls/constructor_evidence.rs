@@ -1,7 +1,8 @@
 use super::allocation::{ConstructorContract, ConstructorUse};
 use crate::input::MethodInput;
+use crate::p0_knowledge::DeclarationCatalog;
 use crate::substrate::owned::copy_units;
-use crate::{CodeUnitOffset, DeclarationCatalog, MethodBudget, MethodId, RequestError};
+use crate::{CodeUnitOffset, MethodBudget, MethodId, RequestError};
 
 enum Candidate {
     Declared(ConstructorContract),

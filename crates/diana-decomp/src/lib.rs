@@ -2,10 +2,7 @@
 
 mod engine;
 mod p0_knowledge;
-pub use p0_knowledge::{
-    DeclarationCatalog, DeclarationCoverage, ExternalClassDeclaration, ExternalFieldEvidence,
-    ExternalMethodDeclaration, ExternalMethodSignature, JavaConstantKind,
-};
+pub use p0_knowledge::JavaConstantKind;
 #[path = "p1_input/mod.rs"]
 pub mod input;
 mod p2_flow;

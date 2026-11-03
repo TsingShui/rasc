@@ -1,7 +1,8 @@
 use super::contracts::{clear_scope, directory};
 use crate::input::MethodInput;
+use crate::p0_knowledge::DeclarationCatalog;
 use crate::substrate::owned::copy_units;
-use crate::{DeclarationCatalog, MethodBudget, RequestError};
+use crate::{MethodBudget, RequestError};
 
 pub(crate) fn source_type(
     input: &MethodInput<'_, '_>,

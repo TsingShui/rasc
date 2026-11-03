@@ -1,8 +1,8 @@
-use crate::substrate::owned::push;
-use crate::{
-    DeclarationCatalog, ExternalClassDeclaration, ExternalMethodDeclaration, MethodBudget,
-    RequestError,
+use crate::p0_knowledge::{
+    DeclarationCatalog, ExternalClassDeclaration, ExternalMethodDeclaration,
 };
+use crate::substrate::owned::push;
+use crate::{MethodBudget, RequestError};
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 enum Primitive {

@@ -1,9 +1,10 @@
 use super::calls::SourceCalls;
 use crate::input::{MethodInput, protection::CatchType};
+use crate::p0_knowledge::DeclarationCatalog;
 use crate::p2_flow::{BlockId, Terminal};
 use crate::p5_types::{Kind, TypedBody};
 use crate::substrate::owned::{copy_units, push};
-use crate::{CodeUnitOffset, DeclarationCatalog, MethodBudget, RequestError};
+use crate::{CodeUnitOffset, MethodBudget, RequestError};
 
 pub(super) enum Bounds {
     Known(Vec<Vec<u16>>),

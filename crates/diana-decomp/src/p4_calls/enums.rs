@@ -1,7 +1,8 @@
 use crate::input::catalog::{MemberEntry, MemberSelection};
+use crate::p0_knowledge::DeclarationCatalog;
 use crate::pipeline::control::InputControl;
 use crate::substrate::owned::{copy_proto, copy_units, push};
-use crate::{ClassKey, DeclarationCatalog, FieldId, MethodId, RequestError, RunContext, TypeId};
+use crate::{ClassKey, FieldId, MethodId, RequestError, RunContext, TypeId};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum Role {
@@ -137,8 +138,10 @@ fn collect_impl(
     let Some(parent) = catalog.class(&parent_name, control)? else {
         return Ok(None);
     };
-    if !matches!(class.coverage, crate::DeclarationCoverage::AllDeclarations)
-        || class.access_flags & !0x20 != original.access_flags
+    if !matches!(
+        class.coverage,
+        crate::p0_knowledge::DeclarationCoverage::AllDeclarations
+    ) || class.access_flags & !0x20 != original.access_flags
         || class.parent.as_deref() != Some(parent_name.as_slice())
         || !class.interfaces.is_empty()
         || class.enclosing_scope

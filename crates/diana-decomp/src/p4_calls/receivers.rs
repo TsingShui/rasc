@@ -1,7 +1,8 @@
 use super::contracts::clear_scope;
 use crate::input::MethodInput;
+use crate::p0_knowledge::DeclarationCatalog;
 use crate::substrate::owned::{copy_proto, copy_units};
-use crate::{DeclarationCatalog, MethodBudget, MethodId, RequestError};
+use crate::{MethodBudget, MethodId, RequestError};
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub(crate) enum ReceiverKind {

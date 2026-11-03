@@ -1,7 +1,8 @@
 use super::contracts::{clear_scope, plain};
 use crate::input::MethodInput;
+use crate::p0_knowledge::DeclarationCatalog;
 use crate::substrate::owned::{copy_proto, copy_units, reserve};
-use crate::{DeclarationCatalog, MethodBudget, RequestError};
+use crate::{MethodBudget, RequestError};
 
 const OBJECT: &[u16] = &[
     76, 106, 97, 118, 97, 47, 108, 97, 110, 103, 47, 79, 98, 106, 101, 99, 116, 59,

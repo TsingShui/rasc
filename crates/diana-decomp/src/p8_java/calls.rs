@@ -178,7 +178,7 @@ pub(super) struct SourceCalls {
 }
 pub(super) fn validate_bindings(
     input: &crate::input::MethodInput<'_, '_>,
-    catalog: &crate::DeclarationCatalog,
+    catalog: &crate::p0_knowledge::DeclarationCatalog,
     ssa: &TypedBody<'_>,
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<Option<SourceCalls>, RequestError> {

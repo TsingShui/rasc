@@ -1,10 +1,11 @@
 use super::StaticContract;
 pub(crate) use super::throws::SourceThrows;
 use crate::input::MethodInput;
+use crate::p0_knowledge::DeclarationCatalog;
 use crate::p2_flow::CallId;
 use crate::p3_ssa::SsaBody;
 use crate::substrate::owned::push;
-use crate::{DeclarationCatalog, MethodBudget, RequestError};
+use crate::{MethodBudget, RequestError};
 
 pub(crate) struct ReceiverFacts {
     pub owner: Vec<u16>,

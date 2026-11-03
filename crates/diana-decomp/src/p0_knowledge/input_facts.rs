@@ -1,8 +1,9 @@
 //! Declaration facts derived from the analysed input itself.
 
 use crate::input::{DexString, ProgramIndex};
+use crate::p0_knowledge::DeclarationCatalog;
 use crate::substrate::owned::{copy_units, push};
-use crate::{ClassDefId, DeclarationCatalog, EnvironmentId, RequestError, RunContext};
+use crate::{ClassDefId, EnvironmentId, RequestError, RunContext};
 
 use super::{DeclarationCoverage, ExternalClassDeclaration, ExternalMethodDeclaration};
 
@@ -78,11 +79,7 @@ pub(crate) fn from_input<'a>(
         });
         id = id.checked_add(1).ok_or(RequestError::PlatformCapacity)?;
     }
-    Ok(DeclarationCatalog::with_declarations(
-        environment,
-        Vec::new(),
-        classes,
-    ))
+    Ok(DeclarationCatalog::with_declarations(environment, classes))
 }
 
 fn copy_prototype<'i, 'a>(

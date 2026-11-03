@@ -1,7 +1,8 @@
 use super::*;
+use crate::p0_knowledge::DeclarationCatalog;
 use crate::{
-    ByteOffset, ClassDefId, ClassKey, DeclarationCatalog, DexId, DexImage, Engine, EnvironmentId,
-    ImageOrigin, InputId, Limits, MethodOutput, Options, Request, RunContext,
+    ByteOffset, ClassDefId, ClassKey, DexId, DexImage, Engine, EnvironmentId, ImageOrigin, InputId,
+    Limits, MethodOutput, Options, Request, RunContext,
 };
 
 #[test]

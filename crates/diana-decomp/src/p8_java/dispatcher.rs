@@ -92,7 +92,7 @@ fn edge(
 
 pub(super) fn verify(
     input: &MethodInput<'_, '_>,
-    catalog: &crate::DeclarationCatalog,
+    catalog: &crate::p0_knowledge::DeclarationCatalog,
     plan: crate::p7_regions::PlannedBody<'_>,
     type_names: &super::types::TypeNames,
     calls: &mut super::calls::SourceCalls,

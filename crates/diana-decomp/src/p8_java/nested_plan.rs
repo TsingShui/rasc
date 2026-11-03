@@ -99,7 +99,7 @@ pub(crate) fn verify(
     _permit: &crate::engine::SchedulePermit,
     index: &crate::input::ProgramIndex<'_>,
     key: ClassKey,
-    catalog: &crate::DeclarationCatalog,
+    catalog: &crate::p0_knowledge::DeclarationCatalog,
     fields: &[crate::FieldOutput],
     members: &[MethodOutput],
     control: &mut RunContext<'_>,
@@ -109,7 +109,7 @@ pub(crate) fn verify(
 fn verify_impl(
     index: &crate::input::ProgramIndex<'_>,
     key: ClassKey,
-    catalog: &crate::DeclarationCatalog,
+    catalog: &crate::p0_knowledge::DeclarationCatalog,
     fields: &[crate::FieldOutput],
     members: &[MethodOutput],
     control: &mut RunContext<'_>,

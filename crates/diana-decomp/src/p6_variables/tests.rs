@@ -61,13 +61,14 @@ fn t08_parallel_copies_preserve_chains_cycles_fanout_and_wide_bits() {
 
 #[test]
 fn t09_two_entry_dispatcher_preserves_edges_and_never_reads_da_defaults() {
+    use crate::p0_knowledge::DeclarationCatalog;
     use crate::p8_java::MethodBody;
     use crate::p8_java::dispatcher::{Dispatcher, Transfer};
     use crate::p8_java::{Assignment, Expression, Right};
     use crate::substrate::operators::Arithmetic;
     use crate::{
-        ByteOffset, ClassDefId, ClassKey, DeclarationCatalog, DexId, DexImage, Engine,
-        EnvironmentId, ImageOrigin, InputId, MethodOutput, MethodSelector, Options, Request,
+        ByteOffset, ClassDefId, ClassKey, DexId, DexImage, Engine, EnvironmentId, ImageOrigin,
+        InputId, MethodOutput, MethodSelector, Options, Request,
     };
     fn read(values: &[Option<i32>], id: LocalId) -> i32 {
         values[usize::try_from(id.0).unwrap()].expect("original use observed a DA-only default")

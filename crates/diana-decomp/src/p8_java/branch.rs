@@ -169,7 +169,7 @@ pub(super) fn operation(
 pub(crate) fn verify(
     _schedule: &crate::engine::SchedulePermit,
     input: &MethodInput<'_, '_>,
-    catalog: &crate::DeclarationCatalog,
+    catalog: &crate::p0_knowledge::DeclarationCatalog,
     plan: crate::p7_regions::PlannedBody<'_>,
     chain: &super::constructor_graph::Proof<'_, '_, '_>,
     nested_context: bool,
@@ -188,7 +188,7 @@ pub(crate) fn verify(
 
 fn verify_impl(
     input: &MethodInput<'_, '_>,
-    catalog: &crate::DeclarationCatalog,
+    catalog: &crate::p0_knowledge::DeclarationCatalog,
     plan: crate::p7_regions::PlannedBody<'_>,
     chain: &super::constructor_graph::Proof<'_, '_, '_>,
     environment: EnvironmentId,

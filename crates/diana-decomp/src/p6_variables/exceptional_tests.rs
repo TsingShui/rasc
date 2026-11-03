@@ -1,10 +1,9 @@
 use super::{exceptional, normal::StorageBody};
 use crate::input::ProgramIndex;
+use crate::p0_knowledge::DeclarationCatalog;
 use crate::p2_flow::Op;
 use crate::p3_ssa::{Definition, Sym, ValueId};
-use crate::{
-    ClassDefId, DeclarationCatalog, EnvironmentId, FailureKind, Limits, MethodId, RunContext,
-};
+use crate::{ClassDefId, EnvironmentId, FailureKind, Limits, MethodId, RunContext};
 
 const CATALOG: &str = include_str!("../../tests/fixtures/exception-storage/catalog.json");
 const THROW_STATE: &[u8] = include_bytes!("../../tests/fixtures/throw-state/classes.dex");
@@ -13,8 +12,8 @@ const D030: &[u8] = include_bytes!("../../tests/fixtures/exception-storage/d030.
 const D030_CATALOG: &str = include_str!("../../tests/fixtures/exception-storage/d030-catalog.json");
 #[derive(serde::Deserialize)]
 struct Facts {
-    methods: Vec<crate::ExternalMethodSignature>,
-    classes: Vec<crate::ExternalClassDeclaration>,
+    methods: Vec<crate::p0_knowledge::ExternalMethodSignature>,
+    classes: Vec<crate::p0_knowledge::ExternalClassDeclaration>,
 }
 fn catalog(text: &str) -> DeclarationCatalog {
     let facts: Facts = serde_json::from_str(text).unwrap();

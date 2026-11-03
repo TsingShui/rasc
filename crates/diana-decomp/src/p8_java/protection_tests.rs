@@ -1,9 +1,8 @@
 use crate::input::ProgramIndex;
+use crate::p0_knowledge::DeclarationCatalog;
 use crate::p6_variables::StorageBody;
 use crate::p7_regions::protection::{self, Node, NodeId};
-use crate::{
-    ClassDefId, DeclarationCatalog, EnvironmentId, FailureKind, Limits, MethodId, RunContext,
-};
+use crate::{ClassDefId, EnvironmentId, FailureKind, Limits, MethodId, RunContext};
 
 const INPUT: &[u8] = include_bytes!("../../tests/fixtures/protected-java/classes.dex");
 const SHARED: &[u8] = include_bytes!("../../tests/fixtures/protected-java/shared.dex");
@@ -15,8 +14,8 @@ const DIAMOND_CATALOG: &str =
     include_str!("../../tests/fixtures/exception-storage/d030-catalog.json");
 #[derive(serde::Deserialize)]
 struct Facts {
-    methods: Vec<crate::ExternalMethodSignature>,
-    classes: Vec<crate::ExternalClassDeclaration>,
+    methods: Vec<crate::p0_knowledge::ExternalMethodSignature>,
+    classes: Vec<crate::p0_knowledge::ExternalClassDeclaration>,
 }
 fn catalog(json: &str) -> DeclarationCatalog {
     let facts: Facts = serde_json::from_str(json).unwrap();

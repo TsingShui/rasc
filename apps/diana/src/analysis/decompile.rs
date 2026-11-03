@@ -1,8 +1,8 @@
 //! Engine adapter: one validated locator to one owned report and rendered text.
 
 use diana_decomp::{
-    ClassKey, DeclarationCatalog, DexImage, Engine, EnvironmentId, ImageOrigin, InputId,
-    MethodSelector, Options, RenderedReport, Report, Request, RequestError, RunContext,
+    ClassKey, DexImage, Engine, ImageOrigin, InputId, MethodSelector, Options, RenderedReport,
+    Report, Request, RequestError, RunContext,
 };
 
 use super::images::{ImageError, ImageSet, Selection, resolve_class, resolve_method};
@@ -65,12 +65,7 @@ pub fn run(
     selector: &Selector,
     control: &mut RunContext<'_>,
 ) -> Result<Decompiled, DecompileError> {
-    run_with_catalog(
-        scope,
-        selector,
-        DeclarationCatalog::empty(EnvironmentId(0)),
-        control,
-    )
+    run_with_catalog(scope, selector, control)
 }
 
 /// Runs the engine with an explicit declaration catalog. The CLI passes the
@@ -78,7 +73,6 @@ pub fn run(
 pub fn run_with_catalog(
     scope: &RequestScope,
     selector: &Selector,
-    catalog: DeclarationCatalog,
     control: &mut RunContext<'_>,
 ) -> Result<Decompiled, DecompileError> {
     let images = ImageSet::open(scope)?;
@@ -96,8 +90,8 @@ pub fn run_with_catalog(
             },
         });
     }
-    let engine = Engine::open(dex_images, Options::default(), catalog, control)
-        .map_err(DecompileError::Engine)?;
+    let engine =
+        Engine::open(dex_images, Options::default(), control).map_err(DecompileError::Engine)?;
     let class = ClassKey {
         dex: selection.image.dex,
         class_def: selection.class_def,

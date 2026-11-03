@@ -125,7 +125,7 @@ pub(crate) fn erases_to(
 }
 
 pub(super) fn raw_class(
-    class: &crate::ExternalClassDeclaration,
+    class: &crate::p0_knowledge::ExternalClassDeclaration,
     control: &mut impl InputControl,
 ) -> Result<bool, RequestError> {
     if !class.generic {
@@ -157,7 +157,7 @@ pub(super) fn raw_class(
 }
 
 pub(super) fn object_identity(
-    method: &crate::ExternalMethodDeclaration,
+    method: &crate::p0_knowledge::ExternalMethodDeclaration,
     control: &mut impl InputControl,
 ) -> Result<bool, RequestError> {
     if !method.generic {
@@ -192,14 +192,14 @@ impl RawSignature {
 pub(crate) fn collect(
     _permit: &crate::engine::SchedulePermit,
     input: &crate::input::MethodInput<'_, '_>,
-    catalog: &crate::DeclarationCatalog,
+    catalog: &crate::p0_knowledge::DeclarationCatalog,
     control: &mut impl InputControl,
 ) -> Result<Option<RawSignature>, RequestError> {
     collect_impl(input, catalog, control)
 }
 fn collect_impl(
     input: &crate::input::MethodInput<'_, '_>,
-    _catalog: &crate::DeclarationCatalog,
+    _catalog: &crate::p0_knowledge::DeclarationCatalog,
     control: &mut impl InputControl,
 ) -> Result<Option<RawSignature>, RequestError> {
     let Some(signature) = crate::input::signature::method(input, control)? else {

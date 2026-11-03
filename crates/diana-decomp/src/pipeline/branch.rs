@@ -1,6 +1,7 @@
 use crate::input::MethodInput;
+use crate::p0_knowledge::DeclarationCatalog;
 use crate::substrate::outcome::Outcome;
-use crate::{DeclarationCatalog, MethodBudget, OutputReason, RequestError};
+use crate::{MethodBudget, OutputReason, RequestError};
 
 // Consumed directly by the scheduler; boxing would add a fallible allocation per method.
 #[allow(clippy::large_enum_variant)]

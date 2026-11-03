@@ -1,5 +1,6 @@
 use crate::input::MethodInput;
-use crate::{CodeUnitOffset, DeclarationCatalog, FieldId, MethodBudget, RequestError};
+use crate::p0_knowledge::DeclarationCatalog;
+use crate::{CodeUnitOffset, FieldId, MethodBudget, RequestError};
 
 pub(crate) struct InstanceIntWrite {
     _sealed: (),

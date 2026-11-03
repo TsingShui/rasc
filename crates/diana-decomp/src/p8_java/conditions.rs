@@ -179,8 +179,8 @@ mod tests {
     use super::*;
     #[derive(serde::Deserialize)]
     struct Facts {
-        methods: Vec<crate::ExternalMethodSignature>,
-        classes: Vec<crate::ExternalClassDeclaration>,
+        methods: Vec<crate::p0_knowledge::ExternalMethodSignature>,
+        classes: Vec<crate::p0_knowledge::ExternalClassDeclaration>,
     }
     #[test]
     fn source_condition_replay_rejects_changed_reference_literal_operator_and_definition() {
@@ -188,7 +188,7 @@ mod tests {
             "../../tests/fixtures/source-conditions/catalog.json"
         ))
         .unwrap();
-        let catalog = crate::DeclarationCatalog::with_declarations(
+        let catalog = crate::p0_knowledge::DeclarationCatalog::with_declarations(
             crate::EnvironmentId(0),
             facts.methods,
             facts.classes,

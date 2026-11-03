@@ -1,13 +1,14 @@
+use crate::p0_knowledge::DeclarationCatalog;
 use crate::{
-    ByteOffset, ClassDefId, ClassKey, DeclarationCatalog, DexId, DexImage, Engine, EnvironmentId,
-    FailureKind, ImageOrigin, InputId, Limits, MethodId, MethodOutput, MethodSelector, Options,
-    Request, RunContext,
+    ByteOffset, ClassDefId, ClassKey, DexId, DexImage, Engine, EnvironmentId, FailureKind,
+    ImageOrigin, InputId, Limits, MethodId, MethodOutput, MethodSelector, Options, Request,
+    RunContext,
 };
 
 #[derive(serde::Deserialize)]
 struct Facts {
-    methods: Vec<crate::ExternalMethodSignature>,
-    classes: Vec<crate::ExternalClassDeclaration>,
+    methods: Vec<crate::p0_knowledge::ExternalMethodSignature>,
+    classes: Vec<crate::p0_knowledge::ExternalClassDeclaration>,
 }
 const CATALOG: &str = include_str!("../../tests/fixtures/inherited-binding/catalog.json");
 const DEX: &[u8] = include_bytes!("../../tests/fixtures/inherited-binding/d033.dex");
@@ -125,14 +126,16 @@ fn t12_covariant_constructor_and_receiver_binding_rejects_unproved_directories()
                             }
                     })
                     .unwrap();
-                class.methods.push(crate::ExternalMethodDeclaration {
-                    name: name.clone(),
-                    prototype: units("(Ljava/lang/String;)Ljava/lang/Object;"),
-                    access_flags: 1,
-                    throws: Some(Vec::new()),
-                    generic: false,
-                    signature: None,
-                });
+                class
+                    .methods
+                    .push(crate::p0_knowledge::ExternalMethodDeclaration {
+                        name: name.clone(),
+                        prototype: units("(Ljava/lang/String;)Ljava/lang/Object;"),
+                        access_flags: 1,
+                        throws: Some(Vec::new()),
+                        generic: false,
+                        signature: None,
+                    });
             }
         }
         let catalog =

@@ -1,6 +1,7 @@
 use crate::input::MethodInput;
+use crate::p0_knowledge::DeclarationCatalog;
 use crate::substrate::owned::{copy_proto, copy_units};
-use crate::{DeclarationCatalog, MethodBudget, MethodId, RequestError};
+use crate::{MethodBudget, MethodId, RequestError};
 
 pub(crate) struct CovariantOverride {
     target: MethodId,
@@ -97,8 +98,10 @@ fn collect_impl(
     let Some(class) = catalog.class(&owner, budget)? else {
         return Ok(None);
     };
-    if !matches!(class.coverage, crate::DeclarationCoverage::AllDeclarations)
-        || class.generic
+    if !matches!(
+        class.coverage,
+        crate::p0_knowledge::DeclarationCoverage::AllDeclarations
+    ) || class.generic
         || class.enclosing_scope
         || !class.interfaces.is_empty()
             && !super::interface_scope::collect(input.program(), input.class_id(), catalog, budget)?
@@ -165,8 +168,8 @@ fn collect_impl(
             || ancestor.enclosing_scope
             || !matches!(
                 ancestor.coverage,
-                crate::DeclarationCoverage::AllDeclarations
-                    | crate::DeclarationCoverage::ExportedApi
+                crate::p0_knowledge::DeclarationCoverage::AllDeclarations
+                    | crate::p0_knowledge::DeclarationCoverage::ExportedApi
             )
         {
             return Ok(None);

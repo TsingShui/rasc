@@ -1,9 +1,7 @@
 use crate::input::MethodInput;
+use crate::p0_knowledge::{DeclarationCatalog, DeclarationCoverage, ExternalClassDeclaration};
 use crate::substrate::owned::{copy_proto, copy_units, reserve};
-use crate::{
-    DeclarationCatalog, DeclarationCoverage, ExternalClassDeclaration, MethodBudget, MethodId,
-    RequestError,
-};
+use crate::{MethodBudget, MethodId, RequestError};
 
 #[derive(Clone, Copy)]
 pub(crate) enum CallFormal {

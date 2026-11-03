@@ -22,7 +22,7 @@ pub(crate) enum Statement {
 }
 pub(super) fn validate(
     input: &crate::input::MethodInput<'_, '_>,
-    catalog: &crate::DeclarationCatalog,
+    catalog: &crate::p0_knowledge::DeclarationCatalog,
     typed: &TypedBody<'_>,
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<bool, RequestError> {

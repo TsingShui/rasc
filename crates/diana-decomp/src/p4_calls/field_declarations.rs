@@ -1,7 +1,8 @@
 use crate::input::ProgramIndex;
+use crate::p0_knowledge::DeclarationCatalog;
 use crate::pipeline::control::InputControl;
 use crate::substrate::owned::{copy_units, push};
-use crate::{ClassKey, DeclarationCatalog, FieldFacts, RequestError};
+use crate::{ClassKey, FieldFacts, RequestError};
 
 pub(crate) struct FieldType {
     spelling: &'static str,
@@ -58,7 +59,10 @@ fn string_scope(
     let Some(caller) = catalog.class(&owner, control)? else {
         return Ok(false);
     };
-    if !matches!(caller.coverage, crate::DeclarationCoverage::AllDeclarations) {
+    if !matches!(
+        caller.coverage,
+        crate::p0_knowledge::DeclarationCoverage::AllDeclarations
+    ) {
         return Ok(false);
     }
     match (parent, caller.parent.as_deref()) {

@@ -1,9 +1,10 @@
 use crate::input::MethodInput;
+use crate::p0_knowledge::DeclarationCatalog;
 use crate::p2_flow::{DeclarationType, ResultType};
 use crate::p5_types::Kind;
 use crate::p6_variables::StorageBody;
 use crate::substrate::owned::{TextBuffer, copy_units, push};
-use crate::{DeclarationCatalog, MethodBudget, RequestError};
+use crate::{MethodBudget, RequestError};
 
 fn nested_name(
     input: &MethodInput<'_, '_>,

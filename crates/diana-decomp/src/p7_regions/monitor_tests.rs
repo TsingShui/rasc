@@ -1,11 +1,10 @@
 use crate::input::ProgramIndex;
-use crate::{
-    ClassDefId, DeclarationCatalog, EnvironmentId, FailureKind, Limits, MethodId, RunContext,
-};
+use crate::p0_knowledge::DeclarationCatalog;
+use crate::{ClassDefId, EnvironmentId, FailureKind, Limits, MethodId, RunContext};
 #[derive(serde::Deserialize)]
 struct Facts {
-    methods: Vec<crate::ExternalMethodSignature>,
-    classes: Vec<crate::ExternalClassDeclaration>,
+    methods: Vec<crate::p0_knowledge::ExternalMethodSignature>,
+    classes: Vec<crate::p0_knowledge::ExternalClassDeclaration>,
 }
 #[test]
 fn t19_complete_method_bodies_do_not_hide_unrecovered_fields_or_bindings() {

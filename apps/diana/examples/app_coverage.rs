@@ -64,8 +64,7 @@ fn main() {
             descriptor: descriptor.clone(),
         });
         let started = Instant::now();
-        let catalog = diana_decomp::DeclarationCatalog::empty(diana_decomp::EnvironmentId(0));
-        match decompile::run_with_catalog(&scope, &selector, catalog, &mut controls) {
+        match decompile::run(&scope, &selector, &mut controls) {
             Ok(result) => {
                 durations.push(started.elapsed());
                 *class_status.entry(result.status.to_owned()).or_default() += 1;

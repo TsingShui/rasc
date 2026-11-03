@@ -1,9 +1,10 @@
 use super::interface_scope::Interfaces;
 use crate::input::ProgramIndex;
 use crate::input::catalog::{MemberEntry, MemberSelection};
+use crate::p0_knowledge::{DeclarationCatalog, DeclarationCoverage};
 use crate::pipeline::control::InputControl;
 use crate::substrate::owned::{copy_proto, copy_units};
-use crate::{ClassDefId, DeclarationCatalog, DeclarationCoverage, RequestError};
+use crate::{ClassDefId, RequestError};
 
 pub(crate) struct ClassBindings {
     pub owner: Vec<u16>,

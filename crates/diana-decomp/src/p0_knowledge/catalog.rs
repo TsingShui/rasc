@@ -20,21 +20,11 @@ pub(crate) fn same_units(
     Ok(true)
 }
 
-/// Caller-supplied exact symbol spelling. Matching a signature is not proof of
-/// dispatch, access, throws, hierarchy or a complete overload candidate group.
-#[derive(serde::Deserialize)]
-pub struct ExternalMethodSignature {
-    pub owner: Vec<u16>,
-    pub name: Vec<u16>,
-    pub prototype: Vec<u16>,
-}
-
 /// Immutable declaration evidence for one caller environment. Signatures alone
 /// remain partial; class directories carry explicit coverage. An absent entry
 /// means evidence is missing, never that a method cannot exist.
 pub struct DeclarationCatalog {
     pub(crate) environment: EnvironmentId,
-    methods: Vec<ExternalMethodSignature>,
     classes: Vec<super::ExternalClassDeclaration>,
     fields: Vec<super::ExternalFieldEvidence>,
 }
@@ -43,37 +33,20 @@ impl DeclarationCatalog {
     pub fn empty(environment: EnvironmentId) -> Self {
         Self {
             environment,
-            methods: Vec::new(),
             classes: Vec::new(),
             fields: Vec::new(),
         }
     }
 
-    /// Takes caller-owned partial signature facts without reading files or
-    /// asserting completeness. Native loops charge the request that consumes
-    /// them; this does not admit any executable Java by itself.
-    pub fn partial_signatures(
-        environment: EnvironmentId,
-        methods: Vec<ExternalMethodSignature>,
-    ) -> Self {
-        Self {
-            environment,
-            methods,
-            classes: Vec::new(),
-            fields: Vec::new(),
-        }
-    }
     /// Takes caller-owned directories with explicit per-class coverage. Native
     /// consumers charge candidate scans and reject unknown/inconsistent facts;
     /// construction does not certify source binding or catalog completeness.
-    pub fn with_declarations(
+    pub(crate) fn with_declarations(
         environment: EnvironmentId,
-        methods: Vec<ExternalMethodSignature>,
         classes: Vec<super::ExternalClassDeclaration>,
     ) -> Self {
         Self {
             environment,
-            methods,
             classes,
             fields: Vec::new(),
         }
@@ -81,22 +54,12 @@ impl DeclarationCatalog {
     /// Appends facts derived from another input image of the same request.
     pub(crate) fn extend(&mut self, other: Self) {
         let Self {
-            methods,
-            classes,
-            fields,
-            ..
+            classes, fields, ..
         } = other;
-        self.methods.extend(methods);
         self.classes.extend(classes);
         self.fields.extend(fields);
     }
 
-    /// Takes caller-owned exact field facts. Missing/duplicate entries remain unproven and
-    /// consumers still validate the original identity and declaration scope.
-    pub fn with_field_evidence(mut self, fields: Vec<super::ExternalFieldEvidence>) -> Self {
-        self.fields = fields;
-        self
-    }
     pub(crate) fn field<'c>(
         &'c self,
         owner: DexString<'_>,

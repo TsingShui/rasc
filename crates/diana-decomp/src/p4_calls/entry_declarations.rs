@@ -31,7 +31,7 @@ impl EntryDeclarations {
 pub(crate) fn collect(
     _schedule: &crate::engine::SchedulePermit,
     input: &MethodInput<'_, '_>,
-    catalog: &crate::DeclarationCatalog,
+    catalog: &crate::p0_knowledge::DeclarationCatalog,
     reference: MethodId,
     pc: crate::CodeUnitOffset,
     budget: &mut MethodBudget<'_, '_>,
@@ -41,7 +41,7 @@ pub(crate) fn collect(
 
 fn collect_impl(
     input: &MethodInput<'_, '_>,
-    catalog: &crate::DeclarationCatalog,
+    catalog: &crate::p0_knowledge::DeclarationCatalog,
     reference: MethodId,
     pc: crate::CodeUnitOffset,
     budget: &mut MethodBudget<'_, '_>,

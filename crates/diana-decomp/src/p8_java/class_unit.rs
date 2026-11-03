@@ -80,7 +80,7 @@ pub(crate) fn verify(
     _schedule: &crate::engine::SchedulePermit,
     index: &ProgramIndex<'_>,
     key: ClassKey,
-    catalog: &crate::DeclarationCatalog,
+    catalog: &crate::p0_knowledge::DeclarationCatalog,
     members: Members<'_>,
     control: &mut RunContext<'_>,
 ) -> Result<Option<VerifiedJavaUnit>, RequestError> {
@@ -89,7 +89,7 @@ pub(crate) fn verify(
 pub(super) fn verify_static_nested(
     index: &ProgramIndex<'_>,
     key: ClassKey,
-    catalog: &crate::DeclarationCatalog,
+    catalog: &crate::p0_knowledge::DeclarationCatalog,
     fields: &[crate::FieldOutput],
     members: &[MethodOutput],
     scope: &crate::p4_calls::nested_scope::Scope,
@@ -111,7 +111,7 @@ pub(super) fn verify_static_nested(
 fn verify_impl(
     index: &ProgramIndex<'_>,
     key: ClassKey,
-    catalog: &crate::DeclarationCatalog,
+    catalog: &crate::p0_knowledge::DeclarationCatalog,
     members: Members<'_>,
     nested_name: Option<&[u16]>,
     control: &mut RunContext<'_>,

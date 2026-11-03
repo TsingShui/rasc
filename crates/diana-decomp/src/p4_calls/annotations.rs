@@ -2,9 +2,10 @@ use crate::input::annotation_facts::{
     AnnotationExtent, AnnotationRecord, AnnotationToken, AnnotationValueKind, OriginalAnnotations,
 };
 use crate::input::catalog::{MemberEntry, MemberSelection};
+use crate::p0_knowledge::DeclarationCatalog;
 use crate::pipeline::control::InputControl;
 use crate::substrate::owned::{copy_proto, copy_units, push};
-use crate::{ClassKey, DeclarationCatalog, EnvironmentId, MethodId, RequestError, RunContext};
+use crate::{ClassKey, EnvironmentId, MethodId, RequestError, RunContext};
 
 pub(crate) enum Literal {
     String(Vec<u16>),
@@ -402,7 +403,7 @@ fn declaration(
         || evidence.access_flags & !0x20 != native.access_flags
         || !matches!(
             evidence.coverage,
-            crate::DeclarationCoverage::AllDeclarations
+            crate::p0_knowledge::DeclarationCoverage::AllDeclarations
         )
         || evidence.generic
         || evidence.enclosing_scope
@@ -558,8 +559,10 @@ fn source_scope(
         return Ok(false);
     };
     let context = index.class_context(owner.class_def, control)?;
-    if !matches!(class.coverage, crate::DeclarationCoverage::AllDeclarations)
-        || class.generic
+    if !matches!(
+        class.coverage,
+        crate::p0_knowledge::DeclarationCoverage::AllDeclarations
+    ) || class.generic
         || class.enclosing_scope
         || !class.interfaces.is_empty()
         || class.parent.as_deref() != Some(crate::p5_types::BuiltinReference::Object.descriptor())

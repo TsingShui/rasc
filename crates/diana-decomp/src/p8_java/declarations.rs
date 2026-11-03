@@ -23,7 +23,7 @@ impl JavaMethodDecl {
 pub(crate) fn declaration(
     _schedule: &crate::engine::SchedulePermit,
     input: &MethodInput<'_, '_>,
-    catalog: &crate::DeclarationCatalog,
+    catalog: &crate::p0_knowledge::DeclarationCatalog,
     signature: Option<&crate::p4_calls::raw_signature::RawSignature>,
     annotations: Option<&crate::p4_calls::annotations::Bindings>,
     budget: &mut MethodBudget<'_, '_>,
@@ -33,7 +33,7 @@ pub(crate) fn declaration(
 
 fn declaration_impl(
     input: &MethodInput<'_, '_>,
-    catalog: &crate::DeclarationCatalog,
+    catalog: &crate::p0_knowledge::DeclarationCatalog,
     signature: Option<&crate::p4_calls::raw_signature::RawSignature>,
     annotations: Option<&crate::p4_calls::annotations::Bindings>,
     budget: &mut MethodBudget<'_, '_>,
@@ -301,7 +301,7 @@ fn declaration_type(
     input: &MethodInput<'_, '_>,
     name: DexString<'_>,
     raw: bool,
-    catalog: &crate::DeclarationCatalog,
+    catalog: &crate::p0_knowledge::DeclarationCatalog,
     output: &mut TextBuffer,
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<bool, RequestError> {

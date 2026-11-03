@@ -1,7 +1,8 @@
 use crate::input::MethodInput;
+use crate::p0_knowledge::DeclarationCatalog;
 use crate::p5_types::initialization::ChainKind;
 use crate::p6_variables::StorageBody;
-use crate::{DeclarationCatalog, MethodBudget, RequestError};
+use crate::{MethodBudget, RequestError};
 
 pub(crate) fn verify<'m, 'i, 'a>(
     schedule: &crate::engine::SchedulePermit,

@@ -1,5 +1,6 @@
 use crate::input::catalog::{MemberEntry, MemberSelection};
-use crate::{ClassKey, DeclarationCatalog, RequestError, RunContext};
+use crate::p0_knowledge::DeclarationCatalog;
+use crate::{ClassKey, RequestError, RunContext};
 
 pub(crate) fn collect(
     permit: &crate::engine::SchedulePermit,

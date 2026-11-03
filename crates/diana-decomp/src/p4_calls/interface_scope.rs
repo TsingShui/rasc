@@ -1,7 +1,8 @@
 use crate::input::ProgramIndex;
+use crate::p0_knowledge::DeclarationCatalog;
 use crate::pipeline::control::InputControl;
 use crate::substrate::owned::{copy_units, push};
-use crate::{ClassDefId, DeclarationCatalog, RequestError};
+use crate::{ClassDefId, RequestError};
 
 pub(crate) struct Interfaces {
     names: Vec<Vec<u16>>,
@@ -44,7 +45,10 @@ pub(crate) fn collect(
     };
     if caller.generic
         || caller.enclosing_scope
-        || !matches!(caller.coverage, crate::DeclarationCoverage::AllDeclarations)
+        || !matches!(
+            caller.coverage,
+            crate::p0_knowledge::DeclarationCoverage::AllDeclarations
+        )
     {
         return Ok(None);
     }
@@ -66,7 +70,7 @@ pub(crate) fn collect(
             || !interface.interfaces.is_empty()
             || !matches!(
                 interface.coverage,
-                crate::DeclarationCoverage::AllDeclarations
+                crate::p0_knowledge::DeclarationCoverage::AllDeclarations
             )
         {
             return Ok(None);
@@ -173,7 +177,7 @@ pub(super) fn string_identity() -> &'static [u16] {
 
 pub(super) fn catalog_plain(
     catalog: &DeclarationCatalog,
-    class: &crate::ExternalClassDeclaration,
+    class: &crate::p0_knowledge::ExternalClassDeclaration,
     budget: &mut crate::MethodBudget<'_, '_>,
 ) -> Result<bool, RequestError> {
     for name in &class.interfaces {
@@ -186,7 +190,7 @@ pub(super) fn catalog_plain(
             || interface.access_flags & (1 | 0x200 | 0x400) != (1 | 0x200 | 0x400)
             || !matches!(
                 interface.coverage,
-                crate::DeclarationCoverage::AllDeclarations
+                crate::p0_knowledge::DeclarationCoverage::AllDeclarations
             )
         {
             return Ok(false);

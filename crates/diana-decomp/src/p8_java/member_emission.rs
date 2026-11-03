@@ -218,8 +218,8 @@ mod tests {
     use super::*;
     #[derive(serde::Deserialize)]
     struct Facts {
-        methods: Vec<crate::ExternalMethodSignature>,
-        classes: Vec<crate::ExternalClassDeclaration>,
+        methods: Vec<crate::p0_knowledge::ExternalMethodSignature>,
+        classes: Vec<crate::p0_knowledge::ExternalClassDeclaration>,
     }
     #[test]
     fn bridge_and_signature_producers_retain_resource_and_cancellation_checks() {
@@ -227,7 +227,7 @@ mod tests {
             "../../tests/fixtures/covariant-bridge/catalog.json"
         ))
         .unwrap();
-        let catalog = crate::DeclarationCatalog::with_declarations(
+        let catalog = crate::p0_knowledge::DeclarationCatalog::with_declarations(
             crate::EnvironmentId(0),
             facts.methods,
             facts.classes,

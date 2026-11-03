@@ -1,7 +1,6 @@
 use crate::input::MethodInput;
-use crate::{
-    CodeUnitOffset, DeclarationCatalog, FieldId, JavaConstantKind, MethodBudget, RequestError,
-};
+use crate::p0_knowledge::DeclarationCatalog;
+use crate::{CodeUnitOffset, FieldId, JavaConstantKind, MethodBudget, RequestError};
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub(crate) enum FieldUse {

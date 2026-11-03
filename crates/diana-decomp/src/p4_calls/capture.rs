@@ -1,7 +1,8 @@
 use crate::input::MethodInput;
 use crate::input::catalog::{MemberEntry, MemberSelection};
+use crate::p0_knowledge::DeclarationCatalog;
 use crate::substrate::owned::{copy_units, push};
-use crate::{DeclarationCatalog, FieldId, MethodBudget, RequestError};
+use crate::{FieldId, MethodBudget, RequestError};
 
 pub(crate) struct CaptureDeclaration {
     field: FieldId,
@@ -86,12 +87,13 @@ fn collect_impl(
     if !object_constructor || object.parent.is_some() {
         return Ok(None);
     }
-    if !matches!(class.coverage, crate::DeclarationCoverage::AllDeclarations)
-        || !matches!(
-            enclosing.coverage,
-            crate::DeclarationCoverage::AllDeclarations
-        )
-        || class.generic
+    if !matches!(
+        class.coverage,
+        crate::p0_knowledge::DeclarationCoverage::AllDeclarations
+    ) || !matches!(
+        enclosing.coverage,
+        crate::p0_knowledge::DeclarationCoverage::AllDeclarations
+    ) || class.generic
         || enclosing.generic
         || !class.interfaces.is_empty()
         || class.access_flags & (1 | 0x10 | 0x400) != input.owner_access_flags()

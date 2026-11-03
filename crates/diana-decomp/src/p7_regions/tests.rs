@@ -1,9 +1,10 @@
+use crate::p0_knowledge::DeclarationCatalog;
 use crate::p8_java::MethodBody;
 use crate::test_fixture as fixture;
 use crate::{
-    ByteOffset, ClassDefId, ClassKey, DeclarationCatalog, DexId, DexImage, Engine, EnvironmentId,
-    ImageOrigin, InputId, Limits, MethodOutput, MethodSelector, Options, RepresentationPolicy,
-    Request, RequestError, RunContext,
+    ByteOffset, ClassDefId, ClassKey, DexId, DexImage, Engine, EnvironmentId, ImageOrigin, InputId,
+    Limits, MethodOutput, MethodSelector, Options, RepresentationPolicy, Request, RequestError,
+    RunContext,
 };
 
 #[test]

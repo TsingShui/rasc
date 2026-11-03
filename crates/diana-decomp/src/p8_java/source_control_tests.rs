@@ -1,22 +1,21 @@
 use super::{Builder, Step};
+use crate::p0_knowledge::DeclarationCatalog;
 use crate::p8_java::MethodBody;
-use crate::{
-    ClassDefId, DeclarationCatalog, EnvironmentId, FailureKind, Limits, MethodId, RunContext,
-};
+use crate::{ClassDefId, EnvironmentId, FailureKind, Limits, MethodId, RunContext};
 
 #[derive(serde::Deserialize)]
 struct Facts {
-    methods: Vec<crate::ExternalMethodSignature>,
-    classes: Vec<crate::ExternalClassDeclaration>,
+    methods: Vec<crate::p0_knowledge::ExternalMethodSignature>,
+    classes: Vec<crate::p0_knowledge::ExternalClassDeclaration>,
 }
 
 #[test]
 fn final_assignment_checks_charge_shared_graph_traversal_and_allocation() {
     #[derive(serde::Deserialize)]
     struct FinalFacts {
-        methods: Vec<crate::ExternalMethodSignature>,
-        classes: Vec<crate::ExternalClassDeclaration>,
-        fields: Vec<crate::ExternalFieldEvidence>,
+        methods: Vec<crate::p0_knowledge::ExternalMethodSignature>,
+        classes: Vec<crate::p0_knowledge::ExternalClassDeclaration>,
+        fields: Vec<crate::p0_knowledge::ExternalFieldEvidence>,
     }
     let facts: FinalFacts = serde_json::from_str(include_str!(
         "../../tests/fixtures/final-assignment/d045-catalog.json"
