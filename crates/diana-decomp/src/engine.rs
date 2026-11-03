@@ -68,7 +68,7 @@ pub struct Engine<'a> {
     images: Vec<IndexedImage<'a>>,
     options: Options,
     representation: RepresentationPolicy,
-    catalog: DeclarationCatalog,
+    catalog: DeclarationCatalog<'a>,
 }
 
 impl<'a> Engine<'a> {

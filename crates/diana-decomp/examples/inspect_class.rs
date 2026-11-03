@@ -1,7 +1,7 @@
 use diana_decomp::{
     ByteOffset, ClassDefId, ClassKey, ClassOutput, DexId, DexImage, DiagnosticCause, Engine,
-FailureKind, ImageOrigin, InputId, JavaTargetItem, Limits, MethodOutput,
-    MethodSelector, Options, Request, RequestError, RunContext, SourceLanguage, render,
+    FailureKind, ImageOrigin, InputId, JavaTargetItem, Limits, MethodOutput, MethodSelector,
+    Options, Request, RequestError, RunContext, SourceLanguage, render,
 };
 use serde_json::{Value, json};
 use std::cell::Cell;

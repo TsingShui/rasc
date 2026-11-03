@@ -29,6 +29,11 @@ pub struct ProgramIndex<'a> {
 }
 
 impl<'a> ProgramIndex<'a> {
+    /// Original physical bytes this index borrows.
+    pub(crate) fn bytes(&self) -> &'a [u8] {
+        self.bytes
+    }
+
     pub fn open(bytes: &'a [u8], control: &mut RunContext<'_>) -> Result<Self, InputError> {
         Self::open_with(bytes, control)
     }
@@ -41,7 +46,7 @@ impl<'a> ProgramIndex<'a> {
         Self::from_container(container, ByteOffset(0), control)
     }
 
-    pub(super) fn from_container(
+    pub(crate) fn from_container(
         container: DexContainer<'a>,
         header_offset: ByteOffset,
         control: &mut impl InputControl,
