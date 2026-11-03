@@ -25,6 +25,7 @@ pub fn run(
     kind: Kind,
     format: Format,
     output: Option<&Path>,
+    verbose: bool,
     limits: crate::analysis::limits::RequestLimits,
 ) -> Result<(), Failure> {
     let selector = match kind {
@@ -44,8 +45,8 @@ pub fn run(
         message: error.to_string(),
     })?;
     let payload = match format {
-        Format::Text => text_payload(&decompiled),
-        Format::Json => json_payload(&decompiled),
+        Format::Text => text_payload(&decompiled, verbose),
+        Format::Json => json_payload(&decompiled, verbose),
     };
     publish(
         output,
@@ -55,8 +56,8 @@ pub fn run(
     )
 }
 
-fn text_payload(decompiled: &Decompiled) -> String {
-    match decompiled.method {
+fn text_payload(decompiled: &Decompiled, verbose: bool) -> String {
+    let mut payload = match decompiled.method {
         Some(_) => {
             // A method request displays exactly the selected member, without the
             // class shell or another member's source.
@@ -72,7 +73,37 @@ fn text_payload(decompiled: &Decompiled) -> String {
             }
         }
         None => decompiled.rendered.source.clone(),
+    };
+    if !verbose {
+        return payload;
     }
+    for diagnostic in decompiled.report.diagnostics() {
+        let Some(key) = diagnostic.method else {
+            continue;
+        };
+        if diagnostic.cause.kind() != FailureKind::Unsupported {
+            continue;
+        }
+        let Some(facts) = decompiled
+            .report
+            .class()
+            .members()
+            .iter()
+            .find(|member| member.key() == key)
+            .and_then(member_facts)
+        else {
+            continue;
+        };
+        if !payload.ends_with('\n') {
+            payload.push('\n');
+        }
+        payload.push_str("// diana uncertainty: ");
+        payload.push_str(&format!("{:?}", diagnostic.code()));
+        payload.push_str(" at ");
+        payload.push_str(&member_at(decompiled, facts));
+        payload.push('\n');
+    }
+    payload
 }
 
 fn class_descriptor(decompiled: &Decompiled) -> Vec<u16> {
@@ -105,8 +136,9 @@ fn logical_of(decompiled: &Decompiled) -> u32 {
 
 fn status_of(member: &MethodOutput) -> &'static str {
     match member {
-        MethodOutput::Java { .. } | MethodOutput::JavaInitializer { .. } => "java",
-        MethodOutput::DeclarationOnly { .. } => "declaration_only",
+        MethodOutput::Java { .. }
+        | MethodOutput::JavaInitializer { .. }
+        | MethodOutput::DeclarationOnly { .. } => "java",
         MethodOutput::Debug { .. } => "debug",
         MethodOutput::Unavailable { .. } => "unavailable",
         MethodOutput::Generated { .. } => "java",
@@ -201,7 +233,7 @@ fn member_facts(member: &MethodOutput) -> Option<&MethodFacts> {
     }
 }
 
-fn json_payload(decompiled: &Decompiled) -> String {
+fn json_payload(decompiled: &Decompiled, verbose: bool) -> String {
     let diagnostics: Vec<_> = decompiled
         .report
         .diagnostics()
@@ -248,9 +280,26 @@ fn json_payload(decompiled: &Decompiled) -> String {
             }
             _ => None,
         };
-        methods.push(serde_json::json!({
+        let uncertainties: Vec<_> = decompiled
+            .report
+            .diagnostics()
+            .iter()
+            .filter(|diagnostic| {
+                diagnostic.method == Some(member.key())
+                    && diagnostic.cause.kind() == FailureKind::Unsupported
+            })
+            .map(|diagnostic| diagnostic_value(diagnostic, decompiled))
+            .collect();
+        let mut record = serde_json::json!({
             "at": at_text,
             "status": status_of(member),
+            "body": match member {
+                MethodOutput::DeclarationOnly { .. } => serde_json::Value::String("declaration".to_owned()),
+                MethodOutput::Java { .. }
+                | MethodOutput::JavaInitializer { .. }
+                | MethodOutput::Generated { .. } => serde_json::Value::String("code".to_owned()),
+                MethodOutput::Debug { .. } | MethodOutput::Unavailable { .. } => serde_json::Value::Null,
+            },
             "emission": match member {
                 MethodOutput::Generated { .. } => serde_json::Value::String("generated".to_owned()),
                 MethodOutput::Java { .. } | MethodOutput::JavaInitializer { .. } => {
@@ -263,7 +312,11 @@ fn json_payload(decompiled: &Decompiled) -> String {
             "source_range": span.map(|span| serde_json::json!([span.start.0, span.end.0])),
             "spans": [],
             "reason": reason,
-        }));
+        });
+        if verbose {
+            record["uncertainties"] = serde_json::Value::Array(uncertainties);
+        }
+        methods.push(record);
     }
     let spans: Vec<_> = decompiled
         .rendered
@@ -293,14 +346,14 @@ fn json_payload(decompiled: &Decompiled) -> String {
         None => decompiled.status,
     };
     serde_json::json!({
-        "schema_version": 1,
+        "schema_version": 2,
         "command": if decompiled.method.is_some() { "get-method" } else { "get-class" },
         "selection": {
             "class_at": decompiled.class_at,
             "method_at": decompiled.method_at,
         },
         "status": status,
-        "source": text_payload(decompiled),
+        "source": decompiled.rendered.source,
         "methods": methods,
         "diagnostics": diagnostics,
         "spans": spans,

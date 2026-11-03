@@ -41,8 +41,8 @@ match is a normal empty result.
 | `strings` | `at, value, entry` |
 | `xref` | `entry, context, match, use` |
 | `manifest` | text XML, or JSON `{schema_version, command, entry, status, xml, warnings}` |
-| `get-class` | text display, or JSON schema 1 |
-| `get-method` | text display, or JSON schema 1 |
+| `get-class` | text display, or JSON schema 2 |
+| `get-method` | text display, or JSON schema 2 |
 | `extract` | one file written to `-o`; stdout stays empty |
 
 `classes` can be restricted with `--filter`, `--extends`, `--implements`,
@@ -86,7 +86,7 @@ Text is UTF-8 TSV with the exact column header, or XML for `manifest`/`extract`.
 Fields escape `\\`, tab, CR, LF and NUL, and an isolated surrogate is printed as
 `\uXXXX`; no value is replaced or split across lines. A table in JSON is
 `{schema_version, command, items:[{column: value}]}`; `get-class`/`get-method` use
-the decompilation report schema 1, and `manifest` uses its own report with a
+the decompilation report schema 2, and `manifest` uses its own report with a
 `status` of `complete` or `partial`.
 
 `manifest` and a decoded `extract` keep the document usable: a recovered gap is

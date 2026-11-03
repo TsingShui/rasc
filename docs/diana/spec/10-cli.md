@@ -160,7 +160,7 @@ diana get-method sample.dex 'e0:l0:c7:m23::Lcom/example/App;->check(I)Z'
 A required readable-Java case MUST NOT pass solely because Debug was displayed. Semantic cases require independent behavior evidence where specified.
 A successful compilation does not mean semantic equivalence; a readable local failure does not mean that a request error was swallowed, and the application MUST NOT treat it as a reason to re-analyze or to start another engine.
 
-##### Decompilation JSON schema 1
+##### Decompilation JSON schema 2
 
 The schema applies only to delivered get-class/get-method results. All listed
 fields are present; empty collections are `[]`, and `null` has only the meanings
@@ -170,7 +170,7 @@ unconstrained.
 
 | Object / field | Type and contract |
 |---|---|
-| Report `schema_version` / `command` | Integer `1` / `get-class` or `get-method` |
+| Report `schema_version` / `command` | Integer `2` / `get-class` or `get-method` |
 | Report `selection` | `{class_at: string, method_at: string or null}`; canonical original locators per §6.3, with null method only for a class request |
 | Report `status` | `java_unit` or `mixed` for a class; `java`, `debug` or `unavailable` for a method |
 | Report `source` | Complete rendered UTF8 display string, including Mixed/failure markers; it is not automatically a Java compilation unit |

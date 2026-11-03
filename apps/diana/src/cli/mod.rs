@@ -28,6 +28,9 @@ use table::Record;
 #[derive(Parser)]
 #[command(name = "diana", about = "Native APK/DEX analysis", version)]
 struct Cli {
+    /// Include member uncertainty annotations and diagnostic detail
+    #[arg(long, global = true)]
+    verbose: bool,
     #[command(flatten)]
     limits: LimitArgs,
     #[command(subcommand)]
@@ -189,7 +192,7 @@ enum Command {
     },
     /// Decompile one class
     #[command(
-        long_about = "Displays the existing report: complete Java, or Mixed with every member and the reason of each failure. JSON follows schema 1."
+        long_about = "Displays the readable report with every member and the reason of each failure. JSON follows schema 2."
     )]
     GetClass {
         /// Input file (APK, ZIP or bare DEX)
@@ -302,6 +305,7 @@ enum KindArg {
 pub fn run() -> std::process::ExitCode {
     let cli = Cli::parse();
     let limits = cli.limits.limits();
+    let verbose = cli.verbose;
     let result = match cli.command {
         Command::Entries {
             input,
@@ -325,6 +329,7 @@ pub fn run() -> std::process::ExitCode {
             get::Kind::Class,
             format,
             output.as_deref(),
+            verbose,
             limits,
         ),
         Command::GetMethod {
@@ -338,6 +343,7 @@ pub fn run() -> std::process::ExitCode {
             get::Kind::Method,
             format,
             output.as_deref(),
+            verbose,
             limits,
         ),
         Command::Extract {
