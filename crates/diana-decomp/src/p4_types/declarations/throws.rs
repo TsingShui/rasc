@@ -118,12 +118,14 @@ pub(crate) fn source_throws(
         descriptors,
     }))
 }
+#[allow(dead_code)]
 pub(crate) struct Invocation<'a> {
     pub reference: crate::MethodId,
     pub pc: crate::CodeUnitOffset,
     pub protection: Option<&'a crate::input::protection::CheckedProtection>,
 }
 
+#[allow(dead_code)]
 pub(crate) fn compatible(
     input: &MethodInput<'_, '_>,
     catalog: &Context,

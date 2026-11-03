@@ -19,10 +19,14 @@ pub(crate) const STATIC: u32 = 0x8;
 pub(crate) const FINAL: u32 = 0x10;
 /// Method lock, or declared `synchronized` on native methods.
 pub(crate) const SYNCHRONIZED: u32 = 0x20;
-/// Compiler-generated bridge method.
+/// Compiler-generated bridge method; also field `volatile`.
 pub(crate) const BRIDGE: u32 = 0x40;
-/// Last argument is a rest argument.
+/// Field meaning of the bridge bit.
+pub(crate) const VOLATILE: u32 = BRIDGE;
+/// Last argument is a rest argument; also field `transient`.
 pub(crate) const VARARGS: u32 = 0x80;
+/// Field meaning of the varargs bit.
+pub(crate) const TRANSIENT: u32 = VARARGS;
 /// Implemented in native code.
 pub(crate) const NATIVE: u32 = 0x100;
 /// Interface class.
@@ -63,6 +67,14 @@ const METHOD_BITS: u32 = VISIBILITY
 /// At most one visibility bit, as the format requires.
 pub(crate) fn visibility_valid(flags: u32) -> bool {
     flags & VISIBILITY & (flags & VISIBILITY).wrapping_sub(1) == 0
+}
+
+/// Bits with a defined field meaning.
+const FIELD_BITS: u32 = VISIBILITY | STATIC | FINAL | VOLATILE | TRANSIENT | SYNTHETIC | ENUM;
+
+/// A field flag word that names no undefined or method-only bit.
+pub(crate) fn field_valid(flags: u32) -> bool {
+    visibility_valid(flags) && flags & !FIELD_BITS == 0
 }
 
 /// A method flag word that names no undefined or class-only bit.

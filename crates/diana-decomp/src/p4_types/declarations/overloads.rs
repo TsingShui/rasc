@@ -276,6 +276,7 @@ fn covariant_bridge(
 /// Exact target-formal source types make the nongeneric target at least as
 /// specific as every widening-applicable different vector. Equal vectors need
 /// independent override/bridge evidence; they are not discarded by arrival order.
+#[allow(dead_code)]
 pub(super) fn unique_target(
     catalog: &Context,
     class: &InputClassDeclaration,

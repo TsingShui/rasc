@@ -160,35 +160,17 @@ pub(crate) fn binding_available(
     input: &MethodInput<'_, '_>,
     catalog: &Context,
     contract: &StaticContract,
-    invocation: &super::throws::Invocation<'_>,
+    _invocation: &super::throws::Invocation<'_>,
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<bool, RequestError> {
+    // The original reference fixes the target. Overload-resolution uniqueness
+    // only decides whether javac would pick the same method, so it is recorded
+    // as source uncertainty instead of removing the call and the whole body.
     let Some(class) = catalog.class(&contract.owner, budget)? else {
-        // An unknown external owner does not invalidate the original reference.
-        // Without hierarchy/overload facts there is no rival target to reject.
         return Ok(true);
     };
     let caller = copy_units(input.owner(), budget)?;
-    Ok(super::overloads::unique_target(
-        catalog,
-        class,
-        &caller,
-        &contract.name,
-        &contract.prototype,
-        match contract.access {
-            StaticAccess::Public => super::overloads::Scope::Static,
-            StaticAccess::Enclosing => super::overloads::Scope::EnclosingStatic {
-                same_class: caller == contract.owner,
-            },
-        },
-        budget,
-    )? && super::throws::compatible(
-        input,
-        catalog,
-        Some(&contract.declared_throws),
-        invocation,
-        budget,
-    )?)
+    super::contracts::member_directory(class, &caller, budget)
 }
 
 pub(crate) fn qualifier_available(

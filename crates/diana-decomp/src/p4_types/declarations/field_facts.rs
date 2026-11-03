@@ -97,7 +97,7 @@ pub(crate) fn collect_field(
     if evidence.access_flags & 7 == 2 && !own_private
         || (evidence.access_flags & 8 != 0) != (storage == FieldStorage::Static)
         || evidence.access_flags & 7 != 1 && !lexical && !own_private
-        || evidence.access_flags & !(1 | 2 | 4 | 8 | 16 | 64 | 128 | 0x1000) != 0
+        || !crate::substrate::flags::field_valid(evidence.access_flags)
         || evidence.access_flags & (16 | 64) == (16 | 64)
         || usage == FieldUse::Write && evidence.access_flags & 16 != 0 && !final_initialization
     {
@@ -117,7 +117,9 @@ pub(crate) fn collect_field(
             JavaConstantKind::Constant => {
                 return Err(RequestError::JavaConstantFieldRead { reference, pc });
             }
-            JavaConstantKind::Unknown => return Err(missing()),
+            // Reading the field keeps the original access; an unproven
+            // constant attribute cannot change the emitted expression.
+            JavaConstantKind::Unknown => {}
             JavaConstantKind::NonConstant => {}
         }
     }
