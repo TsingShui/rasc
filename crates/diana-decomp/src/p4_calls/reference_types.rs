@@ -34,10 +34,16 @@ fn named_type(
     let Some(class) = catalog.class(descriptor, budget)? else {
         return Ok(None);
     };
-    let nested = super::nested_scope::collect(input.program(), input.class_id(), catalog, budget)?;
-    let mut lexical = nested
-        .as_ref()
-        .is_some_and(|scope| scope.owner() == descriptor || scope.outer() == descriptor);
+    // Lexical scope is only relevant for nested types; ordinary descriptors
+    // skip the ownership scan entirely.
+    let mut lexical = false;
+    if descriptor.contains(&u16::from(b'$')) {
+        let nested =
+            super::nested_scope::collect(input.program(), input.class_id(), catalog, budget)?;
+        lexical = nested
+            .as_ref()
+            .is_some_and(|scope| scope.owner() == descriptor || scope.outer() == descriptor);
+    }
     if descriptor == caller && class.enclosing_scope {
         let ownership = crate::input::ownership::collect(input.program(), budget)?;
         for entry in ownership.nested() {

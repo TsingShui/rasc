@@ -232,13 +232,18 @@ fn verify_impl(
     if !super::cast_ops::validate(input, catalog, &storage.typed, budget)? {
         return Ok(Outcome::Declined(reason("cast_binding")));
     }
+    let _bind = crate::pipeline::phase_span("p8_bindings");
     let Some(mut calls) = super::calls::validate_bindings(input, catalog, &storage.typed, budget)?
     else {
         return Ok(Outcome::Declined(reason("call_source_binding")));
     };
+    drop(_bind);
+    let _types = crate::pipeline::phase_span("p8_types");
     let Some(type_names) = super::types::resolve(input, catalog, storage, budget)? else {
         return Ok(Outcome::Declined(reason("storage_type_names")));
     };
+    drop(_types);
+    let _low = crate::pipeline::phase_span("p8_lowering");
     let method = super::dispatcher::verify(input, catalog, plan, &type_names, &mut calls, budget)?;
     Ok(match method {
         Some(mut method) => {

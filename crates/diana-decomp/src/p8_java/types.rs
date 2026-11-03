@@ -185,7 +185,14 @@ impl TypeNames {
             _ => return Err(RequestError::InternalInvariant("named type lost identity")),
         };
         let descriptor = copy_units(name, budget)?;
-        if let Some(source) = nested_name(input, catalog, &descriptor, budget)? {
+        // Only nested classes can have a lexical source name; skip the ownership
+        // scan for ordinary top-level descriptors.
+        let nested = descriptor.contains(&u16::from(b'$'));
+        if let Some(source) = (if nested {
+            nested_name(input, catalog, &descriptor, budget)?
+        } else {
+            None
+        }) {
             push(
                 &mut self.named,
                 NamedType {
