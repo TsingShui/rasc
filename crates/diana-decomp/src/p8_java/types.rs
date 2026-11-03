@@ -255,11 +255,6 @@ impl TypeNames {
                 }
                 source.push(builtin.spelling(), budget)?;
             } else {
-                if crate::p4_calls::source_reference_type(input, catalog, base, budget)?
-                    == Some(false)
-                {
-                    return Ok(false);
-                }
                 let Some(base) = super::calls::type_name(base, budget)? else {
                     return Ok(false);
                 };
