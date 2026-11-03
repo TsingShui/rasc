@@ -270,7 +270,14 @@ fn common(
         return Ok(signature.units() == [40, 41, 86]);
     }
     let metadata = input.throws_metadata(budget)?;
-    Ok(!metadata.other_annotations && metadata.exceptions.is_empty())
+    Ok(metadata.exceptions.is_empty()
+        && input.method_annotations_allowed(
+            &[
+                "Ldalvik/annotation/Throws;",
+                "Ldalvik/annotation/MethodParameters;",
+            ],
+            budget,
+        )?)
 }
 fn constructor(
     input: &MethodInput<'_, '_>,

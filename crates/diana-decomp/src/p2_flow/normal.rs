@@ -883,7 +883,12 @@ fn decode_impl<'a>(
                 kind
             } else {
                 return Ok(crate::substrate::outcome::Outcome::Declined(
-                    crate::OutputReason::JavaAnalysisUnavailable,
+                    crate::OutputReason::JavaCheckFailed {
+                        code: crate::DiagnosticCode::JavaAnalysisUnavailable,
+                        phase: "P2",
+                        check: "return_type_projection",
+                        pc: None,
+                    },
                 ));
             },
         )
@@ -959,7 +964,12 @@ fn decode_impl<'a>(
     )?;
     if !supported {
         return Ok(crate::substrate::outcome::Outcome::Declined(
-            crate::OutputReason::JavaAnalysisUnavailable,
+            crate::OutputReason::JavaCheckFailed {
+                code: crate::DiagnosticCode::JavaAnalysisUnavailable,
+                phase: "P2",
+                check: "parameter_type_projection",
+                pc: None,
+            },
         ));
     }
     let mut instructions = Vec::new();
@@ -999,7 +1009,12 @@ fn decode_impl<'a>(
         if checked.layout().is_reachable(pc) {
             let LayoutKind::Instruction(spec) = layout.kind() else {
                 return Ok(crate::substrate::outcome::Outcome::Declined(
-                    crate::OutputReason::JavaAnalysisUnavailable,
+                    crate::OutputReason::JavaCheckFailed {
+                        code: crate::DiagnosticCode::JavaAnalysisUnavailable,
+                        phase: "P2",
+                        check: "reachable_payload",
+                        pc: Some(pc),
+                    },
                 ));
             };
             let operands =
@@ -1234,7 +1249,12 @@ fn decode_impl<'a>(
                     )?
                     else {
                         return Ok(crate::substrate::outcome::Outcome::Declined(
-                            crate::OutputReason::JavaAnalysisUnavailable,
+                            crate::OutputReason::JavaCheckFailed {
+                                code: crate::DiagnosticCode::JavaAnalysisUnavailable,
+                                phase: "P2",
+                                check: "field_type_projection",
+                                pc: Some(pc),
+                            },
                         ));
                     };
                     Decoded::Op(match (spec.opcode - 0x52) / 7 {
@@ -1276,7 +1296,12 @@ fn decode_impl<'a>(
                     };
                     let Some(component) = ArrayKind::parse(input, reference, budget)? else {
                         return Ok(crate::substrate::outcome::Outcome::Declined(
-                            crate::OutputReason::JavaAnalysisUnavailable,
+                            crate::OutputReason::JavaCheckFailed {
+                                code: crate::DiagnosticCode::JavaAnalysisUnavailable,
+                                phase: "P2",
+                                check: "new_array_component",
+                                pc: Some(pc),
+                            },
                         ));
                     };
                     let id = ArrayCreationId(
@@ -1304,7 +1329,12 @@ fn decode_impl<'a>(
                     };
                     let Some(component) = ArrayKind::parse(input, reference, budget)? else {
                         return Ok(crate::substrate::outcome::Outcome::Declined(
-                            crate::OutputReason::JavaAnalysisUnavailable,
+                            crate::OutputReason::JavaCheckFailed {
+                                code: crate::DiagnosticCode::JavaAnalysisUnavailable,
+                                phase: "P2",
+                                check: "filled_array_component",
+                                pc: Some(pc),
+                            },
                         ));
                     };
                     let mut registers = Vec::new();
@@ -1411,7 +1441,12 @@ fn decode_impl<'a>(
                     let descriptor = input.type_name(reference, budget)?;
                     let Some(kind) = reference_type(input, descriptor, reference, budget)? else {
                         return Ok(crate::substrate::outcome::Outcome::Declined(
-                            crate::OutputReason::JavaAnalysisUnavailable,
+                            crate::OutputReason::JavaCheckFailed {
+                                code: crate::DiagnosticCode::JavaAnalysisUnavailable,
+                                phase: "P2",
+                                check: "cast_type_projection",
+                                pc: Some(pc),
+                            },
                         ));
                     };
                     if spec.opcode == 0x20 {
@@ -1601,7 +1636,12 @@ fn decode_impl<'a>(
                                 }
                                 InvokeResult::Reference(None) => {
                                     return Ok(crate::substrate::outcome::Outcome::Declined(
-                                        crate::OutputReason::JavaAnalysisUnavailable,
+                                        crate::OutputReason::JavaCheckFailed {
+                                            code: crate::DiagnosticCode::JavaAnalysisUnavailable,
+                                            phase: "P2",
+                                            check: "invoke_result_type",
+                                            pc: Some(pc),
+                                        },
                                     ));
                                 }
                                 InvokeResult::Void => false,
@@ -1679,7 +1719,12 @@ fn decode_impl<'a>(
                 }
                 _ => {
                     return Ok(crate::substrate::outcome::Outcome::Declined(
-                        crate::OutputReason::JavaAnalysisUnavailable,
+                        crate::OutputReason::JavaCheckFailed {
+                            code: crate::DiagnosticCode::JavaAnalysisUnavailable,
+                            phase: "P2",
+                            check: "unsupported_opcode",
+                            pc: Some(pc),
+                        },
                     ));
                 }
             };
@@ -1825,7 +1870,12 @@ fn decode_impl<'a>(
     let Some(exception_edges) = super::protection::build(&protection, &blocks, &edges, budget)?
     else {
         return Ok(crate::substrate::outcome::Outcome::Declined(
-            crate::OutputReason::JavaAnalysisUnavailable,
+            crate::OutputReason::JavaCheckFailed {
+                code: crate::DiagnosticCode::JavaAnalysisUnavailable,
+                phase: "P2",
+                check: "exception_edge_construction",
+                pc: None,
+            },
         ));
     };
     super::protection::verify(&raw, &protection, &blocks, &edges, &exception_edges, budget)?;

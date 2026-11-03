@@ -161,13 +161,27 @@ fn diagnostic_value(diagnostic: &Diagnostic, decompiled: &Decompiled) -> serde_j
             ),
         }
     });
+    let (phase, check, code_unit) = match &diagnostic.cause {
+        DiagnosticCause::Unsupported(diana_decomp::OutputReason::JavaCheckFailed {
+            phase,
+            check,
+            pc,
+            ..
+        }) => (Some(*phase), Some(*check), pc.map(|pc| pc.0)),
+        DiagnosticCause::Unsupported(diana_decomp::OutputReason::BindingEvidenceMissing {
+            pc,
+            ..
+        }) => (Some("P4"), Some("method_signature_evidence"), Some(pc.0)),
+        _ => (None, None, None),
+    };
     serde_json::json!({
         "code": format!("{:?}", diagnostic.code()),
         "kind": format!("{:?}", diagnostic.cause.kind()).to_lowercase(),
         "severity": severity(diagnostic.cause.kind()),
         "method_at": method_at,
-        "code_unit": serde_json::Value::Null,
-        "phase": serde_json::Value::Null,
+        "code_unit": code_unit,
+        "phase": phase,
+        "check": check,
         "detail": match &diagnostic.cause {
             DiagnosticCause::Request(error) => error.to_string(),
             other => format!("{other:?}"),

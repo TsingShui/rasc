@@ -20,6 +20,13 @@ pub struct ImageFact {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum OutputReason {
     BranchJavaUnsupported,
+    /// A specific failed check, retaining the existing failure category.
+    JavaCheckFailed {
+        code: crate::DiagnosticCode,
+        phase: &'static str,
+        check: &'static str,
+        pc: Option<crate::CodeUnitOffset>,
+    },
     BindingEvidenceMissing {
         reference: crate::MethodId,
         pc: crate::CodeUnitOffset,
@@ -71,6 +78,7 @@ impl Diagnostic {
             DiagnosticCause::Unsupported(OutputReason::BindingEvidenceMissing { .. }) => {
                 Code::BindingEvidenceMissing
             }
+            DiagnosticCause::Unsupported(OutputReason::JavaCheckFailed { code, .. }) => *code,
             DiagnosticCause::Unsupported(OutputReason::BranchJavaUnsupported) => {
                 Code::BranchJavaUnsupported
             }

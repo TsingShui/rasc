@@ -188,6 +188,23 @@ fn t15_derived_array_components_preserve_store_checks_and_copy_cycles() {
                 };
                 assert_eq!(report.diagnostics()[reason.0].cause.kind(), kind, "{name}");
                 assert_eq!(report.diagnostics()[reason.0].code(), code, "{name}");
+                if name == "newDetached" {
+                    assert!(
+                        matches!(
+                            report.diagnostics()[reason.0].cause,
+                            diana_decomp::DiagnosticCause::Unsupported(
+                                diana_decomp::OutputReason::JavaCheckFailed {
+                                    phase: "P8",
+                                    check: "storage_type_names",
+                                    pc: None,
+                                    ..
+                                }
+                            )
+                        ),
+                        "{:?}",
+                        report.diagnostics()[reason.0].cause
+                    );
+                }
             } else {
                 assert!(
                     matches!(&members[0], MethodOutput::Java { .. }),

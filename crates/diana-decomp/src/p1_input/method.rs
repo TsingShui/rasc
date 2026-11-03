@@ -163,6 +163,42 @@ impl<'i, 'a> MethodInput<'i, 'a> {
         };
         super::throws::read(self.index, annotations.method_range(), budget)
     }
+    /// Checks the types of already-validated method annotations against a
+    /// consumer-owned system-metadata list, without interpreting their values.
+    pub(crate) fn method_annotations_allowed(
+        &self,
+        allowed: &[&str],
+        budget: &mut MethodBudget<'_, '_>,
+    ) -> Result<bool, crate::RequestError> {
+        let annotations = match &self.raw {
+            RawPrintable::Method(raw) => raw.annotations(),
+            RawPrintable::Declaration(raw) => raw.annotations(),
+        };
+        let Some(range) = annotations.method_range() else {
+            return Ok(true);
+        };
+        let mut offsets = self.index.annotation_offsets(0x1003, range.start, budget)?;
+        let mut last = None;
+        while offsets.remaining_byte().0 != 0 {
+            budget.charge_work(1)?;
+            let (_, visibility, ty, _) =
+                self.index
+                    .next_annotation(&mut offsets, &mut last, budget)?;
+            let name =
+                crate::substrate::owned::copy_units(self.index.type_name(ty, budget)?, budget)?;
+            let mut matched = false;
+            for descriptor in allowed {
+                budget.charge_work(
+                    u64::try_from(name.len()).map_err(|_| crate::RequestError::PlatformCapacity)?,
+                )?;
+                matched |= name.iter().copied().eq(descriptor.encode_utf16());
+            }
+            if visibility != 2 || !matched {
+                return Ok(false);
+            }
+        }
+        Ok(true)
+    }
     pub(crate) fn own_field_metadata(
         &self,
         reference: crate::FieldId,

@@ -211,33 +211,42 @@ fn verify_impl(
         }
     }
     if !nested_context && capture_dependent {
-        return Ok(Outcome::Declined(
-            crate::OutputReason::JavaAnalysisUnavailable,
-        ));
+        return Ok(Outcome::Declined(crate::OutputReason::JavaCheckFailed {
+            code: crate::DiagnosticCode::JavaAnalysisUnavailable,
+            phase: "P8",
+            check: "capture_requires_nested_context",
+            pc: None,
+        }));
     }
-    let reason = if storage.typed.ssa.raw.try_byte_range().as_range().is_empty() {
-        crate::OutputReason::BranchJavaUnsupported
+    let code = if storage.typed.ssa.raw.try_byte_range().as_range().is_empty() {
+        crate::DiagnosticCode::BranchJavaUnsupported
     } else {
-        crate::OutputReason::JavaAnalysisUnavailable
+        crate::DiagnosticCode::JavaAnalysisUnavailable
+    };
+    let reason = |check| crate::OutputReason::JavaCheckFailed {
+        code,
+        phase: "P8",
+        check,
+        pc: None,
     };
     if matches!(plan.shape, crate::p7_regions::Shape::Protected(None)) {
-        return Ok(Outcome::Declined(reason));
+        return Ok(Outcome::Declined(reason("protected_region_plan")));
     }
     if !super::array_ops::validate(input, catalog, &storage.typed, budget)? {
-        return Ok(Outcome::Declined(reason));
+        return Ok(Outcome::Declined(reason("array_operation_binding")));
     }
     if !super::fresh_fill::validate(input, catalog, &storage.typed, budget)? {
-        return Ok(Outcome::Declined(reason));
+        return Ok(Outcome::Declined(reason("fresh_array_fill")));
     }
     if !super::cast_ops::validate(input, catalog, &storage.typed, budget)? {
-        return Ok(Outcome::Declined(reason));
+        return Ok(Outcome::Declined(reason("cast_binding")));
     }
     let Some(mut calls) = super::calls::validate_bindings(input, catalog, &storage.typed, budget)?
     else {
-        return Ok(Outcome::Declined(reason));
+        return Ok(Outcome::Declined(reason("call_source_binding")));
     };
     let Some(type_names) = super::types::resolve(input, catalog, storage, budget)? else {
-        return Ok(Outcome::Declined(reason));
+        return Ok(Outcome::Declined(reason("storage_type_names")));
     };
     let method = super::dispatcher::verify(
         input,
@@ -254,6 +263,6 @@ fn verify_impl(
             method.capture_field = capture_field;
             Outcome::Ready(method)
         }
-        None => Outcome::Declined(reason),
+        None => Outcome::Declined(reason("java_lowering_or_verification")),
     })
 }

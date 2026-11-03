@@ -41,6 +41,33 @@ fn units(text: &str) -> Vec<u16> {
 }
 
 #[test]
+fn method_annotations_do_not_contaminate_declared_throws() {
+    let bytes = include_bytes!("../fixtures/throws-scope/classes.dex");
+    let mut control = RunContext::new(Limits::default(), &|| false);
+    let engine = Engine::open(
+        vec![DexImage {
+            bytes,
+            header_offset: ByteOffset(0),
+            origin: ImageOrigin { input: InputId(0) },
+        }],
+        Options::default(),
+        DeclarationCatalog::empty(EnvironmentId(0)),
+        &mut control,
+    )
+    .unwrap();
+    let report = engine.decompile(request(0), &mut control).unwrap();
+    assert_eq!(report.class().members().len(), 3);
+    for member in report.class().members() {
+        let MethodOutput::Java { source, .. } = member else {
+            panic!("unrelated annotation denied a constant-return body");
+        };
+        assert!(source.contains("v0 = 7;"));
+        assert!(source.contains("return v0;"));
+    }
+    assert_eq!(report.annotations().original().records().len(), 2);
+}
+
+#[test]
 fn t23_runtime_annotations_bind_original_values_and_keep_owned_metadata() {
     for (bytes, catalog, class, expected_units, expected_ints) in [
         (DEX, CATALOG, 0, &[120u16][..], &[1i64, 2][..]),

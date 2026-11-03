@@ -106,9 +106,6 @@ pub(crate) fn source_throws(
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<Option<SourceThrows>, RequestError> {
     let original = input.throws_metadata(budget)?;
-    if original.other_annotations {
-        return Ok(None);
-    }
     let mut descriptors = Vec::new();
     for exception in original.exceptions {
         budget.charge_work(1)?;
