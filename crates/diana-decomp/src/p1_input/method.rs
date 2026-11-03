@@ -96,8 +96,7 @@ impl<'i, 'a> MethodInput<'i, 'a> {
         id: crate::TypeId,
         budget: &mut MethodBudget<'_, '_>,
     ) -> Result<super::TypeProjection, crate::RequestError> {
-        self.index.type_descriptor(id, budget)?;
-        Ok(super::type_projection::original(id))
+        Ok(self.index.type_projection(id, budget)?)
     }
     pub(crate) fn projected_name(
         &self,

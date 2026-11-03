@@ -127,6 +127,15 @@ impl<'a> ProgramIndex<'a> {
         self.string_with(string_idx, control)
     }
 
+    pub(crate) fn type_projection(
+        &self,
+        id: TypeId,
+        control: &mut impl InputControl,
+    ) -> Result<super::TypeProjection, InputError> {
+        self.type_descriptor(id, control)?;
+        Ok(super::type_projection::original(id))
+    }
+
     pub(crate) fn string_with(
         &self,
         string_idx: StringId,

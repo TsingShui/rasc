@@ -189,9 +189,12 @@ fn parallel(
         let source = if local_type(source_kind)? == local_type(target_kind)? {
             crate::p5_variables::CopySource::Local(LocalId(source.0))
         } else {
-            let evidence = crate::p4_types::zero::evidence(&typed.ssa, source, budget)?.ok_or(
-                RequestError::InternalInvariant("Phi copy lacks zero evidence"),
-            )?;
+            let evidence = typed
+                .zeros
+                .evidence(source)?
+                .ok_or(RequestError::InternalInvariant(
+                    "Phi copy lacks zero evidence",
+                ))?;
             let view = crate::p4_types::zero::view(target_kind).ok_or(
                 RequestError::InternalInvariant("word zero has incompatible storage width"),
             )?;

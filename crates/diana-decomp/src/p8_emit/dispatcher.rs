@@ -213,7 +213,9 @@ pub(super) fn statements(
                         output.push("super", budget)?
                     }
                     crate::p7_java::calls::CallReceiver::Value(value) => {
-                        local(value, output, budget)?
+                        output.push("(", budget)?;
+                        super::java::value_use(value, output, budget)?;
+                        output.push(")", budget)?;
                     }
                 }
                 output.push(".", budget)?;

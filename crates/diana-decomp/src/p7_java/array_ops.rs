@@ -94,8 +94,8 @@ fn valid_view(
     actual: ValueUse,
     value: ValueId,
     expected: Kind,
+    budget: &mut MethodBudget<'_, '_>,
 ) -> Result<bool, RequestError> {
-    let index = usize::try_from(value.0).map_err(|_| RequestError::PlatformCapacity)?;
     if actual.value().0 != value.0 {
         return Ok(false);
     }
@@ -105,32 +105,16 @@ fn valid_view(
     ) {
         return super::dispatcher_verify::numeric_view(ssa, actual, Some(&value), expected);
     }
-    Ok(match (actual, expected, ssa.kinds[index]) {
-        (ValueUse::Direct(_), Kind::Int, Some(Kind::Int))
-        | (ValueUse::Direct(_), Kind::Object, Some(Kind::Object))
-        | (ValueUse::BooleanWord(_), Kind::Int, Some(Kind::Boolean)) => true,
-        (
-            ValueUse::UpcastObject(_),
-            Kind::Object,
-            Some(
-                Kind::String
-                | Kind::PrimitiveArray(_)
-                | Kind::ObjectArray
-                | Kind::Nominal(_)
-                | Kind::ReferenceArray(_)
-                | Kind::ProjectedNominal(_),
-            ),
-        ) => true,
-        (
-            ValueUse::Null {
-                kind: crate::p4_types::BuiltinReference::Object,
-                ..
-            },
-            Kind::Object,
-            Some(Kind::Int),
-        ) => ssa.integral_bits[index] == 1,
-        _ => false,
-    })
+    if expected == Kind::Object {
+        return super::values::verify_reference_store(
+            ssa,
+            actual,
+            value,
+            crate::p2_flow::DeclarationType::Object,
+            budget,
+        );
+    }
+    Ok(false)
 }
 pub(crate) fn verify(
     input: &crate::input::MethodInput<'_, '_>,
@@ -205,7 +189,7 @@ pub(crate) fn verify(
             actual.0 == array.0
                 && element.accepts(component)
                 && result_matches(*result, component.kind())?
-                && valid_view(ssa, *index, op.input(1)?, Kind::Int)?
+                && valid_view(ssa, *index, op.input(1)?, Kind::Int, budget)?
         }
         (
             Op::ArrayStore(_, _, _, element),
@@ -230,11 +214,11 @@ pub(crate) fn verify(
                         )
                 )
                 && element.accepts(component)
-                && valid_view(ssa, *index, op.input(1)?, Kind::Int)?
+                && valid_view(ssa, *index, op.input(1)?, Kind::Int, budget)?
                 && if matches!(actual, ValueUse::ObjectArrayView(_)) {
-                    valid_view(ssa, *value, op.input(2)?, Kind::Object)?
+                    valid_view(ssa, *value, op.input(2)?, Kind::Object, budget)?
                 } else if component.kind() == Kind::Object {
-                    valid_view(ssa, *value, op.input(2)?, component.kind())?
+                    valid_view(ssa, *value, op.input(2)?, component.kind(), budget)?
                 } else {
                     super::values::verify_primitive_store(ssa, *value, op.input(2)?, component)?
                 }

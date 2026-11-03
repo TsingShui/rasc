@@ -339,7 +339,7 @@ pub(super) fn verify_allocation(
             for (&source, &view) in op.inputs.iter().zip(values) {
                 budget.charge_work(1)?;
                 let valid = if component.field_offset() == 2 {
-                    super::values::verify_reference_store(typed, view, source, component)?
+                    super::values::verify_reference_store(typed, view, source, component, budget)?
                 } else {
                     super::values::verify_primitive_store(typed, view, source, component)?
                 };

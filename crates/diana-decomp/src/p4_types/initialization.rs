@@ -62,6 +62,27 @@ pub(crate) struct Initializations {
     pub deferred: Vec<Option<InitializationId>>,
     pub calls: Vec<Option<InitializationId>>,
 }
+impl Initializations {
+    pub(super) fn available_at(
+        &self,
+        ssa: &SsaBody<'_>,
+        value: ValueId,
+        pc: crate::CodeUnitOffset,
+    ) -> Result<bool, RequestError> {
+        let Some(id) = self.deferred.get(ix(value.0)?).copied().flatten() else {
+            return Ok(true);
+        };
+        let initialization = match id {
+            InitializationId::Allocation(_) => self.plans.get(id.index()?).map(|plan| plan.init),
+            InitializationId::This => self.chain.as_ref().map(|chain| chain.init),
+        }
+        .ok_or(RequestError::InternalInvariant(
+            "reference use lost initialization ordering",
+        ))?;
+        Ok(ssa.operation(initialization)?.pc.0 < pc.0)
+    }
+}
+
 fn ix(value: u32) -> Result<usize, RequestError> {
     usize::try_from(value).map_err(|_| RequestError::PlatformCapacity)
 }

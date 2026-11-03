@@ -1,6 +1,7 @@
 use crate::p2_flow::{CallId, InvokeKind};
+use crate::p4_types::TypedBody;
 use crate::p4_types::bindings::CallEvidence;
-use crate::p4_types::{Kind, TypedBody};
+use crate::p5_variables::LocalId;
 use crate::{MethodBudget, RequestError};
 
 pub(super) fn verify(
@@ -35,10 +36,28 @@ pub(super) fn verify(
     else {
         return Ok(false);
     };
-    if site.kind == InvokeKind::Super
-        && receiver.identity != crate::p4_types::calls::ReceiverIdentity::ImplicitThis
-    {
-        return Ok(false);
+    match (receiver, actual.receiver) {
+        (
+            crate::p4_types::calls::TypedReceiver::Super { value },
+            super::calls::CallReceiver::Super(local),
+        ) if site.kind == InvokeKind::Super && local.0 == value.0 => {}
+        (
+            crate::p4_types::calls::TypedReceiver::Value(usage),
+            super::calls::CallReceiver::Value(view),
+        ) if site.kind != InvokeKind::Super
+            && view == super::values::lower(LocalId(usage.value.0), usage.conversion) =>
+        {
+            if !super::values::verify_reference_store(
+                typed,
+                view,
+                usage.value,
+                crate::p2_flow::DeclarationType::Object,
+                budget,
+            )? {
+                return Ok(false);
+            }
+        }
+        _ => return Ok(false),
     }
     if actual.contract.kind != expected
         || actual.contract.reference != site.reference
@@ -47,14 +66,11 @@ pub(super) fn verify(
         || actual.contract.prototype != facts.prototype
         || actual.invoke != site.pc
         || actual.result_site != site.result_pc
-        || actual.receiver.value().0 != receiver.value.0
+        || actual.receiver.value().0 != receiver.value().0
         || matches!(actual.receiver, super::calls::CallReceiver::Super(_))
             != (expected == crate::p4_types::declarations::ReceiverKind::Super)
-        || bound.inputs.first() != Some(&receiver.value)
+        || bound.inputs.first() != Some(&receiver.value())
         || site.registers.first() != Some(&actual.original_receiver)
-        || typed.kinds
-            [usize::try_from(receiver.value.0).map_err(|_| RequestError::PlatformCapacity)?]
-            != Some(Kind::Nominal(receiver.original_type))
     {
         return Ok(false);
     }
@@ -80,7 +96,7 @@ pub(super) fn verify(
     }
     for ((&view, value), formal) in actual.arguments.iter().zip(values).zip(formals) {
         budget.charge_work(1)?;
-        if !super::dispatcher_verify::call_argument(typed, view, *value, *formal)? {
+        if !super::dispatcher_verify::call_argument(typed, view, *value, *formal, budget)? {
             return Ok(false);
         }
     }

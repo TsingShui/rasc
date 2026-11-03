@@ -151,27 +151,11 @@ pub(super) fn verify(
     {
         return Ok(false);
     }
-    use super::branch::ValueUse;
-    Ok(match (actual.source, typed.kinds[ix(source.0)?]) {
-        (ValueUse::Direct(_), Some(Kind::Object)) => true,
-        (
-            ValueUse::UpcastObject(_),
-            Some(
-                Kind::String
-                | Kind::Nominal(_)
-                | Kind::ReferenceArray(_)
-                | Kind::ProjectedNominal(_)
-                | Kind::PrimitiveArray(_)
-                | Kind::ObjectArray,
-            ),
-        ) => true,
-        (
-            ValueUse::Null {
-                kind: crate::p4_types::BuiltinReference::Object,
-                ..
-            },
-            _,
-        ) => typed.ssa.is_zero(source)?,
-        _ => false,
-    })
+    super::values::verify_reference_store(
+        typed,
+        actual.source,
+        source,
+        crate::p2_flow::DeclarationType::Object,
+        budget,
+    )
 }

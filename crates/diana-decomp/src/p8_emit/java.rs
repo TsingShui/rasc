@@ -118,11 +118,6 @@ fn value_with(
         ValueUse::FloatLiteral { bits, .. } => {
             super::literals::fp(u64::from(bits), false, output, budget)?
         }
-        ValueUse::Null { kind, .. } => {
-            output.push("(", budget)?;
-            output.push(kind.spelling(), budget)?;
-            output.push(") null", budget)?;
-        }
         ValueUse::UpcastObject(value) => {
             output.push("(java.lang.Object) ", budget)?;
             source(value, output, budget)?;

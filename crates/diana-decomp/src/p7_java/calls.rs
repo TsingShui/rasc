@@ -39,13 +39,14 @@ pub(crate) struct StaticCall {
 }
 #[derive(Clone, Copy)]
 pub(crate) enum CallReceiver {
-    Value(LocalId),
+    Value(ValueUse),
     Super(LocalId),
 }
 impl CallReceiver {
     pub(crate) fn value(self) -> LocalId {
         match self {
-            Self::Value(value) | Self::Super(value) => value,
+            Self::Value(value) => value.value(),
+            Self::Super(value) => value,
         }
     }
 }
@@ -247,8 +248,7 @@ pub(super) fn validate_bindings(
                 .ok_or(RequestError::InternalInvariant(
                     "constructor lost receiver use",
                 ))?;
-            if receiver.identity != crate::p4_types::calls::ReceiverIdentity::Uninitialized
-                || bound.input(0)? != receiver.value
+            if !matches!(receiver, crate::p4_types::calls::TypedReceiver::Constructor { value, initialization: actual } if *value == bound.input(0)? && *actual == initialization)
             {
                 return Err(RequestError::InternalInvariant(
                     "constructor receiver became readable before init",
@@ -274,7 +274,7 @@ pub(super) fn validate_bindings(
             )? {
                 return Ok(None);
             }
-            if uses.arguments(site.reference, site.pc)?.len() != contract.arity {
+            if uses.arguments().len() != contract.arity {
                 return Err(RequestError::InternalInvariant("constructor changed arity"));
             }
             push(&mut constructors, Some(contract), budget)?;
@@ -284,21 +284,43 @@ pub(super) fn validate_bindings(
         push(&mut constructors, None, budget)?;
         let (receiver, arguments) = match &uses.receiver {
             Some(receiver) => {
+                let value = receiver.value();
                 if site.kind == crate::p2_flow::InvokeKind::Static
-                    || bound.inputs.first() != Some(&receiver.value)
-                    || ssa.kinds[ix(receiver.value.0)?]
-                        != Some(crate::p4_types::Kind::Nominal(receiver.original_type))
+                    || bound.inputs.first() != Some(&value)
                 {
                     return Err(RequestError::InternalInvariant(
                         "receiver conversion changed original definition",
                     ));
                 }
-                let descriptor = crate::substrate::owned::copy_units(
-                    input.type_descriptor(receiver.original_type, budget)?,
-                    budget,
-                )?;
-                if site.kind == crate::p2_flow::InvokeKind::Super
-                    && receiver.identity != crate::p4_types::calls::ReceiverIdentity::ImplicitThis
+                let descriptor = match receiver {
+                    crate::p4_types::calls::TypedReceiver::Super { .. } => {
+                        crate::substrate::owned::copy_units(input.owner(), budget)?
+                    }
+                    crate::p4_types::calls::TypedReceiver::Value(usage) => {
+                        if usage.conversion == crate::p4_types::UseConversion::NullAssignment {
+                            crate::substrate::owned::copy_units(
+                                input.type_descriptor(site.owner, budget)?,
+                                budget,
+                            )?
+                        } else {
+                            ssa.kinds[ix(value.0)?]
+                                .ok_or(RequestError::InternalInvariant(
+                                    "receiver has no storage kind",
+                                ))?
+                                .reference_descriptor(input, budget)?
+                        }
+                    }
+                    crate::p4_types::calls::TypedReceiver::Constructor { .. } => {
+                        return Err(RequestError::InternalInvariant(
+                            "ordinary call used constructor receiver",
+                        ));
+                    }
+                };
+                if (site.kind == crate::p2_flow::InvokeKind::Super)
+                    != matches!(
+                        receiver,
+                        crate::p4_types::calls::TypedReceiver::Super { .. }
+                    )
                 {
                     return Err(RequestError::InternalInvariant(
                         "super receiver lost this origin",
@@ -358,7 +380,7 @@ pub(super) fn validate_bindings(
                 (None, bound.inputs.as_slice())
             }
         };
-        let views = uses.arguments(site.reference, site.pc)?;
+        let views = uses.arguments();
         if views.len() != arguments.len() {
             return Err(RequestError::InternalInvariant(
                 "call conversions changed arity",
@@ -427,7 +449,7 @@ fn plan(
         .get(ix(id.0)?)
         .ok_or(RequestError::InternalInvariant("call lost typed uses"))?;
     let mut arguments = Vec::new();
-    for typed_use in uses.arguments(site.reference, site.pc)? {
+    for typed_use in uses.arguments() {
         budget.charge_work(1)?;
         push(
             &mut arguments,
@@ -639,7 +661,7 @@ pub(super) fn operations(
                     return Ok(None);
                 };
                 let mut arguments = Vec::new();
-                for argument in ssa.call_uses[index].arguments(site.reference, site.pc)? {
+                for argument in ssa.call_uses[index].arguments() {
                     budget.charge_work(1)?;
                     push(
                         &mut arguments,
@@ -660,13 +682,25 @@ pub(super) fn operations(
                     Statement::ReceiverCall {
                         target: op.result.map(|value| LocalId(value.0)),
                         call: ReceiverCall {
-                            receiver: if matches!(
-                                contract.kind,
-                                crate::p4_types::declarations::ReceiverKind::Super
-                            ) {
-                                CallReceiver::Super(LocalId(receiver.0))
-                            } else {
-                                CallReceiver::Value(LocalId(receiver.0))
+                            receiver: match ssa.call_uses[index]
+                                .receiver
+                                .as_ref()
+                                .ok_or(RequestError::InternalInvariant("call lost receiver use"))?
+                            {
+                                crate::p4_types::calls::TypedReceiver::Super { .. } => {
+                                    CallReceiver::Super(LocalId(receiver.0))
+                                }
+                                crate::p4_types::calls::TypedReceiver::Value(usage) => {
+                                    CallReceiver::Value(super::values::lower(
+                                        LocalId(usage.value.0),
+                                        usage.conversion,
+                                    ))
+                                }
+                                crate::p4_types::calls::TypedReceiver::Constructor { .. } => {
+                                    return Err(RequestError::InternalInvariant(
+                                        "ordinary call lost receiver category",
+                                    ));
+                                }
                             },
                             contract,
                             original_receiver,

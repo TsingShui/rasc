@@ -146,7 +146,7 @@ pub(crate) enum CallTarget {
     Constructor,
 }
 pub(crate) struct CallSite {
-    pub formals: Vec<super::CallFormal>,
+    pub formals: Vec<DeclarationType>,
     pub target: CallTarget,
     pub owner: crate::TypeId,
     pub kind: InvokeKind,
@@ -719,7 +719,14 @@ pub(crate) fn declaration_for_projection(
     key: crate::input::TypeProjection,
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<Option<DeclarationType>, RequestError> {
-    let descriptor = input.projected_name(key, budget)?;
+    declaration_from_descriptor(input.projected_name(key, budget)?, key, budget)
+}
+
+pub(super) fn declaration_from_descriptor(
+    descriptor: crate::input::DexString<'_>,
+    key: crate::input::TypeProjection,
+    budget: &mut MethodBudget<'_, '_>,
+) -> Result<Option<DeclarationType>, RequestError> {
     if let Some(kind) = primitive_field_type(descriptor, budget)? {
         return Ok(Some(kind));
     }

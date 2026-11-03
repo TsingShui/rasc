@@ -29,6 +29,13 @@ package-local `AGENTS.md` before working in either package.
 
 ## Workflow
 
+- Contributors MUST NOT develop by accumulating local patches that mask symptoms,
+  special-case observed inputs or bypass missing producer facts. Contributors MUST
+  trace each problem to its architectural cause and implement a general solution
+  in the owning module, with explicit input guarantees and failure behavior.
+  Contributors MUST update affected producers, consumers and invariants together
+  and remove superseded paths. Small, focused changes remain valid when they fix
+  the shared cause; this rule does not require speculative frameworks or broad rewrites.
 - Read the owning [stage chapter](docs/diana/README.md) before capability
   changes.
   Identify consumed facts, guarantees, invariants and classified failure behavior.

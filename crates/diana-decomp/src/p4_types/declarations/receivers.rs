@@ -34,10 +34,7 @@ pub(crate) fn collect_receiver(
     let _span = crate::pipeline::phase_span("p4_receivers");
     let reference = invocation.reference;
     let method = input.method_reference(reference, budget)?;
-    let Some(formals) = crate::p2_flow::call_facts::original_formals(input, reference, budget)?
-    else {
-        return Ok(None);
-    };
+    let formals = crate::p2_flow::call_facts::original_formals(input, reference, budget)?;
     let owner = copy_units(method.owner, budget)?;
     if owner.len() < 3 || owner.first() != Some(&76) || owner.last() != Some(&59) {
         return Ok(None);

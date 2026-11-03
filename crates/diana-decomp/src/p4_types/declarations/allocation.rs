@@ -68,10 +68,7 @@ fn reference_only(
     {
         return unavailable(pc);
     }
-    let Some(formals) = crate::p2_flow::call_facts::original_formals(input, reference, budget)?
-    else {
-        return unavailable(pc);
-    };
+    let formals = crate::p2_flow::call_facts::original_formals(input, reference, budget)?;
     Ok(ConstructorContract {
         _sealed: (),
         reference,

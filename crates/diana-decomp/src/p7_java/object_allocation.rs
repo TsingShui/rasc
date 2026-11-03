@@ -58,7 +58,7 @@ pub(super) fn lower(
         crate::substrate::owned::push(&mut aliases, alias, budget)?;
     }
     let mut arguments = Vec::new();
-    for argument in typed.call_uses[index].arguments(site.reference, site.pc)? {
+    for argument in typed.call_uses[index].arguments() {
         budget.charge_work(1)?;
         crate::substrate::owned::push(
             &mut arguments,
@@ -211,7 +211,7 @@ pub(super) fn verify(
         .zip(formals)
     {
         budget.charge_work(1)?;
-        if !super::dispatcher_verify::call_argument(typed, view, *value, formal)? {
+        if !super::dispatcher_verify::call_argument(typed, view, *value, formal, budget)? {
             return Ok(false);
         }
     }

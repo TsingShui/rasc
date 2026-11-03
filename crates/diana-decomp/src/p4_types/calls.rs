@@ -1,9 +1,7 @@
+use super::IntRange;
 use super::normal::{Kind, UseConversion};
-use super::{BuiltinReference, IntRange};
 use crate::p2_flow::CallId;
 use crate::p3_ssa::{SsaBody, ValueId};
-use crate::p4_types::bindings::CallEvidence;
-use crate::p4_types::declarations::CallFormal;
 use crate::substrate::owned::push;
 use crate::{MethodBudget, RequestError};
 
@@ -13,114 +11,75 @@ pub(crate) struct TypedUse {
 }
 pub(crate) struct CallUses {
     _sealed: (),
-    arguments: Option<Vec<TypedUse>>,
+    arguments: Vec<TypedUse>,
     pub receiver: Option<TypedReceiver>,
 }
-#[derive(Clone, Copy, Eq, PartialEq)]
-pub(crate) enum ReceiverIdentity {
-    Uninitialized,
-    Reference,
-    ImplicitThis,
+pub(crate) enum TypedReceiver {
+    Constructor {
+        value: ValueId,
+        initialization: super::initialization::InitializationId,
+    },
+    Super {
+        value: ValueId,
+    },
+    Value(TypedUse),
 }
-impl CallUses {
-    pub(crate) fn arguments(
-        &self,
-        reference: crate::MethodId,
-        pc: crate::CodeUnitOffset,
-    ) -> Result<&[TypedUse], RequestError> {
-        self.arguments
-            .as_deref()
-            .ok_or(RequestError::BindingEvidenceMissing { reference, pc })
+impl TypedReceiver {
+    pub(crate) fn value(&self) -> ValueId {
+        match self {
+            Self::Constructor { value, .. } | Self::Super { value } => *value,
+            Self::Value(usage) => usage.value,
+        }
     }
 }
-pub(crate) struct TypedReceiver {
-    pub identity: ReceiverIdentity,
-    pub value: ValueId,
-    pub original_type: crate::TypeId,
+impl CallUses {
+    pub(crate) fn arguments(&self) -> &[TypedUse] {
+        &self.arguments
+    }
 }
 fn conversion(
     ssa: &SsaBody<'_>,
+    zeros: &super::zero::ZeroFacts,
     value: ValueId,
-    formal: CallFormal,
+    formal: crate::p2_flow::DeclarationType,
     kinds: &[Option<Kind>],
     bits: &[u8],
     ranges: &[Option<IntRange>],
 ) -> Result<Option<UseConversion>, RequestError> {
+    use crate::p2_flow::DeclarationType;
     let index = usize::try_from(value.0).map_err(|_| RequestError::PlatformCapacity)?;
-    if let CallFormal::Numeric(kind) = formal {
-        return super::numeric::view(ssa, kinds, value, super::numeric::scalar_kind(kind));
+    if formal.field_offset() == 2 {
+        return super::references::view(kinds, zeros, value, formal.kind());
     }
-    if let CallFormal::Nominal(expected) = formal {
-        return Ok(match kinds[index] {
-            // Verified DEX code already proves the reference argument is
-            // assignable to the declared formal; source legality does not need
-            // another hierarchy proof to keep the value.
-            Some(Kind::Nominal(actual)) if actual == expected => Some(UseConversion::Identity),
-            Some(
-                Kind::Object
-                | Kind::String
-                | Kind::Class
-                | Kind::Throwable
-                | Kind::PrimitiveArray(_)
-                | Kind::ObjectArray
-                | Kind::Nominal(_)
-                | Kind::ReferenceArray(_)
-                | Kind::ProjectedNominal(_),
-            ) if !ssa.is_zero(value)? => Some(UseConversion::Identity),
-            _ if ssa.is_zero(value)? => Some(UseConversion::NullAssignment),
-            _ => None,
-        });
-    }
-    if let CallFormal::Reference(kind) = formal {
-        return Ok(if ssa.is_zero(value)? {
-            Some(UseConversion::Null(kind))
-        } else {
-            match (kinds[index], kind) {
-                (Some(Kind::Object), BuiltinReference::Object)
-                | (Some(Kind::String), BuiltinReference::String) => Some(UseConversion::Identity),
-                (
-                    Some(
-                        Kind::String
-                        | Kind::Class
-                        | Kind::Throwable
-                        | Kind::PrimitiveArray(_)
-                        | Kind::ObjectArray
-                        | Kind::Nominal(_)
-                        | Kind::ReferenceArray(_)
-                        | Kind::ProjectedNominal(_),
-                    ),
-                    BuiltinReference::Object,
-                ) => Some(UseConversion::UpcastObject),
-                _ => None,
+    Ok(match formal {
+        DeclarationType::Boolean => match kinds[index] {
+            Some(Kind::Boolean) => Some(UseConversion::Identity),
+            Some(Kind::Int) if bits[index] != 0 && bits[index] & 4 == 0 => {
+                Some(UseConversion::Boolean01)
             }
-        });
-    }
-    Ok(match (kinds[index], formal) {
-        (Some(Kind::Int), CallFormal::Int) | (Some(Kind::Boolean), CallFormal::Boolean) => {
-            Some(UseConversion::Identity)
-        }
-        (Some(Kind::Boolean), CallFormal::Int) => Some(UseConversion::BooleanWord),
-        (Some(Kind::Int), CallFormal::Boolean) if bits[index] != 0 && bits[index] & 4 == 0 => {
-            Some(UseConversion::Boolean01)
-        }
-        (Some(Kind::Int), CallFormal::Narrow(kind)) => {
+            _ => None,
+        },
+        DeclarationType::Narrow(kind) => {
             let range = if bits[index] != 0 && bits[index] & 4 == 0 {
                 ranges[index].and_then(IntRange::known01)
             } else {
                 ranges[index]
             };
-            if range.is_some_and(|range| range.within(kind.range())) {
+            if kinds[index] == Some(Kind::Int)
+                && range.is_some_and(|range| range.within(kind.range()))
+            {
                 Some(UseConversion::Narrow(kind))
             } else {
                 None
             }
         }
-        _ => None,
+        _ => super::numeric::view(ssa, kinds, value, formal.kind())?,
     })
 }
 pub(crate) fn solve(
     ssa: &SsaBody<'_>,
-    bindings: &[CallEvidence],
+    zeros: &super::zero::ZeroFacts,
+    initializations: &super::initialization::Initializations,
     kinds: &[Option<Kind>],
     bits: &[u8],
     ranges: &[Option<IntRange>],
@@ -130,9 +89,6 @@ pub(crate) fn solve(
     for (index, site) in ssa.calls.iter().enumerate() {
         budget.charge_work(1)?;
         let id = CallId(u32::try_from(index).map_err(|_| RequestError::PlatformCapacity)?);
-        let evidence = bindings.get(index).ok_or(RequestError::InternalInvariant(
-            "call lost declaration constraints",
-        ))?;
         let bound = ssa.call(id)?;
         let (receiver, values) = if site.kind == crate::p2_flow::InvokeKind::Static {
             (None, bound.inputs.as_slice())
@@ -142,28 +98,28 @@ pub(crate) fn solve(
                     "receiver call lost receiver",
                 ));
             };
-            let Some(Kind::Nominal(original_type)) =
-                kinds[usize::try_from(value.0).map_err(|_| RequestError::PlatformCapacity)?]
-            else {
-                return Ok(None);
-            };
-            (
-                Some(TypedReceiver {
-                    identity: if site.target == crate::p2_flow::CallTarget::Constructor {
-                        ReceiverIdentity::Uninitialized
-                    } else if site.kind == crate::p2_flow::InvokeKind::Super {
-                        if !is_this(ssa, value, budget)? {
-                            return Ok(None);
-                        }
-                        ReceiverIdentity::ImplicitThis
-                    } else {
-                        ReceiverIdentity::Reference
-                    },
+            let receiver = if site.target == crate::p2_flow::CallTarget::Constructor {
+                let initialization = initializations.calls.get(index).copied().flatten().ok_or(
+                    RequestError::InternalInvariant("constructor use lost initialization product"),
+                )?;
+                TypedReceiver::Constructor {
                     value,
-                    original_type,
-                }),
-                arguments,
-            )
+                    initialization,
+                }
+            } else if !initializations.available_at(ssa, value, site.pc)? {
+                return Ok(None);
+            } else if site.kind == crate::p2_flow::InvokeKind::Super {
+                if !is_this(ssa, value, budget)? {
+                    return Ok(None);
+                }
+                TypedReceiver::Super { value }
+            } else {
+                let Some(conversion) = super::references::read(kinds, zeros, value)? else {
+                    return Ok(None);
+                };
+                TypedReceiver::Value(TypedUse { value, conversion })
+            };
+            (Some(receiver), arguments)
         };
         let formals = &site.formals;
         if values.len() != formals.len() {
@@ -174,13 +130,11 @@ pub(crate) fn solve(
         let mut arguments = Vec::new();
         for (&value, &formal) in values.iter().zip(formals) {
             budget.charge_work(1)?;
-            let Some(conversion) = conversion(ssa, value, formal, kinds, bits, ranges)? else {
-                if matches!(evidence, CallEvidence::Missing) {
-                    return Err(RequestError::BindingEvidenceMissing {
-                        reference: site.reference,
-                        pc: site.pc,
-                    });
-                }
+            if formal.field_offset() == 2 && !initializations.available_at(ssa, value, site.pc)? {
+                return Ok(None);
+            }
+            let Some(conversion) = conversion(ssa, zeros, value, formal, kinds, bits, ranges)?
+            else {
                 return Ok(None);
             };
             push(&mut arguments, TypedUse { value, conversion }, budget)?;
@@ -189,7 +143,7 @@ pub(crate) fn solve(
             &mut uses,
             CallUses {
                 _sealed: (),
-                arguments: Some(arguments),
+                arguments,
                 receiver,
             },
             budget,

@@ -52,8 +52,7 @@ pub(super) fn lower(
             "constructor entry lost binding",
         ))?;
     let mut arguments = Vec::new();
-    let site = &storage.typed.ssa.calls[index];
-    let uses = storage.typed.call_uses[index].arguments(site.reference, site.pc)?;
+    let uses = storage.typed.call_uses[index].arguments();
     if uses.len() != entry.arguments.len() {
         return Err(RequestError::InternalInvariant(
             "constructor origin/use arity changed",
@@ -152,7 +151,13 @@ pub(super) fn verify(
             || !matches!((value.source,expected),(Argument::Parameter(a),ChainArgument::Parameter(b)) if a==b)
                 && !matches!((value.source,expected),(Argument::Int(a),ChainArgument::Literal(b)) if a==b)
                 && !matches!((value.source,expected),(Argument::Long(a),ChainArgument::WideLiteral(b)) if a==b)
-            || !super::dispatcher_verify::call_argument(&storage.typed, value.view, source, formal)?
+            || !super::dispatcher_verify::call_argument(
+                &storage.typed,
+                value.view,
+                source,
+                formal,
+                budget,
+            )?
         {
             return Ok(false);
         }

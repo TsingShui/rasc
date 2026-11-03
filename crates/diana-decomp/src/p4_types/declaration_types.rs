@@ -1,5 +1,6 @@
 use super::normal::Kind;
 use crate::p2_flow::{ArrayKind, DeclarationType};
+use crate::{MethodBudget, RequestError};
 impl DeclarationType {
     pub(crate) fn kind(self) -> Kind {
         match self {
@@ -36,6 +37,47 @@ impl DeclarationType {
         }
     }
 }
+impl Kind {
+    pub(crate) fn reference_descriptor(
+        self,
+        input: &crate::input::MethodInput<'_, '_>,
+        budget: &mut MethodBudget<'_, '_>,
+    ) -> Result<Vec<u16>, RequestError> {
+        let units = match self {
+            Self::Nominal(id) => {
+                return crate::substrate::owned::copy_units(
+                    input.type_descriptor(id, budget)?,
+                    budget,
+                );
+            }
+            Self::ReferenceArray(key) | Self::ProjectedNominal(key) => {
+                return crate::substrate::owned::copy_units(
+                    input.projected_name(key, budget)?,
+                    budget,
+                );
+            }
+            Self::Object => super::BuiltinReference::Object.descriptor(),
+            Self::String => super::BuiltinReference::String.descriptor(),
+            Self::Class => &const { crate::substrate::owned::ascii_units(*b"Ljava/lang/Class;") },
+            Self::Throwable => {
+                &const { crate::substrate::owned::ascii_units(*b"Ljava/lang/Throwable;") }
+            }
+            Self::PrimitiveArray(kind) => kind.descriptor(),
+            Self::ObjectArray => ArrayKind::object_descriptor(),
+            _ => {
+                return Err(RequestError::InternalInvariant(
+                    "numeric kind requested reference descriptor",
+                ));
+            }
+        };
+        let mut result = Vec::new();
+        for &unit in units {
+            crate::substrate::owned::push(&mut result, unit, budget)?;
+        }
+        Ok(result)
+    }
+}
+
 impl ArrayKind {
     pub(crate) fn kind(self) -> Kind {
         self.declaration().kind()

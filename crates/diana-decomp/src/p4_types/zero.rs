@@ -1,31 +1,175 @@
-use crate::p3_ssa::{Definition, SsaBody, ValueId};
+use crate::p2_flow::Op;
+use crate::p3_ssa::{Definition, SsaBody, Sym, ValueId};
+use crate::substrate::owned::push;
 use crate::{MethodBudget, RequestError};
 
-/// Recognizes an original zero constant through ordinary moves only. Phi and
-/// runtime computations do not establish a zero bit pattern.
+const ZERO: u8 = 1;
+const OTHER: u8 = 2;
+
+fn index(value: ValueId) -> Result<usize, RequestError> {
+    usize::try_from(value.0).map_err(|_| RequestError::PlatformCapacity)
+}
+
+/// Finite provenance facts for word-zero constants, moves and Phi inputs.
+/// Runtime computations and unresolved cycles cannot supply zero evidence.
+pub(crate) struct ZeroFacts {
+    facts: Vec<u8>,
+}
+impl ZeroFacts {
+    pub(super) fn build(
+        ssa: &SsaBody<'_>,
+        budget: &mut MethodBudget<'_, '_>,
+    ) -> Result<Self, RequestError> {
+        let mut facts = Vec::new();
+        let mut dependents = Vec::new();
+        let mut pending = Vec::new();
+        for (at, definition) in ssa.values.iter().enumerate() {
+            budget.charge_work(1)?;
+            let value = ValueId(u32::try_from(at).map_err(|_| RequestError::PlatformCapacity)?);
+            let fact = match definition {
+                Definition::Phi => 0,
+                Definition::OpResult(id) => match ssa.operation(*id)?.op {
+                    Op::Constant(_, 0) => ZERO,
+                    Op::Move(..) => 0,
+                    _ => OTHER,
+                },
+                _ => OTHER,
+            };
+            push(&mut facts, fact, budget)?;
+            push(&mut dependents, Vec::new(), budget)?;
+            if fact != 0 {
+                push(&mut pending, value, budget)?;
+            }
+        }
+        for operation in &ssa.operations {
+            budget.charge_work(1)?;
+            if matches!(operation.op, Op::Move(..)) {
+                let result = operation.result.ok_or(RequestError::InternalInvariant(
+                    "zero provenance move lost result",
+                ))?;
+                push(&mut dependents[index(operation.input(0)?)?], result, budget)?;
+            }
+        }
+        for phi in &ssa.phis {
+            budget.charge_work(1)?;
+            for &(_, input) in &phi.inputs {
+                budget.charge_work(1)?;
+                let Sym::Value(input) = input else {
+                    return Err(RequestError::InternalInvariant(
+                        "zero provenance lost Phi input",
+                    ));
+                };
+                push(&mut dependents[index(input)?], phi.result, budget)?;
+            }
+        }
+        propagate(&mut facts, &dependents, &mut pending, budget)?;
+        for (at, fact) in facts.iter_mut().enumerate() {
+            budget.charge_work(1)?;
+            if *fact == 0 {
+                *fact = OTHER;
+                push(
+                    &mut pending,
+                    ValueId(u32::try_from(at).map_err(|_| RequestError::PlatformCapacity)?),
+                    budget,
+                )?;
+            }
+        }
+        propagate(&mut facts, &dependents, &mut pending, budget)?;
+        Ok(Self { facts })
+    }
+
+    pub(crate) fn contains(&self, value: ValueId) -> Result<bool, RequestError> {
+        let fact = self
+            .facts
+            .get(index(value)?)
+            .ok_or(RequestError::InternalInvariant(
+                "foreign zero provenance value",
+            ))?;
+        Ok(*fact == ZERO)
+    }
+
+    pub(crate) fn evidence(&self, value: ValueId) -> Result<Option<ZeroEvidence>, RequestError> {
+        Ok(self.contains(value)?.then_some(ZeroEvidence { value }))
+    }
+}
+
+fn propagate(
+    facts: &mut [u8],
+    dependents: &[Vec<ValueId>],
+    pending: &mut Vec<ValueId>,
+    budget: &mut MethodBudget<'_, '_>,
+) -> Result<(), RequestError> {
+    while let Some(value) = pending.pop() {
+        budget.charge_work(1)?;
+        let fact = facts[index(value)?];
+        for &dependent in &dependents[index(value)?] {
+            budget.charge_work(1)?;
+            let target = &mut facts[index(dependent)?];
+            let merged = *target | fact;
+            if merged != *target {
+                *target = merged;
+                push(pending, dependent, budget)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Independent replay of constant provenance against original SSA definitions.
 pub(crate) fn proven(
     ssa: &SsaBody<'_>,
-    mut value: ValueId,
+    value: ValueId,
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<bool, RequestError> {
-    for _ in 0..ssa.values.len() {
-        budget.charge_work(1)?;
-        if ssa.is_zero(value)? {
-            return Ok(true);
-        }
-        let index = usize::try_from(value.0).map_err(|_| RequestError::PlatformCapacity)?;
-        let Some(Definition::OpResult(id)) = ssa.values.get(index) else {
-            return Ok(false);
-        };
-        let operation = ssa.operation(*id)?;
-        if !matches!(operation.op, crate::p2_flow::Op::Move(..)) {
-            return Ok(false);
-        }
-        value = operation.input(0)?;
+    let mut seen = Vec::new();
+    let mut pending = Vec::new();
+    for _ in &ssa.values {
+        push(&mut seen, false, budget)?;
     }
-    Err(RequestError::InternalInvariant(
-        "cyclic zero move provenance",
-    ))
+    push(&mut pending, value, budget)?;
+    let mut anchored = false;
+    while let Some(value) = pending.pop() {
+        budget.charge_work(1)?;
+        let at = index(value)?;
+        let visited = seen
+            .get_mut(at)
+            .ok_or(RequestError::InternalInvariant("foreign zero replay value"))?;
+        if *visited {
+            continue;
+        }
+        *visited = true;
+        match ssa.values[at] {
+            Definition::OpResult(id) => {
+                let operation = ssa.operation(id)?;
+                match operation.op {
+                    Op::Constant(_, 0) => anchored = true,
+                    Op::Move(..) => push(&mut pending, operation.input(0)?, budget)?,
+                    _ => return Ok(false),
+                }
+            }
+            Definition::Phi => {
+                let mut found = false;
+                for phi in &ssa.phis {
+                    budget.charge_work(1)?;
+                    if phi.result == value {
+                        found = true;
+                        for &(_, input) in &phi.inputs {
+                            budget.charge_work(1)?;
+                            let Sym::Value(input) = input else {
+                                return Ok(false);
+                            };
+                            push(&mut pending, input, budget)?;
+                        }
+                    }
+                }
+                if !found {
+                    return Ok(false);
+                }
+            }
+            _ => return Ok(false),
+        }
+    }
+    Ok(anchored)
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -36,14 +180,6 @@ impl ZeroEvidence {
     pub(crate) fn value(self) -> ValueId {
         self.value
     }
-}
-
-pub(crate) fn evidence(
-    ssa: &SsaBody<'_>,
-    value: ValueId,
-    budget: &mut MethodBudget<'_, '_>,
-) -> Result<Option<ZeroEvidence>, RequestError> {
-    Ok(proven(ssa, value, budget)?.then_some(ZeroEvidence { value }))
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

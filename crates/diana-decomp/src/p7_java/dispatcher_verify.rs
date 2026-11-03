@@ -137,75 +137,45 @@ pub(super) fn call_argument(
     ssa: &TypedBody<'_>,
     view: super::branch::ValueUse,
     value: crate::p3_ssa::ValueId,
-    formal: crate::p4_types::declarations::CallFormal,
+    formal: crate::p2_flow::DeclarationType,
+    budget: &mut MethodBudget<'_, '_>,
 ) -> Result<bool, RequestError> {
     use super::branch::ValueUse;
-    use crate::p4_types::declarations::CallFormal;
+    use crate::p2_flow::DeclarationType;
     let at = ix(value.0)?;
     if view.value().0 != value.0 {
         return Ok(false);
     }
-    if let CallFormal::Numeric(kind) = formal {
-        return numeric_view(
-            ssa,
-            view,
-            Some(&value),
-            crate::p4_types::numeric::scalar_kind(kind),
-        );
+    if formal.field_offset() == 2 {
+        return super::values::verify_reference_store(ssa, view, value, formal, budget);
     }
-    Ok(match (view, formal, ssa.kinds[at]) {
-        (ValueUse::Direct(_), CallFormal::Nominal(_), Some(kind))
-            if crate::p4_types::reference_roots::reference(kind) =>
-        {
-            !ssa.ssa.is_zero(value)?
-        }
-        (ValueUse::NullAssignment(_), CallFormal::Nominal(_), _) => ssa.ssa.is_zero(value)?,
-        (ValueUse::Null { kind, .. }, CallFormal::Reference(expected), _) => {
-            kind == expected && ssa.ssa.is_zero(value)?
-        }
-        (
-            ValueUse::Direct(_),
-            CallFormal::Reference(crate::p4_types::BuiltinReference::Object),
-            Some(Kind::Object),
-        )
-        | (
-            ValueUse::Direct(_),
-            CallFormal::Reference(crate::p4_types::BuiltinReference::String),
-            Some(Kind::String),
-        )
-        | (
-            ValueUse::UpcastObject(_),
-            CallFormal::Reference(crate::p4_types::BuiltinReference::Object),
-            Some(
-                Kind::String
-                | Kind::Class
-                | Kind::Throwable
-                | Kind::PrimitiveArray(_)
-                | Kind::ObjectArray
-                | Kind::Nominal(_)
-                | Kind::ReferenceArray(_)
-                | Kind::ProjectedNominal(_),
-            ),
-        ) => true,
-        (ValueUse::Direct(_), CallFormal::Int, Some(Kind::Int))
-        | (ValueUse::Direct(_), CallFormal::Boolean, Some(Kind::Boolean))
-        | (ValueUse::BooleanWord(_), CallFormal::Int, Some(Kind::Boolean)) => true,
-        (ValueUse::Boolean01(_), CallFormal::Boolean, Some(Kind::Int)) => {
-            ssa.integral_bits[at] != 0 && ssa.integral_bits[at] & 4 == 0
-        }
-        (ValueUse::Narrow { kind, .. }, CallFormal::Narrow(formal), Some(Kind::Int))
-            if kind == formal =>
-        {
-            let range = if ssa.integral_bits[at] != 0 && ssa.integral_bits[at] & 4 == 0 {
-                ssa.ranges[at].and_then(crate::p4_types::IntRange::known01)
-            } else {
-                ssa.ranges[at]
-            };
-            range.is_some_and(|range| range.within(kind.range()))
-        }
-        _ => false,
+    Ok(match formal {
+        DeclarationType::Boolean => match view {
+            ValueUse::Direct(_) => ssa.kinds[at] == Some(Kind::Boolean),
+            ValueUse::Boolean01(_) => {
+                ssa.kinds[at] == Some(Kind::Int)
+                    && ssa.integral_bits[at] != 0
+                    && ssa.integral_bits[at] & 4 == 0
+            }
+            _ => false,
+        },
+        DeclarationType::Narrow(expected) => match view {
+            ValueUse::Narrow { kind, .. }
+                if kind == expected && ssa.kinds[at] == Some(Kind::Int) =>
+            {
+                let range = if ssa.integral_bits[at] != 0 && ssa.integral_bits[at] & 4 == 0 {
+                    ssa.ranges[at].and_then(crate::p4_types::IntRange::known01)
+                } else {
+                    ssa.ranges[at]
+                };
+                range.is_some_and(|range| range.within(kind.range()))
+            }
+            _ => false,
+        },
+        _ => numeric_view(ssa, view, Some(&value), formal.kind())?,
     })
 }
+
 fn static_call(
     ssa: &TypedBody<'_>,
     id: crate::p2_flow::CallId,
@@ -263,7 +233,7 @@ fn static_call(
         .zip(&site.formals)
     {
         budget.charge_work(1)?;
-        if !call_argument(ssa, view, value, formal)? {
+        if !call_argument(ssa, view, value, formal, budget)? {
             return Ok(false);
         }
     }
@@ -311,9 +281,17 @@ fn copies(
             let source = if ty(source_kind)? == ty(target_kind)? {
                 crate::p5_variables::CopySource::Local(LocalId(source.0))
             } else {
-                let evidence = crate::p4_types::zero::evidence(&ssa.ssa, source, budget)?.ok_or(
-                    RequestError::InternalInvariant("Phi literal lost zero evidence"),
-                )?;
+                if !crate::p4_types::zero::proven(&ssa.ssa, source, budget)? {
+                    return Err(RequestError::InternalInvariant(
+                        "Phi zero view lost original provenance",
+                    ));
+                }
+                let evidence =
+                    ssa.zeros
+                        .evidence(source)?
+                        .ok_or(RequestError::InternalInvariant(
+                            "Phi literal lost zero evidence",
+                        ))?;
                 let view = crate::p4_types::zero::view(target_kind).ok_or(
                     RequestError::InternalInvariant("Phi literal has invalid view"),
                 )?;
@@ -814,7 +792,9 @@ pub(super) fn verify(
                 if !outgoing.is_empty()
                     || actual.value().0 != value.0
                     || !match actual {
-                        super::branch::ValueUse::NullAssignment(_) => ssa.ssa.is_zero(value)?,
+                        super::branch::ValueUse::NullAssignment(_) => {
+                            crate::p4_types::zero::proven(&ssa.ssa, value, budget)?
+                        }
                         super::branch::ValueUse::Direct(_) => {
                             matches!(
                                 ssa.kinds[ix(value.0)?],
@@ -906,20 +886,14 @@ pub(super) fn verify(
                         let at = ix(actual.value().0)?;
                         use super::branch::ValueUse;
                         !match actual {
-                            ValueUse::NullAssignment(_) | ValueUse::ObjectArrayView(_) => false,
-                            ValueUse::Null { kind, .. } => {
-                                let declared = match result {
-                                    crate::p2_flow::DeclarationType::Object => {
-                                        Some(crate::p4_types::BuiltinReference::Object)
-                                    }
-                                    crate::p2_flow::DeclarationType::String => {
-                                        Some(crate::p4_types::BuiltinReference::String)
-                                    }
-                                    _ => None,
-                                };
-                                declared == Some(*kind)
-                                    && ssa.kinds[at] == Some(Kind::Int)
-                                    && ssa.integral_bits[at] == 1
+                            ValueUse::ObjectArrayView(_) => false,
+                            ValueUse::NullAssignment(_) => {
+                                result.field_offset() == 2
+                                    && crate::p4_types::zero::proven(
+                                        &ssa.ssa,
+                                        crate::p3_ssa::ValueId(actual.value().0),
+                                        budget,
+                                    )?
                             }
                             ValueUse::FloatLiteral { .. } | ValueUse::DoubleLiteral { .. } => {
                                 numeric_view(
@@ -935,6 +909,8 @@ pub(super) fn verify(
                                         ssa.kinds[at],
                                         Some(
                                             Kind::String
+                                                | Kind::Class
+                                                | Kind::Throwable
                                                 | Kind::Nominal(_)
                                                 | Kind::ReferenceArray(_)
                                                 | Kind::ProjectedNominal(_)
@@ -944,21 +920,19 @@ pub(super) fn verify(
                                     )
                             }
                             ValueUse::Direct(_) => {
-                                matches!(
-                                    result,
-                                    crate::p2_flow::DeclarationType::Int
-                                        | crate::p2_flow::DeclarationType::Float
-                                        | crate::p2_flow::DeclarationType::Long
-                                        | crate::p2_flow::DeclarationType::Double
-                                        | crate::p2_flow::DeclarationType::Boolean
-                                        | crate::p2_flow::DeclarationType::Object
-                                        | crate::p2_flow::DeclarationType::String
-                                        | crate::p2_flow::DeclarationType::Nominal(_)
-                                        | crate::p2_flow::DeclarationType::ReferenceArray(_)
-                                        | crate::p2_flow::DeclarationType::ProjectedNominal(_)
-                                        | crate::p2_flow::DeclarationType::PrimitiveArray(_)
-                                        | crate::p2_flow::DeclarationType::ObjectArray
-                                ) && ssa.kinds[at] == Some(result.kind())
+                                if result.field_offset() == 2 {
+                                    ssa.kinds[at]
+                                        .is_some_and(crate::p4_types::reference_roots::reference)
+                                } else {
+                                    matches!(
+                                        result,
+                                        crate::p2_flow::DeclarationType::Int
+                                            | crate::p2_flow::DeclarationType::Float
+                                            | crate::p2_flow::DeclarationType::Long
+                                            | crate::p2_flow::DeclarationType::Double
+                                            | crate::p2_flow::DeclarationType::Boolean
+                                    ) && ssa.kinds[at] == Some(result.kind())
+                                }
                             }
                             ValueUse::Narrow { kind, .. } => {
                                 let range = ssa.ranges[at];

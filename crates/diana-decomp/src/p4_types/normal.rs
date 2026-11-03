@@ -73,6 +73,7 @@ pub(crate) struct TypedBodyData<'a> {
     _sealed: (),
     pub ssa: SsaBody<'a>,
     pub roots: super::reference_roots::ReferenceRoots,
+    pub zeros: super::zero::ZeroFacts,
     pub kinds: Vec<Option<Kind>>,
     pub integral_bits: Vec<u8>,
     pub ranges: Vec<Option<crate::p4_types::IntRange>>,
@@ -125,7 +126,6 @@ pub(crate) enum UseConversion {
     DoubleLiteral(u64),
     BooleanWord,
     Boolean01,
-    Null(crate::p4_types::BuiltinReference),
     NullAssignment,
     UpcastObject,
     Narrow(crate::p4_types::Narrow),
@@ -198,6 +198,7 @@ fn solve_impl<'a>(
     let exceptions = resolved.exceptions;
     let field_declarations = resolved.fields;
     let array_components = super::array_components::collect(input, &ssa, budget)?;
+    let zeros = super::zero::ZeroFacts::build(&ssa, budget)?;
     let mut integral_bits = Vec::new();
     let mut ranges = Vec::new();
     let mut kinds = Vec::new();
@@ -529,7 +530,7 @@ fn solve_impl<'a>(
                 };
                 // A proven word-zero has independent integer/null use views.
                 // It must not constrain a reference Phi to an integer kind.
-                if super::zero::proven(&ssa, source, budget)? {
+                if zeros.contains(source)? {
                     changed |= merge_range(&mut ranges[index], Some(super::IntRange::literal(0)));
                     if integral_bits[index] & 1 == 0 {
                         integral_bits[index] |= 1;
@@ -571,24 +572,14 @@ fn solve_impl<'a>(
             break;
         }
     }
-    for phi in &ssa.phis {
-        let index = ix(phi.result.0)?;
-        if kinds[index].is_none() {
-            let mut all_zero = !phi.inputs.is_empty();
-            for &(_, input) in &phi.inputs {
-                budget.charge_work(1)?;
-                let Sym::Value(value) = input else {
-                    all_zero = false;
-                    break;
-                };
-                if !super::zero::proven(&ssa, value, budget)? {
-                    all_zero = false;
-                    break;
-                }
-            }
-            if all_zero {
-                kinds[index] = Some(Kind::Int);
-            }
+    for (index, kind) in kinds.iter_mut().enumerate() {
+        budget.charge_work(1)?;
+        if kind.is_none()
+            && zeros.contains(crate::p3_ssa::ValueId(
+                u32::try_from(index).map_err(|_| RequestError::PlatformCapacity)?,
+            ))?
+        {
+            *kind = Some(Kind::Int);
         }
     }
     if type_conflict {
@@ -601,7 +592,7 @@ fn solve_impl<'a>(
             },
         ));
     }
-    let Some(arrays) = solve_arrays(input, &ssa, &kinds, &integral_bits, budget)? else {
+    let Some(arrays) = solve_arrays(input, &ssa, &zeros, &kinds, &integral_bits, budget)? else {
         return Ok(crate::substrate::outcome::Outcome::Declined(
             crate::OutputReason::JavaCheckFailed {
                 code: crate::DiagnosticCode::JavaAnalysisUnavailable,
@@ -642,7 +633,8 @@ fn solve_impl<'a>(
             },
         ));
     };
-    let Some(filled_arrays) = solve_filled_arrays(input, &ssa, &kinds, &integral_bits, budget)?
+    let Some(filled_arrays) =
+        solve_filled_arrays(input, &ssa, &zeros, &kinds, &integral_bits, budget)?
     else {
         return Ok(crate::substrate::outcome::Outcome::Declined(
             crate::OutputReason::JavaCheckFailed {
@@ -663,7 +655,7 @@ fn solve_impl<'a>(
             },
         ));
     };
-    let Some(cast_uses) = solve_casts(&ssa, &kinds, budget)? else {
+    let Some(cast_uses) = solve_casts(&ssa, &zeros, &kinds, budget)? else {
         return Ok(crate::substrate::outcome::Outcome::Declined(
             crate::OutputReason::JavaCheckFailed {
                 code: crate::DiagnosticCode::JavaAnalysisUnavailable,
@@ -673,7 +665,14 @@ fn solve_impl<'a>(
             },
         ));
     };
-    let Some(field_uses) = solve_fields(&ssa, &field_declarations, &kinds, &integral_bits, budget)?
+    let Some(field_uses) = solve_fields(
+        &ssa,
+        &zeros,
+        &field_declarations,
+        &kinds,
+        &integral_bits,
+        budget,
+    )?
     else {
         return Ok(crate::substrate::outcome::Outcome::Declined(
             crate::OutputReason::JavaCheckFailed {
@@ -684,8 +683,15 @@ fn solve_impl<'a>(
             },
         ));
     };
-    let Some(call_uses) =
-        super::calls::solve(&ssa, &bindings, &kinds, &integral_bits, &ranges, budget)?
+    let Some(call_uses) = super::calls::solve(
+        &ssa,
+        &zeros,
+        &initializations,
+        &kinds,
+        &integral_bits,
+        &ranges,
+        budget,
+    )?
     else {
         return Ok(crate::substrate::outcome::Outcome::Declined(
             crate::OutputReason::JavaCheckFailed {
@@ -735,6 +741,7 @@ fn solve_impl<'a>(
         capture,
         source_throws,
         roots,
+        zeros,
         _sealed: (),
         ssa,
         kinds,
@@ -766,7 +773,7 @@ fn solve_impl<'a>(
             let value = typed.ssa.bound[index]
                 .terminal
                 .ok_or(RequestError::InternalInvariant("typed throw lost value"))?;
-            Some(if typed.ssa.is_zero(value)? {
+            Some(if typed.zeros.contains(value)? {
                 UseConversion::NullAssignment
             } else if matches!(
                 typed.kinds[ix(value.0)?],
@@ -809,6 +816,7 @@ fn solve_impl<'a>(
 fn solve_arrays(
     input: &crate::input::MethodInput<'_, '_>,
     ssa: &SsaBody<'_>,
+    zeros: &super::zero::ZeroFacts,
     kinds: &[Option<Kind>],
     bits: &[u8],
     budget: &mut MethodBudget<'_, '_>,
@@ -861,7 +869,6 @@ fn solve_arrays(
                 ArrayUse::Load { index }
             } else {
                 let source = op.input(2)?;
-                let at = ix(source.0)?;
                 let receiver =
                     if matches!(kinds[ix(op.input(0)?.0)?], Some(Kind::ReferenceArray(_))) {
                         ArrayReceiver::ObjectView
@@ -870,22 +877,12 @@ fn solve_arrays(
                     };
                 let value =
                     if component.kind() == Kind::Object || receiver == ArrayReceiver::ObjectView {
-                        match kinds[at] {
-                            Some(Kind::Object) => UseConversion::Identity,
-                            Some(
-                                Kind::String
-                                | Kind::PrimitiveArray(_)
-                                | Kind::ObjectArray
-                                | Kind::Nominal(_)
-                                | Kind::ReferenceArray(_)
-                                | Kind::ProjectedNominal(_),
-                            ) => UseConversion::UpcastObject,
-                            Some(Kind::Int) if bits[at] == 1 => {
-                                UseConversion::Null(crate::p4_types::BuiltinReference::Object)
-                            }
-                            None => return Ok(None),
-                            _ => return Err(bad()),
-                        }
+                        let Some(conversion) =
+                            super::references::view(kinds, zeros, source, Kind::Object)?
+                        else {
+                            return Ok(None);
+                        };
+                        conversion
                     } else {
                         let Some(view) =
                             super::primitive_stores::view(ssa, kinds, bits, source, component)?
@@ -912,6 +909,7 @@ fn solve_arrays(
 
 fn solve_fields(
     ssa: &SsaBody<'_>,
+    zeros: &super::zero::ZeroFacts,
     declarations: &[Option<crate::p4_types::bindings::FieldEvidence>],
     kinds: &[Option<Kind>],
     bits: &[u8],
@@ -954,7 +952,7 @@ fn solve_fields(
             };
             let source = op.input(usize::from(!is_static))?;
             let conversion = if kind.field_offset() == 2 {
-                super::references::store_view(ssa, kinds, source, kind)?
+                super::references::view(kinds, zeros, source, kind.kind())?
             } else {
                 super::primitive_stores::view(ssa, kinds, bits, source, kind)?
             };
@@ -980,6 +978,7 @@ fn solve_fields(
 
 fn solve_casts(
     ssa: &SsaBody<'_>,
+    zeros: &super::zero::ZeroFacts,
     kinds: &[Option<Kind>],
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<Option<Vec<Option<crate::p4_types::calls::TypedUse>>>, RequestError> {
@@ -991,28 +990,8 @@ fn solve_casts(
             continue;
         }
         let value = op.input(0)?;
-        let conversion = if ssa.is_zero(value)? {
-            UseConversion::Null(crate::p4_types::BuiltinReference::Object)
-        } else {
-            match kinds[ix(value.0)?] {
-                Some(Kind::Object) => UseConversion::Identity,
-                Some(
-                    Kind::String
-                    | Kind::Nominal(_)
-                    | Kind::ReferenceArray(_)
-                    | Kind::ProjectedNominal(_)
-                    | Kind::PrimitiveArray(_)
-                    | Kind::ObjectArray,
-                ) => UseConversion::UpcastObject,
-                None => return Ok(None),
-                _ => {
-                    return Err(crate::input::MethodError::Malformed {
-                        pc: op.pc,
-                        problem: crate::input::MethodProblem::InvalidTypeOperand,
-                    }
-                    .into());
-                }
-            }
+        let Some(conversion) = super::references::view(kinds, zeros, value, Kind::Object)? else {
+            return Ok(None);
         };
         push(
             &mut uses,
@@ -1026,6 +1005,7 @@ fn solve_casts(
 fn solve_filled_arrays(
     input: &crate::input::MethodInput<'_, '_>,
     ssa: &SsaBody<'_>,
+    zeros: &super::zero::ZeroFacts,
     kinds: &[Option<Kind>],
     bits: &[u8],
     budget: &mut MethodBudget<'_, '_>,
@@ -1063,7 +1043,7 @@ fn solve_filled_arrays(
         for &value in &op.inputs {
             budget.charge_work(1)?;
             let conversion = if target.field_offset() == 2 {
-                super::references::store_view(ssa, kinds, value, target)?
+                super::references::view(kinds, zeros, value, target.kind())?
             } else {
                 super::primitive_stores::view(ssa, kinds, bits, value, target)?
             };
@@ -1240,48 +1220,17 @@ fn return_use(
             },
         );
     }
-    if typed.kinds[index] == Some(Kind::Int) && typed.integral_bits[index] == 1 {
-        let kind = match result {
-            DeclarationType::String => Some(super::BuiltinReference::String),
-            DeclarationType::Object => Some(super::BuiltinReference::Object),
-            _ => None,
-        };
-        if let Some(kind) = kind {
-            return Ok(Some(UseConversion::Null(kind)));
-        }
+    if super::reference_roots::reference(result.kind()) {
+        return super::references::view(&typed.kinds, &typed.zeros, value, result.kind());
     }
     if matches!(result.kind(), Kind::Float | Kind::Long | Kind::Double) {
         return super::numeric::view(&typed.ssa, &typed.kinds, value, result.kind());
     }
-    if typed.kinds[index] == Some(result.kind())
-        && matches!(
-            result.kind(),
-            Kind::Nominal(_)
-                | Kind::ReferenceArray(_)
-                | Kind::ProjectedNominal(_)
-                | Kind::PrimitiveArray(_)
-                | Kind::ObjectArray
-        )
-    {
-        return Ok(Some(UseConversion::Identity));
-    }
     Ok(match (typed.kinds[index], result.kind()) {
-        (Some(Kind::Int), Kind::Int)
-        | (Some(Kind::Boolean), Kind::Boolean)
-        | (Some(Kind::Object), Kind::Object)
-        | (Some(Kind::String), Kind::String) => Some(UseConversion::Identity),
+        (Some(Kind::Int), Kind::Int) | (Some(Kind::Boolean), Kind::Boolean) => {
+            Some(UseConversion::Identity)
+        }
         (Some(Kind::Boolean), Kind::Int) => Some(UseConversion::BooleanWord),
-        (
-            Some(
-                Kind::String
-                | Kind::Nominal(_)
-                | Kind::ReferenceArray(_)
-                | Kind::ProjectedNominal(_)
-                | Kind::PrimitiveArray(_)
-                | Kind::ObjectArray,
-            ),
-            Kind::Object,
-        ) => Some(UseConversion::UpcastObject),
         (Some(Kind::Int), Kind::Boolean)
             if typed.integral_bits[index] != 0 && typed.integral_bits[index] & 4 == 0 =>
         {

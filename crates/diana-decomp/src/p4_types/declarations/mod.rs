@@ -25,6 +25,5 @@ mod fields;
 mod hierarchy;
 #[allow(dead_code)]
 mod overloads;
-pub(crate) use crate::p2_flow::CallFormal;
 pub(crate) use contracts::StaticContract;
 pub(crate) use contracts::qualifier_available;

@@ -17,10 +17,7 @@ pub(super) fn lower(
     };
     let value = op.input(0)?;
     let lock = if typed.roots.one(value)? == Some(Root::Null) {
-        ValueUse::Null {
-            kind: crate::p4_types::BuiltinReference::Object,
-            value: LocalId(value.0),
-        }
+        ValueUse::NullAssignment(LocalId(value.0))
     } else {
         ValueUse::Direct(LocalId(value.0))
     };
@@ -67,10 +64,9 @@ pub(super) fn verify(
                     [usize::try_from(value.0).map_err(|_| RequestError::PlatformCapacity)?]
                 .is_some_and(crate::p4_types::reference_roots::reference)
         }
-        ValueUse::Null {
-            value: local,
-            kind: crate::p4_types::BuiltinReference::Object,
-        } => local.0 == value.0 && typed.roots.one(value)? == Some(Root::Null),
+        ValueUse::NullAssignment(local) => {
+            local.0 == value.0 && typed.roots.one(value)? == Some(Root::Null)
+        }
         _ => false,
     };
     Ok(*operation == id

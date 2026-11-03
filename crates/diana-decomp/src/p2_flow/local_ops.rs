@@ -107,7 +107,8 @@ pub(super) fn call(
         &const { crate::substrate::owned::ascii_units(*b"<init>") },
         budget,
     )?;
-    let input_formals = super::call_facts::from_reference(&method.declaration.prototype, budget)?;
+    let input_formals =
+        super::call_facts::from_reference(index, &method.declaration.prototype, budget)?;
     Ok(CallSite {
         formals: input_formals,
         target: if constructor {

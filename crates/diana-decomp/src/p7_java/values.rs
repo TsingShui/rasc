@@ -11,10 +11,6 @@ pub(crate) enum ValueUse {
         value: LocalId,
         bits: u32,
     },
-    Null {
-        value: LocalId,
-        kind: crate::p4_types::BuiltinReference,
-    },
     UpcastObject(LocalId),
     Direct(LocalId),
     NullAssignment(LocalId),
@@ -36,7 +32,6 @@ impl ValueUse {
             | Self::BooleanWord(value)
             | Self::Narrow { value, .. }
             | Self::UpcastObject(value)
-            | Self::Null { value, .. }
             | Self::DoubleLiteral { value, .. }
             | Self::FloatLiteral { value, .. } => value,
         }
@@ -48,6 +43,7 @@ pub(super) fn verify_reference_store(
     actual: ValueUse,
     source: crate::p3_ssa::ValueId,
     target: crate::p2_flow::DeclarationType,
+    budget: &mut crate::MethodBudget<'_, '_>,
 ) -> Result<bool, crate::RequestError> {
     use crate::p4_types::Kind;
     let at = usize::try_from(source.0).map_err(|_| crate::RequestError::PlatformCapacity)?;
@@ -55,21 +51,13 @@ pub(super) fn verify_reference_store(
         return Ok(false);
     }
     Ok(match actual {
-        ValueUse::NullAssignment(_) => typed.ssa.is_zero(source)?,
-        ValueUse::Direct(_) => typed.kinds[at] == Some(target.kind()),
+        ValueUse::NullAssignment(_) => crate::p4_types::zero::proven(&typed.ssa, source, budget)?,
+        ValueUse::Direct(_) => {
+            typed.kinds[at].is_some_and(crate::p4_types::reference_roots::reference)
+        }
         ValueUse::UpcastObject(_) => {
             target.kind() == Kind::Object
-                && matches!(
-                    typed.kinds[at],
-                    Some(
-                        Kind::String
-                            | Kind::Nominal(_)
-                            | Kind::ReferenceArray(_)
-                            | Kind::ProjectedNominal(_)
-                            | Kind::PrimitiveArray(_)
-                            | Kind::ObjectArray
-                    )
-                )
+                && typed.kinds[at].is_some_and(crate::p4_types::reference_roots::reference)
         }
         _ => false,
     })
@@ -113,7 +101,6 @@ pub(crate) fn lower(local: LocalId, conversion: UseConversion) -> ValueUse {
         UseConversion::NullAssignment => ValueUse::NullAssignment(local),
         UseConversion::BooleanWord => ValueUse::BooleanWord(local),
         UseConversion::Boolean01 => ValueUse::Boolean01(local),
-        UseConversion::Null(kind) => ValueUse::Null { value: local, kind },
         UseConversion::UpcastObject => ValueUse::UpcastObject(local),
         UseConversion::Narrow(kind) => ValueUse::Narrow { value: local, kind },
     }

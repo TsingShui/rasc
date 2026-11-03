@@ -17,17 +17,41 @@ uncertainty is a product requirement but is not yet generally implemented.
 
 ## Zero constant use views
 
-P4 recognizes a word-zero constant through ordinary move definitions. Phi,
-parameters and runtime computations do not establish zero provenance. A proven
-zero input does not force a Phi with nonzero reference inputs to have an integer
-type. A Phi whose inputs are all proven zeros retains an integer storage view
-when no other type constraint selects its representation.
+P4 builds word-zero provenance from original zero constants, ordinary moves and
+Phi inputs using a finite worklist. A Phi is known zero only when every incoming
+origin is zero. Parameters, runtime computations and unanchored cycles cannot
+establish zero provenance. A zero input does not force a Phi with nonzero
+reference inputs to have an integer type. A Phi whose inputs are all proven zeros
+retains an integer storage view when no other type constraint selects its
+representation.
 
 P4 supplies sealed zero evidence and a typed view: integer `0`, boolean `false`,
 float positive zero, or reference `null`. P5 uses that evidence when a normal-edge
 Phi copy needs a different representation. Nonzero inputs still require compatible
 storage types; the engine MUST NOT reinterpret an arbitrary integer as a reference.
-Zero provenance traversal charges work and checks cancellation.
+Zero provenance traversal charges work and checks cancellation. P4 caches these
+facts in `TypedBody`; independent source replay checks the original definition
+graph rather than treating cached zero evidence as complete method validation.
+
+## Call and reference uses
+
+P2 call formals use the same `DeclarationType` as fields, returns and arrays.
+P4 consumes those formals directly for numeric-family constraints and argument
+views; a call's owner remains its original DEX identity, not the receiver's
+storage type. Every completed call-use product contains all argument views.
+
+An ordinary receiver contains a `TypedUse`, so Object, String, Class, Throwable,
+arrays and nominal or projected references do not require an invented TypeId.
+A constructor receiver names the existing initialization product. A super
+receiver retains its checked this origin. P4 does not add a second alias tracker
+or infer initialization from the method name alone.
+
+Calls, reference assignments, casts and returns consume the same zero and
+reference-value facts. A zero use selects a null literal; other reference uses
+preserve the existing value without adding a throwing cast. These views do not
+prove source subtype or access legality. Numeric families, boolean conversions
+and lossless call/return narrowing retain their own requirements; primitive
+field or array stores retain their format-defined write conversions.
 
 ## 4. Types and Java expressions (T10/T11/T15)
 

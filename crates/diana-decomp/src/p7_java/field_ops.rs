@@ -376,7 +376,7 @@ pub(crate) fn verify(
             usage == FieldUse::Write
                 && op.result.is_none()
                 && if kind.field_offset() == 2 {
-                    super::values::verify_reference_store(typed, *value, source, kind)?
+                    super::values::verify_reference_store(typed, *value, source, kind, budget)?
                 } else {
                     super::values::verify_primitive_store(typed, *value, source, kind)?
                 }
