@@ -15,10 +15,11 @@ complete result.
 
 ## Result presentation
 
-Readable Java carries native check completion separately from availability.
-P8 MUST render `JavaMethod` and `JavaInitializer` without requiring
-`NativeChecksComplete`. An `Incomplete` member keeps the class Mixed and retains
-its body. Detailed uncertainty presentation follows the `--verbose` rules below.
+P8 renders owned readable methods and class assemblies without a verification
+status. JavaUnit means that the available shell and members were assembled in
+Java notation; it does not establish source legality or compilability. Mixed
+means that the presentation combines readable members with original facts or
+unavailable representations. Concrete diagnostics follow the verbose rules below.
 
 Readable Java keeps material uncertainties in the report. The default presentation
 does not print them: no uncertainty line in text and no `uncertainties` member in
@@ -28,14 +29,14 @@ Each uncertainty names the unknown or failed check and, when available, its
 original code unit; it is display metadata and never becomes an executable
 statement or a fabricated body.
 
-P7 decides language eligibility, P8 only reads the existing result, and the application MUST NOT
+P7 constructs the presentation, P8 only reads the existing result, and the application MUST NOT
 refuse to call the renderer because a class is Mixed:
 1. A complete class uses the complete Java printer; a single-method Java result prints
    the corresponding declaration or body without an index prefix.
-2. Mixed first states the original class identity and “not a complete Java compilation unit”, and
+2. Mixed first states the original class identity and “readable members and original facts”, and
    keeps the shell/fields according to the real DeclarationOutput. Members are presented
-   segment by segment according to their original MethodKey: Java keeps the validated declaration
-   or body; Java retains its readable reconstruction and uncertainty reasons without claiming verification; Generated references only the proven owner syntax and the original key mapping and
+   segment by segment according to their original MethodKey: Java keeps its readable declaration
+   or body and concrete uncertainty reasons; Generated references only the proven owner syntax and the original key mapping and
    MUST NOT fabricate an independent method; Debug keeps the available original facts, their coverage and the reason;
    Unavailable keeps the identity, the reason and any available excerpt. An unexplainable shell is
    marked as such, and available methods MUST NOT be deleted because of it.

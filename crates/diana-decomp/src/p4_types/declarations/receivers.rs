@@ -22,12 +22,11 @@ pub(crate) struct ReceiverContract {
     pub prototype: Vec<u16>,
     pub kind: ReceiverKind,
     pub arity: usize,
-    pub declared_throws: Vec<Vec<u16>>,
 }
 pub(crate) fn collect_receiver(
     input: &MethodInput<'_, '_>,
     _catalog: &Context,
-    invocation: &super::throws::Invocation<'_>,
+    invocation: &super::throws::Invocation,
     kind: ReceiverKind,
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<Option<ReceiverDeclaration>, RequestError> {
@@ -48,7 +47,6 @@ pub(crate) fn collect_receiver(
             prototype: copy_proto(&method.declaration.prototype, budget)?,
             kind,
             arity: formals.len(),
-            declared_throws: Vec::new(),
         },
     }))
 }
@@ -85,7 +83,6 @@ impl ReceiverDeclaration {
             prototype: retain(&target.prototype, budget)?,
             kind: target.kind,
             arity: target.arity,
-            declared_throws: super::throws::retain(Some(&target.declared_throws), budget)?,
         }))
     }
 }

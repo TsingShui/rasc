@@ -23,7 +23,7 @@ pub(crate) enum Plan {
         capture_field: GeneratedCaptureField,
         _binding: crate::p4_types::declarations::class_scope::ClassBindings,
     },
-    Static(super::VerifiedJavaUnit),
+    Static(super::JavaUnit),
 }
 impl Plan {
     pub(crate) fn header(&self) -> &str {
@@ -114,12 +114,6 @@ fn verify_impl(
     members: &[MethodOutput],
     control: &mut RunContext<'_>,
 ) -> Result<Option<Plan>, RequestError> {
-    for member in members {
-        control.charge_work(1)?;
-        if member.verification() == Some(crate::JavaVerification::Incomplete) {
-            return Ok(None);
-        }
-    }
     let Some(scope) = crate::p4_types::declarations::nested_scope::collect(
         index,
         key.class_def,
@@ -204,7 +198,7 @@ fn verify_impl(
         return Ok(None);
     }
     if scope.flags() & 8 != 0 {
-        return Ok(super::class_unit::verify_static_nested(
+        return Ok(super::class_unit::assemble_static_nested(
             index, key, catalog, fields, members, &scope, control,
         )?
         .map(Plan::Static));

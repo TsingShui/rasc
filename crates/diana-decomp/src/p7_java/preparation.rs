@@ -61,7 +61,6 @@ pub(super) fn expression(
         (_, Some(PreparationValue::String(units)))
             if descriptor == crate::p4_types::BuiltinReference::String.descriptor() =>
         {
-            super::declarations::check_constant_utf8(units, control)?;
             output.push("\"", control)?;
             for &unit in units {
                 control.charge_work(1)?;

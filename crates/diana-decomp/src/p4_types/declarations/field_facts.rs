@@ -1,6 +1,6 @@
 use crate::context::Context;
 use crate::input::MethodInput;
-use crate::{CodeUnitOffset, FieldId, JavaConstantKind, MethodBudget, RequestError};
+use crate::{CodeUnitOffset, FieldId, MethodBudget, RequestError};
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub(crate) enum FieldUse {
@@ -18,6 +18,8 @@ pub(crate) enum AssignmentObligation {
     OwnFinalInitialization,
     OuterCapture,
 }
+/// The original field operation plus available declaration metadata. Missing
+/// flags do not invent access, volatility or constant status.
 pub(crate) struct FieldAccess {
     pub outer_capture: Option<Vec<u16>>,
     pub assignment: AssignmentObligation,
@@ -29,7 +31,7 @@ pub(crate) struct FieldAccess {
     pub owner: Vec<u16>,
     pub name: Vec<u16>,
     pub usage: FieldUse,
-    pub flags: u32,
+    pub flags: Option<u32>,
 }
 pub(crate) fn collect_field(
     input: &MethodInput<'_, '_>,
@@ -40,125 +42,58 @@ pub(crate) fn collect_field(
     pc: CodeUnitOffset,
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<FieldAccess, RequestError> {
-    let missing = || RequestError::FieldBindingEvidenceMissing { reference, pc };
     let original = input.field_reference(reference, budget)?;
-    let Some(kind) = crate::p2_flow::field_type(
+    let kind = crate::p2_flow::field_type(
         input,
         original.declaration.field_type,
         original.declaration.field_type_idx,
         budget,
     )?
-    else {
-        return Err(missing());
-    };
-    let Some(evidence) = catalog.field(
-        original.owner,
-        original.declaration.name,
-        original.declaration.field_type,
-        budget,
-    )?
-    else {
-        return Err(missing());
-    };
-    let final_initialization = usage == FieldUse::Write
-        && evidence.access_flags & crate::substrate::flags::FINAL != 0
-        && storage == FieldStorage::Static
-        && crate::substrate::flags::class_initializer(input.access_flags())
-        && input.declaration().name.matches_with(
-            &const { crate::substrate::owned::ascii_units(*b"<clinit>") },
+    .ok_or(RequestError::FieldBindingEvidenceMissing { reference, pc })?;
+    let flags = catalog
+        .field(
+            original.owner,
+            original.declaration.name,
+            original.declaration.field_type,
             budget,
         )?
-        && input.own_field_metadata(reference, budget)?.is_some();
-    let nested = super::nested_scope::collect(input.program(), input.class_id(), catalog, budget)?;
-    let capture_outer = if let Some(scope) = &nested {
-        if evidence.owner == scope.owner()
-            && crate::substrate::flags::capture_field(evidence.access_flags)
-            && original
-                .declaration
-                .field_type
-                .matches_with(scope.outer(), budget)?
-        {
-            let mut outer = Vec::new();
-            for &unit in scope.outer() {
-                crate::substrate::owned::push(&mut outer, unit, budget)?;
+        .map(|declaration| declaration.access_flags);
+    let own_flags = input.own_field_metadata(reference, budget)?;
+    let flags = own_flags.or(flags);
+    let own = own_flags.is_some();
+    let own_final = own
+        && usage == FieldUse::Write
+        && flags.is_some_and(|flags| flags & crate::substrate::flags::FINAL != 0)
+        && match storage {
+            FieldStorage::Instance => {
+                crate::substrate::flags::instance_constructor(input.access_flags())
             }
-            Some(outer)
-        } else {
-            None
+            FieldStorage::Static => {
+                crate::substrate::flags::class_initializer(input.access_flags())
+            }
+        };
+    let capture_outer = if storage == FieldStorage::Instance
+        && usage == FieldUse::Read
+        && flags.is_some_and(crate::substrate::flags::capture_field)
+        && let Some(scope) =
+            super::nested_scope::collect(input.program(), input.class_id(), catalog, budget)?
+        && original.owner.matches_with(scope.owner(), budget)?
+        && original
+            .declaration
+            .field_type
+            .matches_with(scope.outer(), budget)?
+    {
+        let mut outer = Vec::new();
+        for &unit in scope.outer() {
+            crate::substrate::owned::push(&mut outer, unit, budget)?;
         }
+        Some(outer)
     } else {
         None
     };
-    let lexical = nested
-        .as_ref()
-        .is_some_and(|scope| evidence.owner == scope.owner() || evidence.owner == scope.outer());
-    let own_private = evidence.access_flags
-        & (crate::substrate::flags::PUBLIC
-            | crate::substrate::flags::PRIVATE
-            | crate::substrate::flags::PROTECTED)
-        == crate::substrate::flags::PRIVATE
-        && input.owner().matches_with(&evidence.owner, budget)?;
-    if evidence.access_flags
-        & (crate::substrate::flags::PUBLIC
-            | crate::substrate::flags::PRIVATE
-            | crate::substrate::flags::PROTECTED)
-        == crate::substrate::flags::PRIVATE
-        && !own_private
-        || (evidence.access_flags & crate::substrate::flags::STATIC != 0)
-            != (storage == FieldStorage::Static)
-        || evidence.access_flags
-            & (crate::substrate::flags::PUBLIC
-                | crate::substrate::flags::PRIVATE
-                | crate::substrate::flags::PROTECTED)
-            != crate::substrate::flags::PUBLIC
-            && !lexical
-            && !own_private
-        || !crate::substrate::flags::field_valid(evidence.access_flags)
-        || evidence.access_flags
-            & (crate::substrate::flags::FINAL | crate::substrate::flags::VOLATILE)
-            == (crate::substrate::flags::FINAL | crate::substrate::flags::VOLATILE)
-        || usage == FieldUse::Write
-            && evidence.access_flags & crate::substrate::flags::FINAL != 0
-            && !final_initialization
-    {
-        return Err(missing());
-    }
-    match input.referenced_field_metadata(reference, budget)? {
-        crate::input::ReferencedFieldMetadata::Declared(native)
-            if native.access_flags == evidence.access_flags && native.same_named_fields == 1 => {}
-        crate::input::ReferencedFieldMetadata::External => {}
-        _ => return Err(missing()),
-    }
-    if usage == FieldUse::Read
-        && evidence.access_flags & crate::substrate::flags::FINAL != 0
-        && (kind.field_offset() != 2 || kind == crate::p2_flow::DeclarationType::String)
-    {
-        match evidence.constant_kind {
-            JavaConstantKind::Constant => {
-                return Err(RequestError::JavaConstantFieldRead { reference, pc });
-            }
-            // Reading the field keeps the original access; an unproven
-            // constant attribute cannot change the emitted expression.
-            JavaConstantKind::Unknown => {}
-            JavaConstantKind::NonConstant => {}
-        }
-    }
-    let Some(owner) = catalog.class(&evidence.owner, budget)? else {
-        return Err(missing());
-    };
-    let mut names = 0usize;
-    for name in &owner.field_names {
-        budget.charge_work(1)?;
-        if crate::context::same_units(name, &evidence.name, budget)? {
-            names = names.checked_add(1).ok_or(RequestError::PlatformCapacity)?;
-        }
-    }
-    if names != 1 {
-        return Err(missing());
-    }
     Ok(FieldAccess {
         outer_capture: capture_outer,
-        assignment: if final_initialization {
+        assignment: if own_final {
             AssignmentObligation::OwnFinalInitialization
         } else {
             AssignmentObligation::Ordinary
@@ -171,7 +106,7 @@ pub(crate) fn collect_field(
         owner: crate::substrate::owned::copy_units(original.owner, budget)?,
         name: crate::substrate::owned::copy_units(original.declaration.name, budget)?,
         usage,
-        flags: evidence.access_flags,
+        flags,
     })
 }
 
@@ -182,41 +117,23 @@ pub(crate) fn collect_capture(
     pc: CodeUnitOffset,
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<FieldAccess, RequestError> {
-    let original = input.field_reference(reference, budget)?;
-    let Some(kind) = crate::p2_flow::field_type(
+    let mut access = collect_field(
         input,
-        original.declaration.field_type,
-        original.declaration.field_type_idx,
+        catalog,
+        reference,
+        FieldStorage::Instance,
+        FieldUse::Write,
+        pc,
         budget,
-    )?
-    else {
-        return Err(RequestError::FieldBindingEvidenceMissing { reference, pc });
-    };
-    let Some(evidence) = catalog.field(
-        original.owner,
-        original.declaration.name,
-        original.declaration.field_type,
-        budget,
-    )?
-    else {
-        return Err(RequestError::FieldBindingEvidenceMissing { reference, pc });
-    };
-    if !crate::substrate::flags::capture_field(evidence.access_flags) {
+    )?;
+    if !access
+        .flags
+        .is_some_and(crate::substrate::flags::capture_field)
+    {
         return Err(RequestError::FieldBindingEvidenceMissing { reference, pc });
     }
-    Ok(FieldAccess {
-        outer_capture: None,
-        assignment: AssignmentObligation::OuterCapture,
-        kind,
-        storage: FieldStorage::Instance,
-        _sealed: (),
-        reference,
-        owner_type: original.owner_type,
-        owner: crate::substrate::owned::copy_units(original.owner, budget)?,
-        name: crate::substrate::owned::copy_units(original.declaration.name, budget)?,
-        usage: FieldUse::Write,
-        flags: evidence.access_flags,
-    })
+    access.assignment = AssignmentObligation::OuterCapture;
+    Ok(access)
 }
 
 pub(crate) fn collect_own_write(
@@ -226,29 +143,13 @@ pub(crate) fn collect_own_write(
     pc: CodeUnitOffset,
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<FieldAccess, RequestError> {
-    let original = input.field_reference(reference, budget)?;
-    let write = super::fields::bind_own_int_write(input, catalog, reference, pc, budget)?;
-    let native =
-        input
-            .own_field_metadata(reference, budget)?
-            .ok_or(RequestError::InternalInvariant(
-                "own field lost native declaration",
-            ))?;
-    Ok(FieldAccess {
-        outer_capture: None,
-        assignment: if native.access_flags & crate::substrate::flags::FINAL != 0 {
-            AssignmentObligation::OwnFinalInitialization
-        } else {
-            AssignmentObligation::Ordinary
-        },
-        kind: crate::p2_flow::DeclarationType::Int,
-        _sealed: (),
-        storage: FieldStorage::Instance,
-        reference: write.reference,
-        owner_type: original.owner_type,
-        owner: crate::substrate::owned::copy_units(original.owner, budget)?,
-        name: write.name,
-        usage: FieldUse::Write,
-        flags: native.access_flags,
-    })
+    collect_field(
+        input,
+        catalog,
+        reference,
+        FieldStorage::Instance,
+        FieldUse::Write,
+        pc,
+        budget,
+    )
 }

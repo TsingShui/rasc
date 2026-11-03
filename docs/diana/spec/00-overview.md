@@ -42,8 +42,9 @@ identify material uncertainty and retain original member identity and available
 DEX facts. A local failure MUST NOT discard other members. A readable result is
 not a claim that source compiles or is semantically equivalent.
 
-P7 retains a renderable `JavaMethod` independently of native source-check
-completion. Missing analysis or representation products still use original-fact
+P7 retains a renderable `JavaMethod` with concrete recovery diagnostics.
+Diana MUST NOT use whole-result Java legality or compilability as an analysis
+goal, result status or output gate. Missing analysis or representation products still use original-fact
 debug output. Text and JSON present the same underlying report; neither is a
 capability switch. Current coverage is maintained in the documentation README.
 
@@ -55,14 +56,6 @@ input MUST NOT be reported as successful reconstruction. Unknown instruction
 widths MUST NOT be guessed; available original facts and coverage remain explicit.
 P8 renders existing products and MUST NOT perform another analysis or repair
 missing semantics.
-
-## Migration status
-
-The chaptered specification now carries the product, input, phase, CLI and
-algorithm contracts. Older verification-only gates survived migration and still
-conflict with the readable-output direction. Reconciling them is required before
-implementing that direction; observed capability comes from implemented behavior,
-not a chapter heading.
 
 ## Control, limits and resources
 
@@ -215,12 +208,11 @@ The application MUST create one RunContext per request and pass it in sequence t
 
 Caller-supplied external declarations are not the product path. The ordinary
 request derives class and member facts for every definition in the input and
-treats owners outside the input as unknown; the strict policy may still accept
-caller-provided declarations for verification tests. A single DEX uses an images vector of length 1; DexIds are allocated within the request and map back to the root physical/logical identity through ImageOrigin, different arrival orders are not required to produce the same numbers, and no extra sorting is done for file names or input order. The catalog MAY be empty; insufficient type/call evidence remains explicit in the local result. The library MUST NOT access disk, processes or the network, and the root request scope holds the byte owner until Engine use ends; an ordinary DEX has header_offset=0; T04 implements native 041 reading, H04 only performs application borrowing and original-identity adaptation, and T25/H04 provide the D065 evidence for their respective sides.
+treats owners outside the input as unknown; Diana does not accept external declarations as a verification policy. A single DEX uses an images vector of length 1; DexIds are allocated within the request and map back to the root physical/logical identity through ImageOrigin, different arrival orders are not required to produce the same numbers, and no extra sorting is done for file names or input order. The catalog MAY be empty; insufficient type/call evidence remains explicit in the local result. The library MUST NOT access disk, processes or the network, and the root request scope holds the byte owner until Engine use ends; an ordinary DEX has header_offset=0; T04 implements native 041 reading, H04 only performs application borrowing and original-identity adaptation, and T25/H04 provide the D065 evidence for their respective sides.
 
 Readable Java MUST identify material unresolved assumptions or failed checks and preserve original method identity, available DEX debug facts and coverage. Its producer MUST use the existing shared analysis chain and available checked input facts; it MUST NOT fabricate instruction widths or claim unknown declaration, type or control-flow facts as proven. If a useful reconstruction cannot be formed, the engine MUST retain Debug or Unavailable. P8 renders the produced result without further analysis. Readable output does not suppress Malformed, BudgetExceeded, Cancelled or InternalInvariant classification.
 
-P7 produces readable Java from the shared analysis products and records material uncertainties. Native checks MAY establish additional facts, but completing every check is not a prerequisite for displaying Java. The engine MUST NOT present unknown facts as proven or call javac; independent compilation and behavior checks provide evidence only for their tested environments.
+P7 produces readable Java from the shared analysis products and records material uncertainties. Internal checks preserve input safety and analysis/transform invariants; they do not qualify output as legal Java. The engine MUST NOT present unknown facts as proven or call javac; independent compilation and behavior checks provide evidence only for their tested environments.
 
 Generated members retain original identities and MUST NOT be duplicated in owner syntax. If a member cannot be expressed independently, Diana MUST present its available readable reconstruction or original facts without inventing a wrapper.
 
@@ -231,7 +223,7 @@ A class-shaped result is not a guarantee of compilation or equivalence. Members 
 | Category | Example | Handling |
 |---|---|---|
 | `Malformed` | out-of-range ID, truncated opcode, wrong branch boundary, invalid LEB, use of an undefined register | If a global header/catalog cannot be located, RequestError; a locally invalid method → Unavailable, optionally with an explicit raw excerpt. This is not an ordinary Unsupported, and available original facts/bytes remain diagnostic information, not verified Java or a valid-program claim |
-| `Unsupported` | known legal invoke-custom, constructor that cannot be legalized, monitor/exception structure that cannot be proven, missing external declaration evidence | retain checked original instructions, references and coverage as an analysis-oriented debug snapshot; if decoding cannot continue safely, keep available facts/bytes and identify the missing range |
+| `Unsupported` | known legal invoke-custom, constructor or monitor/exception structure whose operations cannot yet be represented | retain checked original instructions, references and coverage as an analysis-oriented debug snapshot; if decoding cannot continue safely, keep available facts/bytes and identify the missing range |
 | `BudgetExceeded` | a resource limit explicitly configured by the caller is hit, or an actual allocation/platform capacity fails | stop that method's analysis; if resources are still available for raw, print it completely, otherwise Unavailable; there is no numeric quota by default and the engine MUST NOT retry with an increased limit |
 | `InternalInvariant` | identity inconsistency before and after the verifier, certificate missing an edge, algorithm-impossible state | the diagnostic MUST state BUG explicitly and the dev test MUST fail; the request report MAY keep a method-level raw fallback, but the status remains an internal error and MUST NOT count as a normal Unsupported or a Java success |
 | `Cancelled` | the caller's cancellation token | stop the request with RequestError::Cancelled; the engine MUST NOT continue producing per-method debug output after cancellation |
@@ -252,7 +244,7 @@ The engine retains an available readable reconstruction as Java together with it
 Class-level reasons retain their original ClassKey in the enclosing result. Input
 and request errors use the same kind/code distinction. A reason does not claim a
 site when global damage prevents locating it. Typed codes already named in
-[output reasons](07-java.md), such as BindingEvidenceMissing, ArrayFillShape, JavaTargetLimit and
+[output reasons](07-java.md), such as BindingEvidenceMissing, ArrayFillShape and
 MonitorScopeUnproved, retain those meanings; add a code only with an actual
 failure producer, not a speculative enumeration of every possible rejection.
 
@@ -425,7 +417,7 @@ protection-domain/resource checks have no off switch.
 |---|---|---|
 | literal formatting/indent/output names | every verified artifact | P8 text/spans (if a name change affects Java binding, P8 alone is not enough) |
 | normal structured vs dispatcher policy | P1–P5 | P6/P7/P8; only the plan is selected, the CFG is not changed |
-| external declaration/hierarchy catalog | raw input/P2 original semantics | P4–P8; P3 is rebuilt as well if its exception-edge/throws input changed, and the request recomputes the whole method |
+| original declaration/hierarchy facts | unchanged checked bytes | a new input creates a new Engine and rebuilds the shared method chain |
 | CFG topology/exception chain | only raw/catalog | everything downstream of P2 is invalidated; the engine MUST NOT reuse old ValueIds/CopyPlans |
 | generic/nested source policy | the value identity reusable by raw/P2–P3 | binding/types/storage/Java after P4; the whole method is recomputed |
 

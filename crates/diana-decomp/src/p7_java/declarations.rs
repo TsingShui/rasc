@@ -1,11 +1,11 @@
 use crate::input::{DexString, MethodInput, RawPrintable};
 use crate::pipeline::control::InputControl;
 use crate::substrate::owned::{TextBuffer, copy_units};
-use crate::{JavaTargetItem, MethodBudget, RequestError};
+use crate::{MethodBudget, RequestError};
 
-/// A no-code Java declaration admitted by the native declaration verifier.
+/// An owned readable declaration for an original no-code member.
 /// This is a fragment, not a JavaUnit or an executable recovered body.
-/// Class-owned annotation defaults are supplied by the verified unit, not this fragment.
+/// Class-owned annotation defaults are supplied by the assembled unit, not this fragment.
 pub struct JavaMethodDecl {
     source: String,
     signature: Option<Vec<u16>>,
@@ -38,7 +38,6 @@ fn declaration_impl(
     annotations: Option<&crate::p4_types::declarations::annotations::Bindings>,
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<Option<JavaMethodDecl>, RequestError> {
-    check_target(input, budget)?;
     let RawPrintable::Declaration(raw) = input.raw() else {
         return Ok(None);
     };
@@ -173,91 +172,6 @@ fn declaration_impl(
             None
         },
     }))
-}
-
-pub(super) fn check_target(
-    input: &MethodInput<'_, '_>,
-    budget: &mut impl InputControl,
-) -> Result<(), RequestError> {
-    // Descriptor-defined limits apply before choosing Java recovery or a raw
-    // result; they do not depend on an estimated generated body size.
-    let words = input
-        .declaration()
-        .prototype
-        .parameter_words
-        .0
-        .checked_add(u64::from(
-            input.access_flags() & crate::substrate::flags::STATIC == 0,
-        ))
-        .ok_or(RequestError::PlatformCapacity)?;
-    target_limit(JavaTargetItem::ParameterWords, words, 255)?;
-    target_limit(
-        JavaTargetItem::MethodName,
-        mutf8_length(input.declaration().name, budget)?,
-        65535,
-    )?;
-    let mut length = 2u64
-        .checked_add(mutf8_length(
-            input.declaration().prototype.return_type,
-            budget,
-        )?)
-        .ok_or(RequestError::PlatformCapacity)?;
-    input.declaration().prototype.visit_parameter_types(
-        budget,
-        |name, budget| -> Result<(), RequestError> {
-            length = length
-                .checked_add(mutf8_length(name, budget)?)
-                .ok_or(RequestError::PlatformCapacity)?;
-            Ok(())
-        },
-    )?;
-    target_limit(JavaTargetItem::MethodDescriptor, length, 65535)
-}
-
-pub(super) fn check_constant_utf8(
-    units: &[u16],
-    budget: &mut impl InputControl,
-) -> Result<(), RequestError> {
-    let mut length = 0u64;
-    for &unit in units {
-        budget.charge_work(1)?;
-        let bytes = mutf8_unit_bytes(unit);
-        length = length
-            .checked_add(bytes)
-            .ok_or(RequestError::PlatformCapacity)?;
-    }
-    target_limit(JavaTargetItem::ConstantUtf8Bytes, length, 65535)
-}
-
-fn mutf8_length(name: DexString<'_>, budget: &mut impl InputControl) -> Result<u64, RequestError> {
-    let mut units = name.reader()?;
-    let mut length = 0u64;
-    while let Some(unit) = units.next(budget)? {
-        let bytes = mutf8_unit_bytes(unit);
-        length = length
-            .checked_add(bytes)
-            .ok_or(RequestError::PlatformCapacity)?;
-    }
-    Ok(length)
-}
-
-fn mutf8_unit_bytes(unit: u16) -> u64 {
-    match unit {
-        1..=0x7f => 1,
-        0..=0x7ff => 2,
-        _ => 3,
-    }
-}
-
-fn target_limit(item: JavaTargetItem, actual: u64, maximum: u64) -> Result<(), RequestError> {
-    if actual > maximum {
-        return Err(RequestError::JavaTargetLimit {
-            item,
-            actual,
-            maximum,
-        });
-    }
-    Ok(())
 }
 
 fn primitive_type(

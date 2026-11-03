@@ -225,6 +225,19 @@ fn reconstruct_impl(
         return Ok(Outcome::Declined(reason("protected_region_plan")));
     }
     let mut checks = super::dispatcher::LoweringChecks::default();
+    for evidence in storage.typed.field_declarations.iter().flatten() {
+        budget.charge_work(1)?;
+        if let crate::p4_types::bindings::FieldDeclaration::Known(access) = &evidence.declaration
+            && access.flags.is_none()
+        {
+            super::method::note(
+                &mut checks.uncertainties,
+                "field_declaration_unknown",
+                None,
+                budget,
+            )?;
+        }
+    }
     if !super::array_ops::validate(input, catalog, &storage.typed, budget)? {
         super::method::note(
             &mut checks.uncertainties,

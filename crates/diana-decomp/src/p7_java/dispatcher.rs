@@ -107,10 +107,6 @@ pub(super) fn lower(
 ) -> Result<Option<JavaMethod>, RequestError> {
     let plan = plan.into_data();
     let storage = &plan.storage;
-    let final_assignments = super::final_assignment::verify(storage, &plan.shape, budget)?;
-    if final_assignments.is_none() {
-        super::method::note(&mut checks.uncertainties, "final_assignment", None, budget)?;
-    }
     let placements = super::exceptional::obligations(storage, budget)?;
     if !placements.is_empty() && !matches!(plan.shape, crate::p6_regions::Shape::Protected(Some(_)))
     {
@@ -142,13 +138,10 @@ pub(super) fn lower(
             "dispatcher belongs to another method",
         ));
     }
-    super::declarations::check_target(input, budget)?;
+
     let flags = input.access_flags();
     let initializer = super::initializers::is_initializer(input, budget)?;
-    if initializer
-        && (!super::initializers::header_admitted(input, budget)?
-            || !calls.throws.descriptors.is_empty())
-    {
+    if initializer && !super::initializers::header_admitted(input, budget)? {
         checks.refused = Some("initializer_header");
         return Ok(None);
     }
@@ -241,7 +234,6 @@ pub(super) fn lower(
             catalog,
             storage,
             region,
-            calls,
             &mut checks.uncertainties,
             budget,
         )?
@@ -529,7 +521,7 @@ pub(super) fn lower(
     }
     if let crate::p6_regions::Shape::Structured(region) = plan.shape {
         let source = super::natural_control::lower(&body, &region, budget)?;
-        let mut method = JavaMethod::structured(
+        let method = JavaMethod::structured(
             header.finish(),
             super::structured::StructuredBody {
                 storage: body,
@@ -537,10 +529,7 @@ pub(super) fn lower(
             },
             syntax,
         );
-        method.final_assignments = final_assignments;
         return Ok(Some(method));
     }
-    let mut method = JavaMethod::dispatcher(header.finish(), body, syntax);
-    method.final_assignments = final_assignments;
-    Ok(Some(method))
+    Ok(Some(JavaMethod::dispatcher(header.finish(), body, syntax)))
 }

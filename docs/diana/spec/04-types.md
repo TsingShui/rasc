@@ -303,14 +303,10 @@ evaluate it on the host and then drop the negative-zero/NaN policy.
 A String is escaped unit by unit as UTF16 without NFC/NFKC normalization, and a surrogate pair
 MUST NOT be combined before counting the length.
 quote/backslash/CR/LF use language-specific escapes, an original backslash is output as a pair to
-avoid an unintended Unicode escape; Java source escaping is not reused for JSON debug snapshots. The
-CONSTANT_Utf8 of a Java classfile has a further 65535-byte bound: per u16 unit, MUTF8 length is
-0→2, 1..127→1, 128..2047→2 and everything else→3. The six-character `\uXXXX` in Java source is
-not the same measure as this length; exceeding the bound MUST NOT be avoided by concatenating
-compile-time constants, because javac folds them.
-To work around the bound the implementation MUST NOT introduce StringBuilder, chunked helpers or
-changed intern identity; exceeding the bound is Unsupported/JavaLiteralTooLarge, and raw is
-selected per §8.
+avoid an unintended Unicode escape; Java source escaping is not reused for JSON debug snapshots. Classfile MUTF8 limits do not constrain readable source. The printer preserves
+all original UTF-16 units within actual platform capacity and configured output
+quotas; it does not split values, change intern identity or invent runtime helpers
+for compilation.
 
 ### 4.9 Lossless use conversion of narrow integers after a Phi
 
@@ -394,35 +390,14 @@ projections, and a proven compiler bridge MUST NOT be treated as another hand-wr
 return-only overload; the original runtime directory is still fully kept for checking the
 original invoke/dispatch identity.
 
-P7 processes each ordinary Java call in the following fixed order:
-1. Fix the receiver and arguments as locals or literal views per P4, preserving the original
-   receiver/argument evaluation order.
-2. Make the source static type of every argument exactly match the target formal descriptor;
-   only Identity, a proven upcast, the original check-cast or a validated primitive conversion is
-   allowed. `(T)null` is safe; the implementation MUST NOT add downcasts arbitrarily.
-3. Enumerate the complete and accessible source-visible candidates, first collapsing overridden
-   parent declarations per inheritance/override/hiding facts, and then checking fixed-arity
-   overloads against the fixed formal types; a normal covariant override MUST NOT be mistaken for
-   two hand-written overloads. varargs follow the original array argument and are not unpacked or
-   boxed. The selected erased member/dispatch MUST match the original invoke; when the remaining
-   valid declarations differ only in return type with no legal override or Generated explanation,
-   or when an unclear generic binding remains, the result is Unsupported.
-4. static uses a type qualifier that provably resolves to the same resolution/initialization
-   target; virtual/interface keeps the receiver; direct is allowed only in the current legal
-   private/constructor form; super uses `super.m` and checks the same super resolution target.
-   When interface-special, cross-owner access or the source shell cannot express the call, the
-   implementation MUST NOT rewrite it as virtual to hide the problem.
-5. For a read of static final primitive/String, additionally check
-   `JavaConstantKind=Constant|NonConstant|Unknown`. An internal unit uses the blank-final/static
-   block scheme of §12 and is marked NonConstant; if an external one is Constant, a Java source
-   read may be inlined and lose the class-init or the original read, so sget MUST NOT be lowered
-   directly and the result is Unsupported/JavaConstantFieldRead. Unknown yields
-   Unsupported/BindingEvidenceMissing; the implementation MUST NOT trigger initialization
-   additionally through reflection or a helper.
-6. Accumulate the escaping checked exceptions and subtract the ones catchable in order; the
-   remaining throws MUST be compatible with the original override/declaration contract. An
-   unknown throws set or parent contract is rejected; the implementation MUST NOT use sneaky
-   throw, wrap in catch or widen the public contract.
+P7 prints each call from the original reference and invoke kind using the P4
+receiver and argument views. It MUST preserve original receiver/argument order,
+formal descriptors and dispatch identity. It MUST NOT add a throwing cast, boxing,
+helper or changed dispatch merely to make source compile.
+Java overload/access/checked-throws acceptance is not a method output gate.
+Original Throws annotations are retained, not inferred from catch parameters.
+Field reads and writes use original references; absent declaration flags remain
+unknown, not presumed public, nonvolatile or nonconstant.
 
 A method without calls produces an empty but valid BindingTable; a whole-platform catalog is not
 required. const and primitive operations do not depend on fabricated library facts. The
@@ -454,8 +429,8 @@ The local declarations, EntrySeed copies and prefix move materialization involve
 the call completes normally, and the implementation MUST prove that no other use or handler can
 observe them before the call; a failing path MUST NOT materialize the initialized this. This way
 the output neither reads an unassigned Java local before super nor fabricates compilation by
-assigning null to uninit. Inheritance, access, ctor overload and checked throws are still checked
-by the same binding rules. T22 has separate rules for outer capture, and a general pre-super
+assigning null to uninit. Constructor target/prototype and receiver origin remain checked; source access,
+overload and checked-throws legality do not gate output. T22 has separate rules for outer capture, and a general pre-super
 reordering MUST NOT be opened.
 
 #### First-entry initialization evidence
@@ -520,55 +495,29 @@ reorder by default. Inside a constructor, UninitThis up to super/this likewise b
 after normal completion, and leading local declarations MUST NOT move before the Java constructor
 invocation.
 
-### 9.4 Executable decision of Java binding
+### 9.4 Original binding and source spelling
 
-For the target formal vector F, the actual source static types are fixed to F before the
-candidates are judged, instead of looking only at which overload the printed text resembles. For a
-complete candidate m, fixed-arity applicability holds when the arities are equal and each F_i
-converts to m.formal_i by an identity/widening conversion allowed in this profile; the decision
-performs no boxing, generic inference or varargs expansion, and these shapes MUST NOT be treated as
-“competing candidates that do not exist” when they influence selection. When the candidate set
-contains such shapes that could influence selection, the Java binding is rejected. Among the
-applicable candidates, only a unique most-specific target whose original owner/proto/dispatch all
-match is accepted.
+DEX references and invoke kinds identify the original operation. P7 keeps those
+facts independently of Java source spelling. Complete Java overload resolution,
+accessibility and qualifier scope are not prerequisites for readable output.
+P4 typed views still preserve original word interpretation; a source-level mismatch
+MUST NOT be repaired with fabricated conversions or changed targets.
 
-The null literal of D019 MUST have the static type Object formal, otherwise pick(String) wins;
-the super of D021 is not an ordinary virtual call on the same receiver. A varargs call uses an
-array argument at fixed arity, and a declaration that MUST keep its varargs flag still needs the
-legal `T...` form; not expanding the call MUST NOT be equated with freely changing the
-declaration.
+### 9.5 Original Throws metadata
 
-Completeness covers declarations in the owner/name/inheritance/access scope, not “the pool
-contains that method_id”. A missing parent, a hidden candidate and a return-only collision MUST
-NOT default to success. Static qualifiers, fields and type spellings MUST also be resolved in the
-actual source scope: even fully qualified text can be shadowed by a field or type of the same
-name, so the implementation MUST NOT merely concatenate descriptors. When the source name cannot
-be bound faithfully, the related Java is rejected and the original key/name is unchanged. No
-complete whole-platform catalog is needed.
-
-### 9.5 Boundaries of checked throws and declaration proofs
-
-P4 collects declaration and binding obligations and MUST NOT widen a method's throws in advance by
-the catch parameter's Throwable. After the lexical catch structure is fixed, P7 separates the
-declared checked set of the original operation, the part already caught in priority order, the new
-exceptions of the handler itself and the rethrow of the original exception; the precise-rethrow
-rule of §10 applies only to an effectively-final original catch parameter. Constructor,
-initializer and override have different allowed throws sets, and `throws Throwable` MUST NOT be
-added uniformly.
-
-An Unknown fact does not mean that no checked exception exists, and Complete does not prove that an
-external callee never throws another object at runtime through sneaky or native means; it is
-primarily the declaration contract used for Java compilation binding. The semantics still keep the
-original call and exception propagation, and a declared throws MUST NOT delete a real exception
-edge. The original catch priority MUST NOT be reordered by the throws set either.
+P4 retains original Throws annotation descriptors for P7 headers. Missing external
+throws facts remain unknown. Production does not enumerate declaration-bounded
+escaping exceptions to prove Java catch reachability or rethrow legality.
+Original exception edges, handler priority and pre-throw values remain governed
+by P2–P6 and checked against P7 control/operation products.
 
 #### 3.4 Input declaration facts and minimal call binding
 
 The concrete immutable data tables are the P1 declaration products cached by
 `context::Context`: class declaration, method declaration, field evidence and
-hierarchy edges. FieldDecl additionally records
-`JavaConstantKind=Constant|NonConstant|Unknown`, which prevents sget from being constant-inlined by javac; a raw encoded
-value does not by itself prove the constant attribute of the external source. Each owner/candidate group has Complete/Partial/Unknown. A partial directory
+hierarchy edges. Field flags come only from input definitions. Missing flags stay
+unknown; source constantness is not inferred as an output qualification. Each
+owner/candidate group has Complete/Partial/Unknown. A partial directory
 retains its readable members and classified issues, and it MUST NOT establish
 member absence or hierarchy-wide uniqueness. Missing evidence affects only the
 corresponding Java capability; the context MUST NOT read files, query the
@@ -585,7 +534,6 @@ subtype(a,b) -> ProvenYes|ProvenNo|Unknown
 
 subtype traverses the known parent/interface graph with a visited set and an explicit queue, and charges loops/depth/candidate count; it MUST return ProvenNo only when the complete ancestor set was exhausted without a hit, and it MUST report a missing node as Unknown. overloads includes the facts required for inheritance/hiding and access; P4 MUST NOT let a candidate traversal replace the Java selection with the first arriving item.
 
-P7 uses fixed-arity calls with exact formal static types, and it MUST allow only known reference/
-primitive widening as candidate applicability, without introducing boxing or varargs expansion. P7 MUST require the applicable set to contain a unique most-specific erased
-target that agrees with the original invoke resolution. P7 MUST NOT guess generic inference, return-only collision or unknown parent contracts
-in this profile. See [04-types](04-types.md) for the complete steps.
+P7 consumes fixed-arity original calls and P4 argument views without requiring
+Java overload-selection proof. Generated-member transformations retain their own
+identity/template obligations.

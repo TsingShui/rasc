@@ -62,11 +62,7 @@ fn collect_impl(
     let original = super::constructor_evidence::collect(
         input,
         catalog,
-        &super::throws::Invocation {
-            reference,
-            pc,
-            protection: None,
-        },
+        &super::throws::Invocation { reference, pc },
         budget,
     )?;
     Ok(EntryDeclarations {

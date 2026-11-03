@@ -723,10 +723,7 @@ fn verify_impl(
     let Some(name) = super::calls::type_name(declaration.descriptor(), control)? else {
         return Ok(None);
     };
-    super::declarations::check_constant_utf8(
-        &declaration.descriptor()[1..declaration.descriptor().len() - 1],
-        control,
-    )?;
+
     let mut header = TextBuffer::new();
     let simple = if let Some(at) = name.rfind('.') {
         header.push("package ", control)?;
@@ -755,7 +752,7 @@ fn verify_impl(
         if !super::declarations::identifier(&constant.name, control)? {
             return Ok(None);
         }
-        super::declarations::check_constant_utf8(&constant.name, control)?;
+
         for scalar in char::decode_utf16(constant.name.iter().copied()) {
             header.character(
                 scalar
@@ -784,7 +781,7 @@ pub(crate) fn unit(
     fields: &[crate::FieldOutput],
     members: &[crate::MethodOutput],
     control: &mut RunContext<'_>,
-) -> Result<Option<super::VerifiedJavaUnit>, RequestError> {
+) -> Result<Option<super::JavaUnit>, RequestError> {
     if fields.len()
         != proof
             .order
@@ -900,7 +897,7 @@ pub(crate) fn unit(
     }
     let mut header = TextBuffer::new();
     header.push(&proof.header, control)?;
-    Ok(Some(super::class_unit::VerifiedJavaUnit::enumeration(
+    Ok(Some(super::class_unit::JavaUnit::enumeration(
         header.finish(),
         Binding {
             _owner: proof.declaration.owner(),

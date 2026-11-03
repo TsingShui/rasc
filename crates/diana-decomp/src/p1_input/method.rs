@@ -62,16 +62,6 @@ pub enum RawPrintable<'a> {
     Declaration(ValidatedRawDeclaration),
 }
 
-pub(crate) enum ReferencedFieldMetadata {
-    External,
-    Absent,
-    Declared(OwnFieldMetadata),
-}
-pub(crate) struct OwnFieldMetadata {
-    _sealed: (),
-    pub access_flags: u32,
-    pub same_named_fields: usize,
-}
 /// The input seam for one original declaration in a selected logical program.
 /// Construction is restricted to the owning input validator.
 pub struct MethodInput<'i, 'a> {
@@ -202,85 +192,32 @@ impl<'i, 'a> MethodInput<'i, 'a> {
         &self,
         reference: crate::FieldId,
         budget: &mut MethodBudget<'_, '_>,
-    ) -> Result<Option<OwnFieldMetadata>, crate::RequestError> {
+    ) -> Result<Option<u32>, crate::RequestError> {
         let field = self.index.field_reference(reference, budget)?;
         let owner = crate::substrate::owned::copy_units(self.owner, budget)?;
         if !field.owner.matches_with(&owner, budget)? {
             return Ok(None);
         }
-        let name = crate::substrate::owned::copy_units(field.declaration.name, budget)?;
         let mut flags = None;
-        let mut same_named_fields = 0usize;
         self.index
             .class_with(self.class_id, budget)?
             .visit_members_with(
                 budget,
                 MemberSelection::Fields,
-                |entry, budget| -> Result<(), crate::RequestError> {
+                |entry, _| -> Result<(), crate::RequestError> {
                     let MemberEntry::Field(field) = entry else {
                         return Err(crate::RequestError::InternalInvariant(
                             "field projection acquired another member",
                         ));
                     };
-                    let declaration = field.declaration?;
-                    if declaration.name.matches_with(&name, budget)? {
-                        same_named_fields = same_named_fields
-                            .checked_add(1)
-                            .ok_or(crate::RequestError::PlatformCapacity)?;
-                    }
+                    field.declaration?;
                     if field.field_idx == reference {
                         flags = Some(field.access_flags);
                     }
                     Ok(())
                 },
             )?;
-        Ok(flags.map(|access_flags| OwnFieldMetadata {
-            _sealed: (),
-            access_flags,
-            same_named_fields,
-        }))
-    }
-    pub(crate) fn referenced_field_metadata(
-        &self,
-        reference: crate::FieldId,
-        budget: &mut MethodBudget<'_, '_>,
-    ) -> Result<ReferencedFieldMetadata, crate::RequestError> {
-        let Some(class) = self.index.field_owner_class(reference, budget)? else {
-            return Ok(ReferencedFieldMetadata::External);
-        };
-        let original = self.index.field_reference(reference, budget)?;
-        let name = crate::substrate::owned::copy_units(original.declaration.name, budget)?;
-        let mut flags = None;
-        let mut same_named_fields = 0usize;
-        self.index.class_with(class, budget)?.visit_members_with(
-            budget,
-            MemberSelection::Fields,
-            |entry, budget| -> Result<(), crate::RequestError> {
-                let MemberEntry::Field(field) = entry else {
-                    return Err(crate::RequestError::InternalInvariant(
-                        "field metadata acquired another member",
-                    ));
-                };
-                let declaration = field.declaration?;
-                if declaration.name.matches_with(&name, budget)? {
-                    same_named_fields = same_named_fields
-                        .checked_add(1)
-                        .ok_or(crate::RequestError::PlatformCapacity)?;
-                }
-                if field.field_idx == reference {
-                    flags = Some(field.access_flags);
-                }
-                Ok(())
-            },
-        )?;
-        Ok(match flags {
-            Some(access_flags) => ReferencedFieldMetadata::Declared(OwnFieldMetadata {
-                _sealed: (),
-                access_flags,
-                same_named_fields,
-            }),
-            None => ReferencedFieldMetadata::Absent,
-        })
+        Ok(flags)
     }
     pub(crate) fn type_name(
         &self,

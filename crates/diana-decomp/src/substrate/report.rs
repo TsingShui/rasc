@@ -179,12 +179,9 @@ fn request_code(error: &crate::RequestError) -> crate::DiagnosticCode {
         RequestError::DefinitionAvailabilityUnproved { .. } => Code::DefinitionAvailabilityUnproved,
         RequestError::InvalidWideRead { .. } => Code::InvalidWideRead,
         RequestError::MonitorScopeUnproved { .. } => Code::MonitorScopeUnproved,
-        RequestError::FinalAssignmentUnproved { .. } => Code::FinalAssignmentUnproved,
-        RequestError::JavaTargetLimit { .. } => Code::JavaTargetLimit,
         RequestError::SourceNameUnproved { .. }
         | RequestError::BindingEvidenceMissing { .. }
         | RequestError::FieldBindingEvidenceMissing { .. } => Code::BindingEvidenceMissing,
-        RequestError::JavaConstantFieldRead { .. } => Code::JavaConstantFieldRead,
         RequestError::ArrayFillShape { .. } => Code::ArrayFillShape,
         RequestError::InitializationUnavailable { .. } => Code::InitializationUnavailable,
         RequestError::InternalInvariant(_) => Code::InternalInvariant,
@@ -233,15 +230,6 @@ pub enum MethodOutput {
     },
 }
 impl MethodOutput {
-    /// Native source-check completion is independent of readable availability.
-    pub fn verification(&self) -> Option<crate::JavaVerification> {
-        match self {
-            Self::Java { declaration, .. } => Some(declaration.verification()),
-            Self::JavaInitializer { declaration, .. } => Some(declaration.verification()),
-            _ => None,
-        }
-    }
-
     pub fn key(&self) -> MethodKey {
         match self {
             Self::Generated { facts, .. }
@@ -262,7 +250,7 @@ pub enum ClassOutput {
         key: ClassKey,
         descriptor: Vec<u16>,
         access_flags: u32,
-        declaration: crate::VerifiedJavaUnit,
+        declaration: crate::JavaUnit,
         fields: Vec<crate::FieldOutput>,
         members: Vec<MethodOutput>,
     },

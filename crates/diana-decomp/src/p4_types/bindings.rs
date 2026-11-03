@@ -54,7 +54,6 @@ pub(crate) struct FieldEvidence {
 pub(crate) enum FieldDeclaration {
     Known(source::field_facts::FieldAccess),
     Missing,
-    Constant,
 }
 pub(super) fn collect<'a>(
     _schedule: &crate::engine::SchedulePermit,
@@ -91,7 +90,6 @@ fn collect_impl<'a>(
             let invocation = source::throws::Invocation {
                 reference: call.reference,
                 pc: call.pc,
-                protection: Some(&ssa.protection),
             };
             if call.target == crate::p2_flow::CallTarget::Constructor {
                 let declarations =
@@ -176,7 +174,6 @@ fn collect_impl<'a>(
         let declaration = match result {
             Ok(facts) => FieldDeclaration::Known(facts),
             Err(RequestError::FieldBindingEvidenceMissing { .. }) => FieldDeclaration::Missing,
-            Err(RequestError::JavaConstantFieldRead { .. }) => FieldDeclaration::Constant,
             Err(error) => return Err(error),
         };
         push(
@@ -204,7 +201,7 @@ pub(crate) fn binding_available(
     input: &MethodInput<'_, '_>,
     catalog: &Context,
     contract: &StaticContract,
-    invocation: &source::throws::Invocation<'_>,
+    invocation: &source::throws::Invocation,
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<bool, RequestError> {
     source::contracts::binding_available(input, catalog, contract, invocation, budget)

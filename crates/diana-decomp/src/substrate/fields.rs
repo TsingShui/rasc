@@ -42,7 +42,7 @@ pub enum GeneratedField {
 }
 
 pub enum FieldDeclarationOutput {
-    Java(crate::VerifiedJavaField),
+    Java(crate::JavaField),
     Generated(GeneratedField),
     Unavailable(DiagnosticId),
 }

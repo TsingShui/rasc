@@ -1,13 +1,12 @@
 use crate::RequestError;
 
 /// An owned readable reconstruction produced by P7 from shared analysis facts.
-/// Native source checks are separate from availability; an incomplete check is
-/// retained as uncertainty, not a claim of compilability or semantic equivalence.
+/// Specific unresolved facts are retained as diagnostics; the product carries no
+/// whole-method source-legality status.
 pub struct JavaMethod {
     pub(super) header: String,
     pub(super) syntax: super::initializers::MemberSyntax,
     pub(super) body: MethodBody,
-    pub(super) final_assignments: Option<super::final_assignment::Certificate>,
     pub(super) capture_field: Option<crate::FieldId>,
     pub(super) type_names: super::types::TypeNames,
     pub(super) uncertainties: Vec<crate::OutputReason>,
@@ -16,12 +15,6 @@ pub(crate) enum MethodBody {
     Protected(super::protected::ProtectedBody),
     Structured(super::structured::StructuredBody),
     Dispatcher(super::dispatcher::Dispatcher),
-}
-/// Completion of the native source checks, not a compiler or equivalence certificate.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum JavaVerification {
-    NativeChecksComplete,
-    Incomplete,
 }
 
 pub(super) fn note(
@@ -46,13 +39,6 @@ pub(super) fn note(
 }
 
 impl JavaMethod {
-    pub fn verification(&self) -> JavaVerification {
-        if self.uncertainties.is_empty() {
-            JavaVerification::NativeChecksComplete
-        } else {
-            JavaVerification::Incomplete
-        }
-    }
     pub fn uncertainties(&self) -> &[crate::OutputReason] {
         &self.uncertainties
     }
@@ -78,7 +64,6 @@ impl JavaMethod {
         Self {
             header,
             body: MethodBody::Structured(body),
-            final_assignments: None,
             capture_field: None,
             syntax,
             type_names: super::types::TypeNames::default(),
@@ -172,7 +157,6 @@ impl JavaMethod {
         Self {
             header,
             body: MethodBody::Protected(body),
-            final_assignments: None,
             capture_field: None,
             syntax,
             type_names: super::types::TypeNames::default(),
@@ -187,89 +171,10 @@ impl JavaMethod {
         Self {
             header,
             body: MethodBody::Dispatcher(body),
-            final_assignments: None,
             capture_field: None,
             syntax,
             type_names: super::types::TypeNames::default(),
             uncertainties: Vec::new(),
         }
     }
-}
-
-pub(crate) fn source_group_admitted(
-    index: &crate::input::ProgramIndex<'_>,
-    key: crate::MethodKey,
-    facts: &crate::MethodFacts,
-    emission: Option<&super::member_emission::Plan>,
-    budget: &mut impl crate::pipeline::control::InputControl,
-) -> Result<bool, RequestError> {
-    use crate::input::catalog::{MemberEntry, MemberSelection};
-    let close = facts
-        .prototype
-        .iter()
-        .position(|&unit| unit == u16::from(b')'))
-        .ok_or(RequestError::InternalInvariant(
-            "checked method has no parameter terminator",
-        ))?;
-    let mut admitted = true;
-    let class = index.class_with(key.class.class_def, budget)?;
-    class.visit_members_with(
-        budget,
-        MemberSelection::AllHeaders,
-        |entry, budget| -> Result<(), RequestError> {
-            if let MemberEntry::MethodHeader {
-                method_idx,
-                declaration,
-                ..
-            } = entry
-            {
-                if method_idx == key.method
-                    || match emission {
-                        Some(plan) => plan.permits(method_idx, key.method, budget)?,
-                        None => false,
-                    }
-                {
-                    return Ok(());
-                }
-                let declaration = match declaration {
-                    Ok(declaration) => declaration,
-                    Err(error) => {
-                        if !matches!(
-                            error.kind(),
-                            crate::FailureKind::Malformed | crate::FailureKind::Unsupported
-                        ) {
-                            return Err(error.into());
-                        }
-                        // Prototype damage leaves a collision obligation only
-                        // when the independently checked source name matches.
-                        match index.method_name(method_idx, class.type_idx, budget) {
-                            Ok(name) => {
-                                if name.matches_with(&facts.name, budget)? {
-                                    admitted = false;
-                                }
-                            }
-                            Err(error) if error.kind() == crate::FailureKind::Malformed => {}
-                            Err(error) => return Err(error.into()),
-                        }
-                        return Ok(());
-                    }
-                };
-                if declaration.name.matches_with(&facts.name, budget)? {
-                    let prototype =
-                        crate::substrate::owned::copy_proto(&declaration.prototype, budget)?;
-                    let end = prototype
-                        .iter()
-                        .position(|&unit| unit == u16::from(b')'))
-                        .ok_or(RequestError::InternalInvariant(
-                            "checked sibling has no parameter terminator",
-                        ))?;
-                    if facts.prototype[..=close] == prototype[..=end] {
-                        admitted = false;
-                    }
-                }
-            }
-            Ok(())
-        },
-    )?;
-    Ok(admitted)
 }

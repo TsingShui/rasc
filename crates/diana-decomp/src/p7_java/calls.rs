@@ -206,7 +206,6 @@ pub(super) fn validate_bindings(
         let invocation = crate::p4_types::declarations::throws::Invocation {
             reference: site.reference,
             pc: site.pc,
-            protection: Some(&ssa.ssa.protection),
         };
         let bound = ssa.ssa.call(id)?;
         let uses = ssa
@@ -275,16 +274,6 @@ pub(super) fn validate_bindings(
                 ));
             };
             let contract = declarations.bind(site.reference, site.pc, &owner, use_kind, budget)?;
-            if !throws.covers_at(
-                input,
-                catalog,
-                &contract.declared_throws,
-                &ssa.ssa.protection,
-                site.pc,
-                budget,
-            )? {
-                return Ok(None);
-            }
             if uses.arguments().len() != contract.arity {
                 return Err(RequestError::InternalInvariant("constructor changed arity"));
             }
@@ -357,16 +346,6 @@ pub(super) fn validate_bindings(
                         reference: site.reference,
                         pc: site.pc,
                     })?;
-                if !throws.covers_at(
-                    input,
-                    catalog,
-                    &contract.declared_throws,
-                    &ssa.ssa.protection,
-                    site.pc,
-                    budget,
-                )? {
-                    return Ok(None);
-                }
                 (Some(contract), &bound.inputs[1..])
             }
             None => {
@@ -414,9 +393,6 @@ pub(super) fn validate_bindings(
         constructors,
         throws,
     };
-    if !super::protected_throws::validate(input, catalog, ssa, &result, budget)? {
-        return Ok(None);
-    }
     Ok(Some(result))
 }
 fn plan(
@@ -628,7 +604,7 @@ pub(super) fn operations(
                         "string lost original value",
                     ))?;
             let units = crate::substrate::owned::copy_units(original.value, budget)?;
-            super::declarations::check_constant_utf8(&units, budget)?;
+
             let target = LocalId(
                 op.result
                     .ok_or(RequestError::InternalInvariant("string lost result"))?

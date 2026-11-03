@@ -153,7 +153,7 @@ fn render_class(
             ..
         } => {
             output.push(
-                "Mixed: not a complete Java compilation unit\nOriginal class ",
+                "Mixed: readable members and original facts\nOriginal class ",
                 control,
             )?;
             for scalar in char::decode_utf16(descriptor.iter().copied()) {
@@ -308,7 +308,7 @@ fn render_class(
 
 fn write_java_members(
     members: &[MethodOutput],
-    unit: Option<&crate::VerifiedJavaUnit>,
+    unit: Option<&crate::JavaUnit>,
     output: &mut TextBuffer,
     spans: &mut Vec<OriginSpan>,
     control: &mut RunContext<'_>,
@@ -327,7 +327,7 @@ fn write_java_members(
                 .unwrap_or(declaration.source()),
             _ => {
                 return Err(RequestError::InternalInvariant(
-                    "JavaUnit contains an unverified member",
+                    "JavaUnit contains a member without readable source",
                 ));
             }
         };

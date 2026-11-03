@@ -18,14 +18,14 @@ pub(crate) enum Statement {
         receiver: Receiver,
         name: String,
         reference: FieldId,
-        flags: u32,
+        flags: Option<u32>,
         result: LocalId,
     },
     Store {
         receiver: Receiver,
         name: String,
         reference: FieldId,
-        flags: u32,
+        flags: Option<u32>,
         value: ValueUse,
     },
 }
@@ -104,10 +104,6 @@ fn declaration<'a>(
     match &evidence.declaration {
         FieldDeclaration::Known(declaration) => Ok(declaration),
         FieldDeclaration::Missing => Err(RequestError::FieldBindingEvidenceMissing {
-            reference: evidence.reference,
-            pc: op.pc,
-        }),
-        FieldDeclaration::Constant => Err(RequestError::JavaConstantFieldRead {
             reference: evidence.reference,
             pc: op.pc,
         }),

@@ -5,15 +5,11 @@ use crate::substrate::owned::{copy_units, push};
 use crate::{ClassDefId, RequestError};
 
 pub(crate) struct Interfaces {
-    names: Vec<Vec<u16>>,
     string_specialization: bool,
 }
 impl Interfaces {
     pub(crate) fn string_specialization(&self) -> bool {
         self.string_specialization
-    }
-    pub(crate) fn names(&self) -> &[Vec<u16>] {
-        &self.names
     }
 }
 
@@ -31,7 +27,6 @@ pub(crate) fn collect(
             return Ok(None);
         }
         return Ok(Some(Interfaces {
-            names: Vec::new(),
             string_specialization: false,
         }));
     }
@@ -161,7 +156,6 @@ pub(crate) fn collect(
         }
     }
     Ok(Some(Interfaces {
-        names,
         string_specialization: specialization,
     }))
 }

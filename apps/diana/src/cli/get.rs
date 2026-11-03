@@ -300,10 +300,6 @@ fn json_payload(decompiled: &Decompiled, verbose: bool) -> String {
         let mut record = serde_json::json!({
             "at": at_text,
             "status": status_of(member),
-            "verification": member.verification().map(|verification| match verification {
-                diana_decomp::JavaVerification::NativeChecksComplete => "native_checks_complete",
-                diana_decomp::JavaVerification::Incomplete => "incomplete",
-            }),
             "body": match member {
                 MethodOutput::DeclarationOnly { .. } => serde_json::Value::String("declaration".to_owned()),
                 MethodOutput::Java { .. }

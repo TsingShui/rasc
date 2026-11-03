@@ -57,20 +57,6 @@ impl Plan {
     ) -> Result<(), RequestError> {
         push(&mut self.bridges, bridge, control)
     }
-    pub(crate) fn permits(
-        &self,
-        bridge: MethodId,
-        target: MethodId,
-        control: &mut impl crate::pipeline::control::InputControl,
-    ) -> Result<bool, RequestError> {
-        for entry in &self.bridges {
-            control.charge_work(1)?;
-            if entry.bridge == bridge {
-                return Ok(entry.target == target);
-            }
-        }
-        Ok(false)
-    }
     pub(crate) fn generated(
         &self,
         bridge: MethodId,

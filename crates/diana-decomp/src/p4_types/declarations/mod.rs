@@ -21,9 +21,7 @@ pub(crate) mod throws;
 pub(crate) use receivers::{ReceiverContract, ReceiverDeclaration, ReceiverKind};
 pub(crate) mod field_declarations;
 pub(crate) mod field_facts;
-mod fields;
 mod hierarchy;
 #[allow(dead_code)]
 mod overloads;
 pub(crate) use contracts::StaticContract;
-pub(crate) use contracts::qualifier_available;

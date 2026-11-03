@@ -24,7 +24,7 @@ fn candidate(result: Result<ConstructorContract, RequestError>) -> Result<Candid
 pub(crate) fn collect(
     input: &MethodInput<'_, '_>,
     catalog: &Context,
-    invocation: &super::throws::Invocation<'_>,
+    invocation: &super::throws::Invocation,
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<ConstructorDeclarations, RequestError> {
     let reference = input.method_reference(invocation.reference, budget)?;

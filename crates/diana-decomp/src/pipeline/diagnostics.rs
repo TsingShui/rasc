@@ -29,7 +29,6 @@ pub enum DiagnosticCode {
     MethodNotDefined,
     MetadataUnavailable,
     BindingEvidenceMissing,
-    JavaConstantFieldRead,
     ArrayFillShape,
     InitializationUnavailable,
     BranchJavaUnsupported,
@@ -38,13 +37,11 @@ pub enum DiagnosticCode {
     InvokePolymorphicUnsupported,
     JavaDeclarationUnsupported,
     ClassAssemblyUnavailable,
-    JavaTargetLimit,
     UnknownDex,
     UndefinedRegister,
     DefinitionAvailabilityUnproved,
     InvalidWideRead,
     MonitorScopeUnproved,
-    FinalAssignmentUnproved,
     InternalInvariant,
 }
 

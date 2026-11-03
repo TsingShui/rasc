@@ -3,61 +3,51 @@ use crate::pipeline::control::InputControl;
 use crate::substrate::owned::TextBuffer;
 use crate::{FieldFacts, FieldStorage, RequestError};
 
-/// A source field declaration checked by P8. Unit admission separately requires
-/// initialization and whole-class binding evidence; this is not a JavaUnit.
-pub struct VerifiedJavaField {
+/// An owned readable field declaration and its original static preparation.
+pub struct JavaField {
     source: String,
     pub(crate) default_preparation: bool,
     preparation: Option<String>,
     pub(super) initial_expression: Option<String>,
 }
-impl VerifiedJavaField {
+impl JavaField {
     pub fn source(&self) -> &str {
         &self.source
     }
 
-    /// A checked static preparation block emitted after all field declarations
-    /// and before original initializer bodies. None does not certify preparation;
-    /// whole-unit admission separately rejects unsupported encoded values.
+    /// Original non-default static preparation, emitted before initializer bodies.
+    /// Unavailable preparation remains classified in the field result.
     pub(crate) fn preparation(&self) -> Option<&str> {
         self.preparation.as_deref()
     }
 }
-pub(crate) fn verify(
+pub(crate) fn reconstruct(
     _schedule: &crate::engine::SchedulePermit,
     field: &FieldInput,
     facts: &FieldFacts,
     ty: &crate::p4_types::declarations::field_declarations::FieldType,
     control: &mut impl InputControl,
-) -> Result<Option<VerifiedJavaField>, RequestError> {
-    verify_impl(field, facts, ty, control)
+) -> Result<Option<JavaField>, RequestError> {
+    reconstruct_impl(field, facts, ty, control)
 }
 
-fn verify_impl(
+fn reconstruct_impl(
     field: &FieldInput,
     facts: &FieldFacts,
     ty: &crate::p4_types::declarations::field_declarations::FieldType,
     control: &mut impl InputControl,
-) -> Result<Option<VerifiedJavaField>, RequestError> {
+) -> Result<Option<JavaField>, RequestError> {
     let flags = field.access_flags;
-    if flags & !(1 | 2 | 4 | 8 | 16 | 64 | 128) != 0
-        || (flags & 7).count_ones() > 1
-        || flags & (16 | 64) == 80
-        || (flags & 8 != 0) != matches!(field.storage, FieldStorage::Static(_))
+    if !crate::substrate::flags::field_valid(flags)
+        || (flags & crate::substrate::flags::STATIC != 0)
+            != matches!(field.storage, FieldStorage::Static(_))
     {
         return Ok(None);
-    }
-    if flags & 16 != 0
-        && matches!(field.storage, FieldStorage::Instance)
-        && facts.descriptor != [73]
-    {
-        return Err(RequestError::FinalAssignmentUnproved { field: field.key });
     }
     if !super::declarations::identifier(&facts.name, control)? {
         return Ok(None);
     }
-    super::declarations::check_constant_utf8(&facts.name, control)?;
-    super::declarations::check_constant_utf8(&facts.descriptor, control)?;
+
     let mut source = TextBuffer::new();
     for (bit, spelling) in [
         (1, "public "),
@@ -93,8 +83,7 @@ fn verify_impl(
     } else {
         None
     };
-    let preparation = if flags & 16 == 0
-        && !field.default_preparation
+    let preparation = if !field.default_preparation
         && matches!(field.storage, FieldStorage::Static(_))
         && initial_expression.is_some()
     {
@@ -123,7 +112,7 @@ fn verify_impl(
     } else {
         None
     };
-    Ok(Some(VerifiedJavaField {
+    Ok(Some(JavaField {
         source: source.finish(),
         default_preparation: matches!(field.storage, FieldStorage::Instance)
             || field.default_preparation,

@@ -22,13 +22,10 @@ P2–P5 chain through `engine/method_chain.rs`, then P6 and P7. P8 renders the r
 product. Declaration-only and generated members have their own phase-owned
 checks. A declined method currently goes to the classified raw exit.
 
-The product direction is readable output with explicit uncertainty. P7 retains
-renderable methods when catch/source checks or final-assignment evidence remain
-incomplete. Missing analysis or representation products still decline to debug.
-
-The [stage chapters](README.md) describe each phase. Reconciling older
-verification-only gates with readable output remains in progress; do not infer
-implementation coverage from a phase name.
+P7 produces readable methods and concrete recovery diagnostics. It does not
+certify Java legality. Class assembly preserves original headers, preparation
+and member coverage; missing analysis or representation products still decline
+to debug. The [stage chapters](README.md) describe each phase.
 
 ## 4. Phases, products and actual order
 
@@ -43,7 +40,7 @@ The engine has eight numbered phases. Input context and Engine scheduling are no
 | P4 `p4_types` | `TypedBody`, declaration constraints | primitive/reference/null/raw constant bits, use conversions, Phi join, finite monotonic work queue | does not have to rebuild complete generic source; does not modify CFG topology |
 | P5 `p5_variables` | `StorageBody`, `CopyPlan` | one LocalId per definition, no general coalescing; parallel copies on normal edges, exception shadow slots; DA certificate | does not infer lexical structure, MUST NOT put SSA construction in a Repeat that regenerates identities |
 | P6 `p6_regions` | `RegionPlan`, `ProtectionCertificate` | analyzes normal SCC/SESE, try ranges/handlers and monitors from a read-only StorageBody | does not modify the original CFG, MUST NOT treat catch-all automatically as finally |
-| P7 `p7_java` | readable Java and uncertainty facts | structured/dispatcher lowering, expression legalization, class/constructor/initializer and throws checks | does not guess unparsed bytes, MUST NOT skip a block merely because of a visited set |
+| P7 `p7_java` | readable Java and uncertainty facts | structured/dispatcher lowering, expression legalization, class/constructor/initializer reconstruction and original Throws metadata | does not guess unparsed bytes, MUST NOT skip a block merely because of a visited set |
 | P8 `p8_emit` | `RenderedReport`, final UTF-8 `OriginSpan` | AST printer, original-fact debug renderer, diagnostic renderer | does not do value/type/control-flow recovery |
 
 **Scheduling order**:
@@ -57,9 +54,9 @@ per Explicit method: ValidatedRawMethod(P1)
   → solve_types(P4)     → verify_types
   → allocate_and_copy(P5) → verify_storage
   → identify_regions(P6)
-  → lower_java(P7)      → record applicable checks and uncertainties
+  → lower_java(P7)      → check operation correspondence and retain unresolved facts
 Generated member: original code + template evidence → owner syntax and target admission (no independent fake Java body)
-class assembly(P7)     → verify_unit_or_mark_mixed
+class assembly(P7)     → assemble_original_members_or_mark_mixed
 render(P8)
 any classified failure ──→ original method + available resources (explicit raw quota if any) ──→ debug / unavailable(P8)
 ```

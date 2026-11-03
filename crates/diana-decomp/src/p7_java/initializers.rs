@@ -13,23 +13,17 @@ pub(crate) enum JavaMember {
 }
 
 /// An original class-initialization body rendered as a readable Java static
-/// initializer, not a callable method. Native checks and uncertainty are retained
-/// separately; unit admission still requires preparation and final-field evidence.
+/// initializer, not a callable method. Original preparation and operation order
+/// are preserved without proving Java definite assignment.
 pub struct JavaInitializer {
     method: super::JavaMethod,
 }
 impl JavaInitializer {
-    pub fn verification(&self) -> super::JavaVerification {
-        self.method.verification()
-    }
     pub fn uncertainties(&self) -> &[crate::OutputReason] {
         self.method.uncertainties()
     }
     pub fn calls(&self) -> impl Iterator<Item = super::JavaCallSite<'_>> {
         self.method.calls()
-    }
-    pub(super) fn final_assignments(&self) -> Option<&super::final_assignment::Certificate> {
-        self.method.final_assignments.as_ref()
     }
     pub(crate) fn seal(method: super::JavaMethod) -> JavaMember {
         if matches!(method.syntax, MemberSyntax::Initializer { .. }) {

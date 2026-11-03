@@ -644,7 +644,7 @@ impl<'a> Engine<'a> {
                 control,
             )?
         } else if whole_class && field_issue.is_none() {
-            match crate::p7_java::verify_unit(
+            match crate::p7_java::assemble_unit(
                 &SchedulePermit { _private: () },
                 &image.index,
                 request.class,
@@ -1036,8 +1036,6 @@ fn normal_member(
     )?;
     drop(_p7);
     let _p8 = crate::pipeline::phase_span("p7_java");
-    // Source collision with a sibling overload blocks class-unit assembly, not
-    // this member's readable body; class_unit::verify retains that check.
     let result = crate::p7_java::reconstruct_method(
         &SchedulePermit { _private: () },
         &input,
@@ -1135,7 +1133,7 @@ fn class_fields(
                 match crate::p4_types::declarations::field_declarations::bind(
                     index, key, catalog, facts, control,
                 ) {
-                    Ok(Some(ty)) => crate::p7_java::verify_field(
+                    Ok(Some(ty)) => crate::p7_java::reconstruct_field(
                         &SchedulePermit { _private: () },
                         &field,
                         facts,

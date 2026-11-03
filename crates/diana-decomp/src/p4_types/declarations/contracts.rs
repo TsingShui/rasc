@@ -29,7 +29,6 @@ pub(crate) struct StaticContract {
     pub owner: Vec<u16>,
     pub name: Vec<u16>,
     pub prototype: Vec<u16>,
-    pub declared_throws: Vec<Vec<u16>>,
 }
 pub(super) fn member_directory(
     class: &InputClassDeclaration,
@@ -149,7 +148,6 @@ pub(crate) fn collect_static(
         owner,
         name: copy_units(reference.declaration.name, budget)?,
         prototype: copy_proto(&reference.declaration.prototype, budget)?,
-        declared_throws: Vec::new(),
     }))
 }
 
@@ -157,7 +155,7 @@ pub(crate) fn binding_available(
     input: &MethodInput<'_, '_>,
     catalog: &Context,
     contract: &StaticContract,
-    _invocation: &super::throws::Invocation<'_>,
+    _invocation: &super::throws::Invocation,
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<bool, RequestError> {
     // The original reference fixes the target. Overload-resolution uniqueness

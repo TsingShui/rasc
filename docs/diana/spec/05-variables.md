@@ -27,7 +27,7 @@ selected**. The type comes from P4, and the source is a materialized local or a 
 type. It creates no local or runtime computation. Local sources participate in
 copy dependencies; literal sources do not. A literal destination still waits
 until pending copies have read its old value. The copy verifier replays literal
-and local sources as distinct symbolic values, and Java verification checks
+and local sources as distinct symbolic values, and P7 operation replay checks
 literal provenance against original SSA definitions.
 
 ```text

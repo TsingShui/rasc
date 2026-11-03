@@ -24,7 +24,7 @@ pub(super) fn verify(
     let Some(uses) = bindings.uses() else {
         return Ok(None);
     };
-    if bindings.owner() != key || uses.len() > usize::from(u16::MAX) {
+    if bindings.owner() != key {
         return Ok(None);
     }
     let mut source = TextBuffer::new();
@@ -32,7 +32,7 @@ pub(super) fn verify(
     for annotation in uses {
         for default in annotation.defaults() {
             control.charge_work(1)?;
-            super::declarations::check_constant_utf8(default.name(), control)?;
+
             if !super::declarations::identifier(default.name(), control)?
                 || literal(default.value(), control)?.is_none()
             {
@@ -40,7 +40,7 @@ pub(super) fn verify(
             }
         }
         control.charge_work(1)?;
-        super::declarations::check_constant_utf8(annotation.descriptor(), control)?;
+
         let descriptor = annotation.descriptor();
         let start = descriptor
             .iter()
@@ -48,9 +48,6 @@ pub(super) fn verify(
             .map_or(1, |at| at + 1);
         let name = &descriptor[start..descriptor.len() - 1];
         if !super::declarations::identifier(name, control)? {
-            return Ok(None);
-        }
-        if annotation.elements().len() > usize::from(u16::MAX) {
             return Ok(None);
         }
         source.push("@", control)?;
@@ -65,7 +62,7 @@ pub(super) fn verify(
         let mut methods = Vec::new();
         for (index, element) in annotation.elements().iter().enumerate() {
             control.charge_work(1)?;
-            super::declarations::check_constant_utf8(element.name(), control)?;
+
             if !super::declarations::identifier(element.name(), control)? {
                 return Ok(None);
             }
@@ -129,9 +126,6 @@ fn literal(
             )
         }
         Literal::IntArray(values) => {
-            if values.len() > usize::from(u16::MAX) {
-                return Ok(None);
-            }
             let mut source = TextBuffer::new();
             source.push("{", control)?;
             for (ordinal, value) in values.iter().enumerate() {
@@ -164,19 +158,16 @@ pub(super) fn definition(
     fields: &[crate::FieldOutput],
     members: &[crate::MethodOutput],
     control: &mut RunContext<'_>,
-) -> Result<Option<super::class_unit::VerifiedJavaUnit>, RequestError> {
+) -> Result<Option<super::class_unit::JavaUnit>, RequestError> {
     let Some(definition) = bindings.definition() else {
         return Ok(None);
     };
-    if bindings.owner() != key
-        || !fields.is_empty()
-        || definition.elements().len() != members.len()
-        || members.len() > usize::from(u16::MAX)
+    if bindings.owner() != key || !fields.is_empty() || definition.elements().len() != members.len()
     {
         return Ok(None);
     }
     let descriptor = definition.descriptor();
-    super::declarations::check_constant_utf8(&descriptor[1..descriptor.len() - 1], control)?;
+
     let Some(name) = super::calls::type_name(descriptor, control)? else {
         return Ok(None);
     };
@@ -213,7 +204,7 @@ pub(super) fn definition(
         {
             return Ok(None);
         }
-        super::declarations::check_constant_utf8(element.name(), control)?;
+
         for earlier in &definition.elements()[..position] {
             control.charge_work(1)?;
             if earlier.method() == element.method() || earlier.name() == element.name() {
@@ -225,7 +216,7 @@ pub(super) fn definition(
         };
         crate::substrate::owned::push(&mut elements, (element.method(), source), control)?;
     }
-    Ok(Some(super::class_unit::VerifiedJavaUnit::annotation(
+    Ok(Some(super::class_unit::JavaUnit::annotation(
         header.finish(),
         VerifiedDefinition { elements },
     )))

@@ -446,16 +446,6 @@ impl<'a> ProgramIndex<'a> {
         Ok(MethodDeclaration { name, prototype })
     }
 
-    pub(crate) fn method_name(
-        &self,
-        method_idx: MethodId,
-        owner: TypeId,
-        control: &mut impl InputControl,
-    ) -> Result<DexString<'a>, InputError> {
-        let (name, _) = self.method_header(method_idx, owner, control)?;
-        Ok(name)
-    }
-
     fn method_header(
         &self,
         method_idx: MethodId,
@@ -515,15 +505,6 @@ impl<'a> ProgramIndex<'a> {
         Ok(self.type_descriptor(id, control)?.0)
     }
 
-    pub(crate) fn field_owner_class(
-        &self,
-        id: FieldId,
-        control: &mut impl InputControl,
-    ) -> Result<Option<ClassDefId>, InputError> {
-        let mut field = self.table(TableKey::Field(id), control)?;
-        let owner = TypeId(u32::from(field.read_u16_with(control)?));
-        self.class_location(owner, control)
-    }
     pub(crate) fn local_field_flags(
         &self,
         field_id: FieldId,

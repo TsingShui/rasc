@@ -229,17 +229,7 @@ impl TypeNames {
             budget.charge_work(1)?;
             dimensions += 1;
         }
-        // The JVM array-type format admits at most 255 dimensions.
-        if dimensions > 255 {
-            return Ok(false);
-        }
         let base = &descriptor[dimensions..];
-        let constant_name = if dimensions == 0 && descriptor.first() == Some(&76) {
-            &descriptor[1..descriptor.len() - 1]
-        } else {
-            &descriptor
-        };
-        super::declarations::check_constant_utf8(constant_name, budget)?;
         let primitive = match base {
             [90] => Some("boolean"),
             [66] => Some("byte"),

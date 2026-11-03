@@ -9,6 +9,9 @@ package-local `AGENTS.md` before working in either package.
 - Default retrieval MUST expose available readable code, preserve original member
   identities and DEX facts, and mark material uncertainty. A local failure MUST
   NOT suppress other members; text and JSON present the same result.
+- Java legality or compilability is not a decompilation goal or output gate.
+  Keep concrete recovery diagnostics, not whole-result verification badges;
+  retain input safety, analysis invariants and semantics-preserving transform checks.
 - Treat APK/DEX bytes as untrusted: check sizes, ranges and arithmetic before
   slicing or allocating. Do not panic, hang or allocate without bounds.
 - The analysed input is the single source of decompilation facts. Do not require

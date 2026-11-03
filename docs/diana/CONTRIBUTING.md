@@ -40,9 +40,10 @@ readability, original facts and uncertainty, not a verified-Java status.
 
 Prioritize core APK/DEX analysis, decompilation and required safety. Keep non-core
 tooling, registry/trace infrastructure and their documentation minimal; do not
-expand them into frameworks or lengthy designs. The shared analysis chain MAY retain a clearly marked unverified readable result
-when verification is incomplete; otherwise fallback is a classified raw-output
-path, not a separate recovery subsystem or retry pipeline.
+expand them into frameworks or lengthy designs. The shared analysis chain MUST retain available readable output with concrete
+recovery diagnostics. Contributors MUST NOT build a whole-result Java-legality
+qualification path. Fallback retains original facts when reconstruction is unavailable,
+not a separate recovery subsystem or retry pipeline.
 
 Every authored Diana document, including this file and the package README/AGENTS
 files, MUST follow `docs/diana/WRITING.md`. Read it before editing documentation.
@@ -94,7 +95,7 @@ bypass.
   phases.
 - Contributors MUST NOT organize `engine.rs` as successive whole-method
   builders/verifiers that emit on the first match. Ordinary methods MUST use one
-  analysis chain. P7 MAY retain a marked unverified reconstruction from available
+  analysis chain. P7 MUST retain available readable reconstruction from
   shared products; the classified read-only raw exit MUST NOT retry analysis or
   reconstruct values.
 - Contributors MUST keep P4 constraints/binding obligations distinct from P4

@@ -1,9 +1,10 @@
 # Diana
 
 Native Rust APK/DEX decompiler, designed to replace rasc.
-The native engine and CLI are implemented. The current engine often returns raw
-DEX information for real applications; the revised readable-output contract is
-not yet implemented.
+The native engine and CLI are implemented. Source-legality qualification is not
+an output goal; readable reconstruction retains concrete unresolved facts.
+Missing analysis or lowering products still return original DEX information.
+Real-application coverage is not established by the current Rust tests.
 
 ## Active project
 
@@ -59,8 +60,8 @@ dependencies. See [sources and download policy](docs/diana/SOURCE_MAP.md).
 
 The decompiler contract exposes recovered code by default. A failed method is
 shown as original DEX debug information or an explicit unavailable result alongside other recovered
-methods; Mixed is not a gate that suppresses the whole class. Complete Java-unit
-qualification and hard failures remain separate from readable output.
+methods; Mixed is not a gate that suppresses the whole class. Class assembly records presentation coverage, not compilability. Hard failures
+remain separate from readable availability.
 
 - [Documentation entry](docs/diana/README.md)
 - [Specification chapters](docs/diana/spec/00-overview.md)

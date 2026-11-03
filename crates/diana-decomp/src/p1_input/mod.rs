@@ -29,7 +29,6 @@ pub(crate) mod annotation_facts;
 pub(crate) mod field_declarations;
 mod field_evidence;
 pub(crate) use field_evidence::InputFieldEvidence;
-pub use field_evidence::JavaConstantKind;
 pub(crate) mod operands;
 pub(crate) mod ownership;
 pub(crate) mod signature;
@@ -47,7 +46,6 @@ pub use cursor::{Cursor, checked_range};
 pub use error::{InputError, InputProblem, UnsupportedInput};
 use error::{count_usize, file_length, file_offset, malformed};
 pub use header::{DexHeader, TableSection, read_header};
-pub(crate) use method::ReferencedFieldMetadata;
 pub use method::{
     CheckedAnnotations, MethodInput, RawPrintable, ValidatedRawDeclaration, ValidatedRawMethod,
 };

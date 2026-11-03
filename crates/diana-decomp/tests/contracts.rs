@@ -19,8 +19,6 @@ mod invoke;
 mod layout;
 #[path = "input/operands.rs"]
 mod operands;
-#[path = "pipeline/readable.rs"]
-mod readable;
 #[path = "input/reader.rs"]
 mod reader;
 #[path = "input/structure.rs"]

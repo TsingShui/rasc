@@ -3,10 +3,9 @@ use crate::input::catalog::{MemberEntry, MemberSelection};
 use crate::substrate::owned::TextBuffer;
 use crate::{ClassKey, MethodOutput, RequestError, RunContext};
 
-/// An owned Java 8 class declaration whose original member set and source
-/// bindings passed native P8 verification. Rendering uses the report's verified
-/// members; it does not reopen the input or invoke a compiler.
-pub struct VerifiedJavaUnit {
+/// An owned readable class assembly with original member coverage.
+/// This is a presentation product, not a source-legality certificate.
+pub struct JavaUnit {
     header: String,
     preparation: String,
     _binding: Binding,
@@ -23,7 +22,7 @@ enum Binding {
         _binding: super::enums::Binding,
     },
 }
-impl VerifiedJavaUnit {
+impl JavaUnit {
     pub(super) fn annotation(
         header: String,
         binding: super::annotations::VerifiedDefinition,
@@ -61,17 +60,17 @@ pub(crate) struct Members<'a> {
     pub(crate) annotations: Option<&'a crate::p4_types::declarations::annotations::Bindings>,
 }
 
-pub(crate) fn verify(
+pub(crate) fn assemble(
     _schedule: &crate::engine::SchedulePermit,
     index: &ProgramIndex<'_>,
     key: ClassKey,
     catalog: &crate::context::Context,
     members: Members<'_>,
     control: &mut RunContext<'_>,
-) -> Result<Option<VerifiedJavaUnit>, RequestError> {
-    verify_impl(index, key, catalog, members, None, control)
+) -> Result<Option<JavaUnit>, RequestError> {
+    assemble_impl(index, key, catalog, members, None, control)
 }
-pub(super) fn verify_static_nested(
+pub(super) fn assemble_static_nested(
     index: &ProgramIndex<'_>,
     key: ClassKey,
     catalog: &crate::context::Context,
@@ -79,8 +78,8 @@ pub(super) fn verify_static_nested(
     members: &[MethodOutput],
     scope: &crate::p4_types::declarations::nested_scope::Scope,
     control: &mut RunContext<'_>,
-) -> Result<Option<VerifiedJavaUnit>, RequestError> {
-    verify_impl(
+) -> Result<Option<JavaUnit>, RequestError> {
+    assemble_impl(
         index,
         key,
         catalog,
@@ -93,14 +92,14 @@ pub(super) fn verify_static_nested(
         control,
     )
 }
-fn verify_impl(
+fn assemble_impl(
     index: &ProgramIndex<'_>,
     key: ClassKey,
     catalog: &crate::context::Context,
     members: Members<'_>,
     nested_name: Option<&[u16]>,
     control: &mut RunContext<'_>,
-) -> Result<Option<VerifiedJavaUnit>, RequestError> {
+) -> Result<Option<JavaUnit>, RequestError> {
     if let Some(bindings) = members.annotations
         && bindings.definition().is_some()
     {
@@ -125,54 +124,10 @@ fn verify_impl(
     };
     let fields = members.fields;
     let members = members.methods;
-    for member in members {
-        control.charge_work(1)?;
-        if member.verification() == Some(crate::JavaVerification::Incomplete) {
-            return Ok(None);
-        }
-    }
-    let mut emission = super::member_emission::Plan::default();
-    for member in members {
-        control.charge_work(1)?;
-        if let MethodOutput::Generated {
-            declaration: crate::GeneratedMember::Bridge(declaration),
-            ..
-        } = member
-        {
-            emission.add(declaration.clone(), control)?;
-        }
-    }
     let class = index.class_with(key.class_def, control)?;
     let interface = class.access_flags & crate::substrate::flags::INTERFACE != 0;
-    if interface {
-        if class.access_flags
-            & !(crate::substrate::flags::PUBLIC
-                | crate::substrate::flags::INTERFACE
-                | crate::substrate::flags::ABSTRACT)
-            != 0
-            || class.access_flags & crate::substrate::flags::ABSTRACT == 0
-            || !fields.is_empty()
-        {
-            return Ok(None);
-        }
-    } else if class.access_flags
-        & !(1 | crate::substrate::flags::FINAL | crate::substrate::flags::ABSTRACT)
-        != 0
-        || class.access_flags & (crate::substrate::flags::FINAL | crate::substrate::flags::ABSTRACT)
-            == 0x410
-    {
-        return Ok(None);
-    }
-    if interface {
-        for member in members {
-            control.charge_work(1)?;
-            if !matches!(member, MethodOutput::DeclarationOnly { .. }) {
-                return Ok(None);
-            }
-        }
-    }
     let context = index.class_context(key.class_def, control)?;
-    let interfaces = context.interfaces?;
+    context.interfaces?;
     if context.annotations_offset.0 != 0
         && index
             .annotation_directory(context.annotations_offset, control)?
@@ -194,12 +149,11 @@ fn verify_impl(
         }
         owns_nested |= entry.enclosing() == key.class_def;
     }
-    if interface && !interfaces.is_empty()
-        || annotations.is_none()
-            && !((owns_nested || nested_name.is_some())
-                && index.only_ownership_annotations(context.annotations_offset, control)?)
-            && !index.no_class_annotations(context.annotations_offset, control)?
-            && crate::input::signature::class(index, key.class_def, control)?.is_none()
+    if annotations.is_none()
+        && !((owns_nested || nested_name.is_some())
+            && index.only_ownership_annotations(context.annotations_offset, control)?)
+        && !index.no_class_annotations(context.annotations_offset, control)?
+        && crate::input::signature::class(index, key.class_def, control)?.is_none()
     {
         return Ok(None);
     }
@@ -240,56 +194,10 @@ fn verify_impl(
             {
                 fields_admitted = false;
             }
-            if field.access_flags & (8 | crate::substrate::flags::FINAL) == (8 | crate::substrate::flags::FINAL) {
-                let mut assigned = false;
-                for member in members {
-                    control.charge_work(1)?;
-                    if let MethodOutput::JavaInitializer { declaration, .. } = member
-                        && let Some(proof) = declaration.final_assignments()
-                        && proof.covers(field.field_idx, control)? {
-                        assigned = true;
-                    }
-                }
-                let crate::FieldDeclarationOutput::Java(declaration) = &actual.declaration else { fields_admitted = false; return Ok(()) };
-                if assigned {
-                    if !declaration.default_preparation { fields_admitted = false; }
-                } else if let Some(expression) = &declaration.initial_expression {
-                    preparation.push("static { ", control)?;
-                    for scalar in char::decode_utf16(facts.name.iter().copied()) {
-                        control.charge_work(1)?;
-                        preparation.character(scalar.map_err(|_| RequestError::InternalInvariant("verified final name lost scalar"))?, control)?;
-                    }
-                    preparation.push(" = ", control)?;
-                    preparation.push(expression, control)?;
-                    preparation.push("; }\n", control)?;
-                } else { fields_admitted = false; }
-            } else if field.access_flags & crate::substrate::flags::FINAL != 0 {
-                let mut constructors = 0usize;
-                for member in members {
-                    control.charge_work(1)?;
-                    let MethodOutput::Java { facts, .. } = member else { continue };
-                    if facts.name == const { crate::substrate::owned::ascii_units(*b"<init>") } {
-                        constructors = constructors.checked_add(1).ok_or(RequestError::PlatformCapacity)?;
-                        if !super::final_delegation::assigned(members, facts.key.method, field.field_idx, control)? {
-                            fields_admitted = false;
-                        }
-                    }
-                }
-                if constructors == 0 { fields_admitted = false; }
-            }
-            if field.access_flags & crate::substrate::flags::FINAL == 0
-                && let crate::FieldDeclarationOutput::Java(declaration) = &actual.declaration
+            if let crate::FieldDeclarationOutput::Java(declaration) = &actual.declaration
                 && let Some(block) = declaration.preparation() {
                 preparation.push(block, control)?;
                 preparation.push("\n", control)?;
-            }
-            for other in &fields[..field_position - 1] {
-                control.checkpoint()?;
-                if let Some(other) = &other.facts
-                    && crate::context::same_units(&facts.name, &other.name, control)?
-                {
-                    fields_admitted = false;
-                }
             }
             Ok(())
         },
@@ -299,7 +207,6 @@ fn verify_impl(
     }
     let mut admitted = true;
     let mut position = 0usize;
-    let mut constructor = false;
     class.visit_members_with(
         control,
         MemberSelection::AllHeaders,
@@ -324,13 +231,12 @@ fn verify_impl(
                     position = position
                         .checked_add(1)
                         .ok_or(RequestError::PlatformCapacity)?;
-                    let generated = matches!(member, MethodOutput::Generated { .. });
                     if let MethodOutput::Generated { facts, declaration, .. } = member {
                         let crate::GeneratedMember::Bridge(declaration) = declaration else { admitted = false; return Ok(()); };
                         let mut owner_present = false;
                         for other in members {
                             control.charge_work(1)?;
-                            owner_present |= matches!(other, MethodOutput::Java { facts, declaration: owner, .. } if facts.key.method == declaration.target());
+                            owner_present |= matches!(other, MethodOutput::Java { facts, .. } if facts.key.method == declaration.target());
                         }
                         if declaration.bridge() != facts.key.method || !owner_present { admitted = false; }
                     }
@@ -351,26 +257,20 @@ fn verify_impl(
                         || !declaration
                             .prototype
                             .matches_with(&facts.prototype, control)?
-                        || !generated && !super::method::source_group_admitted(index, facts.key, facts, Some(&emission), control)?
                     {
                         admitted = false;
                     }
-                    constructor |= facts.name == const { crate::substrate::owned::ascii_units(*b"<init>") };
                 }
                 MemberEntry::Method(_) => {
                     return Err(RequestError::InternalInvariant(
-                        "class verification decoded a method body",
+                        "class assembly decoded a method body",
                     ));
                 }
             }
             Ok(())
         },
     )?;
-    if !admitted
-        || position != members.len()
-        || (!interface && !constructor)
-        || (interface && constructor)
-    {
+    if !admitted || position != members.len() {
         return Ok(None);
     }
     let Some(binding) = crate::p4_types::declarations::class_scope::collect(
@@ -382,16 +282,6 @@ fn verify_impl(
     else {
         return Ok(None);
     };
-    if interface
-        && !crate::context::same_units(
-            &binding.parent,
-            crate::p4_types::BuiltinReference::Object.descriptor(),
-            control,
-        )?
-    {
-        return Ok(None);
-    }
-    super::declarations::check_constant_utf8(&binding.owner[1..binding.owner.len() - 1], control)?;
     let Some(name) = super::calls::type_name(&binding.owner, control)? else {
         return Ok(None);
     };
@@ -434,24 +324,29 @@ fn verify_impl(
     }
     header.push(if interface { "interface " } else { "class " }, control)?;
     header.push(simple, control)?;
-    if !crate::context::same_units(
-        &binding.parent,
-        crate::p4_types::BuiltinReference::Object.descriptor(),
-        control,
-    )? {
-        let Some(parent) = super::calls::type_name(&binding.parent, control)? else {
+    if let Some(parent) = &binding.parent
+        && !crate::context::same_units(
+            parent,
+            crate::p4_types::BuiltinReference::Object.descriptor(),
+            control,
+        )?
+    {
+        let Some(parent) = super::calls::type_name(parent, control)? else {
             return Ok(None);
         };
-        super::declarations::check_constant_utf8(
-            &binding.parent[1..binding.parent.len() - 1],
-            control,
-        )?;
         header.push(" extends ", control)?;
         header.push(&parent, control)?;
     }
-    if !binding.interfaces.names().is_empty() {
-        header.push(" implements ", control)?;
-        for (position, descriptor) in binding.interfaces.names().iter().enumerate() {
+    if !binding.interfaces.is_empty() {
+        header.push(
+            if interface {
+                " extends "
+            } else {
+                " implements "
+            },
+            control,
+        )?;
+        for (position, descriptor) in binding.interfaces.iter().enumerate() {
             control.charge_work(1)?;
             if position != 0 {
                 header.push(", ", control)?;
@@ -460,14 +355,14 @@ fn verify_impl(
                 return Ok(None);
             };
             header.push(&name, control)?;
-            if binding.interfaces.string_specialization() {
+            if binding.string_specialization {
                 header.push("<java.lang.String>", control)?;
             }
         }
     }
     header.push(" {\n", control)?;
     control.checkpoint()?;
-    Ok(Some(VerifiedJavaUnit {
+    Ok(Some(JavaUnit {
         header: header.finish(),
         preparation: preparation.finish(),
         _binding: Binding::Class {

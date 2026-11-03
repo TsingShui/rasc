@@ -2,7 +2,6 @@
 
 mod context;
 mod engine;
-pub use input::JavaConstantKind;
 #[path = "p1_input/mod.rs"]
 pub mod input;
 mod p2_flow;
@@ -29,11 +28,11 @@ pub use p7_java::enums::{EnumFieldRole, EnumMemberRole, GeneratedEnumField, Gene
 pub use p7_java::member_emission::GeneratedMember;
 pub use p7_java::nested_plan::GeneratedCaptureField;
 pub use p7_java::{
-    GeneratedBridge, JavaCallSite, JavaInitializer, JavaInvokeKind, JavaMethod, JavaMethodDecl,
-    JavaVerification, VerifiedJavaField, VerifiedJavaUnit,
+    GeneratedBridge, JavaCallSite, JavaField, JavaInitializer, JavaInvokeKind, JavaMethod,
+    JavaMethodDecl, JavaUnit,
 };
 pub use p8_emit::render;
-pub use pipeline::request::{JavaTargetItem, RequestError};
+pub use pipeline::request::RequestError;
 pub use substrate::fields::{
     FieldDeclarationOutput, FieldFacts, FieldInitialValue, FieldKey, FieldOutput, FieldStorage,
     GeneratedField, StaticFieldOrdinal,

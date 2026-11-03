@@ -9,7 +9,6 @@ pub(crate) struct ConstructorContract {
     pub owner: Vec<u16>,
     pub prototype: Vec<u16>,
     pub arity: usize,
-    pub declared_throws: Vec<Vec<u16>>,
 }
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub(crate) enum ConstructorUse {
@@ -20,7 +19,7 @@ pub(crate) enum ConstructorUse {
 pub(crate) fn resolve(
     input: &MethodInput<'_, '_>,
     _catalog: &Context,
-    invocation: &super::throws::Invocation<'_>,
+    invocation: &super::throws::Invocation,
     expected_owner: &[u16],
     _use_kind: ConstructorUse,
     budget: &mut MethodBudget<'_, '_>,
@@ -38,7 +37,6 @@ impl ConstructorContract {
             owner: super::receivers::retain(&self.owner, budget)?,
             prototype: super::receivers::retain(&self.prototype, budget)?,
             arity: self.arity,
-            declared_throws: super::throws::retain(Some(&self.declared_throws), budget)?,
         })
     }
 }
@@ -48,7 +46,7 @@ impl ConstructorContract {
 /// access, hierarchy or throws fact is asserted.
 fn reference_only(
     input: &MethodInput<'_, '_>,
-    invocation: &super::throws::Invocation<'_>,
+    invocation: &super::throws::Invocation,
     expected_owner: &[u16],
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<ConstructorContract, RequestError> {
@@ -75,7 +73,6 @@ fn reference_only(
         owner: copy_units(method.owner, budget)?,
         prototype: copy_proto(&method.declaration.prototype, budget)?,
         arity: formals.len(),
-        declared_throws: Vec::new(),
     })
 }
 
