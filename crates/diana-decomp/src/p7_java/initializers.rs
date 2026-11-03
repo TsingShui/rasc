@@ -19,9 +19,6 @@ pub struct VerifiedJavaInitializer {
     method: super::VerifiedJavaMethod,
 }
 impl VerifiedJavaInitializer {
-    pub fn compilation_contract(&self) -> super::CompilationContract {
-        self.method.compilation_contract()
-    }
     pub fn calls(&self) -> impl Iterator<Item = super::JavaCallSite<'_>> {
         self.method.calls()
     }

@@ -167,7 +167,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let reason = reason.map(|index| base + index);
             let span = rendered.spans.iter().find(|span| span.method == key);
             let source = span.and_then(|span| rendered.source.get(span.start.0..span.end.0));
-            json!({"class_def_idx":key.class.class_def.0,"owner_units":owner,"method_id_idx":key.method.0,"member_kind":if matches!(member,MethodOutput::JavaInitializer { .. }) {"initializer"} else {"method"},"status":status,"name_units":facts.map(|v| &v.name),"proto_units":facts.map(|v| &v.prototype),"access_flags":facts.map(|v| v.access_flags),"evidence":match member { MethodOutput::Java { declaration, .. } => Some(java_evidence(declaration.compilation_contract(), declaration.calls())), MethodOutput::JavaInitializer { declaration, .. } => Some(java_evidence(declaration.compilation_contract(), declaration.calls())), _ => None },"reason":reason,"source":source,"language":span.map(|span|language(span.language))})
+            json!({"class_def_idx":key.class.class_def.0,"owner_units":owner,"method_id_idx":key.method.0,"member_kind":if matches!(member,MethodOutput::JavaInitializer { .. }) {"initializer"} else {"method"},"status":status,"name_units":facts.map(|v| &v.name),"proto_units":facts.map(|v| &v.prototype),"access_flags":facts.map(|v| v.access_flags),"evidence":match member { MethodOutput::Java { declaration, .. } => Some(java_evidence(declaration.calls())), MethodOutput::JavaInitializer { declaration, .. } => Some(java_evidence(declaration.calls())), _ => None },"reason":reason,"source":source,"language":span.map(|span|language(span.language))})
         }).collect();
     let spans: Vec<Value> = rendered
         .spans
@@ -256,11 +256,8 @@ fn annotation_facts(annotations: &diana_decomp::ClassAnnotations, base: usize) -
     json!({"status":status,"reason":reason,"dex_id":original.owner().dex.0,"class_def_idx":original.owner().class_def.0,"directory_offset":original.directory().0,"records":records,"unavailable_prefix":original.unavailable_prefix().map(|prefix|json!({"file_byte_start":prefix.range().start.0,"file_byte_end":prefix.range().end.0,"bytes":prefix.bytes()}))})
 }
 
-fn java_evidence<'a>(
-    contract: diana_decomp::CompilationContract,
-    calls: impl Iterator<Item = diana_decomp::JavaCallSite<'a>>,
-) -> Value {
-    json!({"compilation_contract":format!("{contract:?}"),"calls":calls.map(|call|json!({"reference_method_id_idx":call.reference.0,"receiver_register":call.receiver.map(|register|register.0),"allocation_pc":call.allocation.map(|pc|pc.0),"owner_units":call.owner,"name_units":call.name,"proto_units":call.prototype,"invoke_pc":call.invoke.0,"result_pc":call.result.map(|pc|pc.0),"kind":format!("{:?}",call.kind)})).collect::<Vec<_>>()})
+fn java_evidence<'a>(calls: impl Iterator<Item = diana_decomp::JavaCallSite<'a>>) -> Value {
+    json!({"calls":calls.map(|call|json!({"reference_method_id_idx":call.reference.0,"receiver_register":call.receiver.map(|register|register.0),"allocation_pc":call.allocation.map(|pc|pc.0),"owner_units":call.owner,"name_units":call.name,"proto_units":call.prototype,"invoke_pc":call.invoke.0,"result_pc":call.result.map(|pc|pc.0),"kind":format!("{:?}",call.kind)})).collect::<Vec<_>>()})
 }
 
 fn failure(cause: DiagnosticCause, report: Option<&diana_decomp::Report>) -> Value {

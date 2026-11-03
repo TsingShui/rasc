@@ -144,6 +144,17 @@ validated against DEX declaration syntax, and the implementation MUST NOT look t
 members after a lossy conversion. Display, Java literals and original identity are three
 different purposes.
 
+## Output admission
+
+Admission decides whether an analysed member body is displayed, never whether its
+analysis runs. A member body MUST NOT be withheld because the printed source is
+not compilable: identifier validity, access legality, checked-exception
+declaration, constant-inlining behaviour and overload-resolution uniqueness are
+source-presentation facts. They MAY be reported as uncertainty; they MUST NOT
+delete an analysed body or another member. Semantic obligations - original
+effect/exception/lock/initialization order, array literal contents and checked
+instruction structure - remain hard failures.
+
 ## Access flags
 
 Original `access_flags` bits retain their AOSP `dex-format` meaning per kind

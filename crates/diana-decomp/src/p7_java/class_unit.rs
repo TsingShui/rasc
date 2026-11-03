@@ -54,10 +54,6 @@ impl VerifiedJavaUnit {
     pub(crate) fn preparation(&self) -> &str {
         &self.preparation
     }
-
-    pub fn compilation_contract(&self) -> super::CompilationContract {
-        super::CompilationContract::Java8
-    }
 }
 pub(crate) struct Members<'a> {
     pub(crate) fields: &'a [crate::FieldOutput],

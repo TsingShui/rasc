@@ -163,20 +163,22 @@ pub(super) fn verify(
     if (!constructor
         && (flags & 8 != 0) != matches!(ssa.ssa.frame, crate::p2_flow::MethodFrame::Static))
         || if constructor {
-            flags & !0x10007 != 0
-                || flags & 0x10000 == 0
-                || input.owner_access_flags()
-                    & (crate::substrate::flags::ENUM
-                        | crate::substrate::flags::ANNOTATION
-                        | crate::substrate::flags::INTERFACE)
-                    != 0
+            flags
+                & !(crate::substrate::flags::PUBLIC
+                    | crate::substrate::flags::PRIVATE
+                    | crate::substrate::flags::PROTECTED
+                    | crate::substrate::flags::STATIC
+                    | crate::substrate::flags::FINAL
+                    | crate::substrate::flags::SYNTHETIC
+                    | crate::substrate::flags::CONSTRUCTOR)
+                != 0
+                || flags & crate::substrate::flags::CONSTRUCTOR == 0
         } else if initializer {
             false
         } else {
             !crate::substrate::flags::method_valid(flags) || flags & 0x1000 != 0 && flags & 8 == 0
         }
         || !crate::substrate::flags::visibility_valid(flags)
-        || input.owner_access_flags() & crate::substrate::flags::INTERFACE != 0
     {
         *refused = Some("method_flags");
         return Ok(None);

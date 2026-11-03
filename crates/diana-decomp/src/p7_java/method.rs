@@ -1,11 +1,5 @@
 use crate::RequestError;
 
-/// Fixed source target used by native method verification and external V4 checks.
-#[derive(Clone, Copy, Debug)]
-pub enum CompilationContract {
-    Java8,
-}
-
 /// An owned method AST admitted by the P8 verifier, including validated source
 /// type names. It contains no input or analysis-arena borrows. Verification does
 /// not invoke a Java compiler.
@@ -156,9 +150,6 @@ impl VerifiedJavaMethod {
             syntax,
             type_names: super::types::TypeNames::default(),
         }
-    }
-    pub fn compilation_contract(&self) -> CompilationContract {
-        CompilationContract::Java8
     }
 }
 
