@@ -42,3 +42,33 @@ gates, branch coverage and initialization. Those belong to the provisional
 emission batch, not to this one.
 
 Workspace gates at this point: 235 tests pass, strict Clippy and formatting pass.
+
+## Coverage baseline
+
+`apps/diana/examples/app_coverage.rs` samples classes from one input, runs the
+ordinary request chain once per class and aggregates member outcomes with the
+diagnostic codes. It is a development measurement caller, not part of the gates.
+
+First recorded run on a 22 MB application, 120 sampled classes of 15,753:
+
+| Member outcome | Count |
+|---|---|
+| debug (declined member) | 681 |
+| declaration only | 96 |
+| java | 2 |
+| unavailable | 5 |
+
+| Diagnostic code | Count |
+|---|---|
+| BindingEvidenceMissing | 420 |
+| JavaDeclarationUnsupported | 267 |
+| ClassAssemblyUnavailable | 159 |
+| BranchJavaUnsupported | 141 |
+| InitializationUnavailable | 61 |
+| JavaAnalysisUnavailable | 40 |
+| FinalAssignmentUnproved | 8 |
+| InputMalformed(InvalidEncodedValue) | 7 |
+
+No class reached `JavaUnit`. Median class time was 238 ms, maximum 5.0 s.
+The next slice addresses the two largest codes, both evidence-driven: reference
+call binding and declaration rendering without verified catalog signatures.
