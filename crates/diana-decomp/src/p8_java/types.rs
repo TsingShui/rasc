@@ -175,7 +175,7 @@ impl TypeNames {
     fn include(
         &mut self,
         input: &MethodInput<'_, '_>,
-        catalog: &DeclarationCatalog,
+        _catalog: &DeclarationCatalog,
         kind: Kind,
         cache: &OnceCell<Option<NestedIndex>>,
         budget: &mut MethodBudget<'_, '_>,
