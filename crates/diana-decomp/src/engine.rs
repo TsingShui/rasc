@@ -155,16 +155,11 @@ impl<'a> Engine<'a> {
         }
         // Declaration facts come only from the analysed input. Caller-supplied
         // external declarations are not consulted.
-        let environment = crate::EnvironmentId(0);
-        let mut facts = DeclarationCatalog::empty(environment);
+        let mut facts = DeclarationCatalog::empty();
         {
             for image in &indexed {
-                let derived = crate::p0_knowledge::input_facts::from_input(
-                    &image.index,
-                    environment,
-                    control,
-                )
-                .map_err(|error| match error {
+                let derived = crate::p0_knowledge::input_facts::from_input(&image.index, control)
+                    .map_err(|error| match error {
                     crate::RequestError::Input(error) => error,
                     crate::RequestError::Control(error) => InputError::Control(error),
                     crate::RequestError::Allocation(_) => InputError::Allocation {
@@ -642,7 +637,6 @@ impl<'a> Engine<'a> {
                 proof,
                 &fields,
                 &members,
-                self.catalog.environment,
                 control,
             )?
         } else if whole_class && field_issue.is_none() {
@@ -715,7 +709,6 @@ impl<'a> Engine<'a> {
                 origin: image.image.origin,
                 header_offset: image.image.header_offset,
             },
-            environment: self.catalog.environment,
         })
     }
 

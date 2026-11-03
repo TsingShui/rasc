@@ -1,4 +1,3 @@
-use crate::EnvironmentId;
 use crate::input::{DexString, InputError};
 use crate::pipeline::control::InputControl;
 
@@ -24,15 +23,13 @@ pub(crate) fn same_units(
 /// remain partial; class directories carry explicit coverage. An absent entry
 /// means evidence is missing, never that a method cannot exist.
 pub struct DeclarationCatalog {
-    pub(crate) environment: EnvironmentId,
     classes: Vec<super::ExternalClassDeclaration>,
     fields: Vec<super::ExternalFieldEvidence>,
 }
 
 impl DeclarationCatalog {
-    pub fn empty(environment: EnvironmentId) -> Self {
+    pub(crate) fn empty() -> Self {
         Self {
-            environment,
             classes: Vec::new(),
             fields: Vec::new(),
         }
@@ -41,12 +38,8 @@ impl DeclarationCatalog {
     /// Takes caller-owned directories with explicit per-class coverage. Native
     /// consumers charge candidate scans and reject unknown/inconsistent facts;
     /// construction does not certify source binding or catalog completeness.
-    pub(crate) fn with_declarations(
-        environment: EnvironmentId,
-        classes: Vec<super::ExternalClassDeclaration>,
-    ) -> Self {
+    pub(crate) fn with_declarations(classes: Vec<super::ExternalClassDeclaration>) -> Self {
         Self {
-            environment,
             classes,
             fields: Vec::new(),
         }

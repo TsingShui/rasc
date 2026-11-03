@@ -1,6 +1,6 @@
 use crate::p4_calls::annotations::{Bindings, Literal};
 use crate::substrate::owned::TextBuffer;
-use crate::{ClassKey, EnvironmentId, RequestError, RunContext};
+use crate::{ClassKey, RequestError, RunContext};
 
 pub(super) struct VerifiedUses {
     source: String,
@@ -19,16 +19,12 @@ impl VerifiedUses {
 pub(super) fn verify(
     bindings: &Bindings,
     key: ClassKey,
-    environment: EnvironmentId,
     control: &mut RunContext<'_>,
 ) -> Result<Option<VerifiedUses>, RequestError> {
     let Some(uses) = bindings.uses() else {
         return Ok(None);
     };
-    if bindings.owner() != key
-        || bindings.environment() != environment
-        || uses.len() > usize::from(u16::MAX)
-    {
+    if bindings.owner() != key || uses.len() > usize::from(u16::MAX) {
         return Ok(None);
     }
     let mut source = TextBuffer::new();
@@ -165,7 +161,6 @@ impl VerifiedDefinition {
 pub(super) fn definition(
     bindings: &Bindings,
     key: ClassKey,
-    environment: EnvironmentId,
     fields: &[crate::FieldOutput],
     members: &[crate::MethodOutput],
     control: &mut RunContext<'_>,
@@ -174,7 +169,6 @@ pub(super) fn definition(
         return Ok(None);
     };
     if bindings.owner() != key
-        || bindings.environment() != environment
         || !fields.is_empty()
         || definition.elements().len() != members.len()
         || members.len() > usize::from(u16::MAX)
@@ -233,7 +227,6 @@ pub(super) fn definition(
     }
     Ok(Some(super::class_unit::VerifiedJavaUnit::annotation(
         header.finish(),
-        environment,
         VerifiedDefinition { elements },
     )))
 }

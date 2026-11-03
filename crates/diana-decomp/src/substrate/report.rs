@@ -1,8 +1,8 @@
 use crate::input::{InputError, MethodError};
 use crate::p8_java::JavaMethodDecl;
 use crate::{
-    ByteOffset, ClassKey, DebugError, DebugSource, DexId, DiagnosticId, EnvironmentId, FailureKind,
-    InputId, MethodKey, ResourceUsage, SourceByteOffset,
+    ByteOffset, ClassKey, DebugError, DebugSource, DexId, DiagnosticId, FailureKind, InputId,
+    MethodKey, ResourceUsage, SourceByteOffset,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -335,7 +335,6 @@ pub struct Report {
     pub(crate) diagnostics: Vec<Diagnostic>,
     pub(crate) stats: ResourceUsage,
     pub(crate) image: ImageFact,
-    pub(crate) environment: EnvironmentId,
 }
 impl Report {
     pub fn annotations(&self) -> &ClassAnnotations {
@@ -356,9 +355,6 @@ impl Report {
     }
     pub fn image(&self) -> ImageFact {
         self.image
-    }
-    pub fn environment(&self) -> EnvironmentId {
-        self.environment
     }
 }
 

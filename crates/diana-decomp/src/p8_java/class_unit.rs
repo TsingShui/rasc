@@ -1,14 +1,13 @@
 use crate::input::ProgramIndex;
 use crate::input::catalog::{MemberEntry, MemberSelection};
 use crate::substrate::owned::TextBuffer;
-use crate::{ClassKey, EnvironmentId, MethodOutput, RequestError, RunContext};
+use crate::{ClassKey, MethodOutput, RequestError, RunContext};
 
 /// An owned Java 8 class declaration whose original member set and source
 /// bindings passed native P8 verification. Rendering uses the report's verified
 /// members; it does not reopen the input or invoke a compiler.
 pub struct VerifiedJavaUnit {
     header: String,
-    environment: EnvironmentId,
     preparation: String,
     _binding: Binding,
 }
@@ -27,12 +26,10 @@ enum Binding {
 impl VerifiedJavaUnit {
     pub(super) fn annotation(
         header: String,
-        environment: EnvironmentId,
         binding: super::annotations::VerifiedDefinition,
     ) -> Self {
         Self {
             header,
-            environment,
             preparation: String::new(),
             _binding: Binding::Annotation { binding },
         }
@@ -43,14 +40,9 @@ impl VerifiedJavaUnit {
             _ => None,
         }
     }
-    pub(super) fn enumeration(
-        header: String,
-        environment: EnvironmentId,
-        binding: super::enums::Binding,
-    ) -> Self {
+    pub(super) fn enumeration(header: String, binding: super::enums::Binding) -> Self {
         Self {
             header,
-            environment,
             preparation: String::new(),
             _binding: Binding::Enum { _binding: binding },
         }
@@ -63,9 +55,6 @@ impl VerifiedJavaUnit {
         &self.preparation
     }
 
-    pub fn environment(&self) -> EnvironmentId {
-        self.environment
-    }
     pub fn compilation_contract(&self) -> super::CompilationContract {
         super::CompilationContract::Java8
     }
@@ -116,7 +105,6 @@ fn verify_impl(
     nested_name: Option<&[u16]>,
     control: &mut RunContext<'_>,
 ) -> Result<Option<VerifiedJavaUnit>, RequestError> {
-    let environment = catalog.environment;
     if let Some(bindings) = members.annotations
         && bindings.definition().is_some()
     {
@@ -126,15 +114,13 @@ fn verify_impl(
         return super::annotations::definition(
             bindings,
             key,
-            environment,
             members.fields,
             members.methods,
             control,
         );
     }
     let annotations = if let Some(bindings) = members.annotations {
-        let Some(verified) = super::annotations::verify(bindings, key, environment, control)?
-        else {
+        let Some(verified) = super::annotations::verify(bindings, key, control)? else {
             return Ok(None);
         };
         Some(verified)
@@ -335,18 +321,14 @@ fn verify_impl(
                         let mut owner_present = false;
                         for other in members {
                             control.charge_work(1)?;
-                            owner_present |= matches!(other, MethodOutput::Java { facts, declaration: owner, .. } if facts.key.method == declaration.target() && owner.environment() == environment);
+                            owner_present |= matches!(other, MethodOutput::Java { facts, declaration: owner, .. } if facts.key.method == declaration.target());
                         }
                         if declaration.bridge() != facts.key.method || !owner_present { admitted = false; }
                     }
                     let facts = match member {
                         MethodOutput::Generated { facts, .. } => facts,
-                        MethodOutput::Java {
-                            facts, declaration, ..
-                        } if declaration.environment() == environment => facts,
-                        MethodOutput::JavaInitializer {
-                            facts, declaration, ..
-                        } if declaration.environment() == environment => facts,
+                        MethodOutput::Java { facts, .. } => facts,
+                        MethodOutput::JavaInitializer { facts, .. } => facts,
                         MethodOutput::DeclarationOnly { facts, .. } => facts,
                         _ => {
                             admitted = false;
@@ -473,7 +455,6 @@ fn verify_impl(
     control.checkpoint()?;
     Ok(Some(VerifiedJavaUnit {
         header: header.finish(),
-        environment,
         preparation: preparation.finish(),
         _binding: Binding::Class {
             _binding: binding,

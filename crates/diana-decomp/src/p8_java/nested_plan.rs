@@ -243,7 +243,6 @@ fn verify_impl(
                         method: method_idx,
                     })
                     || facts.access_flags != access_flags
-                    || declaration.environment() != catalog.environment
                     || !original.name.matches_with(&facts.name, control)?
                     || crate::substrate::owned::copy_proto(&original.prototype, control)?
                         != facts.prototype

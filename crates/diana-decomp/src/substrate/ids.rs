@@ -104,9 +104,6 @@ pub struct DexId(pub u32);
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct InputId(pub u64);
 
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub struct EnvironmentId(pub u64);
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct ClassKey {
     pub dex: DexId,

@@ -90,7 +90,6 @@ fn declaration_impl(
     }
     let mut annotation_string = false;
     if let Some(bindings) = annotations
-        && bindings.environment() == catalog.environment
         && bindings.owner().class_def == input.class_id()
         && let Some(definition) = bindings.definition()
         && input

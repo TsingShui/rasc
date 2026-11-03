@@ -3,7 +3,7 @@
 use crate::input::{DexString, ProgramIndex};
 use crate::p0_knowledge::DeclarationCatalog;
 use crate::substrate::owned::{copy_units, push};
-use crate::{ClassDefId, EnvironmentId, RequestError, RunContext};
+use crate::{ClassDefId, RequestError, RunContext};
 
 use super::{DeclarationCoverage, ExternalClassDeclaration, ExternalMethodDeclaration};
 
@@ -12,7 +12,6 @@ use super::{DeclarationCoverage, ExternalClassDeclaration, ExternalMethodDeclara
 /// stay absent rather than inferred.
 pub(crate) fn from_input<'a>(
     index: &ProgramIndex<'a>,
-    environment: EnvironmentId,
     control: &mut RunContext<'_>,
 ) -> Result<DeclarationCatalog, RequestError> {
     let ownership = crate::input::ownership::collect(index, control)?;
@@ -79,7 +78,7 @@ pub(crate) fn from_input<'a>(
         });
         id = id.checked_add(1).ok_or(RequestError::PlatformCapacity)?;
     }
-    Ok(DeclarationCatalog::with_declarations(environment, classes))
+    Ok(DeclarationCatalog::with_declarations(classes))
 }
 
 fn copy_prototype<'i, 'a>(

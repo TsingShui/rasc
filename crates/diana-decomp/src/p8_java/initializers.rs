@@ -1,5 +1,5 @@
 use crate::input::MethodInput;
-use crate::{EnvironmentId, MethodBudget, RequestError};
+use crate::{MethodBudget, RequestError};
 
 #[derive(Clone, Copy)]
 pub(crate) enum MemberSyntax {
@@ -19,9 +19,6 @@ pub struct VerifiedJavaInitializer {
     method: super::VerifiedJavaMethod,
 }
 impl VerifiedJavaInitializer {
-    pub fn environment(&self) -> EnvironmentId {
-        self.method.environment()
-    }
     pub fn compilation_contract(&self) -> super::CompilationContract {
         self.method.compilation_contract()
     }

@@ -1,4 +1,4 @@
-use crate::{EnvironmentId, RequestError};
+use crate::RequestError;
 
 /// Fixed source target used by native method verification and external V4 checks.
 #[derive(Clone, Copy, Debug)]
@@ -15,7 +15,6 @@ pub struct VerifiedJavaMethod {
     pub(super) body: MethodBody,
     pub(super) final_assignments: Option<super::final_assignment::Certificate>,
     pub(super) capture_field: Option<crate::FieldId>,
-    environment: EnvironmentId,
     pub(super) type_names: super::types::TypeNames,
 }
 pub(crate) enum MethodBody {
@@ -41,7 +40,6 @@ impl VerifiedJavaMethod {
         header: String,
         body: super::structured::StructuredBody,
         syntax: super::initializers::MemberSyntax,
-        environment: EnvironmentId,
     ) -> Self {
         Self {
             header,
@@ -49,7 +47,6 @@ impl VerifiedJavaMethod {
             final_assignments: None,
             capture_field: None,
             syntax,
-            environment,
             type_names: super::types::TypeNames::default(),
         }
     }
@@ -130,7 +127,6 @@ impl VerifiedJavaMethod {
         header: String,
         body: super::protected::ProtectedBody,
         syntax: super::initializers::MemberSyntax,
-        environment: EnvironmentId,
     ) -> Self {
         Self {
             header,
@@ -138,7 +134,6 @@ impl VerifiedJavaMethod {
             final_assignments: None,
             capture_field: None,
             syntax,
-            environment,
             type_names: super::types::TypeNames::default(),
         }
     }
@@ -146,7 +141,6 @@ impl VerifiedJavaMethod {
         header: String,
         body: super::dispatcher::Dispatcher,
         syntax: super::initializers::MemberSyntax,
-        environment: EnvironmentId,
     ) -> Self {
         Self {
             header,
@@ -154,12 +148,8 @@ impl VerifiedJavaMethod {
             final_assignments: None,
             capture_field: None,
             syntax,
-            environment,
             type_names: super::types::TypeNames::default(),
         }
-    }
-    pub fn environment(&self) -> EnvironmentId {
-        self.environment
     }
     pub fn compilation_contract(&self) -> CompilationContract {
         CompilationContract::Java8

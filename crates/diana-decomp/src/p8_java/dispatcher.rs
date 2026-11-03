@@ -4,7 +4,7 @@ use crate::p2_flow::{BlockId, EdgeId, Terminal};
 use crate::p5_types::Kind;
 use crate::p6_variables::StorageBody;
 use crate::substrate::owned::{TextBuffer, copy_units, reserve};
-use crate::{EnvironmentId, MethodBudget, RequestError, VerifiedJavaMethod};
+use crate::{MethodBudget, RequestError, VerifiedJavaMethod};
 
 pub(crate) struct Edge {
     pub source: BlockId,
@@ -96,7 +96,6 @@ pub(super) fn verify(
     plan: crate::p7_regions::PlannedBody<'_>,
     type_names: &super::types::TypeNames,
     calls: &mut super::calls::SourceCalls,
-    environment: EnvironmentId,
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<Option<VerifiedJavaMethod>, RequestError> {
     let plan = plan.into_data();
@@ -486,7 +485,6 @@ pub(super) fn verify(
                 source,
             },
             syntax,
-            environment,
         )));
     }
     if let crate::p7_regions::Shape::Structured(region) = plan.shape {
@@ -498,12 +496,11 @@ pub(super) fn verify(
                 source,
             },
             syntax,
-            environment,
         );
         method.final_assignments = Some(final_assignments);
         return Ok(Some(method));
     }
-    let mut method = VerifiedJavaMethod::dispatcher(header.finish(), body, syntax, environment);
+    let mut method = VerifiedJavaMethod::dispatcher(header.finish(), body, syntax);
     method.final_assignments = Some(final_assignments);
     Ok(Some(method))
 }

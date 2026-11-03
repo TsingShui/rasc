@@ -5,7 +5,7 @@ use crate::input::catalog::{MemberEntry, MemberSelection};
 use crate::p0_knowledge::DeclarationCatalog;
 use crate::pipeline::control::InputControl;
 use crate::substrate::owned::{copy_proto, copy_units, push};
-use crate::{ClassKey, EnvironmentId, MethodId, RequestError, RunContext};
+use crate::{ClassKey, MethodId, RequestError, RunContext};
 
 pub(crate) enum Literal {
     String(Vec<u16>),
@@ -65,15 +65,11 @@ enum Form {
 }
 pub(crate) struct Bindings {
     owner: ClassKey,
-    environment: EnvironmentId,
     form: Form,
 }
 impl Bindings {
     pub(crate) fn owner(&self) -> ClassKey {
         self.owner
-    }
-    pub(crate) fn environment(&self) -> EnvironmentId {
-        self.environment
     }
     pub(crate) fn uses(&self) -> Option<&[Use]> {
         match &self.form {
@@ -777,7 +773,6 @@ fn collect_impl(
         return Ok(
             declaration(index, facts.owner(), catalog, control)?.map(|definition| Bindings {
                 owner: facts.owner(),
-                environment: catalog.environment,
                 form: Form::Definition(definition),
             }),
         );
@@ -825,7 +820,6 @@ fn collect_impl(
     }
     Ok(Some(Bindings {
         owner: facts.owner(),
-        environment: catalog.environment,
         form: Form::Uses(uses),
     }))
 }

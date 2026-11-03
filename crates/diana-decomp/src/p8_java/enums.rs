@@ -785,7 +785,6 @@ pub(crate) fn unit(
     proof: &Proof,
     fields: &[crate::FieldOutput],
     members: &[crate::MethodOutput],
-    environment: crate::EnvironmentId,
     control: &mut RunContext<'_>,
 ) -> Result<Option<super::VerifiedJavaUnit>, RequestError> {
     if fields.len()
@@ -905,7 +904,6 @@ pub(crate) fn unit(
     header.push(&proof.header, control)?;
     Ok(Some(super::class_unit::VerifiedJavaUnit::enumeration(
         header.finish(),
-        environment,
         Binding {
             _owner: proof.declaration.owner(),
         },

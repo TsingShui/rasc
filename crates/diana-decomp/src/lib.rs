@@ -66,9 +66,9 @@ pub mod raw {
 
 pub use substrate::ids::{
     ByteLength, ByteOffset, ByteRange, CallSiteId, ClassDefId, ClassKey, CodeUnitCount,
-    CodeUnitDelta, CodeUnitOffset, DexId, DiagnosticId, EnvironmentId, FieldId, InputId,
-    MethodHandleId, MethodId, MethodKey, ProtoId, RegisterId, RegisterWordCount, SourceByteOffset,
-    StringId, TypeId, Utf16Count, Utf16Offset,
+    CodeUnitDelta, CodeUnitOffset, DexId, DiagnosticId, FieldId, InputId, MethodHandleId, MethodId,
+    MethodKey, ProtoId, RegisterId, RegisterWordCount, SourceByteOffset, StringId, TypeId,
+    Utf16Count, Utf16Offset,
 };
 
 pub use pipeline::control::{

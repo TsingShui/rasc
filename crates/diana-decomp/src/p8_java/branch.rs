@@ -3,7 +3,7 @@ use crate::p2_flow::{BlockId, EdgeId, Op};
 use crate::p5_types::TypedBody;
 use crate::p6_variables::StorageBody;
 use crate::substrate::owned::reserve;
-use crate::{EnvironmentId, MethodBudget, RequestError, VerifiedJavaMethod};
+use crate::{MethodBudget, RequestError, VerifiedJavaMethod};
 
 pub(crate) use super::local_declarations::Local;
 pub(crate) use crate::p6_variables::LocalId;
@@ -175,15 +175,7 @@ pub(crate) fn verify(
     nested_context: bool,
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<crate::substrate::outcome::Outcome<VerifiedJavaMethod>, RequestError> {
-    verify_impl(
-        input,
-        catalog,
-        plan,
-        chain,
-        catalog.environment,
-        nested_context,
-        budget,
-    )
+    verify_impl(input, catalog, plan, chain, nested_context, budget)
 }
 
 fn verify_impl(
@@ -191,7 +183,6 @@ fn verify_impl(
     catalog: &crate::p0_knowledge::DeclarationCatalog,
     plan: crate::p7_regions::PlannedBody<'_>,
     chain: &super::constructor_graph::Proof<'_, '_, '_>,
-    environment: EnvironmentId,
     nested_context: bool,
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<crate::substrate::outcome::Outcome<VerifiedJavaMethod>, RequestError> {
@@ -248,15 +239,7 @@ fn verify_impl(
     let Some(type_names) = super::types::resolve(input, catalog, storage, budget)? else {
         return Ok(Outcome::Declined(reason("storage_type_names")));
     };
-    let method = super::dispatcher::verify(
-        input,
-        catalog,
-        plan,
-        &type_names,
-        &mut calls,
-        environment,
-        budget,
-    )?;
+    let method = super::dispatcher::verify(input, catalog, plan, &type_names, &mut calls, budget)?;
     Ok(match method {
         Some(mut method) => {
             method.type_names = type_names;
