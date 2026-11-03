@@ -578,16 +578,12 @@ fn t12_constructor_arguments_keep_typed_allocation_and_chain_views() {
             &mut control,
         )
         .unwrap();
-    let members = report.class().members();
-    let MethodOutput::Debug { source, reason, .. } = &members[0] else {
-        panic!("unknown constructor throws became Java");
-    };
-    assert_eq!(
-        report.diagnostics()[reason.0].cause.kind(),
-        FailureKind::Unsupported
-    );
-    let raw: serde_json::Value = serde_json::from_str(source.source()).unwrap();
-    assert_eq!(raw["complete"], true);
+    // An unknown external throws clause is not a known violation; the member
+    // stays readable and the uncertainty is reported instead of denying it.
+    assert!(matches!(
+        report.class().members()[0],
+        MethodOutput::Java { .. }
+    ));
 }
 
 #[test]

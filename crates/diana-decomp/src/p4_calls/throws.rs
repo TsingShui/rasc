@@ -68,9 +68,10 @@ pub(super) fn retain(
     declared: Option<&[Vec<u16>]>,
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<Vec<Vec<u16>>, RequestError> {
-    let declared = declared.ok_or(RequestError::InternalInvariant(
-        "resolved call lost known throws",
-    ))?;
+    // Unknown throws stay unknown; they do not suppress the readable call.
+    let Some(declared) = declared else {
+        return Ok(Vec::new());
+    };
     let mut result = Vec::new();
     for descriptor in declared {
         budget.charge_work(1)?;
@@ -220,8 +221,9 @@ pub(crate) fn compatible(
     invocation: &Invocation<'_>,
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<bool, RequestError> {
+    // An unknown external throws clause is not a known violation.
     let Some(declared) = declared else {
-        return Ok(false);
+        return Ok(true);
     };
     if declared.is_empty() {
         return Ok(true);

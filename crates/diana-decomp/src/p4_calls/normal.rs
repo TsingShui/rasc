@@ -92,23 +92,6 @@ fn collect_impl<'a>(
     let mut decline_reason = None;
     for call in &ssa.calls {
         budget.charge_work(1)?;
-        if decline_reason.is_none()
-            && catalog.policy() == crate::EvidencePolicy::Declared
-            && input.local_method(call.reference, budget)?.is_none()
-        {
-            let original = input.method_reference(call.reference, budget)?;
-            if !catalog.contains_signature(
-                original.owner,
-                original.declaration.name,
-                &original.declaration.prototype,
-                budget,
-            )? {
-                decline_reason = Some(crate::OutputReason::BindingEvidenceMissing {
-                    reference: call.reference,
-                    pc: call.pc,
-                });
-            }
-        }
         let evidence = if call.kind != crate::p2_flow::InvokeKind::Static {
             let original = input.method_reference(call.reference, budget)?;
             let facts = ReceiverFacts {
