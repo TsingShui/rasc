@@ -94,6 +94,20 @@ impl DeclarationCatalog {
             fields: Vec::new(),
         }
     }
+    /// Appends facts derived from another input image of the same request.
+    pub(crate) fn extend(&mut self, other: Self) {
+        let Self {
+            policy: _,
+            methods,
+            classes,
+            fields,
+            ..
+        } = other;
+        self.methods.extend(methods);
+        self.classes.extend(classes);
+        self.fields.extend(fields);
+    }
+
     /// Selects how an absent declaration entry is treated. The default keeps
     /// every Java capability gated on declared evidence.
     pub fn with_policy(mut self, policy: EvidencePolicy) -> Self {

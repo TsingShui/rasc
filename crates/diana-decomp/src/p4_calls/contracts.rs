@@ -488,7 +488,9 @@ pub(super) fn binding_available(
     budget: &mut MethodBudget<'_, '_>,
 ) -> Result<bool, RequestError> {
     let Some(class) = catalog.class(&contract.owner, budget)? else {
-        return Ok(false);
+        // An unknown external owner does not invalidate the original reference.
+        // Without hierarchy/overload facts there is no rival target to reject.
+        return Ok(catalog.policy() == crate::EvidencePolicy::TrustedReferences);
     };
     let caller = copy_units(input.owner(), budget)?;
     Ok(super::overloads::unique_target(

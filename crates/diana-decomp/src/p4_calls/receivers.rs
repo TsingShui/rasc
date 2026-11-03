@@ -217,10 +217,25 @@ impl ReceiverDeclaration {
         )? {
             return Ok(None);
         }
-        let Some(class) = catalog.class(&target.owner, budget)? else {
-            return Ok(None);
-        };
-        let Some(source) = catalog.class(parameter, budget)? else {
+        // External declaration facts are optional. When the receiver's own owner
+        // or its static type has no catalog entry, the original reference still
+        // fixes the call; the missing hierarchy/hiding facts stay unknown.
+        let (Some(class), Some(source)) = (
+            catalog.class(&target.owner, budget)?,
+            catalog.class(parameter, budget)?,
+        ) else {
+            if catalog.policy() == crate::EvidencePolicy::TrustedReferences {
+                return Ok(Some(ReceiverContract {
+                    _sealed: (),
+                    reference: target.reference,
+                    owner: retain(&target.owner, budget)?,
+                    name: retain(&target.name, budget)?,
+                    prototype: retain(&target.prototype, budget)?,
+                    kind: target.kind,
+                    arity: target.arity,
+                    declared_throws: super::throws::retain(Some(&target.declared_throws), budget)?,
+                }));
+            }
             return Ok(None);
         };
         // P4 has checked the referenced declaration group. The final static

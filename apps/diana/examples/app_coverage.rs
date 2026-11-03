@@ -16,10 +16,10 @@ fn main() {
     let mut args = std::env::args().skip(1);
     let input = args.next().expect("input");
     let sample: usize = args.next().expect("classes").parse().expect("classes");
-    let mut trusted = false;
+    let mut strict = false;
     for flag in args {
         match flag.as_str() {
-            "--trusted" => trusted = true,
+            "--strict" => strict = true,
             other => panic!("unknown flag {other}"),
         }
     }
@@ -72,10 +72,10 @@ fn main() {
         });
         let started = Instant::now();
         let catalog = diana_decomp::DeclarationCatalog::empty(diana_decomp::EnvironmentId(0))
-            .with_policy(if trusted {
-                diana_decomp::EvidencePolicy::TrustedReferences
-            } else {
+            .with_policy(if strict {
                 diana_decomp::EvidencePolicy::Declared
+            } else {
+                diana_decomp::EvidencePolicy::TrustedReferences
             });
         match decompile::run_with_catalog(&scope, &selector, catalog, &mut controls) {
             Ok(result) => {

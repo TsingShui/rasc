@@ -3,8 +3,8 @@ use crate::input::{DexContainer, InputError, InputProblem, ProgramIndex};
 use crate::substrate::owned::{copy_proto, copy_units, reserve};
 use crate::substrate::report::*;
 use crate::{
-    ByteOffset, ClassKey, DebugSourceKind, DeclarationCatalog, DiagnosticId, FailureKind,
-    MethodBudget, MethodKey, RequestError, RunContext,
+    ByteOffset, ClassKey, DebugSourceKind, DeclarationCatalog, DiagnosticId, EvidencePolicy,
+    FailureKind, MethodBudget, MethodKey, RequestError, RunContext,
 };
 
 // Phase implementations can name the credential, but only the scheduler can construct it.
@@ -153,11 +153,39 @@ impl<'a> Engine<'a> {
                 index,
             });
         }
+        // The product path takes declaration facts from the analysed input
+        // itself. Caller-supplied external declarations remain available only to
+        // the strict verification policy.
+        let environment = catalog.environment;
+        let trusted = catalog.policy() == EvidencePolicy::TrustedReferences;
+        let mut facts = DeclarationCatalog::empty(environment).with_policy(catalog.policy());
+        if trusted {
+            for image in &indexed {
+                let derived = crate::p0_knowledge::input_facts::from_input(
+                    &image.index,
+                    environment,
+                    control,
+                )
+                .map_err(|error| match error {
+                    crate::RequestError::Input(error) => error,
+                    crate::RequestError::Control(error) => InputError::Control(error),
+                    crate::RequestError::Allocation(_) => InputError::Allocation {
+                        offset_byte: ByteOffset(0),
+                    },
+                    _ => InputError::PlatformCapacity {
+                        offset_byte: ByteOffset(0),
+                    },
+                })?;
+                facts.extend(derived);
+            }
+        } else {
+            facts = catalog;
+        }
         Ok(Self {
             images: indexed,
             options,
             representation: RepresentationPolicy::default(),
-            catalog,
+            catalog: facts,
         })
     }
 
