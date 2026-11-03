@@ -15,6 +15,13 @@ complete result.
 
 ## Result presentation
 
+Readable Java keeps material uncertainties in the report. The default presentation
+does not print them: no uncertainty line in text and no `uncertainties` member in
+JSON. `--verbose` adds those annotations without changing members, sources,
+ordering or the reasons of Debug and Unavailable results, which are always shown.
+Each uncertainty names the unknown or failed check and, when available, its
+original code unit; it is display metadata and never becomes an executable
+statement or a fabricated body.
 
 P8 decides language eligibility, P9 only reads the existing result, and the application MUST NOT
 refuse to call the renderer because a class is Mixed:

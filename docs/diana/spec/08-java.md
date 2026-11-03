@@ -7,8 +7,9 @@ P8 consumes the planned method, storage, types, original input and available
 declaration facts. It constructs method and class representations and handles
 declarations, calls, arrays, constructors, exceptions and generated members.
 
-The product direction is to show readable reconstruction when possible, with
-material uncertainties explicit. A local failure MUST NOT hide other members.
+The product direction is to show readable reconstruction when possible. Material
+uncertainties are retained in the report and surfaced on request (`--verbose`),
+never by suppressing the readable member. A local failure MUST NOT hide other members.
 Neither readable Java nor a class-shaped output alone claims compilability or
 semantic equivalence.
 
