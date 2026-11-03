@@ -174,8 +174,13 @@ pub(super) fn verify(
     {
         return Ok(None);
     }
-    let nested_scope =
-        crate::p4_calls::nested_scope::collect(input.program(), input.class_id(), catalog, budget)?;
+    // Ownership metadata is only needed for nested classes.
+    let owner = copy_units(input.owner(), budget)?;
+    let nested_scope = if owner.contains(&u16::from(b'$')) {
+        crate::p4_calls::nested_scope::collect(input.program(), input.class_id(), catalog, budget)?
+    } else {
+        None
+    };
     let name = if constructor && nested_scope.is_some() {
         let Some(scope) = &nested_scope else {
             return Ok(None);
