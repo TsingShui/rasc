@@ -262,14 +262,6 @@ impl TypeNames {
                 None
             };
             if let Some(builtin) = builtin {
-                if !crate::p4_calls::qualifier_available(
-                    input,
-                    catalog,
-                    &[106, 97, 118, 97],
-                    budget,
-                )? {
-                    return Ok(false);
-                }
                 source.push(builtin.spelling(), budget)?;
             } else {
                 let Some(base) = super::calls::type_name(base, budget)? else {

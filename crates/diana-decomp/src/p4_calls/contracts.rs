@@ -227,6 +227,10 @@ pub(super) fn original_formals(
                 budget,
             )? {
                 CallFormal::Reference(crate::substrate::primitive_types::BuiltinReference::String)
+            } else if name.matches_with(&[76], budget)? || name.matches_with(&[91], budget)? {
+                // Any other reference or array argument is bound as Object; the
+                // source may lose its exact formal type, not the call.
+                CallFormal::Reference(crate::substrate::primitive_types::BuiltinReference::Object)
             } else {
                 supported = false;
                 return Ok(());
