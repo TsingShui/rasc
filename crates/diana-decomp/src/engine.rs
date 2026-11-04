@@ -1,6 +1,6 @@
 use crate::input::{DexContainer, InputError, InputProblem, ProgramIndex};
 use crate::substrate::report::*;
-use crate::{ByteOffset, ClassKey, MethodId, MethodKey, RequestError, RunContext};
+use crate::{ByteOffset, ClassKey, FailureKind, MethodId, MethodKey, RequestError, RunContext};
 
 // Phase implementations can name the credential, but only the scheduler can construct it.
 pub(crate) struct SchedulePermit {
@@ -155,22 +155,38 @@ impl<'a> Engine<'a> {
     }
 }
 
-pub struct ClassAnalysis {
+pub struct ClassAnalysis<'a> {
     pub image: ImageFact,
     pub facts: std::sync::Arc<crate::p0::ClassFacts>,
-    /// Original method entries resolved for this request. P2 adds method results.
-    pub entries: Vec<MethodId>,
+    pub methods: Vec<MethodAnalysis<'a>>,
     pub diagnostics: Vec<Diagnostic>,
 }
 
+pub struct MethodAnalysis<'a> {
+    pub key: MethodKey,
+    pub result: Result<crate::input::DecodedMethod<'a>, RequestError>,
+}
+
 impl<'a> Engine<'a> {
-    /// Runs P0 and the method tasks for one class request. Class assembly and
-    /// rendering belong to P8/P9 and are not part of this boundary.
+    /// P0 only: class facts for one original class identity.
+    pub fn class_facts(
+        &self,
+        class: ClassKey,
+        control: &mut RunContext<'_>,
+    ) -> Result<std::sync::Arc<crate::p0::ClassFacts>, RequestError> {
+        control.checkpoint()?;
+        let position = usize::try_from(class.dex.0).map_err(|_| RequestError::UnknownDex)?;
+        let image = self.images.get(position).ok_or(RequestError::UnknownDex)?;
+        Ok(image.index.class_facts_cached(class.class_def, control)?)
+    }
+
+    /// Runs P0, the method reader and P1 for one class request. Class assembly
+    /// and rendering belong to P8/P9 and are not part of this boundary.
     pub fn analyze(
         &self,
         request: Request,
         control: &mut RunContext<'_>,
-    ) -> Result<ClassAnalysis, RequestError> {
+    ) -> Result<ClassAnalysis<'a>, RequestError> {
         control.checkpoint()?;
         let position =
             usize::try_from(request.class.dex.0).map_err(|_| RequestError::UnknownDex)?;
@@ -179,14 +195,37 @@ impl<'a> Engine<'a> {
             .index
             .class_facts_cached(request.class.class_def, control)?;
         let entries: Vec<MethodId> = match &request.method {
-            Some(selector) => vec![image.index.resolve_method(
-                facts.class_def(),
-                &selector.name,
-                &selector.prototype,
-                control,
-            )?],
+            Some(selector) => vec![facts.resolve_method(&selector.name, &selector.prototype)?],
             None => facts.methods().iter().map(|entry| entry.method()).collect(),
         };
+        let mut methods = Vec::new();
+        for method in entries {
+            control.checkpoint()?;
+            let key = MethodKey {
+                class: request.class,
+                method,
+            };
+            let result = (|| -> Result<_, RequestError> {
+                let source = image.index.method_source(&facts, method, control)?;
+                image
+                    .index
+                    .decode_method_source(&source, control)
+                    .map_err(RequestError::from)
+            })();
+            match result {
+                Err(error)
+                    if matches!(
+                        error.kind(),
+                        FailureKind::Cancelled
+                            | FailureKind::ResourceExhausted
+                            | FailureKind::InternalInvariant
+                    ) =>
+                {
+                    return Err(error);
+                }
+                result => methods.push(MethodAnalysis { key, result }),
+            }
+        }
         Ok(ClassAnalysis {
             image: ImageFact {
                 dex: request.class.dex,
@@ -194,7 +233,7 @@ impl<'a> Engine<'a> {
                 header_offset: image.image.header_offset,
             },
             facts,
-            entries,
+            methods,
             diagnostics: Vec::new(),
         })
     }

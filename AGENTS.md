@@ -77,6 +77,12 @@ chapters describe the existing implementation until migrated to this target.
   file verification, corpus handling and reference isolation, read
   [CONTRIBUTING](docs/diana/CONTRIBUTING.md) for the relevant work. Read
   [WRITING](docs/diana/WRITING.md) before editing Diana documentation.
+- For development verification of the engine, use the `dbg_shell` Cargo example
+  as the single inspection entry:
+  `cargo run -p diana-decomp --example dbg_shell --locked -- --dex <classes.dex> --exec '<json>'`.
+  It accepts a bare DEX, emits one JSON response per command, and exposes the
+  delivered P0/P1 products. Do not add phase-specific debug binaries, renderers or
+  debug examples.
 - Contributors MUST NOT develop, add or restore any unit tests, including inline
   `#[test]` functions, `#[cfg(test)]` modules and private-phase test harnesses.
   Existing test cases and fixtures are removed by operator decision.

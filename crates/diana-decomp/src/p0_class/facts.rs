@@ -435,6 +435,52 @@ impl ClassFacts {
     pub fn annotations_issue(&self) -> Option<&RequestError> {
         self.annotations_issue.as_ref()
     }
+    /// Resolve an exact original method selector over the delivered directory.
+    /// A partial directory is not treated as proof that the member is absent.
+    pub fn resolve_method(
+        &self,
+        name: &[u16],
+        prototype: &[u16],
+    ) -> Result<MethodId, RequestError> {
+        let mut found = None;
+        let mut unresolved = None;
+        for entry in &self.methods {
+            match entry.declaration() {
+                Fact::Present(declaration)
+                    if declaration.name_units() == name
+                        && declaration.prototype_units() == prototype =>
+                {
+                    if found.is_some() {
+                        return Err(RequestError::Input(crate::input::InputError::Malformed {
+                            code: crate::input::InputProblem::InvalidReference,
+                            offset_byte: self.header_offset,
+                        }));
+                    }
+                    found = Some(entry.method());
+                }
+                Fact::Unavailable(RequestError::Input(error)) => {
+                    unresolved.get_or_insert(*error);
+                }
+                Fact::Unavailable(_) => {
+                    return Err(RequestError::InternalInvariant(
+                        "method declaration failure was not a classified input error",
+                    ));
+                }
+                Fact::Present(_) | Fact::Absent | Fact::NotRead => {}
+            }
+        }
+        if let Some(method) = found {
+            return Ok(method);
+        }
+        Err(match unresolved {
+            Some(error) => RequestError::Input(error),
+            None => RequestError::Input(crate::input::InputError::Malformed {
+                code: crate::input::InputProblem::InvalidReference,
+                offset_byte: self.header_offset,
+            }),
+        })
+    }
+
     /// Whether every attempted declaration and metadata read completed. This is
     /// not a statement about method code or Java representability.
     pub fn is_partial(&self) -> bool {

@@ -656,64 +656,6 @@ impl<'a> ProgramIndex<'a> {
         Ok(found)
     }
 
-    pub(crate) fn resolve_method(
-        &self,
-        class_id: ClassDefId,
-        name: &[u16],
-        prototype: &[u16],
-        control: &mut RunContext<'_>,
-    ) -> Result<MethodId, InputError> {
-        let class = self.class_with(class_id, control)?;
-        let mut found = None;
-        // A malformed candidate cannot match a complete selector. Keep its
-        // error if no independently valid declaration matches the request.
-        let mut local_error = None;
-        for index in 0..self.header.method_ids.count {
-            control.checkpoint()?;
-            let id = MethodId(index);
-            let mut record = self.table(TableKey::Method(id), control)?;
-            if TypeId(u32::from(record.read_u16_with(control)?)) != class.type_idx {
-                continue;
-            }
-            record.read_u16_with(control)?;
-            let actual_name =
-                match local(self.string_with(StringId(record.read_u32_with(control)?), control))? {
-                    Ok(name) => name,
-                    Err(error) => {
-                        local_error.get_or_insert(error);
-                        continue;
-                    }
-                };
-            if !actual_name.matches(name, control)? {
-                continue;
-            }
-            let declaration = match local(self.method_declaration(id, class.type_idx, control))? {
-                Ok(declaration) => declaration,
-                Err(error) => {
-                    local_error.get_or_insert(error);
-                    continue;
-                }
-            };
-            if declaration.prototype.matches(prototype, control)? {
-                if found.is_some() {
-                    return Err(malformed(
-                        InputProblem::InvalidReference,
-                        self.header.method_ids.offset_byte,
-                    ));
-                }
-                found = Some(id);
-            }
-        }
-        found.ok_or_else(|| {
-            local_error.unwrap_or_else(|| {
-                malformed(
-                    InputProblem::InvalidReference,
-                    self.header.method_ids.offset_byte,
-                )
-            })
-        })
-    }
-
     pub(crate) fn source_file(
         &self,
         id: ClassDefId,

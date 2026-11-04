@@ -17,4 +17,8 @@ changing an engine capability.
   `docs/diana/SOURCE_MAP.md` before reviewing or reusing reference material.
 - Contributors MUST NOT develop, add or restore unit tests. Follow the root
   testing policy; preserve production input and analysis invariant checks.
+- Engine development verification uses the `dbg_shell` example:
+  `cargo run -p diana-decomp --example dbg_shell --locked -- --dex <classes.dex> --exec '<json>'`.
+  It is the single P0/P1 inspection entry and accepts a bare DEX. Do not add
+  phase-specific debug renderers, binaries or examples.
 - Build from the repository root with `cargo build --locked -p diana-decomp`.

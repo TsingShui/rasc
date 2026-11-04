@@ -11,7 +11,10 @@ use std::path::PathBuf;
 
 use diana_decomp::input::ProgramIndex;
 use diana_decomp::p1::DecodedItem;
-use diana_decomp::{ClassDefId, ClassKey, DexId, FailureKind, MethodId, RequestError, RunContext};
+use diana_decomp::{
+    ByteOffset, ClassDefId, ClassKey, DexId, DexImage, Engine, FailureKind, ImageOrigin, InputId,
+    MethodId, Options, Request, RequestError, RunContext,
+};
 use serde_json::{Value, json};
 
 struct Shell {
@@ -32,6 +35,16 @@ impl Shell {
         let cancel = || false;
         let mut control = RunContext::new(&cancel);
         let index = ProgramIndex::open(&self.bytes, &mut control).map_err(RequestError::Input)?;
+        let engine = Engine::open(
+            vec![DexImage {
+                bytes: &self.bytes,
+                header_offset: ByteOffset(0),
+                origin: ImageOrigin { input: InputId(0) },
+            }],
+            Options::default(),
+            &mut control,
+        )
+        .map_err(RequestError::Input)?;
         let command = request
             .get("cmd")
             .and_then(Value::as_str)
@@ -57,7 +70,7 @@ impl Shell {
             }
             "class" => {
                 let class = class_id(request)?;
-                let facts = self.facts(&index, class, &mut control)?;
+                let facts = engine.class_facts(class_key(class), &mut control)?;
                 let declared = facts.class_data_shape();
                 let delivered = facts.delivered_shape();
                 Ok(json!({
@@ -82,7 +95,7 @@ impl Shell {
             }
             "p0" => {
                 let class = class_id(request)?;
-                let facts = self.facts(&index, class, &mut control)?;
+                let facts = engine.class_facts(class_key(class), &mut control)?;
                 let declared = facts.class_data_shape();
                 let delivered = facts.delivered_shape();
                 let fields: Vec<Value> = facts
@@ -145,7 +158,7 @@ impl Shell {
             }
             "methods" => {
                 let class = class_id(request)?;
-                let facts = self.facts(&index, class, &mut control)?;
+                let facts = engine.class_facts(class_key(class), &mut control)?;
                 let values: Vec<Value> = facts
                     .methods()
                     .iter()
@@ -164,14 +177,23 @@ impl Shell {
             "p1" | "decoded" => {
                 let class = class_id(request)?;
                 let method = method_id(request)?;
-                let facts = self.facts(&index, class, &mut control)?;
-                if facts.method_entry(MethodId(method)).is_none() {
+                let mut analysis = engine.analyze(
+                    Request {
+                        class: class_key(class),
+                        method: None,
+                    },
+                    &mut control,
+                )?;
+                let Some(index) = analysis
+                    .methods
+                    .iter()
+                    .position(|entry| entry.key.method == MethodId(method))
+                else {
                     return Err(RequestError::InternalInvariant(
                         "method is not in the P0 directory",
                     ));
-                }
-                let source = index.method_source(&facts, MethodId(method), &mut control)?;
-                let decoded = index.decode_method_source(&source, &mut control)?;
+                };
+                let decoded = analysis.methods.swap_remove(index).result?;
                 let mut items = Vec::new();
                 for item in decoded.items() {
                     items.push(match item {
@@ -215,21 +237,12 @@ impl Shell {
             })),
         }
     }
+}
 
-    fn facts(
-        &self,
-        index: &ProgramIndex<'_>,
-        class: u32,
-        control: &mut RunContext<'_>,
-    ) -> Result<std::sync::Arc<diana_decomp::p0::ClassFacts>, RequestError> {
-        Ok(std::sync::Arc::new(diana_decomp::p0::collect(
-            index,
-            ClassKey {
-                dex: DexId(0),
-                class_def: ClassDefId(class),
-            },
-            control,
-        )?))
+fn class_key(class: u32) -> ClassKey {
+    ClassKey {
+        dex: DexId(0),
+        class_def: ClassDefId(class),
     }
 }
 
