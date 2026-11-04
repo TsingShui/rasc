@@ -1,6 +1,6 @@
 # P0 — Class facts
 
-Code: `crates/diana-decomp/src/p0_class/`, with the application adapter in
+Code: `crates/diana-decomp/src/p0/`, with the application adapter in
 the engine development shell `crates/diana-decomp/examples/dbg_shell.rs`.
 
 ## Input and ownership

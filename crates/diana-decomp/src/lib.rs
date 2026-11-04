@@ -2,7 +2,6 @@
 
 mod engine;
 pub mod input;
-#[path = "p0_class/mod.rs"]
 pub mod p0;
 pub mod p1;
 pub use engine::{

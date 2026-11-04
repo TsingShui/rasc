@@ -29,6 +29,8 @@ pub struct DecodedInstruction {
     references: [Option<DecodedReference>; 2],
     branch_target: Option<CodeUnitOffset>,
     payload_target: Option<CodeUnitOffset>,
+    result_pc: Option<CodeUnitOffset>,
+    producer_pc: Option<CodeUnitOffset>,
 }
 
 impl DecodedInstruction {
@@ -63,6 +65,15 @@ impl DecodedInstruction {
     /// P1's checked payload target for switch/fill-array instructions.
     pub fn payload_target(&self) -> Option<CodeUnitOffset> {
         self.payload_target
+    }
+    /// The immediately following `move-result*` consumed by this producer, when
+    /// P1 validated the adjacency.
+    pub fn result_pc(&self) -> Option<CodeUnitOffset> {
+        self.result_pc
+    }
+    /// The producer whose normal result this `move-result*` consumes.
+    pub fn producer_pc(&self) -> Option<CodeUnitOffset> {
+        self.producer_pc
     }
 }
 
@@ -353,6 +364,8 @@ impl<'a> ProgramIndex<'a> {
                                     references,
                                     branch_target,
                                     payload_target,
+                                    result_pc: None,
+                                    producer_pc: None,
                                 }),
                                 budget,
                             )
@@ -383,8 +396,9 @@ impl<'a> ProgramIndex<'a> {
         source: &RawMethodView<'a>,
         layout: CheckedMethodLayout<'a>,
         protection: CheckedProtection,
-        items: Vec<DecodedItem>,
+        mut items: Vec<DecodedItem>,
     ) -> DecodedMethod<'a> {
+        link_results(&mut items);
         DecodedMethod {
             source: source.clone(),
             layout,
@@ -396,6 +410,27 @@ impl<'a> ProgramIndex<'a> {
             code_units: source.code_units(),
             instruction_bytes: source.code_byte_range(),
         }
+    }
+}
+
+fn link_results(items: &mut [DecodedItem]) {
+    for index in 1..items.len() {
+        let DecodedItem::Instruction(result) = items[index] else {
+            continue;
+        };
+        if !matches!(result.spec.opcode, 0x0a..=0x0c) {
+            continue;
+        }
+        let result_pc = result.pc;
+        let DecodedItem::Instruction(producer) = &mut items[index - 1] else {
+            continue;
+        };
+        producer.result_pc = Some(result_pc);
+        let producer_pc = producer.pc;
+        let DecodedItem::Instruction(result) = &mut items[index] else {
+            continue;
+        };
+        result.producer_pc = Some(producer_pc);
     }
 }
 

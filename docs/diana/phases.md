@@ -8,7 +8,7 @@ facts from them.
 | Phase | Engine directory | Current responsibility |
 |---|---|---|
 | Input context | `context/` | Request-level cross-DEX lookup and lazy caching of P1 declarations |
-| P0 | `p0_class/` | Class declaration, four-group member directory, static preparation and metadata facts using shared safe reads |
+| P0 | `p0/` | Class declaration, four-group member directory, static preparation and metadata facts using shared safe reads |
 | Input | `input/` | Checked DEX tables, method source reader, metadata and declaration readers |
 | P1 | `p1/` | Disassembly, structural checks and original instruction associations |
 | P2 | `p2_flow/` | Instruction operations, effects and control-flow graph |

@@ -214,6 +214,8 @@ impl Shell {
                             "registers": instruction.registers().map(|value| value.0).collect::<Vec<_>>(),
                             "branch_target": instruction.branch_target().map(|value| value.0),
                             "payload_target": instruction.payload_target().map(|value| value.0),
+                            "result_pc": instruction.result_pc().map(|value| value.0),
+                            "producer_pc": instruction.producer_pc().map(|value| value.0),
                             "references": instruction.references().map(|reference| json!({
                                 "kind": format!("{:?}", reference.kind),
                                 "target": format!("{:?}", reference.target),
