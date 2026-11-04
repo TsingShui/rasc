@@ -461,7 +461,13 @@ pub(super) fn verify(
             "tracked slots differ from original exact-slot obligations",
         ));
     }
-    let work = Work::new(f)?;
+    let mut work = Work::new(f)?;
+    for row in &mut work.defs {
+        row.sort_unstable_by_key(|s| f.states[s.0 as usize].slot);
+    }
+    for row in &mut work.phis {
+        row.sort_unstable_by_key(|p| f.phis[p.0 as usize].slot);
+    }
     for row in &work.defs {
         if row
             .windows(2)

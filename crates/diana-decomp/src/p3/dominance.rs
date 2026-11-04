@@ -4,6 +4,7 @@ use super::scratch::{bug, filled, id, push, reserve};
 use super::{PointId, SsaError, SsaFacts};
 
 pub(super) struct Dominance {
+    #[cfg(test)]
     pub parent: Vec<usize>,
     pub depth: Vec<usize>,
     pub children: Csr,
@@ -143,6 +144,7 @@ pub(super) fn construct(f: &mut SsaFacts, graph: &Graph) -> Result<Dominance, Ss
         ));
     }
     Ok(Dominance {
+        #[cfg(test)]
         parent: point_parent,
         depth,
         children,
@@ -151,6 +153,7 @@ pub(super) fn construct(f: &mut SsaFacts, graph: &Graph) -> Result<Dominance, Ss
 
 impl Dominance {
     /// Check the predecessor-meet equations, independently of LT's semi/eval data.
+    #[cfg(test)]
     pub fn verify(&self, f: &SsaFacts, graph: &Graph) -> Result<(), SsaError> {
         let n = self.parent.len();
         let levels = (usize::BITS - n.leading_zeros()) as usize;

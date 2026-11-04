@@ -23,7 +23,7 @@ commit PC. No new executable operation or heap effect is introduced.
 
 Every transfer retains its original edge, return, normal-commit or continuation
 role. Equal source/target pairs keep distinct transfer identities. `OperationSite`
-and `TerminalSite` provide original ownership, state positions and checked binding
+and `TerminalSite` provide original ownership, state positions and binding
 spans. Phi incoming records refer to `TransferId`; consumers can obtain the
 original transfer mapping without invoking a P3 analysis helper.
 
@@ -59,8 +59,8 @@ method as malformed without path-feasibility evidence.
 
 1. `dominance.rs` computes Lengauer–Tarjan dominators over normal and exceptional
    private transfers. DFS, union/find compression and tree walks use explicit
-   stacks. Predecessor-meet checks validate the resulting tree separately from
-   LT's semi-dominator scratch.
+   stacks. Independent predecessor-meet verification is compiled only in tests,
+   separate from LT's semi-dominator scratch.
 2. `rename.rs` computes backward live demand per affected slot. Normal writes and
    overlap invalidations both kill preceding state versions. Entry-only states
    do not require IDF expansion.
@@ -73,12 +73,14 @@ method as malformed without path-feasibility evidence.
    is retained. Identities are compacted before publication, not changed by P4.
 6. Finite source-category propagation establishes availability.
 
-Scratch allocation is fallible. Per-slot demand, IDF traversal and independent
-checking can revisit graph positions for different slots; this is not a claim
+Scratch allocation is fallible. Per-slot demand and IDF traversal can revisit
+graph positions for different slots; this is not a claim
 that the whole method pass is linear. There are no numeric resource quotas.
 
-## Production correspondence checks
+## Test-only correspondence checks
 
+`check.rs` and the independent dominator verifier compile only under `cfg(test)`.
+Neither runs on ordinary Engine requests; there is no runtime verification mode.
 `check.rs` verifies position ownership and the exact normal/exception transfer
 multiset against P2, including commits, first entry and returns. It checks the
 fixed slot set, entry/normal/exception definitions, complete overlap
@@ -90,19 +92,24 @@ published exact-slot source. A sparse claim cache detects conflicting sources
 without manufacturing missing bindings. This checker does not reuse the
 renamer's version stacks. Availability is checked independently by reachability
 from the three base source categories. Every retained Phi must be in the use
-closure. These checks are executable obligations, not a formal whole-P3 proof.
+closure. These are test obligations, not production acceptance gates or a formal
+whole-P3 proof. Availability propagation and Phi construction themselves remain
+normal algorithm work; only their independent verification is test-only.
 
 ## Outcomes and inspection
 
 Only the owning constructor with Engine's credential can publish `SsaMethod`.
 `SsaStop` retains the complete P2 input, classified error and an unvalidated
 `SsaPartial`. A partial snapshot cannot be promoted to `SsaFacts` or `SsaMethod`.
-Actual allocation/capacity failures remain ResourceExhausted; failed construction
-or correspondence remains InternalInvariant. Class termination retains delivered
+Actual allocation/capacity failures remain ResourceExhausted; construction
+invariant failures remain InternalInvariant. Correspondence failures exist only
+in test builds. Class termination retains delivered
 members and an explicit termination kind.
 
 Use the single `dbg_shell` example with `p3` (`details:true` for records) or
 `p3-all`. P2 and byte-roundtrip commands observe products retained by the same
 Engine chain; they do not bypass P3 or start a second analysis route. The testing
-policy remains the root AGENTS.md scoped exception; no P3 unit-test suite or
-committed corpus fixture is introduced.
+policy remains the root AGENTS.md scoped exception. The existing core test also
+covers SSA joins, loops, entry backedges, irreducible flow, exception-old-state
+binding, overlap invalidation and unproved sources; no separate suite or committed
+corpus fixture is introduced.

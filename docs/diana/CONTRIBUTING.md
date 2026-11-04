@@ -33,7 +33,12 @@ Use source ideas only through explicit review and focused extraction/reimplement
 Diana is a decompiler: default class/method retrieval MUST expose available
 code, not require an entirely verified Java unit before showing anything.
 Keep partial Java, original DEX debug information and unavailable reasons explicit; a local failure
-MUST NOT discard other members. Text/JSON are presentations of the same result,
+MUST NOT discard independently recoverable fragments within that method or other
+members. All error handling follows [failure locality](PIPELINE_DESIGN.md#9-局部失败与方法退出).
+Contributors MUST identify the owning producer, affected facts, actual dependents
+and retained output when adding or changing an error path. Any wider stop requires
+a concrete dependency/resource reason, not only an error kind or an Engine-level
+catch-and-continue patch. Text/JSON are presentations of the same result,
 not capability gates. Preserve hard errors and distinguish observed readable output
 from independently established semantic behavior. Product acceptance evaluates
 readability, original facts and uncertainty, not a verified-Java status.
@@ -111,7 +116,7 @@ or adding a bypass.
 - Reviewers MUST reject parallel recovery implementations with their own
   complete-method decoding, SSA/type analysis or register/alias tracking.
   Operation-specific helpers and phase-owned proofs do not authorize another
-  method entry path. Independent replay remains a verifier obligation.
+  method entry path. Independent replay remains a test-only verifier obligation.
 - A migration MUST preserve available members, original identities, classified
   failures, raw completeness, effect order and resource behavior.
   Contributors MUST remove replaced paths before reporting the migration
@@ -142,7 +147,7 @@ reproducible inputs; no private APKs are committed.
 The root [AGENTS.md](../../AGENTS.md) owns the prohibition on unit-test development.
 Existing unit and integration cases, fixtures and test-only helpers are removed
 by operator decision. The root policy defines one operator-approved core
-unit-test exception for dynamic instructions through public Engine interfaces.
+unit-test exception for P2/P3 semantic cases through public Engine interfaces.
 CI runs format, lint and build checks without test jobs.
 Contributors MUST NOT restore the removed cases or test-only construction paths.
 
@@ -151,9 +156,13 @@ scripts, downloaders, documentation generators and build/release helpers.
 Contributors MUST NOT bypass this prohibition with self-tests or automated smoke
 checks, and MUST NOT request an exception.
 
-Production input validation, analysis invariants and semantics-preserving
-transform checks remain required. Removing test cases does not authorize weakening
-those checks or claiming that semantic behavior has been independently established.
+Production retains safe parsing, range/arithmetic checks, fallible allocation and
+necessary construction error handling. Independent output audits, symbolic replay,
+duplicate graph/dominance checks and transform-correspondence verification MUST
+compile only under `cfg(test)`. Ordinary debug/release requests MUST NOT execute
+them, and no runtime or feature switch enables them. Tests exercise the same
+Engine algorithms with those verifiers enabled; a successful production product
+means construction completed, not that an independent verifier accepted it.
 
 Regression review checks original member identities, readable availability and
 classified failures. Respect unrelated uncommitted work and obtain operator
@@ -223,10 +232,9 @@ remain authoritative.
 
 - Contributors MUST use newtypes for confusable coordinates and identities across
   module boundaries, such as byte offsets, code-unit offsets and method IDs.
-  Ordinary loop counters do not require wrappers. Raw, range-checked and
-  semantically validated products MUST have distinct types where later analysis
-  depends on those guarantees; only the owning validator constructs its sealed
-  validated product.
+  Ordinary loop counters do not require wrappers. Raw input, partial construction
+  snapshots and complete analysis products MUST remain distinct where consumers
+  depend on those guarantees; only the owning stage constructs its sealed product.
 - Contributors MUST model mutually exclusive states with enums rather than
   independent flags that permit contradictions. Output states and failure kinds
   remain separate as defined by [00-overview](spec/00-overview.md). Independent declaration/code results

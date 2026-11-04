@@ -1,5 +1,6 @@
 //! P3 exception-aware pruned SSA over immutable P2 execution facts.
 mod build;
+#[cfg(test)]
 mod check;
 mod dominance;
 mod graph;

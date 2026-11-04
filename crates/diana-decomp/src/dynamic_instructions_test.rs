@@ -11,7 +11,7 @@ use crate::p2::{
     CommitRule, Coverage, EdgeRole, EdgeTarget, ExceptionFrame, HeapTransfer, InvokeKind,
     LockTransfer, MoveKind, OpKind, ReadOrder,
 };
-use crate::p3::SsaMethod;
+use crate::p3::{SsaMethod, StateKind, TransferOrigin, ValueOrigin};
 use crate::raw::{DexVersion, OperandReference, RawDecodeError, ReferenceSlot};
 use crate::{
     ByteOffset, CallSiteId, ClassDefId, ClassKey, CodeUnitOffset, DexId, DexImage, Engine,
@@ -30,6 +30,7 @@ const VOID: u16 = 8;
 #[test]
 fn dynamic_instructions_preserve_layout_references_and_completions() {
     check_metamorphic_relations();
+    check_ssa_cases();
     for opcode in 0xfa..=0xfd {
         for version in [38, 39] {
             for prototype in [0, WIDE, 2, VOID] {
@@ -165,6 +166,136 @@ fn dynamic_instructions_preserve_layout_references_and_completions() {
             assert_invalid_reference(&fixture.bytes);
         }
     }
+}
+
+fn check_ssa_cases() {
+    let cases: [(&str, &[u16], u16, usize, usize); 10] = [
+        (
+            "diamond",
+            &[0x0538, 4, 0x1012, 0x0228, 0x2012, 0x017b],
+            6,
+            1,
+            0,
+        ),
+        ("loop", &[0x0012, 0x00d8, 0x0100, 0x5034, 0xfffe], 6, 1, 0),
+        ("entry-backedge", &[0x05d8, 0x0105, 0x053c, 0xfffe], 6, 1, 0),
+        ("wide-invalid", &[0x1612, 0x517d], 8, 0, 1),
+        ("mixed-wide", &[0x0738, 3, 0x0228, 0x1612, 0x517d], 8, 1, 1),
+        (
+            "mixed-undefined",
+            &[0x0538, 3, 0x0228, 0x1012, 0x017b],
+            6,
+            1,
+            1,
+        ),
+        ("same-target", &[0x0538, 2], 6, 0, 0),
+        ("dead-phi", &[0x0538, 4, 0x1012, 0x0228, 0x2012], 6, 0, 0),
+        ("direct-dominator", &[0x1012, 0x0538, 3, 0, 0x017b], 6, 0, 0),
+        (
+            "irreducible",
+            &[
+                0x0012, 0x0538, 4, 0x0728, 0, 0x00d8, 0x0100, 0x0538, 3, 0x0528, 0x00d8, 0x0200,
+                0xf928, 0,
+            ],
+            6,
+            2,
+            0,
+        ),
+    ];
+    for (name, words, proto, phis, unavailable) in cases {
+        let fixture = dex(39, words, None, proto, 8, 3, 0);
+        let ssa = flowed(&fixture.bytes);
+        let f = ssa.facts();
+        assert_eq!(f.phis().len(), phis, "{name}");
+        assert_eq!(
+            f.uses()
+                .iter()
+                .filter(|u| f.readable_value(u).is_none())
+                .count(),
+            unavailable,
+            "{name}"
+        );
+        if matches!(name, "mixed-wide" | "mixed-undefined") {
+            let state = f.state(f.phis()[0].state()).unwrap();
+            assert!(state.availability().may_have_value());
+            assert_eq!(
+                state.availability().may_be_invalidated(),
+                name == "mixed-wide"
+            );
+            assert_eq!(
+                state.availability().may_be_undefined(),
+                name == "mixed-undefined"
+            );
+        }
+        if name == "wide-invalid" {
+            let usage = &f.uses()[0];
+            let state = f.state(usage.state()).unwrap();
+            assert!(
+                matches!(state.kind(), StateKind::Invalidated { operation } if operation.0 == 0)
+            );
+            assert!(!state.availability().may_have_value());
+            assert!(state.availability().may_be_invalidated());
+        }
+        if name == "entry-backedge" {
+            let inputs = f.phis()[0].incoming();
+            assert_eq!(inputs.len(), 2);
+            assert!(
+                inputs
+                    .iter()
+                    .any(|i| f.transfers()[i.transfer().0 as usize].origin()
+                        == TransferOrigin::Entry)
+            );
+            assert!(inputs.iter().any(|i| matches!(
+                f.transfers()[i.transfer().0 as usize].origin(),
+                TransferOrigin::Edge(_)
+            )));
+        }
+        if name == "same-target" {
+            assert_eq!(
+                f.transfers()
+                    .iter()
+                    .filter(|t| matches!(t.origin(), TransferOrigin::Edge(_)))
+                    .count(),
+                2
+            );
+        }
+    }
+    let fixture = dex_with_handler(
+        39,
+        &[0x30fc, 0, 0x0765],
+        Some(0x050b),
+        8,
+        8,
+        3,
+        3,
+        &[0x000d, 0x517d, 0x000e],
+    );
+    let ssa = flowed(&fixture.bytes);
+    let f = ssa.facts();
+    let handler_use = &f.operation_uses(crate::p2::OpId(2)).unwrap()[0];
+    let old = f.readable_value(handler_use).unwrap();
+    assert_eq!(
+        f.values()[old.0 as usize].origin(),
+        ValueOrigin::Entry(crate::p3::EntryRole::Parameter(0))
+    );
+    assert_ne!(
+        old,
+        f.operation_outputs(crate::p2::OpId(0)).unwrap()[0].value()
+    );
+    assert!(
+        !f.dominates(
+            f.operation_site(crate::p2::OpId(0))
+                .unwrap()
+                .commit()
+                .unwrap(),
+            handler_use.point()
+        )
+    );
+    assert!(
+        f.values()
+            .iter()
+            .any(|v| v.origin() == ValueOrigin::Exception(crate::p2::OpId(1)))
+    );
 }
 
 fn check_metamorphic_relations() {
@@ -673,6 +804,30 @@ fn dex(
     incoming: u16,
     outgoing: u16,
 ) -> Fixture {
+    dex_with_handler(
+        version,
+        instruction,
+        result,
+        entry_proto,
+        registers,
+        incoming,
+        outgoing,
+        &[0x000d, 0x000e],
+    )
+}
+
+// SSA cases supply an explicit handler body in addition to the fixed code-item inputs.
+#[allow(clippy::too_many_arguments)]
+fn dex_with_handler(
+    version: u8,
+    instruction: &[u16],
+    result: Option<u16>,
+    entry_proto: u16,
+    registers: u16,
+    incoming: u16,
+    outgoing: u16,
+    handler_words: &[u16],
+) -> Fixture {
     let types = [
         "I",
         "J",
@@ -811,7 +966,7 @@ fn dex(
     words.extend(result);
     words.push(0x000e);
     let handler = u32::try_from(words.len()).unwrap();
-    words.extend([0x000d, 0x000e]);
+    words.extend(handler_words);
     for value in [registers, incoming, outgoing, 1] {
         bytes.extend(value.to_le_bytes());
     }

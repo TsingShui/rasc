@@ -1,9 +1,10 @@
 # P2 wide-copy proof trial
 
 The entry `wide_copy.rs` includes `../src/p2/wide_copy.rs`, the exact Rust source
-called by `p2/replay.rs`. It does not copy the executable function into a model.
-Normal Cargo builds remove the `verus_keep_ghost`-gated annotations and spec code;
-they require no Verus Cargo dependency or runtime process.
+called by the test-only `p2/replay.rs`. It does not copy the executable function
+into a model. Ordinary Cargo builds exclude the replay module and this predicate
+entirely; test builds erase ghost annotations. Neither requires a Verus Cargo
+dependency or runtime process.
 
 ## Property and assumptions
 

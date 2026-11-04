@@ -20,8 +20,8 @@ establish that later stages are implemented.
   order, numeric bits, exception selection, lock and initialization behavior.
   Missing facts remain explicit uncertainty, not invented values or declarations.
 - Default retrieval MUST expose available readable code and original facts.
-  A local failure MUST NOT hide independently available members. Java legality
-  and compilability are not output gates.
+  A local failure MUST NOT hide independently recoverable fragments within the
+  same method or other members. Java legality and compilability are not output gates.
 - Text and JSON MUST present the same underlying result. No generated dispatcher,
   fabricated exception body or second analysis/retry route is permitted.
 - The engine MUST remain native Rust without unsafe code or external runtime/
@@ -51,9 +51,13 @@ producer did not read that fact. Complete directory coverage does not imply that
 every member declaration or method body is valid.
 
 Stage stops MUST retain original identity, concrete reasons and available facts.
-They MUST NOT promote an incomplete product to success. Resource/invariant termination is distinct from a local unsupported member. See
-[PIPELINE_DESIGN §4.5](../PIPELINE_DESIGN.md#45-独立读取状态阶段停止与诊断)
-and the outcome contracts in [02-flow](02-flow.md) and [03-ssa](03-ssa.md).
+They MUST NOT promote an incomplete product to success. Failure kind alone MUST
+NOT determine stop scope. All error handling MUST follow
+[PIPELINE_DESIGN §9](../PIPELINE_DESIGN.md#9-局部失败与方法退出): preserve independent
+fragments and results, and widen a stop only for an actual shared dependency or
+resource failure. Product guarantees and read states remain governed by
+[§4.5](../PIPELINE_DESIGN.md#45-独立读取状态阶段停止与诊断) and the outcome contracts
+in [02-flow](02-flow.md) and [03-ssa](03-ssa.md).
 
 ## Safety and evidence
 
@@ -67,7 +71,8 @@ truncation. Original input facts, platform capacity and bounded queues are not
 optional safety checks.
 
 Build/lint success and finite corpus observations do not prove semantic
-correctness. Stage-owned translation checks establish only their stated
+correctness. Independent stage-owned translation checks compile only in tests;
+normal decompilation does not run them. Their results establish only their stated
 obligations and semantic model. Reference use and evidence limitations are owned
 by [SOURCE_MAP](../SOURCE_MAP.md); contribution and testing rules are owned by
 [CONTRIBUTING](../CONTRIBUTING.md) and the root AGENTS.md.

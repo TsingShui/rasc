@@ -20,17 +20,27 @@ P3 privately retains P2 and delivers exact-slot states, definitions, ordered use
 bindings, necessary Phis, per-transfer incoming states and original StatePoint
 mappings. Borrowed `ExecutionFacts` exposes normal execution queries, not a
 predecessor product. [P3's contract](../../docs/diana/spec/03-ssa.md) describes
-exception-aware LT dominators, live-demand IDF placement and correspondence checks.
+exception-aware LT dominators, live-demand IDF placement and test-only correspondence checks.
 Undefined/invalidated sources remain explicit availability facts, not default values.
 
 A P2 stop retains the complete P1 input, classified error and available unvalidated
-construction facts. A P3 stop retains complete P2 input and an unvalidated SSA
+construction facts. A P3 stop retains complete P2 input and a partial SSA
 snapshot; neither stop can be promoted to a successful product. Class requests retain delivered members and mark request-level
 termination explicitly. Range/capacity checks and fallible allocation remain
 mandatory. The CLI/host owns process termination; Engine has no request
 cancellation callback/token or checkpoint parameter. There are no numeric quotas.
 
-Translation checking compares ordered local symbolic behavior and completion
+[Failure locality](../../docs/diana/PIPELINE_DESIGN.md#9-局部失败与方法退出) requires
+partial-method recovery and independent continuation. This is not yet uniform:
+Engine currently stops a class on `ResourceExhausted` or `InternalInvariant`, and
+fragment-level recovery is not implemented throughout the method chain.
+
+Independent translation checking compiles only under `cfg(test)`; ordinary
+Engine requests do not run symbolic replay, output audits or duplicate dominator
+verification. There is no runtime or feature switch. Parsing and construction
+still enforce input safety, checked arithmetic and allocation failures.
+
+Test verification compares ordered local symbolic behavior and completion
 rules and matches every original transfer/coverage owner. It does not prove ART
 admission or concrete external-call behavior. Real-input corpus runs have not
 encountered custom/polymorphic invokes or method-handle/type constants. The scoped
@@ -39,11 +49,11 @@ checks public Engine products against independently specified references, ordere
 slots, result categories and normal/exception completion rules. It also checks
 classified stops for invalid versions, references, argument layouts and results.
 The same test checks register-renaming relations, equivalent wide-copy/constant
-encodings and retention of call/exception effects when a result is discarded.
+encodings, discarded call results and SSA joins/loops/exception/overlap cases.
 This is static synthetic-input evidence, not ART execution evidence.
-A [Verus trial](proofs/README.md) proves the wide-copy patch predicate called by
-production replay, using the same Rust function body. The adapter and remaining
-P2 checks are not machine-proved; this is not a proof of whole-method correctness.
+A [Verus trial](proofs/README.md) proves the wide-copy patch predicate used by
+test replay, using the same Rust function body. It is absent from production. The adapter and remaining
+P2 test checks are not machine-proved; this is not a proof of whole-method correctness.
 Fault-injected allocation execution has not been performed; failure retention is
 currently code-reviewed.
 
@@ -62,7 +72,8 @@ measurements remain unperformed.
 
 `p2-all` observes retained execution facts from the same Engine chain and reports
 classified outcomes and encountered opcode variants. `roundtrip-all` checks independent byte re-encoding over retained
-P1 evidence. No phase-specific debug binary is required.
+P1 evidence. These inspection commands do not run the test-only P2/P3 verifiers.
+No phase-specific debug binary is required.
 
 Applicable engine gates:
 

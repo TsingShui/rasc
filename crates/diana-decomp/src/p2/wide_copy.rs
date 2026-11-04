@@ -1,5 +1,5 @@
-//! Acceptance of captured word patches for DEX move-wide.
-//! Verus checks this same executable body; ordinary Cargo builds erase ghost code.
+//! Test-only acceptance of captured word patches for DEX move-wide.
+//! Verus checks the same body used by test replay; production excludes this module.
 
 #[cfg(verus_keep_ghost)]
 use vstd::prelude::*;

@@ -8,10 +8,15 @@ package-local `AGENTS.md` before working in either package.
 
 - Default retrieval MUST expose available readable code, preserve original member
   identities and DEX facts, and mark material uncertainty. A local failure MUST
-  NOT suppress other members; text and JSON present the same result.
+  NOT suppress independently recoverable fragments within the same method or
+  other members; text and JSON present the same result.
 - Java legality or compilability is not a decompilation goal or output gate.
   Keep concrete recovery diagnostics, not whole-result verification badges;
-  retain input safety, analysis invariants and semantics-preserving transform checks.
+  retain input safety and necessary construction error handling. Independent
+  translation/correspondence verification belongs to tests, not normal requests.
+- Normal decompilation MUST NOT run independent output validation, symbolic replay
+  or duplicate graph/dominance verification. Compile these only under `cfg(test)`;
+  do not add a runtime or feature switch that enables them on ordinary requests.
 - Treat APK/DEX bytes as untrusted: check sizes, ranges and arithmetic before
   slicing or allocating. Do not panic, hang or allocate without bounds.
 - The analysed input is the single source of decompilation facts. Do not require
@@ -32,6 +37,18 @@ package-local `AGENTS.md` before working in either package.
 - Never bypass a missing producer or sealed boundary with a parallel analysis
   route. Follow the approved refactoring authority below for interface changes.
 
+## Error handling
+
+- All error paths MUST follow [failure locality](docs/diana/PIPELINE_DESIGN.md#9-局部失败与方法退出):
+  contain failure to the smallest reliably identified scope and propagate missing
+  facts only to their actual dependents. Partial method recovery is a normal result.
+- Failure kind MUST NOT alone determine stop scope. A method-private invariant or
+  allocation failure MUST NOT automatically terminate sibling methods, classes or
+  DEX images; widening a stop requires a concrete shared-input/resource reason.
+- Preserve recovered code, original facts, identities and precise unavailable
+  ranges/reasons. Do not erase effects, fabricate values or promote incomplete
+  analysis snapshots to complete products to appear tolerant.
+
 ## Pipeline refactoring authority
 
 The target in [PIPELINE_DESIGN](docs/diana/PIPELINE_DESIGN.md) is approved: P0 owns
@@ -45,7 +62,8 @@ chapters describe the existing implementation until migrated to this target.
   outcomes, check organization and implementation order. Prefer implementing the
   new product structure; existing algorithms can be reused or rewritten without
   preserving old private IR layouts or moving files one-to-one. Contributors MUST
-  document producer/consumer needs, retain safety and semantic-check obligations,
+  document producer/consumer needs, retain input safety and test-owned semantic
+  verification obligations,
   and remove replaced paths when the new chain enters the shared formal entry.
   Rewriting MUST NOT introduce a second method-analysis or retry route.
 - Contributors MUST NOT change agreed output behavior, hide available members or
@@ -90,12 +108,12 @@ chapters describe the existing implementation until migrated to this target.
   Existing test cases and fixtures are removed by operator decision.
   The sole operator-approved exception is the one core test in
   `crates/diana-decomp/src/dynamic_instructions_test.rs`, exercised through public
-  Engine interfaces with synthetic DEX input. Contributors MAY maintain this
+  Engine interfaces with synthetic DEX input, including P2/P3 correspondence cases. Contributors MAY maintain this
   scoped test and run it with `cargo nextest run`; this does not authorize other
   tests, fixture suites or private-stage harnesses.
 - Contributors MUST NOT add tests, fixtures or CI test jobs for non-core tooling.
-  Production input checks, analysis invariants and semantics-preserving transform
-  checks remain required. Build/lint success does not establish semantic correctness.
+  Production input safety and necessary construction errors remain enforced;
+  independent transform verification remains test-only. Build/lint success does not establish semantic correctness.
 - Respect uncommitted work; obtain approval before withdrawing or committing
   unrelated changes. Do not commit, push, publish or tag unless requested.
   Authorized commit subjects start with `[AUTOMATED] ` and a Conventional type.

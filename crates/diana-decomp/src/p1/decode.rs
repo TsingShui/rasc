@@ -40,6 +40,7 @@ impl<'a> ProgramIndex<'a> {
             Ok(facts) => facts,
             Err(error) => return outcome(items, error),
         };
+        #[cfg(test)]
         if let Err(error) = check_reference_coverage(&items, &reference_facts) {
             return outcome(items, error);
         }
@@ -225,6 +226,7 @@ impl<'a> ProgramIndex<'a> {
     }
 }
 
+#[cfg(test)]
 fn check_reference_coverage(
     items: &[super::DecodedItem],
     facts: &[ReferenceFactEntry<'_>],

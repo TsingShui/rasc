@@ -33,7 +33,7 @@ Both stage stops retain their error and available unvalidated construction facts
 ```
 
 P2/P3 construction requires a `MethodTask` credential issued only by Engine.
-Each stage owns construction and checks; Engine cannot assemble successful
+Each stage owns construction; independent checks are test-only. Engine cannot assemble successful
 FlowMethod or SsaMethod products. A class stop retains delivered members with an explicit termination
 kind. Local unsupported methods do not erase independent siblings. The currently
 implemented method scheduling loop is sequential.
@@ -58,12 +58,13 @@ DEX reconstruction.
 - Only owning-stage constructors with scheduler-issued authority can publish
   mature products. Consumers MUST NOT promote partial snapshots or reuse stage
   construction to retry a stopped method.
-- Stage checks validate their own conversions against original obligations.
-  Checks MUST NOT repair missing bindings, manufacture predecessor facts or
-  invoke another stage's analysis.
+- Independent stage correspondence checks compile only under `cfg(test)`.
+  Normal Engine requests run the algorithms without verification passes or a
+  verification switch. Input safety and construction error handling remain.
+  Test verifiers MUST NOT repair bindings or invoke another stage's analysis.
 - Method results and failure kinds are distinct. Unknown heap/lock outcomes are
   explicit semantics, not a successful verification badge or an input error.
 
 The stage chapters define [input](spec/01-input.md), [P0](spec/00-class.md) and
-[P2 execution/checking](spec/02-flow.md) and [P3 SSA/checking](spec/03-ssa.md). PIPELINE_DESIGN remains authoritative
+[P2 execution/tests](spec/02-flow.md) and [P3 SSA/tests](spec/03-ssa.md). PIPELINE_DESIGN remains authoritative
 for ownership, consumers, failure preservation and the later product chain.

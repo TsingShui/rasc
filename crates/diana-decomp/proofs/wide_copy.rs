@@ -1,4 +1,4 @@
-//! Verus entry over the exact production checker source, not a copied model.
+//! Verus entry over the exact test-checker source, not a copied model.
 #![forbid(unsafe_code)]
 #![allow(dead_code)]
 

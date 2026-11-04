@@ -615,6 +615,7 @@ pub struct FlowMethod<'a> {
 }
 
 impl<'a> FlowMethod<'a> {
+    #[cfg(test)]
     pub(super) fn decoded(&self) -> &DecodedMethod<'a> {
         &self.decoded
     }

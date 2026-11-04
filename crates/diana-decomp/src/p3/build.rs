@@ -1,5 +1,7 @@
+#[cfg(test)]
+use super::check;
 use super::scratch::{bug, filled, id, lists, push};
-use super::{check, dominance, graph, rename, *};
+use super::{dominance, graph, rename, *};
 use crate::p2::{ExecutionFacts, FlowMethod, OpKind};
 use crate::{FailureKind, RegisterSlot, SlotWidth};
 use std::collections::TryReserveError;
@@ -11,6 +13,7 @@ pub enum SsaError {
     Allocation(#[source] TryReserveError),
     #[error("SSA capacity is not representable on this platform")]
     PlatformCapacity,
+    #[cfg(test)]
     #[error("SSA correspondence failed at {point:?}: {obligation}")]
     Correspondence {
         point: PointId,
@@ -79,12 +82,6 @@ impl Work {
         }
         for phi in &f.phis {
             push(&mut work.phis[phi.point.0 as usize], phi.id)?;
-        }
-        for row in &mut work.defs {
-            row.sort_unstable_by_key(|s| f.states[s.0 as usize].slot);
-        }
-        for row in &mut work.phis {
-            row.sort_unstable_by_key(|p| f.phis[p.0 as usize].slot);
         }
         Ok(work)
     }
@@ -277,10 +274,13 @@ fn construct(flow: ExecutionFacts<'_, '_>, f: &mut SsaFacts) -> Result<(), SsaEr
         }
     }
     let dom = dominance::construct(f, &graph)?;
+    #[cfg(test)]
     dom.verify(f, &graph)?;
     rename::place(f, &graph, &dom, &mut work)?;
     rename::bind(f, &graph, &dom, &work)?;
     rename::compact(f)?;
     rename::availability(f)?;
-    check::verify(flow, f, &graph)
+    #[cfg(test)]
+    check::verify(flow, f, &graph)?;
+    Ok(())
 }

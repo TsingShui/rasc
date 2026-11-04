@@ -29,6 +29,7 @@ pub enum FlowError {
         opcode: u8,
         reason: &'static str,
     },
+    #[cfg(test)]
     #[error("P2 correspondence failed at {pc:?}: {obligation}")]
     Correspondence {
         pc: CodeUnitOffset,
@@ -43,9 +44,9 @@ impl FlowError {
         match self {
             Self::Allocation(_) | Self::PlatformCapacity => FailureKind::ResourceExhausted,
             Self::Unsupported { .. } => FailureKind::Unsupported,
-            Self::InternalInvariant(_) | Self::Correspondence { .. } => {
-                FailureKind::InternalInvariant
-            }
+            Self::InternalInvariant(_) => FailureKind::InternalInvariant,
+            #[cfg(test)]
+            Self::Correspondence { .. } => FailureKind::InternalInvariant,
         }
     }
 }
@@ -134,6 +135,7 @@ pub(crate) fn build_flow<'a>(
         exits: parts.exits,
         coverage: parts.coverage,
     };
+    #[cfg(test)]
     if let Err(error) = super::check::verify(&flow) {
         return FlowBuild::Stopped(super::FlowStop {
             input: flow.decoded,

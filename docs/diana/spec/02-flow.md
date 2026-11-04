@@ -48,9 +48,13 @@ contains field/array access and check-cast handlers. Neither source is a product
 dependency or an external declaration source. The checks do not establish ART
 admission or account for debugger/VM instrumentation.
 
-## Translation validation
+## Test-only translation validation
 
-`check.rs` validates the product before publication:
+`check.rs`, `oracle.rs`, `replay.rs` and their scratch/predicate helpers compile
+only under `cfg(test)`. Test builds check constructed products; ordinary debug
+and release requests do not run these passes and have no verification switch.
+Input parsing, required instruction associations and construction failures remain
+part of normal analysis. The test checker:
 
 1. Check arena identities and the complete, non-overlapping block partition.
 2. Walk each block's operations in original PC order, including each merged
@@ -90,11 +94,11 @@ with an exact captured-input predicate. The remaining relation fields still
 compare independently constructed descriptions. The predicate's Verus contract
 establishes acceptance conditions and equality with the old-frame DEX copy rule
 for arbitrary word values, including overlap. The proof entry includes the same
-executable source used by replay; ordinary Cargo builds erase proof annotations.
+executable source used by test replay; ordinary Cargo builds exclude this checker.
 The decoded/symbolic-record adapter and whole-method composition remain unproven.
 See the [proof contract and reproduction](../../../crates/diana-decomp/proofs/README.md).
 
-Acceptance: every published operation has matching behavior, ordered arguments,
+Test acceptance: each exercised operation has matching behavior, ordered arguments,
 normal register patch and exceptional selection/frame obligations, and every
 published transfer has one original owner. Traversals have finite measures and
 scratch allocation is fallible. Scratch indexing uses standard in-place unstable
@@ -136,6 +140,6 @@ subsequent members. Product records are privately constructed and consumers use
 immutable queries; later stages cannot assemble a substitute success product.
 
 Inspect actual products through the single `dbg_shell` example. `p2-all` reports
-successful/failed methods and observed replay opcode variants. Missing variants
+constructed/failed methods and encountered opcode variants, not verification results. Missing variants
 are missing input evidence, not a pass. Follow the root AGENTS.md scoped test
-policy; production safety and translation checks remain required.
+policy; input safety remains in production and correspondence verification stays in tests.
