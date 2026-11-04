@@ -132,27 +132,6 @@ impl PrimitiveArray {
             Self::Long | Self::Double => 8,
         }
     }
-    pub(crate) fn parse_units(
-        name: &[u16],
-        budget: &mut RunContext<'_>,
-    ) -> Result<Option<Self>, RequestError> {
-        for kind in [
-            Self::Boolean,
-            Self::Byte,
-            Self::Short,
-            Self::Char,
-            Self::Int,
-            Self::Float,
-            Self::Long,
-            Self::Double,
-        ] {
-            if crate::context::same_units(name, kind.descriptor(), budget)? {
-                return Ok(Some(kind));
-            }
-        }
-        Ok(None)
-    }
-
     pub(crate) fn parse(
         name: DexString<'_>,
         budget: &mut RunContext<'_>,

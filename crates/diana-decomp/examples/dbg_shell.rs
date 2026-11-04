@@ -193,7 +193,16 @@ impl Shell {
                         "method is not in the P0 directory",
                     ));
                 };
-                let decoded = analysis.methods.swap_remove(index).result?;
+                let outcome = analysis.methods.swap_remove(index).result?;
+                let Some(decoded) = outcome.decoded else {
+                    return Ok(json!({
+                        "class_def": class,
+                        "method": method,
+                        "decoded": false,
+                        "prefix": outcome.prefix.len(),
+                        "error": outcome.error.map(|error| format!("{error}")),
+                    }));
+                };
                 let mut items = Vec::new();
                 for item in decoded.items() {
                     items.push(match item {

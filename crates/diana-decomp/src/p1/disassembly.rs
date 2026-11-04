@@ -115,6 +115,13 @@ impl<'a> DecodedPayload {
     }
 }
 
+/// P1 result with an explicit decoded product or a retained prefix.
+pub struct DecodedOutcome<'a> {
+    pub decoded: Option<DecodedMethod<'a>>,
+    pub prefix: Vec<DecodedItem>,
+    pub error: Option<MethodError>,
+}
+
 /// One decoded original item in PC order.
 #[derive(Clone, Copy, Debug)]
 pub enum DecodedItem {
@@ -289,87 +296,96 @@ impl<'a> DecodedMethod<'a> {
 }
 
 impl<'a> ProgramIndex<'a> {
-    /// Disassembles the checked instruction bytes of one method source. The
-    /// reader owns range and encoding checks; this builds the original instruction
-    /// directory and resolves each operand reference to its table domain. It
-    /// performs no CFG construction, register typing or source selection.
-    pub(crate) fn decode_method(
+    /// Builds the original instruction/payload directory once. On failure the
+    /// returned prefix contains every item decoded before the failing PC.
+    pub(crate) fn build_items(
         &self,
+        source: &RawMethodView<'a>,
+        budget: &mut RunContext<'_>,
+    ) -> Result<Vec<DecodedItem>, (Vec<DecodedItem>, MethodError)> {
+        let mut items = Vec::new();
+        let result =
+            (|| -> Result<(), MethodError> {
+                let mut pc = CodeUnitOffset(0);
+                while pc.0 < source.code_units().0 {
+                    budget.checkpoint()?;
+                    let layout = instruction_layout_of(source, pc)?;
+                    match layout.kind() {
+                        LayoutKind::Instruction(spec) => {
+                            let operands = instruction_operands(source.instructions(), pc, layout)
+                                .map_err(MethodError::Decode)?;
+                            let mut references = [None; 2];
+                            for (slot, reference) in layout.references().into_iter().enumerate() {
+                                let Some(reference) = reference else {
+                                    continue;
+                                };
+                                let kind = spec.references.get(slot).copied().flatten().ok_or(
+                                    MethodError::InternalInvariant(
+                                        "decoded reference slot has no declared kind",
+                                    ),
+                                )?;
+                                references[slot] = Some(DecodedReference {
+                                    kind,
+                                    target: reference.target,
+                                    slot: reference.operand_slot,
+                                });
+                            }
+                            let relative = operands
+                                .offset()
+                                .map(|delta| pc.0.checked_add_signed(delta.0).map(CodeUnitOffset));
+                            let branch_target = match spec.flow {
+                                FlowKind::Goto | FlowKind::Conditional => relative.flatten(),
+                                _ => None,
+                            };
+                            let payload_target = match spec.flow {
+                                FlowKind::PackedSwitch
+                                | FlowKind::SparseSwitch
+                                | FlowKind::FillArray => relative.flatten(),
+                                _ => None,
+                            };
+                            push(
+                                &mut items,
+                                DecodedItem::Instruction(DecodedInstruction {
+                                    pc,
+                                    spec,
+                                    layout,
+                                    operands,
+                                    references,
+                                    branch_target,
+                                    payload_target,
+                                }),
+                                budget,
+                            )
+                            .map_err(scratch)?;
+                        }
+                        _ => {
+                            push(
+                                &mut items,
+                                DecodedItem::Payload(DecodedPayload { pc, layout }),
+                                budget,
+                            )
+                            .map_err(scratch)?;
+                        }
+                    }
+                    pc = pc.checked_advance(layout.width()).ok_or(
+                        MethodError::InternalInvariant("checked instruction extent overflowed"),
+                    )?;
+                }
+                Ok(())
+            })();
+        match result {
+            Ok(()) => Ok(items),
+            Err(error) => Err((items, error)),
+        }
+    }
+
+    pub(crate) fn assemble_decoded(
         source: &RawMethodView<'a>,
         layout: CheckedMethodLayout<'a>,
         protection: CheckedProtection,
-        budget: &mut RunContext<'_>,
-    ) -> Result<DecodedMethod<'a>, MethodError> {
-        budget.checkpoint()?;
-        let mut items = Vec::new();
-        let mut pc = CodeUnitOffset(0);
-        while pc.0 < source.code_units().0 {
-            budget.checkpoint()?;
-            let layout = instruction_layout_of(source, pc)?;
-            match layout.kind() {
-                LayoutKind::Instruction(spec) => {
-                    let operands = instruction_operands(source.instructions(), pc, layout)
-                        .map_err(MethodError::Decode)?;
-                    let mut references = [None; 2];
-                    for (slot, reference) in layout.references().into_iter().enumerate() {
-                        let Some(reference) = reference else {
-                            continue;
-                        };
-                        let kind = spec.references.get(slot).copied().flatten().ok_or(
-                            MethodError::InternalInvariant(
-                                "decoded reference slot has no declared kind",
-                            ),
-                        )?;
-                        references[slot] = Some(DecodedReference {
-                            kind,
-                            target: reference.target,
-                            slot: reference.operand_slot,
-                        });
-                    }
-                    let relative = operands
-                        .offset()
-                        .map(|delta| pc.0.checked_add_signed(delta.0).map(CodeUnitOffset));
-                    let branch_target = match spec.flow {
-                        FlowKind::Goto | FlowKind::Conditional => relative.flatten(),
-                        _ => None,
-                    };
-                    let payload_target = match spec.flow {
-                        FlowKind::PackedSwitch | FlowKind::SparseSwitch | FlowKind::FillArray => {
-                            relative.flatten()
-                        }
-                        _ => None,
-                    };
-                    push(
-                        &mut items,
-                        DecodedItem::Instruction(DecodedInstruction {
-                            pc,
-                            spec,
-                            layout,
-                            operands,
-                            references,
-                            branch_target,
-                            payload_target,
-                        }),
-                        budget,
-                    )
-                    .map_err(scratch)?;
-                }
-                _ => {
-                    push(
-                        &mut items,
-                        DecodedItem::Payload(DecodedPayload { pc, layout }),
-                        budget,
-                    )
-                    .map_err(scratch)?;
-                }
-            }
-            pc = pc
-                .checked_advance(layout.width())
-                .ok_or(MethodError::InternalInvariant(
-                    "checked instruction extent overflowed",
-                ))?;
-        }
-        Ok(DecodedMethod {
+        items: Vec<DecodedItem>,
+    ) -> DecodedMethod<'a> {
+        DecodedMethod {
             source: source.clone(),
             layout,
             protection,
@@ -379,7 +395,7 @@ impl<'a> ProgramIndex<'a> {
             outs_size: source.outs_size(),
             code_units: source.code_units(),
             instruction_bytes: source.code_byte_range(),
-        })
+        }
     }
 }
 

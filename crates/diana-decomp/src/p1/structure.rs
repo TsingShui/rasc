@@ -5,7 +5,7 @@ use thiserror::Error;
 use super::binding::{ResultKind, check_producer};
 use crate::input::debug_program::DebugProgram;
 use crate::input::formats::{FlowKind, RegisterShape, RegisterWidth, ResultRole, wide_word};
-use crate::input::operands::{RawOperands, RegisterEncoding, instruction_operands};
+use crate::input::operands::{RawOperands, RegisterEncoding};
 use crate::input::{Cursor, InputError, ProgramIndex, RawMethodView};
 use crate::raw::{
     Format, InsnLayout, LayoutKind, OpcodeSpec, OperandReference, RawDecodeError,
@@ -119,6 +119,7 @@ impl<'a> ProgramIndex<'a> {
     pub fn check_method_layout(
         &self,
         original: &RawMethodView<'a>,
+        items: &[super::DecodedItem],
         budget: &mut RunContext<'_>,
     ) -> Result<CheckedMethodLayout<'a>, MethodError> {
         budget.checkpoint()?;
@@ -131,27 +132,24 @@ impl<'a> ProgramIndex<'a> {
         budget.checkpoint()?;
         let mut boundaries = Boundaries::new(original.code_units(), budget)?;
         let mut instruction_count = 0usize;
-        let mut pc = CodeUnitOffset(0);
-        while pc.0 < original.code_units().0 {
+        for item in items {
             budget.checkpoint()?;
-            let layout = original.layout_at(pc)?;
-            let start = match layout.kind() {
-                LayoutKind::Instruction(_) => {
+            match item {
+                super::DecodedItem::Instruction(_) => {
                     instruction_count = instruction_count
                         .checked_add(1)
                         .ok_or(MethodError::PlatformCapacity)?;
-                    Start::Instruction
+                    boundaries.set_start(item.pc(), Start::Instruction)?;
                 }
-                _ => {
-                    check_keys(original, pc, layout.kind(), budget)?;
-                    Start::Payload
+                super::DecodedItem::Payload(payload) => {
+                    check_keys(original, item.pc(), payload.layout().kind(), budget)?;
+                    boundaries.set_start(item.pc(), Start::Payload)?;
                 }
-            };
-            boundaries.set_start(pc, start)?;
-            pc = advance(pc, layout)?;
+            }
         }
         let mut checker = Checker {
             original,
+            items,
             boundaries,
         };
         checker.check_exceptions(budget)?;
@@ -373,6 +371,7 @@ fn check_keys(
 
 struct Checker<'m, 'a> {
     original: &'m RawMethodView<'a>,
+    items: &'m [super::DecodedItem],
     boundaries: Boundaries,
 }
 
@@ -410,8 +409,37 @@ impl<'a> Checker<'_, 'a> {
         Ok(())
     }
 
+    fn item_at(&self, pc: CodeUnitOffset) -> Result<&super::DecodedItem, MethodError> {
+        self.items
+            .binary_search_by(|item| item.pc().cmp(&pc))
+            .ok()
+            .map(|index| &self.items[index])
+            .ok_or(MethodError::InternalInvariant(
+                "decoded directory lost a checked item",
+            ))
+    }
+
+    fn layout_at(&self, pc: CodeUnitOffset) -> Result<InsnLayout, MethodError> {
+        match self.item_at(pc)? {
+            super::DecodedItem::Instruction(instruction) => Ok(instruction.layout()),
+            super::DecodedItem::Payload(payload) => Ok(payload.layout()),
+        }
+    }
+
+    fn operands_at(
+        &self,
+        pc: CodeUnitOffset,
+    ) -> Result<crate::input::operands::RawOperands, MethodError> {
+        match self.item_at(pc)? {
+            super::DecodedItem::Instruction(instruction) => Ok(*instruction.operands()),
+            super::DecodedItem::Payload(_) => Err(MethodError::InternalInvariant(
+                "decoded directory has no operands for a payload",
+            )),
+        }
+    }
+
     fn spec_at(&self, pc: CodeUnitOffset) -> Result<OpcodeSpec, MethodError> {
-        match self.original.layout_at(pc)?.kind() {
+        match self.layout_at(pc)?.kind() {
             LayoutKind::Instruction(spec) => Ok(spec),
             _ => Err(MethodError::InternalInvariant(
                 "instruction lookup reached payload",
@@ -424,11 +452,7 @@ impl<'a> Checker<'_, 'a> {
         pc: CodeUnitOffset,
         spec: OpcodeSpec,
     ) -> Result<CodeUnitOffset, MethodError> {
-        let operands = instruction_operands(
-            self.original.instructions(),
-            pc,
-            self.original.layout_at(pc)?,
-        )?;
+        let operands = self.operands_at(pc)?;
         let delta = operands
             .offset()
             .ok_or(MethodError::InternalInvariant("branch format has no delta"))?
@@ -471,11 +495,17 @@ impl<'a> Checker<'_, 'a> {
         pc: CodeUnitOffset,
         flow: FlowKind,
     ) -> Result<(CodeUnitOffset, LayoutKind), MethodError> {
-        let target = relative(pc, self.original.signed_word(pc, 1)?)?;
+        let target = relative(
+            pc,
+            self.operands_at(pc)?
+                .offset()
+                .ok_or(MethodError::InternalInvariant("switch lost payload delta"))?
+                .0,
+        )?;
         if self.boundaries.start(target)? != Start::Payload {
             return Err(bad(pc, MethodProblem::WrongPayloadKind));
         }
-        let kind = self.original.layout_at(target)?.kind();
+        let kind = self.layout_at(target)?.kind();
         if !matches!(
             (flow, kind),
             (FlowKind::PackedSwitch, LayoutKind::PackedSwitch { .. })
@@ -522,9 +552,9 @@ impl<'a> Checker<'_, 'a> {
         let mut previous: Option<ResultKind> = None;
         while pc.0 < self.original.code_units().0 {
             budget.checkpoint()?;
-            let layout = self.original.layout_at(pc)?;
+            let layout = self.layout_at(pc)?;
             if let LayoutKind::Instruction(spec) = layout.kind() {
-                let operands = instruction_operands(self.original.instructions(), pc, layout)?;
+                let operands = self.operands_at(pc)?;
                 check_registers(self.original, pc, spec, operands, budget)?;
                 for reference in layout.references().into_iter().flatten() {
                     budget.checkpoint()?;
@@ -605,7 +635,7 @@ impl<'a> Checker<'_, 'a> {
         self.enqueue(entry, &mut pending)?;
         while let Some(pc) = pending.pop() {
             budget.checkpoint()?;
-            let layout = self.original.layout_at(pc)?;
+            let layout = self.layout_at(pc)?;
             let LayoutKind::Instruction(spec) = layout.kind() else {
                 return Err(MethodError::InternalInvariant(
                     "reachability entered a payload",

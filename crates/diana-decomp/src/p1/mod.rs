@@ -6,6 +6,7 @@ mod disassembly;
 mod structure;
 
 pub use disassembly::{
-    DecodedInstruction, DecodedItem, DecodedMethod, DecodedPayload, DecodedReference,
+    DecodedInstruction, DecodedItem, DecodedMethod, DecodedOutcome, DecodedPayload,
+    DecodedReference,
 };
 pub use structure::{CheckedMethodLayout, MethodError, MethodProblem};

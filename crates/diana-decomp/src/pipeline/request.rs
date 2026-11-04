@@ -1,5 +1,5 @@
 use crate::input::{InputError, MethodError};
-use crate::{ControlError, DebugError, FailureKind};
+use crate::{ControlError, FailureKind};
 use std::collections::TryReserveError;
 use thiserror::Error;
 
@@ -9,8 +9,6 @@ pub enum RequestError {
     Input(#[from] InputError),
     #[error(transparent)]
     Method(#[from] MethodError),
-    #[error(transparent)]
-    Debug(#[from] DebugError),
     #[error(transparent)]
     Control(#[from] ControlError),
     #[error("request allocation failed: {0}")]
@@ -63,7 +61,6 @@ impl RequestError {
         match self {
             Self::Input(error) => error.kind(),
             Self::Method(error) => error.kind(),
-            Self::Debug(error) => error.kind(),
             Self::Control(error) => error.kind(),
             Self::Allocation(_) | Self::PlatformCapacity => FailureKind::ResourceExhausted,
             Self::UnknownDex | Self::UndefinedRegister { .. } | Self::InvalidWideRead { .. } => {

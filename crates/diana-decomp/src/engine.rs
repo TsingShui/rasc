@@ -164,7 +164,7 @@ pub struct ClassAnalysis<'a> {
 
 pub struct MethodAnalysis<'a> {
     pub key: MethodKey,
-    pub result: Result<crate::input::DecodedMethod<'a>, RequestError>,
+    pub result: Result<crate::p1::DecodedOutcome<'a>, RequestError>,
 }
 
 impl<'a> Engine<'a> {

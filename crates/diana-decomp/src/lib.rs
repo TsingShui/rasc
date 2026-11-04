@@ -1,18 +1,10 @@
 //! Native DEX analysis with caller-owned input and request-scoped resource control.
 
-mod context;
 mod engine;
 pub mod input;
 #[path = "p0_class/mod.rs"]
 pub mod p0;
 pub mod p1;
-mod p2_flow;
-mod p3_ssa;
-mod p4_types;
-mod p5_variables;
-mod p6_regions;
-mod p7_java;
-mod p8_emit;
 pub use engine::{
     DexImage, Engine, MethodSelector, Options, RecoveryPolicy, RepresentationPolicy, Request,
 };
@@ -21,32 +13,11 @@ pub use input::annotation_facts::{
     AnnotationRecord, AnnotationToken, AnnotationValue, AnnotationValueKind, OriginalAnnotations,
 };
 pub use input::ownership::{NestedClass, Ownership};
-pub use p4_types::CaptureCertificate;
-pub use p7_java::enums::{EnumFieldRole, EnumMemberRole, GeneratedEnumField, GeneratedEnumMember};
-pub use p7_java::member_emission::GeneratedMember;
-pub use p7_java::nested_plan::GeneratedCaptureField;
-pub use p7_java::{
-    GeneratedBridge, JavaCallSite, JavaField, JavaInitializer, JavaInvokeKind, JavaMethod,
-    JavaMethodDecl, JavaUnit,
-};
-pub use p8_emit::render;
 pub use pipeline::request::RequestError;
-pub use substrate::fields::{
-    FieldDeclarationOutput, FieldFacts, FieldInitialValue, FieldKey, FieldOutput, FieldStorage,
-    GeneratedField, StaticFieldOrdinal,
-};
-pub use substrate::report::NestedReport;
-pub use substrate::report::{AnnotationStatus, ClassAnnotations};
-pub use substrate::report::{
-    ClassOriginSpan, ClassOutput, DeclarationOutput, Diagnostic, DiagnosticCause, ImageFact,
-    ImageOrigin, MethodFacts, MethodOutput, OriginSpan, OutputReason, RenderedReport, Report,
-    SourceLanguage,
-};
+pub use substrate::fields::{FieldStorage, StaticFieldOrdinal};
+pub use substrate::report::{Diagnostic, DiagnosticCause, ImageFact, ImageOrigin};
 mod pipeline;
 
-pub use p8_emit::{
-    DebugCoverage, DebugError, DebugIssue, DebugResourceError, DebugSource, DebugSourceKind,
-};
 mod substrate;
 
 pub mod raw {

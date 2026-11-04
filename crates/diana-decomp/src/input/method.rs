@@ -43,10 +43,6 @@ pub struct MethodSource<'i, 'a> {
     owner_access_flags: u32,
     declaration: crate::p0::MethodDeclaration,
     raw: RawPrintable<'a>,
-    /// P1's decoded instruction and structural product, absent until P1 runs.
-    /// The reader does not create it and downstream analysis MUST NOT run
-    /// without it.
-    decoded: Option<super::DecodedMethod<'a>>,
     /// The independent method/parameter annotation read for this member. A
     /// damaged set retains its own classified error and does not remove code.
     metadata: Result<CheckedAnnotations, RequestError>,
@@ -294,21 +290,6 @@ impl<'i, 'a> MethodSource<'i, 'a> {
     pub fn raw(&self) -> &RawPrintable<'a> {
         &self.raw
     }
-    /// The P1 product. `None` means the scheduler has not run P1 for this
-    /// source; it is not an empty or declaration-only method.
-    pub fn decoded(&self) -> Option<&super::DecodedMethod<'a>> {
-        self.decoded.as_ref()
-    }
-    pub(crate) fn with_decoded(mut self, decoded: super::DecodedMethod<'a>) -> Self {
-        self.decoded = Some(decoded);
-        self
-    }
-    /// Runs P1 for this reader product and returns the same source carrying the
-    /// decoded product. A declaration-only source is not decoded.
-    pub fn decode(self, budget: &mut RunContext<'_>) -> Result<Self, MethodError> {
-        let decoded = self.program().decode_method_source(&self, budget)?;
-        Ok(self.with_decoded(decoded))
-    }
     /// Checked annotation locations, or defaults when that optional read
     /// failed. Code and declaration facts remain valid.
     pub fn annotations(&self) -> CheckedAnnotations {
@@ -436,7 +417,6 @@ impl<'a> ProgramIndex<'a> {
             owner_access_flags: class.access_flags,
             declaration,
             raw,
-            decoded: None,
             metadata,
         })
     }
