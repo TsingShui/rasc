@@ -5,8 +5,8 @@ use serde::{Serialize, Serializer};
 use crate::input::catalog::{ClassDataShape, MethodGroup};
 use crate::substrate::flags::{ClassAccessFlags, FieldAccessFlags, MethodAccessFlags};
 use crate::{
-    ByteOffset, ByteRange, ClassDefId, ClassKey, FieldId, FieldStorage, MethodId,
-    OriginalAnnotations, RequestError, TypeId,
+    ByteOffset, ClassDefId, ClassKey, FieldId, FieldStorage, MethodId, OriginalAnnotations,
+    RequestError, TypeId,
 };
 
 /// A locally read fact. Absence is distinct from damage and deliberate non-reading.

@@ -162,7 +162,7 @@ pub struct MethodAnalysis<'a> {
 /// A method entry either has no code or has a P1 product/prefix.
 pub enum MethodOutcome<'a> {
     DeclarationOnly,
-    Decoded(crate::p1::DecodedOutcome<'a>),
+    Decoded(Box<crate::p1::DecodedOutcome<'a>>),
 }
 
 impl<'a> Engine<'a> {
@@ -175,7 +175,7 @@ impl<'a> Engine<'a> {
         control.checkpoint()?;
         let position = usize::try_from(class.dex.0).map_err(|_| RequestError::UnknownDex)?;
         let image = self.images.get(position).ok_or(RequestError::UnknownDex)?;
-        Ok(image.index.class_facts_cached(class.class_def, control)?)
+        image.index.class_facts_cached(class.class_def, control)
     }
 
     /// Runs P0, the method reader and P1 for one method entry only.
@@ -195,7 +195,7 @@ impl<'a> Engine<'a> {
                 crate::input::RawPrintable::Method(_) => image
                     .index
                     .decode_method_source(&source, control)
-                    .map(MethodOutcome::Decoded)
+                    .map(|outcome| MethodOutcome::Decoded(Box::new(outcome)))
                     .map_err(RequestError::from),
             }
         })();
@@ -237,7 +237,7 @@ impl<'a> Engine<'a> {
                     crate::input::RawPrintable::Method(_) => image
                         .index
                         .decode_method_source(&source, control)
-                        .map(MethodOutcome::Decoded)
+                        .map(|outcome| MethodOutcome::Decoded(Box::new(outcome)))
                         .map_err(RequestError::from),
                 }
             })();

@@ -15,7 +15,7 @@ use diana_decomp::p1::{DecodedInstruction, DecodedItem, DecodedPayload};
 use diana_decomp::raw::{Format as DexFormat, RawLiteral, ReferenceSlot};
 use diana_decomp::{
     ByteOffset, ClassDefId, ClassKey, DexId, DexImage, Engine, FailureKind, ImageOrigin, InputId,
-    MethodId, MethodOutcome, Options, Request, RequestError, RunContext,
+    MethodId, MethodOutcome, Request, RequestError, RunContext,
 };
 use serde_json::{Value, json};
 
@@ -364,7 +364,7 @@ impl Shell {
                     ));
                 };
                 let outcome = match analysis.methods.swap_remove(index).result? {
-                    MethodOutcome::Decoded(outcome) => outcome,
+                    MethodOutcome::Decoded(outcome) => *outcome,
                     MethodOutcome::DeclarationOnly => {
                         return Ok(json!({"declaration_only": true}));
                     }
@@ -446,7 +446,7 @@ impl Shell {
                     ));
                 };
                 let outcome = match analysis.methods.swap_remove(index).result? {
-                    MethodOutcome::Decoded(outcome) => outcome,
+                    MethodOutcome::Decoded(outcome) => *outcome,
                     MethodOutcome::DeclarationOnly => {
                         return Ok(json!({"declaration_only": true}));
                     }
@@ -486,9 +486,18 @@ impl Shell {
                         }),
                     });
                 }
+                let mut catch_targets = Vec::new();
+                for boundary in decoded.try_boundaries().collect::<Vec<_>>() {
+                    let clauses = decoded
+                        .catch_clauses_at(diana_decomp::CodeUnitOffset(boundary), &mut control)?;
+                    if !clauses.is_empty() {
+                        catch_targets.push(json!({"try_start": boundary, "clauses": clauses}));
+                    }
+                }
                 Ok(json!({
                     "class_def": class,
                     "method": method,
+                    "catch_targets": catch_targets,
                     "instruction_bytes": [
                         decoded.instruction_bytes().start.0,
                         decoded.instruction_bytes().end.0,
@@ -545,7 +554,7 @@ fn encode(instruction: &DecodedInstruction) -> Option<Vec<u16>> {
         });
     let signed = |value: i32, bits: u32| (value as u32 & ((1u32 << bits) - 1)) as u16;
     let word = |value: u32| value as u16;
-    let mut encoded = match instruction.spec().format {
+    let encoded = match instruction.spec().format {
         DexFormat::F10x => vec![opcode],
         DexFormat::F12x => vec![opcode | word(regs.first()? << 8) | word(regs.get(1)? << 12)],
         DexFormat::F11n => {
@@ -568,7 +577,6 @@ fn encode(instruction: &DecodedInstruction) -> Option<Vec<u16>> {
                     RawLiteral::Signed8(value) => word(u32::from(value as u8 as u16)),
                     RawLiteral::Bits32(value) => word(value),
                     RawLiteral::Bits64(value) => word(value as u32),
-                    _ => return None,
                 },
                 _ => word(reference?),
             };
@@ -677,7 +685,6 @@ fn encode(instruction: &DecodedInstruction) -> Option<Vec<u16>> {
             }
             words
         }
-        _ => return None,
     };
     Some(encoded)
 }
@@ -824,13 +831,11 @@ fn command(line: &str) -> Result<Value, RequestError> {
         .ok_or(RequestError::InternalInvariant("empty command"))?;
     let mut object = serde_json::Map::new();
     object.insert("cmd".into(), Value::String(cmd.to_owned()));
-    let mut position = 0usize;
-    for word in words {
+    for (position, word) in words.enumerate() {
         let name = if position == 0 { "class" } else { "method" };
         if let Ok(value) = word.parse::<u64>() {
             object.insert(name.into(), Value::Number(value.into()));
         }
-        position += 1;
     }
     Ok(Value::Object(object))
 }
@@ -985,7 +990,7 @@ fn main() -> std::process::ExitCode {
             };
             let id = request.get("id").cloned();
             let value = response(id.as_ref(), shell.run(&request));
-            write_value(&mut stdout, &value, format);
+            let _ = write_value(&mut stdout, &value, format);
         }
         return std::process::ExitCode::SUCCESS;
     }

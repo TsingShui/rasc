@@ -256,22 +256,6 @@ pub(crate) fn method_valid(flags: u32) -> bool {
     visibility_valid(flags) && flags & !METHOD_BITS == 0
 }
 
-/// A class initializer: static, marked as a constructor, with no other
-/// kind-specific bit. Visibility and synthetic markers are permitted.
-
-/// Compiler-generated bridge method.
-
-/// A field that holds one enum constant: `ENUM|STATIC|FINAL` with only
-/// visibility and synthetic markers as optional extra bits.
-
-/// The compiler-generated `$VALUES` table of an enum.
-
-/// A synthesized outer-capture field: `private final synthetic`.
-
-/// An interface or annotation method: `public abstract` with no body.
-
-/// An annotation interface class declaration.
-
 /// An instance constructor: the constructor marker without `static`.
 pub(crate) fn instance_constructor(flags: u32) -> bool {
     method_valid(flags) && flags & (CONSTRUCTOR | STATIC) == CONSTRUCTOR

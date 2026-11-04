@@ -58,7 +58,7 @@ pub(crate) fn check_producer(
         (_, Some(OperandReference::Method(id))) => {
             index.method_reference(id, budget)?.declaration.prototype
         }
-        (_, Some(OperandReference::CallSite(id))) => index.call_site(id, budget)?.into_prototype(),
+        (_, Some(OperandReference::CallSite(id))) => index.call_site(id, budget)?,
         _ => {
             return Err(MethodError::InternalInvariant(
                 "invoke has no checked target reference",

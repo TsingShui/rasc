@@ -3,7 +3,6 @@ use std::collections::TryReserveError;
 use thiserror::Error;
 
 use super::binding::{ResultKind, check_producer};
-use crate::input::debug_program::DebugProgram;
 use crate::input::formats::{FlowKind, RegisterShape, RegisterWidth, ResultRole, wide_word};
 use crate::input::operands::{RawOperands, RegisterEncoding};
 use crate::input::{Cursor, InputError, ProgramIndex, RawMethodView};
@@ -160,23 +159,6 @@ impl<'a> ProgramIndex<'a> {
             original: original.clone(),
             boundaries: checker.boundaries,
         })
-    }
-
-    /// Reads the optional original debug program for this method. Damaged or
-    /// unsupported debug records are metadata problems: they retain their own
-    /// state and never stop intact code from reaching later stages.
-    pub fn check_debug_info(
-        &self,
-        original: &RawMethodView<'a>,
-        budget: &mut RunContext<'_>,
-    ) -> Result<(), MethodError> {
-        let Some(offset) = original.debug_info_offset_byte() else {
-            return Ok(());
-        };
-        let mut debug = DebugProgram::open(self, original, original.method_id, offset, budget)?;
-        while debug.next(self, original, budget)?.is_some() {}
-        budget.checkpoint()?;
-        Ok(())
     }
 
     fn reference_in_bounds(&self, reference: OperandReference) -> bool {

@@ -1,7 +1,5 @@
-use crate::input::{
-    MethodSource, ProgramIndex, RawMethodView, RawPrintable, formats::FlowKind, strings::TypeShape,
-};
-use crate::raw::{LayoutKind, OperandReference};
+use crate::input::{MethodSource, ProgramIndex, RawPrintable, strings::TypeShape};
+use crate::raw::OperandReference;
 use crate::{CodeUnitOffset, RequestError, RunContext};
 
 use super::{DecodedOutcome, MethodError, MethodProblem};
@@ -21,8 +19,9 @@ impl<'a> ProgramIndex<'a> {
                 "P1 was asked to decode a declaration-only source",
             ));
         };
-        let (_, return_shape) =
-            self.type_descriptor(crate::TypeId(source.declaration().return_type_id), budget)?;
+        let (_, return_shape) = source
+            .program()
+            .type_descriptor(crate::TypeId(source.declaration().return_type_id), budget)?;
         let items = match self.build_items(code, budget) {
             Ok(items) => items,
             Err((prefix, error)) => return outcome(prefix, error),

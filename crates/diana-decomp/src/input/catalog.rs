@@ -585,7 +585,7 @@ impl<'a> ProgramIndex<'a> {
         let mut found = None;
         self.class_with(class_id, control)?.visit_members_with(
             control,
-            MemberSelection::Header(method_id),
+            MemberSelection::AllMembers,
             |entry, control| -> Result<(), InputError> {
                 if let MemberEntry::MethodHeader {
                     method_idx,
@@ -732,7 +732,6 @@ impl<'a> ProgramIndex<'a> {
             ));
         }
         Ok(MethodReference {
-            owner_type: owner_idx,
             owner,
             declaration: self.method_declaration(id, owner_idx, control)?,
         })
@@ -753,7 +752,6 @@ impl<'a> ProgramIndex<'a> {
             ));
         }
         Ok(FieldReference {
-            owner_type: owner_idx,
             owner,
             declaration: self.validate_field(id, owner_idx, control)?,
         })
@@ -854,13 +852,11 @@ pub(crate) struct LocalMethod<'a> {
     pub plain_scope: bool,
 }
 pub(crate) struct MethodReference<'i, 'a> {
-    pub owner_type: TypeId,
     pub owner: DexString<'a>,
     pub declaration: MethodDeclaration<'i, 'a>,
 }
 
 pub(crate) struct FieldReference<'a> {
-    pub owner_type: TypeId,
     pub owner: DexString<'a>,
     pub declaration: FieldDeclaration<'a>,
 }
@@ -1007,9 +1003,6 @@ pub struct FieldEntry<'a> {
 
 pub(crate) enum MemberSelection {
     AllMethods,
-    Method(MethodId),
-    Header(MethodId),
-    AllHeaders,
     /// Every field and method header in original group order, without reading code.
     AllMembers,
     Fields,
@@ -1200,12 +1193,7 @@ impl<'i, 'a> ClassView<'i, 'a> {
                     }
                     match member {
                         EncodedMember::Field => {
-                            if matches!(
-                                selection,
-                                MemberSelection::Method(_)
-                                    | MemberSelection::Header(_)
-                                    | MemberSelection::AllHeaders
-                            ) {
+                            if matches!(selection, MemberSelection::AllMethods) {
                                 continue;
                             }
                             let declaration = local(self.index.validate_field(
@@ -1234,23 +1222,12 @@ impl<'i, 'a> ClassView<'i, 'a> {
                             )?;
                         }
                         EncodedMember::Method { code_offset } => {
-                            if let MemberSelection::Method(selected)
-                            | MemberSelection::Header(selected) = selection
-                                && selected != MethodId(index)
-                            {
-                                continue;
-                            }
                             let declaration = local(self.index.method_declaration(
                                 MethodId(index),
                                 self.type_idx,
                                 control,
                             ))?;
-                            if matches!(
-                                selection,
-                                MemberSelection::Header(_)
-                                    | MemberSelection::AllHeaders
-                                    | MemberSelection::AllMembers
-                            ) {
+                            if matches!(selection, MemberSelection::AllMembers) {
                                 let group_slot = match kind {
                                     MemberKind::Field => group,
                                     MemberKind::Method => group + 2,

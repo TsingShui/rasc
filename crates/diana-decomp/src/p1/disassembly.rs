@@ -183,10 +183,6 @@ impl<'a> DecodedMethod<'a> {
     pub fn is_reachable(&self, pc: CodeUnitOffset) -> bool {
         self.layout.is_reachable(pc)
     }
-    /// P1's checked try ranges and handler targets in original order.
-    pub(crate) fn protection(&self) -> &CheckedProtection {
-        &self.protection
-    }
     /// Checked original try boundaries in code units.
     pub fn try_boundaries(&self) -> impl Iterator<Item = u32> + '_ {
         self.protection.boundaries().map(|value| value.0)
@@ -195,6 +191,28 @@ impl<'a> DecodedMethod<'a> {
     /// Checked original handler entry targets in code units.
     pub fn handler_targets(&self) -> impl Iterator<Item = u32> + '_ {
         self.protection.targets().map(|value| value.0)
+    }
+    /// Checked catch clauses covering `pc`, with `None` for catch-all.
+    pub fn catch_clauses_at(
+        &self,
+        pc: CodeUnitOffset,
+        budget: &mut RunContext<'_>,
+    ) -> Result<Vec<(Option<u32>, u32)>, RequestError> {
+        let Some(clauses) = self.protection.at(pc, budget)? else {
+            return Ok(Vec::new());
+        };
+        Ok(clauses
+            .iter()
+            .map(|clause| {
+                (
+                    match clause.kind {
+                        crate::input::protection::CatchType::Typed(id) => Some(id.0),
+                        crate::input::protection::CatchType::All => None,
+                    },
+                    clause.target.0,
+                )
+            })
+            .collect())
     }
     pub fn method_id(&self) -> MethodId {
         self.source.method_id
