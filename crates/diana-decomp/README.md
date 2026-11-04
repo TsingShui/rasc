@@ -25,9 +25,20 @@ cancellation callback/token or checkpoint parameter. There are no numeric quotas
 
 Translation checking compares ordered local symbolic behavior and completion
 rules and matches every original transfer/coverage owner. It does not prove ART
-admission or concrete external-call behavior. The two local corpora exercise
-ordinary operations but do not provide execution evidence for custom/polymorphic
-invokes or method-handle/type constants. Fault-injected allocation execution has not been performed; failure retention is currently code-reviewed.
+admission or concrete external-call behavior. Real-input corpus runs have not
+encountered custom/polymorphic invokes or method-handle/type constants. The scoped
+`src/dynamic_instructions_test.rs` unit test constructs DEX 038/039 inputs and
+checks public Engine products against independently specified references, ordered
+slots, result categories and normal/exception completion rules. It also checks
+classified stops for invalid versions, references, argument layouts and results.
+The same test checks register-renaming relations, equivalent wide-copy/constant
+encodings and retention of call/exception effects when a result is discarded.
+This is static synthetic-input evidence, not ART execution evidence.
+A [Verus trial](proofs/README.md) proves the wide-copy patch predicate called by
+production replay, using the same Rust function body. The adapter and remaining
+P2 checks are not machine-proved; this is not a proof of whole-method correctness.
+Fault-injected allocation execution has not been performed; failure retention is
+currently code-reviewed.
 
 Use the single engine inspection entry from the repository root:
 
@@ -38,7 +49,7 @@ cargo run -p diana-decomp --release --example dbg_shell --locked -- \
 
 `p2-all` observes the Engine chain and reports classified outcomes and encountered
 opcode variants. `roundtrip-all` checks independent byte re-encoding over retained
-P1 evidence. No phase-specific debug binary or unit-test fixture is required.
+P1 evidence. No phase-specific debug binary is required.
 
 Applicable engine gates:
 
@@ -46,6 +57,8 @@ Applicable engine gates:
 cargo fmt --all -- --check
 cargo clippy -p diana-decomp --all-targets --all-features --locked -- -D warnings
 cargo build -p diana-decomp --release --locked
+cargo nextest run -p diana-decomp --all-features --locked \
+  -E 'test(dynamic_instructions_preserve_layout_references_and_completions)'
 ```
 
 Dependency, reference-isolation and unit-test policies are owned by root/package

@@ -1,5 +1,8 @@
 //! Native DEX analysis with caller-owned input and classified failures.
 
+#[cfg(test)]
+mod dynamic_instructions_test;
+
 mod engine;
 pub mod input;
 pub mod p0;

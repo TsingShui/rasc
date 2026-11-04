@@ -456,13 +456,73 @@ pub(super) fn verify(
     }
     let original = dex_relation(dex_step(flow.decoded(), instruction)?, instruction)?;
     let lowered = flow_relation(flow_step(flow, operation)?, flow, operation)?;
-    if original != lowered {
+    let Completion {
+        frame: original_frame,
+        writes: original_writes,
+        heap: original_heap,
+        lock: original_lock,
+    } = original.normal;
+    let Completion {
+        frame: lowered_frame,
+        writes: lowered_writes,
+        heap: lowered_heap,
+        lock: lowered_lock,
+    } = lowered.normal;
+    let writes_match = if matches!(instruction.opcode(), 0x04..=0x06) {
+        wide_patch_matches(instruction, &lowered_writes)?
+    } else {
+        original_writes == lowered_writes
+    };
+    if !writes_match
+        || (
+            original.reads,
+            original.event,
+            original_frame,
+            original_heap,
+            original_lock,
+            original.thrown,
+        ) != (
+            lowered.reads,
+            lowered.event,
+            lowered_frame,
+            lowered_heap,
+            lowered_lock,
+            lowered.thrown,
+        )
+    {
         return Err(FlowError::Correspondence {
             pc: instruction.pc(),
             obligation: "symbolic event/normal patch/throw state",
         });
     }
     Ok(())
+}
+
+fn wide_patch_matches(
+    instruction: &DecodedInstruction,
+    writes: &[WordWrite],
+) -> Result<bool, FlowError> {
+    let [first, second] = writes else {
+        return Ok(false);
+    };
+    let captured = |write: &WordWrite| match write.value {
+        WordValue::Input(source, part) => Some(super::wide_copy::CopyWord {
+            register: write.register.0,
+            source: source.start.0,
+            source_words: source.words(),
+            part,
+        }),
+        _ => None,
+    };
+    let (Some(first), Some(second)) = (captured(first), captured(second)) else {
+        return Ok(false);
+    };
+    Ok(super::wide_copy::wide_copy_matches(
+        register(instruction, 1)?.0,
+        register(instruction, 0)?.0,
+        first,
+        second,
+    ))
 }
 
 fn register(instruction: &DecodedInstruction, index: usize) -> Result<RegisterId, FlowError> {

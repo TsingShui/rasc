@@ -85,6 +85,15 @@ ValueIds.
 Every local comparison starts with an arbitrary frame/heap and does not propagate
 values, aliases or feasible paths into another operation.
 
+For `move-wide` variants, `wide_copy.rs` replaces generic word-patch equality
+with an exact captured-input predicate. The remaining relation fields still
+compare independently constructed descriptions. The predicate's Verus contract
+establishes acceptance conditions and equality with the old-frame DEX copy rule
+for arbitrary word values, including overlap. The proof entry includes the same
+executable source used by replay; ordinary Cargo builds erase proof annotations.
+The decoded/symbolic-record adapter and whole-method composition remain unproven.
+See the [proof contract and reproduction](../../../crates/diana-decomp/proofs/README.md).
+
 Acceptance: every published operation has matching behavior, ordered arguments,
 normal register patch and exceptional selection/frame obligations, and every
 published transfer has one original owner. Traversals have finite measures and
@@ -125,5 +134,5 @@ immutable queries; later stages cannot assemble a substitute success product.
 
 Inspect actual products through the single `dbg_shell` example. `p2-all` reports
 successful/failed methods and observed replay opcode variants. Missing variants
-are missing input evidence, not a pass. Do not restore unit tests or fixtures;
-production safety and translation checks remain required.
+are missing input evidence, not a pass. Follow the root AGENTS.md scoped test
+policy; production safety and translation checks remain required.

@@ -141,7 +141,9 @@ reproducible inputs; no private APKs are committed.
 
 The root [AGENTS.md](../../AGENTS.md) owns the prohibition on unit-test development.
 Existing unit and integration cases, fixtures and test-only helpers are removed
-by operator decision. CI runs format, lint and build checks without test jobs.
+by operator decision. The root policy defines one operator-approved core
+unit-test exception for dynamic instructions through public Engine interfaces.
+CI runs format, lint and build checks without test jobs.
 Contributors MUST NOT restore the removed cases or test-only construction paths.
 
 Contributors MUST NOT write tests for non-core code, including maintenance

@@ -8,6 +8,7 @@ mod product;
 mod replay;
 mod scratch;
 mod transfer;
+mod wide_copy;
 
 pub use build::FlowError;
 pub(crate) use build::{FlowBuild, build_flow};

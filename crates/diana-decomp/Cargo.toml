@@ -10,6 +10,7 @@ readme = "README.md"
 
 [lints.rust]
 unsafe_code = "forbid"
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(verus_keep_ghost)'] }
 
 [dependencies]
 fastrace = { version = "0.7", optional = true }

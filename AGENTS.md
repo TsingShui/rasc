@@ -88,6 +88,11 @@ chapters describe the existing implementation until migrated to this target.
 - Contributors MUST NOT develop, add or restore any unit tests, including inline
   `#[test]` functions, `#[cfg(test)]` modules and private-phase test harnesses.
   Existing test cases and fixtures are removed by operator decision.
+  The sole operator-approved exception is the one core test in
+  `crates/diana-decomp/src/dynamic_instructions_test.rs`, exercised through public
+  Engine interfaces with synthetic DEX input. Contributors MAY maintain this
+  scoped test and run it with `cargo nextest run`; this does not authorize other
+  tests, fixture suites or private-stage harnesses.
 - Contributors MUST NOT add tests, fixtures or CI test jobs for non-core tooling.
   Production input checks, analysis invariants and semantics-preserving transform
   checks remain required. Build/lint success does not establish semantic correctness.
