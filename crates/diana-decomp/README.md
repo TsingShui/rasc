@@ -6,8 +6,8 @@ forbids unsafe code and external runtime/process dependencies; declarations come
 only from the analyzed input.
 
 The active method chain is P0 class facts → method reader → P1 disassembly → P2
-execution model → P3 SSA. `Engine::analyze_method` and class requests use one method task.
-P4–P9 are not yet active; the application decompilation interface is being rebuilt.
+execution model → P3 SSA → P4 value/use interpretation. `Engine::analyze_method`
+and class requests use one method task. P5–P9 are not yet active; the application decompilation interface is being rebuilt.
 The approved architecture is [PIPELINE_DESIGN](../../docs/diana/PIPELINE_DESIGN.md).
 
 P1 retains complete instruction/payload facts, original references, entry layout
@@ -25,7 +25,8 @@ Undefined/invalidated sources remain explicit availability facts, not default va
 
 A P2 stop retains the complete P1 input, classified error and available unvalidated
 construction facts. A P3 stop retains complete P2 input and a partial SSA
-snapshot; neither stop can be promoted to a successful product. Class requests
+snapshot; neither stop can be promoted to a successful product. P4 construction
+stops likewise retain SSA and a distinct unpublished `TypePartial`. Class requests
 reserve result storage before starting method work and retain all selected known
 member outcomes. A method-task resource/invariant error no longer stops siblings;
 `ClassAnalysis.terminated` and its kind-based truncation path are removed.
@@ -43,8 +44,19 @@ unknown Phi incoming and recovery after an established overwrite.
 
 This does not establish the entire target: P1 still requires reliable instruction
 boundaries, entry layout and control/protection associations. An unreliable graph
-stops with original facts instead of producing SSA by dropping edges. P4–P9 remain
-inactive, so partial Java-like text output is not yet delivered.
+stops with original facts instead of producing SSA by dropping edges.
+
+P4 consumes existing SSA/execution facts and retains P3 inside `TypedMethod`.
+It delivers value families/type sources, per-use literal/reference/integral views,
+Phi incoming adaptations and position-related constructor states. P0's class
+declaration now travels inside the method products as one shared immutable
+`OwnerFacts` handle, so `this` carries its declared owner type and constructor
+calls on `this` distinguish `This`, `Super` and `OtherOwner`. Remaining gaps are
+cross-class reference hierarchy, catch descriptors and array payload facts;
+no new input-context query is implemented. Ambiguous object
+identity and unsupported interpretations are reported separately from missing
+input facts. P5–P9 remain inactive, so partial Java-like text is not yet delivered.
+The [P4 chapter](../../docs/diana/spec/04-types.md) records its algorithm and guarantees.
 
 Independent translation checking compiles only under `cfg(test)`; ordinary
 Engine requests do not run symbolic replay, output audits or duplicate dominator
@@ -62,7 +74,10 @@ classified stops for unsupported versions and retained local errors for referenc
 argument layouts and results.
 The same test checks register-renaming relations, equivalent wide-copy/constant
 encodings, discarded call results, SSA joins/loops/exception/overlap cases, local
-recovery inside one method and continued analysis of an executable sibling.
+recovery inside one method and continued analysis of an executable sibling. P4
+cases cover independent zero views, float bits versus numeric conversion, array
+components, local use conflicts, Phi/range/grounded-loop facts and constructor
+normal versus exceptional initialization.
 This is static synthetic-input evidence, not ART execution evidence.
 A [Verus trial](proofs/README.md) proves the wide-copy patch predicate used by
 test replay, using the same Rust function body. It is absent from production. The adapter and remaining
@@ -84,12 +99,24 @@ and per-method construction failures. Optional `class` selects one original clas
 through `Engine::analyze`; `analysis_ns` measures that analysis, excluding index
 opening, JSON formatting and inactive rendering. `partial_methods`, `local_issues`
 and unresolved input counts distinguish ready products from fully established
-facts; batch `complete` describes traversal, not semantic verification. P3 is not
-formally verified. Six representative single-class Engine requests were compared
-with `e8d9eb1`, using interleaved release runs and twelve timed samples after warmup.
-Per-class median after/before ratios ranged from 0.962 to 1.052, with matching
-analysis counts. This is finite analysis-only latency evidence, not an end-to-end
-CLI/rendering benchmark or a general speedup claim.
+facts; batch `complete` describes traversal, not semantic verification. P3/P4 are not
+formally verified. `p4` (`details:true`) exposes type origins, bits, requirements,
+views and initialization paths. `p4-all` adds typed/partial counts, interpretation
+problems and missing-fact occurrences to the same traversal. These are diagnostic
+counts, not semantic verification badges. The timed Engine traversal now includes P4.
+
+This correction was checked with engine format/check/Clippy and release builds;
+no tests were added, modified or run. Two authorized real-input runs delivered
+115,760 TypedMethod products without construction/upstream/class stops. Across
+both inputs, methods carrying partial type results numbered 105,732 before owner
+transmission, 44,291 after transmission alone and 32,552 after consuming the known
+superclass relation in use views. These are aggregate uncertainty counts, not
+recovery or correctness rates. 3,407 ordinary use views remain undetermined, with
+reference-relation and identity uncertainty recorded separately. Byte roundtrip
+checked 1,444,571 items without mismatches. The new unreadable-direct-call transfer
+was statically reviewed; these inputs had no upstream local issues and do not
+supply execution coverage of that path. The observations do not prove complete
+type recovery or ART admission.
 
 `p2-all` observes retained execution facts from the same Engine chain and reports
 classified outcomes and encountered opcode variants. `roundtrip-all` checks independent byte re-encoding over retained

@@ -44,6 +44,10 @@ impl<'a> ProgramIndex<'a> {
         self.bytes
     }
 
+    pub(super) fn dex_id(&self) -> crate::DexId {
+        self.dex
+    }
+
     /// Number of original class definitions in this logical member.
     pub fn class_count(&self) -> u32 {
         self.header.class_defs.count
@@ -557,6 +561,7 @@ impl<'a> ProgramIndex<'a> {
         let interfaces = local(self.interfaces(interfaces_raw))?;
         let values_offset = local(self.values_offset(values_raw))?;
         Ok(ClassContext {
+            superclass_type: (super_idx != u32::MAX).then_some(TypeId(super_idx)),
             superclass,
             interfaces,
             values_offset,
@@ -721,6 +726,7 @@ impl<'a> ProgramIndex<'a> {
 }
 
 pub(crate) struct ClassContext<'a> {
+    pub superclass_type: Option<TypeId>,
     pub superclass: Result<Option<DexString<'a>>, InputError>,
     pub interfaces: Result<&'a [u8], InputError>,
     pub values_offset: Result<Option<ByteOffset>, InputError>,

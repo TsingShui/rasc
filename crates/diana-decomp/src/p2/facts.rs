@@ -18,6 +18,9 @@ impl<'f, 'a> ExecutionFacts<'f, 'a> {
     pub fn class_id(self) -> ClassDefId {
         self.flow.class_id()
     }
+    pub fn owner_facts(self) -> &'f crate::p0::OwnerFacts {
+        self.flow.owner_facts()
+    }
     pub fn declaration(self) -> &'f crate::p0::MethodDeclaration {
         self.flow.declaration()
     }

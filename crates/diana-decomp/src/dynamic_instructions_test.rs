@@ -11,7 +11,8 @@ use crate::p2::{
     CommitRule, Coverage, EdgeRole, EdgeTarget, ExceptionFrame, HeapTransfer, InvokeKind,
     LockTransfer, MoveKind, OpKind, ReadOrder,
 };
-use crate::p3::{SsaMethod, StateKind, TransferOrigin, ValueOrigin};
+use crate::p3::{StateKind, TransferOrigin, ValueOrigin};
+use crate::p4::TypedMethod;
 use crate::raw::{DexVersion, OperandReference, RawDecodeError, ReferenceSlot};
 use crate::{
     ByteOffset, CallSiteId, ClassDefId, ClassKey, CodeUnitOffset, DexId, DexImage, Engine,
@@ -32,6 +33,7 @@ fn dynamic_instructions_preserve_layout_references_and_completions() {
     check_metamorphic_relations();
     check_ssa_cases();
     check_local_recovery();
+    check_types();
     for opcode in 0xfa..=0xfd {
         for version in [38, 39] {
             for prototype in [0, WIDE, 2, VOID] {
@@ -177,18 +179,336 @@ fn dynamic_instructions_preserve_layout_references_and_completions() {
     }
 }
 
-fn local_use<'f>(ssa: &'f SsaMethod<'_>, pc: u32, argument: usize) -> &'f crate::p3::UseBinding {
+fn type_use<'f>(typed: &'f TypedMethod<'_>, pc: u32, argument: usize) -> &'f crate::p4::UseView {
+    let site = local_use(typed, pc, argument).site();
+    typed
+        .facts()
+        .uses()
+        .iter()
+        .find(|u| u.site() == site)
+        .unwrap()
+}
+
+fn check_types() {
+    use crate::p4::{Family, Initialization, Interpretation, MissingFact, Problem};
+    // The same zero is a null argument, an integer operand and an equality input.
+    // Equality's constraint must not leak to the other uses of this definition.
+    let fixture = dex(
+        39,
+        &[0x0012, 0x03fe, 1, 0x20fa, 3, 0x0003, 3, 0x017b, 0x4032, 2],
+        None,
+        8,
+        5,
+        3,
+        2,
+    );
+    let typed = flowed(&fixture.bytes);
+    assert_eq!(
+        type_use(&typed, 3, 1).interpretation(),
+        Interpretation::Null
+    );
+    assert!(matches!(
+        type_use(&typed, 7, 0).interpretation(),
+        Interpretation::Literal {
+            bits: crate::p4::Bits { value: 0, .. },
+            family: Family::Integral
+        }
+    ));
+    let branch = typed
+        .facts()
+        .uses()
+        .iter()
+        .find(|u| {
+            matches!(u.site(), crate::p3::UseSite::Terminal { .. })
+                && u.state() == local_use(&typed, 7, 0).state()
+        })
+        .unwrap();
+    assert!(matches!(
+        branch.interpretation(),
+        Interpretation::Literal {
+            family: Family::Integral,
+            ..
+        }
+    ));
+    assert_eq!(
+        type_use(&typed, 3, 1).requirement().families().selected(),
+        Some(Family::Reference)
+    );
+
+    // Float interpretation preserves 0x3f800000; numeric int-to-float is a
+    // different original operation, not a replacement literal interpretation.
+    let fixture = dex(39, &[0x0014, 0, 0x3f80, 0x017f, 0x027b], None, 5, 3, 0, 0);
+    let typed = flowed(&fixture.bytes);
+    assert!(matches!(
+        type_use(&typed, 3, 0).interpretation(),
+        Interpretation::Literal {
+            bits: crate::p4::Bits {
+                value: 0x3f800000,
+                ..
+            },
+            family: Family::Float
+        }
+    ));
+    assert!(matches!(
+        type_use(&typed, 4, 0).interpretation(),
+        Interpretation::Literal {
+            bits: crate::p4::Bits {
+                value: 0x3f800000,
+                ..
+            },
+            family: Family::Integral
+        }
+    ));
+    let fixture = dex(39, &[0x0013, 7, 0x0182, 0x127f], None, 5, 3, 0, 0);
+    let typed = flowed(&fixture.bytes);
+    assert_eq!(
+        type_use(&typed, 3, 0).interpretation(),
+        Interpretation::Direct(Family::Float)
+    );
+    let value = typed
+        .ssa_facts()
+        .readable_value(local_use(&typed, 3, 0))
+        .unwrap();
+    assert_eq!(typed.facts().value(value).unwrap().literal(), None);
+
+    // The array descriptor is a fixed declaration seed, not a type inferred
+    // backwards from neg-float. Keep the original type index 11.
+    let mut fixture = dex(39, &[0x0112, 0x0044, 0x0102, 0x007f], None, 3, 3, 1, 0);
+    fixture.bytes[fixture.array_descriptor..fixture.array_descriptor + 4]
+        .copy_from_slice(&[2, b'[', b'F', 0]);
+    let typed = flowed(&fixture.bytes);
+    let value = typed
+        .ssa_facts()
+        .readable_value(local_use(&typed, 3, 0))
+        .unwrap();
+    let facts = typed.facts().value(value).unwrap();
+    assert_eq!(facts.families().selected(), Some(Family::Float));
+    assert!(
+        facts
+            .types()
+            .iter()
+            .any(|&n| typed.facts().name(n).unwrap().units() == [u16::from(b'F')])
+    );
+    assert_eq!(
+        type_use(&typed, 3, 0).interpretation(),
+        Interpretation::Direct(Family::Float)
+    );
+
+    // One bad consumer cannot erase the known int source or an independent use.
+    let fixture = dex(39, &[0x0012, 0x017b, 0x127f, 0x137b], None, 5, 4, 0, 0);
+    let typed = flowed(&fixture.bytes);
+    assert!(matches!(
+        type_use(&typed, 2, 0).interpretation(),
+        Interpretation::Unknown(Problem::FamilyConflict)
+    ));
+    assert_eq!(
+        type_use(&typed, 3, 0).interpretation(),
+        Interpretation::Direct(Family::Integral)
+    );
+
+    // Distinct literal inputs require a runtime Phi with an integral common
+    // representation. Equal bits can instead remain a per-use literal.
+    let fixture = dex(
+        39,
+        &[0x0538, 4, 0x1012, 0x0228, 0x2012, 0x017b],
+        None,
+        6,
+        8,
+        3,
+        0,
+    );
+    let typed = flowed(&fixture.bytes);
+    assert_eq!(typed.facts().phis().len(), 1);
+    let phi = &typed.facts().phis()[0];
+    assert_eq!(phi.families().selected(), Some(Family::Integral));
+    let mut incoming = phi
+        .incoming()
+        .iter()
+        .map(|i| match i.interpretation {
+            Interpretation::Literal {
+                bits,
+                family: Family::Integral,
+            } => bits.value,
+            _ => panic!("Phi lost its literal adaptation"),
+        })
+        .collect::<Vec<_>>();
+    incoming.sort_unstable();
+    assert_eq!(incoming, [1, 2]);
+    let value = typed.ssa_facts().phis()[0].value();
+    assert_eq!(
+        typed.facts().value(value).unwrap().integral_range(),
+        Some(crate::p4::IntegralRange { min: 1, max: 2 })
+    );
+    assert_eq!(typed.facts().value(value).unwrap().literal(), None);
+
+    let fixture = dex(
+        39,
+        &[0x0538, 4, 0x0012, 0x0228, 0x0012, 0x0107],
+        None,
+        6,
+        8,
+        3,
+        0,
+    );
+    let typed = flowed(&fixture.bytes);
+    assert_eq!(
+        type_use(&typed, 5, 0).interpretation(),
+        Interpretation::Null
+    );
+    assert!(matches!(
+        typed.facts().phis()[0].representation(),
+        crate::p4::PhiRepresentation::Literal(crate::p4::Bits { value: 0, .. })
+    ));
+    for (seed, expect_null) in [(0x0012, true), (0x1012, false)] {
+        let fixture = dex(
+            39,
+            &[seed, 0x0101, 0x0538, 4, 0x1001, 0xfc28, 0x0207],
+            None,
+            6,
+            8,
+            3,
+            0,
+        );
+        let typed = flowed(&fixture.bytes);
+        assert_eq!(
+            type_use(&typed, 6, 0).interpretation() == Interpretation::Null,
+            expect_null
+        );
+        if !expect_null {
+            assert!(matches!(
+                type_use(&typed, 6, 0).interpretation(),
+                Interpretation::Unknown(Problem::NonzeroReferenceLiteral)
+            ));
+        }
+    }
+    let fixture = dex(39, &[0x5007], None, 6, 8, 3, 0);
+    let typed = flowed(&fixture.bytes);
+    assert_eq!(
+        type_use(&typed, 0, 0).interpretation(),
+        Interpretation::Unknown(Problem::FamilyConflict)
+    );
+
+    // A raw ungrouped invocation stays an explicit operation-level gap. No
+    // argument views or return value are manufactured to make it typed.
+    let fixture = dex(
+        39,
+        &[0x30fc, 0xffff, 0x0576, 0x000b, 0x0204],
+        None,
+        8,
+        8,
+        3,
+        3,
+    );
+    let typed = flowed(&fixture.bytes);
+    assert!(
+        typed
+            .facts()
+            .issues()
+            .iter()
+            .any(|i| i.problem == Problem::Missing(MissingFact::ArgumentLayout))
+    );
+    assert!(matches!(
+        type_use(&typed, 4, 0).interpretation(),
+        Interpretation::Unknown(Problem::SourceUnavailable(_))
+    ));
+
+    // External constructor body absent: the original owner/prototype and SSA
+    // alias are sufficient. Protect only the call, not the preceding allocation.
+    let mut fixture = dex_with_handler(
+        39,
+        &[0x0022, 2, 0x0107, 0x1070, 0, 1, 0x0207],
+        None,
+        5,
+        4,
+        0,
+        1,
+        &[0x030d, 0x0207, 0x000e],
+        None,
+    );
+    put16(&mut fixture.bytes, fixture.methods + 2, 5);
+    put32(&mut fixture.bytes, fixture.methods + 4, fixture.init_name);
+    put32(&mut fixture.bytes, fixture.tries, 3);
+    put16(&mut fixture.bytes, fixture.tries + 4, 3);
+    let typed = flowed(&fixture.bytes);
+    assert_eq!(typed.facts().constructors().len(), 1);
+    assert_eq!(
+        typed.facts().constructors()[0].relation,
+        crate::p4::ConstructorRelation::Allocation
+    );
+    for (pc, expected) in [
+        (3, Initialization::BeforeConstructor),
+        (6, Initialization::Initialized),
+        (9, Initialization::ConstructorFailed),
+    ] {
+        let site = local_use(&typed, pc, 0).site();
+        assert_eq!(
+            typed
+                .facts()
+                .initialization()
+                .iter()
+                .find(|i| i.site == site)
+                .unwrap()
+                .state,
+            expected
+        );
+    }
+    assert_eq!(
+        typed
+            .execution()
+            .operations()
+            .iter()
+            .filter(|o| matches!(o.kind(), OpKind::NewInstance { .. }))
+            .count(),
+        1
+    );
+    let mut fixture = dex(
+        39,
+        &[0x0022, 2, 0x1070, 0, 0, 0x1070, 0, 0, 0x0107],
+        None,
+        5,
+        4,
+        0,
+        1,
+    );
+    put16(&mut fixture.bytes, fixture.methods + 2, 5);
+    put32(&mut fixture.bytes, fixture.methods + 4, fixture.init_name);
+    let typed = flowed(&fixture.bytes);
+    let site = local_use(&typed, 8, 0).site();
+    assert_eq!(
+        typed
+            .facts()
+            .initialization()
+            .iter()
+            .find(|i| i.site == site)
+            .unwrap()
+            .state,
+        Initialization::ConstructorStateConflict
+    );
+    assert!(
+        typed
+            .facts()
+            .issues()
+            .iter()
+            .any(|i| i.problem == Problem::InitializationStateConflict)
+    );
+}
+
+fn local_use<'f>(ssa: &'f TypedMethod<'_>, pc: u32, argument: usize) -> &'f crate::p3::UseBinding {
     let op = ssa
         .execution()
         .operations()
         .iter()
         .find(|o| o.pc() == CodeUnitOffset(pc))
         .unwrap();
-    &ssa.facts().operation_uses(op.id()).unwrap().unwrap()[argument]
+    &ssa.ssa_facts().operation_uses(op.id()).unwrap().unwrap()[argument]
 }
-fn assert_local_source(ssa: &SsaMethod<'_>, at: u32, source: u32) {
-    let value = ssa.facts().readable_value(local_use(ssa, at, 0)).unwrap();
-    let ValueOrigin::Operation { operation, .. } = ssa.facts().values()[value.0 as usize].origin()
+fn assert_local_source(ssa: &TypedMethod<'_>, at: u32, source: u32) {
+    let value = ssa
+        .ssa_facts()
+        .readable_value(local_use(ssa, at, 0))
+        .unwrap();
+    let ValueOrigin::Operation { operation, .. } =
+        ssa.ssa_facts().values()[value.0 as usize].origin()
     else {
         panic!("use at {at} lost its original operation source");
     };
@@ -264,37 +584,40 @@ fn check_local_recovery() {
             .collect::<Vec<_>>(),
         [6, 7, 5]
     );
-    assert!(ssa.facts().operation_uses(call.id()).unwrap().is_err());
-    let output = ssa.facts().operation_outputs(call.id()).unwrap()[0];
-    assert!(ssa.facts().output_value(&output).is_none());
+    assert!(ssa.ssa_facts().operation_uses(call.id()).unwrap().is_err());
+    let output = ssa.ssa_facts().operation_outputs(call.id()).unwrap()[0];
+    assert!(ssa.ssa_facts().output_value(&output).is_none());
     assert_eq!(
-        ssa.facts().state(output.state()).unwrap().kind(),
+        ssa.ssa_facts().state(output.state()).unwrap().kind(),
         StateKind::Unavailable {
             operation: call.id()
         }
     );
     for pc in [6, 7] {
         let usage = local_use(&ssa, pc, 0);
-        assert!(ssa.facts().readable_value(usage).is_none());
+        assert!(ssa.ssa_facts().readable_value(usage).is_none());
         assert!(
-            ssa.facts()
+            ssa.ssa_facts()
                 .state(usage.state())
                 .unwrap()
                 .availability()
                 .may_be_unavailable()
         );
     }
-    let parameter = ssa.facts().readable_value(local_use(&ssa, 8, 0)).unwrap();
+    let parameter = ssa
+        .ssa_facts()
+        .readable_value(local_use(&ssa, 8, 0))
+        .unwrap();
     assert_eq!(
-        ssa.facts().values()[parameter.0 as usize].origin(),
+        ssa.ssa_facts().values()[parameter.0 as usize].origin(),
         ValueOrigin::Entry(crate::p3::EntryRole::Parameter(0))
     );
     assert_local_source(&ssa, 10, 9);
     assert_local_source(&ssa, 13, 11);
     assert_local_source(&ssa, 16, 0);
     assert!(
-        !ssa.facts().dominates(
-            ssa.facts()
+        !ssa.ssa_facts().dominates(
+            ssa.ssa_facts()
                 .operation_site(call.id())
                 .unwrap()
                 .commit()
@@ -348,7 +671,11 @@ fn check_local_recovery() {
         ssa.execution().operations()[1].kind(),
         OpKind::UnresolvedResult { .. }
     ));
-    assert!(ssa.facts().readable_value(local_use(&ssa, 4, 0)).is_none());
+    assert!(
+        ssa.ssa_facts()
+            .readable_value(local_use(&ssa, 4, 0))
+            .is_none()
+    );
     assert_local_source(&ssa, 6, 5);
     assert!(
         ssa.execution()
@@ -426,10 +753,10 @@ fn check_local_recovery() {
             .collect::<Vec<_>>(),
         [1, 2]
     );
-    let Ok(MethodOutcome::Ssa(first)) = &class.methods[0].result else {
+    let Ok(MethodOutcome::Typed(first)) = &class.methods[0].result else {
         panic!("partial method discarded");
     };
-    let Ok(MethodOutcome::Ssa(second)) = &class.methods[1].result else {
+    let Ok(MethodOutcome::Typed(second)) = &class.methods[1].result else {
         panic!("sibling not analyzed");
     };
     assert!(first.execution().issues().next().is_some());
@@ -452,10 +779,10 @@ fn check_local_recovery() {
     );
     let ssa = flowed(&fixture.bytes);
     let usage = local_use(&ssa, 9, 0);
-    let state = ssa.facts().state(usage.state()).unwrap();
+    let state = ssa.ssa_facts().state(usage.state()).unwrap();
     assert!(matches!(state.kind(), StateKind::Phi(_)));
     assert!(state.availability().may_have_value() && state.availability().may_be_unavailable());
-    assert!(ssa.facts().readable_value(usage).is_none());
+    assert!(ssa.ssa_facts().readable_value(usage).is_none());
 
     // Invalid register operands are facts with errors, not new valid variables.
     // A partial out-of-frame wide write also makes an overlapping valid word uncertain.
@@ -484,20 +811,20 @@ fn check_local_recovery() {
     );
     let bad_read = local_use(&ssa, 2, 0);
     assert_eq!(
-        ssa.facts().state(bad_read.state()).unwrap().kind(),
+        ssa.ssa_facts().state(bad_read.state()).unwrap().kind(),
         StateKind::OutsideFrame
     );
-    assert!(ssa.facts().readable_value(bad_read).is_none());
+    assert!(ssa.ssa_facts().readable_value(bad_read).is_none());
     assert_local_source(&ssa, 3, 0);
     let overlapped = local_use(&ssa, 6, 0);
     assert!(
-        ssa.facts()
+        ssa.ssa_facts()
             .state(overlapped.state())
             .unwrap()
             .availability()
             .may_be_unavailable()
     );
-    assert!(ssa.facts().readable_value(overlapped).is_none());
+    assert!(ssa.ssa_facts().readable_value(overlapped).is_none());
     assert_local_source(&ssa, 8, 7);
 }
 
@@ -538,7 +865,7 @@ fn check_ssa_cases() {
     for (name, words, proto, phis, unavailable) in cases {
         let fixture = dex(39, words, None, proto, 8, 3, 0);
         let ssa = flowed(&fixture.bytes);
-        let f = ssa.facts();
+        let f = ssa.ssa_facts();
         assert_eq!(f.phis().len(), phis, "{name}");
         assert_eq!(
             f.uses()
@@ -605,7 +932,7 @@ fn check_ssa_cases() {
         None,
     );
     let ssa = flowed(&fixture.bytes);
-    let f = ssa.facts();
+    let f = ssa.ssa_facts();
     let handler_use = &f.operation_uses(crate::p2::OpId(2)).unwrap().unwrap()[0];
     let old = f.readable_value(handler_use).unwrap();
     assert_eq!(
@@ -787,7 +1114,7 @@ fn check_metamorphic_relations() {
 }
 
 fn invoke_signature(
-    flow: &SsaMethod<'_>,
+    flow: &TypedMethod<'_>,
 ) -> (
     InvokeKind,
     OperandReference,
@@ -823,10 +1150,11 @@ fn analyze(bytes: &[u8]) -> MethodOutcome<'_> {
     engine.analyze_method(CLASS, ENTRY).unwrap().result.unwrap()
 }
 
-fn flowed(bytes: &[u8]) -> SsaMethod<'_> {
+fn flowed(bytes: &[u8]) -> TypedMethod<'_> {
     match analyze(bytes) {
-        MethodOutcome::Ssa(ssa) => ssa,
+        MethodOutcome::Typed(ssa) => ssa,
         MethodOutcome::SsaStopped(stop) => panic!("P3 stopped: {}", stop.error()),
+        MethodOutcome::TypeStopped(stop) => panic!("P4 stopped: {}", stop.error()),
         MethodOutcome::DisassemblyStopped(stop) => panic!("P1 stopped: {:?}", stop.error),
         MethodOutcome::FlowStopped(stop) => panic!("P2 stopped: {}", stop.error()),
         MethodOutcome::DeclarationOnly => panic!("executable member became declaration-only"),
@@ -836,8 +1164,9 @@ fn flowed(bytes: &[u8]) -> SsaMethod<'_> {
 fn has_issue(bytes: &[u8], expected: impl Fn(&MethodError) -> bool) -> bool {
     match analyze(bytes) {
         MethodOutcome::DisassemblyStopped(stop) => stop.error.as_ref().is_some_and(expected),
-        MethodOutcome::Ssa(ssa) => ssa.execution().issues().any(|(_, issue)| expected(issue)),
+        MethodOutcome::Typed(ssa) => ssa.execution().issues().any(|(_, issue)| expected(issue)),
         MethodOutcome::SsaStopped(stop) => panic!("P3 lost local recovery: {}", stop.error()),
+        MethodOutcome::TypeStopped(stop) => panic!("P4 lost local recovery: {}", stop.error()),
         MethodOutcome::FlowStopped(stop) => panic!("P2 lost local recovery: {}", stop.error()),
         MethodOutcome::DeclarationOnly => panic!("code disappeared"),
     }
@@ -1077,7 +1406,7 @@ fn check_prototype(prototype: &CheckedPrototype<'_>, id: u16) {
     );
 }
 
-fn check_completion(flow: &SsaMethod<'_>, handler_pc: u32, heap: HeapTransfer) {
+fn check_completion(flow: &TypedMethod<'_>, handler_pc: u32, heap: HeapTransfer) {
     assert_eq!(flow.execution().operations().len(), 2);
     let operation = &flow.execution().operations()[0];
     assert_eq!(operation.pc(), CodeUnitOffset(0));
@@ -1132,6 +1461,10 @@ struct Fixture {
     code: usize,
     handles: usize,
     call_site_data: usize,
+    methods: usize,
+    init_name: u32,
+    array_descriptor: usize,
+    tries: usize,
 }
 
 // Independent byte encoding: no production opcode/layout or stage constructors.
@@ -1198,6 +1531,7 @@ fn dex_with_handler(
     ];
     let mut strings = types.to_vec();
     strings.extend([
+        "<init>",
         "IJI",
         "JJI",
         "LJI",
@@ -1248,8 +1582,12 @@ fn dex_with_handler(
         }
     }
     map.push((0x2002, u32::try_from(strings.len()).unwrap(), bytes.len()));
+    let mut array_descriptor = 0;
     for (index, text) in strings.iter().enumerate() {
         let offset = bytes.len();
+        if *text == "[Ljava/lang/Object;" {
+            array_descriptor = offset;
+        }
         put32(
             &mut bytes,
             string_ids + index * 4,
@@ -1318,6 +1656,7 @@ fn dex_with_handler(
         bytes.extend(word.to_le_bytes());
     }
     align(&mut bytes);
+    let tries = bytes.len();
     bytes.extend(0u32.to_le_bytes());
     bytes.extend(u16::try_from(instruction.len()).unwrap().to_le_bytes());
     bytes.extend(1u16.to_le_bytes());
@@ -1396,6 +1735,10 @@ fn dex_with_handler(
         code,
         handles,
         call_site_data,
+        methods: method_ids,
+        init_name: string_id("<init>"),
+        array_descriptor,
+        tries,
     }
 }
 

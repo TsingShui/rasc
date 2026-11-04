@@ -322,6 +322,7 @@ pub fn collect(index: &ProgramIndex<'_>, owner: ClassKey) -> Result<ClassFacts, 
         descriptor: OriginalText::new(copy_units(class.descriptor)?),
         access_flags: access_flags(class.access_flags, MemberKind::Class)?,
         superclass,
+        superclass_type_index: context.superclass_type.map(|id| id.0),
         interfaces,
         source_file,
     };
@@ -426,9 +427,7 @@ pub fn collect(index: &ProgramIndex<'_>, owner: ClassKey) -> Result<ClassFacts, 
     let methods_issue = walk.issue.map(RequestError::from);
     let annotations = crate::input::annotation_facts::collect(index, owner)?;
     Ok(ClassFacts {
-        owner,
-        header_offset: index.header.header_offset,
-        class: declaration,
+        class: OwnerFacts::new(owner, index.header.header_offset, declaration),
         shape: walk.shape,
         delivered: ClassDataShape {
             static_fields: walk.delivered[0],

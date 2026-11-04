@@ -152,11 +152,12 @@ pub struct MethodAnalysis<'a> {
     pub result: Result<MethodOutcome<'a>, RequestError>,
 }
 
-/// The sole executable method path advances P1 -> P2 -> P3 or retains a classified stop.
+/// The sole executable method path advances P1 -> P2 -> P3 -> P4 or retains a classified stop.
 pub enum MethodOutcome<'a> {
     DeclarationOnly,
     DisassemblyStopped(crate::p1::DecodedOutcome<'a>),
-    Ssa(crate::p3::SsaMethod<'a>),
+    Typed(crate::p4::TypedMethod<'a>),
+    TypeStopped(crate::p4::TypeStop<'a>),
     FlowStopped(crate::p2::FlowStop<'a>),
     SsaStopped(crate::p3::SsaStop<'a>),
 }
@@ -165,7 +166,8 @@ impl MethodOutcome<'_> {
     /// Borrowed execution facts without extracting the predecessor product.
     pub fn execution(&self) -> Option<crate::p2::ExecutionFacts<'_, '_>> {
         match self {
-            Self::Ssa(ssa) => Some(ssa.execution()),
+            Self::Typed(typed) => Some(typed.execution()),
+            Self::TypeStopped(stop) => Some(stop.execution()),
             Self::SsaStopped(stop) => Some(stop.execution()),
             _ => None,
         }
@@ -174,7 +176,8 @@ impl MethodOutcome<'_> {
     /// Original read-only evidence for debugging; no stage constructor is exposed.
     pub fn evidence(&self) -> Option<crate::p2::MethodEvidence<'_, '_>> {
         match self {
-            Self::Ssa(ssa) => Some(ssa.evidence()),
+            Self::Typed(typed) => Some(typed.evidence()),
+            Self::TypeStopped(stop) => Some(stop.evidence()),
             Self::SsaStopped(stop) => Some(stop.evidence()),
             Self::FlowStopped(stop) => Some(stop.evidence()),
             _ => None,
@@ -199,12 +202,16 @@ impl MethodTask {
             return Ok(MethodOutcome::DeclarationOnly);
         }
         let mut outcome = index.decode_method_source(&source)?;
+        drop(source);
         let Some(decoded) = outcome.decoded.take() else {
             return Ok(MethodOutcome::DisassemblyStopped(outcome));
         };
         match crate::p2::build_flow(&task, decoded) {
             crate::p2::FlowBuild::Ready(flow) => match crate::p3::build_ssa(&task, flow) {
-                crate::p3::SsaBuild::Ready(ssa) => Ok(MethodOutcome::Ssa(ssa)),
+                crate::p3::SsaBuild::Ready(ssa) => match crate::p4::build_types(&task, ssa) {
+                    crate::p4::TypeBuild::Ready(typed) => Ok(MethodOutcome::Typed(typed)),
+                    crate::p4::TypeBuild::Stopped(stop) => Ok(MethodOutcome::TypeStopped(stop)),
+                },
                 crate::p3::SsaBuild::Stopped(stop) => Ok(MethodOutcome::SsaStopped(stop)),
             },
             crate::p2::FlowBuild::Stopped(stop) => Ok(MethodOutcome::FlowStopped(stop)),
@@ -223,7 +230,7 @@ impl<'a> Engine<'a> {
         image.index.class_facts_cached(class.class_def)
     }
 
-    /// Runs P0, the method reader, P1, P2 and P3 for one method entry only.
+    /// Runs P0, the method reader and P1–P4 for one method entry only.
     pub fn analyze_method(
         &self,
         class: ClassKey,
@@ -239,7 +246,7 @@ impl<'a> Engine<'a> {
         })
     }
 
-    /// Runs P0, the method reader, P1, P2 and P3 for one class request. Class assembly
+    /// Runs P0, the method reader and P1–P4 for one class request. Class assembly
     /// and rendering belong to P8/P9 and are not part of this boundary.
     pub fn analyze(&self, request: Request) -> Result<ClassAnalysis<'a>, RequestError> {
         let position =

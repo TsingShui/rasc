@@ -1,7 +1,7 @@
 use super::values::EncodedValues;
 use super::{
-    Cursor, DexString, InputError, InputProblem, MethodBody, MethodError, ProgramIndex,
-    RawMethodView, file_offset, malformed,
+    Cursor, InputError, InputProblem, MethodBody, MethodError, ProgramIndex, RawMethodView,
+    file_offset, malformed,
 };
 
 use crate::{ByteLength, ByteOffset, ByteRange, ClassDefId, MethodId, RequestError};
@@ -34,12 +34,9 @@ pub enum RawPrintable<'a> {
 /// Construction is restricted to the owning input validator.
 pub struct MethodSource<'i, 'a> {
     index: &'i ProgramIndex<'a>,
-    class_id: ClassDefId,
     method_id: MethodId,
-    header_offset: ByteOffset,
-    owner: DexString<'a>,
+    owner: crate::p0::OwnerFacts,
     access_flags: u32,
-    owner_access_flags: u32,
     declaration: crate::p0::MethodDeclaration,
     raw: RawPrintable<'a>,
     /// The independent method/parameter annotation read for this member. A
@@ -54,22 +51,19 @@ impl<'i, 'a> MethodSource<'i, 'a> {
     }
 
     pub fn class_id(&self) -> ClassDefId {
-        self.class_id
+        self.owner.key().class_def
     }
     pub fn method_id(&self) -> MethodId {
         self.method_id
     }
     pub fn header_offset(&self) -> ByteOffset {
-        self.header_offset
+        self.owner.header_offset()
     }
-    pub fn owner(&self) -> DexString<'a> {
-        self.owner
+    pub fn owner_facts(&self) -> &crate::p0::OwnerFacts {
+        &self.owner
     }
     pub fn access_flags(&self) -> u32 {
         self.access_flags
-    }
-    pub fn owner_access_flags(&self) -> u32 {
-        self.owner_access_flags
     }
     pub fn declaration(&self) -> &crate::p0::MethodDeclaration {
         &self.declaration
@@ -106,8 +100,10 @@ impl<'a> ProgramIndex<'a> {
         facts: &crate::p0::ClassFacts,
         method_id: MethodId,
     ) -> Result<MethodSource<'i, 'a>, MethodError> {
-        let class = self.class(facts.class_def())?;
-        if class.type_idx != facts.type_index() {
+        if facts.owner().dex != self.dex_id()
+            || facts.header_offset() != self.header.header_offset
+            || self.class_type_id(facts.class_def())? != facts.type_index()
+        {
             return Err(MethodError::InternalInvariant(
                 "class facts and class view disagree on the original type",
             ));
@@ -151,7 +147,7 @@ impl<'a> ProgramIndex<'a> {
                     + u64::from(access_flags & crate::substrate::flags::STATIC == 0),
             )),
         )?;
-        self.finish_method_source(class, method_id, access_flags, body, declaration)
+        self.finish_method_source(facts, method_id, access_flags, body, declaration)
     }
 
     /// Locates one original method by walking its class-data directory and then
@@ -170,13 +166,13 @@ impl<'a> ProgramIndex<'a> {
 
     fn finish_method_source<'i>(
         &'i self,
-        class: super::ClassView<'_, 'a>,
+        facts: &crate::p0::ClassFacts,
         method_id: MethodId,
         access_flags: u32,
         body: MethodBody<'a>,
         declaration: crate::p0::MethodDeclaration,
     ) -> Result<MethodSource<'i, 'a>, MethodError> {
-        let class_id = class.class_def_idx;
+        let class_id = facts.class_def();
         // Optional metadata is read independently: a damaged debug program or
         // annotation set keeps its own state and never removes intact code.
         let metadata = self
@@ -192,12 +188,9 @@ impl<'a> ProgramIndex<'a> {
 
         Ok(MethodSource {
             index: self,
-            class_id,
             method_id,
-            header_offset: self.header.header_offset,
-            owner: class.descriptor,
+            owner: facts.owner_facts(),
             access_flags,
-            owner_access_flags: class.access_flags,
             declaration,
             raw,
             metadata,

@@ -68,7 +68,7 @@ impl<'a> ProgramIndex<'a> {
                 protection,
                 items,
                 DecodedFacts {
-                    class_id: source.class_id(),
+                    owner: source.owner_facts().clone(),
                     declaration,
                     access_flags: source.access_flags(),
                     entry,

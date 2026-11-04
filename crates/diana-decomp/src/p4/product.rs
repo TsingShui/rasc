@@ -1,0 +1,478 @@
+use crate::p2::{ExecutionFacts, MethodEvidence, OpId};
+use crate::p3::{PointId, SsaFacts, SsaMethod, StateId, TransferId, UseSite, ValueId};
+use crate::{CodeUnitOffset, SlotWidth, TypeId};
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Family {
+    Integral,
+    Long,
+    Float,
+    Double,
+    Reference,
+}
+
+/// Machine representations, not Java declarations or runtime object identities.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct Families(pub(super) u8);
+impl Families {
+    pub fn contains(self, family: Family) -> bool {
+        self.0 & Self::one(family).0 != 0
+    }
+    pub fn selected(self) -> Option<Family> {
+        [
+            Family::Integral,
+            Family::Long,
+            Family::Float,
+            Family::Double,
+            Family::Reference,
+        ]
+        .into_iter()
+        .find(|&f| self == Self::one(f))
+    }
+    pub fn is_conflict(self) -> bool {
+        self.0 == 0
+    }
+    pub(super) const WORD: Self = Self(1 | 4 | 16);
+    pub(super) const WIDE: Self = Self(2 | 8);
+    pub(super) const NUMBER: Self = Self(1 | 4);
+    pub(super) const INT_REF: Self = Self(1 | 16);
+    pub(super) const fn one(f: Family) -> Self {
+        Self(match f {
+            Family::Integral => 1,
+            Family::Long => 2,
+            Family::Float => 4,
+            Family::Double => 8,
+            Family::Reference => 16,
+        })
+    }
+    pub(super) fn width(width: SlotWidth) -> Self {
+        if width == SlotWidth::One {
+            Self::WORD
+        } else {
+            Self::WIDE
+        }
+    }
+    pub(super) fn intersect(self, other: Self) -> Self {
+        Self(self.0 & other.0)
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct TypeNameId(pub u32);
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SignaturePart {
+    Owner,
+    Field,
+    Return,
+    Parameter(u32),
+    Type,
+}
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum TypeOrigin {
+    Owner {
+        key: crate::ClassKey,
+        original: TypeId,
+    },
+    Parameter {
+        index: u32,
+        original: TypeId,
+    },
+    Return {
+        original: TypeId,
+    },
+    Reference {
+        pc: CodeUnitOffset,
+        slot: crate::raw::ReferenceSlot,
+        part: SignaturePart,
+        original: Option<TypeId>,
+    },
+    Intrinsic,
+    Component {
+        array: TypeNameId,
+    },
+}
+#[derive(Debug)]
+pub struct TypeName {
+    pub(super) units: Vec<u16>,
+    pub(super) origin: TypeOrigin,
+}
+impl TypeName {
+    pub fn units(&self) -> &[u16] {
+        &self.units
+    }
+    pub fn origin(&self) -> TypeOrigin {
+        self.origin
+    }
+}
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct Bits {
+    pub value: u64,
+    pub width: SlotWidth,
+}
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct IntegralRange {
+    pub min: i64,
+    pub max: i64,
+}
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+/// A root records proven alias provenance, not disjointness from other producers.
+pub enum Identity {
+    Unknown,
+    Root(ValueId),
+    Multiple,
+}
+
+#[derive(Debug)]
+pub struct ValueFacts {
+    pub(super) value: ValueId,
+    pub(super) families: Families,
+    pub(super) types: Vec<TypeNameId>,
+    pub(super) type_unknown: bool,
+    pub(super) literal: Option<Bits>,
+    pub(super) mixed_literal: bool,
+    pub(super) range: Option<IntegralRange>,
+    pub(super) range_unknown: bool,
+    pub(super) identity: Identity,
+}
+impl ValueFacts {
+    pub fn value(&self) -> ValueId {
+        self.value
+    }
+    pub fn families(&self) -> Families {
+        self.families
+    }
+    /// Original declared/produced type sources, not an exact runtime class claim.
+    pub fn types(&self) -> &[TypeNameId] {
+        &self.types
+    }
+    pub fn has_unknown_type_source(&self) -> bool {
+        self.type_unknown
+    }
+    pub fn literal(&self) -> Option<Bits> {
+        if self.mixed_literal {
+            None
+        } else {
+            self.literal
+        }
+    }
+    /// Range under the integral interpretation, never inferred from a use's demand.
+    pub fn integral_range(&self) -> Option<IntegralRange> {
+        if self.range_unknown { None } else { self.range }
+    }
+    pub fn identity(&self) -> Identity {
+        self.identity
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum MissingFact {
+    CatchDescriptor,
+    ReferenceDeclaration,
+    ArgumentLayout,
+    ArrayComponent,
+    ArrayPayload,
+    Hierarchy,
+    InitializationReceiver,
+    InitializationOwnerRelation,
+}
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Problem {
+    ConstructionPending,
+    Missing(MissingFact),
+    SourceUnavailable(StateId),
+    AmbiguousRepresentation(Families),
+    FamilyConflict,
+    OriginalUseIssue(OpId),
+    OwnerDeclarationUnavailable,
+    ConstructorOwnerMismatch,
+    AmbiguousIdentity,
+    InitializationStateConflict,
+    NonzeroReferenceLiteral,
+    LiteralOutOfRange,
+    NarrowingRange,
+    NonArrayDescriptor(TypeNameId),
+}
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Relation {
+    Same,
+    WidenToObject,
+    DirectSuperclass,
+    Unknown,
+}
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Interpretation {
+    Direct(Family),
+    IntegralView {
+        declared: TypeNameId,
+    },
+    Reference {
+        declared: TypeNameId,
+        relation: Relation,
+    },
+    Literal {
+        bits: Bits,
+        family: Family,
+    },
+    Null,
+    /// A bit-preserving copy or pure Phi does not choose a numeric interpretation.
+    LiteralBits(Bits),
+    CopyBits(crate::SlotWidth),
+    Unknown(Problem),
+}
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum ReadMeaning {
+    Value,
+    CopyBits,
+    Equality,
+}
+#[derive(Debug)]
+pub struct Requirement {
+    pub(super) meaning: ReadMeaning,
+    pub(super) families: Families,
+    pub(super) types: Vec<TypeNameId>,
+    pub(super) missing: Option<MissingFact>,
+}
+impl Requirement {
+    pub fn families(&self) -> Families {
+        self.families
+    }
+    pub fn types(&self) -> &[TypeNameId] {
+        &self.types
+    }
+    pub fn missing(&self) -> Option<MissingFact> {
+        self.missing
+    }
+}
+#[derive(Debug)]
+pub struct UseView {
+    pub(super) site: UseSite,
+    pub(super) state: StateId,
+    pub(super) requirement: Requirement,
+    pub(super) interpretation: Interpretation,
+}
+impl UseView {
+    pub fn site(&self) -> UseSite {
+        self.site
+    }
+    pub fn state(&self) -> StateId {
+        self.state
+    }
+    pub fn requirement(&self) -> &Requirement {
+        &self.requirement
+    }
+    pub fn interpretation(&self) -> Interpretation {
+        self.interpretation
+    }
+}
+#[derive(Clone, Copy, Debug)]
+pub struct IncomingView {
+    pub transfer: TransferId,
+    pub state: StateId,
+    pub interpretation: Interpretation,
+}
+#[derive(Debug)]
+pub enum PhiRepresentation {
+    Literal(Bits),
+    Runtime(Families),
+}
+#[derive(Debug)]
+pub struct PhiView {
+    pub(super) phi: crate::p3::PhiId,
+    pub(super) representation: PhiRepresentation,
+    pub(super) families: Families,
+    pub(super) incoming: Vec<IncomingView>,
+}
+impl PhiView {
+    pub fn representation(&self) -> &PhiRepresentation {
+        &self.representation
+    }
+    pub fn phi(&self) -> crate::p3::PhiId {
+        self.phi
+    }
+    pub fn families(&self) -> Families {
+        self.families
+    }
+    pub fn incoming(&self) -> &[IncomingView] {
+        &self.incoming
+    }
+}
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ConstructorRelation {
+    Allocation,
+    This,
+    Super,
+    OtherOwner,
+    AmbiguousIdentity,
+    Unknown(MissingFact),
+    NotAllocation,
+}
+#[derive(Clone, Copy, Debug)]
+pub struct ConstructorFact {
+    pub operation: OpId,
+    pub receiver: Option<StateId>,
+    pub identity: Identity,
+    pub relation: ConstructorRelation,
+}
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Initialization {
+    Initialized,
+    BeforeConstructor,
+    ConstructorFailed,
+    ConstructorStateConflict,
+    Mixed(InitializationStates),
+    Unknown,
+    SourceUnavailable,
+}
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct InitializationStates(pub(super) u8);
+impl InitializationStates {
+    pub fn may_be_before_constructor(self) -> bool {
+        self.0 & 1 != 0
+    }
+    pub fn may_be_initialized(self) -> bool {
+        self.0 & 2 != 0
+    }
+    pub fn may_have_failed(self) -> bool {
+        self.0 & 4 != 0
+    }
+    pub fn may_be_unknown(self) -> bool {
+        self.0 & 8 != 0
+    }
+    pub fn may_have_constructor_state_conflict(self) -> bool {
+        self.0 & 16 != 0
+    }
+}
+#[derive(Clone, Copy, Debug)]
+pub struct InitializationUse {
+    pub site: UseSite,
+    pub point: PointId,
+    pub state: Initialization,
+}
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum IssueSite {
+    Value(ValueId),
+    Use(UseSite),
+    Operation(OpId),
+    Incoming {
+        phi: crate::p3::PhiId,
+        transfer: TransferId,
+    },
+}
+#[derive(Clone, Copy, Debug)]
+pub struct TypeIssue {
+    pub site: IssueSite,
+    pub problem: Problem,
+}
+
+pub struct TypeFacts {
+    pub(super) names: Vec<TypeName>,
+    pub(super) values: Vec<ValueFacts>,
+    pub(super) uses: Vec<UseView>,
+    pub(super) phis: Vec<PhiView>,
+    pub(super) constructors: Vec<ConstructorFact>,
+    pub(super) initialization: Vec<InitializationUse>,
+    pub(super) issues: Vec<TypeIssue>,
+}
+impl TypeFacts {
+    pub(super) fn empty() -> Self {
+        Self {
+            names: Vec::new(),
+            values: Vec::new(),
+            uses: Vec::new(),
+            phis: Vec::new(),
+            constructors: Vec::new(),
+            initialization: Vec::new(),
+            issues: Vec::new(),
+        }
+    }
+    pub fn names(&self) -> &[TypeName] {
+        &self.names
+    }
+    pub fn name(&self, id: TypeNameId) -> Option<&TypeName> {
+        self.names.get(id.0 as usize)
+    }
+    pub fn values(&self) -> &[ValueFacts] {
+        &self.values
+    }
+    pub fn value(&self, id: ValueId) -> Option<&ValueFacts> {
+        self.values.get(id.0 as usize)
+    }
+    pub fn uses(&self) -> &[UseView] {
+        &self.uses
+    }
+    pub fn phis(&self) -> &[PhiView] {
+        &self.phis
+    }
+    pub fn constructors(&self) -> &[ConstructorFact] {
+        &self.constructors
+    }
+    pub fn initialization(&self) -> &[InitializationUse] {
+        &self.initialization
+    }
+    pub fn issues(&self) -> &[TypeIssue] {
+        &self.issues
+    }
+}
+
+pub struct TypedMethod<'a> {
+    pub(super) ssa: SsaMethod<'a>,
+    pub(super) facts: TypeFacts,
+}
+impl<'a> TypedMethod<'a> {
+    pub fn facts(&self) -> &TypeFacts {
+        &self.facts
+    }
+    pub fn ssa_facts(&self) -> &SsaFacts {
+        self.ssa.facts()
+    }
+    pub fn execution(&self) -> ExecutionFacts<'_, 'a> {
+        self.ssa.execution()
+    }
+    pub fn evidence(&self) -> MethodEvidence<'_, 'a> {
+        self.ssa.evidence()
+    }
+    pub fn method_id(&self) -> crate::MethodId {
+        self.ssa.method_id()
+    }
+    pub fn class_id(&self) -> crate::ClassDefId {
+        self.ssa.class_id()
+    }
+}
+pub struct TypeStop<'a> {
+    pub(super) ssa: SsaMethod<'a>,
+    pub(super) error: super::TypeError,
+    pub(super) partial: TypePartial,
+}
+impl<'a> TypeStop<'a> {
+    pub fn error(&self) -> &super::TypeError {
+        &self.error
+    }
+    pub fn ssa_facts(&self) -> &SsaFacts {
+        self.ssa.facts()
+    }
+    pub fn execution(&self) -> ExecutionFacts<'_, 'a> {
+        self.ssa.execution()
+    }
+    pub fn evidence(&self) -> MethodEvidence<'_, 'a> {
+        self.ssa.evidence()
+    }
+    pub fn partial(&self) -> &TypePartial {
+        &self.partial
+    }
+}
+
+/// Unpublished construction records, not a TypedMethod or its TypeFacts contract.
+pub struct TypePartial {
+    pub(super) facts: TypeFacts,
+}
+impl TypePartial {
+    pub fn values(&self) -> &[ValueFacts] {
+        &self.facts.values
+    }
+    pub fn uses(&self) -> &[UseView] {
+        &self.facts.uses
+    }
+    pub fn issues(&self) -> &[TypeIssue] {
+        &self.facts.issues
+    }
+}

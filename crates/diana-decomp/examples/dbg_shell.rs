@@ -500,7 +500,7 @@ impl Shell {
                     "handler_targets": decoded.handler_targets().collect::<Vec<_>>(),
                 }))
             }
-            "p3-all" => ssa_all(
+            "p3-all" | "p4-all" => ssa_all(
                 &engine,
                 index.class_count(),
                 request
@@ -508,13 +508,42 @@ impl Shell {
                     .map(|_| class_id(request))
                     .transpose()?,
             ),
+            "p4" | "types" => {
+                let analysis = engine
+                    .analyze_method(class_key(class_id(request)?), MethodId(method_id(request)?))?;
+                let outcome = analysis.result?;
+                let details = request
+                    .get("details")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false);
+                match &outcome {
+                    MethodOutcome::Typed(typed) => Ok(type_json(typed, details)),
+                    MethodOutcome::SsaStopped(stop) => Ok(
+                        json!({"stage":"p4","upstream_stage":"p3","kind":format!("{:?}",stop.error().kind()),"error":format!("{}",stop.error())}),
+                    ),
+                    MethodOutcome::TypeStopped(stop) => Ok(
+                        json!({"stage":"p4","stopped":true,"kind":format!("{:?}",stop.error().kind()),"error":format!("{}",stop.error()),"partial":{"values":stop.partial().values().len(),"uses":stop.partial().uses().len(),"issues":stop.partial().issues().len()}}),
+                    ),
+                    _ => Ok(inspection_stop(&outcome)
+                        .unwrap_or(json!({"stage":"p4","upstream_stopped":true}))),
+                }
+            }
             "p3" | "ssa" => {
                 let analysis = engine
                     .analyze_method(class_key(class_id(request)?), MethodId(method_id(request)?))?;
                 let outcome = analysis.result?;
                 match &outcome {
-                    MethodOutcome::Ssa(ssa) => Ok(ssa_json(
-                        ssa,
+                    MethodOutcome::Typed(ssa) => Ok(ssa_json(
+                        ssa.ssa_facts(),
+                        ssa.execution(),
+                        request
+                            .get("details")
+                            .and_then(Value::as_bool)
+                            .unwrap_or(false),
+                    )),
+                    MethodOutcome::TypeStopped(stop) => Ok(ssa_json(
+                        stop.ssa_facts(),
+                        stop.execution(),
                         request
                             .get("details")
                             .and_then(Value::as_bool)
@@ -585,7 +614,8 @@ impl Shell {
                                 p1_errors += 1;
                                 continue;
                             }
-                            MethodOutcome::Ssa(ssa) => Ok(ssa.execution()),
+                            MethodOutcome::Typed(ssa) => Ok(ssa.execution()),
+                            MethodOutcome::TypeStopped(stop) => Ok(stop.execution()),
                             MethodOutcome::SsaStopped(stop) => Ok(stop.execution()),
                             MethodOutcome::FlowStopped(stop) => Err(stop.error()),
                         };
@@ -774,10 +804,45 @@ impl Shell {
     }
 }
 
-fn ssa_json(ssa: &diana_decomp::p3::SsaMethod<'_>, details: bool) -> Value {
-    let f = ssa.facts();
-    json!({"stage":"p3", "class":ssa.class_id().0,"method":ssa.method_id().0,
-    "issues":ssa.execution().issues().map(|(pc,e)|json!({"pc":pc.0,"kind":format!("{:?}",e.kind()),"detail":format!("{e}")})).collect::<Vec<_>>(),
+fn type_json(typed: &diana_decomp::p4::TypedMethod<'_>, details: bool) -> Value {
+    let f = typed.facts();
+    use diana_decomp::p4::{Interpretation, Problem};
+    let mut missing = std::collections::BTreeMap::<String, u64>::new();
+    for issue in f.issues() {
+        if let Problem::Missing(fact) = issue.problem {
+            *missing.entry(format!("{fact:?}")).or_default() += 1;
+        }
+    }
+    json!({"stage":"p4","class":typed.class_id().0,"method":typed.method_id().0,
+        "input_issues":typed.execution().issues().map(|(pc,e)|json!({"pc":pc.0,"kind":format!("{:?}",e.kind()),"detail":format!("{e}")})).collect::<Vec<_>>(),
+        "values":f.values().len(),"uses":f.uses().len(),"phis":f.phis().len(),
+        "constructors":f.constructors().len(),"initialization_uses":f.initialization().len(),
+        "issues":f.issues().len(),"missing_facts":missing,
+        "unknown_views":f.uses().iter().filter(|u|matches!(u.interpretation(),Interpretation::Unknown(_))).count(),
+        "conflict_values":f.values().iter().filter(|v|v.families().is_conflict()).count(),
+        "details":details.then(||json!({
+            "names":f.names().iter().enumerate().map(|(i,n)|json!({"id":i,"units":n.units(),"origin":format!("{:?}",n.origin())})).collect::<Vec<_>>(),
+            "values":f.values().iter().map(|v|json!({"value":v.value().0,"families":format!("{:?}",v.families()),"types":v.types().iter().map(|n|n.0).collect::<Vec<_>>(),
+                "unknown_type_source":v.has_unknown_type_source(),"literal":v.literal().map(|b|json!({"bits":b.value,"width":format!("{:?}",b.width)})),
+                "range":v.integral_range().map(|r|json!([r.min,r.max])),"identity":format!("{:?}",v.identity())})).collect::<Vec<_>>(),
+            "uses":f.uses().iter().map(|u|json!({"site":format!("{:?}",u.site()),"state":u.state().0,"required":format!("{:?}",u.requirement().families()),
+                "types":u.requirement().types().iter().map(|n|n.0).collect::<Vec<_>>(),"view":format!("{:?}",u.interpretation())})).collect::<Vec<_>>(),
+            "phis":f.phis().iter().map(|p|json!({"phi":p.phi().0,"representation":format!("{:?}",p.representation()),
+                "incoming":p.incoming().iter().map(|i|json!({"transfer":i.transfer.0,"state":i.state.0,"view":format!("{:?}",i.interpretation)})).collect::<Vec<_>>()})).collect::<Vec<_>>(),
+            "constructors":f.constructors().iter().map(|c|json!({"operation":c.operation.0,"receiver":c.receiver.map(|s|s.0),"identity":format!("{:?}",c.identity),"relation":format!("{:?}",c.relation)})).collect::<Vec<_>>(),
+            "initialization":f.initialization().iter().map(|i|json!({"site":format!("{:?}",i.site),"point":i.point.0,"state":format!("{:?}",i.state)})).collect::<Vec<_>>(),
+            "issues":f.issues().iter().map(|i|json!({"site":format!("{:?}",i.site),"problem":format!("{:?}",i.problem)})).collect::<Vec<_>>()
+        }))
+    })
+}
+
+fn ssa_json(
+    f: &diana_decomp::p3::SsaFacts,
+    flow: diana_decomp::p2::ExecutionFacts<'_, '_>,
+    details: bool,
+) -> Value {
+    json!({"stage":"p3", "class":flow.class_id().0,"method":flow.method_id().0,
+    "issues":flow.issues().map(|(pc,e)|json!({"pc":pc.0,"kind":format!("{:?}",e.kind()),"detail":format!("{e}")})).collect::<Vec<_>>(),
     "unresolved_input_sites":f.operation_sites().iter().filter(|s|!s.inputs_available()).count(),
     "points":f.points().len(),"transfers":f.transfers().len(),"slots":f.slots().len(),
     "states":f.states().len(),"values":f.values().len(),"uses":f.uses().len(),"phis":f.phis().len(),
@@ -807,6 +872,11 @@ fn ssa_all(
         (0u64, 0u64, 0u64, 0u64, 0u64, 0u64);
     let (mut points, mut states, mut values, mut uses, mut phis, mut unavailable) =
         (0u64, 0u64, 0u64, 0u64, 0u64, 0u64);
+    let (mut typed_ready, mut type_failed, mut type_issues, mut unknown_views) =
+        (0u64, 0u64, 0u64, 0u64);
+    let mut missing = std::collections::BTreeMap::<String, u64>::new();
+    let mut problems = std::collections::BTreeMap::<String, u64>::new();
+    let (mut typed_partial, mut conflict_values) = (0u64, 0u64);
     let mut first_failure = None;
     let mut analysis_time = std::time::Duration::ZERO;
     let (mut local_issues, mut partial_methods, mut unresolved_inputs) = (0u64, 0u64, 0u64);
@@ -831,11 +901,76 @@ fn ssa_all(
         };
         for entry in &analysis.methods {
             methods += 1;
+            let available = match &entry.result {
+                Ok(MethodOutcome::Typed(typed)) => {
+                    typed_ready += 1;
+                    type_issues += typed.facts().issues().len() as u64;
+                    typed_partial += u64::from(!typed.facts().issues().is_empty());
+                    conflict_values += typed
+                        .facts()
+                        .values()
+                        .iter()
+                        .filter(|v| v.families().is_conflict())
+                        .count() as u64;
+                    unknown_views += typed
+                        .facts()
+                        .uses()
+                        .iter()
+                        .filter(|u| {
+                            matches!(
+                                u.interpretation(),
+                                diana_decomp::p4::Interpretation::Unknown(_)
+                            )
+                        })
+                        .count() as u64;
+                    for issue in typed.facts().issues() {
+                        let key = match issue.problem {
+                            diana_decomp::p4::Problem::ConstructionPending => "ConstructionPending",
+                            diana_decomp::p4::Problem::Missing(_) => "MissingFact",
+                            diana_decomp::p4::Problem::FamilyConflict => "FamilyConflict",
+                            diana_decomp::p4::Problem::AmbiguousRepresentation(_) => {
+                                "AmbiguousRepresentation"
+                            }
+                            diana_decomp::p4::Problem::AmbiguousIdentity => "AmbiguousIdentity",
+                            diana_decomp::p4::Problem::InitializationStateConflict => {
+                                "InitializationStateConflict"
+                            }
+                            diana_decomp::p4::Problem::SourceUnavailable(_) => "SourceUnavailable",
+                            diana_decomp::p4::Problem::NarrowingRange => "NarrowingRange",
+                            diana_decomp::p4::Problem::LiteralOutOfRange => "LiteralOutOfRange",
+                            diana_decomp::p4::Problem::NonzeroReferenceLiteral => {
+                                "NonzeroReferenceLiteral"
+                            }
+                            diana_decomp::p4::Problem::NonArrayDescriptor(_) => {
+                                "NonArrayDescriptor"
+                            }
+                            diana_decomp::p4::Problem::OriginalUseIssue(_) => "OriginalUseIssue",
+                            diana_decomp::p4::Problem::OwnerDeclarationUnavailable => {
+                                "OwnerDeclarationUnavailable"
+                            }
+                            diana_decomp::p4::Problem::ConstructorOwnerMismatch => {
+                                "ConstructorOwnerMismatch"
+                            }
+                        };
+                        *problems.entry(key.into()).or_default() += 1;
+                        if let diana_decomp::p4::Problem::Missing(fact) = issue.problem {
+                            *missing.entry(format!("{fact:?}")).or_default() += 1;
+                        }
+                    }
+                    Some((typed.ssa_facts(), typed.execution()))
+                }
+                Ok(MethodOutcome::TypeStopped(stop)) => {
+                    type_failed += 1;
+                    Some((stop.ssa_facts(), stop.execution()))
+                }
+                _ => None,
+            };
             match &entry.result {
                 Ok(MethodOutcome::DeclarationOnly) => no_code += 1,
-                Ok(MethodOutcome::Ssa(ssa)) => {
+                Ok(MethodOutcome::Typed(_) | MethodOutcome::TypeStopped(_)) => {
                     ready += 1;
-                    let f = ssa.facts();
+                    let (f, flow) = available
+                        .ok_or(RequestError::InternalInvariant("retained SSA view missing"))?;
                     points += f.points().len() as u64;
                     states += f.states().len() as u64;
                     values += f.values().len() as u64;
@@ -850,7 +985,7 @@ fn ssa_all(
                         })
                         .count() as u64;
                     unavailable += unavailable_count;
-                    let issues = ssa.execution().issues().count() as u64;
+                    let issues = flow.issues().count() as u64;
                     let inputs = f
                         .operation_sites()
                         .iter()
@@ -885,6 +1020,7 @@ fn ssa_all(
     Ok(
         json!({"classes":requested,"class":selected,"methods":methods,"no_code":no_code,"ssa":ready,"failed":failed,"upstream":upstream,"class_errors":class_errors,
         "partial_methods":partial_methods,"local_issues":local_issues,"unresolved_input_sites":unresolved_inputs,"analysis_ns":analysis_time.as_nanos(),
+        "typed":typed_ready,"typed_partial_methods":typed_partial,"conflict_values":conflict_values,"type_failed":type_failed,"type_issues":type_issues,"type_problems":problems,"unknown_type_views":unknown_views,"missing_facts":missing,
         "points":points,"states":states,"values":values,"uses":uses,"phis":phis,"unavailable_uses":unavailable,
         "complete":true,"first_failure":first_failure,"elapsed_ms":started.elapsed().as_millis()}),
     )
@@ -906,7 +1042,9 @@ fn inspection_stop(outcome: &MethodOutcome<'_>) -> Option<Value> {
                 "blocks": partial.blocks().len(), "edges": partial.edges().len(),
             })),
         })),
-        MethodOutcome::Ssa(_) | MethodOutcome::SsaStopped(_) => None,
+        MethodOutcome::Typed(_) | MethodOutcome::TypeStopped(_) | MethodOutcome::SsaStopped(_) => {
+            None
+        }
     }
 }
 

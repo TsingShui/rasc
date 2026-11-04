@@ -674,6 +674,9 @@ impl<'a> FlowMethod<'a> {
     pub fn class_id(&self) -> crate::ClassDefId {
         self.decoded.class_id()
     }
+    pub fn owner_facts(&self) -> &crate::p0::OwnerFacts {
+        self.decoded.owner_facts()
+    }
     pub fn declaration(&self) -> &crate::p0::MethodDeclaration {
         self.decoded.declaration()
     }

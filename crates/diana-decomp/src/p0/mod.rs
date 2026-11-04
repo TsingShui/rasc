@@ -6,5 +6,5 @@ mod facts;
 pub use collect::collect;
 pub use facts::{
     ClassFacts, Fact, FieldDirectoryEntry, InitialValue, MethodDeclaration, OriginalText,
-    ScalarValue,
+    OwnerFacts, ScalarValue,
 };

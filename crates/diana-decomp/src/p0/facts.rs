@@ -144,8 +144,53 @@ pub struct ClassDeclaration {
     pub descriptor: OriginalText,
     pub access_flags: OriginalFlags,
     pub superclass: Fact<OriginalText>,
+    pub superclass_type_index: Option<u32>,
     pub interfaces: Fact<Vec<Fact<OriginalText>>>,
     pub source_file: Fact<OriginalText>,
+}
+
+/// P0's immutable class declaration, shared by the class and its method products.
+/// It contains no member directory, code reader or analysis construction entry.
+#[derive(Clone)]
+pub struct OwnerFacts {
+    key: ClassKey,
+    header_offset: ByteOffset,
+    data: std::sync::Arc<ClassDeclaration>,
+}
+impl OwnerFacts {
+    pub(super) fn new(key: ClassKey, header_offset: ByteOffset, data: ClassDeclaration) -> Self {
+        Self {
+            key,
+            header_offset,
+            data: std::sync::Arc::new(data),
+        }
+    }
+    pub fn key(&self) -> ClassKey {
+        self.key
+    }
+    pub fn header_offset(&self) -> ByteOffset {
+        self.header_offset
+    }
+    pub fn type_id(&self) -> TypeId {
+        TypeId(self.data.type_index)
+    }
+    pub fn descriptor(&self) -> &OriginalText {
+        &self.data.descriptor
+    }
+    pub fn access_flags(&self) -> ClassAccessFlags {
+        ClassAccessFlags::from_raw(self.data.access_flags.raw())
+    }
+    pub fn superclass(&self) -> &Fact<OriginalText> {
+        &self.data.superclass
+    }
+    /// Original header identity. It is established only when superclass() is Present;
+    /// an unavailable descriptor retains its raw identity and original error.
+    pub fn superclass_type_id(&self) -> Option<TypeId> {
+        self.data.superclass_type_index.map(TypeId)
+    }
+    pub fn interfaces(&self) -> &Fact<Vec<Fact<OriginalText>>> {
+        &self.data.interfaces
+    }
 }
 
 #[derive(Serialize)]
@@ -329,9 +374,7 @@ impl MethodDirectoryEntry {
 /// directory and independently available metadata. Local declaration/metadata
 /// damage stays in its own member entry. Method code is not opened.
 pub struct ClassFacts {
-    pub(super) owner: ClassKey,
-    pub(super) header_offset: ByteOffset,
-    pub(super) class: ClassDeclaration,
+    pub(super) class: OwnerFacts,
     pub(super) shape: ClassDataShape,
     pub(super) delivered: ClassDataShape,
     pub(super) terminated_at: Option<ByteOffset>,
@@ -345,34 +388,37 @@ pub struct ClassFacts {
 
 impl ClassFacts {
     pub fn owner(&self) -> ClassKey {
-        self.owner
+        self.class.key()
     }
     pub fn header_offset(&self) -> ByteOffset {
-        self.header_offset
+        self.class.header_offset()
     }
     pub fn class_def(&self) -> ClassDefId {
-        self.owner.class_def
+        self.class.key().class_def
     }
     pub fn type_index(&self) -> TypeId {
-        TypeId(self.class.type_index)
+        self.class.type_id()
     }
     pub fn descriptor(&self) -> &OriginalText {
-        &self.class.descriptor
+        self.class.descriptor()
     }
     pub fn access_flags(&self) -> ClassAccessFlags {
-        ClassAccessFlags::from_raw(self.class.access_flags.raw())
+        self.class.access_flags()
     }
     pub fn superclass(&self) -> &Fact<OriginalText> {
-        &self.class.superclass
+        self.class.superclass()
     }
     pub fn interfaces(&self) -> &Fact<Vec<Fact<OriginalText>>> {
-        &self.class.interfaces
+        self.class.interfaces()
     }
     pub fn source_file(&self) -> &Fact<OriginalText> {
-        &self.class.source_file
+        &self.class.data.source_file
     }
     /// Original `class_data` group counts, including groups whose traversal
     /// stopped early. This describes the header, not the delivered directory.
+    pub fn owner_facts(&self) -> OwnerFacts {
+        self.class.clone()
+    }
     pub fn class_data_shape(&self) -> ClassDataShape {
         self.shape
     }
@@ -418,7 +464,7 @@ impl ClassFacts {
                     if found.is_some() {
                         return Err(RequestError::Input(crate::input::InputError::Malformed {
                             code: crate::input::InputProblem::InvalidReference,
-                            offset_byte: self.header_offset,
+                            offset_byte: self.header_offset(),
                         }));
                     }
                     found = Some(entry.method());
@@ -441,7 +487,7 @@ impl ClassFacts {
             Some(error) => RequestError::Input(error),
             None => RequestError::Input(crate::input::InputError::Malformed {
                 code: crate::input::InputProblem::InvalidReference,
-                offset_byte: self.header_offset,
+                offset_byte: self.header_offset(),
             }),
         })
     }
@@ -452,15 +498,15 @@ impl ClassFacts {
         self.fields_issue.is_some()
             || self.methods_issue.is_some()
             || self.annotations_issue.is_some()
-            || self.class.superclass.unavailable().is_some()
-            || self.class.interfaces.unavailable().is_some()
-            || match &self.class.interfaces {
+            || self.class.superclass().unavailable().is_some()
+            || self.class.interfaces().unavailable().is_some()
+            || match self.class.interfaces() {
                 Fact::Present(interfaces) => interfaces
                     .iter()
                     .any(|interface| interface.unavailable().is_some()),
                 _ => false,
             }
-            || self.class.source_file.unavailable().is_some()
+            || self.class.data.source_file.unavailable().is_some()
             || self
                 .fields
                 .iter()
