@@ -112,12 +112,13 @@ accurately; do not report removed tests or missing semantic evidence as a pass.
 ## Documentation map
 
 - [phases](docs/diana/phases.md): phase map and current scheduling entry.
-- [spec/00–09](docs/diana/README.md): product overview and phase chapters;
-  detailed contracts are still being migrated.
-- [spec/00–10](docs/diana/spec/): product, input, phases, CLI and algorithms.
+- [documentation entry](docs/diana/README.md): active contracts and package docs.
+- [PIPELINE_DESIGN](docs/diana/PIPELINE_DESIGN.md): approved P0–P9 architecture.
+- [spec](docs/diana/spec/): product boundary and implemented P0/input/P1/P2 contracts.
 - [SOURCE_MAP](docs/diana/SOURCE_MAP.md): sources, attribution and reference use.
 - [CONTRIBUTING](docs/diana/CONTRIBUTING.md): detailed contribution rules.
 - [WRITING](docs/diana/WRITING.md): documentation conventions.
 
-Technical contracts are being revised toward readable output; do not interpret
-old verification gates as evidence that the revised behavior is implemented.
+PIPELINE_DESIGN is the approved architecture, not an implementation-status claim.
+Use phases and package READMEs for active capabilities; archived specifications
+and verification gates are not current contracts or acceptance evidence.

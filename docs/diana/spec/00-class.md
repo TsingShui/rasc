@@ -30,7 +30,7 @@ encoded values retain their complete checked bytes and format tag.
 
 The collector retains class, field, method and parameter annotations with their
 original associations, visibility, descriptor, physical ranges and value events.
-Nested metadata uses the P1 flat container-event representation. System annotations
+Nested metadata uses the shared reader's flat container-event representation. System annotations
 retain raw facts; P0 does not infer nested ownership or generic source declarations.
 
 ## Snapshot and failure behavior
@@ -57,7 +57,7 @@ shared data; the logical header offset remains part of identity.
 
 ## Development inspection
 
-The engine development shell is the single P0/P1 observation entry:
+The engine development shell is the single P0/P1/P2 observation entry:
 
 ```sh
 cargo run -p diana-decomp --example dbg_shell --locked -- \

@@ -1,15 +1,20 @@
 # Diana CLI
 
-Diana is the command-line front end of the native Diana decompiler. The binary is
-`diana` (`diana.exe` on Windows); it never delegates to rasc, dexdec or an external
-runtime. Old command names and flags (`getclass`, `findrefs`, `skill`,
+Diana is the command-line front end of the native Diana decompiler. Its source
+currently depends on result APIs being rebuilt after P2, so the application
+package is not buildable during this refactoring. The command descriptions below
+record the application surface, not successful execution of the current tree.
+The binary name is `diana` (`diana.exe` on Windows); it never delegates to rasc,
+dexdec or an external runtime. Old command names and flags (`getclass`, `findrefs`, `skill`,
 `--require-java`, `--class-id`, `--members`, `--offset`, `--limit`) do not exist and
 are rejected as unknown arguments.
 
 The engine lives in [diana-decomp](../../crates/diana-decomp/README.md) and borrows
-DEX bytes supplied by this package. See
-[specification](../../docs/diana/spec/00-overview.md) for the interface. The `0.0.0` version is an
-unpublished scaffold marker.
+DEX bytes supplied by this package. The
+[approved architecture](../../docs/diana/PIPELINE_DESIGN.md) owns product boundaries;
+this README owns command and publication descriptions. Old decompilation schema 2
+is not the current Engine analysis interface. The `0.0.0` version is an unpublished
+scaffold marker.
 
 ## Commands
 
@@ -121,7 +126,7 @@ allocation failure is reported as a classified error instead of a truncated resu
 Cancellation is cooperative between analysis stages; a process killed by a signal
 is not a catchable cancellation guarantee.
 
-## Internal P0/P1 inspection
+## Internal P0/P1/P2 inspection
 
 Use the engine development shell with a bare DEX:
 
@@ -133,7 +138,8 @@ cargo run -p diana-decomp --example dbg_shell --locked -- \
 ```
 
 It writes one JSON response per command. See the engine package for the
-supported `class`, `p0`, `methods`, `p1` and `decoded` commands.
+supported `class`, `p0`, `methods`, `p1`, `decoded`, `p2`, `p2-all` and byte-roundtrip
+inspection commands.
 
 ## Agent usage
 
@@ -155,9 +161,6 @@ provides no skill-install command.
 5. `diana extract app.apk 'AndroidManifest.xml' -o manifest.xml` decodes the binary
    manifest; `--raw` keeps the original AXML bytes. Extraction writes only the
    requested file.
-6. Convert DEX to a JVM-executable form with an external tool such as the Android
-   `d8`, then reuse that existing conversion for later checks. Diana itself neither
-   performs that conversion nor runs recovered code.
 
 Do not delete or move a user's installed rasc skill when adopting Diana; this
 document is additive.

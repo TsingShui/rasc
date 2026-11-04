@@ -1,10 +1,11 @@
 # Diana
 
 Native Rust APK/DEX decompiler, designed to replace rasc.
-The native engine and CLI are implemented. Source-legality qualification is not
-an output goal; readable reconstruction retains concrete unresolved facts.
-Missing analysis or lowering products still return original DEX information.
-Real-application coverage is not established by build or lint checks.
+The engine currently implements the P0 → method reader → P1 → P2 analysis chain.
+The CLI source remains in the workspace; decompilation/result integration is being
+rebuilt and the application package is not currently buildable. Readable output
+with original facts and uncertainty remains the goal, not Java compilability.
+Build and lint checks do not establish real-application coverage.
 
 ## Active project
 
@@ -63,7 +64,8 @@ methods; Mixed is not a gate that suppresses the whole class. Class assembly rec
 remain separate from readable availability.
 
 - [Documentation entry](docs/diana/README.md)
-- [Specification chapters](docs/diana/spec/00-overview.md)
+- [Approved architecture](docs/diana/PIPELINE_DESIGN.md)
+- [Product boundary](docs/diana/spec/00-overview.md)
 - [Sources and reproducibility](docs/diana/SOURCE_MAP.md)
 - Archived reference scope: removed from the tree at commit 5cb156c; see
   [SOURCE_MAP](docs/diana/SOURCE_MAP.md) for the pinned upstream anchors
