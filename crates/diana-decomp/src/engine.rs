@@ -154,19 +154,30 @@ pub struct MethodAnalysis<'a> {
     pub result: Result<MethodOutcome<'a>, RequestError>,
 }
 
-/// The sole executable method path advances P1 -> P2 or retains a classified stop.
+/// The sole executable method path advances P1 -> P2 -> P3 or retains a classified stop.
 pub enum MethodOutcome<'a> {
     DeclarationOnly,
     DisassemblyStopped(crate::p1::DecodedOutcome<'a>),
-    Flowed(crate::p2::FlowMethod<'a>),
+    Ssa(crate::p3::SsaMethod<'a>),
     FlowStopped(crate::p2::FlowStop<'a>),
+    SsaStopped(crate::p3::SsaStop<'a>),
 }
 
 impl MethodOutcome<'_> {
+    /// Borrowed execution facts without extracting the predecessor product.
+    pub fn execution(&self) -> Option<crate::p2::ExecutionFacts<'_, '_>> {
+        match self {
+            Self::Ssa(ssa) => Some(ssa.execution()),
+            Self::SsaStopped(stop) => Some(stop.execution()),
+            _ => None,
+        }
+    }
+
     /// Original read-only evidence for debugging; no stage constructor is exposed.
     pub fn evidence(&self) -> Option<crate::p2::MethodEvidence<'_, '_>> {
         match self {
-            Self::Flowed(flow) => Some(flow.evidence()),
+            Self::Ssa(ssa) => Some(ssa.evidence()),
+            Self::SsaStopped(stop) => Some(stop.evidence()),
             Self::FlowStopped(stop) => Some(stop.evidence()),
             _ => None,
         }
@@ -194,7 +205,10 @@ impl MethodTask {
             return Ok(MethodOutcome::DisassemblyStopped(outcome));
         };
         match crate::p2::build_flow(&task, decoded) {
-            crate::p2::FlowBuild::Ready(flow) => Ok(MethodOutcome::Flowed(flow)),
+            crate::p2::FlowBuild::Ready(flow) => match crate::p3::build_ssa(&task, flow) {
+                crate::p3::SsaBuild::Ready(ssa) => Ok(MethodOutcome::Ssa(ssa)),
+                crate::p3::SsaBuild::Stopped(stop) => Ok(MethodOutcome::SsaStopped(stop)),
+            },
             crate::p2::FlowBuild::Stopped(stop) => Ok(MethodOutcome::FlowStopped(stop)),
         }
     }
@@ -211,7 +225,7 @@ impl<'a> Engine<'a> {
         image.index.class_facts_cached(class.class_def)
     }
 
-    /// Runs P0, the method reader, P1 and P2 for one method entry only.
+    /// Runs P0, the method reader, P1, P2 and P3 for one method entry only.
     pub fn analyze_method(
         &self,
         class: ClassKey,
@@ -227,7 +241,7 @@ impl<'a> Engine<'a> {
         })
     }
 
-    /// Runs P0, the method reader, P1 and P2 for one class request. Class assembly
+    /// Runs P0, the method reader, P1, P2 and P3 for one class request. Class assembly
     /// and rendering belong to P8/P9 and are not part of this boundary.
     pub fn analyze(&self, request: Request) -> Result<ClassAnalysis<'a>, RequestError> {
         let position =
@@ -264,6 +278,14 @@ impl<'a> Engine<'a> {
                     ) =>
                 {
                     Some(error.kind())
+                }
+                Ok(MethodOutcome::SsaStopped(stop))
+                    if matches!(
+                        stop.error().kind(),
+                        FailureKind::ResourceExhausted | FailureKind::InternalInvariant
+                    ) =>
+                {
+                    Some(stop.error().kind())
                 }
                 Ok(MethodOutcome::FlowStopped(stop))
                     if matches!(

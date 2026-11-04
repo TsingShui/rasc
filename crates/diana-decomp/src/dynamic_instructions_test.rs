@@ -8,9 +8,10 @@
 use crate::input::{InputError, InputProblem};
 use crate::p1::{CheckedPrototype, CheckedReferenceFact, MethodError, MethodProblem};
 use crate::p2::{
-    CommitRule, Coverage, EdgeRole, EdgeTarget, ExceptionFrame, FlowMethod, HeapTransfer,
-    InvokeKind, LockTransfer, MoveKind, OpKind, ReadOrder,
+    CommitRule, Coverage, EdgeRole, EdgeTarget, ExceptionFrame, HeapTransfer, InvokeKind,
+    LockTransfer, MoveKind, OpKind, ReadOrder,
 };
+use crate::p3::SsaMethod;
 use crate::raw::{DexVersion, OperandReference, RawDecodeError, ReferenceSlot};
 use crate::{
     ByteOffset, CallSiteId, ClassDefId, ClassKey, CodeUnitOffset, DexId, DexImage, Engine,
@@ -99,16 +100,20 @@ fn dynamic_instructions_preserve_layout_references_and_completions() {
         let words = [0xff00 | u16::from(opcode), 1];
         let fixture = dex(39, &words, None, 5, 300, 0, 0);
         let flow = flowed(&fixture.bytes);
-        let operation = &flow.operations()[0];
-        assert_eq!(flow.reads(operation), &[]);
-        assert_eq!(flow.writes(operation), &[slot(255, SlotWidth::One)]);
+        let operation = &flow.execution().operations()[0];
+        assert_eq!(flow.execution().reads(operation), &[]);
+        assert_eq!(
+            flow.execution().writes(operation),
+            &[slot(255, SlotWidth::One)]
+        );
         assert_eq!(operation.result_pc(), None);
         assert_eq!(operation.normal().commit(), CommitRule::AtOperation);
         assert_eq!(operation.normal().commit_pc(), Some(CodeUnitOffset(0)));
         match (
             opcode,
             operation.kind(),
-            flow.reference_fact(CodeUnitOffset(0), ReferenceSlot::First),
+            flow.execution()
+                .reference_fact(CodeUnitOffset(0), ReferenceSlot::First),
         ) {
             (
                 0xfe,
@@ -192,8 +197,16 @@ fn check_metamorphic_relations() {
         let before = flowed(&original.bytes);
         let after = flowed(&shifted.bytes);
         assert_eq!(invoke_signature(&before), invoke_signature(&after));
-        assert_eq!(before.operations().len(), after.operations().len());
-        for (a, b) in before.operations().iter().zip(after.operations()) {
+        assert_eq!(
+            before.execution().operations().len(),
+            after.execution().operations().len()
+        );
+        for (a, b) in before
+            .execution()
+            .operations()
+            .iter()
+            .zip(after.execution().operations())
+        {
             let renamed = |slots: &[RegisterSlot]| {
                 slots
                     .iter()
@@ -203,34 +216,45 @@ fn check_metamorphic_relations() {
                     })
                     .collect::<Vec<_>>()
             };
-            assert_eq!(after.reads(b), renamed(before.reads(a)));
-            assert_eq!(after.writes(b), renamed(before.writes(a)));
+            assert_eq!(
+                after.execution().reads(b),
+                renamed(before.execution().reads(a))
+            );
+            assert_eq!(
+                after.execution().writes(b),
+                renamed(before.execution().writes(a))
+            );
             assert_eq!(a.effects(), b.effects());
             assert_eq!(a.normal(), b.normal());
             assert_eq!(a.exceptional(), b.exceptional());
         }
-        assert_eq!(before.edges(), after.edges());
-        assert_eq!(before.exits(), after.exits());
-        assert_eq!(before.coverage(), after.coverage());
+        assert_eq!(before.execution().edges(), after.execution().edges());
+        assert_eq!(before.execution().exits(), after.execution().exits());
+        assert_eq!(before.execution().coverage(), after.execution().coverage());
 
         let discarded = dex(39, &words, None, entry, registers, incoming, 4);
         let discarded = flowed(&discarded.bytes);
-        let used = &before.operations()[0];
-        let unused = &discarded.operations()[0];
+        let used = &before.execution().operations()[0];
+        let unused = &discarded.execution().operations()[0];
         assert_eq!(invoke_signature(&before), invoke_signature(&discarded));
-        assert_eq!(before.reads(used), discarded.reads(unused));
+        assert_eq!(
+            before.execution().reads(used),
+            discarded.execution().reads(unused)
+        );
         assert_eq!(used.effects(), unused.effects());
         assert_eq!(used.exceptional(), unused.exceptional());
         assert_eq!(unused.normal().commit(), CommitRule::None);
         assert_eq!(unused.normal().heap(), used.normal().heap());
         assert_eq!(unused.normal().lock(), used.normal().lock());
-        assert!(discarded.writes(unused).is_empty());
+        assert!(discarded.execution().writes(unused).is_empty());
         assert_eq!(
             before
+                .execution()
                 .exception_edges()
                 .map(|e| (e.source_op(), e.role()))
                 .collect::<Vec<_>>(),
             discarded
+                .execution()
                 .exception_edges()
                 .map(|e| (e.source_op(), e.role()))
                 .collect::<Vec<_>>()
@@ -260,7 +284,7 @@ fn check_metamorphic_relations() {
         for words in encodings {
             let fixture = dex(39, &words, None, 6, 8, 3, 0);
             let flow = flowed(&fixture.bytes);
-            let op = &flow.operations()[0];
+            let op = &flow.execution().operations()[0];
             if wide {
                 assert!(matches!(
                     op.kind(),
@@ -268,8 +292,8 @@ fn check_metamorphic_relations() {
                         kind: MoveKind::Wide
                     }
                 ));
-                assert_eq!(flow.reads(op), &[slot(6, SlotWidth::Two)]);
-                assert_eq!(flow.writes(op), &[slot(5, SlotWidth::Two)]);
+                assert_eq!(flow.execution().reads(op), &[slot(6, SlotWidth::Two)]);
+                assert_eq!(flow.execution().writes(op), &[slot(5, SlotWidth::Two)]);
             } else {
                 assert!(matches!(
                     op.kind(),
@@ -278,8 +302,8 @@ fn check_metamorphic_relations() {
                         width: SlotWidth::One
                     }
                 ));
-                assert!(flow.reads(op).is_empty());
-                assert_eq!(flow.writes(op), &[slot(0, SlotWidth::One)]);
+                assert!(flow.execution().reads(op).is_empty());
+                assert_eq!(flow.execution().writes(op), &[slot(0, SlotWidth::One)]);
             }
             assert!(!op.effects().may_throw());
             assert_eq!(op.exceptional(), None);
@@ -288,13 +312,13 @@ fn check_metamorphic_relations() {
             assert_eq!(op.normal().commit_pc(), Some(CodeUnitOffset(0)));
             assert_eq!(op.normal().heap(), HeapTransfer::Preserve);
             assert_eq!(op.normal().lock(), LockTransfer::Preserve);
-            assert_eq!(flow.exception_edges().count(), 0);
+            assert_eq!(flow.execution().exception_edges().count(), 0);
         }
     }
 }
 
 fn invoke_signature(
-    flow: &FlowMethod<'_>,
+    flow: &SsaMethod<'_>,
 ) -> (
     InvokeKind,
     OperandReference,
@@ -306,7 +330,7 @@ fn invoke_signature(
         target,
         prototype,
         result,
-    } = flow.operations()[0].kind()
+    } = flow.execution().operations()[0].kind()
     else {
         panic!("call disappeared after an input transformation");
     };
@@ -330,9 +354,10 @@ fn analyze(bytes: &[u8]) -> MethodOutcome<'_> {
     engine.analyze_method(CLASS, ENTRY).unwrap().result.unwrap()
 }
 
-fn flowed(bytes: &[u8]) -> FlowMethod<'_> {
+fn flowed(bytes: &[u8]) -> SsaMethod<'_> {
     match analyze(bytes) {
-        MethodOutcome::Flowed(flow) => flow,
+        MethodOutcome::Ssa(ssa) => ssa,
+        MethodOutcome::SsaStopped(stop) => panic!("P3 stopped: {}", stop.error()),
         MethodOutcome::DisassemblyStopped(stop) => panic!("P1 stopped: {:?}", stop.error),
         MethodOutcome::FlowStopped(stop) => panic!("P2 stopped: {}", stop.error()),
         MethodOutcome::DeclarationOnly => panic!("executable member became declaration-only"),
@@ -406,7 +431,7 @@ fn check_invoke(version: u8, opcode: u8, prototype: u16, capture: bool) {
     let result = capture.then_some((dest << 8) | result_opcode);
     let fixture = dex(version, &words, result, entry, registers, incoming, 4);
     let flow = flowed(&fixture.bytes);
-    let operation = &flow.operations()[0];
+    let operation = &flow.execution().operations()[0];
     let polymorphic = opcode <= 0xfb;
     let source = flow.evidence().instruction_at(CodeUnitOffset(0)).unwrap();
     let (raw_words, reads) = match opcode {
@@ -441,7 +466,7 @@ fn check_invoke(version: u8, opcode: u8, prototype: u16, capture: bool) {
         source.registers().map(|r| r.0).collect::<Vec<_>>(),
         raw_words
     );
-    assert_eq!(flow.reads(operation), reads);
+    assert_eq!(flow.execution().reads(operation), reads);
     let layouts = flow.evidence().invoke_layouts().collect::<Vec<_>>();
     assert_eq!(layouts.len(), 1);
     assert_eq!(layouts[0].0, CodeUnitOffset(0));
@@ -477,7 +502,9 @@ fn check_invoke(version: u8, opcode: u8, prototype: u16, capture: bool) {
             name,
             prototype: declaration,
             ..
-        }) = flow.reference_fact(CodeUnitOffset(0), ReferenceSlot::First)
+        }) = flow
+            .execution()
+            .reference_fact(CodeUnitOffset(0), ReferenceSlot::First)
         else {
             panic!("missing method fact")
         };
@@ -496,8 +523,9 @@ fn check_invoke(version: u8, opcode: u8, prototype: u16, capture: bool) {
             declaration.parameters()[0].descriptor().units().unwrap(),
             "[Ljava/lang/Object;".encode_utf16().collect::<Vec<_>>()
         );
-        let Some(CheckedReferenceFact::Proto { prototype: actual }) =
-            flow.reference_fact(CodeUnitOffset(0), ReferenceSlot::Second)
+        let Some(CheckedReferenceFact::Proto { prototype: actual }) = flow
+            .execution()
+            .reference_fact(CodeUnitOffset(0), ReferenceSlot::Second)
         else {
             panic!("missing polymorphic prototype")
         };
@@ -515,7 +543,9 @@ fn check_invoke(version: u8, opcode: u8, prototype: u16, capture: bool) {
             name,
             handle,
             prototype: actual,
-        }) = flow.reference_fact(CodeUnitOffset(0), ReferenceSlot::First)
+        }) = flow
+            .execution()
+            .reference_fact(CodeUnitOffset(0), ReferenceSlot::First)
         else {
             panic!("missing call-site fact")
         };
@@ -529,16 +559,19 @@ fn check_invoke(version: u8, opcode: u8, prototype: u16, capture: bool) {
     }
     let width = u32::try_from(words.len()).unwrap();
     if capture {
-        assert_eq!(flow.writes(operation), &[slot(dest, result_width.unwrap())]);
+        assert_eq!(
+            flow.execution().writes(operation),
+            &[slot(dest, result_width.unwrap())]
+        );
         assert_eq!(operation.result_pc(), Some(CodeUnitOffset(width)));
         assert_eq!(operation.normal().commit(), CommitRule::AfterResult);
         assert_eq!(operation.normal().commit_pc(), Some(CodeUnitOffset(width)));
         assert_eq!(
-            flow.coverage_at(CodeUnitOffset(width)),
+            flow.execution().coverage_at(CodeUnitOffset(width)),
             Some(Coverage::MergedResult(operation.id()))
         );
     } else {
-        assert_eq!(flow.writes(operation), &[]);
+        assert_eq!(flow.execution().writes(operation), &[]);
         assert_eq!(operation.result_pc(), None);
         assert_eq!(operation.normal().commit(), CommitRule::None);
         assert_eq!(operation.normal().commit_pc(), None);
@@ -573,12 +606,12 @@ fn check_prototype(prototype: &CheckedPrototype<'_>, id: u16) {
     );
 }
 
-fn check_completion(flow: &FlowMethod<'_>, handler_pc: u32, heap: HeapTransfer) {
-    assert_eq!(flow.operations().len(), 2);
-    let operation = &flow.operations()[0];
+fn check_completion(flow: &SsaMethod<'_>, handler_pc: u32, heap: HeapTransfer) {
+    assert_eq!(flow.execution().operations().len(), 2);
+    let operation = &flow.execution().operations()[0];
     assert_eq!(operation.pc(), CodeUnitOffset(0));
     assert_eq!(
-        flow.coverage_at(CodeUnitOffset(0)),
+        flow.execution().coverage_at(CodeUnitOffset(0)),
         Some(Coverage::Operation(operation.id()))
     );
     assert!(operation.effects().may_throw());
@@ -594,7 +627,7 @@ fn check_completion(flow: &FlowMethod<'_>, handler_pc: u32, heap: HeapTransfer) 
     assert_eq!(exceptional.frame(), ExceptionFrame::PreserveBeforeOperation);
     assert_eq!(exceptional.heap(), heap);
     assert_eq!(exceptional.lock(), LockTransfer::Preserve);
-    let edges = flow.exception_edges().collect::<Vec<_>>();
+    let edges = flow.execution().exception_edges().collect::<Vec<_>>();
     assert_eq!(edges.len(), 1);
     assert_eq!(edges[0].source_op(), Some(operation.id()));
     assert_eq!(
@@ -610,11 +643,17 @@ fn check_completion(flow: &FlowMethod<'_>, handler_pc: u32, heap: HeapTransfer) 
         panic!("catch-all became an uncaught exit")
     };
     assert_eq!(
-        flow.block(handler).unwrap().start_pc(),
+        flow.execution().block(handler).unwrap().start_pc(),
         CodeUnitOffset(handler_pc)
     );
-    assert!(matches!(flow.operations()[1].kind(), OpKind::MoveException));
-    assert_eq!(flow.operations()[1].pc(), CodeUnitOffset(handler_pc));
+    assert!(matches!(
+        flow.execution().operations()[1].kind(),
+        OpKind::MoveException
+    ));
+    assert_eq!(
+        flow.execution().operations()[1].pc(),
+        CodeUnitOffset(handler_pc)
+    );
 }
 
 struct Fixture {

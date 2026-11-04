@@ -28,7 +28,7 @@ establish that later stages are implemented.
   process dependencies. Input bytes are borrowed; files and ZIPs remain
   application-owned.
 
-P0, the method reader, P1 and P2 currently deliver analysis facts through Engine.
+P0, the method reader, P1, P2 and P3 currently deliver analysis facts through Engine.
 The final method/class presentation and rendering interfaces are not yet active;
 old `Engine::decompile`, `Report`, JavaUnit/Mixed schemas and P8 renderer signatures
 are not current APIs. Application command descriptions belong to the
@@ -53,7 +53,7 @@ every member declaration or method body is valid.
 Stage stops MUST retain original identity, concrete reasons and available facts.
 They MUST NOT promote an incomplete product to success. Resource/invariant termination is distinct from a local unsupported member. See
 [PIPELINE_DESIGN §4.5](../PIPELINE_DESIGN.md#45-独立读取状态阶段停止与诊断)
-and the actual P2 outcome contract in [02-flow](02-flow.md).
+and the outcome contracts in [02-flow](02-flow.md) and [03-ssa](03-ssa.md).
 
 ## Safety and evidence
 

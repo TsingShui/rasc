@@ -83,7 +83,7 @@ chapters describe the existing implementation until migrated to this target.
   as the single inspection entry:
   `cargo run -p diana-decomp --example dbg_shell --locked -- --dex <classes.dex> --exec '<json>'`.
   It accepts a bare DEX, emits one JSON response per command, and exposes the
-  delivered P0/P1 products. Do not add phase-specific debug binaries, renderers or
+  delivered P0/P1/P2/P3 products. Do not add phase-specific debug binaries, renderers or
   debug examples.
 - Contributors MUST NOT develop, add or restore any unit tests, including inline
   `#[test]` functions, `#[cfg(test)]` modules and private-phase test harnesses.
@@ -121,7 +121,7 @@ accurately; do not report removed tests or missing semantic evidence as a pass.
 - [phases](docs/diana/phases.md): phase map and current scheduling entry.
 - [documentation entry](docs/diana/README.md): active contracts and package docs.
 - [PIPELINE_DESIGN](docs/diana/PIPELINE_DESIGN.md): approved P0–P9 architecture.
-- [spec](docs/diana/spec/): product boundary and implemented P0/input/P1/P2 contracts.
+- [spec](docs/diana/spec/): product boundary and implemented P0/input/P1/P2/P3 contracts.
 - [SOURCE_MAP](docs/diana/SOURCE_MAP.md): sources, attribution and reference use.
 - [CONTRIBUTING](docs/diana/CONTRIBUTING.md): detailed contribution rules.
 - [WRITING](docs/diana/WRITING.md): documentation conventions.

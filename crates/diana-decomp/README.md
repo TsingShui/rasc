@@ -6,8 +6,8 @@ forbids unsafe code and external runtime/process dependencies; declarations come
 only from the analyzed input.
 
 The active method chain is P0 class facts → method reader → P1 disassembly → P2
-execution model. `Engine::analyze_method` and class requests use one method task.
-P3–P9 are not yet active; the application decompilation interface is being rebuilt.
+execution model → P3 SSA. `Engine::analyze_method` and class requests use one method task.
+P4–P9 are not yet active; the application decompilation interface is being rebuilt.
 The approved architecture is [PIPELINE_DESIGN](../../docs/diana/PIPELINE_DESIGN.md).
 
 P1 retains complete instruction/payload facts, original references, entry layout
@@ -15,10 +15,17 @@ and structural associations. P2 owns ordered operations, exact slots, explicit
 normal/exception frame/heap/lock completion rules, transfers, exits and coverage.
 It does not expose its complete P1 predecessor. Read-only `MethodEvidence` supports
 original inspection and checks without product extraction or construction access.
-P2 constructors are internal and require Engine's method-task authority.
+P2/P3 constructors are internal and require Engine's method-task authority.
+P3 privately retains P2 and delivers exact-slot states, definitions, ordered use
+bindings, necessary Phis, per-transfer incoming states and original StatePoint
+mappings. Borrowed `ExecutionFacts` exposes normal execution queries, not a
+predecessor product. [P3's contract](../../docs/diana/spec/03-ssa.md) describes
+exception-aware LT dominators, live-demand IDF placement and correspondence checks.
+Undefined/invalidated sources remain explicit availability facts, not default values.
 
 A P2 stop retains the complete P1 input, classified error and available unvalidated
-construction facts. Class requests retain delivered members and mark request-level
+construction facts. A P3 stop retains complete P2 input and an unvalidated SSA
+snapshot; neither stop can be promoted to a successful product. Class requests retain delivered members and mark request-level
 termination explicitly. Range/capacity checks and fallible allocation remain
 mandatory. The CLI/host owns process termination; Engine has no request
 cancellation callback/token or checkpoint parameter. There are no numeric quotas.
@@ -47,8 +54,14 @@ cargo run -p diana-decomp --release --example dbg_shell --locked -- \
   --dex <classes.dex> --exec '{"cmd":"p2","class":0,"method":0,"details":true}'
 ```
 
-`p2-all` observes the Engine chain and reports classified outcomes and encountered
-opcode variants. `roundtrip-all` checks independent byte re-encoding over retained
+`p3` (`details:true`) observes state positions, bindings, definitions and Phi
+incoming records. `p3-all` reports SSA counts, unavailable uses, upstream failures
+and explicit incomplete execution on request termination. P3 is not formally
+verified; allocation-failure injection and formal single-class performance
+measurements remain unperformed.
+
+`p2-all` observes retained execution facts from the same Engine chain and reports
+classified outcomes and encountered opcode variants. `roundtrip-all` checks independent byte re-encoding over retained
 P1 evidence. No phase-specific debug binary is required.
 
 Applicable engine gates:

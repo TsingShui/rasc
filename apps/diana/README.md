@@ -1,7 +1,7 @@
 # Diana CLI
 
 Diana is the command-line front end of the native Diana decompiler. Its source
-currently depends on result APIs being rebuilt after P2, so the application
+currently depends on result APIs being rebuilt during the engine refactoring, so the application
 package is not buildable during this refactoring. The command descriptions below
 record the application surface, not successful execution of the current tree.
 The binary name is `diana` (`diana.exe` on Windows); it never delegates to rasc,
@@ -127,7 +127,7 @@ The CLI/host owns process termination, including signals. There is no cooperativ
 request cancellation API or engine callback. Process termination is not a promise
 to deliver an in-progress result or clean up every interrupted write.
 
-## Internal P0/P1/P2 inspection
+## Internal P0–P3 inspection
 
 Use the engine development shell with a bare DEX:
 
@@ -139,7 +139,7 @@ cargo run -p diana-decomp --example dbg_shell --locked -- \
 ```
 
 It writes one JSON response per command. See the engine package for the
-supported `class`, `p0`, `methods`, `p1`, `decoded`, `p2`, `p2-all` and byte-roundtrip
+supported `class`, `p0`, `methods`, `p1`, `decoded`, `p2`, `p2-all`, `p3`, `p3-all` and byte-roundtrip
 inspection commands.
 
 ## Agent usage

@@ -56,7 +56,7 @@ shared data; the logical header offset remains part of identity.
 
 ## Development inspection
 
-The engine development shell is the single P0/P1/P2 observation entry:
+The engine development shell is the single P0–P3 observation entry:
 
 ```sh
 cargo run -p diana-decomp --example dbg_shell --locked -- \

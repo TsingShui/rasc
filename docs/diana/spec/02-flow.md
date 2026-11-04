@@ -124,6 +124,9 @@ The debug shell observes these outcomes and does not call a stage builder.
 `FlowMethod` privately owns P1; its ordinary interface supplies execution facts
 and original declarations. `MethodEvidence` supplies restricted borrowed debug/check
 facts, with no product extraction, mutable access or construction entry.
+`ExecutionFacts` is a separate immutable view over complete P2 execution facts.
+P3 privately retains FlowMethod and consumes this view; it cannot extract a
+predecessor product or obtain raw evidence through the ordinary execution view.
 
 A P2 stop retains its complete P1 input, classified error and available unvalidated
 construction snapshot as `FlowStop`; it is not a successful partial FlowMethod.

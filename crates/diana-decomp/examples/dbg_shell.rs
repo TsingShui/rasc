@@ -500,6 +500,27 @@ impl Shell {
                     "handler_targets": decoded.handler_targets().collect::<Vec<_>>(),
                 }))
             }
+            "p3-all" => ssa_all(&engine, index.class_count()),
+            "p3" | "ssa" => {
+                let analysis = engine
+                    .analyze_method(class_key(class_id(request)?), MethodId(method_id(request)?))?;
+                let outcome = analysis.result?;
+                match &outcome {
+                    MethodOutcome::Ssa(ssa) => Ok(ssa_json(
+                        ssa,
+                        request
+                            .get("details")
+                            .and_then(Value::as_bool)
+                            .unwrap_or(false),
+                    )),
+                    MethodOutcome::SsaStopped(stop) => Ok(json!({"stage":"p3", "stopped":true,
+                        "kind":format!("{:?}",stop.error().kind()), "error":format!("{}",stop.error()),
+                        "partial":{"points":stop.partial().points().len(),"states":stop.partial().states().len(),
+                            "uses":stop.partial().uses().len(),"phis":stop.partial().phis().len()}})),
+                    _ => Ok(inspection_stop(&outcome)
+                        .unwrap_or(json!({"stage":"p3","declaration_only":true}))),
+                }
+            }
             "p2-all" => {
                 let started = std::time::Instant::now();
                 let classes = index.class_count();
@@ -557,19 +578,23 @@ impl Shell {
                                 p1_errors += 1;
                                 continue;
                             }
-                            MethodOutcome::Flowed(flow) => Ok(flow),
+                            MethodOutcome::Ssa(ssa) => Ok(ssa.execution()),
+                            MethodOutcome::SsaStopped(stop) => Ok(stop.execution()),
                             MethodOutcome::FlowStopped(stop) => Err(stop.error()),
                         };
                         match result {
                             Ok(flow) => {
                                 flowed += 1;
                                 for operation in flow.operations() {
-                                    let original = flow
+                                    let original = outcome
                                         .evidence()
+                                        .ok_or(RequestError::InternalInvariant(
+                                            "P2 evidence missing",
+                                        ))?
                                         .instruction_at(operation.pc())
                                         .ok_or(RequestError::InternalInvariant(
-                                        "replayed operation lost its source",
-                                    ))?;
+                                            "replayed operation lost its source",
+                                        ))?;
                                     *replay_opcodes
                                         .entry(original.spec().mnemonic.to_owned())
                                         .or_default() += 1;
@@ -666,9 +691,9 @@ impl Shell {
                 if let Some(response) = inspection_stop(&outcome) {
                     return Ok(response);
                 }
-                let MethodOutcome::Flowed(flow) = outcome else {
-                    return Err(RequestError::InternalInvariant("method has no flow"));
-                };
+                let flow = outcome
+                    .execution()
+                    .ok_or(RequestError::InternalInvariant("method has no flow"))?;
                 let details = if request.get("details").and_then(Value::as_bool) == Some(true) {
                     Some(json!({
                         "operations": flow.operations().iter().map(|operation| json!({
@@ -745,6 +770,102 @@ impl Shell {
     }
 }
 
+fn ssa_json(ssa: &diana_decomp::p3::SsaMethod<'_>, details: bool) -> Value {
+    let f = ssa.facts();
+    json!({"stage":"p3", "class":ssa.class_id().0,"method":ssa.method_id().0,
+    "points":f.points().len(),"transfers":f.transfers().len(),"slots":f.slots().len(),
+    "states":f.states().len(),"values":f.values().len(),"uses":f.uses().len(),"phis":f.phis().len(),
+    "unavailable_uses":f.uses().iter().filter(|u|!f.state(u.state()).is_some_and(|s|s.availability().is_available())).count(),
+    "details":details.then(||json!({
+        "operation_sites":f.operation_sites().iter().map(|s|json!({"operation":s.operation().0,"execute":s.execute().0,"commit":s.commit().map(|p|p.0),
+            "commit_rule":format!("{:?}",s.commit_rule()),"commit_pc":s.commit_pc().map(|p|p.0),"uses":[s.use_start(),s.use_len()],"outputs":[s.output_start(),s.output_len()]})).collect::<Vec<_>>(),
+        "slots":f.slots().iter().map(|s|json!({"start":s.start.0,"width":format!("{:?}",s.width)})).collect::<Vec<_>>(),
+        "points":f.points().iter().map(|p|json!({"id":p.id().0,"kind":format!("{:?}",p.kind()),"idom":p.idom().map(|p|p.0)})).collect::<Vec<_>>(),
+        "transfers":f.transfers().iter().map(|t|json!({"id":t.id().0,"from":t.from().0,"target":format!("{:?}",t.target()),"origin":format!("{:?}",t.origin())})).collect::<Vec<_>>(),
+        "states":f.states().iter().map(|s|json!({"id":s.id().0,"slot":s.slot().0,"point":s.point().0,"kind":format!("{:?}",s.kind()),"availability":format!("{:?}",s.availability())})).collect::<Vec<_>>(),
+        "values":f.values().iter().map(|v|json!({"id":v.id().0,"slot":v.slot().0,"point":v.point().0,"origin":format!("{:?}",v.origin())})).collect::<Vec<_>>(),
+        "uses":f.uses().iter().map(|u|json!({"site":format!("{:?}",u.site()),"point":u.point().0,"slot":u.slot().0,"state":u.state().0,"value":f.readable_value(u).map(|v|v.0)})).collect::<Vec<_>>(),
+        "outputs":f.outputs().iter().map(|o|json!({"operation":o.operation().0,"output":o.output(),"point":o.point().0,"slot":o.slot().0,"state":o.state().0,"value":o.value().0})).collect::<Vec<_>>(),
+        "phis":f.phis().iter().map(|p|json!({"id":p.id().0,"point":p.point().0,"slot":p.slot().0,"state":p.state().0,"value":p.value().0,
+            "incoming":p.incoming().iter().map(|i|json!({"transfer":i.transfer().0,"state":i.state().0})).collect::<Vec<_>>()})).collect::<Vec<_>>()
+    }))})
+}
+
+fn ssa_all(engine: &Engine<'_>, classes: u32) -> Result<Value, RequestError> {
+    let started = std::time::Instant::now();
+    let (mut methods, mut no_code, mut ready, mut failed, mut upstream, mut class_errors) =
+        (0u64, 0u64, 0u64, 0u64, 0u64, 0u64);
+    let (mut points, mut states, mut values, mut uses, mut phis, mut unavailable) =
+        (0u64, 0u64, 0u64, 0u64, 0u64, 0u64);
+    let mut first_failure = None;
+    let mut terminated = None;
+    for class in 0..classes {
+        let analysis = match engine.analyze(Request {
+            class: class_key(class),
+            method: None,
+        }) {
+            Ok(a) => a,
+            Err(e) => {
+                class_errors += 1;
+                if first_failure.is_none() {
+                    first_failure = Some(json!({"class":class,"error":format!("{e}")}));
+                }
+                continue;
+            }
+        };
+        for entry in &analysis.methods {
+            methods += 1;
+            match &entry.result {
+                Ok(MethodOutcome::DeclarationOnly) => no_code += 1,
+                Ok(MethodOutcome::Ssa(ssa)) => {
+                    ready += 1;
+                    let f = ssa.facts();
+                    points += f.points().len() as u64;
+                    states += f.states().len() as u64;
+                    values += f.values().len() as u64;
+                    uses += f.uses().len() as u64;
+                    phis += f.phis().len() as u64;
+                    unavailable += f
+                        .uses()
+                        .iter()
+                        .filter(|u| {
+                            !f.state(u.state())
+                                .is_some_and(|s| s.availability().is_available())
+                        })
+                        .count() as u64;
+                }
+                Ok(MethodOutcome::SsaStopped(stop)) => {
+                    failed += 1;
+                    if first_failure.is_none() {
+                        first_failure = Some(
+                            json!({"class":class,"method":entry.key.method.0,"kind":format!("{:?}",stop.error().kind()),"error":format!("{}",stop.error())}),
+                        );
+                    }
+                }
+                other => {
+                    upstream += 1;
+                    if first_failure.is_none() {
+                        first_failure = Some(
+                            json!({"class":class,"method":entry.key.method.0,"error":match other {
+                    Err(e)=>format!("{e}"),Ok(MethodOutcome::FlowStopped(s))=>format!("{}",s.error()),
+                    Ok(MethodOutcome::DisassemblyStopped(s))=>format!("{:?}",s.error),_=>"upstream stopped".into()} }),
+                        );
+                    }
+                }
+            }
+        }
+        if let Some(kind) = analysis.terminated {
+            terminated = Some(format!("{kind:?}"));
+            break;
+        }
+    }
+    Ok(
+        json!({"classes":classes,"methods":methods,"no_code":no_code,"ssa":ready,"failed":failed,"upstream":upstream,"class_errors":class_errors,
+        "points":points,"states":states,"values":values,"uses":uses,"phis":phis,"unavailable_uses":unavailable,
+        "complete":terminated.is_none(),"terminated":terminated,"first_failure":first_failure,"elapsed_ms":started.elapsed().as_millis()}),
+    )
+}
+
 fn inspection_stop(outcome: &MethodOutcome<'_>) -> Option<Value> {
     match outcome {
         MethodOutcome::DeclarationOnly => Some(json!({"declaration_only": true})),
@@ -761,7 +882,7 @@ fn inspection_stop(outcome: &MethodOutcome<'_>) -> Option<Value> {
                 "blocks": partial.blocks().len(), "edges": partial.edges().len(),
             })),
         })),
-        MethodOutcome::Flowed(_) => None,
+        MethodOutcome::Ssa(_) | MethodOutcome::SsaStopped(_) => None,
     }
 }
 

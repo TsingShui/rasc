@@ -1,7 +1,7 @@
 # Diana
 
 Native Rust APK/DEX decompiler, designed to replace rasc.
-The engine currently implements the P0 → method reader → P1 → P2 analysis chain.
+The engine currently implements the P0 → method reader → P1 → P2 → P3 analysis chain.
 The CLI source remains in the workspace; decompilation/result integration is being
 rebuilt and the application package is not currently buildable. Readable output
 with original facts and uncertainty remains the goal, not Java compilability.
@@ -44,8 +44,8 @@ cargo build --workspace --release --locked
 Use `-p diana` or `-p diana-decomp` to select one package. Both share the root
 `Cargo.lock`; the archived reference retains its own lockfile. The active
 [Diana CI](.github/workflows/diana.yml) checks format, lint and release builds
-without publishing. Test cases and fixtures have been removed; unit-test
-development is prohibited by [AGENTS.md](AGENTS.md). These checks do not establish
+without publishing. Historical test cases and fixtures have been removed;
+[AGENTS.md](AGENTS.md) defines one scoped core-test exception. These checks do not establish
 semantic correctness or real-application coverage.
 
 
