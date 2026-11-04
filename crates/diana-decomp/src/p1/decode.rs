@@ -11,6 +11,11 @@ use super::reference::{
 };
 use super::{DecodedOutcome, EntryLayout, EntryParameter, MethodError, MethodProblem};
 
+struct ReferenceReads<'a> {
+    facts: Vec<ReferenceFactEntry<'a>>,
+    issues: Vec<(CodeUnitOffset, MethodError)>,
+}
+
 impl<'a> ProgramIndex<'a> {
     /// P1: validates the original instruction structure, decodes the complete
     /// instruction/payload directory and associates original references with
@@ -32,16 +37,16 @@ impl<'a> ProgramIndex<'a> {
             Ok(items) => items,
             Err((prefix, error)) => return outcome(prefix, error),
         };
-        let layout = match self.check_method_layout(code, &items) {
-            Ok(layout) => layout,
-            Err(error) => return outcome(items, error),
-        };
-        let reference_facts = match self.check_reference_contents(&items, return_shape) {
+        let references = match self.read_reference_facts(&items, return_shape) {
             Ok(facts) => facts,
             Err(error) => return outcome(items, error),
         };
+        let layout = match self.check_method_layout(code, &items, &references.facts) {
+            Ok(layout) => layout,
+            Err(error) => return outcome(items, error),
+        };
         #[cfg(test)]
-        if let Err(error) = check_reference_coverage(&items, &reference_facts) {
+        if let Err(error) = check_reference_coverage(&items, &references.facts) {
             return outcome(items, error);
         }
         let protection = match crate::input::protection::read(&layout).map_err(method_error) {
@@ -52,6 +57,10 @@ impl<'a> ProgramIndex<'a> {
             Ok(entry) => entry,
             Err(error) => return outcome(items, error),
         };
+        let declaration = match source.declaration().try_copy().map_err(method_error) {
+            Ok(declaration) => declaration,
+            Err(error) => return outcome(items, error),
+        };
         Ok(DecodedOutcome {
             decoded: Some(crate::input::ProgramIndex::assemble_decoded(
                 code,
@@ -60,12 +69,13 @@ impl<'a> ProgramIndex<'a> {
                 items,
                 DecodedFacts {
                     class_id: source.class_id(),
-                    declaration: source.declaration().clone(),
+                    declaration,
                     access_flags: source.access_flags(),
                     entry,
                     annotations: source.annotations(),
                     metadata_issue: source.metadata().is_err(),
-                    reference_facts,
+                    reference_facts: references.facts,
+                    issues: references.issues,
                 },
             )),
             prefix: Vec::new(),
@@ -73,129 +83,32 @@ impl<'a> ProgramIndex<'a> {
         })
     }
 
-    fn check_reference_contents(
+    fn read_reference_facts(
         &self,
         items: &[super::DecodedItem],
         return_shape: TypeShape,
-    ) -> Result<Vec<ReferenceFactEntry<'a>>, MethodError> {
+    ) -> Result<ReferenceReads<'a>, MethodError> {
         let mut facts = Vec::new();
+        let mut issues = Vec::new();
         for item in items {
             let super::DecodedItem::Instruction(instruction) = item else {
                 continue;
             };
             let pc = instruction.pc();
-            let spec = instruction.spec();
             for reference in instruction.references() {
-                let fact = match reference.target {
-                    OperandReference::String(id) => CheckedReferenceFact::String {
-                        value: self.string(id)?,
-                    },
-                    OperandReference::Type(id) => {
-                        let (descriptor, shape) = self.type_descriptor(id)?;
-                        let valid = match spec.opcode {
-                            0x1f | 0x20 => matches!(shape, TypeShape::Class | TypeShape::Array),
-                            0x22 => matches!(shape, TypeShape::Class),
-                            0x23..=0x25 => matches!(shape, TypeShape::Array),
-                            _ => true,
-                        };
-                        if !valid {
-                            return Err(bad_type(pc));
-                        }
-                        if matches!(spec.opcode, 0x24 | 0x25) {
-                            let mut units = descriptor.reader()?;
-                            units.next()?;
-                            if matches!(units.next()?, Some(0x4a | 0x44)) {
-                                return Err(bad_type(pc));
-                            }
-                        }
-                        CheckedReferenceFact::Type {
-                            descriptor,
-                            form: type_form(shape),
-                            words: shape.words(),
-                        }
-                    }
-                    OperandReference::Field(id) => {
-                        let field = self.field_reference(id)?;
-                        if matches!(spec.opcode, 0x52..=0x6d) {
-                            let first = field.declaration.field_type.reader()?.next()?;
-                            let matches_kind = match (spec.opcode - 0x52) % 7 {
-                                0 => matches!(first, Some(73 | 70)),
-                                1 => matches!(first, Some(74 | 68)),
-                                2 => matches!(first, Some(76 | 91)),
-                                3 => first == Some(90),
-                                4 => first == Some(66),
-                                5 => first == Some(67),
-                                6 => first == Some(83),
-                                _ => false,
-                            };
-                            if !matches_kind {
-                                return Err(MethodError::Malformed {
-                                    pc,
-                                    problem: MethodProblem::InvalidFieldKind,
-                                });
-                            }
-                        }
-                        if matches!(spec.opcode, 0x52..=0x6d)
-                            && let Some(flags) = self.local_field_flags(id)?
-                            && (flags & 8 != 0) != matches!(spec.opcode, 0x60..=0x6d)
-                        {
-                            return Err(MethodError::Malformed {
-                                pc,
-                                problem: MethodProblem::InvalidFieldKind,
-                            });
-                        }
-                        CheckedReferenceFact::Field {
-                            owner: field.owner,
-                            owner_type: field.owner_type,
-                            name: field.declaration.name,
-                            field_type: field.declaration.field_type,
-                            field_type_id: field.declaration.field_type_idx,
-                        }
-                    }
-                    OperandReference::Method(id) => {
-                        let method = self.method_reference(id)?;
-                        if matches!(spec.opcode, 0x6e..=0x72 | 0x74..=0x78)
-                            && let Some(target) = self.local_method(id)?
-                            && (target.access_flags & crate::substrate::flags::STATIC != 0)
-                                != matches!(spec.opcode, 0x71 | 0x77)
-                        {
-                            return Err(MethodError::Malformed {
-                                pc,
-                                problem: MethodProblem::InvalidInvokeKind,
-                            });
-                        }
-                        let prototype =
-                            CheckedPrototype::from_prototype(&method.declaration.prototype)?;
-                        CheckedReferenceFact::Method {
-                            owner: method.owner,
-                            owner_type: method.owner_type,
-                            name: method.declaration.name,
-                            prototype,
-                        }
-                    }
-                    OperandReference::Proto(id) => {
-                        let proto = self.prototype(id)?;
-                        CheckedReferenceFact::Proto {
-                            prototype: CheckedPrototype::from_prototype(&proto)?,
-                        }
-                    }
-                    OperandReference::CallSite(id) => {
-                        let callsite = self.call_site(id)?;
-                        CheckedReferenceFact::CallSite {
-                            name: callsite.name,
-                            handle: CheckedMethodHandleFact::new(
-                                callsite.handle.kind,
-                                callsite.handle.member,
-                            ),
-                            prototype: CheckedPrototype::from_prototype(&callsite.prototype)?,
-                        }
-                    }
-                    OperandReference::MethodHandle(id) => {
-                        let handle = self.method_handle(id)?;
-                        CheckedReferenceFact::MethodHandle {
-                            handle: CheckedMethodHandleFact::new(handle.kind, handle.member),
-                        }
-                    }
+                let fact = if self.reference_in_bounds(reference.target) {
+                    self.resolve_instruction_reference(reference.target)
+                } else {
+                    Err(MethodError::ReferenceOutOfBounds {
+                        pc,
+                        reference: reference.target,
+                    })
+                };
+                let use_issue = match &fact {
+                    Ok(fact) => self
+                        .check_reference_use(pc, instruction.opcode(), reference.target, fact)
+                        .err(),
+                    Err(_) => None,
                 };
                 push(
                     &mut facts,
@@ -203,26 +116,169 @@ impl<'a> ProgramIndex<'a> {
                         pc,
                         slot: reference.slot,
                         fact,
+                        use_issue,
                     },
                 )
                 .map_err(method_error)?;
             }
-            if matches!(spec.flow, crate::input::formats::FlowKind::Return) {
+            if matches!(
+                instruction.spec().flow,
+                crate::input::formats::FlowKind::Return
+            ) {
                 let expected = match return_shape {
                     TypeShape::Void => 0x0e,
                     TypeShape::Class | TypeShape::Array => 0x11,
                     other if other.words() == 2 => 0x10,
                     _ => 0x0f,
                 };
-                if spec.opcode != expected {
-                    return Err(MethodError::Malformed {
-                        pc,
-                        problem: MethodProblem::InvalidResultKind,
-                    });
+                if instruction.opcode() != expected {
+                    push(
+                        &mut issues,
+                        (
+                            pc,
+                            MethodError::Malformed {
+                                pc,
+                                problem: MethodProblem::InvalidResultKind,
+                            },
+                        ),
+                    )
+                    .map_err(method_error)?;
                 }
             }
         }
-        Ok(facts)
+        Ok(ReferenceReads { facts, issues })
+    }
+
+    fn resolve_instruction_reference(
+        &self,
+        target: OperandReference,
+    ) -> Result<CheckedReferenceFact<'a>, MethodError> {
+        Ok(match target {
+            OperandReference::String(id) => CheckedReferenceFact::String {
+                value: self.string(id)?,
+            },
+            OperandReference::Type(id) => {
+                let (descriptor, shape) = self.type_descriptor(id)?;
+                CheckedReferenceFact::Type {
+                    descriptor,
+                    form: type_form(shape),
+                    words: shape.words(),
+                }
+            }
+            OperandReference::Field(id) => {
+                let field = self.field_reference(id)?;
+                CheckedReferenceFact::Field {
+                    owner: field.owner,
+                    owner_type: field.owner_type,
+                    name: field.declaration.name,
+                    field_type: field.declaration.field_type,
+                    field_type_id: field.declaration.field_type_idx,
+                }
+            }
+            OperandReference::Method(id) => {
+                let method = self.method_reference(id)?;
+                CheckedReferenceFact::Method {
+                    owner: method.owner,
+                    owner_type: method.owner_type,
+                    name: method.declaration.name,
+                    prototype: CheckedPrototype::from_prototype(&method.declaration.prototype)?,
+                }
+            }
+            OperandReference::Proto(id) => CheckedReferenceFact::Proto {
+                prototype: CheckedPrototype::from_prototype(&self.prototype(id)?)?,
+            },
+            OperandReference::CallSite(id) => {
+                let site = self.call_site(id)?;
+                CheckedReferenceFact::CallSite {
+                    name: site.name,
+                    handle: CheckedMethodHandleFact::new(site.handle.kind, site.handle.member),
+                    prototype: CheckedPrototype::from_prototype(&site.prototype)?,
+                }
+            }
+            OperandReference::MethodHandle(id) => {
+                let handle = self.method_handle(id)?;
+                CheckedReferenceFact::MethodHandle {
+                    handle: CheckedMethodHandleFact::new(handle.kind, handle.member),
+                }
+            }
+        })
+    }
+
+    fn check_reference_use(
+        &self,
+        pc: CodeUnitOffset,
+        opcode: u8,
+        target: OperandReference,
+        fact: &CheckedReferenceFact<'_>,
+    ) -> Result<(), MethodError> {
+        match fact {
+            CheckedReferenceFact::Type {
+                descriptor, form, ..
+            } => {
+                use super::TypeForm;
+                let valid = match opcode {
+                    0x1f | 0x20 => matches!(form, TypeForm::Class | TypeForm::Array),
+                    0x22 => matches!(form, TypeForm::Class),
+                    0x23..=0x25 => matches!(form, TypeForm::Array),
+                    _ => true,
+                };
+                if !valid {
+                    return Err(bad_type(pc));
+                }
+                if matches!(opcode, 0x24 | 0x25) {
+                    let mut units = descriptor.reader()?;
+                    units.next()?;
+                    if matches!(units.next()?, Some(0x4a | 0x44)) {
+                        return Err(bad_type(pc));
+                    }
+                }
+            }
+            CheckedReferenceFact::Field { field_type, .. } if matches!(opcode, 0x52..=0x6d) => {
+                let first = field_type.reader()?.next()?;
+                let valid = match (opcode - 0x52) % 7 {
+                    0 => matches!(first, Some(73 | 70)),
+                    1 => matches!(first, Some(74 | 68)),
+                    2 => matches!(first, Some(76 | 91)),
+                    3 => first == Some(90),
+                    4 => first == Some(66),
+                    5 => first == Some(67),
+                    6 => first == Some(83),
+                    _ => false,
+                };
+                let OperandReference::Field(id) = target else {
+                    return Err(MethodError::InternalInvariant(
+                        "field fact has another reference domain",
+                    ));
+                };
+                if !valid
+                    || self
+                        .local_field_flags(id)?
+                        .is_some_and(|flags| (flags & 8 != 0) != matches!(opcode, 0x60..=0x6d))
+                {
+                    return Err(MethodError::Malformed {
+                        pc,
+                        problem: MethodProblem::InvalidFieldKind,
+                    });
+                }
+            }
+            CheckedReferenceFact::Method { .. } if matches!(opcode, 0x6e..=0x72 | 0x74..=0x78) => {
+                let OperandReference::Method(id) = target else {
+                    return Err(MethodError::InternalInvariant(
+                        "method fact has another reference domain",
+                    ));
+                };
+                if self.local_method(id)?.is_some_and(|method| {
+                    (method.access_flags & STATIC != 0) != matches!(opcode, 0x71 | 0x77)
+                }) {
+                    return Err(MethodError::Malformed {
+                        pc,
+                        problem: MethodProblem::InvalidInvokeKind,
+                    });
+                }
+            }
+            _ => {}
+        }
+        Ok(())
     }
 }
 
@@ -340,12 +396,6 @@ fn outcome<'a>(
     prefix: Vec<crate::p1::DecodedItem>,
     error: MethodError,
 ) -> Result<DecodedOutcome<'a>, MethodError> {
-    if matches!(
-        error.kind(),
-        crate::FailureKind::ResourceExhausted | crate::FailureKind::InternalInvariant
-    ) {
-        return Err(error);
-    }
     Ok(DecodedOutcome {
         decoded: None,
         prefix,

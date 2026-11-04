@@ -197,6 +197,34 @@ pub struct MethodDeclaration {
 }
 
 impl MethodDeclaration {
+    /// Native method consumers copy owned declaration facts fallibly, without
+    /// resolving the original declaration again or using infallible Vec clones.
+    pub(crate) fn try_copy(&self) -> Result<Self, RequestError> {
+        fn units<T: Copy>(source: &[T]) -> Result<Vec<T>, RequestError> {
+            let mut result = Vec::new();
+            crate::substrate::owned::reserve(&mut result, source.len())?;
+            result.extend_from_slice(source);
+            Ok(result)
+        }
+        fn text(source: &OriginalText) -> Result<OriginalText, RequestError> {
+            Ok(OriginalText::new(units(source.units())?))
+        }
+        let mut parameter_types = Vec::new();
+        crate::substrate::owned::reserve(&mut parameter_types, self.parameter_types.len())?;
+        for parameter in &self.parameter_types {
+            parameter_types.push(text(parameter)?);
+        }
+        Ok(Self {
+            name: text(&self.name)?,
+            prototype: text(&self.prototype)?,
+            shorty: text(&self.shorty)?,
+            parameter_types,
+            parameter_type_ids: units(&self.parameter_type_ids)?,
+            return_type: text(&self.return_type)?,
+            return_type_id: self.return_type_id,
+            parameter_words: self.parameter_words,
+        })
+    }
     pub fn name_units(&self) -> &[u16] {
         self.name.units()
     }

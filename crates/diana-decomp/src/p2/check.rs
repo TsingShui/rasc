@@ -298,7 +298,28 @@ fn check_coverage_and_order(flow: &FlowMethod<'_>) -> Result<(), FlowError> {
             .end()
             .is_none_or(|end| u64::from(end.0) > flow.decoded().registers_size().0)
         {
-            return Err(bug("slot is outside the original register frame"));
+            let issue_at = |pc| {
+                flow.decoded().issues().any(|(at, e)| {
+                    at == pc
+                        && matches!(
+                            e,
+                            crate::p1::MethodError::Malformed {
+                                problem: crate::p1::MethodProblem::InvalidRegisterSpan,
+                                ..
+                            }
+                        )
+                })
+            };
+            let explained = flow.operations().iter().any(|op| {
+                (issue_at(op.pc()) || op.result_pc().is_some_and(issue_at))
+                    && (flow.writes(op).contains(slot)
+                        || flow.reads(op).is_ok_and(|r| r.contains(slot)))
+            }) || flow.blocks().iter().any(|b| {
+                b.terminal_pc().is_some_and(issue_at) && flow.terminal_reads(b).contains(slot)
+            });
+            if !explained {
+                return Err(bug("out-of-frame slot has no original register issue"));
+            }
         }
     }
     Ok(())

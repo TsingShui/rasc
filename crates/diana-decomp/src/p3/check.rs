@@ -187,7 +187,9 @@ fn definitions(flow: ExecutionFacts<'_, '_>, f: &SsaFacts, w: &Work) -> Result<(
             return Err(bug("entry has duplicate exact-slot states"));
         }
         match (entry_roles[state.slot.0 as usize], state.kind) {
-            (None, StateKind::Undefined) => {}
+            (None, StateKind::Undefined) if flow.slot_is_valid(f.slots[state.slot.0 as usize]) => {}
+            (None, StateKind::OutsideFrame)
+                if !flow.slot_is_valid(f.slots[state.slot.0 as usize]) => {}
             (Some(role), StateKind::Value(v)) => {
                 let value = &f.values[v.0 as usize];
                 if value.point != PointId(0)
@@ -226,37 +228,70 @@ fn definitions(flow: ExecutionFacts<'_, '_>, f: &SsaFacts, w: &Work) -> Result<(
                 return Err(bug("normal output lost its original operation/slot/commit"));
             }
             let state = &f.states[output.state.0 as usize];
-            let value = &f.values[output.value.0 as usize];
-            let expected = if matches!(op.kind(), OpKind::MoveException) {
-                ValueOrigin::Exception(op.id())
-            } else {
-                ValueOrigin::Operation {
-                    operation: op.id(),
-                    output: id(i)?,
-                }
-            };
-            if state.kind != StateKind::Value(output.value)
-                || state.slot != key
+            if state.slot != key
                 || state.point != output.point
-                || value.slot != key
-                || value.point != output.point
-                || value.origin != expected
                 || state_owned[output.state.0 as usize]
-                || value_owned[output.value.0 as usize]
             {
-                return Err(bug("normal result or exception object definition differs"));
+                return Err(bug("normal output state identity differs"));
+            }
+            let established = !matches!(
+                op.kind(),
+                OpKind::UnresolvedInvoke {
+                    result: crate::p2::InvokeResult::Unavailable,
+                    ..
+                } | OpKind::UnresolvedResult { .. }
+            ) && flow.slot_is_valid(written);
+            match f.output_value(output) {
+                Some(v) if established => {
+                    let value = &f.values[v.0 as usize];
+                    let expected = if matches!(op.kind(), OpKind::MoveException) {
+                        ValueOrigin::Exception(op.id())
+                    } else {
+                        ValueOrigin::Operation {
+                            operation: op.id(),
+                            output: id(i)?,
+                        }
+                    };
+                    if state.kind != StateKind::Value(v)
+                        || value.slot != key
+                        || value.point != output.point
+                        || value.origin != expected
+                        || value_owned[v.0 as usize]
+                    {
+                        return Err(bug("normal value origin differs"));
+                    }
+                    value_owned[v.0 as usize] = true;
+                }
+                None if !established
+                    && state.kind == (StateKind::Unavailable { operation: op.id() }) => {}
+                _ => {
+                    return Err(bug(
+                        "unavailable output was promoted to a value or a known value was lost",
+                    ));
+                }
             }
             state_owned[output.state.0 as usize] = true;
-            value_owned[output.value.0 as usize] = true;
         }
         let Some(point) = commit else { continue };
         for &state in &w.defs[point.0 as usize] {
             let def = &f.states[state.0 as usize];
-            if matches!(def.kind, StateKind::Value(_)) {
+            if state_owned[state.0 as usize] {
                 continue;
             }
             let tracked = f.slots[def.slot.0 as usize];
-            if def.kind != (StateKind::Invalidated { operation: op.id() })
+            let unknown = matches!(
+                op.kind(),
+                OpKind::UnresolvedInvoke {
+                    result: crate::p2::InvokeResult::Unavailable,
+                    ..
+                } | OpKind::UnresolvedResult { .. }
+            ) || flow.writes(op).iter().any(|s| !flow.slot_is_valid(*s));
+            let expected = if unknown {
+                StateKind::Unavailable { operation: op.id() }
+            } else {
+                StateKind::Invalidated { operation: op.id() }
+            };
+            if def.kind != expected
                 || !flow.writes(op).iter().any(|d| {
                     tracked != *d
                         && u64::from(tracked.start.0) < u64::from(d.start.0) + u64::from(d.words())
@@ -437,11 +472,11 @@ pub(super) fn verify(
         u.state.0 as usize >= f.states.len()
             || u.point.0 as usize >= f.points.len()
             || u.slot.0 as usize >= f.slots.len()
-    }) || f
-        .outputs
-        .iter()
-        .any(|o| o.state.0 as usize >= f.states.len() || o.value.0 as usize >= f.values.len())
-    {
+    }) || f.outputs.iter().any(|o| {
+        o.state.0 as usize >= f.states.len()
+            || f.output_value(o)
+                .is_some_and(|v| v.0 as usize >= f.values.len())
+    }) {
         return Err(bug("use/output contains a foreign arena identity"));
     }
     let mut expected_slots = Vec::new();
@@ -495,10 +530,20 @@ pub(super) fn verify(
     let mut cursor = 0;
     for op in flow.operations() {
         let site = f.operations[op.id().0 as usize];
-        if site.use_start != id(cursor)? || site.use_len != id(flow.reads(op).len())? {
+        let reads = flow.reads(op);
+        if site.inputs_available != reads.is_ok() || site.use_start != id(cursor)? {
+            return Err(bug("operation input availability or start differs"));
+        }
+        let Ok(reads) = reads else {
+            if site.use_len != 0 {
+                return Err(bug("unavailable grouping fabricated input bindings"));
+            }
+            continue;
+        };
+        if site.use_len != id(reads.len())? {
             return Err(bug("operation use span differs from original reads"));
         }
-        for (argument, &s) in flow.reads(op).iter().enumerate() {
+        for (argument, &s) in reads.iter().enumerate() {
             let usage = f.uses.get(cursor).ok_or(bug("operation use omitted"))?;
             cursor += 1;
             if usage.site
@@ -594,6 +639,7 @@ fn check_availability(f: &SsaFacts) -> Result<(), SsaError> {
                 StateKind::Value(_) => 1,
                 StateKind::Undefined => 2,
                 StateKind::Invalidated { .. } => 4,
+                StateKind::OutsideFrame | StateKind::Unavailable { .. } => 8,
                 StateKind::Phi(_) => 0,
             };
             if expected == 0 || state.availability.0 != expected {
@@ -610,13 +656,14 @@ fn check_availability(f: &SsaFacts) -> Result<(), SsaError> {
     }
     let mut expected = filled(f.states.len(), 0u8)?;
     let mut queue = Vec::new();
-    for bit in [1u8, 2, 4] {
+    for bit in [1u8, 2, 4, 8] {
         queue.clear();
         for s in &f.states {
             let base = match s.kind {
                 StateKind::Value(_) => 1,
                 StateKind::Undefined => 2,
                 StateKind::Invalidated { .. } => 4,
+                StateKind::OutsideFrame | StateKind::Unavailable { .. } => 8,
                 StateKind::Phi(_) => 0,
             };
             if base == bit {

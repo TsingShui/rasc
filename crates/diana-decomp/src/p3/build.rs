@@ -108,6 +108,7 @@ pub(super) fn state(
         StateKind::Value(_) => 1,
         StateKind::Undefined => 2,
         StateKind::Invalidated { .. } => 4,
+        StateKind::OutsideFrame | StateKind::Unavailable { .. } => 8,
         StateKind::Phi(_) => 0,
     });
     push(
@@ -169,6 +170,7 @@ fn construct(flow: ExecutionFacts<'_, '_>, f: &mut SsaFacts) -> Result<(), SsaEr
         let slot = SlotId(id(i)?);
         let kind = match role {
             Some(role) => StateKind::Value(value(f, slot, PointId(0), ValueOrigin::Entry(role))?),
+            None if !flow.slot_is_valid(f.slots[i]) => StateKind::OutsideFrame,
             None => StateKind::Undefined,
         };
         state(f, slot, PointId(0), kind)?;
@@ -197,8 +199,16 @@ fn construct(flow: ExecutionFacts<'_, '_>, f: &mut SsaFacts) -> Result<(), SsaEr
                     output: id(i)?,
                 }
             };
-            let val = value(f, key, point, origin)?;
-            let def = state(f, key, point, StateKind::Value(val))?;
+            let val = if op.kind().output_is_established() && flow.slot_is_valid(written) {
+                Some(value(f, key, point, origin)?)
+            } else {
+                None
+            };
+            let kind = match val {
+                Some(v) => StateKind::Value(v),
+                None => StateKind::Unavailable { operation: op.id() },
+            };
+            let def = state(f, key, point, kind)?;
             push(
                 &mut f.outputs,
                 OutputBinding {
@@ -207,7 +217,6 @@ fn construct(flow: ExecutionFacts<'_, '_>, f: &mut SsaFacts) -> Result<(), SsaEr
                     point,
                     slot: key,
                     state: def,
-                    value: val,
                 },
             )?;
             // Width is One/Two: only starts r-1, r, r+1 can overlap.
@@ -233,16 +242,27 @@ fn construct(flow: ExecutionFacts<'_, '_>, f: &mut SsaFacts) -> Result<(), SsaEr
         affected.dedup();
         for &key in &affected {
             if !f.outputs[start..].iter().any(|o| o.slot == key) {
-                state(f, key, point, StateKind::Invalidated { operation: op.id() })?;
+                let kind = if f.outputs[start..]
+                    .iter()
+                    .any(|o| f.output_value(o).is_none())
+                {
+                    StateKind::Unavailable { operation: op.id() }
+                } else {
+                    StateKind::Invalidated { operation: op.id() }
+                };
+                state(f, key, point, kind)?;
             }
         }
     }
     let mut work = Work::new(f)?;
     for op in flow.operations() {
         f.operations[op.id().0 as usize].use_start = id(work.seeds.len())?;
-        f.operations[op.id().0 as usize].use_len = id(flow.reads(op).len())?;
+        let Ok(reads) = flow.reads(op) else {
+            continue;
+        };
+        f.operations[op.id().0 as usize].use_len = id(reads.len())?;
         let point = f.operations[op.id().0 as usize].execute;
-        for (i, &s) in flow.reads(op).iter().enumerate() {
+        for (i, &s) in reads.iter().enumerate() {
             work.usage(UseSeed {
                 site: UseSite::Operation {
                     operation: op.id(),

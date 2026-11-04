@@ -8,6 +8,26 @@ use crate::{CodeUnitOffset, FieldId, MethodHandleId, ProtoId, StringId, TypeId};
 use super::transfer::*;
 use super::{FlowError, MethodEvidence};
 
+static INVALID_OPERATION_INPUTS: crate::p1::MethodError = crate::p1::MethodError::InternalInvariant(
+    "operation inputs do not belong to this execution product",
+);
+
+/// A readable return category survives an unavailable argument grouping.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum InvokeResult {
+    Void,
+    Value(SlotWidth),
+    Unavailable,
+}
+impl From<Option<SlotWidth>> for InvokeResult {
+    fn from(value: Option<SlotWidth>) -> Self {
+        match value {
+            Some(width) => Self::Value(width),
+            None => Self::Void,
+        }
+    }
+}
+
 /// Identity of one operation in this method product.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct OpId(pub u32);
@@ -26,6 +46,20 @@ pub struct ExitId(pub u32);
 pub struct SlotSpan {
     pub(super) start: u32,
     pub(super) len: u32,
+}
+
+impl OpKind {
+    /// Whether the result origin is established independently of argument grouping.
+    /// Consumers must separately check that the encoded destination is in-frame.
+    pub fn output_is_established(&self) -> bool {
+        !matches!(
+            self,
+            Self::UnresolvedInvoke {
+                result: InvokeResult::Unavailable,
+                ..
+            } | Self::UnresolvedResult { .. }
+        )
+    }
 }
 
 impl SlotSpan {
@@ -372,6 +406,17 @@ pub enum OpKind {
         prototype: Option<ProtoId>,
         result: Option<SlotWidth>,
     },
+    /// Dispatch/reference identities and effects are known, argument grouping is not.
+    UnresolvedInvoke {
+        kind: InvokeKind,
+        target: OperandReference,
+        prototype: Option<ProtoId>,
+        result: InvokeResult,
+    },
+    /// The encoded destination is known, but no valid producer result is established.
+    UnresolvedResult {
+        width: SlotWidth,
+    },
     Monitor {
         enter: bool,
     },
@@ -641,10 +686,45 @@ impl<'a> FlowMethod<'a> {
     pub fn slots(&self) -> &[RegisterSlot] {
         &self.slots
     }
-    pub fn reads(&self, operation: &Operation) -> &[RegisterSlot] {
-        &self.slots
-            [operation.reads.start as usize..(operation.reads.start + operation.reads.len) as usize]
+    pub fn reads(&self, operation: &Operation) -> Result<&[RegisterSlot], &crate::p1::MethodError> {
+        if matches!(operation.kind, OpKind::UnresolvedInvoke { .. }) {
+            if let Some(Err(issue)) = self.decoded.invoke_layout_at(operation.pc) {
+                return Err(issue);
+            }
+            return Err(&INVALID_OPERATION_INPUTS);
+        }
+        let end = operation
+            .reads
+            .start
+            .checked_add(operation.reads.len)
+            .ok_or(&INVALID_OPERATION_INPUTS)?;
+        self.slots
+            .get(operation.reads.start as usize..end as usize)
+            .ok_or(&INVALID_OPERATION_INPUTS)
     }
+    /// Original argument words, not inferred One/Two parameter slots.
+    pub fn input_words(
+        &self,
+        operation: &Operation,
+    ) -> Option<impl Iterator<Item = crate::RegisterId> + '_> {
+        if !matches!(
+            operation.kind,
+            OpKind::Invoke { .. } | OpKind::UnresolvedInvoke { .. }
+        ) {
+            return None;
+        }
+        self.decoded
+            .instruction_at(operation.pc)
+            .map(|i| i.registers())
+    }
+    pub fn slot_is_valid(&self, slot: RegisterSlot) -> bool {
+        u64::from(slot.start.0) + u64::from(slot.words()) <= self.decoded.registers_size().0
+    }
+    pub fn issues(&self) -> impl Iterator<Item = (CodeUnitOffset, &crate::p1::MethodError)> + '_ {
+        self.decoded.issues()
+    }
+    /// Encoded destination intervals, also bounding unresolved possible writes.
+    /// These are not established values when the result or slot is unavailable.
     pub fn writes(&self, operation: &Operation) -> &[RegisterSlot] {
         &self.slots[operation.writes.start as usize
             ..(operation.writes.start + operation.writes.len) as usize]
@@ -693,13 +773,20 @@ impl<'a> FlowMethod<'a> {
     }
 }
 
-impl FlowMethod<'_> {
+impl<'a> FlowMethod<'a> {
     pub fn reference_fact(
         &self,
         pc: CodeUnitOffset,
         slot: ReferenceSlot,
-    ) -> Option<&crate::p1::CheckedReferenceFact<'_>> {
+    ) -> Option<Result<&crate::p1::CheckedReferenceFact<'a>, &crate::p1::MethodError>> {
         self.decoded.reference_fact(pc, slot)
+    }
+    pub fn reference_use_issue(
+        &self,
+        pc: CodeUnitOffset,
+        slot: ReferenceSlot,
+    ) -> Option<&crate::p1::MethodError> {
+        self.decoded.reference_use_issue(pc, slot)
     }
 }
 

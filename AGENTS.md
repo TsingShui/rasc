@@ -42,6 +42,10 @@ package-local `AGENTS.md` before working in either package.
 - All error paths MUST follow [failure locality](docs/diana/PIPELINE_DESIGN.md#9-局部失败与方法退出):
   contain failure to the smallest reliably identified scope and propagate missing
   facts only to their actual dependents. Partial method recovery is a normal result.
+- P1–P9 MUST each implement the [local-result contract](docs/diana/PIPELINE_DESIGN.md#92-p1p9-统一消费局部结果).
+  Published products describe coverage, established facts and local unavailability;
+  a downstream stage MUST NOT collapse mixed input into whole-method failure merely
+  because one item is unavailable. Keep owning-stage construction and one method chain.
 - Failure kind MUST NOT alone determine stop scope. A method-private invariant or
   allocation failure MUST NOT automatically terminate sibling methods, classes or
   DEX images; widening a stop requires a concrete shared-input/resource reason.

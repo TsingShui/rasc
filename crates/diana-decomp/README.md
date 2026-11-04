@@ -25,15 +25,26 @@ Undefined/invalidated sources remain explicit availability facts, not default va
 
 A P2 stop retains the complete P1 input, classified error and available unvalidated
 construction facts. A P3 stop retains complete P2 input and a partial SSA
-snapshot; neither stop can be promoted to a successful product. Class requests retain delivered members and mark request-level
-termination explicitly. Range/capacity checks and fallible allocation remain
-mandatory. The CLI/host owns process termination; Engine has no request
+snapshot; neither stop can be promoted to a successful product. Class requests
+reserve result storage before starting method work and retain all selected known
+member outcomes. A method-task resource/invariant error no longer stops siblings;
+`ClassAnalysis.terminated` and its kind-based truncation path are removed.
+Range/capacity checks and fallible allocation remain mandatory. The CLI/host owns process termination; Engine has no request
 cancellation callback/token or checkpoint parameter. There are no numeric quotas.
 
-[Failure locality](../../docs/diana/PIPELINE_DESIGN.md#9-局部失败与方法退出) requires
-partial-method recovery and independent continuation. This is not yet uniform:
-Engine currently stops a class on `ResourceExhausted` or `InternalInvariant`, and
-fragment-level recovery is not implemented throughout the method chain.
+The [P1–P9 local-result contract](../../docs/diana/PIPELINE_DESIGN.md#92-p1p9-统一消费局部结果)
+requires each stage to preserve independent results within the same method.
+P1–P3 now continue through local reference-read/use, register-span, invoke-grouping,
+result-use and return-kind issues. Target declarations, grouping and return category
+keep separate states; invoke binding reuses P1's resolved prototype rather than
+reading declarations again. Unresolved inputs are not zero arguments, and unknown
+results create no ValueId. SSA preserves exact-slot scope, exceptional old state,
+unknown Phi incoming and recovery after an established overwrite.
+
+This does not establish the entire target: P1 still requires reliable instruction
+boundaries, entry layout and control/protection associations. An unreliable graph
+stops with original facts instead of producing SSA by dropping edges. P4–P9 remain
+inactive, so partial Java-like text output is not yet delivered.
 
 Independent translation checking compiles only under `cfg(test)`; ordinary
 Engine requests do not run symbolic replay, output audits or duplicate dominator
@@ -47,15 +58,18 @@ encountered custom/polymorphic invokes or method-handle/type constants. The scop
 `src/dynamic_instructions_test.rs` unit test constructs DEX 038/039 inputs and
 checks public Engine products against independently specified references, ordered
 slots, result categories and normal/exception completion rules. It also checks
-classified stops for invalid versions, references, argument layouts and results.
+classified stops for unsupported versions and retained local errors for references,
+argument layouts and results.
 The same test checks register-renaming relations, equivalent wide-copy/constant
-encodings, discarded call results and SSA joins/loops/exception/overlap cases.
+encodings, discarded call results, SSA joins/loops/exception/overlap cases, local
+recovery inside one method and continued analysis of an executable sibling.
 This is static synthetic-input evidence, not ART execution evidence.
 A [Verus trial](proofs/README.md) proves the wide-copy patch predicate used by
 test replay, using the same Rust function body. It is absent from production. The adapter and remaining
 P2 test checks are not machine-proved; this is not a proof of whole-method correctness.
-Fault-injected allocation execution has not been performed; failure retention is
-currently code-reviewed.
+Simulated P2 capacity/invariant and P3 capacity failures have been observed through
+class requests with an executable sibling continuing. These are typed-failure
+observations, not actual allocator-failure injection; the latter remains unperformed.
 
 Use the single engine inspection entry from the repository root:
 
@@ -66,9 +80,16 @@ cargo run -p diana-decomp --release --example dbg_shell --locked -- \
 
 `p3` (`details:true`) observes state positions, bindings, definitions and Phi
 incoming records. `p3-all` reports SSA counts, unavailable uses, upstream failures
-and explicit incomplete execution on request termination. P3 is not formally
-verified; allocation-failure injection and formal single-class performance
-measurements remain unperformed.
+and per-method construction failures. Optional `class` selects one original class
+through `Engine::analyze`; `analysis_ns` measures that analysis, excluding index
+opening, JSON formatting and inactive rendering. `partial_methods`, `local_issues`
+and unresolved input counts distinguish ready products from fully established
+facts; batch `complete` describes traversal, not semantic verification. P3 is not
+formally verified. Six representative single-class Engine requests were compared
+with `e8d9eb1`, using interleaved release runs and twelve timed samples after warmup.
+Per-class median after/before ratios ranged from 0.962 to 1.052, with matching
+analysis counts. This is finite analysis-only latency evidence, not an end-to-end
+CLI/rendering benchmark or a general speedup claim.
 
 `p2-all` observes retained execution facts from the same Engine chain and reports
 classified outcomes and encountered opcode variants. `roundtrip-all` checks independent byte re-encoding over retained

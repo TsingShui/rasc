@@ -1,4 +1,6 @@
 use super::reference::{CheckedReferenceFact, ReferenceFactEntry};
+static INVALID_INVOKE_CAUSE: MethodError =
+    MethodError::InternalInvariant("invoke lost its original reference failure");
 use super::{CheckedMethodLayout, MethodError};
 use crate::input::formats::{DexVersion, FlowKind, InsnLayout, LayoutKind, OpcodeSpec};
 use crate::input::operands::{RawOperands, instruction_operands};
@@ -60,11 +62,12 @@ impl DecodedInstruction {
     pub fn references(&self) -> impl Iterator<Item = DecodedReference> + '_ {
         self.references.into_iter().flatten()
     }
-    /// P1's checked normal branch target for goto/conditional instructions.
+    /// Original relative target. It is a CFG target only under a published
+    /// DecodedMethod's control guarantee; a stopped prefix can contain a bad target.
     pub fn branch_target(&self) -> Option<CodeUnitOffset> {
         self.branch_target
     }
-    /// P1's checked payload target for switch/fill-array instructions.
+    /// Original payload target; the stopped-prefix case does not establish its association.
     pub fn payload_target(&self) -> Option<CodeUnitOffset> {
         self.payload_target
     }
@@ -248,20 +251,19 @@ pub(crate) struct DecodedFacts<'a> {
     pub annotations: crate::input::CheckedAnnotations,
     pub metadata_issue: bool,
     pub reference_facts: Vec<ReferenceFactEntry<'a>>,
+    pub issues: Vec<(CodeUnitOffset, MethodError)>,
 }
 
 /// P1's decoded original instruction directory. Every instruction the reader
 /// safely ranged is represented with its opcode, width, operands and reference
 /// domains. Branch, switch, handler and producer/result association is added by
 /// the owning P1 structural checks and P2; this product does not claim a CFG.
-#[derive(Clone)]
 pub struct DecodedMethod<'a> {
     source: RawMethodView<'a>,
     layout: CheckedMethodLayout<'a>,
     protection: CheckedProtection,
-    /// One immutable item directory, shared by every product that retains the
-    /// decoded facts. Cloning the product copies a handle, not the items.
-    items: std::sync::Arc<Vec<DecodedItem>>,
+    /// One directory moved down the method chain; inspection borrows it.
+    items: Vec<DecodedItem>,
     class_id: crate::ClassDefId,
     declaration: crate::p0::MethodDeclaration,
     access_flags: u32,
@@ -269,7 +271,8 @@ pub struct DecodedMethod<'a> {
     annotations: crate::input::CheckedAnnotations,
     metadata_issue: bool,
     /// Checked target declarations for every original operand reference.
-    reference_facts: std::sync::Arc<Vec<ReferenceFactEntry<'a>>>,
+    reference_facts: Vec<ReferenceFactEntry<'a>>,
+    issues: Vec<(CodeUnitOffset, MethodError)>,
     registers_size: u16,
     ins_size: u16,
     outs_size: u16,
@@ -313,32 +316,109 @@ impl<'a> DecodedMethod<'a> {
     pub fn entry(&self) -> &EntryLayout {
         &self.entry
     }
-    /// P1's checked invoke layout at `pc`, when that instruction is an invoke.
-    pub fn invoke_layout_at(&self, pc: CodeUnitOffset) -> Option<&InvokeLayout> {
-        self.layout.invoke_layout_at(pc)
+    /// Parameter-layout state at an invoke, distinct from its readable return category.
+    pub fn invoke_layout_at(
+        &self,
+        pc: CodeUnitOffset,
+    ) -> Option<Result<&InvokeLayout, &MethodError>> {
+        self.layout
+            .invoke_layout_at(pc)
+            .map(|state| state.map_err(|e| self.invoke_issue(pc, e)))
     }
-    /// All checked invoke layouts in original PC order.
-    pub fn invoke_layouts(&self) -> impl Iterator<Item = (CodeUnitOffset, &InvokeLayout)> + '_ {
-        self.layout.invoke_layouts()
+    fn invoke_issue<'f>(
+        &'f self,
+        pc: CodeUnitOffset,
+        issue: &'f super::binding::InvokeIssue,
+    ) -> &'f MethodError {
+        match issue {
+            super::binding::InvokeIssue::Constraint(error) => error,
+            super::binding::InvokeIssue::Reference(slot) => self
+                .reference_fact(pc, *slot)
+                .and_then(Result::err)
+                .unwrap_or(&INVALID_INVOKE_CAUSE),
+        }
     }
-    /// Checked declaration facts for one original reference site.
+    /// The result category is independent of successful parameter grouping.
+    pub fn invoke_result_at(
+        &self,
+        pc: CodeUnitOffset,
+    ) -> Option<Result<Option<SlotWidth>, &MethodError>> {
+        // Presence only: failed grouping must not erase a readable result category.
+        let _grouping = self.layout.invoke_layout_at(pc)?;
+        let instruction = self.instruction_at(pc)?;
+        let slot = if matches!(instruction.opcode(), 0xfa | 0xfb) {
+            ReferenceSlot::Second
+        } else {
+            ReferenceSlot::First
+        };
+        Some(match self.reference_fact(pc, slot)? {
+            Err(e) => Err(e),
+            Ok(
+                CheckedReferenceFact::Method { prototype, .. }
+                | CheckedReferenceFact::CallSite { prototype, .. }
+                | CheckedReferenceFact::Proto { prototype },
+            ) => Ok(prototype.result()),
+            Ok(_) => return None,
+        })
+    }
+    /// All invoke layout states in original PC order.
+    pub fn invoke_layouts(
+        &self,
+    ) -> impl Iterator<Item = (CodeUnitOffset, Result<&InvokeLayout, &MethodError>)> + '_ {
+        self.layout
+            .invoke_layouts()
+            .map(|(pc, state)| (pc, state.map_err(|e| self.invoke_issue(pc, e))))
+    }
+    /// Target-read state for one original reference site; opcode-use issues are separate.
     pub fn reference_fact(
         &self,
         pc: CodeUnitOffset,
         slot: ReferenceSlot,
-    ) -> Option<&CheckedReferenceFact<'a>> {
+    ) -> Option<Result<&CheckedReferenceFact<'a>, &MethodError>> {
         self.reference_facts
             .binary_search_by(|entry| (entry.pc, entry.slot).cmp(&(pc, slot)))
             .ok()
-            .map(|index| &self.reference_facts[index].fact)
+            .map(|index| self.reference_facts[index].fact.as_ref())
     }
-    /// All checked reference facts in original site order.
+    /// All original reference sites and target-read states in site order.
     pub fn reference_facts(
         &self,
-    ) -> impl Iterator<Item = (CodeUnitOffset, ReferenceSlot, &CheckedReferenceFact<'a>)> + '_ {
+    ) -> impl Iterator<
+        Item = (
+            CodeUnitOffset,
+            ReferenceSlot,
+            Result<&CheckedReferenceFact<'a>, &MethodError>,
+        ),
+    > + '_ {
         self.reference_facts
             .iter()
-            .map(|entry| (entry.pc, entry.slot, &entry.fact))
+            .map(|entry| (entry.pc, entry.slot, entry.fact.as_ref()))
+    }
+    pub fn reference_use_issue(
+        &self,
+        pc: CodeUnitOffset,
+        slot: ReferenceSlot,
+    ) -> Option<&MethodError> {
+        self.reference_facts
+            .binary_search_by(|e| (e.pc, e.slot).cmp(&(pc, slot)))
+            .ok()
+            .and_then(|i| self.reference_facts[i].use_issue.as_ref())
+    }
+    pub fn issues(&self) -> impl Iterator<Item = (CodeUnitOffset, &MethodError)> + '_ {
+        self.layout
+            .issues()
+            .chain(self.issues.iter().map(|(pc, e)| (*pc, e)))
+            .chain(self.reference_facts.iter().flat_map(|f| {
+                f.fact
+                    .as_ref()
+                    .err()
+                    .into_iter()
+                    .chain(f.use_issue.as_ref())
+                    .map(move |e| (f.pc, e))
+            }))
+    }
+    pub fn result_issue_at(&self, pc: CodeUnitOffset) -> Option<&MethodError> {
+        self.layout.result_issue_at(pc)
     }
     pub fn is_reachable(&self, pc: CodeUnitOffset) -> bool {
         self.layout.is_reachable(pc)
@@ -569,19 +649,20 @@ impl<'a> ProgramIndex<'a> {
         mut items: Vec<DecodedItem>,
         facts: DecodedFacts<'a>,
     ) -> DecodedMethod<'a> {
-        link_results(&mut items);
+        link_results(&layout, &mut items);
         DecodedMethod {
             source: source.clone(),
             layout,
             protection,
-            items: std::sync::Arc::new(items),
+            items,
             class_id: facts.class_id,
             declaration: facts.declaration,
             access_flags: facts.access_flags,
             entry: facts.entry,
             annotations: facts.annotations,
             metadata_issue: facts.metadata_issue,
-            reference_facts: std::sync::Arc::new(facts.reference_facts),
+            reference_facts: facts.reference_facts,
+            issues: facts.issues,
             registers_size: source.registers_size(),
             ins_size: source.ins_size(),
             outs_size: source.outs_size(),
@@ -591,12 +672,13 @@ impl<'a> ProgramIndex<'a> {
     }
 }
 
-fn link_results(items: &mut [DecodedItem]) {
+fn link_results(layout: &CheckedMethodLayout<'_>, items: &mut [DecodedItem]) {
     for index in 1..items.len() {
         let DecodedItem::Instruction(result) = items[index] else {
             continue;
         };
-        if !matches!(result.spec.opcode, 0x0a..=0x0c) {
+        if !matches!(result.spec.opcode, 0x0a..=0x0c) || layout.result_issue_at(result.pc).is_some()
+        {
             continue;
         }
         let result_pc = result.pc;
@@ -612,8 +694,7 @@ fn link_results(items: &mut [DecodedItem]) {
     }
 }
 
-/// Decoding scratch uses the method budget; only its control/allocation
-/// classification crosses into `MethodError`, whose variants stay owner-specific.
+/// Preserve decoding allocation and input failures in their owner-specific type.
 pub(super) fn scratch(error: RequestError) -> MethodError {
     match error {
         RequestError::Allocation(error) => MethodError::Allocation(error),

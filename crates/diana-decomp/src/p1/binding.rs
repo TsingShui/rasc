@@ -1,25 +1,27 @@
+use super::reference::{CheckedPrototype, CheckedReferenceFact, ReferenceFactEntry};
 use super::structure::bad;
 use super::{MethodError, MethodProblem};
-use crate::CodeUnitOffset;
-use crate::input::ProgramIndex;
-use crate::input::formats::{InsnLayout, OpcodeSpec, OperandReference, RegisterShape};
+use crate::input::formats::{OpcodeSpec, RegisterShape};
 use crate::input::operands::RawOperands;
-use crate::substrate::slots::SlotWidth;
+use crate::raw::ReferenceSlot;
+use crate::{CodeUnitOffset, SlotWidth};
 
-#[derive(Clone)]
-pub(crate) struct ProducerFact {
-    pub result: ResultKind,
-    pub invoke: Option<super::InvokeLayout>,
+#[derive(Debug)]
+pub(super) enum InvokeIssue {
+    Reference(ReferenceSlot),
+    Constraint(MethodError),
 }
-
-#[derive(Clone, Copy)]
-pub(crate) enum ResultKind {
+pub(super) struct ProducerFact {
+    pub result: ResultKind,
+    pub invoke: Option<Result<super::InvokeLayout, MethodError>>,
+}
+#[derive(Clone, Copy, Debug)]
+pub(super) enum ResultKind {
     Void,
     Scalar,
     Wide,
     Object,
 }
-
 impl ResultKind {
     pub(super) fn accepts(self, opcode: u8) -> bool {
         matches!(
@@ -29,107 +31,103 @@ impl ResultKind {
     }
 }
 
-/// Checks ordinary/custom invoke words against original prototypes, without resolving
-/// dispatch or assigning types to register values. All reads use the normal
-/// method ledger; borrowed iterators require no scratch allocation.
-pub(crate) fn check_producer(
-    index: &ProgramIndex<'_>,
+/// The already-produced prototype is the sole binding source. An unreadable
+/// target declaration need not erase a separate polymorphic prototype.
+pub(super) fn invoke_prototype<'f, 'a>(
+    facts: &'f [ReferenceFactEntry<'a>],
+    pc: CodeUnitOffset,
+    opcode: u8,
+) -> Result<&'f CheckedPrototype<'a>, InvokeIssue> {
+    let slot = if matches!(opcode, 0xfa | 0xfb) {
+        ReferenceSlot::Second
+    } else {
+        ReferenceSlot::First
+    };
+    let entry = facts
+        .binary_search_by(|e| (e.pc, e.slot).cmp(&(pc, slot)))
+        .ok()
+        .map(|i| &facts[i])
+        .ok_or(InvokeIssue::Constraint(MethodError::InternalInvariant(
+            "invoke lost its reference site",
+        )))?;
+    let fact = entry
+        .fact
+        .as_ref()
+        .map_err(|_| InvokeIssue::Reference(slot))?;
+    match fact {
+        CheckedReferenceFact::Method { prototype, .. }
+        | CheckedReferenceFact::CallSite { prototype, .. }
+        | CheckedReferenceFact::Proto { prototype } => Ok(prototype),
+        _ => Err(InvokeIssue::Constraint(MethodError::InternalInvariant(
+            "invoke reference has no prototype",
+        ))),
+    }
+}
+
+/// Only argument grouping can fail here; a readable prototype still supplies a
+/// receiver rule and result category, including when the encoded word count is bad.
+pub(super) fn check_producer(
+    facts: &[ReferenceFactEntry<'_>],
     pc: CodeUnitOffset,
     spec: OpcodeSpec,
-    layout: InsnLayout,
     operands: RawOperands,
-) -> Result<Option<ProducerFact>, MethodError> {
+) -> Result<Option<ProducerFact>, InvokeIssue> {
     if spec.registers == RegisterShape::ArrayWords {
         return Ok(Some(ProducerFact {
             result: ResultKind::Object,
             invoke: None,
         }));
     }
-    if !matches!(
-        spec.opcode,
-        0x6e..=0x72 | 0x74..=0x78 | 0xfa..=0xfd
-    ) {
+    if !matches!(spec.opcode,0x6e..=0x72|0x74..=0x78|0xfa..=0xfd) {
         return Ok(None);
     }
-    let prototype = match (spec.opcode, layout.references()[0].map(|r| r.target)) {
-        // A polymorphic call's own declaration describes the receiver only; the
-        // second reference supplies the actual argument/result prototype.
-        (0xfa | 0xfb, Some(OperandReference::Method(id))) => {
-            index.method_reference(id)?;
-            let Some(OperandReference::Proto(proto)) = layout.references()[1].map(|r| r.target)
-            else {
-                return Err(MethodError::InternalInvariant(
-                    "polymorphic invoke has no checked prototype reference",
-                ));
-            };
-            index.prototype(proto)?
-        }
-        (_, Some(OperandReference::Method(id))) => {
-            index.method_reference(id)?.declaration.prototype
-        }
-        (_, Some(OperandReference::CallSite(id))) => index.call_site(id)?.prototype,
-        _ => {
-            return Err(MethodError::InternalInvariant(
-                "invoke has no checked target reference",
-            ));
-        }
-    };
+    let prototype = invoke_prototype(facts, pc, spec.opcode)?;
     let receiver = !matches!(spec.opcode, 0x71 | 0x77 | 0xfc | 0xfd);
-    // A checked type_list has a u32 count, so its word total plus a receiver
-    // is at most 2 * u32::MAX + 1 and fits u64.
-    let expected_words = prototype.parameter_words.0 + u64::from(receiver);
-    if operands.registers().len() as u64 != expected_words {
-        return Err(bad(pc, MethodProblem::InvalidInvokeWordCount));
-    }
-    let mut shorty = prototype.shorty.reader()?;
-    let result = match shorty.next()? {
-        Some(0x56) => ResultKind::Void,
-        Some(0x4a | 0x44) => ResultKind::Wide,
-        Some(0x4c) => ResultKind::Object,
-        Some(0x5a | 0x42 | 0x53 | 0x43 | 0x49 | 0x46) => ResultKind::Scalar,
-        _ => {
+    let grouping = (|| {
+        let expected = prototype.parameter_words() + u64::from(receiver);
+        if operands.registers().len() as u64 != expected {
+            return Err(bad(pc, MethodProblem::InvalidInvokeWordCount));
+        }
+        let mut shorty = prototype.shorty().reader()?;
+        shorty.next()?;
+        let mut words = operands.registers().iter();
+        if receiver {
+            words
+                .next()
+                .ok_or(MethodError::InternalInvariant("missing checked receiver"))?;
+        }
+        let mut arguments = Vec::new();
+        while let Some(tag) = shorty.next()? {
+            let first = words
+                .next()
+                .ok_or(MethodError::InternalInvariant("missing checked argument"))?;
+            let width = if matches!(tag, 0x4a | 0x44) {
+                let second = words
+                    .next()
+                    .ok_or(MethodError::InternalInvariant("missing checked wide word"))?;
+                if first.0.checked_add(1) != Some(second.0) {
+                    return Err(bad(pc, MethodProblem::NonAdjacentWideArgument));
+                }
+                SlotWidth::Two
+            } else {
+                SlotWidth::One
+            };
+            crate::substrate::owned::push(&mut arguments, width)
+                .map_err(super::disassembly::scratch)?;
+        }
+        if words.next().is_some() {
             return Err(MethodError::InternalInvariant(
-                "checked shorty has no return kind",
+                "checked argument words remain",
             ));
         }
-    };
-    let mut words = operands.registers().iter();
-    if receiver {
-        words
-            .next()
-            .ok_or(MethodError::InternalInvariant("missing checked receiver"))?;
-    }
-    let mut arguments = Vec::new();
-    while let Some(tag) = shorty.next()? {
-        let first = words
-            .next()
-            .ok_or(MethodError::InternalInvariant("missing checked argument"))?;
-        let width = if matches!(tag, 0x4a | 0x44) {
-            let second = words
-                .next()
-                .ok_or(MethodError::InternalInvariant("missing checked wide word"))?;
-            if first.0.checked_add(1) != Some(second.0) {
-                return Err(bad(pc, MethodProblem::NonAdjacentWideArgument));
-            }
-            SlotWidth::Two
-        } else {
-            SlotWidth::One
-        };
-        crate::substrate::owned::push(&mut arguments, width)
-            .map_err(super::disassembly::scratch)?;
-    }
-    if words.next().is_some() {
-        return Err(MethodError::InternalInvariant(
-            "checked argument words remain",
-        ));
-    }
-    let result_width = match result {
-        ResultKind::Void => None,
-        ResultKind::Scalar | ResultKind::Object => Some(SlotWidth::One),
-        ResultKind::Wide => Some(SlotWidth::Two),
-    };
+        Ok(super::InvokeLayout::new(
+            receiver,
+            arguments,
+            prototype.result(),
+        ))
+    })();
     Ok(Some(ProducerFact {
-        result,
-        invoke: Some(super::InvokeLayout::new(receiver, arguments, result_width)),
+        result: prototype.result_kind,
+        invoke: Some(grouping),
     }))
 }

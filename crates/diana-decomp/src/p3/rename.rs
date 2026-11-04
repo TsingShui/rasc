@@ -329,7 +329,6 @@ pub(super) fn compact(f: &mut SsaFacts) -> Result<(), SsaError> {
     }
     for output in &mut f.outputs {
         output.state = state_map[output.state.0 as usize].ok_or(bug("output lost source"))?;
-        output.value = value_map[output.value.0 as usize].ok_or(bug("output lost value"))?;
     }
     for mut phi in std::mem::take(&mut f.phis) {
         let Some(new) = phi_map[phi.id.0 as usize] else {

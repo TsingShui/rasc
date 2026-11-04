@@ -305,12 +305,6 @@ impl Shell {
                             }
                         }
                     }
-                    if let Some(kind) = analysis.terminated {
-                        return Ok(
-                            json!({"terminated": format!("{kind:?}"), "methods": methods,
-                            "checked": checked, "failures": failures}),
-                        );
-                    }
                 }
                 Ok(json!({
                     "classes": classes,
@@ -452,12 +446,17 @@ impl Shell {
                             "pc": pc.0,
                             "slot": format!("{slot:?}"),
                             "fact": format!("{fact:?}"),
+                            "use_issue": decoded.reference_use_issue(pc, slot).map(|e|format!("{e}")),
                         })
                     })
                     .collect::<Vec<_>>();
                 let invokes = decoded
                     .invoke_layouts()
                     .map(|(pc, layout)| {
+                        let layout = match layout {
+                            Ok(layout) => layout,
+                            Err(error) => return json!({"pc":pc.0,"available":false,"error":format!("{error}")}),
+                        };
                         json!({
                             "pc": pc.0,
                             "receiver": layout.has_receiver(),
@@ -491,6 +490,7 @@ impl Shell {
                     },
                     "invokes": invokes,
                     "reference_facts": reference_facts,
+                    "issues": decoded.issues().map(|(pc,e)|json!({"pc":pc.0,"kind":format!("{:?}",e.kind()),"detail":format!("{e}")})).collect::<Vec<_>>(),
                     "instruction_bytes": [
                         decoded.instruction_bytes().start.0,
                         decoded.instruction_bytes().end.0,
@@ -500,7 +500,14 @@ impl Shell {
                     "handler_targets": decoded.handler_targets().collect::<Vec<_>>(),
                 }))
             }
-            "p3-all" => ssa_all(&engine, index.class_count()),
+            "p3-all" => ssa_all(
+                &engine,
+                index.class_count(),
+                request
+                    .get("class")
+                    .map(|_| class_id(request))
+                    .transpose()?,
+            ),
             "p3" | "ssa" => {
                 let analysis = engine
                     .analyze_method(class_key(class_id(request)?), MethodId(method_id(request)?))?;
@@ -647,12 +654,6 @@ impl Shell {
                             }
                         }
                     }
-                    if let Some(kind) = analysis.terminated {
-                        return Ok(
-                            json!({"terminated": format!("{kind:?}"), "methods": methods,
-                            "failures": failures, "flowed": flowed}),
-                        );
-                    }
                 }
                 Ok(json!({
                     "classes": classes,
@@ -701,9 +702,11 @@ impl Shell {
                             "pc": operation.pc().0,
                             "block": operation.block().0,
                             "kind": format!("{:?}", operation.kind()),
-                            "reads": flow.reads(operation).iter().map(|slot| json!({
+                            "reads": flow.reads(operation).ok().map(|reads| reads.iter().map(|slot| json!({
                                 "start": slot.start.0, "words": slot.words(),
-                            })).collect::<Vec<_>>(),
+                            })).collect::<Vec<_>>()),
+                            "reads_issue": flow.reads(operation).err().map(|e|format!("{e}")),
+                            "input_words": flow.input_words(operation).map(|w|w.map(|r|r.0).collect::<Vec<_>>()),
                             "writes": flow.writes(operation).iter().map(|slot| json!({
                                 "start": slot.start.0, "words": slot.words(),
                             })).collect::<Vec<_>>(),
@@ -749,6 +752,7 @@ impl Shell {
                     "blocks": flow.blocks().len(),
                     "operations": flow.operations().len(),
                     "details": details,
+                    "issues": flow.issues().map(|(pc,e)|json!({"pc":pc.0,"kind":format!("{:?}",e.kind()),"detail":format!("{e}")})).collect::<Vec<_>>(),
                     "edges": flow.edges().len(),
                     "normal_edges": normal_edges,
                     "exception_edges": exception_edges,
@@ -773,37 +777,49 @@ impl Shell {
 fn ssa_json(ssa: &diana_decomp::p3::SsaMethod<'_>, details: bool) -> Value {
     let f = ssa.facts();
     json!({"stage":"p3", "class":ssa.class_id().0,"method":ssa.method_id().0,
+    "issues":ssa.execution().issues().map(|(pc,e)|json!({"pc":pc.0,"kind":format!("{:?}",e.kind()),"detail":format!("{e}")})).collect::<Vec<_>>(),
+    "unresolved_input_sites":f.operation_sites().iter().filter(|s|!s.inputs_available()).count(),
     "points":f.points().len(),"transfers":f.transfers().len(),"slots":f.slots().len(),
     "states":f.states().len(),"values":f.values().len(),"uses":f.uses().len(),"phis":f.phis().len(),
     "unavailable_uses":f.uses().iter().filter(|u|!f.state(u.state()).is_some_and(|s|s.availability().is_available())).count(),
     "details":details.then(||json!({
         "operation_sites":f.operation_sites().iter().map(|s|json!({"operation":s.operation().0,"execute":s.execute().0,"commit":s.commit().map(|p|p.0),
-            "commit_rule":format!("{:?}",s.commit_rule()),"commit_pc":s.commit_pc().map(|p|p.0),"uses":[s.use_start(),s.use_len()],"outputs":[s.output_start(),s.output_len()]})).collect::<Vec<_>>(),
+            "commit_rule":format!("{:?}",s.commit_rule()),"commit_pc":s.commit_pc().map(|p|p.0),"inputs_available":s.inputs_available(),"uses":[s.use_start(),s.use_len()],"outputs":[s.output_start(),s.output_len()]})).collect::<Vec<_>>(),
         "slots":f.slots().iter().map(|s|json!({"start":s.start.0,"width":format!("{:?}",s.width)})).collect::<Vec<_>>(),
         "points":f.points().iter().map(|p|json!({"id":p.id().0,"kind":format!("{:?}",p.kind()),"idom":p.idom().map(|p|p.0)})).collect::<Vec<_>>(),
         "transfers":f.transfers().iter().map(|t|json!({"id":t.id().0,"from":t.from().0,"target":format!("{:?}",t.target()),"origin":format!("{:?}",t.origin())})).collect::<Vec<_>>(),
         "states":f.states().iter().map(|s|json!({"id":s.id().0,"slot":s.slot().0,"point":s.point().0,"kind":format!("{:?}",s.kind()),"availability":format!("{:?}",s.availability())})).collect::<Vec<_>>(),
         "values":f.values().iter().map(|v|json!({"id":v.id().0,"slot":v.slot().0,"point":v.point().0,"origin":format!("{:?}",v.origin())})).collect::<Vec<_>>(),
         "uses":f.uses().iter().map(|u|json!({"site":format!("{:?}",u.site()),"point":u.point().0,"slot":u.slot().0,"state":u.state().0,"value":f.readable_value(u).map(|v|v.0)})).collect::<Vec<_>>(),
-        "outputs":f.outputs().iter().map(|o|json!({"operation":o.operation().0,"output":o.output(),"point":o.point().0,"slot":o.slot().0,"state":o.state().0,"value":o.value().0})).collect::<Vec<_>>(),
+        "outputs":f.outputs().iter().map(|o|json!({"operation":o.operation().0,"output":o.output(),"point":o.point().0,"slot":o.slot().0,"state":o.state().0,"value":f.output_value(o).map(|v|v.0)})).collect::<Vec<_>>(),
         "phis":f.phis().iter().map(|p|json!({"id":p.id().0,"point":p.point().0,"slot":p.slot().0,"state":p.state().0,"value":p.value().0,
             "incoming":p.incoming().iter().map(|i|json!({"transfer":i.transfer().0,"state":i.state().0})).collect::<Vec<_>>()})).collect::<Vec<_>>()
     }))})
 }
 
-fn ssa_all(engine: &Engine<'_>, classes: u32) -> Result<Value, RequestError> {
+fn ssa_all(
+    engine: &Engine<'_>,
+    classes: u32,
+    selected: Option<u32>,
+) -> Result<Value, RequestError> {
     let started = std::time::Instant::now();
     let (mut methods, mut no_code, mut ready, mut failed, mut upstream, mut class_errors) =
         (0u64, 0u64, 0u64, 0u64, 0u64, 0u64);
     let (mut points, mut states, mut values, mut uses, mut phis, mut unavailable) =
         (0u64, 0u64, 0u64, 0u64, 0u64, 0u64);
     let mut first_failure = None;
-    let mut terminated = None;
-    for class in 0..classes {
-        let analysis = match engine.analyze(Request {
+    let mut analysis_time = std::time::Duration::ZERO;
+    let (mut local_issues, mut partial_methods, mut unresolved_inputs) = (0u64, 0u64, 0u64);
+    let requested = selected.map_or(classes, |_| 1);
+    for ordinal in 0..requested {
+        let class = selected.unwrap_or(ordinal);
+        let began = std::time::Instant::now();
+        let result = engine.analyze(Request {
             class: class_key(class),
             method: None,
-        }) {
+        });
+        analysis_time += began.elapsed();
+        let analysis = match result {
             Ok(a) => a,
             Err(e) => {
                 class_errors += 1;
@@ -825,7 +841,7 @@ fn ssa_all(engine: &Engine<'_>, classes: u32) -> Result<Value, RequestError> {
                     values += f.values().len() as u64;
                     uses += f.uses().len() as u64;
                     phis += f.phis().len() as u64;
-                    unavailable += f
+                    let unavailable_count = f
                         .uses()
                         .iter()
                         .filter(|u| {
@@ -833,6 +849,17 @@ fn ssa_all(engine: &Engine<'_>, classes: u32) -> Result<Value, RequestError> {
                                 .is_some_and(|s| s.availability().is_available())
                         })
                         .count() as u64;
+                    unavailable += unavailable_count;
+                    let issues = ssa.execution().issues().count() as u64;
+                    let inputs = f
+                        .operation_sites()
+                        .iter()
+                        .filter(|s| !s.inputs_available())
+                        .count() as u64;
+                    local_issues += issues;
+                    unresolved_inputs += inputs;
+                    partial_methods +=
+                        u64::from(issues != 0 || inputs != 0 || unavailable_count != 0);
                 }
                 Ok(MethodOutcome::SsaStopped(stop)) => {
                     failed += 1;
@@ -854,15 +881,12 @@ fn ssa_all(engine: &Engine<'_>, classes: u32) -> Result<Value, RequestError> {
                 }
             }
         }
-        if let Some(kind) = analysis.terminated {
-            terminated = Some(format!("{kind:?}"));
-            break;
-        }
     }
     Ok(
-        json!({"classes":classes,"methods":methods,"no_code":no_code,"ssa":ready,"failed":failed,"upstream":upstream,"class_errors":class_errors,
+        json!({"classes":requested,"class":selected,"methods":methods,"no_code":no_code,"ssa":ready,"failed":failed,"upstream":upstream,"class_errors":class_errors,
+        "partial_methods":partial_methods,"local_issues":local_issues,"unresolved_input_sites":unresolved_inputs,"analysis_ns":analysis_time.as_nanos(),
         "points":points,"states":states,"values":values,"uses":uses,"phis":phis,"unavailable_uses":unavailable,
-        "complete":terminated.is_none(),"terminated":terminated,"first_failure":first_failure,"elapsed_ms":started.elapsed().as_millis()}),
+        "complete":true,"first_failure":first_failure,"elapsed_ms":started.elapsed().as_millis()}),
     )
 }
 

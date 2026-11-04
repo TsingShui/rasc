@@ -24,6 +24,7 @@ pub struct CheckedPrototype<'a> {
     return_type_id: TypeId,
     parameters: Vec<CheckedParameter<'a>>,
     parameter_words: u64,
+    pub(super) result_kind: super::binding::ResultKind,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -54,7 +55,20 @@ impl<'a> CheckedPrototype<'a> {
             )
             .map_err(super::disassembly::scratch)
         })?;
+        use super::binding::ResultKind;
+        let result_kind = match prototype.shorty.reader()?.next()? {
+            Some(0x56) => ResultKind::Void,
+            Some(0x4a | 0x44) => ResultKind::Wide,
+            Some(0x4c) => ResultKind::Object,
+            Some(0x5a | 0x42 | 0x53 | 0x43 | 0x49 | 0x46) => ResultKind::Scalar,
+            _ => {
+                return Err(MethodError::InternalInvariant(
+                    "checked prototype has no result kind",
+                ));
+            }
+        };
         Ok(Self {
+            result_kind,
             shorty: prototype.shorty,
             return_type: prototype.return_type,
             return_type_id: prototype.return_type_idx,
@@ -63,6 +77,14 @@ impl<'a> CheckedPrototype<'a> {
         })
     }
 
+    pub fn result(&self) -> Option<crate::SlotWidth> {
+        use super::binding::ResultKind;
+        match self.result_kind {
+            ResultKind::Void => None,
+            ResultKind::Wide => Some(crate::SlotWidth::Two),
+            _ => Some(crate::SlotWidth::One),
+        }
+    }
     pub fn shorty(&self) -> DexString<'a> {
         self.shorty
     }
@@ -80,11 +102,13 @@ impl<'a> CheckedPrototype<'a> {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub(crate) struct ReferenceFactEntry<'a> {
     pub pc: CodeUnitOffset,
     pub slot: ReferenceSlot,
-    pub fact: CheckedReferenceFact<'a>,
+    pub fact: Result<CheckedReferenceFact<'a>, MethodError>,
+    /// A declaration can be readable even when its use by this opcode is invalid.
+    pub use_issue: Option<MethodError>,
 }
 
 /// Checked facts for one original operand reference. These are the declaration

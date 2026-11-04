@@ -3,7 +3,7 @@ use std::collections::TryReserveError;
 use thiserror::Error;
 
 use super::InvokeLayout;
-use super::binding::{ResultKind, check_producer};
+use super::binding::{InvokeIssue, ResultKind, check_producer};
 use crate::input::formats::{FlowKind, RegisterShape, RegisterWidth, ResultRole, wide_word};
 use crate::input::operands::{RawOperands, RegisterEncoding};
 use crate::input::{Cursor, InputError, ProgramIndex, RawMethodView};
@@ -84,21 +84,28 @@ pub(super) fn bad(pc: CodeUnitOffset, problem: MethodProblem) -> MethodError {
     MethodError::Malformed { pc, problem }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 struct InvokeFact {
     pc: CodeUnitOffset,
-    layout: InvokeLayout,
+    layout: Result<InvokeLayout, InvokeIssue>,
 }
 
-/// Structural checks over all original words, including dead instructions.
-/// This also checks original debug addresses and local records. Declaration
-/// annotations, reference contents and register definition/type analysis retain
-/// their own validation obligations.
-#[derive(Clone, Debug)]
+#[derive(Debug)]
+struct InstructionIssue {
+    pc: CodeUnitOffset,
+    result: bool,
+    error: MethodError,
+}
+
+/// Original boundary/control associations and per-instruction layout states.
+/// Registers, result uses and argument grouping retain local issues; an unreliable
+/// boundary or control relation cannot be published as a known execution graph.
+#[derive(Debug)]
 pub struct CheckedMethodLayout<'a> {
     original: RawMethodView<'a>,
     boundaries: Boundaries,
     invokes: Vec<InvokeFact>,
+    issues: Vec<InstructionIssue>,
 }
 
 impl<'a> CheckedMethodLayout<'a> {
@@ -111,16 +118,42 @@ impl<'a> CheckedMethodLayout<'a> {
     }
 
     /// Checked invoke layout at `pc`, in original PC order.
-    pub fn invoke_layout_at(&self, pc: CodeUnitOffset) -> Option<&InvokeLayout> {
+    pub(super) fn invoke_layout_at(
+        &self,
+        pc: CodeUnitOffset,
+    ) -> Option<Result<&InvokeLayout, &InvokeIssue>> {
         self.invokes
             .binary_search_by_key(&pc, |fact| fact.pc)
             .ok()
-            .map(|index| &self.invokes[index].layout)
+            .map(|index| self.invokes[index].layout.as_ref())
     }
 
     /// All checked invoke layouts in original PC order.
-    pub fn invoke_layouts(&self) -> impl Iterator<Item = (CodeUnitOffset, &InvokeLayout)> + '_ {
-        self.invokes.iter().map(|fact| (fact.pc, &fact.layout))
+    pub(super) fn invoke_layouts(
+        &self,
+    ) -> impl Iterator<Item = (CodeUnitOffset, Result<&InvokeLayout, &InvokeIssue>)> + '_ {
+        self.invokes
+            .iter()
+            .map(|fact| (fact.pc, fact.layout.as_ref()))
+    }
+    pub fn issues(&self) -> impl Iterator<Item = (CodeUnitOffset, &MethodError)> + '_ {
+        self.issues
+            .iter()
+            .map(|i| (i.pc, &i.error))
+            .chain(
+                self.invokes
+                    .iter()
+                    .filter_map(|i| match i.layout.as_ref().err() {
+                        Some(InvokeIssue::Constraint(e)) => Some((i.pc, e)),
+                        _ => None,
+                    }),
+            )
+    }
+    pub fn result_issue_at(&self, pc: CodeUnitOffset) -> Option<&MethodError> {
+        self.issues
+            .iter()
+            .find(|i| i.result && i.pc == pc)
+            .map(|i| &i.error)
     }
 
     /// Queries an original instruction boundary, not a semantic CFG leader.
@@ -130,15 +163,14 @@ impl<'a> CheckedMethodLayout<'a> {
 }
 
 impl<'a> ProgramIndex<'a> {
-    /// Checks registers, reference bounds, branch/payload/try/handler boundaries,
-    /// invoke prototype words, result kinds, exception entry positions and
-    /// reachable fallthrough, followed by original debug metadata. Only the matching original image supplies
-    /// reference bounds. Work and scratch use
-    /// the normal method budget; failure leaves the borrowed original intact.
-    pub fn check_method_layout(
+    /// Establishes boundaries and control associations, retaining operand/result
+    /// issues separately. Binding consumes P1's already-resolved reference facts,
+    /// never re-reads prototypes or opens another analysis route.
+    pub(super) fn check_method_layout(
         &self,
         original: &RawMethodView<'a>,
         items: &[super::DecodedItem],
+        facts: &[super::reference::ReferenceFactEntry<'a>],
     ) -> Result<CheckedMethodLayout<'a>, MethodError> {
         if !std::ptr::eq(self.bytes, original.source_bytes)
             || self.header.header_offset != original.header_offset
@@ -167,19 +199,21 @@ impl<'a> ProgramIndex<'a> {
             items,
             boundaries,
             invokes: Vec::new(),
+            issues: Vec::new(),
         };
         checker.check_exceptions()?;
-        checker.check_instructions(self)?;
+        checker.check_instructions(facts)?;
         checker.check_reachability(instruction_count)?;
 
         Ok(CheckedMethodLayout {
             original: original.clone(),
             boundaries: checker.boundaries,
             invokes: checker.invokes,
+            issues: checker.issues,
         })
     }
 
-    fn reference_in_bounds(&self, reference: OperandReference) -> bool {
+    pub(super) fn reference_in_bounds(&self, reference: OperandReference) -> bool {
         match reference {
             OperandReference::String(id) => id.0 < self.header.string_ids.count,
             OperandReference::Type(id) => id.0 < self.header.type_ids.count,
@@ -360,6 +394,7 @@ struct Checker<'m, 'a> {
     items: &'m [super::DecodedItem],
     boundaries: Boundaries,
     invokes: Vec<InvokeFact>,
+    issues: Vec<InstructionIssue>,
 }
 
 impl<'a> Checker<'_, 'a> {
@@ -528,35 +563,54 @@ impl<'a> Checker<'_, 'a> {
         })
     }
 
-    fn check_instructions(&mut self, index: &ProgramIndex<'_>) -> Result<(), MethodError> {
+    fn check_instructions(
+        &mut self,
+        facts: &[super::reference::ReferenceFactEntry<'a>],
+    ) -> Result<(), MethodError> {
+        enum Producer {
+            Known(ResultKind),
+            Unavailable,
+        }
         let mut pc = CodeUnitOffset(0);
-        let mut previous: Option<ResultKind> = None;
+        let mut previous = None;
         while pc.0 < self.original.code_units().0 {
             let layout = self.layout_at(pc)?;
             if let LayoutKind::Instruction(spec) = layout.kind() {
                 let operands = self.operands_at(pc)?;
-                check_registers(self.original, pc, spec, operands)?;
-                for reference in layout.references().into_iter().flatten() {
-                    if !index.reference_in_bounds(reference.target) {
-                        return Err(MethodError::ReferenceOutOfBounds {
+                if let Err(error) = check_registers(self.original, pc, spec, operands) {
+                    crate::substrate::owned::push(
+                        &mut self.issues,
+                        InstructionIssue {
                             pc,
-                            reference: reference.target,
-                        });
-                    }
+                            result: false,
+                            error,
+                        },
+                    )
+                    .map_err(super::disassembly::scratch)?;
                 }
-                match spec.result {
-                    ResultRole::MoveResult => {
-                        let Some(expected) = previous else {
-                            return Err(bad(pc, MethodProblem::InvalidResultEntry));
-                        };
-                        if !expected.accepts(spec.opcode) {
-                            return Err(bad(pc, MethodProblem::InvalidResultKind));
+                if spec.result == ResultRole::MoveResult {
+                    let issue = match &previous {
+                        Some(Producer::Known(expected)) if !expected.accepts(spec.opcode) => {
+                            Some(bad(pc, MethodProblem::InvalidResultKind))
                         }
+                        None => Some(bad(pc, MethodProblem::InvalidResultEntry)),
+                        _ => None,
+                    };
+                    if let Some(error) = issue {
+                        crate::substrate::owned::push(
+                            &mut self.issues,
+                            InstructionIssue {
+                                pc,
+                                result: true,
+                                error,
+                            },
+                        )
+                        .map_err(super::disassembly::scratch)?;
                     }
-                    ResultRole::MoveException if self.boundaries.flags(pc) & 4 == 0 => {
-                        return Err(bad(pc, MethodProblem::InvalidExceptionEntry));
-                    }
-                    _ => {}
+                } else if spec.result == ResultRole::MoveException
+                    && self.boundaries.flags(pc) & 4 == 0
+                {
+                    return Err(bad(pc, MethodProblem::InvalidExceptionEntry));
                 }
                 match spec.flow {
                     FlowKind::Goto | FlowKind::Conditional => {
@@ -573,21 +627,33 @@ impl<'a> Checker<'_, 'a> {
                     }
                     _ => {}
                 }
-                let producer = check_producer(index, pc, spec, layout, operands)?;
-                if let Some(invoke) = producer
-                    .as_ref()
-                    .and_then(|producer| producer.invoke.as_ref())
-                {
-                    crate::substrate::owned::push(
-                        &mut self.invokes,
-                        InvokeFact {
-                            pc,
-                            layout: invoke.clone(),
-                        },
-                    )
-                    .map_err(super::disassembly::scratch)?;
+                match check_producer(facts, pc, spec, operands) {
+                    Ok(Some(producer)) => {
+                        if let Some(layout) = producer.invoke {
+                            crate::substrate::owned::push(
+                                &mut self.invokes,
+                                InvokeFact {
+                                    pc,
+                                    layout: layout.map_err(InvokeIssue::Constraint),
+                                },
+                            )
+                            .map_err(super::disassembly::scratch)?;
+                        }
+                        previous = Some(Producer::Known(producer.result));
+                    }
+                    Ok(None) => previous = None,
+                    Err(error) => {
+                        crate::substrate::owned::push(
+                            &mut self.invokes,
+                            InvokeFact {
+                                pc,
+                                layout: Err(error),
+                            },
+                        )
+                        .map_err(super::disassembly::scratch)?;
+                        previous = Some(Producer::Unavailable);
+                    }
                 }
-                previous = producer.map(|producer| producer.result);
             } else {
                 previous = None;
             }

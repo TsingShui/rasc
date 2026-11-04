@@ -123,7 +123,9 @@ impl<'a> ProgramIndex<'a> {
         // and opens only the original code item; it never resolves the
         // declaration record again.
         let declaration = match entry.declaration() {
-            crate::p0::Fact::Present(declaration) => declaration.clone(),
+            crate::p0::Fact::Present(declaration) => {
+                declaration.try_copy().map_err(method_error)?
+            }
             crate::p0::Fact::Unavailable(crate::RequestError::Input(error)) => {
                 return Err(MethodError::Input(*error));
             }

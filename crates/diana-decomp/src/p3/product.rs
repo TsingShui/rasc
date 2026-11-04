@@ -46,7 +46,14 @@ pub enum ValueOrigin {
 pub enum StateKind {
     Value(ValueId),
     Undefined,
-    Invalidated { operation: OpId },
+    Invalidated {
+        operation: OpId,
+    },
+    /// The original operand interval is outside the method's register window.
+    OutsideFrame,
+    Unavailable {
+        operation: OpId,
+    },
     Phi(PhiId),
 }
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -67,6 +74,9 @@ impl Availability {
     }
     pub fn may_be_undefined(self) -> bool {
         self.0 & 2 != 0
+    }
+    pub fn may_be_unavailable(self) -> bool {
+        self.0 & 8 != 0
     }
     pub fn may_be_invalidated(self) -> bool {
         self.0 & 4 != 0
@@ -111,8 +121,7 @@ record!(OutputBinding {
     output: u32,
     point: PointId,
     slot: SlotId,
-    state: StateId,
-    value: ValueId
+    state: StateId
 });
 record!(PhiIncoming {
     transfer: TransferId,
@@ -120,7 +129,7 @@ record!(PhiIncoming {
 });
 record!(OperationSite { operation: OpId, execute: PointId, commit: Option<PointId>,
     commit_rule: crate::p2::CommitRule, commit_pc: Option<crate::CodeUnitOffset>,
-    use_start: u32, use_len: u32, output_start: u32, output_len: u32 });
+    use_start: u32, use_len: u32, inputs_available: bool, output_start: u32, output_len: u32 });
 record!(TerminalSite {
     block: BlockId,
     point: PointId,
@@ -217,10 +226,23 @@ impl SsaFacts {
     pub fn operation_site(&self, op: OpId) -> Option<&OperationSite> {
         self.operations.get(op.0 as usize)
     }
-    pub fn operation_uses(&self, op: OpId) -> Option<&[UseBinding]> {
+    /// Err identifies an operation whose ordered input layout is unavailable;
+    /// the original cause and ungrouped words remain in the execution product.
+    pub fn operation_uses(&self, op: OpId) -> Option<Result<&[UseBinding], OpId>> {
         let site = self.operation_site(op)?;
+        if !site.inputs_available {
+            return Some(Err(op));
+        }
         self.uses
             .get(site.use_start as usize..(site.use_start.checked_add(site.use_len)?) as usize)
+            .map(Ok)
+    }
+    /// The state is the single source of truth; an unavailable output has no ValueId.
+    pub fn output_value(&self, output: &OutputBinding) -> Option<ValueId> {
+        match self.state(output.state)?.kind {
+            StateKind::Value(value) => Some(value),
+            _ => None,
+        }
     }
     pub fn operation_outputs(&self, op: OpId) -> Option<&[OutputBinding]> {
         let site = self.operation_site(op)?;

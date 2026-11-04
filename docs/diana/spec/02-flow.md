@@ -4,8 +4,11 @@ Code: `crates/diana-decomp/src/p2/`; construction: the Engine method task calls
 `build.rs::build_flow` with its private scheduling credential.
 The approved product boundary is [PIPELINE_DESIGN §5.2](../PIPELINE_DESIGN.md#52-p2完整方法执行模型-flowmethod).
 
-P2 consumes a complete `DecodedMethod`. It produces ordered operations,
-terminals, normal and exceptional transfers, exits and original-item coverage.
+P2 consumes an owner-published `DecodedMethod`. Under the
+[P1–P9 contract](../PIPELINE_DESIGN.md#92-p1p9-统一消费局部结果), completeness means
+coverage and local states are accounted for, not that every fact was recovered.
+P2 produces ordered operations, terminals, normal and exceptional transfers,
+exits, original-item coverage and explicit unavailable execution facts.
 P2 MUST NOT decode instructions again, resolve declarations through a program
 index, construct SSA or choose Java expressions. Numeric quotas are not used.
 Platform capacity and allocation failures retain their classifications.
@@ -47,6 +50,37 @@ contains `ResolveString`, integer division/remainder and monitor helpers;
 contains field/array access and check-cast handlers. Neither source is a production
 dependency or an external declaration source. The checks do not establish ART
 admission or account for debugger/VM instrumentation.
+
+## Local execution-fact contract
+
+P2 MUST keep instruction identity and established behavior, reads, writes,
+commit rules, effects and transfers independently. One failed interpretation
+MUST NOT erase the other established facts or prevent unrelated operations from
+being processed. Known facts and an unavailable item together form a published
+execution description; an inconsistent construction snapshot does not.
+
+Unknown reads/writes MUST NOT become empty spans. P2 MUST identify the possibly
+affected register range and completion paths when precise facts are unavailable.
+An unknown target/handler/commit MUST NOT become fallthrough, no handler, no write
+or a method exit. Uncertain reachability MUST NOT be labeled unreachable merely
+because an unresolved edge was omitted. If no narrower influence is established,
+P2 MUST expose the wider uncertainty rather than invent precise bounds.
+
+P3 receives these facts and impact through the execution interface, not raw
+opcode access. Heap, lock and initialization uncertainty remains separate from
+register state; absence of a recovered effect is not absence of the effect.
+
+`UnresolvedInvoke` retains dispatch kind, original target/prototype identities and
+call/heap/initialization/throw obligations when argument grouping is unavailable.
+`reads` returns an error, not an empty argument list; `input_words` retains the
+ungrouped original invocation words. `InvokeResult` independently distinguishes
+Void, a known width and Unavailable. `UnresolvedResult` preserves an invalid
+move-result as its own destination site, never a fabricated producer binding.
+
+`writes` retains encoded destination intervals, including possible writes whose
+result is unavailable. Consumers MUST check result establishment and register-window
+validity before treating them as known definitions. Out-of-frame operands retain
+their original intervals and classified issues; they are not valid method variables.
 
 ## Test-only translation validation
 
@@ -98,9 +132,10 @@ executable source used by test replay; ordinary Cargo builds exclude this checke
 The decoded/symbolic-record adapter and whole-method composition remain unproven.
 See the [proof contract and reproduction](../../../crates/diana-decomp/proofs/README.md).
 
-Test acceptance: each exercised operation has matching behavior, ordered arguments,
-normal register patch and exceptional selection/frame obligations, and every
-published transfer has one original owner. Traversals have finite measures and
+Test acceptance: each exercised fully established operation has matching behavior,
+ordered arguments, normal register patch and exceptional selection/frame obligations.
+Unavailable facts retain their source, reason and affected scope rather than a
+fabricated interpretation. Every established transfer has one original owner. Traversals have finite measures and
 scratch allocation is fallible. Scratch indexing uses standard in-place unstable
 sorting; no request cancellation callback participates in the algorithm.
 The transfer index costs O(E log E + X log X) to order, followed by indexed
@@ -132,12 +167,15 @@ facts, with no product extraction, mutable access or construction entry.
 P3 privately retains FlowMethod and consumes this view; it cannot extract a
 predecessor product or obtain raw evidence through the ordinary execution view.
 
-A P2 stop retains its complete P1 input, classified error and available unvalidated
-construction snapshot as `FlowStop`; it is not a successful partial FlowMethod.
-A class-level resource/invariant stop returns the collected prefix
-with an explicit `terminated` kind. Local unsupported stops do not suppress
-subsequent members. Product records are privately constructed and consumers use
-immutable queries; later stages cannot assemble a substitute success product.
+`FlowMethod` can contain the local data/binding states above while retaining P1
+issues. `FlowStop` retains P1, a classified construction error and a partial
+snapshot; it MUST NOT be relabeled as `FlowMethod`. Product records remain private,
+and consumers do not repair missing facts. A returned method-task failure no longer
+terminates siblings by error kind: class result storage is reserved before tasks
+start, and each result occupies its original member position. Shared selection or
+collector allocation failures still return a class-request error before task work.
+Control/protection publication limits are described in the input chapter; P2 does
+not manufacture an unknown-edge graph from a stopped P1 snapshot.
 
 Inspect actual products through the single `dbg_shell` example. `p2-all` reports
 constructed/failed methods and encountered opcode variants, not verification results. Missing variants

@@ -50,6 +50,15 @@ recorded read error. `Absent` means confirmed nonexistence; `NotRead` means the
 producer did not read that fact. Complete directory coverage does not imply that
 every member declaration or method body is valid.
 
+P1–P9 MUST publish coverage, established facts and local unavailability as defined
+by [the common product model](../PIPELINE_DESIGN.md#41-成熟度与增量) and
+[stage-by-stage consumption](../PIPELINE_DESIGN.md#92-p1p9-统一消费局部结果).
+A complete availability description does not claim that every item was recovered.
+Established facts retain their guarantees; missing items retain their reasons and
+impact. A construction snapshot is not such a published product.
+
+Local fact failure MUST NOT automatically stop a stage. Stage stops are reserved
+for an inability to maintain the minimum product guarantees or retain results.
 Stage stops MUST retain original identity, concrete reasons and available facts.
 They MUST NOT promote an incomplete product to success. Failure kind alone MUST
 NOT determine stop scope. All error handling MUST follow

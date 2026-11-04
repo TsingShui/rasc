@@ -15,8 +15,8 @@ use crate::p3::{SsaMethod, StateKind, TransferOrigin, ValueOrigin};
 use crate::raw::{DexVersion, OperandReference, RawDecodeError, ReferenceSlot};
 use crate::{
     ByteOffset, CallSiteId, ClassDefId, ClassKey, CodeUnitOffset, DexId, DexImage, Engine,
-    FailureKind, ImageOrigin, InputId, MethodHandleId, MethodId, MethodOutcome, ProtoId,
-    RegisterId, RegisterSlot, SlotWidth,
+    ImageOrigin, InputId, MethodHandleId, MethodId, MethodOutcome, ProtoId, RegisterId,
+    RegisterSlot, SlotWidth,
 };
 
 const CLASS: ClassKey = ClassKey {
@@ -31,6 +31,7 @@ const VOID: u16 = 8;
 fn dynamic_instructions_preserve_layout_references_and_completions() {
     check_metamorphic_relations();
     check_ssa_cases();
+    check_local_recovery();
     for opcode in 0xfa..=0xfd {
         for version in [38, 39] {
             for prototype in [0, WIDE, 2, VOID] {
@@ -42,11 +43,14 @@ fn dynamic_instructions_preserve_layout_references_and_completions() {
         }
         let (words, entry, registers, incoming) = invoke_words(opcode, WIDE);
         let fixture = dex(37, &words, None, entry, registers, incoming, 4);
-        assert!(matches!(stopped(&fixture.bytes), MethodError::Decode(
+        assert!(has_issue(
+            &fixture.bytes,
+            |error| matches!(error, MethodError::Decode(
             RawDecodeError::UnsupportedVersion {
                 pc: CodeUnitOffset(0), opcode: actual, minimum: DexVersion::V038,
                 actual: DexVersion::V037,
-            }) if actual == opcode));
+            }) if *actual == opcode)
+        ));
 
         let mut wrong_count = words.clone();
         wrong_count[0] -= if matches!(opcode, 0xfa | 0xfc) {
@@ -60,15 +64,16 @@ fn dynamic_instructions_preserve_layout_references_and_completions() {
         let mut bad_reference = words.clone();
         bad_reference[1] = u16::MAX;
         let fixture = dex(39, &bad_reference, None, entry, registers, incoming, 4);
-        assert!(
-            matches!(stopped(&fixture.bytes), MethodError::ReferenceOutOfBounds {
+        assert!(has_issue(
+            &fixture.bytes,
+            |error| matches!(error, MethodError::ReferenceOutOfBounds {
                 pc: CodeUnitOffset(0), reference,
-            } if reference == if opcode <= 0xfb {
+            } if *reference == if opcode <= 0xfb {
                 OperandReference::Method(MethodId(65535))
             } else {
                 OperandReference::CallSite(CallSiteId(65535))
             })
-        );
+        ));
 
         let fixture = dex(39, &words, Some(0x050a), entry, registers, incoming, 4);
         assert_problem(
@@ -81,13 +86,13 @@ fn dynamic_instructions_preserve_layout_references_and_completions() {
             let mut bad_proto = words.clone();
             bad_proto[3] = u16::MAX;
             let fixture = dex(39, &bad_proto, None, entry, registers, incoming, 4);
-            assert!(matches!(
-                stopped(&fixture.bytes),
+            assert!(has_issue(&fixture.bytes, |error| matches!(
+                error,
                 MethodError::ReferenceOutOfBounds {
                     pc: CodeUnitOffset(0),
                     reference: OperandReference::Proto(ProtoId(65535)),
                 }
-            ));
+            )));
         }
         if matches!(opcode, 0xfa | 0xfc) {
             let mut nonadjacent = words.clone();
@@ -102,7 +107,7 @@ fn dynamic_instructions_preserve_layout_references_and_completions() {
         let fixture = dex(39, &words, None, 5, 300, 0, 0);
         let flow = flowed(&fixture.bytes);
         let operation = &flow.execution().operations()[0];
-        assert_eq!(flow.execution().reads(operation), &[]);
+        assert_eq!(flow.execution().reads(operation).unwrap(), &[]);
         assert_eq!(
             flow.execution().writes(operation),
             &[slot(255, SlotWidth::One)]
@@ -114,7 +119,8 @@ fn dynamic_instructions_preserve_layout_references_and_completions() {
             opcode,
             operation.kind(),
             flow.execution()
-                .reference_fact(CodeUnitOffset(0), ReferenceSlot::First),
+                .reference_fact(CodeUnitOffset(0), ReferenceSlot::First)
+                .map(Result::unwrap),
         ) {
             (
                 0xfe,
@@ -136,19 +142,22 @@ fn dynamic_instructions_preserve_layout_references_and_completions() {
         check_completion(&flow, 3, HeapTransfer::Preserve);
 
         let fixture = dex(38, &words, None, 5, 300, 0, 0);
-        assert!(matches!(stopped(&fixture.bytes), MethodError::Decode(
+        assert!(has_issue(
+            &fixture.bytes,
+            |error| matches!(error, MethodError::Decode(
             RawDecodeError::UnsupportedVersion {
                 pc: CodeUnitOffset(0), opcode: actual, minimum: DexVersion::V039,
                 actual: DexVersion::V038,
-            }) if actual == opcode));
+            }) if *actual == opcode)
+        ));
         let fixture = dex(39, &[words[0], u16::MAX], None, 5, 300, 0, 0);
-        assert!(matches!(
-            stopped(&fixture.bytes),
+        assert!(has_issue(&fixture.bytes, |error| matches!(
+            error,
             MethodError::ReferenceOutOfBounds {
                 pc: CodeUnitOffset(0),
                 ..
             }
-        ));
+        )));
     }
 
     let mut fixture = dex(39, &[0xfffe, 1], None, 5, 300, 0, 0);
@@ -166,6 +175,330 @@ fn dynamic_instructions_preserve_layout_references_and_completions() {
             assert_invalid_reference(&fixture.bytes);
         }
     }
+}
+
+fn local_use<'f>(ssa: &'f SsaMethod<'_>, pc: u32, argument: usize) -> &'f crate::p3::UseBinding {
+    let op = ssa
+        .execution()
+        .operations()
+        .iter()
+        .find(|o| o.pc() == CodeUnitOffset(pc))
+        .unwrap();
+    &ssa.facts().operation_uses(op.id()).unwrap().unwrap()[argument]
+}
+fn assert_local_source(ssa: &SsaMethod<'_>, at: u32, source: u32) {
+    let value = ssa.facts().readable_value(local_use(ssa, at, 0)).unwrap();
+    let ValueOrigin::Operation { operation, .. } = ssa.facts().values()[value.0 as usize].origin()
+    else {
+        panic!("use at {at} lost its original operation source");
+    };
+    assert_eq!(
+        ssa.execution().operation(operation).unwrap().pc(),
+        CodeUnitOffset(source)
+    );
+}
+fn check_local_recovery() {
+    // An unreadable string retains its original identity and definite destination.
+    // Independent arithmetic and later overwrites still have precise SSA sources.
+    let fixture = dex(
+        39,
+        &[0x1012, 0x011a, 0xffff, 0x027b, 0x1407, 0x5112, 0x137b],
+        None,
+        8,
+        8,
+        3,
+        0,
+    );
+    let ssa = flowed(&fixture.bytes);
+    assert!(matches!(
+        ssa.execution()
+            .reference_fact(CodeUnitOffset(1), ReferenceSlot::First),
+        Some(Err(_))
+    ));
+    assert!(
+        ssa.execution()
+            .issues()
+            .any(|(pc, _)| pc == CodeUnitOffset(1))
+    );
+    assert_local_source(&ssa, 3, 0);
+    assert_local_source(&ssa, 4, 1);
+    assert_local_source(&ssa, 6, 5);
+    assert!(
+        matches!(ssa.execution().operations()[1].kind(), OpKind::ConstString { value }
+        if value.0 == 65535)
+    );
+    assert!(ssa.execution().operations()[1].effects().may_throw());
+
+    // An unknown call layout is not a zero-argument call. Its possible result
+    // affects only the encoded destination and overlaps, on normal completion.
+    let words = [
+        0x0016, 9, 0x30fc, 0xffff, 0x0576, 0x000b, 0x0204, 0x1301, 0x5204, 0x3412, 0x437b, 0x0016,
+        7, 0x0204,
+    ];
+    let fixture = dex_with_handler(
+        39,
+        &words,
+        None,
+        8,
+        8,
+        3,
+        3,
+        &[0x040d, 0x0204, 0x000e],
+        None,
+    );
+    let ssa = flowed(&fixture.bytes);
+    let call = &ssa.execution().operations()[1];
+    assert!(matches!(
+        call.kind(),
+        OpKind::UnresolvedInvoke {
+            kind: InvokeKind::Custom,
+            ..
+        }
+    ));
+    assert!(ssa.execution().reads(call).is_err());
+    assert_eq!(
+        ssa.execution()
+            .input_words(call)
+            .unwrap()
+            .map(|r| r.0)
+            .collect::<Vec<_>>(),
+        [6, 7, 5]
+    );
+    assert!(ssa.facts().operation_uses(call.id()).unwrap().is_err());
+    let output = ssa.facts().operation_outputs(call.id()).unwrap()[0];
+    assert!(ssa.facts().output_value(&output).is_none());
+    assert_eq!(
+        ssa.facts().state(output.state()).unwrap().kind(),
+        StateKind::Unavailable {
+            operation: call.id()
+        }
+    );
+    for pc in [6, 7] {
+        let usage = local_use(&ssa, pc, 0);
+        assert!(ssa.facts().readable_value(usage).is_none());
+        assert!(
+            ssa.facts()
+                .state(usage.state())
+                .unwrap()
+                .availability()
+                .may_be_unavailable()
+        );
+    }
+    let parameter = ssa.facts().readable_value(local_use(&ssa, 8, 0)).unwrap();
+    assert_eq!(
+        ssa.facts().values()[parameter.0 as usize].origin(),
+        ValueOrigin::Entry(crate::p3::EntryRole::Parameter(0))
+    );
+    assert_local_source(&ssa, 10, 9);
+    assert_local_source(&ssa, 13, 11);
+    assert_local_source(&ssa, 16, 0);
+    assert!(
+        !ssa.facts().dominates(
+            ssa.facts()
+                .operation_site(call.id())
+                .unwrap()
+                .commit()
+                .unwrap(),
+            local_use(&ssa, 16, 0).point()
+        )
+    );
+    assert_eq!(call.normal().heap(), HeapTransfer::EventOutcome);
+    assert_eq!(
+        call.exceptional().unwrap().frame(),
+        ExceptionFrame::PreserveBeforeOperation
+    );
+
+    // Bad argument grouping must not erase a separately readable return category.
+    let fixture = dex(39, &[0x20fc, 0, 0x0576, 0x000b, 0x0204], None, 8, 8, 3, 3);
+    let ssa = flowed(&fixture.bytes);
+    assert!(
+        ssa.execution()
+            .reads(&ssa.execution().operations()[0])
+            .is_err()
+    );
+    assert!(matches!(
+        ssa.execution().operations()[0].kind(),
+        OpKind::UnresolvedInvoke {
+            result: crate::p2::InvokeResult::Value(SlotWidth::Two),
+            ..
+        }
+    ));
+    assert_local_source(&ssa, 4, 0);
+    assert!(ssa.execution().issues().any(|(_, e)| matches!(
+        e,
+        MethodError::Malformed {
+            problem: MethodProblem::InvalidInvokeWordCount,
+            ..
+        }
+    )));
+
+    // A mismatched result is an explicit missing source, not a value from the
+    // previous call or a default; independently following operations still bind.
+    let fixture = dex(
+        39,
+        &[0x30fc, 0, 0x0576, 0x000a, 0x0101, 0x5212, 0x237b],
+        None,
+        8,
+        8,
+        3,
+        3,
+    );
+    let ssa = flowed(&fixture.bytes);
+    assert!(matches!(
+        ssa.execution().operations()[1].kind(),
+        OpKind::UnresolvedResult { .. }
+    ));
+    assert!(ssa.facts().readable_value(local_use(&ssa, 4, 0)).is_none());
+    assert_local_source(&ssa, 6, 5);
+    assert!(
+        ssa.execution()
+            .issues()
+            .any(|(pc, e)| pc == CodeUnitOffset(3)
+                && matches!(
+                    e,
+                    MethodError::Malformed {
+                        problem: MethodProblem::InvalidResultKind,
+                        ..
+                    }
+                ))
+    );
+
+    // A readable type declaration survives an invalid opcode association.
+    let fixture = dex(39, &[0x0022, 0, 0x5112, 0x127b], None, 8, 8, 3, 0);
+    let ssa = flowed(&fixture.bytes);
+    assert!(matches!(
+        ssa.execution()
+            .reference_fact(CodeUnitOffset(0), ReferenceSlot::First),
+        Some(Ok(CheckedReferenceFact::Type {
+            form: crate::p1::TypeForm::Primitive,
+            ..
+        }))
+    ));
+    assert!(
+        ssa.execution()
+            .reference_use_issue(CodeUnitOffset(0), ReferenceSlot::First)
+            .is_some()
+    );
+    assert_local_source(&ssa, 3, 2);
+
+    // A decoder cannot create a trustworthy graph by guessing an unknown width
+    // or dropping an invalid target. Retain the prefix and the classified cause.
+    for words in [&[0x1012, 0x00e3, 0x2012][..], &[0x1012, 0x7f28, 0x2012][..]] {
+        let fixture = dex(39, words, None, 8, 8, 3, 0);
+        let MethodOutcome::DisassemblyStopped(stop) = analyze(&fixture.bytes) else {
+            panic!("unreliable boundary/control was promoted to SSA");
+        };
+        assert!(stop.decoded.is_none());
+        assert_eq!(stop.prefix[0].pc(), CodeUnitOffset(0));
+        assert!(stop.error.is_some());
+    }
+
+    // Aggregation preserves a locally damaged body AND actually analyzes the
+    // following executable sibling through the same method chain.
+    let fixture = dex_with_handler(
+        39,
+        &[0x1012, 0x011a, 0xffff, 0x027b],
+        None,
+        8,
+        8,
+        3,
+        0,
+        &[0x000d, 0x000e],
+        Some(&[0x0016, 7, 0x0010]),
+    );
+    let engine = Engine::open(vec![DexImage {
+        bytes: &fixture.bytes,
+        header_offset: ByteOffset(0),
+        origin: ImageOrigin { input: InputId(0) },
+    }])
+    .unwrap();
+    let class = engine
+        .analyze(crate::Request {
+            class: CLASS,
+            method: None,
+        })
+        .unwrap();
+    assert_eq!(
+        class
+            .methods
+            .iter()
+            .map(|m| m.key.method.0)
+            .collect::<Vec<_>>(),
+        [1, 2]
+    );
+    let Ok(MethodOutcome::Ssa(first)) = &class.methods[0].result else {
+        panic!("partial method discarded");
+    };
+    let Ok(MethodOutcome::Ssa(second)) = &class.methods[1].result else {
+        panic!("sibling not analyzed");
+    };
+    assert!(first.execution().issues().next().is_some());
+    assert_local_source(first, 3, 0);
+    assert!(second.execution().issues().next().is_none());
+    assert_eq!(second.execution().operations().len(), 1);
+    assert_eq!(second.execution().operations()[0].pc(), CodeUnitOffset(0));
+
+    // Unknown and established sources must both survive a join.
+    let fixture = dex(
+        39,
+        &[
+            0x1012, 0x0738, 7, 0x30fc, 0xffff, 0x0576, 0x000a, 0x0228, 0x2012, 0x0101,
+        ],
+        None,
+        8,
+        8,
+        3,
+        3,
+    );
+    let ssa = flowed(&fixture.bytes);
+    let usage = local_use(&ssa, 9, 0);
+    let state = ssa.facts().state(usage.state()).unwrap();
+    assert!(matches!(state.kind(), StateKind::Phi(_)));
+    assert!(state.availability().may_have_value() && state.availability().may_be_unavailable());
+    assert!(ssa.facts().readable_value(usage).is_none());
+
+    // Invalid register operands are facts with errors, not new valid variables.
+    // A partial out-of-frame wide write also makes an overlapping valid word uncertain.
+    let fixture = dex(
+        39,
+        &[0x0013, 5, 0xf17b, 0x027b, 0x0716, 3, 0x7301, 0x4712, 0x7401],
+        None,
+        8,
+        8,
+        3,
+        0,
+    );
+    let ssa = flowed(&fixture.bytes);
+    assert_eq!(
+        ssa.execution()
+            .issues()
+            .filter(|(_, e)| matches!(
+                e,
+                MethodError::Malformed {
+                    problem: MethodProblem::InvalidRegisterSpan,
+                    ..
+                }
+            ))
+            .count(),
+        2
+    );
+    let bad_read = local_use(&ssa, 2, 0);
+    assert_eq!(
+        ssa.facts().state(bad_read.state()).unwrap().kind(),
+        StateKind::OutsideFrame
+    );
+    assert!(ssa.facts().readable_value(bad_read).is_none());
+    assert_local_source(&ssa, 3, 0);
+    let overlapped = local_use(&ssa, 6, 0);
+    assert!(
+        ssa.facts()
+            .state(overlapped.state())
+            .unwrap()
+            .availability()
+            .may_be_unavailable()
+    );
+    assert!(ssa.facts().readable_value(overlapped).is_none());
+    assert_local_source(&ssa, 8, 7);
 }
 
 fn check_ssa_cases() {
@@ -269,10 +602,11 @@ fn check_ssa_cases() {
         3,
         3,
         &[0x000d, 0x517d, 0x000e],
+        None,
     );
     let ssa = flowed(&fixture.bytes);
     let f = ssa.facts();
-    let handler_use = &f.operation_uses(crate::p2::OpId(2)).unwrap()[0];
+    let handler_use = &f.operation_uses(crate::p2::OpId(2)).unwrap().unwrap()[0];
     let old = f.readable_value(handler_use).unwrap();
     assert_eq!(
         f.values()[old.0 as usize].origin(),
@@ -280,7 +614,8 @@ fn check_ssa_cases() {
     );
     assert_ne!(
         old,
-        f.operation_outputs(crate::p2::OpId(0)).unwrap()[0].value()
+        f.output_value(&f.operation_outputs(crate::p2::OpId(0)).unwrap()[0])
+            .unwrap()
     );
     assert!(
         !f.dominates(
@@ -348,8 +683,8 @@ fn check_metamorphic_relations() {
                     .collect::<Vec<_>>()
             };
             assert_eq!(
-                after.execution().reads(b),
-                renamed(before.execution().reads(a))
+                after.execution().reads(b).unwrap(),
+                renamed(before.execution().reads(a).unwrap())
             );
             assert_eq!(
                 after.execution().writes(b),
@@ -369,8 +704,8 @@ fn check_metamorphic_relations() {
         let unused = &discarded.execution().operations()[0];
         assert_eq!(invoke_signature(&before), invoke_signature(&discarded));
         assert_eq!(
-            before.execution().reads(used),
-            discarded.execution().reads(unused)
+            before.execution().reads(used).unwrap(),
+            discarded.execution().reads(unused).unwrap()
         );
         assert_eq!(used.effects(), unused.effects());
         assert_eq!(used.exceptional(), unused.exceptional());
@@ -423,7 +758,10 @@ fn check_metamorphic_relations() {
                         kind: MoveKind::Wide
                     }
                 ));
-                assert_eq!(flow.execution().reads(op), &[slot(6, SlotWidth::Two)]);
+                assert_eq!(
+                    flow.execution().reads(op).unwrap(),
+                    &[slot(6, SlotWidth::Two)]
+                );
                 assert_eq!(flow.execution().writes(op), &[slot(5, SlotWidth::Two)]);
             } else {
                 assert!(matches!(
@@ -433,7 +771,7 @@ fn check_metamorphic_relations() {
                         width: SlotWidth::One
                     }
                 ));
-                assert!(flow.execution().reads(op).is_empty());
+                assert!(flow.execution().reads(op).unwrap().is_empty());
                 assert_eq!(flow.execution().writes(op), &[slot(0, SlotWidth::One)]);
             }
             assert!(!op.effects().may_throw());
@@ -495,36 +833,32 @@ fn flowed(bytes: &[u8]) -> SsaMethod<'_> {
     }
 }
 
-fn stopped(bytes: &[u8]) -> MethodError {
+fn has_issue(bytes: &[u8], expected: impl Fn(&MethodError) -> bool) -> bool {
     match analyze(bytes) {
-        MethodOutcome::DisassemblyStopped(stop) => {
-            assert!(stop.decoded.is_none());
-            let error = stop.error.unwrap();
-            assert!(matches!(
-                error.kind(),
-                FailureKind::Malformed | FailureKind::Unsupported
-            ));
-            error
-        }
-        _ => panic!("invalid instruction did not stop at P1"),
+        MethodOutcome::DisassemblyStopped(stop) => stop.error.as_ref().is_some_and(expected),
+        MethodOutcome::Ssa(ssa) => ssa.execution().issues().any(|(_, issue)| expected(issue)),
+        MethodOutcome::SsaStopped(stop) => panic!("P3 lost local recovery: {}", stop.error()),
+        MethodOutcome::FlowStopped(stop) => panic!("P2 lost local recovery: {}", stop.error()),
+        MethodOutcome::DeclarationOnly => panic!("code disappeared"),
     }
 }
 
 fn assert_problem(bytes: &[u8], expected_pc: u32, expected: MethodProblem) {
-    assert!(
-        matches!(stopped(bytes), MethodError::Malformed { pc, problem }
-        if pc == CodeUnitOffset(expected_pc) && problem == expected)
-    );
+    assert!(has_issue(
+        bytes,
+        |error| matches!(error, MethodError::Malformed { pc, problem }
+        if *pc == CodeUnitOffset(expected_pc) && *problem == expected)
+    ));
 }
 
 fn assert_invalid_reference(bytes: &[u8]) {
-    assert!(matches!(
-        stopped(bytes),
+    assert!(has_issue(bytes, |error| matches!(
+        error,
         MethodError::Input(InputError::Malformed {
             code: InputProblem::InvalidReference,
             ..
         })
-    ));
+    )));
 }
 
 fn invoke_words(opcode: u8, prototype: u16) -> (Vec<u16>, u16, u16, u16) {
@@ -597,13 +931,16 @@ fn check_invoke(version: u8, opcode: u8, prototype: u16, capture: bool) {
         source.registers().map(|r| r.0).collect::<Vec<_>>(),
         raw_words
     );
-    assert_eq!(flow.execution().reads(operation), reads);
+    assert_eq!(flow.execution().reads(operation).unwrap(), reads);
     let layouts = flow.evidence().invoke_layouts().collect::<Vec<_>>();
     assert_eq!(layouts.len(), 1);
     assert_eq!(layouts[0].0, CodeUnitOffset(0));
-    assert_eq!(layouts[0].1.has_receiver(), polymorphic);
-    assert_eq!(layouts[0].1.arguments(), &[SlotWidth::Two, SlotWidth::One]);
-    assert_eq!(layouts[0].1.result(), result_width);
+    assert_eq!(layouts[0].1.as_ref().unwrap().has_receiver(), polymorphic);
+    assert_eq!(
+        layouts[0].1.as_ref().unwrap().arguments(),
+        &[SlotWidth::Two, SlotWidth::One]
+    );
+    assert_eq!(layouts[0].1.as_ref().unwrap().result(), result_width);
     let OpKind::Invoke {
         kind,
         target,
@@ -636,6 +973,7 @@ fn check_invoke(version: u8, opcode: u8, prototype: u16, capture: bool) {
         }) = flow
             .execution()
             .reference_fact(CodeUnitOffset(0), ReferenceSlot::First)
+            .map(Result::unwrap)
         else {
             panic!("missing method fact")
         };
@@ -657,6 +995,7 @@ fn check_invoke(version: u8, opcode: u8, prototype: u16, capture: bool) {
         let Some(CheckedReferenceFact::Proto { prototype: actual }) = flow
             .execution()
             .reference_fact(CodeUnitOffset(0), ReferenceSlot::Second)
+            .map(Result::unwrap)
         else {
             panic!("missing polymorphic prototype")
         };
@@ -677,6 +1016,7 @@ fn check_invoke(version: u8, opcode: u8, prototype: u16, capture: bool) {
         }) = flow
             .execution()
             .reference_fact(CodeUnitOffset(0), ReferenceSlot::First)
+            .map(Result::unwrap)
         else {
             panic!("missing call-site fact")
         };
@@ -813,6 +1153,7 @@ fn dex(
         incoming,
         outgoing,
         &[0x000d, 0x000e],
+        None,
     )
 }
 
@@ -827,6 +1168,7 @@ fn dex_with_handler(
     incoming: u16,
     outgoing: u16,
     handler_words: &[u16],
+    target_words: Option<&[u16]>,
 ) -> Fixture {
     let types = [
         "I",
@@ -961,7 +1303,7 @@ fn dex_with_handler(
     }
     align(&mut bytes);
     let code = bytes.len();
-    map.push((0x2001, 1, code));
+    map.push((0x2001, if target_words.is_some() { 2 } else { 1 }, code));
     let mut words = instruction.to_vec();
     words.extend(result);
     words.push(0x000e);
@@ -981,13 +1323,26 @@ fn dex_with_handler(
     bytes.extend(1u16.to_le_bytes());
     bytes.extend([1, 0]);
     uleb(&mut bytes, handler);
+    let target_code = target_words.map(|words| {
+        align(&mut bytes);
+        let offset = u32::try_from(bytes.len()).unwrap();
+        for value in [5u16, 3, 0, 0] {
+            bytes.extend(value.to_le_bytes());
+        }
+        bytes.extend(0u32.to_le_bytes());
+        bytes.extend(u32::try_from(words.len()).unwrap().to_le_bytes());
+        for word in words {
+            bytes.extend(word.to_le_bytes());
+        }
+        offset
+    });
     let class_data = bytes.len();
     map.push((0x2000, 1, class_data));
     bytes.extend([0, 0, 2, 0, 1, 9]);
     uleb(&mut bytes, u32::try_from(code).unwrap());
     bytes.push(1);
-    uleb(&mut bytes, 0x109);
-    bytes.push(0);
+    uleb(&mut bytes, if target_code.is_some() { 9 } else { 0x109 });
+    uleb(&mut bytes, target_code.unwrap_or(0));
     put32(&mut bytes, class_defs, 3);
     put32(&mut bytes, class_defs + 4, 1);
     put32(&mut bytes, class_defs + 8, 4);

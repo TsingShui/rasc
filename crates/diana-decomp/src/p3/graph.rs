@@ -166,6 +166,7 @@ pub(super) fn construct(flow: ExecutionFacts<'_, '_>, f: &mut SsaFacts) -> Resul
                     commit_pc: op.normal().commit_pc(),
                     use_start: 0,
                     use_len: 0,
+                    inputs_available: flow.reads(op).is_ok(),
                     output_start: 0,
                     output_len: 0,
                 },

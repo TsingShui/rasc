@@ -1,6 +1,6 @@
 use crate::input::{DexContainer, InputError, InputProblem, ProgramIndex};
 use crate::substrate::report::*;
-use crate::{ByteOffset, ClassKey, FailureKind, MethodId, MethodKey, RequestError};
+use crate::{ByteOffset, ClassKey, MethodId, MethodKey, RequestError};
 
 /// Original caller-owned bytes and one logical header selection. The caller
 /// retains the physical owner until this engine is dropped.
@@ -145,8 +145,6 @@ pub struct ClassAnalysis<'a> {
     pub facts: std::sync::Arc<crate::p0::ClassFacts>,
     pub methods: Vec<MethodAnalysis<'a>>,
     pub diagnostics: Vec<Diagnostic>,
-    /// Request-level stop after the retained method prefix; not successful truncation.
-    pub terminated: Option<FailureKind>,
 }
 
 pub struct MethodAnalysis<'a> {
@@ -262,7 +260,6 @@ impl<'a> Engine<'a> {
         }
         let mut methods = Vec::new();
         crate::substrate::owned::reserve(&mut methods, entries.len())?;
-        let mut terminated = None;
         for method in entries {
             // Keep a classified stop alongside already delivered siblings.
             let key = MethodKey {
@@ -270,41 +267,10 @@ impl<'a> Engine<'a> {
                 method,
             };
             let result = MethodTask::run(&image.index, &facts, method);
-            let terminal = match &result {
-                Err(error)
-                    if matches!(
-                        error.kind(),
-                        FailureKind::ResourceExhausted | FailureKind::InternalInvariant
-                    ) =>
-                {
-                    Some(error.kind())
-                }
-                Ok(MethodOutcome::SsaStopped(stop))
-                    if matches!(
-                        stop.error().kind(),
-                        FailureKind::ResourceExhausted | FailureKind::InternalInvariant
-                    ) =>
-                {
-                    Some(stop.error().kind())
-                }
-                Ok(MethodOutcome::FlowStopped(stop))
-                    if matches!(
-                        stop.error().kind(),
-                        FailureKind::ResourceExhausted | FailureKind::InternalInvariant
-                    ) =>
-                {
-                    Some(stop.error().kind())
-                }
-                _ => None,
-            };
-            // Capacity was reserved for all selected entries before starting work.
+            // Result storage was reserved before starting any task. All method
+            // products and scratch are private, so a returned task failure does
+            // not invalidate sibling inputs or the result collector.
             methods.push(MethodAnalysis { key, result });
-            // Return the retained prefix and stop; never silently skip subsequent
-            // siblings after request-level resource/invariant failure.
-            if let Some(kind) = terminal {
-                terminated = Some(kind);
-                break;
-            }
         }
         Ok(ClassAnalysis {
             image: ImageFact {
@@ -315,7 +281,6 @@ impl<'a> Engine<'a> {
             facts,
             methods,
             diagnostics: Vec::new(),
-            terminated,
         })
     }
 }

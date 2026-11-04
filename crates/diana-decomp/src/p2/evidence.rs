@@ -58,7 +58,14 @@ impl<'f, 'a> MethodEvidence<'f, 'a> {
     ) -> Result<Vec<(Option<u32>, u32)>, RequestError> {
         self.decoded.catch_clauses_at(pc)
     }
-    pub fn invoke_layouts(self) -> impl Iterator<Item = (CodeUnitOffset, &'f InvokeLayout)> + 'f {
+    pub fn invoke_layouts(
+        self,
+    ) -> impl Iterator<
+        Item = (
+            CodeUnitOffset,
+            Result<&'f InvokeLayout, &'f crate::p1::MethodError>,
+        ),
+    > + 'f {
         self.decoded.invoke_layouts()
     }
     pub fn reference_facts(
@@ -67,10 +74,20 @@ impl<'f, 'a> MethodEvidence<'f, 'a> {
         Item = (
             CodeUnitOffset,
             crate::raw::ReferenceSlot,
-            &'f crate::p1::CheckedReferenceFact<'a>,
+            Result<&'f crate::p1::CheckedReferenceFact<'a>, &'f crate::p1::MethodError>,
         ),
     > + 'f {
         self.decoded.reference_facts()
+    }
+    pub fn reference_use_issue(
+        self,
+        pc: CodeUnitOffset,
+        slot: crate::raw::ReferenceSlot,
+    ) -> Option<&'f crate::p1::MethodError> {
+        self.decoded.reference_use_issue(pc, slot)
+    }
+    pub fn issues(self) -> impl Iterator<Item = (CodeUnitOffset, &'f crate::p1::MethodError)> + 'f {
+        self.decoded.issues()
     }
     pub fn payloads(self) -> impl Iterator<Item = &'f DecodedPayload> + 'f {
         self.decoded.payloads()

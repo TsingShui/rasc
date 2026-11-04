@@ -6,8 +6,8 @@ use super::transfer::*;
 use super::{
     ArrayAccess, BinaryForm, BinaryOp, Block, BlockId, BranchOp, CommitRule, CompareOp, Coverage,
     Edge, EdgeId, EdgeRole, EdgeTarget, Effects, Exit, ExitId, ExitKind, FieldAccess, FlowMethod,
-    InvokeKind, MoveKind, NormalEdge, OpId, OpKind, Operation, SlotSpan, SwitchKind, Terminal,
-    UnaryOp, ValueKind,
+    InvokeKind, InvokeResult, MoveKind, NormalEdge, OpId, OpKind, Operation, SlotSpan, SwitchKind,
+    Terminal, UnaryOp, ValueKind,
 };
 use crate::input::formats::FlowKind;
 use crate::p1::{DecodedInstruction, DecodedItem, DecodedMethod};
@@ -191,7 +191,7 @@ impl<'a, 'd> Builder<'a, 'd> {
 
     fn build_atoms(&mut self) -> Result<(), FlowError> {
         for (index, instruction) in self.instructions.iter().enumerate() {
-            if matches!(instruction.opcode(), 0x0a..=0x0c) {
+            if matches!(instruction.opcode(), 0x0a..=0x0c) && instruction.producer_pc().is_some() {
                 let producer_pc = instruction
                     .producer_pc()
                     .ok_or(internal("move-result has no checked producer"))?;
@@ -416,6 +416,26 @@ impl<'a, 'd> Builder<'a, 'd> {
                 (
                     OpKind::Move { kind },
                     reads,
+                    writes,
+                    Effects::default(),
+                    CommitRule::AtOperation,
+                    None,
+                )
+            }
+            0x0a..=0x0c => {
+                if self.decoded.result_issue_at(pc).is_none() {
+                    return Err(internal("unmerged move-result lost its P1 issue"));
+                }
+                let width = if opcode == 0x0b {
+                    SlotWidth::Two
+                } else {
+                    SlotWidth::One
+                };
+                let dest = self.register(instruction, 0)?;
+                let writes = self.slots_for([RegisterSlot::new(dest, width)])?;
+                (
+                    OpKind::UnresolvedResult { width },
+                    self.empty_span(),
                     writes,
                     Effects::default(),
                     CommitRule::AtOperation,
@@ -772,16 +792,37 @@ impl<'a, 'd> Builder<'a, 'd> {
                 let layout = self
                     .decoded
                     .invoke_layout_at(pc)
-                    .ok_or(internal("invoke has no checked P1 layout"))?;
-                let reads = self.invoke_reads(instruction, layout)?;
-                let result = layout.result();
+                    .ok_or(internal("invoke has no P1 layout state"))?;
+                let (kind, reads) = match layout {
+                    Ok(layout) => {
+                        let reads = self.invoke_reads(instruction, layout)?;
+                        (
+                            OpKind::Invoke {
+                                kind,
+                                target,
+                                prototype,
+                                result: layout.result(),
+                            },
+                            reads,
+                        )
+                    }
+                    Err(_) => (
+                        OpKind::UnresolvedInvoke {
+                            kind,
+                            target,
+                            prototype,
+                            result: self
+                                .decoded
+                                .invoke_result_at(pc)
+                                .and_then(Result::ok)
+                                .map(InvokeResult::from)
+                                .unwrap_or(InvokeResult::Unavailable),
+                        },
+                        self.empty_span(),
+                    ),
+                };
                 (
-                    OpKind::Invoke {
-                        kind,
-                        target,
-                        prototype,
-                        result,
-                    },
+                    kind,
                     reads,
                     self.empty_span(),
                     Effects::CALL

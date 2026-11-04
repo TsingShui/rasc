@@ -50,14 +50,14 @@ is not an active engine module. P1 does not require source names, generic metada
 line numbers or debug local names to analyze code. Current range/metadata behavior
 must be inspected in the reader rather than inferred from removed debug schemas.
 
-## P1 complete disassembly product
+## P1 disassembly facts
 
 `decode_method_source` uses the method reader product and the selected index's
 restricted original reference readers. One decoded instruction/payload directory
 is shared by structural checks and subsequent products; P1 MUST NOT recover
 boundaries by guessing widths or seeking a later return.
 
-A complete `DecodedMethod` retains:
+For established positions and facts, `DecodedMethod` retains:
 
 | Facts | Consumer need |
 |---|---|
@@ -82,13 +82,48 @@ hierarchies as input gates. Known format damage remains `Malformed`; unsupported
 encoding/capability remains `Unsupported`. Instruction/reference association is
 not a whole-method legality badge.
 
+## Local availability and publication
+
+P1 MUST follow [the P1–P9 contract](../PIPELINE_DESIGN.md#92-p1p9-统一消费局部结果).
+The coverage obligations here define that full target; the current publication
+floor and retained representations are specified under Outcomes below.
+Its published product MUST describe code coverage as decoded instructions,
+payloads, reliably bounded unrecovered ranges and ranges without established
+instruction boundaries. A range is not an executable instruction.
+
+P1 MUST retain each established operand, reference identity and structural
+association independently. A reference read failure remains associated with its
+original slot and reason; it MUST NOT erase known width or other independent
+facts. Invoke word order, parameter grouping, result category and adjacency MUST
+have explicit states when they cannot all be established; P2 MUST NOT guess them.
+
+Only the reader/decoder that established an extent can authorize continuation at
+its end. P1 MUST NOT guess an unknown width, scan for a later return or manufacture
+a successor. It MUST preserve later independently established positions when safe.
+P2 consumes the coverage and fact states through the same published product,
+without retrying P1 or accepting its mutable construction snapshot.
+
 ## Outcomes and evidence
 
-A failed P1 decode retains decoded prefix items and a classified error in
-`DecodedOutcome`; an incomplete prefix MUST NOT be used as a complete method.
-Resource/invariant errors retain their request classification.
-Engine moves only a complete P1 product into P2. P2 failures retain that product
-and local construction facts without upgrading them to success.
+Published `DecodedMethod` retains reference-read results separately from opcode-use
+issues. `reference_fact` distinguishes no reference site from a failed read;
+`reference_use_issue` preserves a bad association without erasing a readable
+owner/name/type/prototype. Operand and result issues retain their original PC.
+
+Invoke binding consumes the same checked prototype facts, not another declaration
+read. Parameter grouping and result category are independent: failed grouping
+retains a readable return category, and a polymorphic prototype remains usable
+when the separate target declaration is unreadable. `invoke_layout_at` exposes
+failed grouping; `invoke_result_at` exposes the independent return state.
+
+P1 currently publishes only with a complete instruction directory, entry layout
+and established control/protection associations. Unknown width or unreliable
+control still produces `DecodedOutcome` with retained items and a classified error;
+this includes resource/invariant construction stops rather than dropping the prefix.
+That snapshot MUST NOT be promoted or used to invent a graph. Local reference,
+register-span, argument-grouping, result-use and return-kind issues do not themselves
+prevent publishing a method when these minimum guarantees hold. Broader control
+uncertainty handling remains governed by the target contract and the engine README.
 
 `RawMethodView::visit_layouts` and `visit_instructions` are read-only original
 inspection paths over safe ranges. They are not substitute analysis routes.

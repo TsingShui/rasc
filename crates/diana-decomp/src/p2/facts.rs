@@ -30,8 +30,29 @@ impl<'f, 'a> ExecutionFacts<'f, 'a> {
     pub fn slots(self) -> &'f [RegisterSlot] {
         self.flow.slots()
     }
-    pub fn reads(self, op: &Operation) -> &'f [RegisterSlot] {
+    pub fn reads(self, op: &Operation) -> Result<&'f [RegisterSlot], &'f crate::p1::MethodError> {
         self.flow.reads(op)
+    }
+    pub fn slot_is_valid(self, slot: RegisterSlot) -> bool {
+        self.flow.slot_is_valid(slot)
+    }
+    pub fn issues(
+        self,
+    ) -> impl Iterator<Item = (crate::CodeUnitOffset, &'f crate::p1::MethodError)> + 'f {
+        self.flow.issues()
+    }
+    pub fn input_words(
+        self,
+        op: &Operation,
+    ) -> Option<impl Iterator<Item = crate::RegisterId> + 'f> {
+        self.flow.input_words(op)
+    }
+    pub fn reference_use_issue(
+        self,
+        pc: crate::CodeUnitOffset,
+        slot: crate::raw::ReferenceSlot,
+    ) -> Option<&'f crate::p1::MethodError> {
+        self.flow.reference_use_issue(pc, slot)
     }
     pub fn writes(self, op: &Operation) -> &'f [RegisterSlot] {
         self.flow.writes(op)
@@ -73,7 +94,7 @@ impl<'f, 'a> ExecutionFacts<'f, 'a> {
         self,
         pc: crate::CodeUnitOffset,
         slot: crate::raw::ReferenceSlot,
-    ) -> Option<&'f crate::p1::CheckedReferenceFact<'f>> {
+    ) -> Option<Result<&'f crate::p1::CheckedReferenceFact<'a>, &'f crate::p1::MethodError>> {
         self.flow.reference_fact(pc, slot)
     }
 }

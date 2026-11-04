@@ -16,6 +16,12 @@ their owning modules.
 P4–P9 retain their specified responsibilities in PIPELINE_DESIGN: types,
 storage, regions, method expression, class/name assembly and pure rendering.
 Their archived implementations are not active stages or alternate recovery paths.
+The [P1–P9 local-result contract](PIPELINE_DESIGN.md#92-p1p9-统一消费局部结果) applies
+to every stage: mature products account for coverage, established facts and local
+unavailability, and downstream processing preserves independent results. This
+contract is broader than the currently supported local data/binding continuation;
+control/protection publication limits and inactive stages remain recorded in the
+engine README.
 
 ## Current method scheduling
 
@@ -34,9 +40,12 @@ Both stage stops retain their error and available unvalidated construction facts
 
 P2/P3 construction requires a `MethodTask` credential issued only by Engine.
 Each stage owns construction; independent checks are test-only. Engine cannot assemble successful
-FlowMethod or SsaMethod products. A class stop retains delivered members with an explicit termination
-kind. Local unsupported methods do not erase independent siblings. The currently
-implemented method scheduling loop is sequential.
+FlowMethod or SsaMethod products. Local reference, operand and binding issues can
+flow through to SSA with independent facts preserved. Class requests reserve result
+storage before tasks and retain every selected known member result, including
+method-task construction failures; error kind does not truncate siblings. The loop
+is sequential. `ClassAnalysis.terminated` is removed rather than retained as an
+always-empty class-abort mechanism.
 
 `dbg_shell` is the sole engine inspection example. P1/P2/P3 views and batch commands
 observe the Engine products; they do not start a second stage chain. Byte

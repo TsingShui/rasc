@@ -38,7 +38,11 @@ members. All error handling follows [failure locality](PIPELINE_DESIGN.md#9-局�
 Contributors MUST identify the owning producer, affected facts, actual dependents
 and retained output when adding or changing an error path. Any wider stop requires
 a concrete dependency/resource reason, not only an error kind or an Engine-level
-catch-and-continue patch. Text/JSON are presentations of the same result,
+catch-and-continue patch. The [P1–P9 contract](PIPELINE_DESIGN.md#92-p1p9-统一消费局部结果)
+applies to each stage's input, output and stop behavior, not only P1–P3 or outer
+scheduling. Contributors MUST update the owning producer and real consumers
+together; a later stage MUST NOT erase local results by reintroducing an all-or-nothing
+gate. Text/JSON are presentations of the same result,
 not capability gates. Preserve hard errors and distinguish observed readable output
 from independently established semantic behavior. Product acceptance evaluates
 readability, original facts and uncertainty, not a verified-Java status.

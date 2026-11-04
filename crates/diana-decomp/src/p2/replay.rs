@@ -430,11 +430,122 @@ fn flow_relation(
     })
 }
 
+fn verify_unresolved(
+    flow: &FlowMethod<'_>,
+    instruction: &DecodedInstruction,
+    op: &Operation,
+) -> Result<(), FlowError> {
+    let pc = instruction.pc();
+    let bad = || FlowError::Correspondence {
+        pc,
+        obligation: "unavailable input/result facts and bounded normal write",
+    };
+    let (result, expected_heap) = match op.kind {
+        OpKind::UnresolvedInvoke {
+            kind,
+            target,
+            prototype,
+            result: category,
+        } => {
+            let expected = match instruction.opcode() {
+                0x6e | 0x74 => InvokeKind::Virtual,
+                0x6f | 0x75 => InvokeKind::Super,
+                0x70 | 0x76 => InvokeKind::Direct,
+                0x71 | 0x77 => InvokeKind::Static,
+                0x72 | 0x78 => InvokeKind::Interface,
+                0xfa | 0xfb => InvokeKind::Polymorphic,
+                0xfc | 0xfd => InvokeKind::Custom,
+                _ => return Err(bad()),
+            };
+            let second = if expected == InvokeKind::Polymorphic {
+                match reference(instruction, ReferenceSlot::Second)? {
+                    OperandReference::Proto(p) => Some(p),
+                    _ => return Err(bad()),
+                }
+            } else {
+                None
+            };
+            if kind != expected
+                || target != reference(instruction, ReferenceSlot::First)?
+                || prototype != second
+                || flow.reads(op).is_ok()
+                || !matches!(flow.decoded().invoke_layout_at(pc), Some(Err(_)))
+                || category
+                    != flow
+                        .decoded()
+                        .invoke_result_at(pc)
+                        .and_then(Result::ok)
+                        .map(super::InvokeResult::from)
+                        .unwrap_or(super::InvokeResult::Unavailable)
+            {
+                return Err(bad());
+            }
+            let result = instruction
+                .result_pc()
+                .map(|pc| flow.decoded().instruction_at(pc).ok_or_else(bad))
+                .transpose()?;
+            (result, super::HeapTransfer::EventOutcome)
+        }
+        OpKind::UnresolvedResult { width } => {
+            if !matches!(instruction.opcode(), 0x0a..=0x0c)
+                || flow.decoded().result_issue_at(pc).is_none()
+                || width
+                    != if instruction.opcode() == 0x0b {
+                        SlotWidth::Two
+                    } else {
+                        SlotWidth::One
+                    }
+                || !flow.reads(op).map_err(|_| bad())?.is_empty()
+            {
+                return Err(bad());
+            }
+            (Some(instruction), super::HeapTransfer::Preserve)
+        }
+        _ => return Err(bad()),
+    };
+    let expected_commit = if result.is_none() {
+        CommitRule::None
+    } else if matches!(op.kind, OpKind::UnresolvedResult { .. }) {
+        CommitRule::AtOperation
+    } else {
+        CommitRule::AfterResult
+    };
+    if op.normal.commit() != expected_commit
+        || op.normal.commit_pc() != result.map(|i| i.pc())
+        || op.normal.heap() != expected_heap
+        || op.normal.lock() != super::LockTransfer::Preserve
+    {
+        return Err(bad());
+    }
+    match result {
+        None if flow.writes(op).is_empty() => {}
+        Some(result) => {
+            let width = if result.opcode() == 0x0b {
+                SlotWidth::Two
+            } else {
+                SlotWidth::One
+            };
+            let reg = result.registers().next().ok_or_else(bad)?;
+            if flow.writes(op) != [RegisterSlot::new(reg, width)] {
+                return Err(bad());
+            }
+        }
+        _ => return Err(bad()),
+    }
+    Ok(())
+}
+
 pub(super) fn verify(
     flow: &FlowMethod<'_>,
     instruction: &DecodedInstruction,
     operation: &Operation,
 ) -> Result<(), FlowError> {
+    if matches!(
+        operation.kind,
+        OpKind::UnresolvedInvoke { .. } | OpKind::UnresolvedResult { .. }
+    ) {
+        return verify_unresolved(flow, instruction, operation);
+    }
     if let OpKind::Binary { form, .. } = operation.kind {
         let expected = match instruction.opcode() {
             0x90..=0xaf => BinaryForm::ThreeAddress,
@@ -716,7 +827,10 @@ fn dex_step(
             };
             let layout = decoded
                 .invoke_layout_at(instruction.pc())
-                .ok_or(FlowError::InternalInvariant("call lost layout"))?;
+                .ok_or(FlowError::InternalInvariant("call lost layout"))?
+                .map_err(|_| {
+                    FlowError::InternalInvariant("known invoke has unavailable input layout")
+                })?;
             step.behavior = Behavior::Call(
                 kind,
                 reference(instruction, ReferenceSlot::First)?,
@@ -839,7 +953,9 @@ fn dex_step(
 fn flow_step(flow: &FlowMethod<'_>, operation: &Operation) -> Result<LocalStep, FlowError> {
     let mut step = LocalStep::new();
     let mut inputs = Vec::new();
-    for slot in flow.reads(operation) {
+    for slot in flow.reads(operation).map_err(|_| {
+        FlowError::InternalInvariant("symbolic replay needs established input slots")
+    })? {
         let input = step.read(slot.start, slot.width)?;
         push(&mut inputs, input)?;
     }
@@ -921,6 +1037,11 @@ fn flow_step(flow: &FlowMethod<'_>, operation: &Operation) -> Result<LocalStep, 
             }
         }
         OpKind::MoveException => Behavior::ReceiveException,
+        OpKind::UnresolvedInvoke { .. } | OpKind::UnresolvedResult { .. } => {
+            return Err(FlowError::InternalInvariant(
+                "unavailable operation entered full symbolic replay",
+            ));
+        }
     };
     match operation.kind {
         OpKind::Const { bits, width } => {
