@@ -561,6 +561,236 @@ impl Shell {
                     "handler_targets": decoded.handler_targets().collect::<Vec<_>>(),
                 }))
             }
+            "p2-all" => {
+                let started = std::time::Instant::now();
+                let classes = index.class_count();
+                let mut methods = 0u64;
+                let mut no_code = 0u64;
+                let mut class_errors = 0u64;
+                let mut p1_errors = 0u64;
+                let mut flowed = 0u64;
+                let mut failed = 0u64;
+                let mut internal = 0u64;
+                let mut unsupported = 0u64;
+                let mut malformed = 0u64;
+                let mut resource = 0u64;
+                let mut blocks = 0u64;
+                let mut operations = 0u64;
+                let mut edges = 0u64;
+                let mut exits = 0u64;
+                let mut normal_edges = 0u64;
+                let mut exception_edges = 0u64;
+                let mut covered_operations = 0u64;
+                let mut merged_results = 0u64;
+                let mut terminals = 0u64;
+                let mut payloads = 0u64;
+                let mut unreachable = 0u64;
+                let mut failures = Vec::new();
+                for class in 0..classes {
+                    control.checkpoint()?;
+                    let facts = match diana_decomp::p0::collect(
+                        &index,
+                        ClassKey {
+                            dex: DexId(0),
+                            class_def: ClassDefId(class),
+                        },
+                        &mut control,
+                    ) {
+                        Ok(facts) => facts,
+                        Err(error) if error.kind() == FailureKind::Cancelled => {
+                            return Err(error);
+                        }
+                        Err(_) => {
+                            class_errors += 1;
+                            continue;
+                        }
+                    };
+                    for entry in facts.methods() {
+                        control.checkpoint()?;
+                        methods += 1;
+                        let method = entry.method();
+                        let source = match index.method_source(&facts, method, &mut control) {
+                            Ok(source) => source,
+                            Err(error) if error.kind() == FailureKind::Cancelled => {
+                                return Err(RequestError::from(error));
+                            }
+                            Err(_) => {
+                                p1_errors += 1;
+                                continue;
+                            }
+                        };
+                        if matches!(source.raw(), RawPrintable::Declaration) {
+                            no_code += 1;
+                            continue;
+                        }
+                        let outcome = match index.decode_method_source(&source, &mut control) {
+                            Ok(outcome) => outcome,
+                            Err(error) if error.kind() == FailureKind::Cancelled => {
+                                return Err(RequestError::from(error));
+                            }
+                            Err(_) => {
+                                p1_errors += 1;
+                                continue;
+                            }
+                        };
+                        let Some(decoded) = outcome.decoded else {
+                            p1_errors += 1;
+                            continue;
+                        };
+                        match diana_decomp::p2::build_flow(decoded, &mut control) {
+                            Ok(flow) => {
+                                flowed += 1;
+                                blocks += u64::try_from(flow.blocks().len()).unwrap_or(u64::MAX);
+                                operations +=
+                                    u64::try_from(flow.operations().len()).unwrap_or(u64::MAX);
+                                edges += u64::try_from(flow.edges().len()).unwrap_or(u64::MAX);
+                                exits += u64::try_from(flow.exits().len()).unwrap_or(u64::MAX);
+                                for edge in flow.edges() {
+                                    match edge.role {
+                                        diana_decomp::p2::EdgeRole::Normal(_) => {
+                                            normal_edges += 1;
+                                        }
+                                        diana_decomp::p2::EdgeRole::Exception { .. } => {
+                                            exception_edges += 1;
+                                        }
+                                    }
+                                }
+                                for coverage in flow.coverage() {
+                                    match coverage {
+                                        diana_decomp::p2::Coverage::Operation(_) => {
+                                            covered_operations += 1;
+                                        }
+                                        diana_decomp::p2::Coverage::MergedResult(_) => {
+                                            merged_results += 1;
+                                        }
+                                        diana_decomp::p2::Coverage::Terminal(_) => terminals += 1,
+                                        diana_decomp::p2::Coverage::Payload => payloads += 1,
+                                        diana_decomp::p2::Coverage::Unreachable => unreachable += 1,
+                                    }
+                                }
+                            }
+                            Err(error) if error.kind() == FailureKind::Cancelled => {
+                                return Err(RequestError::from(error));
+                            }
+                            Err(error) => {
+                                failed += 1;
+                                match error.kind() {
+                                    FailureKind::InternalInvariant => internal += 1,
+                                    FailureKind::Unsupported => unsupported += 1,
+                                    FailureKind::Malformed => malformed += 1,
+                                    FailureKind::ResourceExhausted => resource += 1,
+                                    FailureKind::Cancelled => unreachable!(),
+                                }
+                                if failures.len() < 100 {
+                                    failures.push(json!({
+                                        "class": class,
+                                        "method": method.0,
+                                        "kind": format!("{:?}", error.kind()),
+                                        "detail": format!("{error}"),
+                                    }));
+                                }
+                            }
+                        }
+                    }
+                }
+                Ok(json!({
+                    "classes": classes,
+                    "methods": methods,
+                    "no_code": no_code,
+                    "class_errors": class_errors,
+                    "p1_errors": p1_errors,
+                    "flowed": flowed,
+                    "failed": failed,
+                    "internal": internal,
+                    "unsupported": unsupported,
+                    "malformed": malformed,
+                    "resource": resource,
+                    "blocks": blocks,
+                    "operations": operations,
+                    "edges": edges,
+                    "normal_edges": normal_edges,
+                    "exception_edges": exception_edges,
+                    "exits": exits,
+                    "covered_operations": covered_operations,
+                    "merged_results": merged_results,
+                    "terminals": terminals,
+                    "payloads": payloads,
+                    "unreachable": unreachable,
+                    "failures": failures,
+                    "failures_truncated": failed > u64::try_from(failures.len()).unwrap_or(u64::MAX),
+                    "elapsed_ms": started.elapsed().as_millis(),
+                }))
+            }
+            "p2" => {
+                let class = class_id(request)?;
+                let method = method_id(request)?;
+                let mut analysis = engine.analyze(
+                    Request {
+                        class: class_key(class),
+                        method: None,
+                    },
+                    &mut control,
+                )?;
+                let Some(index) = analysis
+                    .methods
+                    .iter()
+                    .position(|entry| entry.key.method == MethodId(method))
+                else {
+                    return Err(RequestError::InternalInvariant(
+                        "method is not in the P0 directory",
+                    ));
+                };
+                let outcome = match analysis.methods.swap_remove(index).result? {
+                    MethodOutcome::Decoded(outcome) => *outcome,
+                    MethodOutcome::DeclarationOnly => {
+                        return Ok(json!({"declaration_only": true}));
+                    }
+                };
+                let Some(decoded) = outcome.decoded else {
+                    return Ok(json!({
+                        "decoded": false,
+                        "prefix": outcome.prefix.len(),
+                        "error": outcome.error.map(|error| format!("{error}")),
+                    }));
+                };
+                let flow = diana_decomp::p2::build_flow(decoded, &mut control)?;
+                let mut normal_edges = 0usize;
+                let mut exception_edges = 0usize;
+                for edge in flow.edges() {
+                    match edge.role {
+                        diana_decomp::p2::EdgeRole::Normal(_) => normal_edges += 1,
+                        diana_decomp::p2::EdgeRole::Exception { .. } => exception_edges += 1,
+                    }
+                }
+                let mut coverage = std::collections::BTreeMap::new();
+                for value in flow.coverage() {
+                    let name = match value {
+                        diana_decomp::p2::Coverage::Operation(_) => "operation",
+                        diana_decomp::p2::Coverage::Terminal(_) => "terminal",
+                        diana_decomp::p2::Coverage::MergedResult(_) => "merged_result",
+                        diana_decomp::p2::Coverage::Payload => "payload",
+                        diana_decomp::p2::Coverage::Unreachable => "unreachable",
+                    };
+                    *coverage.entry(name).or_insert(0usize) += 1;
+                }
+                Ok(json!({
+                    "class_def": class,
+                    "method": method,
+                    "decoded": true,
+                    "blocks": flow.blocks().len(),
+                    "operations": flow.operations().len(),
+                    "edges": flow.edges().len(),
+                    "normal_edges": normal_edges,
+                    "exception_edges": exception_edges,
+                    "exits": flow.exits().len(),
+                    "coverage": coverage,
+                    "entry": {
+                        "incoming_start": flow.entry().incoming_start().0,
+                        "this": flow.entry().this().map(|slot| json!({"start": slot.start.0, "width": format!("{:?}", slot.width)})),
+                        "parameters": flow.entry().parameters().len(),
+                    },
+                }))
+            }
             "quit" | "exit" => Ok(json!({"bye": true})),
             other => Err(RequestError::InternalInvariant(match other {
                 "load" => "load is not supported; pass --dex",
@@ -1002,7 +1232,7 @@ fn main() -> std::process::ExitCode {
             "--help" | "-h" => {
                 eprintln!(
                     "usage: dbg_shell --dex <classes.dex> [--exec <json>]...\n\
-                     stdin: one command per line, JSON or `p1 <class> <method>`
+                     stdin: one command per line, JSON or `p1 <class> <method>`/`p2 <class> <method>`
                      default: text for stdin shell, json for --exec; --format overrides"
                 );
                 return std::process::ExitCode::SUCCESS;

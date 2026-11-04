@@ -10,6 +10,8 @@ pub enum RequestError {
     #[error(transparent)]
     Method(#[from] MethodError),
     #[error(transparent)]
+    Flow(#[from] crate::p2::FlowError),
+    #[error(transparent)]
     Control(#[from] ControlError),
     #[error("request allocation failed: {0}")]
     Allocation(#[source] TryReserveError),
@@ -61,6 +63,7 @@ impl RequestError {
         match self {
             Self::Input(error) => error.kind(),
             Self::Method(error) => error.kind(),
+            Self::Flow(error) => error.kind(),
             Self::Control(error) => error.kind(),
             Self::Allocation(_) | Self::PlatformCapacity => FailureKind::ResourceExhausted,
             Self::UnknownDex | Self::UndefinedRegister { .. } | Self::InvalidWideRead { .. } => {

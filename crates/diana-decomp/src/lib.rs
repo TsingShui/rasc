@@ -4,6 +4,7 @@ mod engine;
 pub mod input;
 pub mod p0;
 pub mod p1;
+pub mod p2;
 pub use engine::{
     DexImage, Engine, MethodOutcome, MethodSelector, Options, RecoveryPolicy, RepresentationPolicy,
     Request,
