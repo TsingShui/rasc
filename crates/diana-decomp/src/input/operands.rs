@@ -34,6 +34,22 @@ impl RawRegisters {
         self.count() == 0
     }
 
+    /// Original list-format register words, including unused nibbles.
+    pub fn list(&self) -> Option<([RegisterId; 5], u8)> {
+        match self.encoding {
+            RegisterEncoding::List { values, count } => Some((values, count)),
+            RegisterEncoding::Range { .. } => None,
+        }
+    }
+
+    /// Original range-format first register and word count.
+    pub fn range(&self) -> Option<(RegisterId, u8)> {
+        match self.encoding {
+            RegisterEncoding::Range { first, count } => Some((first, count)),
+            RegisterEncoding::List { .. } => None,
+        }
+    }
+
     pub fn iter(&self) -> RegisterIter<'_> {
         RegisterIter {
             registers: self,

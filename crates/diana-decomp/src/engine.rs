@@ -164,7 +164,13 @@ pub struct ClassAnalysis<'a> {
 
 pub struct MethodAnalysis<'a> {
     pub key: MethodKey,
-    pub result: Result<crate::p1::DecodedOutcome<'a>, RequestError>,
+    pub result: Result<MethodOutcome<'a>, RequestError>,
+}
+
+/// A method entry either has no code or has a P1 product/prefix.
+pub enum MethodOutcome<'a> {
+    DeclarationOnly,
+    Decoded(crate::p1::DecodedOutcome<'a>),
 }
 
 impl<'a> Engine<'a> {
@@ -178,6 +184,33 @@ impl<'a> Engine<'a> {
         let position = usize::try_from(class.dex.0).map_err(|_| RequestError::UnknownDex)?;
         let image = self.images.get(position).ok_or(RequestError::UnknownDex)?;
         Ok(image.index.class_facts_cached(class.class_def, control)?)
+    }
+
+    /// Runs P0, the method reader and P1 for one method entry only.
+    pub fn analyze_method(
+        &self,
+        class: ClassKey,
+        method: MethodId,
+        control: &mut RunContext<'_>,
+    ) -> Result<MethodAnalysis<'a>, RequestError> {
+        let facts = self.class_facts(class, control)?;
+        let position = usize::try_from(class.dex.0).map_err(|_| RequestError::UnknownDex)?;
+        let image = self.images.get(position).ok_or(RequestError::UnknownDex)?;
+        let result = (|| -> Result<MethodOutcome<'a>, RequestError> {
+            let source = image.index.method_source(&facts, method, control)?;
+            match source.raw() {
+                crate::input::RawPrintable::Declaration => Ok(MethodOutcome::DeclarationOnly),
+                crate::input::RawPrintable::Method(_) => image
+                    .index
+                    .decode_method_source(&source, control)
+                    .map(MethodOutcome::Decoded)
+                    .map_err(RequestError::from),
+            }
+        })();
+        Ok(MethodAnalysis {
+            key: MethodKey { class, method },
+            result,
+        })
     }
 
     /// Runs P0, the method reader and P1 for one class request. Class assembly
@@ -205,12 +238,16 @@ impl<'a> Engine<'a> {
                 class: request.class,
                 method,
             };
-            let result = (|| -> Result<_, RequestError> {
+            let result = (|| -> Result<MethodOutcome<'a>, RequestError> {
                 let source = image.index.method_source(&facts, method, control)?;
-                image
-                    .index
-                    .decode_method_source(&source, control)
-                    .map_err(RequestError::from)
+                match source.raw() {
+                    crate::input::RawPrintable::Declaration => Ok(MethodOutcome::DeclarationOnly),
+                    crate::input::RawPrintable::Method(_) => image
+                        .index
+                        .decode_method_source(&source, control)
+                        .map(MethodOutcome::Decoded)
+                        .map_err(RequestError::from),
+                }
             })();
             match result {
                 Err(error)

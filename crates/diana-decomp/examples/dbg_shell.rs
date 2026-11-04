@@ -6,14 +6,16 @@
 //!   {"id":2,"cmd":"p1","class":0,"method":0}
 //! Output is one JSON object per line. `--exec` runs commands without a REPL.
 
+use std::collections::BTreeMap;
 use std::io::{BufRead, Write};
 use std::path::PathBuf;
 
-use diana_decomp::input::ProgramIndex;
-use diana_decomp::p1::DecodedItem;
+use diana_decomp::input::{ProgramIndex, RawPrintable};
+use diana_decomp::p1::{DecodedInstruction, DecodedItem, DecodedPayload};
+use diana_decomp::raw::{Format as DexFormat, RawLiteral, ReferenceSlot};
 use diana_decomp::{
     ByteOffset, ClassDefId, ClassKey, DexId, DexImage, Engine, FailureKind, ImageOrigin, InputId,
-    MethodId, Options, Request, RequestError, RunContext,
+    MethodId, MethodOutcome, Options, Request, RequestError, RunContext,
 };
 use serde_json::{Value, json};
 
@@ -180,6 +182,251 @@ impl Shell {
                     .collect();
                 Ok(json!({"class_def": class, "methods": values}))
             }
+            "roundtrip-all" => {
+                let started = std::time::Instant::now();
+                let classes = index.class_count();
+                let mut methods = 0u64;
+                let mut checked = 0u64;
+                let mut skipped = 0u64;
+                let mut mismatches = 0u64;
+                let mut class_errors = 0u64;
+                let mut method_errors = 0u64;
+                let mut no_code = 0u64;
+                let mut failures = Vec::new();
+                let mut skipped_formats: BTreeMap<String, u64> = BTreeMap::new();
+                for class in 0..classes {
+                    control.checkpoint()?;
+                    let facts = match diana_decomp::p0::collect(
+                        &index,
+                        ClassKey {
+                            dex: DexId(0),
+                            class_def: ClassDefId(class),
+                        },
+                        &mut control,
+                    ) {
+                        Ok(facts) => facts,
+                        Err(error) if error.kind() == FailureKind::Cancelled => return Err(error),
+                        Err(_) => {
+                            class_errors += 1;
+                            continue;
+                        }
+                    };
+                    let base = facts.descriptor().units();
+                    let _ = base;
+                    for entry in facts.methods() {
+                        control.checkpoint()?;
+                        methods += 1;
+                        let method = entry.method();
+                        let source = match index.method_source(&facts, method, &mut control) {
+                            Ok(source) => source,
+                            Err(_) => {
+                                method_errors += 1;
+                                continue;
+                            }
+                        };
+                        if matches!(source.raw(), RawPrintable::Declaration) {
+                            no_code += 1;
+                            continue;
+                        }
+                        let outcome = match index.decode_method_source(&source, &mut control) {
+                            Ok(outcome) => outcome,
+                            Err(error) if error.kind() == FailureKind::Cancelled => {
+                                return Err(RequestError::from(error));
+                            }
+                            Err(_) => {
+                                method_errors += 1;
+                                continue;
+                            }
+                        };
+                        let Some(decoded) = outcome.decoded else {
+                            method_errors += 1;
+                            continue;
+                        };
+                        let start = decoded.instruction_bytes().start.0;
+                        for item in decoded.items() {
+                            let DecodedItem::Instruction(instruction) = item else {
+                                let DecodedItem::Payload(payload) = item else {
+                                    unreachable!()
+                                };
+                                let Some(encoded) = encode_payload(payload, decoded.source())
+                                else {
+                                    skipped += 1;
+                                    *skipped_formats.entry("payload".to_owned()).or_default() += 1;
+                                    continue;
+                                };
+                                let Ok(pc) = usize::try_from(payload.pc().0) else {
+                                    skipped += 1;
+                                    continue;
+                                };
+                                let offset = start + pc * 2;
+                                let Some(raw) = self.bytes.get(offset..offset + encoded.len())
+                                else {
+                                    mismatches += 1;
+                                    continue;
+                                };
+                                checked += 1;
+                                if raw != encoded.as_slice() {
+                                    mismatches += 1;
+                                    if failures.len() < 100 {
+                                        failures.push(json!({
+                                            "class": class,
+                                            "method": method.0,
+                                            "pc": payload.pc().0,
+                                            "kind": "payload",
+                                            "format": format!("{:?}", payload.kind()),
+                                            "expected": encoded,
+                                            "actual": raw,
+                                        }));
+                                    }
+                                }
+                                continue;
+                            };
+                            let Some(encoded) = encode(instruction) else {
+                                skipped += 1;
+                                *skipped_formats
+                                    .entry(format!("{:?}", instruction.spec().format))
+                                    .or_default() += 1;
+                                continue;
+                            };
+                            let Ok(pc) = usize::try_from(instruction.pc().0) else {
+                                skipped += 1;
+                                continue;
+                            };
+                            let offset = start + pc * 2;
+                            let Some(raw) = self.bytes.get(offset..offset + encoded.len() * 2)
+                            else {
+                                mismatches += 1;
+                                if failures.len() < 100 {
+                                    failures.push(json!({
+                                        "class": class,
+                                        "method": method.0,
+                                        "pc": instruction.pc().0,
+                                        "error": "raw range",
+                                    }));
+                                }
+                                continue;
+                            };
+                            let actual: Vec<u16> = raw
+                                .as_chunks::<2>()
+                                .0
+                                .iter()
+                                .map(|pair| u16::from_le_bytes(*pair))
+                                .collect();
+                            checked += 1;
+                            if actual != encoded {
+                                mismatches += 1;
+                                if failures.len() < 100 {
+                                    failures.push(json!({
+                                        "class": class,
+                                        "method": method.0,
+                                        "pc": instruction.pc().0,
+                                        "opcode": instruction.spec().mnemonic,
+                                        "format": format!("{:?}", instruction.spec().format),
+                                        "expected": encoded,
+                                        "actual": actual,
+                                    }));
+                                }
+                            }
+                        }
+                    }
+                }
+                Ok(json!({
+                    "classes": classes,
+                    "methods": methods,
+                    "checked": checked,
+                    "skipped": skipped,
+                    "mismatches": mismatches,
+                    "class_errors": class_errors,
+                    "method_errors": method_errors,
+                    "no_code": no_code,
+                    "skipped_formats": skipped_formats,
+                    "failures": failures,
+                    "failures_truncated": mismatches > u64::try_from(failures.len()).unwrap_or(u64::MAX),
+                    "elapsed_ms": started.elapsed().as_millis(),
+                }))
+            }
+            "roundtrip" => {
+                let class = class_id(request)?;
+                let method = method_id(request)?;
+                let mut analysis = engine.analyze(
+                    Request {
+                        class: class_key(class),
+                        method: None,
+                    },
+                    &mut control,
+                )?;
+                let Some(index) = analysis
+                    .methods
+                    .iter()
+                    .position(|entry| entry.key.method == MethodId(method))
+                else {
+                    return Err(RequestError::InternalInvariant(
+                        "method is not in the P0 directory",
+                    ));
+                };
+                let outcome = match analysis.methods.swap_remove(index).result? {
+                    MethodOutcome::Decoded(outcome) => outcome,
+                    MethodOutcome::DeclarationOnly => {
+                        return Ok(json!({"declaration_only": true}));
+                    }
+                };
+                let Some(decoded) = outcome.decoded else {
+                    return Ok(json!({
+                        "decoded": false,
+                        "prefix": outcome.prefix.len(),
+                        "error": outcome.error.map(|error| format!("{error}")),
+                    }));
+                };
+                let base = decoded.instruction_bytes().start.0;
+                let mut checked = 0usize;
+                let mut skipped = Vec::new();
+                let mut mismatches = Vec::new();
+                for item in decoded.items() {
+                    let DecodedItem::Instruction(instruction) = item else {
+                        skipped.push(json!({"pc": item.pc().0, "kind": "payload"}));
+                        continue;
+                    };
+                    let Some(encoded) = encode(instruction) else {
+                        skipped.push(json!({
+                            "pc": instruction.pc().0,
+                            "opcode": instruction.spec().mnemonic,
+                            "format": format!("{:?}", instruction.spec().format),
+                        }));
+                        continue;
+                    };
+                    let Ok(pc) = usize::try_from(instruction.pc().0) else {
+                        continue;
+                    };
+                    let offset = base + pc * 2;
+                    let Some(raw) = self.bytes.get(offset..offset + encoded.len() * 2) else {
+                        mismatches.push(json!({"pc": instruction.pc().0, "error": "raw range"}));
+                        continue;
+                    };
+                    let actual: Vec<u16> = raw
+                        .as_chunks::<2>()
+                        .0
+                        .iter()
+                        .map(|pair| u16::from_le_bytes(*pair))
+                        .collect();
+                    checked += 1;
+                    if actual != encoded {
+                        mismatches.push(json!({
+                            "pc": instruction.pc().0,
+                            "opcode": instruction.spec().mnemonic,
+                            "format": format!("{:?}", instruction.spec().format),
+                            "expected": encoded,
+                            "actual": actual,
+                        }));
+                    }
+                }
+                Ok(json!({
+                    "class_def": class,
+                    "method": method,
+                    "checked": checked,
+                    "skipped": skipped,
+                    "mismatches": mismatches,
+                }))
+            }
             "p1" | "decoded" => {
                 let class = class_id(request)?;
                 let method = method_id(request)?;
@@ -199,7 +446,12 @@ impl Shell {
                         "method is not in the P0 directory",
                     ));
                 };
-                let outcome = analysis.methods.swap_remove(index).result?;
+                let outcome = match analysis.methods.swap_remove(index).result? {
+                    MethodOutcome::Decoded(outcome) => outcome,
+                    MethodOutcome::DeclarationOnly => {
+                        return Ok(json!({"declaration_only": true}));
+                    }
+                };
                 let Some(decoded) = outcome.decoded else {
                     return Ok(json!({
                         "class_def": class,
@@ -254,6 +506,248 @@ impl Shell {
             })),
         }
     }
+}
+
+fn encode(instruction: &DecodedInstruction) -> Option<Vec<u16>> {
+    let opcode = u16::from(instruction.opcode());
+    let regs: Vec<u32> = instruction.registers().map(|register| register.0).collect();
+    let literal = instruction.operands().literal();
+    let offset = instruction.operands().offset().map(|delta| delta.0);
+    let reference_at = |slot: usize| {
+        let wanted = if slot == 0 {
+            ReferenceSlot::First
+        } else {
+            ReferenceSlot::Second
+        };
+        instruction
+            .references()
+            .find(|reference| reference.slot == wanted)
+            .map(|reference| match reference.target {
+                diana_decomp::raw::OperandReference::String(id) => id.0,
+                diana_decomp::raw::OperandReference::Type(id) => id.0,
+                diana_decomp::raw::OperandReference::Field(id) => id.0,
+                diana_decomp::raw::OperandReference::Method(id) => id.0,
+                diana_decomp::raw::OperandReference::Proto(id) => id.0,
+                diana_decomp::raw::OperandReference::CallSite(id) => id.0,
+                diana_decomp::raw::OperandReference::MethodHandle(id) => id.0,
+            })
+    };
+    let reference = instruction
+        .references()
+        .next()
+        .map(|reference| match reference.target {
+            diana_decomp::raw::OperandReference::String(id) => id.0,
+            diana_decomp::raw::OperandReference::Type(id) => id.0,
+            diana_decomp::raw::OperandReference::Field(id) => id.0,
+            diana_decomp::raw::OperandReference::Method(id) => id.0,
+            diana_decomp::raw::OperandReference::Proto(id) => id.0,
+            diana_decomp::raw::OperandReference::CallSite(id) => id.0,
+            diana_decomp::raw::OperandReference::MethodHandle(id) => id.0,
+        });
+    let signed = |value: i32, bits: u32| (value as u32 & ((1u32 << bits) - 1)) as u16;
+    let word = |value: u32| value as u16;
+    let mut encoded = match instruction.spec().format {
+        DexFormat::F10x => vec![opcode],
+        DexFormat::F12x => vec![opcode | word(regs.first()? << 8) | word(regs.get(1)? << 12)],
+        DexFormat::F11n => {
+            let value = match literal? {
+                RawLiteral::Signed8(value) => value as u8,
+                RawLiteral::Bits32(value) => value as u8,
+                _ => return None,
+            };
+            vec![opcode | word(regs.first()? << 8) | word((u32::from(value) & 0xf) << 12)]
+        }
+        DexFormat::F11x => vec![opcode | word(regs.first()? << 8)],
+        DexFormat::F10t => vec![opcode | signed(offset?, 8) << 8],
+        DexFormat::F20t => vec![opcode, word(offset? as u32)],
+        DexFormat::F22x => vec![opcode | word(regs.first()? << 8), word(*regs.get(1)?)],
+        DexFormat::F21t | DexFormat::F21s | DexFormat::F21c => {
+            let value = match instruction.spec().format {
+                DexFormat::F21t => word(offset? as u32),
+                DexFormat::F21s => match literal? {
+                    RawLiteral::Signed16(value) => word(u32::from(value as u16)),
+                    RawLiteral::Signed8(value) => word(u32::from(value as u8 as u16)),
+                    RawLiteral::Bits32(value) => word(value),
+                    RawLiteral::Bits64(value) => word(value as u32),
+                    _ => return None,
+                },
+                _ => word(reference?),
+            };
+            vec![opcode | word(regs.first()? << 8), value]
+        }
+        DexFormat::F23x => vec![
+            opcode | word(regs.first()? << 8),
+            word(*regs.get(1)? | (*regs.get(2)? << 8)),
+        ],
+        DexFormat::F22b => {
+            let RawLiteral::Signed8(value) = literal? else {
+                return None;
+            };
+            vec![
+                opcode | word(regs.first()? << 8),
+                word(*regs.get(1)? | ((u32::from(value as u8)) << 8)),
+            ]
+        }
+        DexFormat::F22t | DexFormat::F22s | DexFormat::F22c => {
+            let value = match instruction.spec().format {
+                DexFormat::F22t => word(offset? as u32),
+                DexFormat::F22s => match literal? {
+                    RawLiteral::Signed16(value) => word(u32::from(value as u16)),
+                    RawLiteral::Signed8(value) => word(u32::from(value as u8 as u16)),
+                    RawLiteral::Bits32(value) => word(value),
+                    _ => return None,
+                },
+                _ => word(reference?),
+            };
+            vec![
+                opcode | word(regs.first()? << 8) | word(*regs.get(1)? << 12),
+                value,
+            ]
+        }
+        DexFormat::F30t => {
+            let value = offset? as u32;
+            vec![opcode, word(value), word(value >> 16)]
+        }
+        DexFormat::F32x => vec![opcode, word(*regs.first()?), word(*regs.get(1)?)],
+        DexFormat::F31i | DexFormat::F31t => {
+            let value = if matches!(instruction.spec().format, DexFormat::F31t) {
+                offset? as u32
+            } else {
+                match literal? {
+                    RawLiteral::Bits32(value) => value,
+                    RawLiteral::Bits64(value) => value as u32,
+                    _ => return None,
+                }
+            };
+            vec![
+                opcode | word(regs.first()? << 8),
+                word(value),
+                word(value >> 16),
+            ]
+        }
+        DexFormat::F31c => {
+            let value = reference?;
+            vec![
+                opcode | word(regs.first()? << 8),
+                word(value),
+                word(value >> 16),
+            ]
+        }
+        DexFormat::F21h => {
+            let value = match literal? {
+                RawLiteral::Bits32(value) => value >> 16,
+                RawLiteral::Bits64(value) => (value >> 48) as u32,
+                _ => return None,
+            };
+            vec![opcode | word(regs.first()? << 8), word(value)]
+        }
+        DexFormat::F51l => {
+            let RawLiteral::Bits64(value) = literal? else {
+                return None;
+            };
+            vec![
+                opcode | word(regs.first()? << 8),
+                word(value as u32),
+                word((value >> 16) as u32),
+                word((value >> 32) as u32),
+                word((value >> 48) as u32),
+            ]
+        }
+        DexFormat::F35c | DexFormat::F45cc => {
+            let (values, count) = instruction.operands().registers().list()?;
+            let index = reference_at(0)?;
+            let mut words = vec![
+                opcode | word(values[4].0 << 8) | word(u32::from(count) << 12),
+                word(index),
+                word(values[0].0 | (values[1].0 << 4) | (values[2].0 << 8) | (values[3].0 << 12)),
+            ];
+            if matches!(instruction.spec().format, DexFormat::F45cc) {
+                words.push(word(reference_at(1)?));
+            }
+            words
+        }
+        DexFormat::F3rc | DexFormat::F4rcc => {
+            let (first, count) = instruction.operands().registers().range()?;
+            let mut words = vec![
+                opcode | word(u32::from(count) << 8),
+                word(reference_at(0)?),
+                word(first.0),
+            ];
+            if matches!(instruction.spec().format, DexFormat::F4rcc) {
+                words.push(word(reference_at(1)?));
+            }
+            words
+        }
+        _ => return None,
+    };
+    Some(encoded)
+}
+
+fn encode_payload(
+    payload: &DecodedPayload,
+    source: &diana_decomp::input::RawMethodView<'_>,
+) -> Option<Vec<u8>> {
+    let mut words: Vec<u16> = Vec::new();
+    match payload.kind() {
+        diana_decomp::raw::LayoutKind::PackedSwitch { entries } => {
+            let mut cases = payload.switch_cases(source).ok()??;
+            let first = cases.next()?;
+            words.push(0x0100);
+            words.push(entries);
+            words.push(first.key as u32 as u16);
+            words.push((first.key as u32 >> 16) as u16);
+            words.push(first.offset.0 as u32 as u16);
+            words.push((first.offset.0 as u32 >> 16) as u16);
+            for case in cases {
+                words.push(case.offset.0 as u32 as u16);
+                words.push((case.offset.0 as u32 >> 16) as u16);
+            }
+        }
+        diana_decomp::raw::LayoutKind::SparseSwitch { entries } => {
+            let cases = payload.switch_cases(source).ok()??;
+            let cases: Vec<_> = cases.collect();
+            words.push(0x0200);
+            words.push(entries);
+            for case in &cases {
+                words.push(case.key as u32 as u16);
+                words.push((case.key as u32 >> 16) as u16);
+            }
+            for case in cases {
+                words.push(case.offset.0 as u32 as u16);
+                words.push((case.offset.0 as u32 >> 16) as u16);
+            }
+        }
+        diana_decomp::raw::LayoutKind::ArrayData {
+            element_width,
+            element_count,
+        } => {
+            words.push(0x0300);
+            words.push(element_width.0 as u16);
+            words.push(element_count as u16);
+            words.push((element_count >> 16) as u16);
+            let elements = payload.array_elements(source).ok()??;
+            let mut bytes = Vec::new();
+            for element in elements {
+                for index in 0..element_width.0 {
+                    bytes.push((element.bits >> (index * 8)) as u8);
+                }
+            }
+            if bytes.len() % 2 != 0 {
+                bytes.push(0);
+            }
+            let mut packed = Vec::new();
+            for pair in bytes.as_chunks::<2>().0 {
+                packed.push(u16::from_le_bytes(*pair));
+            }
+            words.extend(packed);
+        }
+        _ => return None,
+    }
+    let mut bytes = Vec::new();
+    for word in words {
+        bytes.extend_from_slice(&word.to_le_bytes());
+    }
+    Some(bytes)
 }
 
 fn class_key(class: u32) -> ClassKey {

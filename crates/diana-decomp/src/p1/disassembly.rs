@@ -408,7 +408,7 @@ impl<'a> ProgramIndex<'a> {
             ins_size: source.ins_size(),
             outs_size: source.outs_size(),
             code_units: source.code_units(),
-            instruction_bytes: source.code_byte_range(),
+            instruction_bytes: source.instruction_byte_range(),
         }
     }
 }

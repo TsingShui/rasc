@@ -45,6 +45,11 @@ impl<'a> ProgramIndex<'a> {
         self.bytes
     }
 
+    /// Number of original class definitions in this logical member.
+    pub fn class_count(&self) -> u32 {
+        self.header.class_defs.count
+    }
+
     /// Binds the logical DEX identity used for original class keys.
     pub(crate) fn with_dex(mut self, dex: crate::DexId) -> Self {
         self.dex = dex;

@@ -25,6 +25,7 @@ pub struct RawMethodView<'a> {
     outs_size: u16,
     code_units: CodeUnitCount,
     instructions: &'a [u8],
+    instruction_byte_range: ByteRange,
     code_byte_range: ByteRange,
     try_byte_range: ByteRange,
     handler_byte_range: ByteRange,
@@ -57,6 +58,11 @@ impl<'a> RawMethodView<'a> {
     }
     pub fn code_byte_range(&self) -> ByteRange {
         self.code_byte_range
+    }
+    /// Absolute extent of the instruction bytes, excluding the code-item header,
+    /// padding, tries and handlers.
+    pub fn instruction_byte_range(&self) -> ByteRange {
+        self.instruction_byte_range
     }
     pub fn try_byte_range(&self) -> ByteRange {
         self.try_byte_range
@@ -132,6 +138,10 @@ pub(super) fn read_code<'a>(
         outs_size,
         code_units,
         instructions: &index.bytes[instructions.as_range()],
+        instruction_byte_range: ByteRange {
+            start: ByteOffset(offset.0 + 16),
+            end: ByteOffset(offset.0 + 16 + byte_length.0),
+        },
         code_byte_range: ByteRange {
             start: offset,
             end: cursor.position_byte(),
