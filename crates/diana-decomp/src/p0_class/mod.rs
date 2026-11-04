@@ -6,4 +6,7 @@ mod facts;
 
 pub use collect::collect;
 pub use debug::render_json;
-pub use facts::{ClassFacts, Fact, InitialValue, MethodDeclaration, OriginalText, ScalarValue};
+pub use facts::{
+    ClassFacts, Fact, FieldDirectoryEntry, InitialValue, MethodDeclaration, OriginalText,
+    ScalarValue,
+};

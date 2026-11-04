@@ -1,4 +1,4 @@
-use crate::input::field_declarations::FieldInput;
+use crate::p0::FieldDirectoryEntry;
 use crate::pipeline::control::InputControl;
 use crate::substrate::owned::TextBuffer;
 use crate::{FieldFacts, FieldStorage, RequestError};
@@ -23,7 +23,7 @@ impl JavaField {
 }
 pub(crate) fn reconstruct(
     _schedule: &crate::engine::SchedulePermit,
-    field: &FieldInput,
+    field: &FieldDirectoryEntry,
     facts: &FieldFacts,
     ty: &crate::p4_types::declarations::field_declarations::FieldType,
     control: &mut impl InputControl,
@@ -32,15 +32,15 @@ pub(crate) fn reconstruct(
 }
 
 fn reconstruct_impl(
-    field: &FieldInput,
+    field: &FieldDirectoryEntry,
     facts: &FieldFacts,
     ty: &crate::p4_types::declarations::field_declarations::FieldType,
     control: &mut impl InputControl,
 ) -> Result<Option<JavaField>, RequestError> {
-    let flags = field.access_flags;
+    let flags = field.access_flags_raw();
     if !crate::substrate::flags::field_valid(flags)
         || (flags & crate::substrate::flags::STATIC != 0)
-            != matches!(field.storage, FieldStorage::Static(_))
+            != matches!(field.storage(), FieldStorage::Static(_))
     {
         return Ok(None);
     }
@@ -73,18 +73,18 @@ fn reconstruct_impl(
         )?;
     }
     source.push(";", control)?;
-    let initial_expression = if matches!(field.storage, FieldStorage::Static(_)) {
+    let initial_expression = if matches!(field.storage(), FieldStorage::Static(_)) {
         super::preparation::expression(
             &facts.descriptor,
-            field.value.as_ref(),
-            field.default_preparation,
+            field.scalar(),
+            field.default_preparation(),
             control,
         )?
     } else {
         None
     };
-    let preparation = if !field.default_preparation
-        && matches!(field.storage, FieldStorage::Static(_))
+    let preparation = if !field.default_preparation()
+        && matches!(field.storage(), FieldStorage::Static(_))
         && initial_expression.is_some()
     {
         let mut preparation = TextBuffer::new();
@@ -114,8 +114,8 @@ fn reconstruct_impl(
     };
     Ok(Some(JavaField {
         source: source.finish(),
-        default_preparation: matches!(field.storage, FieldStorage::Instance)
-            || field.default_preparation,
+        default_preparation: matches!(field.storage(), FieldStorage::Instance)
+            || field.default_preparation(),
         preparation,
         initial_expression,
     }))

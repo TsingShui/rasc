@@ -44,24 +44,22 @@ fn decode_impl<'a>(
     method: MethodId,
     budget: &mut RunContext<'_>,
 ) -> Result<Option<EntryWindow<'a>>, RequestError> {
-    let Some(envelope) = index.method_envelope(class, method, budget)? else {
-        return Ok(None);
-    };
-    if envelope.access_flags
-        & (crate::substrate::flags::STATIC | crate::substrate::flags::CONSTRUCTOR)
+    let facts = index.class_facts_cached(class, budget)?;
+    let source = index.method_source(&facts, method, budget)?;
+    let access_flags = source.access_flags();
+    let declaration = source.declaration().clone();
+    let owner = index.method_reference(method, budget)?.owner_type;
+    if access_flags & (crate::substrate::flags::STATIC | crate::substrate::flags::CONSTRUCTOR)
         != 0x10000
-        || !envelope.declaration.name.matches_with(
+        || !declaration.name.matches_with(
             &const { crate::substrate::owned::ascii_units(*b"<init>") },
             budget,
         )?
-        || !envelope
-            .declaration
-            .return_type
-            .matches_with(&[86], budget)?
+        || !declaration.return_type.matches_with(&[86], budget)?
     {
         return Ok(None);
     }
-    let Some(raw) = envelope.code else {
+    let crate::input::RawPrintable::Method(raw) = source.raw() else {
         return Ok(None);
     };
     if !raw.try_byte_range().as_range().is_empty() {
@@ -73,14 +71,14 @@ fn decode_impl<'a>(
             offset_byte: raw.code_byte_range().start,
         })
     };
-    if envelope.declaration.parameter_words.checked_add(1) != Some(u64::from(raw.ins_size()))
+    if declaration.parameter_words.checked_add(1) != Some(u64::from(raw.ins_size()))
         || raw.ins_size() > raw.registers_size()
     {
         return Err(bad());
     }
     let mut parameters = Vec::new();
     push(&mut parameters, ParameterFamily::Reference, budget)?;
-    for name in &envelope.declaration.parameter_types {
+    for name in &declaration.parameter_types {
         budget.checkpoint()?;
         let family = match name.units().first() {
             Some(74 | 68) => ParameterFamily::Wide,
@@ -128,9 +126,9 @@ fn decode_impl<'a>(
         if matches!(op, Op::Initialize(_)) {
             return Ok(Some(EntryWindow(EntryWindowData {
                 _sealed: (),
-                method: envelope.method,
-                owner: envelope.owner,
-                raw,
+                method,
+                owner,
+                raw: raw.clone(),
                 parameters,
                 operations,
                 calls,

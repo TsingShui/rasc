@@ -185,19 +185,28 @@ fn collect_impl(
             return Ok(None);
         }
     }
-    let directory = crate::input::field_declarations::collect(index, key, control)?;
-    if let Some(error) = directory.issue {
-        return Err(error);
+    let facts = index.class_facts_cached(key.class_def, control)?;
+    if let Some(error) = facts.fields_issue() {
+        return Err(match error {
+            crate::RequestError::Input(error) => crate::RequestError::Input(*error),
+            _ => crate::RequestError::InternalInvariant(
+                "P0 field issue was not a classified input error",
+            ),
+        });
     }
     let mut storage = None;
     let mut constants = Vec::new();
-    for field in directory.fields {
+    for entry in facts.fields() {
         control.checkpoint()?;
-        let facts = field.facts?;
-        if !matches!(field.storage, crate::FieldStorage::Static(_)) || !field.default_preparation {
+        let field = entry.field();
+        let access_flags = entry.access_flags_raw();
+        let field_facts = entry.declaration_facts(control)?;
+        if !matches!(entry.storage(), crate::FieldStorage::Static(_))
+            || !entry.default_preparation()
+        {
             return Ok(None);
         }
-        let reference = index.field_reference(field.key.field, control)?;
+        let reference = index.field_reference(field, control)?;
         let Some(evidence) = catalog.field(
             reference.owner,
             reference.declaration.name,
@@ -207,34 +216,34 @@ fn collect_impl(
         else {
             return Ok(None);
         };
-        if evidence.access_flags != field.access_flags {
+        if evidence.access_flags != access_flags {
             return Ok(None);
         }
         let mut names = 0usize;
         for name in &class.field_names {
             control.checkpoint()?;
-            if *name == facts.name {
+            if *name == field_facts.name {
                 names = names.checked_add(1).ok_or(RequestError::PlatformCapacity)?;
             }
         }
         if names != 1 {
             return Ok(None);
         }
-        if crate::substrate::flags::enum_values_table(field.access_flags)
-            && facts.descriptor == array
-            && facts.name == units("$VALUES", control)?
+        if crate::substrate::flags::enum_values_table(access_flags)
+            && field_facts.descriptor == array
+            && field_facts.name == units("$VALUES", control)?
         {
-            if storage.replace(field.key.field).is_some() {
+            if storage.replace(field).is_some() {
                 return Ok(None);
             }
-        } else if crate::substrate::flags::enum_constant(field.access_flags)
-            && facts.descriptor == descriptor
+        } else if crate::substrate::flags::enum_constant(access_flags)
+            && field_facts.descriptor == descriptor
         {
             push(
                 &mut constants,
                 Constant {
-                    field: field.key.field,
-                    name: facts.name,
+                    field,
+                    name: field_facts.name,
                 },
                 control,
             )?;

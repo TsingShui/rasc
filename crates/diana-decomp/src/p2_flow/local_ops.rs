@@ -160,7 +160,7 @@ pub(super) fn initialization(
     {
         return Err(RequestError::InitializationUnavailable { pc });
     }
-    index.check_producer_words(pc, spec, layout, operands, budget)?;
+    crate::p1::binding::check_producer(index, pc, spec, layout, operands, budget)?;
     if let Some(local) = index.local_method(reference, budget)?
         && local.access_flags & crate::substrate::flags::STATIC != 0
     {

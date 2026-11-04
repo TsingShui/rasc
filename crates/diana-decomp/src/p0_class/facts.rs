@@ -5,8 +5,8 @@ use serde::{Serialize, Serializer};
 use crate::input::catalog::{ClassDataShape, MethodGroup};
 use crate::substrate::flags::{ClassAccessFlags, FieldAccessFlags, MethodAccessFlags};
 use crate::{
-    ByteOffset, ClassDefId, ClassKey, FieldId, FieldStorage, MethodId, OriginalAnnotations,
-    RequestError, TypeId,
+    ByteOffset, ByteRange, ClassDefId, ClassKey, FieldId, FieldStorage, MethodId,
+    OriginalAnnotations, RequestError, TypeId,
 };
 
 /// A locally read fact. Absence is distinct from damage and deliberate non-reading.
@@ -263,6 +263,61 @@ impl FieldDirectoryEntry {
     }
     pub fn default_preparation(&self) -> bool {
         self.default_preparation
+    }
+    /// Copy the readable field declaration into the shared field-fact shape.
+    pub(crate) fn declaration_facts(
+        &self,
+        control: &mut impl crate::pipeline::control::InputControl,
+    ) -> Result<crate::FieldFacts, crate::RequestError> {
+        match &self.declaration {
+            Fact::Present(declaration) => Ok(crate::FieldFacts {
+                name: crate::substrate::owned::copy_slice_units(declaration.name.units(), control)?,
+                descriptor: crate::substrate::owned::copy_slice_units(
+                    declaration.descriptor.units(),
+                    control,
+                )?,
+            }),
+            Fact::Unavailable(crate::RequestError::Input(error)) => {
+                Err(crate::RequestError::Input(*error))
+            }
+            Fact::Unavailable(_) => Err(crate::RequestError::InternalInvariant(
+                "field declaration failure was not a classified input error",
+            )),
+            Fact::Absent | Fact::NotRead => Err(crate::RequestError::InternalInvariant(
+                "field directory delivered no declaration",
+            )),
+        }
+    }
+
+    /// Original static preparation in the shared field-fact shape. A damaged or
+    /// unread preparation stays `None`; it is not replaced by an implicit default.
+    pub fn preparation(&self) -> Option<crate::FieldInitialValue> {
+        match &self.initial {
+            Fact::Present(InitialValue::ImplicitDefault) => {
+                Some(crate::FieldInitialValue::ImplicitDefault)
+            }
+            Fact::Present(InitialValue::Encoded {
+                tag,
+                value_arg,
+                range_bytes,
+                bytes,
+                ..
+            }) => Some(crate::FieldInitialValue::Encoded {
+                tag: *tag,
+                arg: *value_arg,
+                range: ByteRange {
+                    start: ByteOffset(range_bytes[0]),
+                    end: ByteOffset(range_bytes[1]),
+                },
+                bytes: bytes.clone(),
+            }),
+            Fact::Absent => Some(crate::FieldInitialValue::InstanceDefault),
+            Fact::NotRead | Fact::Unavailable(_) => None,
+        }
+    }
+
+    pub fn access_flags_raw(&self) -> u32 {
+        self.access_flags.raw()
     }
 }
 
