@@ -1,7 +1,7 @@
 use super::branch::ValueUse;
 use super::conditions::Comparison;
 use crate::substrate::owned::push;
-use crate::{MethodBudget, RequestError};
+use crate::{RequestError, RunContext};
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub(crate) enum CastType {
@@ -105,11 +105,7 @@ pub(crate) struct Expression {
     root: ExprId,
 }
 impl Expression {
-    fn push(
-        &mut self,
-        node: Node,
-        budget: &mut MethodBudget<'_, '_>,
-    ) -> Result<ExprId, RequestError> {
+    fn push(&mut self, node: Node, budget: &mut RunContext<'_>) -> Result<ExprId, RequestError> {
         let id =
             ExprId(u32::try_from(self.nodes.len()).map_err(|_| RequestError::PlatformCapacity)?);
         push(&mut self.nodes, node, budget)?;
@@ -131,7 +127,7 @@ pub(super) fn comparison(
     left: ValueUse,
     original: crate::p2_flow::primitives::Compare,
     right: ValueUse,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<Expression, RequestError> {
     let mut tree = Expression {
         nodes: Vec::new(),

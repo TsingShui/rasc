@@ -1,5 +1,5 @@
-use crate::input::{MethodInput, RawPrintable};
-use crate::{CodeUnitOffset, FieldId, MethodBudget, MethodId, RegisterId, RequestError};
+use crate::input::{MethodSource, RawPrintable};
+use crate::{CodeUnitOffset, FieldId, MethodId, RegisterId, RequestError, RunContext};
 
 /// Checked compiler-owned outer capture prefix. The remaining constructor and
 /// owning Java unit require separate ordinary-pipeline and source verification.
@@ -26,10 +26,10 @@ impl CaptureCertificate {
     }
     pub(crate) fn check(
         &self,
-        input: &MethodInput<'_, '_>,
-        budget: &mut MethodBudget<'_, '_>,
+        input: &MethodSource<'_, '_>,
+        budget: &mut RunContext<'_>,
     ) -> Result<(), RequestError> {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         if input.class_id() != self.class || input.method_id() != self.method {
             return Err(RequestError::InternalInvariant(
                 "capture certificate belongs to another constructor",
@@ -41,16 +41,16 @@ impl CaptureCertificate {
 
 pub(crate) fn verify(
     _permit: &crate::engine::SchedulePermit,
-    input: &MethodInput<'_, '_>,
+    input: &MethodSource<'_, '_>,
     declaration: &crate::p4_types::declarations::capture::CaptureDeclaration,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<Option<CaptureCertificate>, RequestError> {
     verify_impl(input, declaration, budget)
 }
 fn verify_impl(
-    input: &MethodInput<'_, '_>,
+    input: &MethodSource<'_, '_>,
     declaration: &crate::p4_types::declarations::capture::CaptureDeclaration,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<Option<CaptureCertificate>, RequestError> {
     let RawPrintable::Method(validated) = input.raw() else {
         return Ok(None);
@@ -139,9 +139,9 @@ fn verify_impl(
     Ok(Some(proof))
 }
 fn replay(
-    input: &MethodInput<'_, '_>,
+    input: &MethodSource<'_, '_>,
     proof: &CaptureCertificate,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<(), RequestError> {
     let RawPrintable::Method(validated) = input.raw() else {
         return Err(RequestError::InternalInvariant(
@@ -222,7 +222,7 @@ fn replay(
     let mut pc = CodeUnitOffset(0);
     let mut writes = 0usize;
     while pc.0 < raw.code_units().0 {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         let layout = crate::raw::instruction_layout(raw.instructions(), pc, raw.version())
             .map_err(crate::input::MethodError::Decode)?;
         if layout

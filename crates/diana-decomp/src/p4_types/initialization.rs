@@ -2,7 +2,7 @@ mod chain;
 use crate::p2_flow::{CallId, CallTarget, Op, OpId};
 use crate::p3_ssa::{SsaBody, ValueId};
 use crate::substrate::owned::push;
-use crate::{MethodBudget, RequestError, TypeId};
+use crate::{RequestError, RunContext, TypeId};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum InitializationId {
@@ -89,13 +89,13 @@ fn ix(value: u32) -> Result<usize, RequestError> {
 pub(super) fn solve(
     ssa: &SsaBody<'_>,
     capture: Option<&super::capture::CaptureUse>,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<Initializations, RequestError> {
     if ssa.object_creations.is_empty()
         && !matches!(ssa.frame, crate::p2_flow::MethodFrame::Constructor(_))
     {
         for site in &ssa.calls {
-            budget.charge_work(1)?;
+            budget.checkpoint()?;
             if site.target == CallTarget::Constructor {
                 return Err(RequestError::InitializationUnavailable { pc: site.pc });
             }
@@ -110,18 +110,18 @@ pub(super) fn solve(
     }
     let mut deferred = Vec::new();
     for _ in &ssa.values {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         push(&mut deferred, None, budget)?;
     }
     let mut calls = Vec::new();
     for _ in &ssa.calls {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         push(&mut calls, None, budget)?;
     }
     let chain = chain::solve(ssa, capture, &mut deferred, &mut calls, budget)?;
     let mut plans = Vec::new();
     for allocation in &ssa.operations {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         let Op::NewInstance(_, creation) = allocation.op else {
             continue;
         };
@@ -147,13 +147,13 @@ pub(super) fn solve(
         let mut initialized = None;
         let mut failure_pc = allocation.pc;
         for (index, block) in ssa.blocks.iter().enumerate() {
-            budget.charge_work(1)?;
+            budget.checkpoint()?;
             if !(block.pc.0 <= allocation.pc.0 && allocation.pc.0 <= block.terminal_pc.0) {
                 continue;
             }
             failure_pc = block.terminal_pc;
             for &op_id in &ssa.bound[index].ops {
-                budget.charge_work(1)?;
+                budget.checkpoint()?;
                 let op = ssa.operation(op_id)?;
                 if op.pc.0 <= allocation.pc.0 {
                     continue;
@@ -186,7 +186,7 @@ pub(super) fn solve(
                             return Err(unavailable(op.pc));
                         }
                         for value in op.inputs.iter().skip(1) {
-                            budget.charge_work(1)?;
+                            budget.checkpoint()?;
                             if deferred[ix(value.0)?] == Some(id) {
                                 return Err(unavailable(op.pc));
                             }
@@ -219,7 +219,7 @@ pub(super) fn solve(
         )?;
     }
     for (index, site) in ssa.calls.iter().enumerate() {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         if site.target == CallTarget::Constructor && calls[index].is_none() {
             return Err(RequestError::InitializationUnavailable { pc: site.pc });
         }

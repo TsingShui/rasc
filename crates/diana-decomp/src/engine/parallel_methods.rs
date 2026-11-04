@@ -60,8 +60,6 @@ impl<'a> Engine<'a> {
         // and diagnostics are charged by each worker against the same request.
         let mut results = Vec::new();
         reserve(&mut results, methods.len(), control)?;
-        let mut usage = Vec::new();
-        reserve(&mut usage, methods.len(), control)?;
         // Include allocations performed during header enumeration and slot setup.
         let parallel = control
             .parallel_control()?
@@ -85,17 +83,14 @@ impl<'a> Engine<'a> {
                         inputs,
                         &mut control,
                     );
-                    (result, diagnostics, control.usage())
+                    (result, diagnostics)
                 })
                 .collect_into_vec(&mut results)
         });
-        for (_, _, used) in &results {
-            usage.push(*used);
-        }
-        control.finish_parallel(&parallel, &usage)?;
+        control.finish_parallel(&parallel)?;
         let mut members = Vec::new();
         reserve(&mut members, results.len(), control)?;
-        for (result, local, _) in results {
+        for (result, local) in results {
             let mut member = result?;
             let offset = diagnostics.values.len();
             for diagnostic in local.values {

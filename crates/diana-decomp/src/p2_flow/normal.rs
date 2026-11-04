@@ -1,7 +1,7 @@
-use crate::input::{MethodInput, RawMethodView, RawPrintable};
-use crate::raw::{LayoutKind, RawLiteral, instruction_layout};
+use crate::input::{MethodSource, RawMethodView, RawPrintable};
+use crate::raw::{LayoutKind, RawLiteral};
 use crate::substrate::owned::push;
-use crate::{CodeUnitOffset, MethodBudget, RegisterId, RequestError};
+use crate::{CodeUnitOffset, RegisterId, RequestError, RunContext};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct BlockId(pub u32);
@@ -179,9 +179,9 @@ pub(crate) enum ArrayKind {
 }
 impl ArrayKind {
     pub(crate) fn parse(
-        input: &MethodInput<'_, '_>,
+        input: &MethodSource<'_, '_>,
         id: crate::TypeId,
-        budget: &mut MethodBudget<'_, '_>,
+        budget: &mut RunContext<'_>,
     ) -> Result<Option<Self>, RequestError> {
         Ok(
             match declaration_for_projection(input, input.type_projection(id, budget)?, budget)? {
@@ -194,8 +194,8 @@ impl ArrayKind {
     }
     pub(crate) fn element_type(
         self,
-        input: &MethodInput<'_, '_>,
-        budget: &mut MethodBudget<'_, '_>,
+        input: &MethodSource<'_, '_>,
+        budget: &mut RunContext<'_>,
     ) -> Result<DeclarationType, RequestError> {
         match self {
             Self::Primitive(kind) => Ok(kind.value_type()),
@@ -543,6 +543,9 @@ pub(crate) struct FlowBodyData<'a> {
     pub result: ResultType,
     pub switches: Vec<Switch>,
     pub raw: RawMethodView<'a>,
+    /// The P1-disassembled original directory this flow was built from. Later
+    /// stages read decoded operands and layouts from it.
+    pub decoded: crate::input::DecodedMethod<'a>,
     pub parameters: Vec<DeclarationType>,
     pub blocks: Vec<Block>,
     pub edges: Vec<Edge>,
@@ -685,10 +688,10 @@ pub(crate) fn terminal_register(terminal: Terminal) -> Option<RegisterId> {
 fn contains_pc(
     pcs: &[CodeUnitOffset],
     pc: CodeUnitOffset,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<bool, RequestError> {
     for old in pcs {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         if *old == pc {
             return Ok(true);
         }
@@ -699,10 +702,10 @@ fn contains_pc(
 fn block_at(
     pcs: &[CodeUnitOffset],
     pc: CodeUnitOffset,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<BlockId, RequestError> {
     for (index, old) in pcs.iter().enumerate() {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         if *old == pc {
             return Ok(BlockId(
                 u32::try_from(index).map_err(|_| RequestError::PlatformCapacity)?,
@@ -715,9 +718,9 @@ fn block_at(
 }
 
 pub(crate) fn declaration_for_projection(
-    input: &MethodInput<'_, '_>,
+    input: &MethodSource<'_, '_>,
     key: crate::input::TypeProjection,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<Option<DeclarationType>, RequestError> {
     declaration_from_descriptor(input.projected_name(key, budget)?, key, budget)
 }
@@ -725,7 +728,7 @@ pub(crate) fn declaration_for_projection(
 pub(super) fn declaration_from_descriptor(
     descriptor: crate::input::DexString<'_>,
     key: crate::input::TypeProjection,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<Option<DeclarationType>, RequestError> {
     if let Some(kind) = primitive_field_type(descriptor, budget)? {
         return Ok(Some(kind));
@@ -758,10 +761,10 @@ pub(super) fn declaration_from_descriptor(
     })
 }
 pub(crate) fn reference_type(
-    input: &MethodInput<'_, '_>,
+    input: &MethodSource<'_, '_>,
     _descriptor: crate::input::DexString<'_>,
     id: crate::TypeId,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<Option<DeclarationType>, RequestError> {
     Ok(
         declaration_for_projection(input, input.type_projection(id, budget)?, budget)?
@@ -769,16 +772,16 @@ pub(crate) fn reference_type(
     )
 }
 pub(crate) fn field_type(
-    input: &MethodInput<'_, '_>,
+    input: &MethodSource<'_, '_>,
     _descriptor: crate::input::DexString<'_>,
     id: crate::TypeId,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<Option<DeclarationType>, RequestError> {
     declaration_for_projection(input, input.type_projection(id, budget)?, budget)
 }
 pub(crate) fn primitive_field_type(
     descriptor: crate::input::DexString<'_>,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<Option<DeclarationType>, RequestError> {
     let mut units = descriptor.reader()?;
     let kind = match units.next(budget)? {
@@ -800,15 +803,15 @@ pub(crate) fn primitive_field_type(
 }
 pub(crate) fn decode<'a>(
     _schedule: &crate::engine::SchedulePermit,
-    input: &MethodInput<'_, 'a>,
-    budget: &mut MethodBudget<'_, '_>,
+    input: &MethodSource<'_, 'a>,
+    budget: &mut RunContext<'_>,
 ) -> Result<crate::substrate::outcome::Outcome<FlowBody<'a>>, RequestError> {
     decode_impl(input, budget)
 }
 
 fn decode_impl<'a>(
-    input: &MethodInput<'_, 'a>,
-    budget: &mut MethodBudget<'_, '_>,
+    input: &MethodSource<'_, 'a>,
+    budget: &mut RunContext<'_>,
 ) -> Result<crate::substrate::outcome::Outcome<FlowBody<'a>>, RequestError> {
     let RawPrintable::Method(checked) = input.raw() else {
         return Ok(crate::substrate::outcome::Outcome::Declined(
@@ -816,6 +819,7 @@ fn decode_impl<'a>(
         ));
     };
     let raw = checked.layout().original().clone();
+    let decoded = checked.decoded();
     let protection = crate::input::protection::read(checked.layout(), budget)?;
     let result = if input
         .declaration()
@@ -991,7 +995,7 @@ fn decode_impl<'a>(
     let mut leaders = Vec::new();
     push(&mut leaders, CodeUnitOffset(0), budget)?;
     for boundary in protection.boundaries() {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         push(
             &mut leaders,
             super::protection::boundary(&raw, boundary)?,
@@ -999,16 +1003,15 @@ fn decode_impl<'a>(
         )?;
     }
     for target in protection.targets() {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         if checked.layout().is_reachable(target) {
             push(&mut leaders, target, budget)?;
         }
     }
     let mut pc = CodeUnitOffset(0);
     while pc.0 < raw.code_units().0 {
-        budget.charge_work(1)?;
-        let layout = instruction_layout(raw.instructions(), pc, raw.version())
-            .map_err(crate::input::MethodError::Decode)?;
+        budget.checkpoint()?;
+        let layout = decoded.layout_at(pc)?;
         let mut next = pc
             .checked_advance(layout.width())
             .ok_or(RequestError::PlatformCapacity)?;
@@ -1023,9 +1026,7 @@ fn decode_impl<'a>(
                     },
                 ));
             };
-            let operands =
-                crate::input::operands::instruction_operands(raw.instructions(), pc, layout)
-                    .map_err(crate::input::MethodError::Decode)?;
+            let operands = decoded.operands_at(pc)?;
             let reg = |n| {
                 operands
                     .registers()
@@ -1345,22 +1346,15 @@ fn decode_impl<'a>(
                     };
                     let mut registers = Vec::new();
                     for register in operands.registers().iter() {
-                        budget.charge_work(1)?;
+                        budget.checkpoint()?;
                         push(&mut registers, register, budget)?;
                     }
                     let mut result = FilledResult::Discarded;
                     if next.0 < raw.code_units().0 {
-                        let result_layout =
-                            instruction_layout(raw.instructions(), next, raw.version())
-                                .map_err(crate::input::MethodError::Decode)?;
+                        let result_layout = decoded.layout_at(next)?;
                         if matches!(result_layout.kind(),LayoutKind::Instruction(spec) if spec.opcode == 0x0c)
                         {
-                            let result_operands = crate::input::operands::instruction_operands(
-                                raw.instructions(),
-                                next,
-                                result_layout,
-                            )
-                            .map_err(crate::input::MethodError::Decode)?;
+                            let result_operands = decoded.operands_at(next)?;
                             let register = result_operands.registers().iter().next().ok_or(
                                 RequestError::InternalInvariant(
                                     "filled array result lost destination",
@@ -1395,8 +1389,7 @@ fn decode_impl<'a>(
                     let payload = CodeUnitOffset(pc.0.checked_add_signed(delta.0).ok_or(
                         RequestError::InternalInvariant("checked fill target overflowed"),
                     )?);
-                    let data = instruction_layout(raw.instructions(), payload, raw.version())
-                        .map_err(crate::input::MethodError::Decode)?;
+                    let data = decoded.layout_at(payload)?;
                     let LayoutKind::ArrayData {
                         element_width,
                         element_count,
@@ -1524,18 +1517,12 @@ fn decode_impl<'a>(
                 0xf | 0x11 if result.width() == ValueWidth::One => Decoded::Return(reg(0)?),
                 0x2b | 0x2c => {
                     let payload = target()?;
-                    let payload_layout =
-                        instruction_layout(raw.instructions(), payload, raw.version())
-                            .map_err(crate::input::MethodError::Decode)?;
-                    let cases = crate::input::operands::switch_payload(
-                        raw.instructions(),
-                        payload,
-                        payload_layout,
-                    )
-                    .map_err(crate::input::MethodError::Decode)?;
+                    let cases = decoded.switch_cases_at(payload)?.ok_or(
+                        RequestError::InternalInvariant("switch lost its decoded payload"),
+                    )?;
                     let mut targets = Vec::new();
                     for case in cases {
-                        budget.charge_work(1)?;
+                        budget.checkpoint()?;
                         let to =
                             pc.0.checked_add_signed(case.offset.0)
                                 .map(CodeUnitOffset)
@@ -1625,9 +1612,7 @@ fn decode_impl<'a>(
                     let mut destination = None;
                     let mut result_pc = None;
                     if next.0 < raw.code_units().0 {
-                        let result_layout =
-                            instruction_layout(raw.instructions(), next, raw.version())
-                                .map_err(crate::input::MethodError::Decode)?;
+                        let result_layout = decoded.layout_at(next)?;
                         if matches!(result_layout.kind(),LayoutKind::Instruction(spec) if matches!(spec.opcode,0x0a..=0x0c))
                         {
                             let valid = match result {
@@ -1657,12 +1642,7 @@ fn decode_impl<'a>(
                                     "void call acquired move-result",
                                 ));
                             }
-                            let result = crate::input::operands::instruction_operands(
-                                raw.instructions(),
-                                next,
-                                result_layout,
-                            )
-                            .map_err(crate::input::MethodError::Decode)?;
+                            let result = decoded.operands_at(next)?;
                             destination = Some(result.registers().iter().next().ok_or(
                                 RequestError::InternalInvariant("move-result lost destination"),
                             )?);
@@ -1749,7 +1729,7 @@ fn decode_impl<'a>(
     // Block order follows original instruction order; no output sorting is used.
     let mut pcs = Vec::new();
     for &(pc, _) in &instructions {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         if contains_pc(&leaders, pc, budget)? {
             push(&mut pcs, pc, budget)?;
         }
@@ -1760,7 +1740,7 @@ fn decode_impl<'a>(
     let mut start = CodeUnitOffset(0);
     let mut next_operation = 0u32;
     for (position, &(pc, instruction)) in instructions.iter().enumerate() {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         if current.is_empty() {
             start = pc;
         }
@@ -1775,7 +1755,7 @@ fn decode_impl<'a>(
                         ))?;
                 let mut cases = Vec::new();
                 for &(key, to) in targets {
-                    budget.charge_work(1)?;
+                    budget.checkpoint()?;
                     push(&mut cases, (key, block_at(&pcs, to, budget)?), budget)?;
                 }
                 let table = SwitchId(
@@ -1846,7 +1826,7 @@ fn decode_impl<'a>(
             Terminal::Switch { table, .. } => {
                 let table = &switches[ix(table.0)?];
                 for &(_, target) in &table.cases {
-                    budget.charge_work(1)?;
+                    budget.checkpoint()?;
                     push(&mut edges, Edge { source, target }, budget)?;
                 }
                 push(
@@ -1907,6 +1887,7 @@ fn decode_impl<'a>(
             result,
             switches,
             raw,
+            decoded: decoded.clone(),
             parameters,
             blocks,
             edges,

@@ -1,7 +1,7 @@
 use crate::context::Context;
-use crate::input::MethodInput;
+use crate::input::MethodSource;
 use crate::substrate::owned::{copy_proto, copy_units};
-use crate::{MethodBudget, MethodId, RequestError};
+use crate::{MethodId, RequestError, RunContext};
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub(crate) enum ReceiverKind {
@@ -24,11 +24,11 @@ pub(crate) struct ReceiverContract {
     pub arity: usize,
 }
 pub(crate) fn collect_receiver(
-    input: &MethodInput<'_, '_>,
+    input: &MethodSource<'_, '_>,
     _catalog: &Context,
     invocation: &super::throws::Invocation,
     kind: ReceiverKind,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<Option<ReceiverDeclaration>, RequestError> {
     let _span = crate::pipeline::phase_span("p4_receivers");
     let reference = invocation.reference;
@@ -54,10 +54,10 @@ pub(crate) fn collect_receiver(
 impl ReceiverDeclaration {
     pub(crate) fn bind_source(
         &self,
-        input: &MethodInput<'_, '_>,
+        input: &MethodSource<'_, '_>,
         catalog: &Context,
         parameter: &[u16],
-        budget: &mut MethodBudget<'_, '_>,
+        budget: &mut RunContext<'_>,
     ) -> Result<Option<ReceiverContract>, RequestError> {
         let target = &self.target;
         let caller = copy_units(input.owner(), budget)?;
@@ -86,13 +86,10 @@ impl ReceiverDeclaration {
         }))
     }
 }
-pub(super) fn retain(
-    units: &[u16],
-    budget: &mut MethodBudget<'_, '_>,
-) -> Result<Vec<u16>, RequestError> {
+pub(super) fn retain(units: &[u16], budget: &mut RunContext<'_>) -> Result<Vec<u16>, RequestError> {
     let mut result = Vec::new();
     for &unit in units {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         crate::substrate::owned::push(&mut result, unit, budget)?;
     }
     Ok(result)

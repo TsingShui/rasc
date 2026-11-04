@@ -1,5 +1,5 @@
-use crate::input::MethodInput;
-use crate::{MethodBudget, RequestError};
+use crate::input::MethodSource;
+use crate::{RequestError, RunContext};
 
 #[derive(Clone, Copy)]
 pub(crate) enum MemberSyntax {
@@ -35,8 +35,8 @@ impl JavaInitializer {
 }
 
 pub(super) fn is_initializer(
-    input: &MethodInput<'_, '_>,
-    budget: &mut MethodBudget<'_, '_>,
+    input: &MethodSource<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<bool, RequestError> {
     Ok(input.declaration().name.matches_with(
         &const { crate::substrate::owned::ascii_units(*b"<clinit>") },
@@ -44,8 +44,8 @@ pub(super) fn is_initializer(
     )?)
 }
 pub(super) fn header_admitted(
-    input: &MethodInput<'_, '_>,
-    budget: &mut MethodBudget<'_, '_>,
+    input: &MethodSource<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<bool, RequestError> {
     let flags = input.access_flags();
     Ok(is_initializer(input, budget)?

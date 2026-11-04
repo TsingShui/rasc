@@ -3,9 +3,9 @@ use crate::p2_flow::{
     Block, BlockId, CallId, CallSite, DeclarationType, Edge, EdgeId, FlowBody, Op, OpId,
     ResultType, Switch, destination, terminal_other, terminal_register,
 };
-use crate::raw::{LayoutKind, instruction_layout};
+use crate::raw::LayoutKind;
 use crate::substrate::owned::push;
-use crate::{CodeUnitOffset, MethodBudget, RegisterId, RequestError};
+use crate::{CodeUnitOffset, RegisterId, RequestError, RunContext};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct ValueId(pub u32);
@@ -74,6 +74,9 @@ pub(crate) struct SsaBodyData<'a> {
     pub operations: Vec<BoundOp>,
     pub result: ResultType,
     pub raw: RawMethodView<'a>,
+    /// The P1-disassembled original directory carried through P2. Later stages
+    /// read decoded layouts and operands from it, not from a second decode.
+    pub decoded: crate::input::DecodedMethod<'a>,
     pub parameters: Vec<DeclarationType>,
     pub blocks: Vec<Block>,
     pub edges: Vec<Edge>,
@@ -117,10 +120,10 @@ fn ix(value: u32) -> Result<usize, RequestError> {
 fn add_register(
     set: &mut Vec<RegisterId>,
     register: RegisterId,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<bool, RequestError> {
     for old in set.iter() {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         if *old == register {
             return Ok(false);
         }
@@ -131,10 +134,10 @@ fn add_register(
 pub(super) fn lookup(
     env: &[(RegisterId, Sym)],
     register: RegisterId,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<Sym, RequestError> {
     for &(slot, value) in env {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         if slot == register {
             return Ok(value);
         }
@@ -145,10 +148,10 @@ fn write(
     env: &mut Vec<(RegisterId, Sym)>,
     register: RegisterId,
     value: Sym,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<(), RequestError> {
     for entry in env.iter_mut() {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         if entry.0 == register {
             entry.1 = value;
             return Ok(());
@@ -172,7 +175,7 @@ pub(super) fn commit(
     register: RegisterId,
     value: ValueId,
     width: crate::p2_flow::ValueWidth,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<(), RequestError> {
     write(env, register, Sym::Value(value), budget)?;
     if width == crate::p2_flow::ValueWidth::Two {
@@ -193,10 +196,10 @@ fn phi_highs(
     block: BlockId,
     registers: u16,
     env: &mut Vec<(RegisterId, Sym)>,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<(), RequestError> {
     for phi in phis {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         if phi.block != block {
             continue;
         }
@@ -214,15 +217,15 @@ fn capture_exceptional(
     pc: CodeUnitOffset,
     env: &[(RegisterId, Sym)],
     snapshots: &mut [Vec<(RegisterId, Sym)>],
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<(), RequestError> {
     for (index, edge) in flow.exception_edges.iter().enumerate() {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         if edge.source != source || edge.pc != pc {
             continue;
         }
         for &register in &live[ix(edge.target.0)?] {
-            budget.charge_work(1)?;
+            budget.checkpoint()?;
             write(
                 &mut snapshots[index],
                 register,
@@ -250,11 +253,11 @@ pub(super) fn seed_parameters(
     count: usize,
     width: impl Fn(usize) -> crate::p2_flow::ValueWidth,
     registers: u16,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<EntrySeeds, RequestError> {
     let mut words = 0u32;
     for i in 0..count {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         words = words
             .checked_add(width(i).words())
             .ok_or(RequestError::PlatformCapacity)?;
@@ -267,7 +270,7 @@ pub(super) fn seed_parameters(
     let mut values = Vec::new();
     let mut seeds = Vec::new();
     for i in 0..count {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         let id = ValueId(u32::try_from(values.len()).map_err(|_| RequestError::PlatformCapacity)?);
         push(
             &mut values,
@@ -289,11 +292,11 @@ pub(super) fn bind_inputs(
     calls: &[CallSite],
     filled: &[crate::p2_flow::FilledArraySite],
     env: &[(RegisterId, Sym)],
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<Vec<ValueId>, RequestError> {
     let mut inputs = Vec::new();
     for register in operation.kind.reads(calls, filled)? {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         push(
             &mut inputs,
             value(lookup(env, register, budget)?, register, operation.pc)?,
@@ -307,7 +310,7 @@ pub(super) fn define_result(
     calls: &[CallSite],
     env: &mut Vec<(RegisterId, Sym)>,
     values: &mut Vec<Definition>,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<Option<ValueId>, RequestError> {
     if let Some(register) = destination(operation.kind) {
         let id = ValueId(u32::try_from(values.len()).map_err(|_| RequestError::PlatformCapacity)?);
@@ -335,41 +338,41 @@ pub(super) fn define_result(
 pub(crate) fn build<'a>(
     _schedule: &crate::engine::SchedulePermit,
     flow: FlowBody<'a>,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<SsaBody<'a>, RequestError> {
     build_impl(flow, budget)
 }
 
 fn build_impl<'a>(
     flow: FlowBody<'a>,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<SsaBody<'a>, RequestError> {
     let mut live = Vec::new();
     for _ in &flow.blocks {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         push(&mut live, Vec::new(), budget)?;
     }
     loop {
         let mut changed = false;
         for index in (0..flow.blocks.len()).rev() {
-            budget.charge_work(1)?;
+            budget.checkpoint()?;
             let block = &flow.blocks[index];
             let mut needed = Vec::new();
             for edge in &flow.edges {
-                budget.charge_work(1)?;
+                budget.checkpoint()?;
                 if ix(edge.source.0)? == index {
                     for &register in &live[ix(edge.target.0)?] {
-                        budget.charge_work(1)?;
+                        budget.checkpoint()?;
                         add_register(&mut needed, register, budget)?;
                     }
                 }
             }
             if matches!(block.terminal, crate::p2_flow::Terminal::Throw(_)) {
                 for edge in &flow.exception_edges {
-                    budget.charge_work(1)?;
+                    budget.checkpoint()?;
                     if ix(edge.source.0)? == index && edge.pc == block.terminal_pc {
                         for &register in &live[ix(edge.target.0)?] {
-                            budget.charge_work(1)?;
+                            budget.checkpoint()?;
                             add_register(&mut needed, register, budget)?;
                         }
                     }
@@ -382,15 +385,15 @@ fn build_impl<'a>(
             .into_iter()
             .flatten()
             {
-                budget.charge_work(1)?;
+                budget.checkpoint()?;
                 add_register(&mut needed, register, budget)?;
             }
             for operation in block.ops.iter().rev() {
-                budget.charge_work(1)?;
+                budget.checkpoint()?;
                 if let Some(destination) = destination(operation.kind) {
                     let mut position = 0;
                     while position < needed.len() {
-                        budget.charge_work(1)?;
+                        budget.checkpoint()?;
                         if needed[position].0 >= destination.0
                             && needed[position].0
                                 < destination
@@ -405,21 +408,21 @@ fn build_impl<'a>(
                     }
                 }
                 for register in operation.kind.reads(&flow.calls, &flow.filled_arrays)? {
-                    budget.charge_work(1)?;
+                    budget.checkpoint()?;
                     add_register(&mut needed, register, budget)?;
                 }
                 for edge in &flow.exception_edges {
-                    budget.charge_work(1)?;
+                    budget.checkpoint()?;
                     if ix(edge.source.0)? == index && edge.pc == operation.pc {
                         for &register in &live[ix(edge.target.0)?] {
-                            budget.charge_work(1)?;
+                            budget.checkpoint()?;
                             add_register(&mut needed, register, budget)?;
                         }
                     }
                 }
             }
             for register in needed {
-                budget.charge_work(1)?;
+                budget.checkpoint()?;
                 changed |= add_register(&mut live[index], register, budget)?;
             }
         }
@@ -439,7 +442,7 @@ fn build_impl<'a>(
     let mut phis = Vec::new();
     for (index, registers) in live.iter().enumerate() {
         for &register in registers {
-            budget.charge_work(1)?;
+            budget.checkpoint()?;
             let result =
                 ValueId(u32::try_from(values.len()).map_err(|_| RequestError::PlatformCapacity)?);
             push(&mut values, Definition::Phi, budget)?;
@@ -461,21 +464,21 @@ fn build_impl<'a>(
     let mut operations = Vec::new();
     let mut call_ops = Vec::new();
     for _ in &flow.calls {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         push(&mut call_ops, None, budget)?;
     }
     let mut outgoing = Vec::new();
     let mut exceptional = Vec::new();
     for _ in &flow.exception_edges {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         push(&mut exceptional, Vec::new(), budget)?;
     }
     for (index, block) in flow.blocks.iter().enumerate() {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         let block_id = BlockId(u32::try_from(index).map_err(|_| RequestError::PlatformCapacity)?);
         let mut env = Vec::new();
         for phi in &phis {
-            budget.charge_work(1)?;
+            budget.checkpoint()?;
             if phi.block == block_id {
                 write(&mut env, phi.register, Sym::Value(phi.result), budget)?;
             }
@@ -483,7 +486,7 @@ fn build_impl<'a>(
         phi_highs(&phis, block_id, flow.raw.registers_size(), &mut env, budget)?;
         let mut ops = Vec::new();
         for operation in &block.ops {
-            budget.charge_work(1)?;
+            budget.checkpoint()?;
             if ix(operation.id.0)? != operations.len() {
                 return Err(RequestError::InternalInvariant(
                     "flow operation identity changed",
@@ -561,10 +564,10 @@ fn build_impl<'a>(
         )?;
         let mut snapshot = Vec::new();
         for edge in &flow.edges {
-            budget.charge_work(1)?;
+            budget.checkpoint()?;
             if edge.source == block_id {
                 for &register in &live[ix(edge.target.0)?] {
-                    budget.charge_work(1)?;
+                    budget.checkpoint()?;
                     write(
                         &mut snapshot,
                         register,
@@ -581,7 +584,7 @@ fn build_impl<'a>(
         push(&mut outgoing, snapshot, budget)?;
     }
     for phi in &mut phis {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         if phi.block == BlockId(0) {
             push(
                 &mut phi.inputs,
@@ -590,7 +593,7 @@ fn build_impl<'a>(
             )?;
         }
         for (index, edge) in flow.edges.iter().enumerate() {
-            budget.charge_work(1)?;
+            budget.checkpoint()?;
             if edge.target == phi.block {
                 push(
                     &mut phi.inputs,
@@ -607,7 +610,7 @@ fn build_impl<'a>(
     }
     for phi in &mut phis {
         for (index, edge) in flow.exception_edges.iter().enumerate() {
-            budget.charge_work(1)?;
+            budget.checkpoint()?;
             if edge.target == phi.block {
                 push(
                     &mut phi.inputs,
@@ -624,7 +627,7 @@ fn build_impl<'a>(
     }
     let mut connected_calls = Vec::new();
     for operation in call_ops {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         push(
             &mut connected_calls,
             operation.ok_or(RequestError::InternalInvariant("unconnected call"))?,
@@ -640,6 +643,7 @@ fn build_impl<'a>(
         operations,
         result: flow.result,
         raw: flow.raw,
+        decoded: flow.decoded,
         object_creations: flow.object_creations,
         array_creations: flow.array_creations,
         filled_arrays: flow.filled_arrays,
@@ -666,7 +670,7 @@ fn verify(
     ssa: &SsaBody<'_>,
     seeds: &[(RegisterId, Sym)],
     widths: &super::word_ownership::WidthFacts,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<(), RequestError> {
     crate::p2_flow::protection::verify(
         &ssa.raw,
@@ -678,20 +682,20 @@ fn verify(
     )?;
     let mut operation_count = 0usize;
     for (index, block) in ssa.blocks.iter().enumerate() {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         if block.pc.0 > block.terminal_pc.0 || block.terminal_pc.0 >= ssa.raw.code_units().0 {
             return Err(RequestError::InternalInvariant("invalid SSA block extent"));
         }
         let block_id = BlockId(u32::try_from(index).map_err(|_| RequestError::PlatformCapacity)?);
         let mut env = Vec::new();
         for phi in &ssa.phis {
-            budget.charge_work(1)?;
+            budget.checkpoint()?;
             if phi.block != block_id {
                 continue;
             }
             let mut expected = usize::from(index == 0);
             for edge in &ssa.edges {
-                budget.charge_work(1)?;
+                budget.checkpoint()?;
                 if edge.target == block_id {
                     expected = expected
                         .checked_add(1)
@@ -699,7 +703,7 @@ fn verify(
                 }
             }
             for edge in &ssa.exception_edges {
-                budget.charge_work(1)?;
+                budget.checkpoint()?;
                 if edge.target == block_id {
                     expected = expected
                         .checked_add(1)
@@ -712,7 +716,7 @@ fn verify(
             write(&mut env, phi.register, Sym::Value(phi.result), budget)?;
             let mut seed_count = 0usize;
             for &(edge, sym) in &phi.inputs {
-                budget.charge_work(1)?;
+                budget.checkpoint()?;
                 if edge == Incoming::EntrySeed {
                     seed_count = seed_count
                         .checked_add(1)
@@ -739,7 +743,7 @@ fn verify(
             ));
         }
         for (original, &id) in block.ops.iter().zip(&ssa.bound[index].ops) {
-            budget.charge_work(1)?;
+            budget.checkpoint()?;
             let op = ssa.operation(id)?;
             if original.id != id
                 || op.id != id
@@ -760,7 +764,7 @@ fn verify(
                 .reads(&ssa.calls, &ssa.filled_arrays)?
                 .enumerate()
             {
-                budget.charge_work(1)?;
+                budget.checkpoint()?;
                 if inputs.next().copied()
                     != Some(widths.read(
                         &env,
@@ -831,7 +835,7 @@ fn verify(
             (terminal_register(block.terminal), ssa.bound[index].terminal),
             (terminal_other(block.terminal), ssa.bound[index].other),
         ] {
-            budget.charge_work(1)?;
+            budget.checkpoint()?;
             let expected = if let Some(register) = register {
                 Some(widths.read(
                     &env,
@@ -850,7 +854,7 @@ fn verify(
             }
         }
         for (edge_index, edge) in ssa.edges.iter().enumerate() {
-            budget.charge_work(1)?;
+            budget.checkpoint()?;
             if edge.source != block_id {
                 continue;
             }
@@ -858,13 +862,13 @@ fn verify(
                 u32::try_from(edge_index).map_err(|_| RequestError::PlatformCapacity)?,
             ));
             for phi in &ssa.phis {
-                budget.charge_work(1)?;
+                budget.checkpoint()?;
                 if phi.block != edge.target {
                     continue;
                 }
                 let mut supplied = None;
                 for &(incoming, sym) in &phi.inputs {
-                    budget.charge_work(1)?;
+                    budget.checkpoint()?;
                     if incoming == id && supplied.replace(sym).is_some() {
                         return Err(RequestError::InternalInvariant("duplicate Phi edge"));
                     }
@@ -889,10 +893,10 @@ pub(super) fn verify_exceptional_inputs(
     source: BlockId,
     pc: CodeUnitOffset,
     env: &[(RegisterId, Sym)],
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<(), RequestError> {
     for (index, edge) in ssa.exception_edges.iter().enumerate() {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         if edge.source != source || edge.pc != pc {
             continue;
         }
@@ -900,13 +904,13 @@ pub(super) fn verify_exceptional_inputs(
             u32::try_from(index).map_err(|_| RequestError::PlatformCapacity)?,
         ));
         for phi in &ssa.phis {
-            budget.charge_work(1)?;
+            budget.checkpoint()?;
             if phi.block != edge.target {
                 continue;
             }
             let mut supplied = None;
             for &(actual, value) in &phi.inputs {
-                budget.charge_work(1)?;
+                budget.checkpoint()?;
                 if actual == incoming && supplied.replace(value).is_some() {
                     return Err(RequestError::InternalInvariant(
                         "duplicate exceptional Phi edge",
@@ -925,11 +929,11 @@ pub(super) fn verify_exceptional_inputs(
 pub(super) fn verify_call_words(
     site: &CallSite,
     original_operands: crate::raw::RawOperands,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<(), RequestError> {
     let mut original_registers = original_operands.registers().iter();
     for &register in &site.registers {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         if original_registers.next() != Some(register) {
             return Err(RequestError::InternalInvariant(
                 "call changed original argument word order",
@@ -948,7 +952,7 @@ pub(super) fn verify_call_words(
         ));
     }
     for (&argument, width) in site.arguments.iter().zip(&site.widths) {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         if site.registers.get(word) != Some(&argument)
             || *width == crate::p2_flow::ValueWidth::Two
                 && word
@@ -981,14 +985,13 @@ fn verify_call(
     pc: CodeUnitOffset,
     call: CallId,
     destination: Option<RegisterId>,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<(), RequestError> {
     let site = ssa
         .calls
         .get(ix(call.0)?)
         .ok_or(RequestError::InternalInvariant("call has foreign identity"))?;
-    let original = instruction_layout(ssa.raw.instructions(), pc, ssa.raw.version())
-        .map_err(crate::input::MethodError::Decode)?;
+    let original = ssa.decoded.layout_at(pc)?;
     if !matches!(original.kind(),LayoutKind::Instruction(spec) if crate::p2_flow::InvokeKind::from_opcode(spec.opcode) == Some(site.kind))
         || !matches!(original.references()[0],Some(reference) if reference.target==crate::raw::OperandReference::Method(site.reference))
     {
@@ -996,9 +999,7 @@ fn verify_call(
             "call changed its original invoke or method reference",
         ));
     }
-    let original_operands =
-        crate::input::operands::instruction_operands(ssa.raw.instructions(), pc, original)
-            .map_err(crate::input::MethodError::Decode)?;
+    let original_operands = ssa.decoded.operands_at(pc)?;
     verify_call_words(site, original_operands, budget)?;
     if let Some(result_pc) = site.result_pc {
         if pc.checked_advance(original.width()) != Some(result_pc) {
@@ -1006,11 +1007,8 @@ fn verify_call(
                 "call result is not adjacent",
             ));
         }
-        let result = instruction_layout(ssa.raw.instructions(), result_pc, ssa.raw.version())
-            .map_err(crate::input::MethodError::Decode)?;
-        let operands =
-            crate::input::operands::instruction_operands(ssa.raw.instructions(), result_pc, result)
-                .map_err(crate::input::MethodError::Decode)?;
+        let result = ssa.decoded.layout_at(result_pc)?;
+        let operands = ssa.decoded.operands_at(result_pc)?;
         let expected = match site.result {
             crate::p2_flow::InvokeResult::Word(_) => Some(0x0a),
             crate::p2_flow::InvokeResult::Reference(_) => Some(0x0c),
@@ -1032,15 +1030,12 @@ fn verify_call(
     }
     Ok(())
 }
-fn verify_availability(
-    ssa: &SsaBody<'_>,
-    budget: &mut MethodBudget<'_, '_>,
-) -> Result<(), RequestError> {
+fn verify_availability(ssa: &SsaBody<'_>, budget: &mut RunContext<'_>) -> Result<(), RequestError> {
     let mut bad = Vec::new();
     let mut conservative = Vec::new();
     let mut grounded = Vec::new();
     for definition in &ssa.values {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         push(&mut bad, false, budget)?;
         push(&mut conservative, false, budget)?;
         push(
@@ -1052,11 +1047,11 @@ fn verify_availability(
     loop {
         let mut changed = false;
         for op in &ssa.operations {
-            budget.charge_work(1)?;
+            budget.checkpoint()?;
             if let Some(result) = op.result {
                 let index = ix(result.0)?;
                 for source in &op.inputs {
-                    budget.charge_work(1)?;
+                    budget.checkpoint()?;
                     if bad[ix(source.0)?] && !bad[index] {
                         bad[index] = true;
                         changed = true;
@@ -1069,10 +1064,10 @@ fn verify_availability(
             }
         }
         for phi in &ssa.phis {
-            budget.charge_work(1)?;
+            budget.checkpoint()?;
             let index = ix(phi.result.0)?;
             for &(incoming, input) in &phi.inputs {
-                budget.charge_work(1)?;
+                budget.checkpoint()?;
                 let (input_bad, input_conservative, input_grounded) = match input {
                     Sym::Bad | Sym::High(_) => (true, false, false),
                     Sym::Value(source) => (
@@ -1111,19 +1106,19 @@ fn verify_availability(
         }
     };
     for op in &ssa.operations {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         for (register, &source) in op.op.reads(&ssa.calls, &ssa.filled_arrays)?.zip(&op.inputs) {
-            budget.charge_work(1)?;
+            budget.checkpoint()?;
             available(source, register, op.pc)?;
         }
     }
     for (index, block) in ssa.blocks.iter().enumerate() {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         for (register, source) in [
             (terminal_register(block.terminal), ssa.bound[index].terminal),
             (terminal_other(block.terminal), ssa.bound[index].other),
         ] {
-            budget.charge_work(1)?;
+            budget.checkpoint()?;
             if let (Some(register), Some(source)) = (register, source) {
                 available(source, register, block.terminal_pc)?;
             }

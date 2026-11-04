@@ -8,6 +8,7 @@ facts from them.
 | Phase | Engine directory | Current responsibility |
 |---|---|---|
 | Input context | `context/` | Request-level cross-DEX lookup and lazy caching of P1 declarations |
+| P0 | `p0_class/` | Independently callable class declaration and metadata snapshot using P1 safe reads |
 | P1 | `p1_input/` | Checked DEX tables, method input and original facts |
 | P2 | `p2_flow/` | Instruction operations, effects and control-flow graph |
 | P3 | `p3_ssa/` | Definitions, uses, Phi and exceptional environments |
@@ -29,7 +30,10 @@ to debug. The [stage chapters](README.md) describe each phase.
 
 ## 4. Phases, products and actual order
 
-The engine has eight numbered phases. Input context and Engine scheduling are not analysis phases.
+The method chain has eight numbered phases, P1–P8. P0 is an independently callable
+class-fact collection entry and is not part of that scheduler. It consumes P1
+read-only declarations without constructing method inputs. Its snapshot contract
+is [P0 class facts](spec/00-class.md). Input context and Engine scheduling are not analysis phases.
 
 | Phase / Module | Owned products | Input and responsibility | Does not own |
 |---|---|---|---|
@@ -58,7 +62,7 @@ per Explicit method: ValidatedRawMethod(P1)
 Generated member: original code + template evidence → owner syntax and target admission (no independent fake Java body)
 class assembly(P7)     → assemble_original_members_or_mark_mixed
 render(P8)
-any classified failure ──→ original method + available resources (explicit raw quota if any) ──→ debug / unavailable(P8)
+any classified failure ──→ original method + available checked facts ──→ debug / unavailable(P8)
 ```
 
 P2 retains exact original call formals in `CallSite`. P4 consumes these formals

@@ -1,9 +1,9 @@
-use crate::input::MethodInput;
+use crate::input::MethodSource;
 use crate::p2_flow::{BlockId, EdgeId, Op};
 use crate::p4_types::TypedBody;
 use crate::p5_variables::StorageBody;
 use crate::substrate::owned::reserve;
-use crate::{JavaMethod, MethodBudget, RequestError};
+use crate::{JavaMethod, RequestError, RunContext};
 
 pub(crate) use super::local_declarations::Local;
 pub(crate) use crate::p5_variables::LocalId;
@@ -42,11 +42,7 @@ pub(super) fn returned(
 fn ix(id: u32) -> Result<usize, RequestError> {
     usize::try_from(id).map_err(|_| RequestError::PlatformCapacity)
 }
-fn append<T>(
-    items: &mut Vec<T>,
-    item: T,
-    budget: &mut MethodBudget<'_, '_>,
-) -> Result<(), RequestError> {
+fn append<T>(items: &mut Vec<T>, item: T, budget: &mut RunContext<'_>) -> Result<(), RequestError> {
     reserve(items, 1, budget)?;
     items.push(item);
     Ok(())
@@ -56,10 +52,10 @@ pub(super) fn copies(
     incoming: Option<EdgeId>,
     target: BlockId,
     output: &mut Vec<Assignment>,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<(), RequestError> {
     for copy in &storage.copies(incoming, target)?.steps {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         append(
             output,
             Assignment {
@@ -74,7 +70,7 @@ pub(super) fn copies(
 pub(super) fn operation(
     typed: &TypedBody<'_>,
     op: &crate::p3_ssa::BoundOp,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<Option<Assignment>, RequestError> {
     use crate::p2_flow::Operand;
     let numeric = |index: usize| -> Result<ValueUse, RequestError> {
@@ -169,23 +165,23 @@ pub(super) fn operation(
 }
 pub(crate) fn reconstruct(
     _schedule: &crate::engine::SchedulePermit,
-    input: &MethodInput<'_, '_>,
+    input: &MethodSource<'_, '_>,
     catalog: &crate::context::Context,
     plan: crate::p6_regions::PlannedBody<'_>,
     chain: &super::constructor_graph::Proof<'_, '_, '_>,
     nested_context: bool,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<crate::substrate::outcome::Outcome<JavaMethod>, RequestError> {
     reconstruct_impl(input, catalog, plan, chain, nested_context, budget)
 }
 
 fn reconstruct_impl(
-    input: &MethodInput<'_, '_>,
+    input: &MethodSource<'_, '_>,
     catalog: &crate::context::Context,
     plan: crate::p6_regions::PlannedBody<'_>,
     chain: &super::constructor_graph::Proof<'_, '_, '_>,
     nested_context: bool,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<crate::substrate::outcome::Outcome<JavaMethod>, RequestError> {
     use crate::substrate::outcome::Outcome;
     let storage = &plan.storage;
@@ -197,7 +193,7 @@ fn reconstruct_impl(
         .map(|capture| capture.field());
     let mut capture_dependent = capture_field.is_some();
     for evidence in storage.typed.field_declarations.iter().flatten() {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         if let crate::p4_types::bindings::FieldDeclaration::Known(access) = &evidence.declaration {
             capture_dependent |= access.outer_capture.is_some();
         }
@@ -226,7 +222,7 @@ fn reconstruct_impl(
     }
     let mut checks = super::dispatcher::LoweringChecks::default();
     for evidence in storage.typed.field_declarations.iter().flatten() {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         if let crate::p4_types::bindings::FieldDeclaration::Known(access) = &evidence.declaration
             && access.flags.is_none()
         {

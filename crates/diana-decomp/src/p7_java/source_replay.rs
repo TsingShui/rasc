@@ -4,7 +4,7 @@ use super::source_control::{Label, Step};
 use crate::p2_flow::BlockId;
 use crate::p6_regions::protection::{Node, Protection};
 use crate::substrate::owned::push;
-use crate::{MethodBudget, RequestError};
+use crate::{RequestError, RunContext};
 
 fn broken() -> RequestError {
     RequestError::InternalInvariant("final source control differs from checked operations")
@@ -40,7 +40,7 @@ struct Lexical {
     try_body_end: Vec<Option<usize>>,
 }
 impl Lexical {
-    fn build(steps: &[Step], budget: &mut MethodBudget<'_, '_>) -> Result<Self, RequestError> {
+    fn build(steps: &[Step], budget: &mut RunContext<'_>) -> Result<Self, RequestError> {
         let mut next = Vec::new();
         let mut alternative = Vec::new();
         let mut close = Vec::new();
@@ -48,7 +48,7 @@ impl Lexical {
         let mut owner = Vec::new();
         let mut stack = Vec::new();
         for (at, step) in steps.iter().enumerate() {
-            budget.charge_work(1)?;
+            budget.checkpoint()?;
             push(
                 &mut next,
                 at.checked_add(1).ok_or(RequestError::PlatformCapacity)?,
@@ -61,7 +61,7 @@ impl Lexical {
             match step {
                 Step::Loop(label) => {
                     for &opening in &stack {
-                        budget.charge_work(1)?;
+                        budget.checkpoint()?;
                         if *label == Label::Loop0
                             && matches!(steps[opening], Step::Loop(Label::Loop0))
                         {
@@ -97,7 +97,7 @@ impl Lexical {
                         Step::Loop(_) => {
                             let mut body = false;
                             for step in &steps[opening + 1..at] {
-                                budget.charge_work(1)?;
+                                budget.checkpoint()?;
                                 body |= matches!(step, Step::Statements(_));
                             }
                             if !body {
@@ -125,7 +125,7 @@ impl Lexical {
                 }
                 Step::Break(label) | Step::Continue(label) => {
                     for &opening in stack.iter().rev() {
-                        budget.charge_work(1)?;
+                        budget.checkpoint()?;
                         if let Step::Loop(actual) = steps[opening]
                             && (*label == Label::Nearest || *label == actual)
                         {
@@ -144,7 +144,7 @@ impl Lexical {
             return Err(broken());
         }
         for (at, step) in steps.iter().enumerate() {
-            budget.charge_work(1)?;
+            budget.checkpoint()?;
             if let Some(opening) = owner[at] {
                 next[at] = if matches!(step, Step::Continue(_)) {
                     opening + 1
@@ -171,10 +171,10 @@ impl Lexical {
         steps: &'a [Step],
         mut at: usize,
         used: &mut [bool],
-        budget: &mut MethodBudget<'_, '_>,
+        budget: &mut RunContext<'_>,
     ) -> Result<&'a Step, RequestError> {
         for _ in steps {
-            budget.charge_work(1)?;
+            budget.checkpoint()?;
             let step = steps.get(at).ok_or_else(broken)?;
             match step {
                 Step::Statements(_)
@@ -213,18 +213,18 @@ pub(super) fn verify(
     storage: &Dispatcher,
     protection: Option<&Protection>,
     names: &[super::protected::CatchName],
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<(), RequestError> {
     let lexical = Lexical::build(steps, budget)?;
     let mut used = Vec::new();
     for _ in steps {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         push(&mut used, false, budget)?;
     }
     let mut seen_tries = Vec::new();
     if let Some(protection) = protection {
         for _ in &protection.nodes {
-            budget.charge_work(1)?;
+            budget.checkpoint()?;
             push(&mut seen_tries, false, budget)?;
         }
     }
@@ -232,14 +232,14 @@ pub(super) fn verify(
     let mut seen = Vec::new();
     let mut locks = Vec::new();
     for _ in &storage.cases {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         push(&mut expected, protection.is_none(), budget)?;
         push(&mut seen, false, budget)?;
         push(&mut locks, None, budget)?;
     }
     if let Some(protection) = protection {
         for node in &protection.nodes {
-            budget.charge_work(1)?;
+            budget.checkpoint()?;
             let id = match node {
                 Node::Block(id) | Node::If { block: id, .. } => Some(*id),
                 Node::Loop { header, .. } => Some(*header),
@@ -266,7 +266,7 @@ pub(super) fn verify(
         return Err(broken());
     }
     for (at, step) in steps.iter().enumerate() {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         match step {
             Step::Statements(id) => {
                 let index = ix(id.0)?;
@@ -323,7 +323,7 @@ pub(super) fn verify(
                     .ok_or_else(broken)?;
                 let mut matched = false;
                 for statement in &case(storage, *id)?.statements {
-                    budget.charge_work(1)?;
+                    budget.checkpoint()?;
                     if let super::calls::Statement::Monitor {
                         operation: actual,
                         kind: crate::p2_flow::MonitorKind::Enter,
@@ -342,7 +342,7 @@ pub(super) fn verify(
                 let protection = protection.ok_or_else(broken)?;
                 let mut inner = None;
                 for node in &protection.nodes {
-                    budget.charge_work(1)?;
+                    budget.checkpoint()?;
                     if let Node::Synchronized { enter, body, .. } = node
                         && enter == id
                         && inner.replace(*body).is_some()
@@ -358,15 +358,15 @@ pub(super) fn verify(
                 let end = lexical.close[at].ok_or_else(broken)?;
                 let mut membership = Vec::new();
                 for _ in &storage.cases {
-                    budget.charge_work(1)?;
+                    budget.checkpoint()?;
                     push(&mut membership, false, budget)?;
                 }
                 for block in blocks {
-                    budget.charge_work(1)?;
+                    budget.checkpoint()?;
                     *membership.get_mut(ix(block.0)?).ok_or_else(broken)? = true;
                 }
                 for step in &steps[at + 1..end] {
-                    budget.charge_work(1)?;
+                    budget.checkpoint()?;
                     if let Step::Statements(block) = step {
                         let present = membership.get_mut(ix(block.0)?).ok_or_else(broken)?;
                         if !*present {
@@ -376,7 +376,7 @@ pub(super) fn verify(
                     }
                 }
                 for present in membership {
-                    budget.charge_work(1)?;
+                    budget.checkpoint()?;
                     if present {
                         return Err(broken());
                     }
@@ -396,7 +396,7 @@ pub(super) fn verify(
                 membership(storage, protection, *body, &steps[at + 1..body_end], budget)?;
                 let mut cursor = body_end + 1;
                 for catch in catches {
-                    budget.charge_work(1)?;
+                    budget.checkpoint()?;
                     let Some(Step::Catch {
                         alternatives,
                         handler,
@@ -412,7 +412,7 @@ pub(super) fn verify(
                     for (clause, actual) in catch.clauses.iter().zip(alternatives) {
                         let mut expected_name = None;
                         for name in names {
-                            budget.charge_work(1)?;
+                            budget.checkpoint()?;
                             if name.kind == clause.kind {
                                 expected_name = Some(name.source.as_str());
                                 break;
@@ -449,14 +449,14 @@ pub(super) fn verify(
     }
     if let Some(protection) = protection {
         for (node, seen) in protection.nodes.iter().zip(seen_tries) {
-            budget.charge_work(1)?;
+            budget.checkpoint()?;
             if matches!(node, Node::Try { .. }) != seen {
                 return Err(broken());
             }
         }
     }
     for (step, used) in steps.iter().zip(used) {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         if matches!(
             step,
             Step::Statements(_)
@@ -473,7 +473,7 @@ pub(super) fn verify(
         }
     }
     for ((expected, seen), lock) in expected.iter().zip(&seen).zip(&locks) {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         if expected != seen || lock.is_some() {
             return Err(broken());
         }

@@ -31,8 +31,9 @@ pub(crate) fn collect(
     control: &mut impl InputControl,
 ) -> Result<Option<Scope>, RequestError> {
     let ownership = index.ownership_cached(control)?;
+    ownership.check_class(id)?;
     for entry in ownership.nested() {
-        control.charge_work(1)?;
+        control.checkpoint()?;
         if entry.class() != id {
             continue;
         }
@@ -91,15 +92,16 @@ pub(crate) fn collect(
     Ok(None)
 }
 pub(super) fn same_nest(
-    input: &crate::input::MethodInput<'_, '_>,
+    input: &crate::input::MethodSource<'_, '_>,
     target: &[u16],
-    budget: &mut crate::MethodBudget<'_, '_>,
+    budget: &mut crate::RunContext<'_>,
 ) -> Result<bool, RequestError> {
     let ownership = input.program().ownership_cached(budget)?;
+    ownership.check_class(input.class_id())?;
     let mut owner = None;
     for entry in ownership.nested() {
         for class in [entry.class(), entry.enclosing()] {
-            budget.charge_work(1)?;
+            budget.checkpoint()?;
             if input
                 .program()
                 .class_with(class, budget)?
@@ -113,8 +115,9 @@ pub(super) fn same_nest(
     let Some(target) = owner else {
         return Ok(false);
     };
+    ownership.check_class(target)?;
     for entry in ownership.nested() {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         if entry.class() == target {
             return Ok(false);
         }
@@ -132,7 +135,7 @@ pub(super) fn same_nest(
         for _ in 0..ownership.nested().len() {
             let mut parent = None;
             for entry in ownership.nested() {
-                budget.charge_work(1)?;
+                budget.checkpoint()?;
                 if entry.class() == *root {
                     parent = Some(entry.enclosing());
                     break;
@@ -146,18 +149,19 @@ pub(super) fn same_nest(
 }
 
 pub(super) fn plain_owner(
-    input: &crate::input::MethodInput<'_, '_>,
+    input: &crate::input::MethodSource<'_, '_>,
     catalog: &Context,
     parent: Option<&[u16]>,
-    budget: &mut crate::MethodBudget<'_, '_>,
+    budget: &mut crate::RunContext<'_>,
 ) -> Result<bool, RequestError> {
     if input.plain_owner_scope(parent, budget)? {
         return Ok(true);
     }
     let ownership = input.program().ownership_cached(budget)?;
+    ownership.check_class(input.class_id())?;
     let mut related = false;
     for entry in ownership.nested() {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         related |= entry.class() == input.class_id() || entry.enclosing() == input.class_id();
     }
     if !related {

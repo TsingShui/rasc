@@ -65,7 +65,7 @@ impl DebugError {
         let Some(issue) = issue else {
             return self;
         };
-        if self.kind() != FailureKind::BudgetExceeded {
+        if self.kind() != FailureKind::ResourceExhausted {
             return self;
         }
         let resource = match self {
@@ -104,7 +104,7 @@ impl DebugError {
             Self::Input(error) => error.kind(),
             Self::Method(error) => error.kind(),
             Self::Control(error) => error.kind(),
-            Self::PlatformCapacity | Self::Allocation(_) => FailureKind::BudgetExceeded,
+            Self::PlatformCapacity | Self::Allocation(_) => FailureKind::ResourceExhausted,
             Self::MethodNotDefined { .. } | Self::AfterMalformed { .. } => FailureKind::Malformed,
             Self::InternalInvariant(_) => FailureKind::InternalInvariant,
         }
@@ -115,7 +115,7 @@ pub(super) fn kind_name(kind: FailureKind) -> &'static str {
     match kind {
         FailureKind::Malformed => "malformed",
         FailureKind::Unsupported => "unsupported",
-        FailureKind::BudgetExceeded => "budget_exceeded",
+        FailureKind::ResourceExhausted => "resource_exhausted",
         FailureKind::InternalInvariant => "internal_invariant",
         FailureKind::Cancelled => "cancelled",
     }

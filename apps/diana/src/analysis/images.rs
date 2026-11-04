@@ -45,7 +45,7 @@ impl<'a> ImageSet<'a> {
         let roots = scope.roots()?;
         let mut images = Vec::new();
         for (ordinal, root) in roots.iter().enumerate() {
-            let mut control = RunContext::new(diana_decomp::Limits::default(), &|| false);
+            let mut control = RunContext::new(&|| false);
             let container = DexContainer::open(root.bytes(), &mut control)?;
             let mut logical = 0u32;
             for header in container.logical_headers(&mut control)? {
@@ -138,7 +138,7 @@ fn stopped(error: ImageError) -> SelectorError {
 fn engine_stopped(error: diana_decomp::input::InputError) -> SelectorError {
     match error.kind() {
         diana_decomp::FailureKind::Cancelled
-        | diana_decomp::FailureKind::BudgetExceeded
+        | diana_decomp::FailureKind::ResourceExhausted
         | diana_decomp::FailureKind::InternalInvariant => SelectorError::Stopped,
         _ => SelectorError::InvalidIndex,
     }

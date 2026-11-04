@@ -3,7 +3,7 @@ use super::flow::{Flow, Transfer};
 use super::graph::{dominators, graph, index, push};
 use crate::p2_flow::{BlockId, EdgeId};
 use crate::substrate::owned::reserve;
-use crate::{MethodBudget, RequestError};
+use crate::{RequestError, RunContext};
 pub(super) struct Candidate {
     pub branches: Vec<BodyBranch>,
     pub prelude: Vec<BlockId>,
@@ -19,9 +19,9 @@ fn exit_stub(
     storage: &Flow,
     target: BlockId,
     exit: BlockId,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<Option<Option<BlockId>>, RequestError> {
-    budget.charge_work(1)?;
+    budget.checkpoint()?;
     if target == exit {
         return Ok(Some(None));
     }
@@ -36,7 +36,7 @@ fn loop_kernel(
     header: BlockId,
     body: &[BlockId],
     branches: &[BodyBranch],
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<bool, RequestError> {
     let Some(&latch) = body.last() else {
         return Ok(false);
@@ -44,7 +44,7 @@ fn loop_kernel(
     let mut members = Vec::new();
     reserve(&mut members, graph.predecessors.len(), budget)?;
     for _ in &graph.predecessors {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         members.push(false);
     }
     members[index(header)?] = true;
@@ -53,7 +53,7 @@ fn loop_kernel(
     push(&mut stack, latch, budget)?;
     // The closure stops at the header: preheader predecessors are not loop members.
     while let Some(node) = stack.pop() {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         if members[index(node)?] {
             continue;
         }
@@ -63,7 +63,7 @@ fn loop_kernel(
         members[index(node)?] = true;
         count = count.checked_add(1).ok_or(RequestError::PlatformCapacity)?;
         for &predecessor in &graph.predecessors[index(node)?] {
-            budget.charge_work(1)?;
+            budget.checkpoint()?;
             if !members[index(predecessor)?] {
                 push(&mut stack, predecessor, budget)?;
             }
@@ -71,7 +71,7 @@ fn loop_kernel(
     }
     let mut expected = 1usize;
     for &node in body {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         if !members[index(node)?] {
             return Ok(false);
         }
@@ -80,10 +80,10 @@ fn loop_kernel(
             .ok_or(RequestError::PlatformCapacity)?;
     }
     for branch in branches {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         if let BodyBranch::Diamond(_) = branch {
             for node in branch.leaves().into_iter().flatten() {
-                budget.charge_work(1)?;
+                budget.checkpoint()?;
                 if !members[index(node)?] {
                     return Ok(false);
                 }
@@ -97,7 +97,7 @@ fn loop_kernel(
 }
 pub(super) fn plan(
     storage: &Flow,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<Option<Candidate>, RequestError> {
     let Some(graph) = graph(storage, budget)? else {
         return Ok(None);
@@ -119,12 +119,12 @@ pub(super) fn plan(
     let mut seen = Vec::new();
     reserve(&mut seen, n, budget)?;
     for _ in 0..n {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         seen.push(false);
     }
     let mut header = BlockId(0);
     loop {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         if seen[index(header)?] {
             return Ok(None);
         }
@@ -144,12 +144,12 @@ pub(super) fn plan(
         ));
     };
     for body_yes in [true, false] {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         let (enter, leave) = if body_yes { (yes, no) } else { (no, yes) };
         let mut used = Vec::new();
         reserve(&mut used, n, budget)?;
         for &value in &seen {
-            budget.charge_work(1)?;
+            budget.checkpoint()?;
             used.push(value);
         }
         let mut body = Vec::new();
@@ -158,7 +158,7 @@ pub(super) fn plan(
         let mut latch = None;
         let mut fits = true;
         while current != header {
-            budget.charge_work(1)?;
+            budget.checkpoint()?;
             if used[index(current)?] || !dom.dominates(header, current, budget)? {
                 fits = false;
                 break;
@@ -189,7 +189,7 @@ pub(super) fn plan(
                                 break;
                             }
                             for arm in [&diamond.yes, &diamond.no].into_iter().flatten() {
-                                budget.charge_work(1)?;
+                                budget.checkpoint()?;
                                 if used[index(arm.block)?]
                                     || !dom.dominates(header, arm.block, budget)?
                                 {
@@ -247,7 +247,7 @@ pub(super) fn plan(
         let mut tail = Vec::new();
         current = leave.target;
         loop {
-            budget.charge_work(1)?;
+            budget.checkpoint()?;
             if used[index(current)?] {
                 fits = false;
                 break;
@@ -267,7 +267,7 @@ pub(super) fn plan(
             continue;
         }
         for &visited in &used {
-            budget.charge_work(1)?;
+            budget.checkpoint()?;
             fits &= visited;
         }
         if !fits {

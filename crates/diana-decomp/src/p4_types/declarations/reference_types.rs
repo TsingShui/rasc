@@ -1,32 +1,32 @@
 use super::contracts::{clear_scope, directory};
 use crate::context::Context;
-use crate::input::MethodInput;
+use crate::input::MethodSource;
 use crate::substrate::owned::copy_units;
-use crate::{MethodBudget, RequestError};
+use crate::{RequestError, RunContext};
 
 #[allow(dead_code)]
 pub(crate) fn source_type(
-    input: &MethodInput<'_, '_>,
+    input: &MethodSource<'_, '_>,
     catalog: &Context,
     descriptor: &[u16],
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<Option<bool>, RequestError> {
     named_type(input, catalog, descriptor, false, budget)
 }
 pub(crate) fn source_reference_type(
-    input: &MethodInput<'_, '_>,
+    input: &MethodSource<'_, '_>,
     catalog: &Context,
     descriptor: &[u16],
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<Option<bool>, RequestError> {
     named_type(input, catalog, descriptor, true, budget)
 }
 fn named_type(
-    input: &MethodInput<'_, '_>,
+    input: &MethodSource<'_, '_>,
     catalog: &Context,
     descriptor: &[u16],
     allow_interface: bool,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<Option<bool>, RequestError> {
     if descriptor.len() < 3 || descriptor.first() != Some(&76) || descriptor.last() != Some(&59) {
         return Ok(Some(false));
@@ -47,8 +47,9 @@ fn named_type(
     }
     if descriptor == caller && class.enclosing_scope {
         let ownership = input.program().ownership_cached(budget)?;
+        ownership.check_class(input.class_id())?;
         for entry in ownership.nested() {
-            budget.charge_work(1)?;
+            budget.checkpoint()?;
             lexical |= entry.enclosing() == input.class_id();
         }
     }
@@ -61,7 +62,7 @@ fn named_type(
     }
     let mut end = descriptor.len() - 1;
     for (i, &unit) in descriptor[1..descriptor.len() - 1].iter().enumerate() {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         if unit == 47 {
             end = i + 1;
             break;
@@ -73,11 +74,11 @@ fn named_type(
     ))
 }
 pub(crate) fn source_subtype(
-    input: &MethodInput<'_, '_>,
+    input: &MethodSource<'_, '_>,
     catalog: &Context,
     from: &[u16],
     to: &[u16],
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<Option<bool>, RequestError> {
     if source_reference_type(input, catalog, from, budget)? != Some(true) {
         return Ok(None);

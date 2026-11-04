@@ -8,8 +8,8 @@ use crate::input::{
 };
 use crate::raw::{LayoutKind, OperandReference, RawCodeItem, RawDecodeError, RawLiteral};
 use crate::{
-    ByteLength, ByteOffset, ClassDefId, CodeUnitCount, CodeUnitOffset, FailureKind, FallbackBudget,
-    MethodId, TypeId,
+    ByteLength, ByteOffset, ClassDefId, CodeUnitCount, CodeUnitOffset, FailureKind, MethodId,
+    RunContext, TypeId,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -88,13 +88,13 @@ impl DebugIssue {
 fn reserve_issues(
     buffer: &mut Vec<DebugIssue>,
     needed: usize,
-    budget: &mut FallbackBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<(), DebugError> {
     if needed <= buffer.capacity() {
         return Ok(());
     }
-    let (capacity, bytes) = capacity_plan(buffer.capacity(), needed, size_of::<DebugIssue>())?;
-    budget.charge_allocation(bytes)?;
+    let capacity = capacity_plan(buffer.capacity(), needed, size_of::<DebugIssue>())?;
+    budget.checkpoint()?;
     buffer
         .try_reserve_exact(capacity - buffer.len())
         .map_err(DebugError::Allocation)?;
@@ -130,7 +130,7 @@ impl IssueLog {
 pub(super) fn missing(
     issues: &mut IssueLog,
     value: DebugIssue,
-    budget: &mut FallbackBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<(), DebugError> {
     if value.kind() == FailureKind::Malformed && issues.malformed.is_none() {
         issues.malformed = Some(value);
@@ -162,7 +162,7 @@ impl ProgramIndex<'_> {
         &self,
         class_id: ClassDefId,
         method_id: MethodId,
-        budget: &mut FallbackBudget<'_, '_>,
+        budget: &mut RunContext<'_>,
     ) -> Result<DebugSource, DebugError> {
         let mut issues = IssueLog::new();
         self.debug_method_with(class_id, method_id, budget, &mut issues)
@@ -173,7 +173,7 @@ impl ProgramIndex<'_> {
         &self,
         class_id: ClassDefId,
         method_id: MethodId,
-        budget: &mut FallbackBudget<'_, '_>,
+        budget: &mut RunContext<'_>,
         issues: &mut IssueLog,
     ) -> Result<DebugSource, DebugError> {
         let class = self.class_with(class_id, budget)?;
@@ -181,8 +181,8 @@ impl ProgramIndex<'_> {
         if let Ok(MethodBody::Code(code)) = &method.body
             && let Some(word) = code.instructions().as_chunks::<2>().0.first()
         {
-            budget.check_code_units(CodeUnitCount(1))?;
-            budget.charge_work(1)?;
+            budget.checkpoint()?;
+            budget.checkpoint()?;
             let word = u16::from_le_bytes(*word);
             if let Err(error) = encoding_head(word, CodeUnitOffset(0), self.header.version) {
                 missing(
@@ -211,7 +211,7 @@ impl ProgramIndex<'_> {
         &self,
         class: &ClassView<'_, '_>,
         method: MethodEntry<'_, '_>,
-        budget: &mut FallbackBudget<'_, '_>,
+        budget: &mut RunContext<'_>,
         issues: &mut IssueLog,
     ) -> Result<DebugSource, DebugError> {
         let class_id = class.class_def_idx;
@@ -245,7 +245,7 @@ impl ProgramIndex<'_> {
             Ok(interfaces) => {
                 output.push("[", budget)?;
                 for (index, word) in interfaces.as_chunks::<2>().0.iter().enumerate() {
-                    budget.charge_work(1)?;
+                    budget.checkpoint()?;
                     if index > 0 {
                         output.push(",", budget)?;
                     }
@@ -357,7 +357,7 @@ impl ProgramIndex<'_> {
         output.push(",\"undecoded_ranges\":[", budget)?;
         let failure = issues.malformed.or_else(|| issues.items.first().copied());
         for (index, issue) in issues.iter().enumerate() {
-            budget.charge_work(1)?;
+            budget.checkpoint()?;
             if index > 0 {
                 output.push(",", budget)?;
             }
@@ -383,7 +383,7 @@ fn selected_method<'i, 'a>(
     class: &ClassView<'i, 'a>,
     method_id: MethodId,
     issues: &mut IssueLog,
-    budget: &mut FallbackBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<MethodEntry<'i, 'a>, DebugError> {
     let mut selected = None;
     let visit: Result<(), DebugError> =
@@ -431,7 +431,7 @@ fn write_excerpt(
     method: MethodEntry<'_, '_>,
     word: u16,
     issues: &IssueLog,
-    budget: &mut FallbackBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<DebugSource, DebugError> {
     let mut output = JsonBuffer::new();
     output.push(
@@ -464,7 +464,7 @@ fn write_excerpt(
     output.unsigned(u64::from(word), budget)?;
     output.push("],\"undecoded_ranges\":[", budget)?;
     for (index, issue) in issues.iter().enumerate() {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         if index > 0 {
             output.push(",", budget)?;
         }
@@ -487,7 +487,7 @@ fn write_field<'a>(
     initializers: &mut super::initializers::Initializers<'a>,
     values_offset: Result<Option<ByteOffset>, InputError>,
     issues: &mut IssueLog,
-    budget: &mut FallbackBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<(), DebugError> {
     output.push("{\"field_id_idx\":", budget)?;
     output.unsigned(u64::from(field.field_idx.0), budget)?;
@@ -525,7 +525,7 @@ pub(super) fn write_reference(
     index: &ProgramIndex<'_>,
     output: &mut JsonBuffer,
     reference: OperandReference,
-    budget: &mut FallbackBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<(), DebugError> {
     match reference {
         OperandReference::String(id) => {
@@ -583,9 +583,9 @@ fn write_code(
     code: &RawMethodView<'_>,
     method_id: MethodId,
     issues: &mut IssueLog,
-    budget: &mut FallbackBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<(), DebugError> {
-    budget.check_code_units(code.code_units())?;
+    budget.checkpoint()?;
     let range = code.code_byte_range();
     output.push("{\"code_item_range\":{\"start\":", budget)?;
     output.unsigned(
@@ -607,7 +607,7 @@ fn write_code(
     output.unsigned(u64::from(code.code_units().0), budget)?;
     output.push(",\"raw_words\":[", budget)?;
     for (index, word) in code.instructions().as_chunks::<2>().0.iter().enumerate() {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         if index > 0 {
             output.push(",", budget)?;
         }
@@ -644,7 +644,7 @@ fn write_code(
     let mut tries = Cursor::bounded(code.source_bytes(), range.start, range.end)?;
     let mut first_try = true;
     while tries.remaining_byte() != ByteLength(0) {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         if !first_try {
             output.push(",", budget)?;
         }
@@ -668,7 +668,7 @@ fn write_code(
         let size = handlers.read_sleb32_with(budget)?;
         let mut first_handler = true;
         for _ in 0..i64::from(size).unsigned_abs() {
-            budget.charge_work(1)?;
+            budget.checkpoint()?;
             if !first_handler {
                 output.push(",", budget)?;
             }
@@ -703,7 +703,7 @@ fn write_item(
     item: RawCodeItem<'_>,
     issues: &mut IssueLog,
     first: &mut bool,
-    budget: &mut FallbackBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<(), DebugError> {
     if !*first {
         output.push(",", budget)?;
@@ -729,7 +729,7 @@ fn write_item(
     match item {
         RawCodeItem::Instruction(instruction) => {
             for (index, register) in instruction.operands().registers().iter().enumerate() {
-                budget.charge_work(1)?;
+                budget.checkpoint()?;
                 if index > 0 {
                     output.push(",", budget)?;
                 }
@@ -751,7 +751,7 @@ fn write_item(
                 output.signed(i64::from(pc.0) + i64::from(delta.0), budget)?;
             }
             for (slot, reference) in layout.references().into_iter().enumerate() {
-                budget.charge_work(1)?;
+                budget.checkpoint()?;
                 if let Some(reference) = reference {
                     output.push(
                         if slot == 0 {
@@ -786,7 +786,7 @@ fn write_item(
             if let Some(cases) = payload.switch_cases() {
                 output.push(",\"cases\":[", budget)?;
                 for (index, case) in cases.enumerate() {
-                    budget.charge_work(1)?;
+                    budget.checkpoint()?;
                     if index > 0 {
                         output.push(",", budget)?;
                     }
@@ -811,7 +811,7 @@ fn write_item(
                 )?;
                 output.push(",\"elements\":[", budget)?;
                 for (index, element) in elements.enumerate() {
-                    budget.charge_work(1)?;
+                    budget.checkpoint()?;
                     if index > 0 {
                         output.push(",", budget)?;
                     }
@@ -839,7 +839,7 @@ fn write_item(
 fn write_missing(
     output: &mut JsonBuffer,
     issue: &DebugIssue,
-    budget: &mut FallbackBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<(), DebugError> {
     output.push("{\"reason\":", budget)?;
     output.text(kind_name(issue.kind()), budget)?;

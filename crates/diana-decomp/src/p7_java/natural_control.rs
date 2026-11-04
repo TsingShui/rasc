@@ -1,7 +1,7 @@
 use super::source_control::{Builder, Label, Plan, Step};
 use crate::p2_flow::BlockId;
 use crate::p7_java::dispatcher::{Case, Dispatcher, Transfer};
-use crate::{MethodBudget, RequestError};
+use crate::{RequestError, RunContext};
 fn case(storage: &Dispatcher, id: BlockId) -> Result<&Case, RequestError> {
     storage
         .cases
@@ -15,10 +15,10 @@ fn trace(
     storage: &Dispatcher,
     blocks: &[BlockId],
     output: &mut Builder,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<(), RequestError> {
     for &id in blocks {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         let block = case(storage, id)?;
         output.statements(block, budget)?;
         match &block.transfer {
@@ -45,7 +45,7 @@ fn guard_edge(
     next: BlockId,
     stub: Option<&Case>,
     output: &mut Builder,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<(), RequestError> {
     output.copies(edge, budget)?;
     if let Some(stub) = stub {
@@ -83,9 +83,9 @@ fn diamond_edge(
     arm: Option<&crate::p6_regions::Arm>,
     join: BlockId,
     output: &mut Builder,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<(), RequestError> {
-    budget.charge_work(1)?;
+    budget.checkpoint()?;
     output.copies(edge, budget)?;
     if let Some(arm) = arm {
         if edge.target != arm.block {
@@ -111,7 +111,7 @@ fn lower_into(
     storage: &Dispatcher,
     region: &crate::p6_regions::Region,
     output: &mut Builder,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<(), RequestError> {
     match region {
         crate::p6_regions::Region::Sequence(block) => trace(storage, &[*block], output, budget),
@@ -144,7 +144,7 @@ fn write_loop(
     storage: &Dispatcher,
     region: &crate::p6_regions::NaturalLoop,
     output: &mut Builder,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<(), RequestError> {
     let header = case(storage, region.header)?;
     let Transfer::Branch { yes, no, .. } = &header.transfer else {
@@ -192,7 +192,7 @@ fn write_loop(
     output.marker(Step::End, budget)?;
     let mut branches = region.branches.iter();
     for (at, &id) in region.body.iter().enumerate() {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         let block = case(storage, id)?;
         let next = region.body.get(at + 1).copied().unwrap_or(region.header);
         output.statements(block, budget)?;
@@ -278,7 +278,7 @@ fn write_loop(
 pub(super) fn lower(
     storage: &Dispatcher,
     region: &crate::p6_regions::Region,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<Plan, RequestError> {
     let mut plan = Builder::new();
     lower_into(storage, region, &mut plan, budget)?;

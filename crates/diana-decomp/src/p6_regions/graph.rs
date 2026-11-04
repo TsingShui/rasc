@@ -1,14 +1,14 @@
 use super::flow::{Flow, Transfer};
 use crate::p2_flow::BlockId;
 use crate::substrate::owned::reserve;
-use crate::{MethodBudget, RequestError};
+use crate::{RequestError, RunContext};
 pub(super) fn index(id: BlockId) -> Result<usize, RequestError> {
     usize::try_from(id.0).map_err(|_| RequestError::PlatformCapacity)
 }
 pub(super) fn push<T>(
     values: &mut Vec<T>,
     value: T,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<(), RequestError> {
     reserve(values, 1, budget)?;
     values.push(value);
@@ -21,7 +21,7 @@ pub(super) struct Graph {
 }
 pub(super) fn graph(
     body: &Flow,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<Option<Graph>, RequestError> {
     let n = body.cases.len();
     if n == 0 {
@@ -32,13 +32,13 @@ pub(super) fn graph(
     reserve(&mut successors, n, budget)?;
     reserve(&mut predecessors, n, budget)?;
     for _ in 0..n {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         successors.push(Vec::new());
         predecessors.push(Vec::new());
     }
     let mut returned = None;
     for (at, case) in body.cases.iter().enumerate() {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         if index(case.key)? != at {
             return Ok(None);
         }
@@ -63,7 +63,7 @@ pub(super) fn graph(
     for (at, edges) in successors.iter().enumerate() {
         let source = BlockId(u32::try_from(at).map_err(|_| RequestError::PlatformCapacity)?);
         for &target in edges {
-            budget.charge_work(1)?;
+            budget.checkpoint()?;
             let Some(pred) = predecessors.get_mut(index(target)?) else {
                 return Err(RequestError::InternalInvariant(
                     "region graph has missing target",
@@ -81,12 +81,12 @@ pub(super) fn graph(
 fn rpo(
     successors: &[Vec<BlockId>],
     root: BlockId,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<Option<Vec<BlockId>>, RequestError> {
     let mut seen = Vec::new();
     reserve(&mut seen, successors.len(), budget)?;
     for _ in successors {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         seen.push(false);
     }
     let mut stack = Vec::new();
@@ -94,7 +94,7 @@ fn rpo(
     seen[index(root)?] = true;
     push(&mut stack, (root, 0usize), budget)?;
     while let Some((block, cursor)) = stack.pop() {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         if let Some(&next) = successors[index(block)?].get(cursor) {
             push(
                 &mut stack,
@@ -117,7 +117,7 @@ fn rpo(
     if order.len() != successors.len() {
         return Ok(None);
     }
-    budget.charge_work(u64::try_from(order.len()).map_err(|_| RequestError::PlatformCapacity)?)?;
+    budget.checkpoint()?;
     order.reverse();
     Ok(Some(order))
 }
@@ -129,10 +129,10 @@ fn intersect(
     mut b: BlockId,
     parents: &[Option<BlockId>],
     positions: &[usize],
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<BlockId, RequestError> {
     while a != b {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         let (current, other) = if positions[index(a)?] > positions[index(b)?] {
             (&mut a, b)
         } else {
@@ -157,7 +157,7 @@ pub(super) fn dominators(
     successors: &[Vec<BlockId>],
     predecessors: &[Vec<BlockId>],
     root: BlockId,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<Option<Dominators>, RequestError> {
     let Some(order) = rpo(successors, root, budget)? else {
         return Ok(None);
@@ -168,12 +168,12 @@ pub(super) fn dominators(
     reserve(&mut positions, n, budget)?;
     reserve(&mut parents, n, budget)?;
     for _ in 0..n {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         positions.push(0);
         parents.push(None);
     }
     for (position, &node) in order.iter().enumerate() {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         positions[index(node)?] = position;
     }
     parents[index(root)?] = Some(root);
@@ -182,20 +182,20 @@ pub(super) fn dominators(
     reserve(&mut queued, n, budget)?;
     reserve(&mut work, n, budget)?;
     for _ in 0..n {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         queued.push(false);
     }
     for &node in order.iter().skip(1).rev() {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         queued[index(node)?] = true;
         work.push(node);
     }
     while let Some(node) = work.pop() {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         queued[index(node)?] = false;
         let mut candidate = None;
         for &predecessor in &predecessors[index(node)?] {
-            budget.charge_work(1)?;
+            budget.checkpoint()?;
             if parents[index(predecessor)?].is_some() {
                 candidate = Some(match candidate {
                     None => predecessor,
@@ -208,7 +208,7 @@ pub(super) fn dominators(
         if candidate != parents[index(node)?] {
             parents[index(node)?] = candidate;
             for &successor in &successors[index(node)?] {
-                budget.charge_work(1)?;
+                budget.checkpoint()?;
                 if successor != root && !queued[index(successor)?] {
                     push(&mut work, successor, budget)?;
                     queued[index(successor)?] = true;
@@ -223,10 +223,10 @@ impl Dominators {
         &self,
         ancestor: BlockId,
         mut node: BlockId,
-        budget: &mut MethodBudget<'_, '_>,
+        budget: &mut RunContext<'_>,
     ) -> Result<bool, RequestError> {
         loop {
-            budget.charge_work(1)?;
+            budget.checkpoint()?;
             if node == ancestor {
                 return Ok(true);
             }

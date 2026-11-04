@@ -2,7 +2,7 @@ use crate::input::{InputError, MethodError};
 use crate::p7_java::JavaMethodDecl;
 use crate::{
     ByteOffset, ClassKey, DebugError, DebugSource, DexId, DiagnosticId, FailureKind, InputId,
-    MethodKey, ResourceUsage, SourceByteOffset,
+    MethodKey, SourceByteOffset,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -330,7 +330,6 @@ pub struct Report {
     pub(crate) nested: Vec<NestedReport>,
     pub(crate) class: ClassOutput,
     pub(crate) diagnostics: Vec<Diagnostic>,
-    pub(crate) stats: ResourceUsage,
     pub(crate) image: ImageFact,
 }
 impl Report {
@@ -346,9 +345,6 @@ impl Report {
     }
     pub fn diagnostics(&self) -> &[Diagnostic] {
         &self.diagnostics
-    }
-    pub fn stats(&self) -> ResourceUsage {
-        self.stats
     }
     pub fn image(&self) -> ImageFact {
         self.image

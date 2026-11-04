@@ -1,9 +1,9 @@
 use super::PrimitiveArray;
-use crate::input::{MethodInput, TypeProjection};
+use crate::input::{MethodSource, TypeProjection};
 use crate::p2_flow::{ArrayKind, DeclarationType, Op};
 use crate::p3_ssa::{Definition, SsaBody, Sym, ValueId};
 use crate::substrate::owned::push;
-use crate::{MethodBudget, RequestError};
+use crate::{RequestError, RunContext};
 
 #[derive(Clone, Copy)]
 struct NamedOrigin {
@@ -34,14 +34,14 @@ impl ArrayComponents {
         &mut self,
         value: ValueId,
         kind: DeclarationType,
-        budget: &mut MethodBudget<'_, '_>,
+        budget: &mut RunContext<'_>,
     ) -> Result<bool, RequestError> {
         let bits = match kind {
             DeclarationType::PrimitiveArray(kind) => mask(kind),
             DeclarationType::ObjectArray => 256,
             DeclarationType::ReferenceArray(array) => {
                 for fact in &self.named {
-                    budget.charge_work(1)?;
+                    budget.checkpoint()?;
                     if fact.value == value && fact.array == array {
                         return Ok(false);
                     }
@@ -59,13 +59,13 @@ impl ArrayComponents {
     }
     pub(super) fn component(
         &self,
-        input: &MethodInput<'_, '_>,
+        input: &MethodSource<'_, '_>,
         value: ValueId,
-        budget: &mut MethodBudget<'_, '_>,
+        budget: &mut RunContext<'_>,
     ) -> Result<Option<DeclarationType>, RequestError> {
         let mut named = None;
         for fact in &self.named {
-            budget.charge_work(1)?;
+            budget.checkpoint()?;
             if fact.value == value {
                 if named.is_some_and(|old| old != fact.array) {
                     return Ok(None);
@@ -97,14 +97,14 @@ impl ArrayComponents {
         &mut self,
         source: ValueId,
         target: ValueId,
-        budget: &mut MethodBudget<'_, '_>,
+        budget: &mut RunContext<'_>,
     ) -> Result<bool, RequestError> {
         let before = self.masks[ix(target.0)?];
         self.masks[ix(target.0)?] |= self.masks[ix(source.0)?];
         let mut changed = before != self.masks[ix(target.0)?];
         let end = self.named.len();
         for index in 0..end {
-            budget.charge_work(1)?;
+            budget.checkpoint()?;
             let fact = self.named[index];
             if fact.value == source {
                 changed |= self.add(target, DeclarationType::ReferenceArray(fact.array), budget)?;
@@ -114,20 +114,20 @@ impl ArrayComponents {
     }
 }
 pub(super) fn collect(
-    input: &MethodInput<'_, '_>,
+    input: &MethodSource<'_, '_>,
     ssa: &SsaBody<'_>,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<ArrayComponents, RequestError> {
     let mut facts = ArrayComponents {
         masks: Vec::new(),
         named: Vec::new(),
     };
     for _ in &ssa.values {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         push(&mut facts.masks, 0, budget)?;
     }
     for (index, definition) in ssa.values.iter().enumerate() {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         let kind = match *definition {
             Definition::Parameter(index) => Some(ssa.parameters[ix(index)?]),
             Definition::OpResult(id) => match ssa.operation(id)?.op {
@@ -158,7 +158,7 @@ pub(super) fn collect(
     loop {
         let mut changed = false;
         for op in &ssa.operations {
-            budget.charge_work(1)?;
+            budget.checkpoint()?;
             if matches!(op.op, Op::Move(..) | Op::MoveWide(..)) {
                 changed |= facts.propagate(
                     op.input(0)?,
@@ -174,7 +174,7 @@ pub(super) fn collect(
                 let end = facts.named.len();
                 // Close every origin before selecting a unique component for a typed use.
                 for index in 0..end {
-                    budget.charge_work(1)?;
+                    budget.checkpoint()?;
                     let fact = facts.named[index];
                     if fact.value == source {
                         let component =
@@ -186,7 +186,7 @@ pub(super) fn collect(
         }
         for phi in &ssa.phis {
             for &(_, incoming) in &phi.inputs {
-                budget.charge_work(1)?;
+                budget.checkpoint()?;
                 let Sym::Value(source) = incoming else {
                     return Err(RequestError::InternalInvariant(
                         "array facts acquired unavailable input",

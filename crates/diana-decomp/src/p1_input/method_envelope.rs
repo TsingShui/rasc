@@ -1,6 +1,6 @@
 use super::catalog::{MemberEntry, MemberSelection};
 use super::{MethodBody, MethodDeclaration, ProgramIndex, RawMethodView};
-use crate::{ClassDefId, MethodBudget, MethodId, RequestError, TypeId};
+use crate::{ClassDefId, MethodId, RequestError, RunContext, TypeId};
 
 /// Original declaration and bounded code ranges, without a complete method-layout claim.
 pub(crate) struct MethodEnvelope<'i, 'a> {
@@ -15,7 +15,7 @@ impl<'a> ProgramIndex<'a> {
         &'i self,
         class: ClassDefId,
         method: MethodId,
-        budget: &mut MethodBudget<'_, '_>,
+        budget: &mut RunContext<'_>,
     ) -> Result<Option<MethodEnvelope<'i, 'a>>, RequestError> {
         let owner = self.class_with(class, budget)?;
         let mut selected = None;
@@ -58,7 +58,7 @@ impl<'a> ProgramIndex<'a> {
         spec: super::formats::OpcodeSpec,
         layout: super::formats::InsnLayout,
         operands: super::operands::RawOperands,
-        budget: &mut MethodBudget<'_, '_>,
+        budget: &mut RunContext<'_>,
     ) -> Result<(), RequestError> {
         super::binding::check_producer(self, pc, spec, layout, operands, budget)?;
         Ok(())

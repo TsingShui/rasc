@@ -1,12 +1,12 @@
 use super::java::{assignments, local};
 use crate::p7_java::dispatcher::{Dispatcher, Edge, Transfer};
 use crate::substrate::owned::TextBuffer;
-use crate::{MethodBudget, RequestError};
+use crate::{RequestError, RunContext};
 
 fn edge(
     edge: &Edge,
     output: &mut TextBuffer,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<(), RequestError> {
     assignments(&edge.copies, output, budget)?;
     output.push("pc = ", budget)?;
@@ -17,7 +17,7 @@ pub(super) fn locals(
     body: &Dispatcher,
     type_names: &crate::p7_java::types::TypeNames,
     output: &mut TextBuffer,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<(), RequestError> {
     if let Some(entry) = body.prologue.first() {
         output.push(
@@ -28,7 +28,7 @@ pub(super) fn locals(
             budget,
         )?;
         for (index, argument) in entry.arguments.iter().enumerate() {
-            budget.charge_work(1)?;
+            budget.checkpoint()?;
             if index != 0 {
                 output.push(", ", budget)?;
             }
@@ -37,7 +37,7 @@ pub(super) fn locals(
         output.push(");\n", budget)?;
     }
     for declaration in &body.locals {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         output.push(type_names.source_name(declaration.source_type)?, budget)?;
         output.push(" ", budget)?;
         local(declaration.id, output, budget)?;
@@ -69,10 +69,10 @@ pub(super) fn locals(
 pub(super) fn statements(
     case: &crate::p7_java::dispatcher::Case,
     output: &mut TextBuffer,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<(), RequestError> {
     for statement in &case.statements {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         match statement {
             crate::p7_java::calls::Statement::Snapshot(snapshot) => {
                 local(snapshot.copy.target, output, budget)?;
@@ -111,7 +111,7 @@ pub(super) fn statements(
                 output.push(&init.source_type, budget)?;
                 output.push("(", budget)?;
                 for (index, &argument) in init.arguments.iter().enumerate() {
-                    budget.charge_work(1)?;
+                    budget.checkpoint()?;
                     if index != 0 {
                         output.push(", ", budget)?;
                     }
@@ -119,7 +119,7 @@ pub(super) fn statements(
                 }
                 output.push(");\n", budget)?;
                 for &alias in &init.aliases {
-                    budget.charge_work(1)?;
+                    budget.checkpoint()?;
                     if alias != init.root {
                         local(alias, output, budget)?;
                         output.push(" = ", budget)?;
@@ -149,7 +149,7 @@ pub(super) fn statements(
                         }
                         output.push(" {", budget)?;
                         for (index, &value) in values.iter().enumerate() {
-                            budget.charge_work(1)?;
+                            budget.checkpoint()?;
                             if index != 0 {
                                 output.push(", ", budget)?;
                             }
@@ -161,7 +161,7 @@ pub(super) fn statements(
             }
             crate::p7_java::calls::Statement::FreshFill(fill) => {
                 for (index, element) in fill.elements.iter().enumerate() {
-                    budget.charge_work(1)?;
+                    budget.checkpoint()?;
                     local(fill.array, output, budget)?;
                     output.push("[", budget)?;
                     output.unsigned(
@@ -222,7 +222,7 @@ pub(super) fn statements(
                 output.push(&call.method, budget)?;
                 output.push("(", budget)?;
                 for (index, &argument) in call.arguments.iter().enumerate() {
-                    budget.charge_work(1)?;
+                    budget.checkpoint()?;
                     if index != 0 {
                         output.push(", ", budget)?;
                     }
@@ -249,7 +249,7 @@ pub(super) fn statements(
                 output.push(&call.method, budget)?;
                 output.push("(", budget)?;
                 for (index, &argument) in call.arguments.iter().enumerate() {
-                    budget.charge_work(1)?;
+                    budget.checkpoint()?;
                     if index != 0 {
                         output.push(", ", budget)?;
                     }
@@ -265,7 +265,7 @@ pub(super) fn statements(
 pub(super) fn open_if(
     transfer: &Transfer,
     output: &mut TextBuffer,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<(), RequestError> {
     use crate::p7_java::conditions::{Comparison, Expression, Right};
     let Transfer::Branch { condition, .. } = transfer else {
@@ -313,12 +313,12 @@ pub(super) fn write(
     body: &Dispatcher,
     type_names: &crate::p7_java::types::TypeNames,
     output: &mut TextBuffer,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<(), RequestError> {
     locals(body, type_names, output, budget)?;
     output.push("int pc = 0;\nwhile (true) {\nswitch (pc) {\n", budget)?;
     for case in &body.cases {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         output.push("case ", budget)?;
         output.unsigned(u64::from(case.key.0), budget)?;
         output.push(": {\n", budget)?;
@@ -337,7 +337,7 @@ pub(super) fn write(
             } => {
                 if *form == crate::p6_regions::SwitchForm::Comparisons {
                     for (key, target) in cases {
-                        budget.charge_work(1)?;
+                        budget.checkpoint()?;
                         output.push("if (", budget)?;
                         local(*value, output, budget)?;
                         output.push(" == ", budget)?;
@@ -352,7 +352,7 @@ pub(super) fn write(
                     local(*value, output, budget)?;
                     output.push(") {\n", budget)?;
                     for (key, target) in cases {
-                        budget.charge_work(1)?;
+                        budget.checkpoint()?;
                         output.push("case ", budget)?;
                         output.arguments(format_args!("{key}"), budget)?;
                         output.push(": {\n", budget)?;

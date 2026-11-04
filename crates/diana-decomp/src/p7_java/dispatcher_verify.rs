@@ -5,15 +5,11 @@ use crate::p3_ssa::{Definition, Sym};
 use crate::p4_types::{Kind, TypedBody};
 use crate::p5_variables::{Copy, CopyPlan, LocalType, Temporary};
 use crate::substrate::owned::reserve;
-use crate::{MethodBudget, RequestError};
+use crate::{RequestError, RunContext};
 fn ix(id: u32) -> Result<usize, RequestError> {
     usize::try_from(id).map_err(|_| RequestError::PlatformCapacity)
 }
-fn push<T>(
-    items: &mut Vec<T>,
-    item: T,
-    budget: &mut MethodBudget<'_, '_>,
-) -> Result<(), RequestError> {
+fn push<T>(items: &mut Vec<T>, item: T, budget: &mut RunContext<'_>) -> Result<(), RequestError> {
     reserve(items, 1, budget)?;
     items.push(item);
     Ok(())
@@ -138,7 +134,7 @@ pub(super) fn call_argument(
     view: super::branch::ValueUse,
     value: crate::p3_ssa::ValueId,
     formal: crate::p2_flow::DeclarationType,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<bool, RequestError> {
     use super::branch::ValueUse;
     use crate::p2_flow::DeclarationType;
@@ -180,7 +176,7 @@ fn static_call(
     ssa: &TypedBody<'_>,
     id: crate::p2_flow::CallId,
     actual: &super::calls::StaticCall,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<bool, RequestError> {
     let site = ssa
         .ssa
@@ -208,7 +204,7 @@ fn static_call(
     }
     let mut source = actual.qualifier.encode_utf16();
     for &unit in &owner[1..owner.len() - 1] {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         if source.next() != Some(if unit == 47 { 46 } else { unit }) {
             return Ok(false);
         }
@@ -218,7 +214,7 @@ fn static_call(
     }
     let mut source = actual.method.encode_utf16();
     for &unit in &contract.name {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         if source.next() != Some(unit) {
             return Ok(false);
         }
@@ -232,7 +228,7 @@ fn static_call(
         .zip(&bound.inputs)
         .zip(&site.formals)
     {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         if !call_argument(ssa, view, value, formal, budget)? {
             return Ok(false);
         }
@@ -246,15 +242,15 @@ fn copies(
     target: BlockId,
     actual: &[Assignment],
     types: &[LocalType],
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<(), RequestError> {
     let mut parallel = Vec::new();
     for phi in &ssa.ssa.phis {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         if phi.block == target {
             let mut source = None;
             for &(edge, sym) in &phi.inputs {
-                budget.charge_work(1)?;
+                budget.checkpoint()?;
                 if edge
                     == incoming.map_or(
                         crate::p3_ssa::Incoming::EntrySeed,
@@ -316,7 +312,7 @@ fn copies(
         temporaries: Vec::new(),
     };
     for local in &body.locals[types.len()..] {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         push(
             &mut plan.temporaries,
             Temporary {
@@ -327,7 +323,7 @@ fn copies(
         )?;
     }
     for statement in actual {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         let source = match statement.expression {
             Expression::Local(super::branch::ValueUse::Direct(local)) => {
                 crate::p5_variables::CopySource::Local(local)
@@ -365,7 +361,7 @@ fn edge(
     actual: &Edge,
     id: EdgeId,
     types: &[LocalType],
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<(), RequestError> {
     let original = ssa
         .ssa
@@ -396,10 +392,10 @@ pub(super) fn snapshot_copies(
     pc: crate::CodeUnitOffset,
     statements: &[super::calls::Statement],
     index: &mut usize,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<(), RequestError> {
     for expected in &storage.exceptional.snapshots {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         if expected.source_block != block || expected.before != pc {
             continue;
         }
@@ -415,11 +411,11 @@ pub(super) fn snapshot_copies(
 }
 
 pub(super) fn verify(
-    input: &crate::input::MethodInput<'_, '_>,
+    input: &crate::input::MethodSource<'_, '_>,
     storage: &crate::p5_variables::StorageBody<'_>,
     body: &Dispatcher,
     names: &super::types::TypeNames,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<(), RequestError> {
     let ssa = &storage.typed;
     if body.prologue.len() > 1
@@ -442,7 +438,7 @@ pub(super) fn verify(
     }
     let mut types = Vec::new();
     for (index, local) in body.locals.iter().enumerate() {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         if !super::local_declarations::verify(local, names, budget)? {
             return Err(RequestError::InternalInvariant(
                 "Java local declaration differs from storage",
@@ -518,11 +514,11 @@ pub(super) fn verify(
     let mut seen = Vec::new();
     reserve(&mut seen, ssa.ssa.blocks.len(), budget)?;
     for _ in &ssa.ssa.blocks {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         seen.push(false);
     }
     for case in &body.cases {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         let index = ix(case.key.0)?;
         let block = ssa
             .ssa
@@ -539,7 +535,7 @@ pub(super) fn verify(
         seen[index] = true;
         let mut statement = 0usize;
         for &id in &ssa.ssa.bound[index].ops {
-            budget.charge_work(1)?;
+            budget.checkpoint()?;
             let bound = ssa.ssa.operation(id)?;
             snapshot_copies(
                 storage,
@@ -731,7 +727,7 @@ pub(super) fn verify(
             if matches!(bound.op, Op::Exception(_)) {
                 let ingress = super::exceptional::ingress(storage, case.key, budget)?;
                 for copy in &ingress.copies.steps {
-                    budget.charge_work(1)?;
+                    budget.checkpoint()?;
                     if !matches!(case.statements.get(statement), Some(super::calls::Statement::Assignment(actual))
                         if actual.target == copy.target && matches!(actual.expression, Expression::Local(super::branch::ValueUse::Direct(source)) if Some(source) == copy.source.local()))
                     {
@@ -762,7 +758,7 @@ pub(super) fn verify(
         }
         let mut outgoing = Vec::new();
         for (id, original) in ssa.ssa.edges.iter().enumerate() {
-            budget.charge_work(1)?;
+            budget.checkpoint()?;
             if original.source == case.key {
                 push(
                     &mut outgoing,
@@ -864,7 +860,7 @@ pub(super) fn verify(
                 for (position, ((actual_key, actual), (key, target))) in
                     cases.iter().zip(&original.cases).enumerate()
                 {
-                    budget.charge_work(1)?;
+                    budget.checkpoint()?;
                     if actual_key != key || actual.target != *target {
                         return Err(RequestError::InternalInvariant(
                             "switch certificate changed an original key or target",
@@ -1007,7 +1003,7 @@ pub(super) fn verify(
         }
     }
     for covered in seen {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         if !covered {
             return Err(RequestError::InternalInvariant(
                 "dispatcher lost a reachable block",

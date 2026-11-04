@@ -1,7 +1,7 @@
 use crate::p2_flow::{DeclarationType, Op};
 use crate::p3_ssa::BoundOp;
 use crate::p4_types::{Kind, TypedBody};
-use crate::{MethodBudget, RequestError};
+use crate::{RequestError, RunContext};
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub(crate) enum CheckKind {
@@ -37,14 +37,14 @@ fn target(
     })
 }
 pub(super) fn validate(
-    input: &crate::input::MethodInput<'_, '_>,
+    input: &crate::input::MethodSource<'_, '_>,
     _catalog: &crate::context::Context,
     typed: &TypedBody<'_>,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<bool, RequestError> {
     let mut checked_qualifier = false;
     for op in &typed.ssa.operations {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         let Some((reference, kind, _)) = target(typed, op)? else {
             continue;
         };
@@ -72,7 +72,7 @@ pub(super) fn lower(
     typed: &TypedBody<'_>,
     op: &BoundOp,
     names: &super::types::TypeNames,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<Statement, RequestError> {
     let (reference, kind, operation) = target(typed, op)?.ok_or(
         RequestError::InternalInvariant("non-check entered type lowering"),
@@ -104,9 +104,9 @@ pub(super) fn verify(
     op: &BoundOp,
     actual: &Statement,
     names: &super::types::TypeNames,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<bool, RequestError> {
-    budget.charge_work(1)?;
+    budget.checkpoint()?;
     let Some((reference, kind, operation)) = target(typed, op)? else {
         return Ok(false);
     };
@@ -126,7 +126,7 @@ pub(super) fn verify(
             .map_err(crate::input::MethodError::Decode)?;
     let mut words = operands.registers().iter();
     for register in registers.into_iter().flatten() {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         if words.next() != Some(register) {
             return Ok(false);
         }

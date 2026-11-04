@@ -1,7 +1,7 @@
 use crate::p7_java::conditions::Comparison;
 use crate::p7_java::numeric_expression::{ExprId, Expression, Node};
 use crate::substrate::owned::{TextBuffer, push};
-use crate::{MethodBudget, RequestError};
+use crate::{RequestError, RunContext};
 enum Work {
     Node(ExprId),
     Text(&'static str),
@@ -9,12 +9,12 @@ enum Work {
 pub(super) fn write(
     tree: &Expression,
     output: &mut TextBuffer,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<(), RequestError> {
     let mut todo = Vec::new();
     push(&mut todo, Work::Node(tree.root()), budget)?;
     while let Some(work) = todo.pop() {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         match work {
             Work::Text(text) => output.push(text, budget)?,
             Work::Node(id) => match tree.node(id)? {

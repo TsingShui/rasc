@@ -1,6 +1,6 @@
 use super::normal::Kind;
 use crate::p2_flow::{ArrayKind, DeclarationType};
-use crate::{MethodBudget, RequestError};
+use crate::{RequestError, RunContext};
 impl DeclarationType {
     pub(crate) fn kind(self) -> Kind {
         match self {
@@ -40,8 +40,8 @@ impl DeclarationType {
 impl Kind {
     pub(crate) fn reference_descriptor(
         self,
-        input: &crate::input::MethodInput<'_, '_>,
-        budget: &mut MethodBudget<'_, '_>,
+        input: &crate::input::MethodSource<'_, '_>,
+        budget: &mut RunContext<'_>,
     ) -> Result<Vec<u16>, RequestError> {
         let units = match self {
             Self::Nominal(id) => {

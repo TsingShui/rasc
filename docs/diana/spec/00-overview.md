@@ -57,41 +57,30 @@ widths MUST NOT be guessed; available original facts and coverage remain explici
 P8 renders existing products and MUST NOT perform another analysis or repair
 missing semantics.
 
-## Control, limits and resources
+## Control and cancellation
 
-open/index, method analysis and render share one `&mut RunContext`, and Limits belong only to that
-context.
-By default every numeric quota is None, so no fixed threshold is added and no fixed raw
-work/memory is reserved. The context stores no IR, spawns nothing and is not shared globally;
-cancellation is checked in every loop pop, instruction, set growth/copy and long string chunk.
-Cancellation ends immediately and MUST NOT switch to raw. Convergence of the analyses is guaranteed
-by the finite state or single-schedule measures of each algorithm, and a fixed step count MUST NOT
-hide an algorithm that cannot terminate.
+open/index, method analysis and render share one `&mut RunContext`, which carries
+only cancellation. The context stores no IR, spawns nothing and is not shared
+globally; cancellation is checked in every loop pop, instruction, set growth/copy
+and long string chunk. Cancellation ends immediately and MUST NOT switch to raw.
+Convergence of the analyses is guaranteed by the finite state or single-schedule
+measures of each algorithm, and a fixed step count MUST NOT hide an algorithm that
+cannot terminate.
 
-Only items the caller explicitly sets to Some(n) have their quota checked, and accumulated used
-amounts are never refunded. The normal and raw work sub-quotas are independent and both count toward
-the request; method-derived allocation totals include normal and raw. Only explicitly finite
-fallback work/allocation amounts claim from the parent quota, and normal MUST NOT use held amounts;
-when unconfigured, raw uses only the remaining resources and does not claim an infinite reservation.
-Unconsumed held amounts MAY be returned, used quota does not roll back, and no retry path bypasses
-the limit.
+Diana exposes no numeric work, allocation, metadata, code-unit, nesting or output
+quota. Every allocation checks the platform-representable size and the minimum
+input record size, then calls try_reserve; a real allocation failure is reported
+explicitly as ResourceExhausted and MUST NOT be turned into format damage. Env,
+metadata, UTF16, AST, spans and text all follow this rule. Traversal and release of
+untrusted depth use an explicit stack or arena and do not rely on host recursion or
+recursive Drop.
 
-Every allocation first checks the platform-representable size, the minimum input record size and
-the applicable explicit quota, and then calls try_reserve; a real allocation failure is reported
-explicitly as BudgetExceeded and MUST NOT be turned into format damage. Env, metadata, UTF16, AST, spans
-and text all follow this rule. Traversal and release of untrusted depth use an explicit stack or
-arena and do not rely on host recursion or recursive Drop; max_nesting acts as a numeric threshold
-only when set explicitly.
-Artifacts are dropped after their last consumption, and the Report keeps only the necessary owned
-facts rather than the whole SSA/Flow history graph.
-
-normal/raw/report output checks only its own explicitly set length items; the final JSON also sets
-no default hard cap, see [Limits](../spec/00-overview.md#control-limits-and-resources). Check against the actual escaped UTF8 increment, and
-MUST NOT first build a huge String and then claim the budget was enforced beforehand.
-Concatenating one member into the report does not charge the member length twice, while real work
-and allocation are still accumulated; unconfigured upper limits do not silently acquire defaults.
-Performance records come from authorized release runs, and the ledger does not replace RSS or actual
-elapsed time.
+Artifacts are dropped after their last consumption, and the Report keeps only the
+necessary owned facts rather than the whole SSA/Flow history graph. Output is
+checked against the actual escaped UTF8 increment as it is produced; the engine
+MUST NOT first build an unbounded String and then claim the work was bounded.
+Performance records come from authorized release runs and do not claim a fixed
+time/RSS upper bound for every input.
 
 ## 1. Product boundary and engineering scope
 
@@ -112,7 +101,7 @@ A local failure MUST NOT discard other members.
 upstream URL and commit
   locally, while the public source commit and path stay unchanged.
 - Input, source, code-unit and UTF16 coordinates are independent; Diana MUST
-  range- and budget-check the offset and count of every input before any slice or
+  range-check the offset, count and arithmetic of every input before any slice or
   allocation.
 - Independent results, source text and synthetic names have no required stable
   display order; Diana MUST NOT add a sorting or arrival-waiting reorder buffer.
@@ -158,10 +147,10 @@ readability alone does not establish semantic equivalence.
 
 ```rust
 pub struct DexImage<'a> { pub bytes: &'a [u8], pub header_offset: usize, pub origin: ImageOrigin }
-pub struct RunContext<'c> { /* private Limits + cumulative ledger + cancellation callback */ }
-// RunContext::new(limits: Limits, is_cancelled: &'c dyn Fn() -> bool) -> Self
+pub struct RunContext<'c> { /* private cancellation callback and shared worker flag */ }
+// RunContext::new(is_cancelled: &'c dyn Fn() -> bool) -> Self
 pub struct Engine<'a> { /* immutable ProgramIndex<'a> + request configuration; the bytes are held by the root scope */ }
-pub struct Options { pub recovery: RecoveryPolicy } // Limits are held only by RunContext
+pub struct Options { pub recovery: RecoveryPolicy }
 pub struct Request { pub class: ClassKey, pub method: Option<MethodSelector> }
 // MethodSelector = { name, proto }; a local MethodKey exists only after resolution, and a method is not selected by name alone.
 pub struct Report {
@@ -203,13 +192,13 @@ render(report: &Report, control: &mut RunContext<'_>)
     -> Result<RenderedReport, RequestError>;
 ```
 
-The application MUST create one RunContext per request and pass it in sequence through read/index, analysis and printing, and MUST NOT rebuild the context and retry in order to bypass a limit. The Engine MUST NOT store the callback or a mutable control, and it needs no global state or scheduler; open and render likewise MUST check cancellation and return Cancelled/BudgetExceeded, and the engine MUST NOT misreport them as Malformed. Diana MUST NOT store Limits again in Options/Engine. Report owns the declarations, literal UTF16, original identity and evidence summaries that the result requires and MUST NOT borrow a temporary SSA/Env; render MUST NOT require the whole graph to be retained, and it MUST NOT re-analyze or start another recovery route because output failed.
+The application MUST create one RunContext per request and pass it in sequence through read/index, analysis and printing, and MUST NOT rebuild the context and retry in order to bypass a limit. The Engine MUST NOT store the callback or a mutable control, and it needs no global state or scheduler; open and render likewise MUST check cancellation and return Cancelled/ResourceExhausted, and the engine MUST NOT misreport them as Malformed. Report owns the declarations, literal UTF16, original identity and evidence summaries that the result requires and MUST NOT borrow a temporary SSA/Env; render MUST NOT require the whole graph to be retained, and it MUST NOT re-analyze or start another recovery route because output failed.
 
 Caller-supplied external declarations are not the product path. The ordinary
 request derives class and member facts for every definition in the input and
 treats owners outside the input as unknown; Diana does not accept external declarations as a verification policy. A single DEX uses an images vector of length 1; DexIds are allocated within the request and map back to the root physical/logical identity through ImageOrigin, different arrival orders are not required to produce the same numbers, and no extra sorting is done for file names or input order. The catalog MAY be empty; insufficient type/call evidence remains explicit in the local result. The library MUST NOT access disk, processes or the network, and the root request scope holds the byte owner until Engine use ends; an ordinary DEX has header_offset=0; T04 implements native 041 reading, H04 only performs application borrowing and original-identity adaptation, and T25/H04 provide the D065 evidence for their respective sides.
 
-Readable Java MUST identify material unresolved assumptions or failed checks and preserve original method identity, available DEX debug facts and coverage. Its producer MUST use the existing shared analysis chain and available checked input facts; it MUST NOT fabricate instruction widths or claim unknown declaration, type or control-flow facts as proven. If a useful reconstruction cannot be formed, the engine MUST retain Debug or Unavailable. P8 renders the produced result without further analysis. Readable output does not suppress Malformed, BudgetExceeded, Cancelled or InternalInvariant classification.
+Readable Java MUST identify material unresolved assumptions or failed checks and preserve original method identity, available DEX debug facts and coverage. Its producer MUST use the existing shared analysis chain and available checked input facts; it MUST NOT fabricate instruction widths or claim unknown declaration, type or control-flow facts as proven. If a useful reconstruction cannot be formed, the engine MUST retain Debug or Unavailable. P8 renders the produced result without further analysis. Readable output does not suppress Malformed, ResourceExhausted, Cancelled or InternalInvariant classification.
 
 P7 produces readable Java from the shared analysis products and records material uncertainties. Internal checks preserve input safety and analysis/transform invariants; they do not qualify output as legal Java. The engine MUST NOT present unknown facts as proven or call javac; independent compilation and behavior checks provide evidence only for their tested environments.
 
@@ -223,7 +212,7 @@ A class-shaped result is not a guarantee of compilation or equivalence. Members 
 |---|---|---|
 | `Malformed` | out-of-range ID, truncated opcode, wrong branch boundary, invalid LEB, use of an undefined register | If a global header/catalog cannot be located, RequestError; a locally invalid method → Unavailable, optionally with an explicit raw excerpt. This is not an ordinary Unsupported, and available original facts/bytes remain diagnostic information, not verified Java or a valid-program claim |
 | `Unsupported` | known legal invoke-custom, constructor or monitor/exception structure whose operations cannot yet be represented | retain checked original instructions, references and coverage as an analysis-oriented debug snapshot; if decoding cannot continue safely, keep available facts/bytes and identify the missing range |
-| `BudgetExceeded` | a resource limit explicitly configured by the caller is hit, or an actual allocation/platform capacity fails | stop that method's analysis; if resources are still available for raw, print it completely, otherwise Unavailable; there is no numeric quota by default and the engine MUST NOT retry with an increased limit |
+| `ResourceExhausted` | an actual allocation or platform-capacity check fails, or a bounded queue/worker cannot be created | stop that method's analysis; the raw exit still reads only checked original facts if that remains possible, otherwise Unavailable; there is no numeric quota and the engine MUST NOT retry with an increased bound |
 | `InternalInvariant` | identity inconsistency before and after the verifier, certificate missing an edge, algorithm-impossible state | the diagnostic MUST state BUG explicitly and the dev test MUST fail; the request report MAY keep a method-level raw fallback, but the status remains an internal error and MUST NOT count as a normal Unsupported or a Java success |
 | `Cancelled` | the caller's cancellation token | stop the request with RequestError::Cancelled; the engine MUST NOT continue producing per-method debug output after cancellation |
 
@@ -238,7 +227,7 @@ The engine retains an available readable reconstruction as Java together with it
 | `severity` | `warning` for a local Unsupported; `error` for a hard failure, including a BUG with raw attached |
 | `method` / `site` | Optional original MethodKey and CodeUnit; a site implies its method, and absence does not mean offset 0 |
 | `phase` | Optional finite PhaseId identifying the producer; no pass registry or traversal history |
-| `detail` | Owned explanation charged to the request; it does not carry an entire graph, input or unbounded trace |
+| `detail` | Owned explanation; it does not carry an entire graph, input or unbounded trace |
 
 Class-level reasons retain their original ClassKey in the enclosing result. Input
 and request errors use the same kind/code distinction. A reason does not claim a
@@ -269,7 +258,7 @@ A phase is an ownership/responsibility split and does not require one file per r
 | Regions | p6_regions/{mod,normal,protection,monitors,verify}.rs; identify_regions | T09/T13/T18/T19 |
 | Java | p7_java/{mod,expressions,dispatcher,structured,declarations,initializers,ownership,enums,verify}.rs; lower_method/assemble_class | the respective core capability cards |
 | Emit | p8_emit/{mod,java,debug,literals,spans}.rs; render | T03/T06 |
-| Control | pipeline/{schedule,control,diagnostics}.rs; direct typed calls and quota checks | T01 |
+| Control | pipeline/{control,diagnostics,request}.rs; direct typed calls and cancellation checks | T01 |
 | Facts | context/{mod,catalog,input_facts}.rs; cross-DEX lookup and lazy cache of P1 declaration facts | T01/T11 |
 | Data | substrate/{ids,origin,types,cfg,java}.rs; only the containers/IDs currently used | created together with the actual consumer |
 
@@ -281,7 +270,7 @@ The application MUST create one context per request and use it for the whole cha
 
 The application MUST allocate DexIds by enumerating this request's images, and they map to the original ImageOrigin; original identity is the origin plus the original table index/proto, not an output array position. Input admission MUST count the 041 views of the same physical slice once; each logical catalog MUST be independent. The same origin supplied by the caller MUST correspond to the same original bytes/header, and the engine MUST reject a conflicting request.
 
-Report is an owned result: the literal UTF16 in the Java AST, the engine MUST copy or intern the declarations used and the original identity into ResultFacts and charge them against the same request's quota; Report MUST NOT borrow an Env/Phi arena and MUST NOT carry the whole analysis graph. render only needs to read ResultFacts and does not need a live Engine. RenderedReport owns the UTF8 text and spans; JSON, files and the CLI are the application's responsibility. ResultFacts retains the used DexId-to-ImageOrigin mapping and each emitted original declaration's class/member index and descriptor/name/proto. The application derives §6.3 locators from those facts; it MUST NOT reopen files, retain an Engine or guess an index from result order to render identity. Library-owned origin tokens are caller-supplied, not host file paths.
+Report is an owned result: the literal UTF16 in the Java AST, the engine MUST copy or intern the declarations used and the original identity into ResultFacts; Report MUST NOT borrow an Env/Phi arena and MUST NOT carry the whole analysis graph. render only needs to read ResultFacts and does not need a live Engine. RenderedReport owns the UTF8 text and spans; JSON, files and the CLI are the application's responsibility. ResultFacts retains the used DexId-to-ImageOrigin mapping and each emitted original declaration's class/member index and descriptor/name/proto. The application derives §6.3 locators from those facts; it MUST NOT reopen files, retain an Engine or guess an index from result order to render identity. Library-owned origin tokens are caller-supplied, not host file paths.
 
 The input helper shared by the engine and the actual lightweight scanner is
 `raw::instruction_layout(code_bytes: &[u8], pc_cu: u32, version) -> Result<InsnLayout, RawDecodeError>`:
@@ -317,7 +306,7 @@ Site { method: MethodKey, code_unit: u32 }
 Origin { sites: Vec<Site>, synthetic_reason: Option<Reason> }
 ```
 
-The engine MUST charge every arena growth first; exhausting the u32 ID space is BudgetExceeded, and the allocator MUST NOT wrap. Diana MUST NOT mix UTF16, input byte and source UTF8 coordinates. Debug names are hints only, and they MUST NOT decide member identity, slot or type.
+The engine MUST check arena growth capacity before allocation; exhausting the u32 ID space is ResourceExhausted, and the allocator MUST NOT wrap. Diana MUST NOT mix UTF16, input byte and source UTF8 coordinates. Debug names are hints only, and they MUST NOT decide member identity, slot or type.
 
 ##### 3.3.2 FlowGraph
 
@@ -365,34 +354,27 @@ P5 MUST receive the body only once every final use conversion is defined; the pr
 while the type solver MUST NOT guess a non-literal as a cast between int/float/ref. What P4 hands to P4 is constraints, and only P7 checks the final Java overload/
 dispatch/throws; Diana MUST NOT impose a circular requirement that P4 already know the source static types.
 
-#### 3.7 RunContext and budget implementation
+#### 3.7 RunContext and cancellation implementation
 
-Limits belong only to RunContext. Public methods are called in sequence; the internal RunControl borrows `&mut RunContext` and adds the current
-method sub-quota. The implementation MUST NOT need RefCell/Mutex, a global context or self-referential structures.
+`RunContext` carries only a cancellation callback, a latched cancelled state and,
+for scoped workers, a shared cancellation flag. It owns no IR, no limits and no
+cumulative resource ledger.
 
-```text
-Quota { limit: Option<u64>, used, held }
-claim(n):        checked used+held+n; check <=limit only when Some(limit); held+=n
-spend(n):        checked used+held+n; check <=limit only when Some(limit); used+=n
-spend_held(n):   held-=n; used+=n          # only for the reservation that was already claimed
-release_unspent: held-=remaining         # not a refund of consumed work/allocation
+```rust
+pub struct RunContext<'c> { /* private cancellation callback and shared flag */ }
+// RunContext::new(is_cancelled: &'c dyn Fn() -> bool) -> Self
+// RunContext::new_parallel(callback: &'c (dyn Fn() -> bool + Sync)) -> Self
 ```
 
-By default every limit is None, so there is no numeric quota and no fixed raw reservation. When a limit is configured explicitly, the engine MUST check the
-request and the applicable sub-quota separately for the same operation, and MUST NOT add them together as if they were two copies of memory. The normal and raw work sub-quotas are independent and both count toward the request;
-the method allocation limit covers the normal/raw total. The engine MUST claim only explicitly finite fallback work/allocation values from the parent quota, and
-normal MUST NOT consume held; the engine MUST NOT claim an "unlimited reservation" for a None limit, and raw shares the request's remaining resources with no additional reserve promised.
-A MethodBudget drop only returns unconsumed held, and it MUST NOT roll back used. A failed explicit reservation MUST NOT start normal analysis; the engine MUST report a resource Unavailable for a locatable
-method, and MUST return RequestError if even the report does not fit.
-The engine MUST propagate Cancelled to the request immediately at the checkpoint and MUST NOT generate raw per method.
+Every decode, graph, slot-set/constraint change, copy, subtype and output loop
+checks cancellation at its natural boundaries. String and buffer processing uses
+fixed chunks so a long unit cannot postpone cancellation indefinitely. Scoped
+Rayon workers share the callback and a latched flag; joining finishes before the
+request checks cancellation for publication.
 
-The engine MUST charge allocation by capacity increment: Vec by delta_capacity*sizeof(T), strings by encoded bytes, HashMap/
-sets with a conservative bucket/control overhead; the allocator MUST call try_reserve only after the check. The engine MUST keep input admission and derived allocation separate, and MUST NOT count resident memory twice for the
-same caller-owned slice borrow. This ledger is a cumulative logical upper bound, and Diana MUST NOT claim it is exact RSS.
-
-Every decode, graph, slot-set/constraint change, copy, subtype and output loop MUST call charge/check_cancel;
-Diana MUST process long strings in fixed chunks, and trace/diagnostic output MUST NOT bypass the limits. The configured limits and their accounting MUST use [00-overview](00-overview.md)
-as the single table, and Diana MUST NOT generate a second registry. render MUST emit only the complete result and MUST NOT re-analyze or retry on error.
+Container growth checks the platform-representable size and calls `try_reserve`.
+An actual allocation failure is reported as a classified error and is not
+converted into format damage. Cancellation does not switch to the raw exit.
 
 ## 9. Implementation trade-offs
 
@@ -422,40 +404,23 @@ protection-domain/resource checks have no off switch.
 
 The engine MUST re-run the whole method for a new request and MUST NOT cache mutable analysis products; the Engine retains only the immutable ProgramIndex. Requests are not required to share numbers or a cross-run canonical fingerprint, and Diana MUST NOT sort fact tables for cache identity. A local worklist modifies only the specified finite facts and enqueues only on an actual change, charging before execution. There is no generic Repeat/Changed scheduling protocol, and Diana MUST NOT create a mechanical test suite for observability.
 
-#### 10.3 Explicit optional resource limits
+#### 10.3 Resource control and allocation failure
 
-Every field of `Limits::default()` is `None`. Each item has type `Option<u64>`:
-`None` sets no quota for that item, and only `Some(n)` checks the bound against the caller-specified n; `Some(0)` is a genuine zero quota.
-Diana MUST NOT use `u64::MAX` as an unlimited substitute and MUST NOT fill in an unconfigured input size, node count, work, allocation, nesting or output threshold.
-Default application requests follow this rule too, and an adapter MUST NOT restore a fixed upper bound secretly.
+Diana exposes no numeric work, allocation, metadata, code-unit, nesting or output
+quota, and no default threshold is substituted for one. The engine keeps no
+cumulative work/allocation ledger and does not report such usage.
 
-| Limits field | Object/timing constrained once configured explicitly |
-|---|---|
-| `max_image_bytes` / `max_request_input_bytes` | a single DEX / deduplicated physical input total, before open and while accumulating |
-| `max_metadata_items` / `max_string_units` | total metadata entries / UTF16 units of a single string, after the format range check and before allocation |
-| `max_method_code_units` | code length of the normal method entry; raw uses a separate field |
-| `max_blocks` / `max_edges` | before CFG growth |
-| `max_values` / `max_constraints` / `max_phi_inputs` | before value, constraint or incoming growth |
-| `max_ast_nodes` / `max_copy_assignments` | before AST and normal/shadow/cycle copy growth |
-| `max_method_allocation_bytes` / `max_request_allocation_bytes` | method normal/raw total / cumulative derived allocation of the whole request, excluding caller-owned borrowed input |
-| `max_work_steps` / `max_request_work_steps` | single-method normal work / open, all normal/raw and render combined; raw does not consume the normal sub-quota |
-| `max_nesting` | before an explicit stack push; when unconfigured, the engine MUST NOT use host recursion for untrusted depth |
-| `max_method_output_bytes` / `fallback_output_bytes` | escaped normal member / UTF8 length of the original-fact debug snapshot |
-| `max_report_output_bytes` | final RenderedReport.text total, including shell, members, markers and diagnostics |
-| `fallback_code_units` | original code-unit range examined by the debug exit |
-| `fallback_work_steps` / `fallback_allocation_bytes` | independent debug work/allocation quota; only an explicitly finite value takes part in the reservation, see §3.7 |
+Removing quotas does not remove safety:
 
-The three output fields are independent: only configured limits are checked, and the engine MUST NOT reset the others when one changes. normal source,
-raw source and report are different length boundaries; assembling the same member into the report does not charge that member's length twice.
-The capacity of unprinted OriginSpans counts as actual derived allocation; serialization length is charged only after JSON conversion, see §7.
-Actual work and allocation accumulated by a temporary/failed candidate is not refunded, but the engine MUST NOT thereby turn an unconfigured allowance into an implicit limit.
-
-The engine MUST return BudgetExceeded naming the actual field/bound when an explicit limit is hit, and MUST NOT change it to Malformed, MUST NOT truncate it into success
-and MUST NOT re-run normal/raw. Diana MUST always check the remaining format input, index width, checked arithmetic and platform-representable capacity; the allocator MUST use try_reserve for container growth and MUST report an actual allocation failure explicitly as BudgetExceeded without fabricating a configured limit.
-Cancellation, file integrity and bounded-queue backpressure do not depend on whether Limits is configured. An unlimited quota does not mean unlimited physical memory,
-and Diana MUST NOT claim a fixed time/RSS upper bound for every input; performance is recorded only from actual release runs.
-
-A trace is optional bounded localization only; Diana MUST NOT add a registry or an invocation-count test for it and MUST NOT introduce a separate console.
+- Every input read checks offsets, lengths, counts and arithmetic before slicing.
+- Container growth checks platform-representable capacity and calls `try_reserve`.
+- An actual allocation failure is reported explicitly as a classified resource
+  failure and MUST NOT be turned into Malformed input.
+- Cancellation, bounded queues and publication atomicity remain required.
+- Traversal of untrusted depth uses an explicit stack or arena and MUST NOT rely
+  on host recursion.
+- The CLI MUST NOT truncate an over-long result into success, because no caller
+  may request a partial result through a numeric bound.
 
 ## Semantic goals
 
@@ -465,7 +430,7 @@ The arguments below are not machine-checked proofs. They describe conditions for
 semantic preservation, not a prerequisite for showing readable source. When a
 condition or a declaration fact is unknown, Diana MUST retain the uncertainty and
 MAY display the reconstruction without claiming that condition holds. Input
-safety, classified failures and resource/cancellation obligations remain binding.
+safety, classified failures and cancellation/allocation obligations remain binding.
 
 ### Objects and states
 

@@ -152,13 +152,11 @@ impl<'a> ProgramIndex<'a> {
                     .checked_mul(2)
                     .unwrap_or(needed)
                     .max(needed);
-                let bytes = capacity
-                    .checked_sub(extra.capacity())
-                    .and_then(|n| n.checked_mul(size_of::<ValueStep<'a>>()))
+                capacity
+                    .checked_mul(size_of::<ValueStep<'a>>())
+                    .filter(|&size| size <= isize::MAX as usize)
                     .ok_or(MethodError::PlatformCapacity)?;
-                control.charge_allocation(
-                    u64::try_from(bytes).map_err(|_| MethodError::PlatformCapacity)?,
-                )?;
+                control.checkpoint()?;
                 extra
                     .try_reserve_exact(capacity - extra.len())
                     .map_err(MethodError::Allocation)?;

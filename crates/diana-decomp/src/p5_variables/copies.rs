@@ -1,5 +1,5 @@
 use crate::substrate::owned::reserve;
-use crate::{MethodBudget, RequestError};
+use crate::{RequestError, RunContext};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct LocalId(pub u32);
@@ -72,11 +72,7 @@ pub(crate) struct CopyPlan {
 fn ix(local: LocalId) -> Result<usize, RequestError> {
     usize::try_from(local.0).map_err(|_| RequestError::PlatformCapacity)
 }
-fn push<T>(
-    values: &mut Vec<T>,
-    value: T,
-    budget: &mut MethodBudget<'_, '_>,
-) -> Result<(), RequestError> {
+fn push<T>(values: &mut Vec<T>, value: T, budget: &mut RunContext<'_>) -> Result<(), RequestError> {
     reserve(values, 1, budget)?;
     values.push(value);
     Ok(())
@@ -109,11 +105,11 @@ fn kind(
 pub(crate) fn plan(
     parallel: &[Copy],
     types: &[LocalType],
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<CopyPlan, RequestError> {
     let mut pending = Vec::new();
     for (index, copy) in parallel.iter().enumerate() {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         if ix(copy.target)? >= types.len()
             || copy.source.local().is_some_and(|local| {
                 usize::try_from(local.0).map_or(true, |index| index >= types.len())
@@ -129,7 +125,7 @@ pub(crate) fn plan(
             ));
         }
         for previous in &parallel[..index] {
-            budget.charge_work(1)?;
+            budget.checkpoint()?;
             if previous.target == copy.target {
                 return Err(RequestError::InternalInvariant(
                     "parallel copy writes one destination twice",
@@ -148,10 +144,10 @@ pub(crate) fn plan(
         budget.checkpoint()?;
         let mut ready = None;
         for (index, copy) in pending.iter().enumerate() {
-            budget.charge_work(1)?;
+            budget.checkpoint()?;
             let mut needed = false;
             for source in &pending {
-                budget.charge_work(1)?;
+                budget.checkpoint()?;
                 if Some(copy.target) == source.source.local() {
                     needed = true;
                     break;
@@ -192,7 +188,7 @@ pub(crate) fn plan(
             budget,
         )?;
         for copy in &mut pending {
-            budget.charge_work(1)?;
+            budget.checkpoint()?;
             if copy.source.local() == Some(source) {
                 copy.source = CopySource::Local(local);
             }
@@ -208,7 +204,7 @@ pub(crate) fn verify(
     parallel: &[Copy],
     types: &[LocalType],
     plan: &CopyPlan,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<(), RequestError> {
     if parallel.is_empty() && plan.steps.is_empty() && plan.temporaries.is_empty() {
         budget.checkpoint()?;
@@ -221,13 +217,13 @@ pub(crate) fn verify(
     let mut state = Vec::new();
     reserve(&mut state, total, budget)?;
     for index in 0..types.len() {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         state.push(Some(CopySource::Local(LocalId(
             u32::try_from(index).map_err(|_| RequestError::PlatformCapacity)?,
         ))));
     }
     for (offset, temporary) in plan.temporaries.iter().enumerate() {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         let expected = types
             .len()
             .checked_add(offset)
@@ -240,7 +236,7 @@ pub(crate) fn verify(
         state.push(None);
     }
     for copy in &plan.steps {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         if source_kind(copy.source, types, &plan.temporaries)?
             != kind(copy.target, types, &plan.temporaries)?
         {
@@ -265,11 +261,11 @@ pub(crate) fn verify(
     let mut expected = Vec::new();
     reserve(&mut expected, types.len(), budget)?;
     for _ in types {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         expected.push(None);
     }
     for copy in parallel {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         let target = ix(copy.target)?;
         if copy.source.local().is_some_and(|local| {
             usize::try_from(local.0).map_or(true, |index| index >= types.len())
@@ -287,7 +283,7 @@ pub(crate) fn verify(
         }
     }
     for (index, actual) in state.iter().enumerate().take(types.len()) {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         let local = LocalId(u32::try_from(index).map_err(|_| RequestError::PlatformCapacity)?);
         let expected = expected[index].unwrap_or(CopySource::Local(local));
         if *actual != Some(expected) {

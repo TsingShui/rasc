@@ -1,9 +1,9 @@
 use crate::context::Context;
-use crate::input::{MethodInput, protection::CatchType};
+use crate::input::{MethodSource, protection::CatchType};
 use crate::p2_flow::{BlockId, Op, OpId};
 use crate::p3_ssa::SsaBody;
 use crate::substrate::owned::push;
-use crate::{MethodBudget, RequestError, TypeId};
+use crate::{RequestError, RunContext, TypeId};
 
 pub(crate) const THROWABLE: &[u16] =
     &const { crate::substrate::owned::ascii_units(*b"Ljava/lang/Throwable;") };
@@ -19,14 +19,14 @@ pub(crate) struct ExceptionBinding {
     pub kind: Option<ExceptionType>,
 }
 pub(crate) fn collect(
-    input: &MethodInput<'_, '_>,
+    input: &MethodSource<'_, '_>,
     _catalog: &Context,
     ssa: &SsaBody<'_>,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<Vec<ExceptionBinding>, RequestError> {
     let mut result = Vec::new();
     for (index, block) in ssa.bound.iter().enumerate() {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         let Some(&first) = block.ops.first() else {
             continue;
         };
@@ -36,7 +36,7 @@ pub(crate) fn collect(
         let handler = BlockId(u32::try_from(index).map_err(|_| RequestError::PlatformCapacity)?);
         let mut kind = None;
         for edge in &ssa.exception_edges {
-            budget.charge_work(1)?;
+            budget.checkpoint()?;
             if edge.target != handler {
                 continue;
             }

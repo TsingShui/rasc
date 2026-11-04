@@ -46,24 +46,20 @@ pub(crate) fn collect(
                 return Ok(());
             }
             let result = (|| -> Result<Option<crate::p7_java::GeneratedBridge>, RequestError> {
-                let mut budget = control.method_budget()?;
-                let input = index.method_input(key.class_def, method_idx, &mut budget)?;
+                let budget = &mut *control;
+                let input = index.method_source_at(key.class_def, method_idx, budget)?;
                 let Some(target) =
-                    crate::p7_java::member_emission::candidate(permit, &input, &mut budget)?
+                    crate::p7_java::member_emission::candidate(permit, &input, budget)?
                 else {
                     return Ok(None);
                 };
                 let Some(evidence) = crate::p4_types::declarations::overrides::collect(
-                    permit,
-                    &input,
-                    target,
-                    catalog,
-                    &mut budget,
+                    permit, &input, target, catalog, budget,
                 )?
                 else {
                     return Ok(None);
                 };
-                crate::p7_java::member_emission::verify(permit, &input, &evidence, &mut budget)
+                crate::p7_java::member_emission::verify(permit, &input, &evidence, budget)
             })();
             match result {
                 Ok(Some(bridge)) => plan.add(bridge, control)?,

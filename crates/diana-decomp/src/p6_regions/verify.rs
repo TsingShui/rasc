@@ -3,7 +3,7 @@ use super::graph::index;
 use super::normal::Candidate;
 use crate::p2_flow::{BlockId, EdgeId};
 use crate::substrate::owned::reserve;
-use crate::{MethodBudget, RequestError};
+use crate::{RequestError, RunContext};
 pub(crate) struct NaturalLoop {
     _sealed: (),
     pub branches: Vec<super::BodyBranch>,
@@ -24,7 +24,7 @@ fn bad<T>() -> Result<T, RequestError> {
 pub(super) fn verify(
     storage: &Flow,
     plan: Candidate,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<NaturalLoop, RequestError> {
     if plan.body.is_empty() || plan.tail.is_empty() {
         return bad();
@@ -32,7 +32,7 @@ pub(super) fn verify(
     let mut seen = Vec::new();
     reserve(&mut seen, storage.cases.len(), budget)?;
     for _ in &storage.cases {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         seen.push(false);
     }
     for block in plan
@@ -42,7 +42,7 @@ pub(super) fn verify(
         .chain(plan.body.iter())
         .chain(plan.tail.iter())
     {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         let Some(visited) = seen.get_mut(index(*block)?) else {
             return bad();
         };
@@ -53,7 +53,7 @@ pub(super) fn verify(
     }
     for branch in &plan.branches {
         for block in branch.leaves().into_iter().flatten() {
-            budget.charge_work(1)?;
+            budget.checkpoint()?;
             let Some(visited) = seen.get_mut(index(block)?) else {
                 return bad();
             };
@@ -64,7 +64,7 @@ pub(super) fn verify(
         }
     }
     for &visited in &seen {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         if !visited {
             return bad();
         }
@@ -74,7 +74,7 @@ pub(super) fn verify(
         return bad();
     }
     for (at, &node) in plan.prelude.iter().enumerate() {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         let target = plan.prelude.get(at + 1).copied().unwrap_or(plan.header);
         if !matches!(&storage.cases[index(node)?].transfer,Transfer::Jump(edge) if edge.target==target)
         {
@@ -94,7 +94,7 @@ pub(super) fn verify(
     }
     let mut branches = plan.branches.iter();
     for (at, &node) in plan.body.iter().enumerate() {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         let target = plan.body.get(at + 1).copied().unwrap_or(plan.header);
         let edge = match &storage.cases[index(node)?].transfer {
             Transfer::Jump(edge) => edge,
@@ -116,7 +116,7 @@ pub(super) fn verify(
                             return bad();
                         }
                         for (edge, arm) in [(yes, &diamond.yes), (no, &diamond.no)] {
-                            budget.charge_work(1)?;
+                            budget.checkpoint()?;
                             match arm {
                                 Some(arm) => {
                                     if edge.target != arm.block {
@@ -148,7 +148,7 @@ pub(super) fn verify(
                     return bad();
                 }
                 if let Some(stub) = guard.stub {
-                    budget.charge_work(1)?;
+                    budget.checkpoint()?;
                     if !matches!(&storage.cases[index(stub)?].transfer,Transfer::Jump(edge) if edge.target==leave.target)
                     {
                         return bad();
@@ -166,7 +166,7 @@ pub(super) fn verify(
         return bad();
     }
     for (at, &node) in plan.tail.iter().enumerate() {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         match plan.tail.get(at + 1) {
             Some(&next) => {
                 if !matches!(&storage.cases[index(node)?].transfer,Transfer::Jump(edge) if edge.target==next)

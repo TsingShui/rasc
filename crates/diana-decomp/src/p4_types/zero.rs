@@ -1,7 +1,7 @@
 use crate::p2_flow::Op;
 use crate::p3_ssa::{Definition, SsaBody, Sym, ValueId};
 use crate::substrate::owned::push;
-use crate::{MethodBudget, RequestError};
+use crate::{RequestError, RunContext};
 
 const ZERO: u8 = 1;
 const OTHER: u8 = 2;
@@ -18,13 +18,13 @@ pub(crate) struct ZeroFacts {
 impl ZeroFacts {
     pub(super) fn build(
         ssa: &SsaBody<'_>,
-        budget: &mut MethodBudget<'_, '_>,
+        budget: &mut RunContext<'_>,
     ) -> Result<Self, RequestError> {
         let mut facts = Vec::new();
         let mut dependents = Vec::new();
         let mut pending = Vec::new();
         for (at, definition) in ssa.values.iter().enumerate() {
-            budget.charge_work(1)?;
+            budget.checkpoint()?;
             let value = ValueId(u32::try_from(at).map_err(|_| RequestError::PlatformCapacity)?);
             let fact = match definition {
                 Definition::Phi => 0,
@@ -42,7 +42,7 @@ impl ZeroFacts {
             }
         }
         for operation in &ssa.operations {
-            budget.charge_work(1)?;
+            budget.checkpoint()?;
             if matches!(operation.op, Op::Move(..)) {
                 let result = operation.result.ok_or(RequestError::InternalInvariant(
                     "zero provenance move lost result",
@@ -51,9 +51,9 @@ impl ZeroFacts {
             }
         }
         for phi in &ssa.phis {
-            budget.charge_work(1)?;
+            budget.checkpoint()?;
             for &(_, input) in &phi.inputs {
-                budget.charge_work(1)?;
+                budget.checkpoint()?;
                 let Sym::Value(input) = input else {
                     return Err(RequestError::InternalInvariant(
                         "zero provenance lost Phi input",
@@ -64,7 +64,7 @@ impl ZeroFacts {
         }
         propagate(&mut facts, &dependents, &mut pending, budget)?;
         for (at, fact) in facts.iter_mut().enumerate() {
-            budget.charge_work(1)?;
+            budget.checkpoint()?;
             if *fact == 0 {
                 *fact = OTHER;
                 push(
@@ -97,13 +97,13 @@ fn propagate(
     facts: &mut [u8],
     dependents: &[Vec<ValueId>],
     pending: &mut Vec<ValueId>,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<(), RequestError> {
     while let Some(value) = pending.pop() {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         let fact = facts[index(value)?];
         for &dependent in &dependents[index(value)?] {
-            budget.charge_work(1)?;
+            budget.checkpoint()?;
             let target = &mut facts[index(dependent)?];
             let merged = *target | fact;
             if merged != *target {
@@ -119,7 +119,7 @@ fn propagate(
 pub(crate) fn proven(
     ssa: &SsaBody<'_>,
     value: ValueId,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<bool, RequestError> {
     let mut seen = Vec::new();
     let mut pending = Vec::new();
@@ -129,7 +129,7 @@ pub(crate) fn proven(
     push(&mut pending, value, budget)?;
     let mut anchored = false;
     while let Some(value) = pending.pop() {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         let at = index(value)?;
         let visited = seen
             .get_mut(at)
@@ -150,11 +150,11 @@ pub(crate) fn proven(
             Definition::Phi => {
                 let mut found = false;
                 for phi in &ssa.phis {
-                    budget.charge_work(1)?;
+                    budget.checkpoint()?;
                     if phi.result == value {
                         found = true;
                         for &(_, input) in &phi.inputs {
-                            budget.charge_work(1)?;
+                            budget.checkpoint()?;
                             let Sym::Value(input) = input else {
                                 return Ok(false);
                             };

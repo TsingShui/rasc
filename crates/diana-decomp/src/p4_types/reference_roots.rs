@@ -2,7 +2,7 @@ use super::normal::Kind;
 use crate::p2_flow::Op;
 use crate::p3_ssa::{Definition, SsaBody, Sym, ValueId};
 use crate::substrate::owned::push;
-use crate::{MethodBudget, RequestError, TypeId};
+use crate::{RequestError, RunContext, TypeId};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum Root {
@@ -62,11 +62,11 @@ pub(crate) fn reference(kind: Kind) -> bool {
 pub(super) fn solve(
     ssa: &SsaBody<'_>,
     kinds: &[Option<Kind>],
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<ReferenceRoots, RequestError> {
     let mut facts = Vec::new();
     for (index, definition) in ssa.values.iter().enumerate() {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         let value = ValueId(u32::try_from(index).map_err(|_| RequestError::PlatformCapacity)?);
         let fact = match *definition {
             Definition::Phi => Fact::None,
@@ -88,7 +88,7 @@ pub(super) fn solve(
     loop {
         let mut changed = false;
         for op in &ssa.operations {
-            budget.charge_work(1)?;
+            budget.checkpoint()?;
             if !matches!(op.op, Op::Move(..) | Op::Cast(..)) {
                 continue;
             }
@@ -102,10 +102,10 @@ pub(super) fn solve(
             }
         }
         for phi in &ssa.phis {
-            budget.charge_work(1)?;
+            budget.checkpoint()?;
             let mut next = facts[ix(phi.result.0)?];
             for &(_, value) in &phi.inputs {
-                budget.charge_work(1)?;
+                budget.checkpoint()?;
                 let Sym::Value(value) = value else {
                     return Err(RequestError::InternalInvariant("unavailable reference Phi"));
                 };

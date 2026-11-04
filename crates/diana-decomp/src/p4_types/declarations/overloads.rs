@@ -1,7 +1,7 @@
 use crate::context::Context;
 use crate::input::{InputClassDeclaration, InputMethodDeclaration};
 use crate::substrate::owned::push;
-use crate::{MethodBudget, RequestError};
+use crate::{RequestError, RunContext};
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 enum Primitive {
@@ -26,12 +26,12 @@ struct Prototype<'a> {
 fn formal<'a>(
     units: &'a [u16],
     at: &mut usize,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<Option<Formal<'a>>, RequestError> {
-    budget.charge_work(1)?;
+    budget.checkpoint()?;
     let start = *at;
     while units.get(*at) == Some(&91) {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         *at = at.checked_add(1).ok_or(RequestError::PlatformCapacity)?;
     }
     let array = *at != start;
@@ -62,7 +62,7 @@ fn formal<'a>(
     }
     let name = *at;
     while let Some(&unit) = units.get(*at) {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         if unit == 59 {
             break;
         }
@@ -79,7 +79,7 @@ fn formal<'a>(
 }
 fn parameters<'a>(
     proto: &'a [u16],
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<Option<Prototype<'a>>, RequestError> {
     if proto.first() != Some(&40) {
         return Ok(None);
@@ -87,7 +87,7 @@ fn parameters<'a>(
     let mut at = 1usize;
     let mut result = Vec::new();
     while proto.get(at) != Some(&41) {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         let Some(kind) = formal(proto, &mut at, budget)? else {
             return Ok(None);
         };
@@ -112,11 +112,7 @@ fn parameters<'a>(
         None
     })
 }
-fn same(
-    a: Formal<'_>,
-    b: Formal<'_>,
-    budget: &mut MethodBudget<'_, '_>,
-) -> Result<bool, RequestError> {
+fn same(a: Formal<'_>, b: Formal<'_>, budget: &mut RunContext<'_>) -> Result<bool, RequestError> {
     Ok(match (a, b) {
         (Formal::Primitive(a), Formal::Primitive(b)) => a == b,
         (Formal::Reference(a), Formal::Reference(b)) => crate::context::same_units(a, b, budget)?,
@@ -126,13 +122,13 @@ fn same(
 fn same_parameters(
     a: &[Formal<'_>],
     b: &[Formal<'_>],
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<bool, RequestError> {
     if a.len() != b.len() {
         return Ok(false);
     }
     for (&a, &b) in a.iter().zip(b) {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         if !same(a, b, budget)? {
             return Ok(false);
         }
@@ -143,7 +139,7 @@ fn widens(
     catalog: &Context,
     from: Formal<'_>,
     to: Formal<'_>,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<Option<bool>, RequestError> {
     if same(from, to, budget)? {
         return Ok(Some(true));
@@ -182,7 +178,7 @@ fn returns(
     catalog: &Context,
     from: Option<Formal<'_>>,
     to: Option<Formal<'_>>,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<bool, RequestError> {
     match (from, to) {
         (None, None) => Ok(true),
@@ -215,7 +211,7 @@ fn covariant_bridge(
     owner: &InputClassDeclaration,
     method: &InputMethodDeclaration,
     classes: &[&InputClassDeclaration],
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<bool, RequestError> {
     if method.access_flags & (crate::substrate::flags::SYNTHETIC | crate::substrate::flags::BRIDGE)
         != (crate::substrate::flags::SYNTHETIC | crate::substrate::flags::BRIDGE)
@@ -234,7 +230,7 @@ fn covariant_bridge(
     };
     let mut implementations = 0usize;
     for candidate in &owner.methods {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         if candidate.access_flags
             & (2 | crate::substrate::flags::PROTECTED
                 | crate::substrate::flags::STATIC
@@ -261,7 +257,7 @@ fn covariant_bridge(
         return Ok(false);
     }
     for ancestor in classes {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         if std::ptr::eq(*ancestor, owner)
             || super::hierarchy::subtype(catalog, &owner.descriptor, &ancestor.descriptor, budget)?
                 != Some(true)
@@ -269,7 +265,7 @@ fn covariant_bridge(
             continue;
         }
         for declaration in &ancestor.methods {
-            budget.charge_work(1)?;
+            budget.checkpoint()?;
             if declaration.access_flags
                 & (1 | crate::substrate::flags::PRIVATE
                     | crate::substrate::flags::STATIC
@@ -297,7 +293,7 @@ pub(super) fn unique_target(
     name: &[u16],
     target: &[u16],
     scope: Scope<'_>,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<bool, RequestError> {
     let _span = crate::pipeline::phase_span("p4_overloads");
     if !matches!(
@@ -311,7 +307,7 @@ pub(super) fn unique_target(
     };
     let mut selected = None;
     for method in &class.methods {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         if crate::context::same_units(&method.name, name, budget)?
             && crate::context::same_units(&method.prototype, target, budget)?
             && selected.replace(method).is_some()
@@ -358,10 +354,10 @@ pub(super) fn unique_target(
     };
     let mut owner_present = false;
     for owner in classes {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         owner_present |= std::ptr::eq(*owner, class);
         for (position, method) in owner.methods.iter().enumerate() {
-            budget.charge_work(1)?;
+            budget.checkpoint()?;
             if !crate::context::same_units(&method.name, name, budget)? {
                 continue;
             }
@@ -376,7 +372,7 @@ pub(super) fn unique_target(
             }
             let mut applicable = true;
             for (&from, &to) in fixed.parameters.iter().zip(&candidate.parameters) {
-                budget.charge_work(1)?;
+                budget.checkpoint()?;
                 match widens(catalog, from, to, budget)? {
                     Some(true) => {}
                     Some(false) => {
@@ -414,7 +410,7 @@ pub(super) fn unique_target(
                 return Ok(false);
             }
             for earlier in &owner.methods[..position] {
-                budget.charge_work(1)?;
+                budget.checkpoint()?;
                 if earlier.access_flags & crate::substrate::flags::BRIDGE != 0
                     || !crate::context::same_units(&earlier.name, name, budget)?
                 {

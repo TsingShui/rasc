@@ -2,7 +2,7 @@ use super::branch::LocalId;
 use crate::p2_flow::Terminal;
 use crate::p3_ssa::BoundBlock;
 use crate::p4_types::{Kind, TypedBody};
-use crate::{MethodBudget, RequestError};
+use crate::{RequestError, RunContext};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum Comparison {
@@ -54,9 +54,9 @@ pub(super) fn lower(
     typed: &TypedBody<'_>,
     bound: &BoundBlock,
     terminal: Terminal,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<Option<Condition>, RequestError> {
-    budget.charge_work(1)?;
+    budget.checkpoint()?;
     let Terminal::Test { opcode, .. } = terminal else {
         return Err(RequestError::InternalInvariant(
             "condition lost original branch",
@@ -111,9 +111,9 @@ pub(super) fn verify(
     bound: &BoundBlock,
     terminal: Terminal,
     condition: &Condition,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<bool, RequestError> {
-    budget.charge_work(1)?;
+    budget.checkpoint()?;
     let Terminal::Test { opcode, .. } = terminal else {
         return Ok(false);
     };

@@ -4,14 +4,14 @@ use super::json::JsonBuffer;
 use crate::input::debug_program::{DebugEvent, DebugOp, DebugProgram};
 use crate::input::{Cursor, MethodError, ProgramIndex, RawMethodView};
 use crate::raw::RawDecodeError;
-use crate::{ByteLength, ByteOffset, CodeUnitCount, FallbackBudget, MethodId, StringId};
+use crate::{ByteLength, ByteOffset, CodeUnitCount, MethodId, RunContext, StringId};
 
 fn note_error(
     error: MethodError,
     offset: ByteOffset,
     code: &RawMethodView<'_>,
     issues: &mut IssueLog,
-    budget: &mut FallbackBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<(), DebugError> {
     match error {
         MethodError::Input(error) => {
@@ -58,7 +58,7 @@ pub(super) fn write_program(
     code: &RawMethodView<'_>,
     method_id: MethodId,
     issues: &mut IssueLog,
-    budget: &mut FallbackBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<(), DebugError> {
     let Some(offset) = code.debug_info_offset_byte() else {
         return Ok(());
@@ -129,7 +129,7 @@ fn write_string(
     index: &ProgramIndex<'_>,
     output: &mut JsonBuffer,
     id: Option<StringId>,
-    budget: &mut FallbackBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<(), DebugError> {
     let Some(id) = id else {
         return output.push("null", budget);
@@ -146,7 +146,7 @@ fn write_event(
     output: &mut JsonBuffer,
     code: &RawMethodView<'_>,
     event: DebugEvent,
-    budget: &mut FallbackBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<(), DebugError> {
     output.push("{\"opcode\":", budget)?;
     output.unsigned(u64::from(event.opcode), budget)?;
@@ -209,7 +209,7 @@ fn write_event(
                 "checked debug event range is missing",
             ))?;
     for (position, byte) in bytes.iter().enumerate() {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         if position > 0 {
             output.push(",", budget)?;
         }

@@ -2,7 +2,7 @@ use super::branch::{LocalId, ValueUse};
 use crate::p2_flow::Op;
 use crate::p3_ssa::{BoundOp, ValueId};
 use crate::p4_types::{ArrayUse, Kind, TypedBody};
-use crate::{MethodBudget, RequestError};
+use crate::{RequestError, RunContext};
 
 pub(crate) enum Statement {
     Length {
@@ -21,13 +21,13 @@ pub(crate) enum Statement {
     },
 }
 pub(super) fn validate(
-    input: &crate::input::MethodInput<'_, '_>,
+    input: &crate::input::MethodSource<'_, '_>,
     _catalog: &crate::context::Context,
     typed: &TypedBody<'_>,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<bool, RequestError> {
     for evidence in &typed.arrays {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         if matches!(
             evidence,
             Some(crate::p4_types::ArrayEvidence {
@@ -94,7 +94,7 @@ fn valid_view(
     actual: ValueUse,
     value: ValueId,
     expected: Kind,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<bool, RequestError> {
     if actual.value().0 != value.0 {
         return Ok(false);
@@ -117,11 +117,11 @@ fn valid_view(
     Ok(false)
 }
 pub(crate) fn verify(
-    input: &crate::input::MethodInput<'_, '_>,
+    input: &crate::input::MethodSource<'_, '_>,
     ssa: &TypedBody<'_>,
     op: &BoundOp,
     actual: &Statement,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<bool, RequestError> {
     let original =
         crate::raw::instruction_layout(ssa.ssa.raw.instructions(), op.pc, ssa.ssa.raw.version())
@@ -147,7 +147,7 @@ pub(crate) fn verify(
             .map_err(crate::input::MethodError::Decode)?;
     let mut original_registers = operands.registers().iter();
     for register in registers.into_iter().flatten() {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         if original_registers.next() != Some(register) {
             return Ok(false);
         }

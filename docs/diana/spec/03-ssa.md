@@ -59,7 +59,7 @@ reverse scan of a block:
 ```
 
 The set only grows, and its universe is the finite set of `(block, slot)` demands; each new
-element and each scan step is charged first. Store sparse slot sets and do not build a
+element and each scan step checks capacity first. Store sparse slot sets and do not build a
 register_count×edge_count matrix first. The callback is checked on pop, on op scan and during
 long set operations.
 
@@ -113,7 +113,7 @@ Sealing uses two graph propagations instead of a ValueId fixed point:
 The termination measure is explicit: liveness inserts at most finitely many demands; IDs are
 assigned once; binding happens once per block; connection happens once per edge/Phi; and the
 retained/bad/grounded marks each happen at most once. There is no repeated switching between
-Phi and aliases, and “the budget ran out” MUST NOT be called convergence. POPL 2023 provides the
+Phi and aliases, and “an allocation failed” MUST NOT be called convergence. POPL 2023 provides the
 basis for the finite domain and naming; this scheme does not use its GVN union domain or borrow
 its proof directly.
 
@@ -136,9 +136,9 @@ Undefined first; an unconnected incoming is still a construction-state Option.
 The simplest implementation rescans the affected block each time, so the worklist has at most
 O(B*|S|) effective growths in the worst case, and one scan still visits Ops and related demand
 sets; the implementation MUST NOT claim that all of P3 is always linear. Set elements, edges and
-inputs touched during the scan are also charged. The Phi count P does not exceed the final
+inputs touched during the scan are reserved fallibly. The Phi count P does not exceed the final
 live-in total, and the incoming count A is taken over real eligible edges; values, phi_inputs
-and allocation budgets limit growth only under explicit configuration. Connection and the three
+and allocation capacity limit growth through checked fallible reservation. Connection and the three
 following graph propagations are O(P+A+uses) with extra storage of the same order; the
 implementation MUST NOT pre-allocate an R×E matrix.
 

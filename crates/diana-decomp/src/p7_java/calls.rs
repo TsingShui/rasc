@@ -2,7 +2,7 @@ use super::branch::{Assignment, LocalId, ValueUse};
 use crate::p2_flow::{CallId, Op};
 use crate::p4_types::TypedBody;
 use crate::substrate::owned::{TextBuffer, reserve};
-use crate::{CodeUnitOffset, MethodBudget, MethodId, RequestError};
+use crate::{CodeUnitOffset, MethodId, RequestError, RunContext};
 
 /// Original invocation kind retained by the readable reconstruction.
 #[derive(Clone, Copy, Debug)]
@@ -106,20 +106,16 @@ pub(crate) enum Statement {
 fn ix(id: u32) -> Result<usize, RequestError> {
     usize::try_from(id).map_err(|_| RequestError::PlatformCapacity)
 }
-fn push<T>(
-    items: &mut Vec<T>,
-    item: T,
-    budget: &mut MethodBudget<'_, '_>,
-) -> Result<(), RequestError> {
+fn push<T>(items: &mut Vec<T>, item: T, budget: &mut RunContext<'_>) -> Result<(), RequestError> {
     reserve(items, 1, budget)?;
     items.push(item);
     Ok(())
 }
-fn copy(units: &[u16], budget: &mut MethodBudget<'_, '_>) -> Result<Vec<u16>, RequestError> {
+fn copy(units: &[u16], budget: &mut RunContext<'_>) -> Result<Vec<u16>, RequestError> {
     let mut out = Vec::new();
     reserve(&mut out, units.len(), budget)?;
     for &unit in units {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         out.push(unit);
     }
     Ok(out)
@@ -133,7 +129,7 @@ fn text(
     }
     let mut output = TextBuffer::new();
     for scalar in char::decode_utf16(units.iter().copied()) {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         output.character(
             scalar.map_err(|_| {
                 RequestError::InternalInvariant("checked identifier lost its scalar")
@@ -155,7 +151,7 @@ pub(super) fn type_name(
         .split(|&unit| unit == 47)
         .enumerate()
     {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         let Some(segment) = text(segment, budget)? else {
             return Ok(None);
         };
@@ -168,7 +164,7 @@ pub(super) fn type_name(
 }
 pub(super) fn identifier_text(
     units: &[u16],
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<Option<String>, RequestError> {
     text(units, budget)
 }
@@ -178,11 +174,11 @@ pub(super) struct SourceCalls {
     pub throws: crate::p4_types::bindings::SourceThrows,
 }
 pub(super) fn validate_bindings(
-    input: &crate::input::MethodInput<'_, '_>,
+    input: &crate::input::MethodSource<'_, '_>,
     catalog: &crate::context::Context,
     ssa: &TypedBody<'_>,
     uncertainties: &mut Vec<crate::OutputReason>,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<Option<SourceCalls>, RequestError> {
     let Some(throws) = &ssa.source_throws else {
         return Ok(None);
@@ -191,7 +187,7 @@ pub(super) fn validate_bindings(
     let mut receivers = Vec::new();
     let mut constructors = Vec::new();
     for (index, site) in ssa.ssa.calls.iter().enumerate() {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         let original = input.method_reference(site.reference, budget)?;
         let owner = crate::substrate::owned::copy_units(original.owner, budget)?;
         if catalog.class(&owner, budget)?.is_none() {
@@ -379,7 +375,7 @@ pub(super) fn validate_bindings(
             ));
         }
         for (&value, typed_use) in arguments.iter().zip(views) {
-            budget.charge_work(1)?;
+            budget.checkpoint()?;
             if value != typed_use.value {
                 return Err(RequestError::InternalInvariant(
                     "call conversion changed definition or order",
@@ -398,7 +394,7 @@ pub(super) fn validate_bindings(
 fn plan(
     ssa: &TypedBody<'_>,
     id: CallId,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<Option<StaticCall>, RequestError> {
     let site = ssa
         .ssa
@@ -418,7 +414,7 @@ fn plan(
         .split(|&unit| unit == 47)
         .enumerate()
     {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         let Some(segment) = text(segment, budget)? else {
             return Ok(None);
         };
@@ -439,7 +435,7 @@ fn plan(
         .ok_or(RequestError::InternalInvariant("call lost typed uses"))?;
     let mut arguments = Vec::new();
     for typed_use in uses.arguments() {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         push(
             &mut arguments,
             super::values::lower(LocalId(typed_use.value.0), typed_use.conversion),
@@ -465,12 +461,12 @@ pub(super) fn operations(
     bindings: &mut SourceCalls,
     names: &super::types::TypeNames,
     placements: &[super::exceptional::Placement<'_>],
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<Option<Vec<Statement>>, RequestError> {
     let ssa = &storage.typed;
     let mut output = Vec::new();
     for &id in &ssa.ssa.bound[ix(block.0)?].ops {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         let op = ssa.ssa.operation(id)?;
         if matches!(&ssa.capture, Some(capture) if capture.operation() == id) {
             continue;
@@ -518,7 +514,7 @@ pub(super) fn operations(
             )?;
             let ingress = super::exceptional::placed_ingress(placements, block, budget)?;
             for copy in &ingress.copies.steps {
-                budget.charge_work(1)?;
+                budget.checkpoint()?;
                 push(
                     &mut output,
                     Statement::Assignment(Assignment {
@@ -651,7 +647,7 @@ pub(super) fn operations(
                 };
                 let mut arguments = Vec::new();
                 for argument in ssa.call_uses[index].arguments() {
-                    budget.charge_work(1)?;
+                    budget.checkpoint()?;
                     push(
                         &mut arguments,
                         super::values::lower(LocalId(argument.value.0), argument.conversion),

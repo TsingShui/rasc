@@ -63,7 +63,7 @@ pub(super) fn expression(
         {
             output.push("\"", control)?;
             for &unit in units {
-                control.charge_work(1)?;
+                control.checkpoint()?;
                 match unit {
                     0 => output.push("\\000", control)?,
                     0x22 => output.push("\\\"", control)?,

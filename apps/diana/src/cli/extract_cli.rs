@@ -3,9 +3,7 @@
 use std::path::Path;
 
 use super::output::Failure;
-use crate::analysis::axml::ManifestLimits;
 use crate::analysis::extract::{self, ExtractError, Request};
-use crate::analysis::limits::RequestLimits;
 use crate::analysis::request::RequestScope;
 
 #[allow(clippy::too_many_arguments)]
@@ -17,14 +15,10 @@ pub fn run(
     raw: bool,
     force: bool,
     strict: bool,
-    limits: RequestLimits,
 ) -> Result<(), Failure> {
     let scope = RequestScope::open(
         input,
-        &crate::analysis::input::InputOptions {
-            limits: limits.input(),
-            allowed_root: None,
-        },
+        &crate::analysis::input::InputOptions { allowed_root: None },
     )
     .map_err(Failure::input)?;
     let extracted = extract::prepare(
@@ -33,7 +27,6 @@ pub fn run(
             name: entry,
             index,
             raw,
-            limits: ManifestLimits::default(),
         },
     )
     .map_err(extract_failure)?;

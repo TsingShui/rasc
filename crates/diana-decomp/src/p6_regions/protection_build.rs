@@ -2,7 +2,7 @@ use super::protection::{Catch, Clause, Node, NodeId, add, blocks, entry, ix};
 use crate::p2_flow::{BlockId, Terminal};
 use crate::p5_variables::StorageBody;
 use crate::substrate::owned::push;
-use crate::{MethodBudget, RequestError};
+use crate::{RequestError, RunContext};
 
 struct Forest {
     nodes: Vec<Node>,
@@ -19,10 +19,10 @@ struct Group {
 fn handler_index(
     handlers: &[BlockId],
     handler: BlockId,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<Option<usize>, RequestError> {
     for (index, &old) in handlers.iter().enumerate() {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         if old == handler {
             return Ok(Some(index));
         }
@@ -32,36 +32,32 @@ fn handler_index(
 fn member(
     values: &[BlockId],
     value: BlockId,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<bool, RequestError> {
     for &old in values {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         if old == value {
             return Ok(true);
         }
     }
     Ok(false)
 }
-fn same(
-    a: &[Clause],
-    b: &[Clause],
-    budget: &mut MethodBudget<'_, '_>,
-) -> Result<bool, RequestError> {
+fn same(a: &[Clause], b: &[Clause], budget: &mut RunContext<'_>) -> Result<bool, RequestError> {
     if a.len() != b.len() {
         return Ok(false);
     }
     for (a, b) in a.iter().zip(b) {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         if a != b {
             return Ok(false);
         }
     }
     Ok(true)
 }
-fn copy<T: Copy>(values: &[T], budget: &mut MethodBudget<'_, '_>) -> Result<Vec<T>, RequestError> {
+fn copy<T: Copy>(values: &[T], budget: &mut RunContext<'_>) -> Result<Vec<T>, RequestError> {
     let mut result = Vec::new();
     for &value in values {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         push(&mut result, value, budget)?;
     }
     Ok(result)
@@ -71,7 +67,7 @@ fn copy<T: Copy>(values: &[T], budget: &mut MethodBudget<'_, '_>) -> Result<Vec<
 fn postdominators(
     storage: &StorageBody<'_>,
     loops: &[super::protected_loops::Loop],
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<Option<Vec<usize>>, RequestError> {
     let ssa = &storage.typed.ssa;
     let n = ssa.blocks.len();
@@ -79,12 +75,12 @@ fn postdominators(
     let mut rank = Vec::new();
     let mut queue = Vec::new();
     for _ in &ssa.blocks {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         push(&mut degree, 0usize, budget)?;
         push(&mut rank, 0usize, budget)?;
     }
     for (index, edge) in ssa.edges.iter().enumerate() {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         if super::protected_loops::cut(
             loops,
             crate::p2_flow::EdgeId(
@@ -99,18 +95,18 @@ fn postdominators(
             .ok_or(RequestError::PlatformCapacity)?;
     }
     for (index, &count) in degree.iter().enumerate() {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         if count == 0 {
             push(&mut queue, index, budget)?;
         }
     }
     let mut head = 0usize;
     while head < queue.len() {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         let source = queue[head];
         head += 1;
         for (index, edge) in ssa.edges.iter().enumerate() {
-            budget.charge_work(1)?;
+            budget.checkpoint()?;
             if super::protected_loops::cut(
                 loops,
                 crate::p2_flow::EdgeId(
@@ -138,20 +134,20 @@ fn postdominators(
         return Ok(None);
     }
     for (position, &block) in queue.iter().enumerate() {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         rank[block] = position;
     }
     push(&mut rank, n, budget)?;
     let mut post = Vec::new();
     for _ in 0..=n {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         push(&mut post, n, budget)?;
     }
     for &source in queue.iter().rev() {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         let mut join = None;
         for (index, edge) in ssa.edges.iter().enumerate() {
-            budget.charge_work(1)?;
+            budget.checkpoint()?;
             if super::protected_loops::cut(
                 loops,
                 crate::p2_flow::EdgeId(
@@ -167,7 +163,7 @@ fn postdominators(
             let mut b = ix(edge.target.0)?;
             if let Some(mut a) = join {
                 while a != b {
-                    budget.charge_work(1)?;
+                    budget.checkpoint()?;
                     if rank[a] < rank[b] {
                         a = post[a];
                     } else {
@@ -216,14 +212,14 @@ fn trace(
     nodes: &mut Vec<Node>,
     start: BlockId,
     stop: Option<BlockId>,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<Option<NodeId>, RequestError> {
     let ssa = &storage.typed.ssa;
     let mut todo = Vec::new();
     let mut results = Vec::new();
     let mut seen = Vec::new();
     for _ in &ssa.blocks {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         push(&mut seen, false, budget)?;
     }
     push(
@@ -235,14 +231,14 @@ fn trace(
         budget,
     )?;
     while let Some(work) = todo.pop() {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         match work {
             Work::Trace { start, stop } => {
                 let mut prefix = Vec::new();
                 let mut current = start;
                 let mut branch = false;
                 while current != stop {
-                    budget.charge_work(1)?;
+                    budget.checkpoint()?;
                     let Some(block) = current else {
                         break;
                     };
@@ -252,7 +248,7 @@ fn trace(
                     if let Some(monitors) = monitors {
                         let mut found = None;
                         for (index, scope) in monitors.scopes.iter().enumerate() {
-                            budget.charge_work(1)?;
+                            budget.checkpoint()?;
                             if scope.block == block {
                                 found = Some(index);
                                 break;
@@ -297,7 +293,7 @@ fn trace(
                     }
                     let mut region = None;
                     for candidate in loops {
-                        budget.charge_work(1)?;
+                        budget.checkpoint()?;
                         if candidate.header == block {
                             region = Some(candidate);
                             break;
@@ -464,7 +460,7 @@ fn trace(
 fn forest(
     storage: &StorageBody<'_>,
     monitors: Option<&super::monitors::Monitors>,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<Option<Forest>, RequestError> {
     let Some(loops) = super::protected_loops::collect(storage, budget)? else {
         return Ok(None);
@@ -493,7 +489,7 @@ fn forest(
     let mut follows = Vec::new();
     let mut owned = ordinary;
     for binding in &storage.typed.exceptions {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         if consumed_handler(monitors, binding.handler, budget)? {
             push(&mut roots, None, budget)?;
             push(&mut handlers, binding.handler, budget)?;
@@ -502,7 +498,7 @@ fn forest(
         }
         let mut stop = ix(binding.handler.0)?;
         while stop != storage.typed.ssa.blocks.len() {
-            budget.charge_work(1)?;
+            budget.checkpoint()?;
             if member(
                 &owned,
                 BlockId(u32::try_from(stop).map_err(|_| RequestError::PlatformCapacity)?),
@@ -533,7 +529,7 @@ fn forest(
             return Ok(None);
         };
         for block in blocks(&nodes, &[root], budget)? {
-            budget.charge_work(1)?;
+            budget.checkpoint()?;
             if member(&owned, block, budget)? {
                 return Ok(None);
             }
@@ -554,18 +550,18 @@ fn groups(
     storage: &StorageBody<'_>,
     forest: &Forest,
     monitors: Option<&super::monitors::Monitors>,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<Option<Vec<Group>>, RequestError> {
     let ssa = &storage.typed.ssa;
     let mut dependencies = Vec::new();
     for (index, root) in forest.roots.iter().enumerate().skip(1) {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         let Some(root) = root else {
             continue;
         };
         let owned = blocks(&forest.nodes, &[*root], budget)?;
         for edge in &ssa.exception_edges {
-            budget.charge_work(1)?;
+            budget.checkpoint()?;
             if member(&owned, edge.source, budget)? {
                 if forest.handlers[index - 1] == edge.target {
                     return Ok(None);
@@ -580,7 +576,7 @@ fn groups(
     }
     for &(a, b) in &dependencies {
         for &(c, d) in &dependencies {
-            budget.charge_work(1)?;
+            budget.checkpoint()?;
             if b == c || a == d {
                 return Ok(None);
             }
@@ -588,14 +584,14 @@ fn groups(
     }
     let mut result: Vec<Group> = Vec::new();
     for edge in &ssa.exception_edges {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         if edge.rank.0 != 0 {
             continue;
         }
         let mut chain = Vec::new();
         let mut depths = Vec::new();
         for clause in &ssa.exception_edges {
-            budget.charge_work(1)?;
+            budget.checkpoint()?;
             if clause.source != edge.source || clause.pc != edge.pc {
                 continue;
             }
@@ -609,7 +605,7 @@ fn groups(
             )?;
             let mut inner = false;
             for &(handler, _) in &dependencies {
-                budget.charge_work(1)?;
+                budget.checkpoint()?;
                 inner |= handler == clause.target;
             }
             push(&mut depths, inner, budget)?;
@@ -617,7 +613,7 @@ fn groups(
         let mut split = chain.len();
         if depths.first() == Some(&true) {
             for (index, &inner) in depths.iter().enumerate() {
-                budget.charge_work(1)?;
+                budget.checkpoint()?;
                 if !inner {
                     split = index;
                     break;
@@ -625,14 +621,14 @@ fn groups(
             }
         }
         for &inner in &depths[split..] {
-            budget.charge_work(1)?;
+            budget.checkpoint()?;
             if inner {
                 return Ok(None);
             }
         }
         let mut cut = chain.len();
         for (index, clause) in chain.iter().enumerate() {
-            budget.charge_work(1)?;
+            budget.checkpoint()?;
             if consumed_handler(monitors, clause.handler, budget)? {
                 cut = index;
                 break;
@@ -647,7 +643,7 @@ fn groups(
             let ambient = &chain[end..];
             let mut found = None;
             for (index, group) in result.iter().enumerate() {
-                budget.charge_work(1)?;
+                budget.checkpoint()?;
                 if same(&group.clauses, clauses, budget)? {
                     if !same(&group.ambient, ambient, budget)? {
                         return Ok(None);
@@ -685,18 +681,18 @@ fn candidate(
     forest: &Forest,
     group: &Group,
     selected: &[NodeId],
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<bool, RequestError> {
     let owned = blocks(&forest.nodes, selected, budget)?;
     for &source in &group.sources {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         if !member(&owned, source, budget)? {
             return Ok(false);
         }
     }
     let mut follow = None;
     for clause in &group.clauses {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         if member(&owned, clause.handler, budget)? {
             return Ok(false);
         }
@@ -715,7 +711,7 @@ fn candidate(
     }
     let mut first = None;
     for &node in selected {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         if let Some(value) = entry(&forest.nodes, node, None, budget)? {
             first = Some(value);
             break;
@@ -725,7 +721,7 @@ fn candidate(
         return Ok(false);
     };
     for edge in &storage.typed.ssa.edges {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         let source = member(&owned, edge.source, budget)?;
         let target = member(&owned, edge.target, budget)?;
         if !source && target && edge.target != first {
@@ -745,7 +741,7 @@ fn candidate(
         push(&mut todo, (node, Vec::<Clause>::new()), budget)?;
     }
     while let Some((id, context)) = todo.pop() {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         let mut block = None;
         match &forest.nodes[ix(id.0)?] {
             Node::Synchronized { scope, enter, body } => {
@@ -781,7 +777,7 @@ fn candidate(
             }
             Node::Sequence(children) => {
                 for &child in children {
-                    budget.charge_work(1)?;
+                    budget.checkpoint()?;
                     push(&mut todo, (child, copy(&context, budget)?), budget)?;
                 }
             }
@@ -789,13 +785,13 @@ fn candidate(
                 let mut nested = Vec::new();
                 for catch in catches {
                     for &clause in &catch.clauses {
-                        budget.charge_work(1)?;
+                        budget.checkpoint()?;
                         push(&mut nested, clause, budget)?;
                     }
                     push(&mut todo, (catch.body, copy(&context, budget)?), budget)?;
                 }
                 for &clause in &context {
-                    budget.charge_work(1)?;
+                    budget.checkpoint()?;
                     if nested.last().is_some_and(|clause: &Clause| {
                         clause.kind == crate::input::protection::CatchType::All
                     }) {
@@ -823,13 +819,13 @@ fn candidate(
                     matches!(original.terminal, Terminal::Throw(_)).then_some(original.terminal_pc),
                 ))
             {
-                budget.charge_work(1)?;
+                budget.checkpoint()?;
                 let Some(pc) = pc else {
                     continue;
                 };
                 let mut expected = Vec::new();
                 for &clause in context.iter().chain(&group.clauses).chain(&group.ambient) {
-                    budget.charge_work(1)?;
+                    budget.checkpoint()?;
                     push(&mut expected, clause, budget)?;
                     if clause.kind == crate::input::protection::CatchType::All {
                         break;
@@ -837,7 +833,7 @@ fn candidate(
                 }
                 let mut actual = Vec::new();
                 for edge in &storage.typed.ssa.exception_edges {
-                    budget.charge_work(1)?;
+                    budget.checkpoint()?;
                     if edge.source == block && edge.pc == pc {
                         push(
                             &mut actual,
@@ -862,7 +858,7 @@ fn reduce(
     monitors: Option<&super::monitors::Monitors>,
     forest: &mut Forest,
     group: &Group,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<bool, RequestError> {
     let mut todo = Vec::new();
     for root in forest.roots.iter().flatten() {
@@ -870,12 +866,12 @@ fn reduce(
     }
     let mut chosen = None;
     while let Some(id) = todo.pop() {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         let node = &forest.nodes[ix(id.0)?];
         if let Node::Sequence(children) = node {
             for length in 1..=children.len() {
                 for start in 0..=children.len() - length {
-                    budget.charge_work(1)?;
+                    budget.checkpoint()?;
                     if candidate(
                         storage,
                         monitors,
@@ -896,7 +892,7 @@ fn reduce(
                 break;
             }
             for &child in children {
-                budget.charge_work(1)?;
+                budget.checkpoint()?;
                 push(&mut todo, child, budget)?;
             }
         } else {
@@ -936,7 +932,7 @@ fn reduce(
     let mut catches: Vec<Catch> = Vec::new();
     let mut used = Vec::new();
     for &clause in &group.clauses {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         if catches
             .last()
             .and_then(|c| c.clauses.first())
@@ -975,9 +971,7 @@ fn reduce(
                 "protection sequence changed kind",
             ));
         };
-        budget.charge_work(
-            u64::try_from(children.len()).map_err(|_| RequestError::PlatformCapacity)?,
-        )?;
+        budget.checkpoint()?;
         children.splice(start..end, [reduced]);
     } else {
         forest.nodes[ix(id.0)?] = replacement;
@@ -987,11 +981,11 @@ fn reduce(
 fn consumed_handler(
     monitors: Option<&super::monitors::Monitors>,
     handler: BlockId,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<bool, RequestError> {
     if let Some(monitors) = monitors {
         for scope in &monitors.scopes {
-            budget.charge_work(1)?;
+            budget.checkpoint()?;
             if monitors.cleanup(scope.cleanup)?.handler == handler {
                 return Ok(true);
             }
@@ -1002,7 +996,7 @@ fn consumed_handler(
 pub(super) fn build(
     storage: &StorageBody<'_>,
     monitors: Option<&super::monitors::Monitors>,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<Option<(Vec<Node>, NodeId)>, RequestError> {
     let Some(mut forest) = forest(storage, monitors, budget)? else {
         return Ok(None);
@@ -1015,14 +1009,14 @@ pub(super) fn build(
     }
     for inner in [true, false] {
         for group in &groups {
-            budget.charge_work(1)?;
+            budget.checkpoint()?;
             if group.inner == inner && !reduce(storage, monitors, &mut forest, group, budget)? {
                 return Ok(None);
             }
         }
     }
     for root in forest.roots.iter().skip(1) {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         if root.is_some() {
             return Ok(None);
         }

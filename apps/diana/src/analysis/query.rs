@@ -1,6 +1,6 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use diana_decomp::{ControlError, FailureKind, Limits, RequestError, RunContext};
+use diana_decomp::{ControlError, FailureKind, RequestError, RunContext};
 
 use super::apk::DexRoot;
 use super::archive::EntryRecord;
@@ -45,27 +45,6 @@ pub enum QueryKind {
     Strings,
 }
 
-/// Explicit query bounds. Unset fields impose no numeric cap; a configured bound
-/// is enforced and never truncated into a successful prefix.
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub struct QueryLimits {
-    pub max_rows: Option<u64>,
-    pub max_batch_rows: Option<u64>,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum QueryLimit {
-    Rows,
-}
-
-impl std::fmt::Display for QueryLimit {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(match self {
-            Self::Rows => "rows",
-        })
-    }
-}
-
 #[derive(Debug, thiserror::Error)]
 pub enum QueryError {
     #[error(transparent)]
@@ -78,12 +57,6 @@ pub enum QueryError {
     Method(#[from] diana_decomp::input::MethodError),
     #[error(transparent)]
     Request(#[from] RequestError),
-    #[error("{limit} exceeded: requested {requested}, maximum {maximum}")]
-    Budget {
-        limit: QueryLimit,
-        requested: u64,
-        maximum: u64,
-    },
     #[error("query worker stopped before delivering its rows")]
     WorkerLost,
     #[error("entries lists physical archive records only; a bare DEX has none")]
@@ -101,7 +74,6 @@ impl QueryError {
             Self::Engine(error) => error.kind(),
             Self::Method(error) => error.kind(),
             Self::Request(error) => error.kind(),
-            Self::Budget { .. } => FailureKind::BudgetExceeded,
             Self::Cancelled => FailureKind::Cancelled,
             Self::WorkerLost => FailureKind::InternalInvariant,
             Self::NotArchive | Self::InvalidJobs => FailureKind::Unsupported,
@@ -127,7 +99,6 @@ pub struct QueryPlan {
     pub class: Option<Vec<u16>>,
     /// Direct hierarchy relations restricting `classes`.
     pub class_filter: super::dex::ClassFilter,
-    pub limits: QueryLimits,
     pub jobs: usize,
 }
 
@@ -139,7 +110,6 @@ pub struct Query<'a> {
     filter: Option<Vec<u16>>,
     class: Option<Vec<u16>>,
     class_filter: super::dex::ClassFilter,
-    limits: QueryLimits,
     jobs: usize,
     entries: Vec<EntryRecord>,
 }
@@ -173,7 +143,6 @@ impl<'a> Query<'a> {
             filter: plan.filter,
             class: plan.class,
             class_filter: plan.class_filter,
-            limits: plan.limits,
             jobs: plan.jobs,
             entries,
         })
@@ -202,9 +171,7 @@ impl<'a> Query<'a> {
             if self.entries.is_empty() {
                 return Err(QueryError::NotArchive);
             }
-            let mut delivered_rows = 0u64;
             for entry in &self.entries {
-                delivered_rows = delivered_rows.saturating_add(1);
                 cancel_check(cancel)?;
                 let row = EntryRow {
                     image: ImageIndex(0),
@@ -219,15 +186,7 @@ impl<'a> Query<'a> {
                 {
                     continue;
                 }
-                if let Some(maximum) = self.limits.max_rows
-                    && delivered_rows > maximum
-                {
-                    return Err(QueryError::Budget {
-                        limit: QueryLimit::Rows,
-                        requested: delivered_rows,
-                        maximum,
-                    });
-                }
+
                 sink(Row::Entry(row))?;
             }
             return Ok(());
@@ -237,11 +196,10 @@ impl<'a> Query<'a> {
             self.roots.len(),
             self.jobs,
             cancel,
-            self.limits,
             |ordinal, cancel, emit| {
                 let root = &self.roots[ordinal];
                 let cancelled = || cancel.load(Ordering::Relaxed);
-                let mut control = RunContext::new(Limits::default(), &cancelled);
+                let mut control = RunContext::new(&cancelled);
                 let image = ImageIndex(ordinal);
                 let filter = self.filter.as_deref();
                 let class = self.class.as_deref();

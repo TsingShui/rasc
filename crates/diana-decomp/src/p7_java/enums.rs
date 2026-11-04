@@ -1,10 +1,8 @@
-use crate::input::{MethodInput, RawPrintable};
+use crate::input::{MethodSource, RawPrintable};
 use crate::p4_types::declarations::enums::{Declaration, Role};
 use crate::raw::{LayoutKind, OperandReference};
 use crate::substrate::owned::{TextBuffer, push};
-use crate::{
-    ClassKey, CodeUnitOffset, FieldId, MethodBudget, MethodId, RegisterId, RequestError, RunContext,
-};
+use crate::{ClassKey, CodeUnitOffset, FieldId, MethodId, RegisterId, RequestError, RunContext};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum EnumMemberRole {
@@ -90,7 +88,7 @@ impl Proof {
             }));
         }
         for (ordinal, &constant) in self.order.iter().enumerate() {
-            control.charge_work(1)?;
+            control.checkpoint()?;
             if field.field == constant {
                 return Ok(Some(GeneratedEnumField {
                     field,
@@ -111,12 +109,12 @@ struct Step {
     reference: Option<OperandReference>,
 }
 fn step(
-    input: &MethodInput<'_, '_>,
+    input: &MethodSource<'_, '_>,
     pc: CodeUnitOffset,
     opcode: u8,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<Option<Step>, RequestError> {
-    budget.charge_work(1)?;
+    budget.checkpoint()?;
     let RawPrintable::Method(raw) = input.raw() else {
         return Ok(None);
     };
@@ -147,10 +145,10 @@ fn step(
     }))
 }
 fn integer(
-    input: &MethodInput<'_, '_>,
+    input: &MethodSource<'_, '_>,
     pc: CodeUnitOffset,
     expected: i32,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<Option<Step>, RequestError> {
     use crate::raw::RawLiteral;
     for opcode in [0x12, 0x13, 0x14] {
@@ -174,7 +172,7 @@ fn one(step: &Step) -> Option<RegisterId> {
 fn registers(step: &Step, expected: &[RegisterId]) -> bool {
     step.registers.iter().eq(expected.iter().copied())
 }
-fn end(input: &MethodInput<'_, '_>, pc: CodeUnitOffset) -> Result<bool, RequestError> {
+fn end(input: &MethodSource<'_, '_>, pc: CodeUnitOffset) -> Result<bool, RequestError> {
     let RawPrintable::Method(raw) = input.raw() else {
         return Ok(false);
     };
@@ -185,12 +183,12 @@ fn end(input: &MethodInput<'_, '_>, pc: CodeUnitOffset) -> Result<bool, RequestE
         == raw.layout().original().instructions().len())
 }
 fn method(
-    input: &MethodInput<'_, '_>,
+    input: &MethodSource<'_, '_>,
     reference: Option<OperandReference>,
     owner: &[u16],
     name: &str,
     proto: &str,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<bool, RequestError> {
     let Some(OperandReference::Method(id)) = reference else {
         return Ok(false);
@@ -215,11 +213,11 @@ fn method(
             .matches_with(&proto_units, budget)?)
 }
 fn enum_method(
-    input: &MethodInput<'_, '_>,
+    input: &MethodSource<'_, '_>,
     reference: Option<OperandReference>,
     name: &str,
     proto: &str,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<bool, RequestError> {
     method(
         input,
@@ -231,9 +229,9 @@ fn enum_method(
     )
 }
 fn common(
-    input: &MethodInput<'_, '_>,
+    input: &MethodSource<'_, '_>,
     role: Role,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<bool, RequestError> {
     let RawPrintable::Method(raw) = input.raw() else {
         return Ok(false);
@@ -278,8 +276,8 @@ fn common(
         )?)
 }
 fn constructor(
-    input: &MethodInput<'_, '_>,
-    budget: &mut MethodBudget<'_, '_>,
+    input: &MethodSource<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<bool, RequestError> {
     let RawPrintable::Method(raw) = input.raw() else {
         return Ok(false);
@@ -316,9 +314,9 @@ fn constructor(
     Ok(registers(&ret, &[]) && end(input, ret.next)?)
 }
 fn initializer(
-    input: &MethodInput<'_, '_>,
+    input: &MethodSource<'_, '_>,
     declaration: &Declaration,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<Option<Vec<FieldId>>, RequestError> {
     let mut pc = CodeUnitOffset(0);
     let mut order = Vec::new();
@@ -380,13 +378,13 @@ fn initializer(
         }
         let mut matched = false;
         for constant in declaration.constants() {
-            budget.charge_work(1)?;
+            budget.checkpoint()?;
             if constant.field == field && constant.name == literal {
                 matched = true;
             }
         }
         for &old in &order {
-            budget.charge_work(1)?;
+            budget.checkpoint()?;
             if old == field {
                 return Ok(None);
             }
@@ -428,10 +426,10 @@ fn initializer(
     Ok(Some(order))
 }
 fn array(
-    input: &MethodInput<'_, '_>,
+    input: &MethodSource<'_, '_>,
     declaration: &Declaration,
     order: &[FieldId],
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<bool, RequestError> {
     let Some(length) = integer(
         input,
@@ -466,7 +464,7 @@ fn array(
     }
     let mut pc = new.next;
     for (ordinal, &field) in order.iter().enumerate() {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         let Some(load) = step(input, pc, 0x62, budget)? else {
             return Ok(false);
         };
@@ -505,9 +503,9 @@ fn array(
     Ok(registers(&ret, &[array]) && end(input, ret.next)?)
 }
 fn values(
-    input: &MethodInput<'_, '_>,
+    input: &MethodSource<'_, '_>,
     declaration: &Declaration,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<bool, RequestError> {
     let Some(load) = step(input, CodeUnitOffset(0), 0x62, budget)? else {
         return Ok(false);
@@ -542,11 +540,11 @@ fn values(
     cast_return(input, result.next, returned, declaration.array(), budget)
 }
 fn cast_return(
-    input: &MethodInput<'_, '_>,
+    input: &MethodSource<'_, '_>,
     pc: CodeUnitOffset,
     value: RegisterId,
     target: &[u16],
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<bool, RequestError> {
     let Some(cast) = step(input, pc, 0x1f, budget)? else {
         return Ok(false);
@@ -567,9 +565,9 @@ fn cast_return(
     Ok(registers(&ret, &[value]) && end(input, ret.next)?)
 }
 fn value_of(
-    input: &MethodInput<'_, '_>,
+    input: &MethodSource<'_, '_>,
     declaration: &Declaration,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<bool, RequestError> {
     let RawPrintable::Method(raw) = input.raw() else {
         return Ok(false);
@@ -628,7 +626,7 @@ fn storage_escapes(
 ) -> Result<bool, RequestError> {
     use crate::input::catalog::{MemberEntry, MemberSelection};
     for class in 0..index.header.class_defs.count {
-        control.charge_work(1)?;
+        control.checkpoint()?;
         if crate::ClassDefId(class) == declaration.owner().class_def {
             continue;
         }
@@ -642,9 +640,9 @@ fn storage_escapes(
                     let MemberEntry::MethodHeader { method_idx, .. } = entry else {
                         return Ok(());
                     };
-                    let mut budget = control.method_budget()?;
+                    let budget = &mut *control;
                     let input =
-                        index.method_input(crate::ClassDefId(class), method_idx, &mut budget)?;
+                        index.method_source_at(crate::ClassDefId(class), method_idx, budget)?;
                     let RawPrintable::Method(raw) = input.raw() else {
                         return Ok(());
                     };
@@ -656,7 +654,7 @@ fn storage_escapes(
                         .ok_or(RequestError::PlatformCapacity)?
                         < raw.instructions().len()
                     {
-                        budget.charge_work(1)?;
+                        budget.checkpoint()?;
                         let layout =
                             crate::raw::instruction_layout(raw.instructions(), pc, raw.version())
                                 .map_err(crate::input::MethodError::Decode)?;
@@ -688,33 +686,32 @@ fn verify_impl(
         return Ok(None);
     }
     let order = {
-        let mut budget = control.method_budget()?;
-        let input = index.method_input(
+        let budget = &mut *control;
+        let input = index.method_source_at(
             declaration.owner().class_def,
             declaration.method(Role::Initializer)?,
-            &mut budget,
+            budget,
         )?;
-        if !common(&input, Role::Initializer, &mut budget)? {
+        if !common(&input, Role::Initializer, budget)? {
             return Ok(None);
         }
-        let Some(order) = initializer(&input, &declaration, &mut budget)? else {
+        let Some(order) = initializer(&input, &declaration, budget)? else {
             return Ok(None);
         };
         order
     };
     for member in declaration.members() {
-        let mut budget = control.method_budget()?;
-        let input =
-            index.method_input(declaration.owner().class_def, member.method, &mut budget)?;
-        if !common(&input, member.role, &mut budget)? {
+        let budget = &mut *control;
+        let input = index.method_source_at(declaration.owner().class_def, member.method, budget)?;
+        if !common(&input, member.role, budget)? {
             return Ok(None);
         }
         let valid = match member.role {
             Role::Initializer => true,
-            Role::Array => array(&input, &declaration, &order, &mut budget)?,
-            Role::Constructor => constructor(&input, &mut budget)?,
-            Role::ValueOf => value_of(&input, &declaration, &mut budget)?,
-            Role::Values => values(&input, &declaration, &mut budget)?,
+            Role::Array => array(&input, &declaration, &order, budget)?,
+            Role::Constructor => constructor(&input, budget)?,
+            Role::ValueOf => value_of(&input, &declaration, budget)?,
+            Role::Values => values(&input, &declaration, budget)?,
         };
         if !valid {
             return Ok(None);
@@ -737,10 +734,10 @@ fn verify_impl(
     header.push(simple, control)?;
     header.push(" {\n", control)?;
     for (ordinal, field) in order.iter().enumerate() {
-        control.charge_work(1)?;
+        control.checkpoint()?;
         let mut constant = None;
         for candidate in declaration.constants() {
-            control.charge_work(1)?;
+            control.checkpoint()?;
             if candidate.field == *field {
                 constant = Some(candidate);
                 break;
@@ -800,7 +797,7 @@ pub(crate) fn unit(
     {
         let mut count = 0usize;
         for field in fields {
-            control.charge_work(1)?;
+            control.checkpoint()?;
             if field.key.field == key {
                 count = count.checked_add(1).ok_or(RequestError::PlatformCapacity)?;
             }
@@ -810,7 +807,7 @@ pub(crate) fn unit(
         }
     }
     for field in fields {
-        control.charge_work(1)?;
+        control.checkpoint()?;
         if !matches!(field.storage, crate::FieldStorage::Static(_))
             || matches!(field.initial, crate::FieldInitialValue::Unavailable(_))
         {
@@ -829,7 +826,7 @@ pub(crate) fn unit(
         } else {
             let mut found = false;
             for constant in proof.declaration.constants() {
-                control.charge_work(1)?;
+                control.checkpoint()?;
                 found |= constant.field == field.key.field && constant.name == facts.name;
             }
             if !found
@@ -854,7 +851,7 @@ pub(crate) fn unit(
     for original in proof.declaration.members() {
         let mut count = 0usize;
         for member in members {
-            control.charge_work(1)?;
+            control.checkpoint()?;
             if member.key().method == original.method {
                 count = count.checked_add(1).ok_or(RequestError::PlatformCapacity)?;
             }
@@ -864,7 +861,7 @@ pub(crate) fn unit(
         }
     }
     for member in members {
-        control.charge_work(1)?;
+        control.checkpoint()?;
         let crate::MethodOutput::Generated {
             facts,
             declaration: crate::GeneratedMember::Enum(actual),

@@ -1,26 +1,27 @@
 use crate::context::Context;
-use crate::input::MethodInput;
+use crate::input::MethodSource;
 use crate::p2_flow::{DeclarationType, ResultType};
 use crate::p4_types::Kind;
 use crate::p5_variables::StorageBody;
 use crate::substrate::owned::{TextBuffer, copy_units, push};
-use crate::{MethodBudget, RequestError};
+use crate::{RequestError, RunContext};
 use std::cell::OnceCell;
 
 struct NestedIndex {
-    /// descriptor -> (enclosing descriptor, simple name units)
-    entries: std::collections::HashMap<Vec<u16>, (Vec<u16>, Vec<u16>)>,
+    /// Original descriptor, enclosing descriptor and simple name units.
+    entries: Vec<(Vec<u16>, Vec<u16>, Vec<u16>)>,
+    issues: Vec<(Vec<u16>, crate::input::InputError)>,
 }
 
 impl NestedIndex {
     fn build(
-        input: &MethodInput<'_, '_>,
-        budget: &mut MethodBudget<'_, '_>,
+        input: &MethodSource<'_, '_>,
+        budget: &mut RunContext<'_>,
     ) -> Result<Option<Self>, RequestError> {
         let ownership = input.program().ownership_cached(budget)?;
-        let mut entries = std::collections::HashMap::new();
+        let mut entries = Vec::new();
         for entry in ownership.nested() {
-            budget.charge_work(1)?;
+            budget.checkpoint()?;
             let descriptor = copy_units(
                 input
                     .program()
@@ -39,17 +40,36 @@ impl NestedIndex {
             for &unit in entry.name() {
                 push(&mut name, unit, budget)?;
             }
-            entries.insert(descriptor, (outer, name));
+            push(&mut entries, (descriptor, outer, name), budget)?;
         }
-        Ok(Some(Self { entries }))
+        let mut issues = Vec::new();
+        for id in 0..input.program().header.class_defs.count {
+            budget.checkpoint()?;
+            let class = crate::ClassDefId(id);
+            if let Some(error) = ownership.issue(class)? {
+                match input.program().class_with(class, budget) {
+                    Ok(class) => {
+                        let descriptor = copy_units(class.descriptor, budget)?;
+                        push(&mut issues, (descriptor, error), budget)?;
+                    }
+                    Err(error)
+                        if matches!(
+                            error.kind(),
+                            crate::FailureKind::Malformed | crate::FailureKind::Unsupported
+                        ) => {}
+                    Err(error) => return Err(error.into()),
+                }
+            }
+        }
+        Ok(Some(Self { entries, issues }))
     }
 }
 
 fn nested_name(
-    input: &MethodInput<'_, '_>,
+    input: &MethodSource<'_, '_>,
     descriptor: &[u16],
     cache: &OnceCell<Option<NestedIndex>>,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<Option<String>, RequestError> {
     if cache.get().is_none() {
         let built = NestedIndex::build(input, budget)?;
@@ -61,17 +81,31 @@ fn nested_name(
     let Some(index) = index else {
         return Ok(None);
     };
-    let mut components: Vec<Vec<u16>> = Vec::new();
-    let mut current: Vec<u16> = descriptor.to_vec();
-    while let Some((outer, name)) = index.entries.get(&current) {
-        budget.charge_work(1)?;
-        components.push(name.clone());
-        current = outer.clone();
+    for (original, error) in &index.issues {
+        budget.checkpoint()?;
+        if original == descriptor {
+            return Err((*error).into());
+        }
+    }
+    let mut components: Vec<&[u16]> = Vec::new();
+    let mut current = descriptor;
+    loop {
+        let mut parent = None;
+        for (original, outer, name) in &index.entries {
+            budget.checkpoint()?;
+            if original == current {
+                parent = Some((outer.as_slice(), name.as_slice()));
+                break;
+            }
+        }
+        let Some((outer, name)) = parent else { break };
+        push(&mut components, name, budget)?;
+        current = outer;
     }
     if components.is_empty() {
         return Ok(None);
     }
-    let Some(base) = super::calls::type_name(&current, budget)? else {
+    let Some(base) = super::calls::type_name(current, budget)? else {
         return Err(RequestError::SourceNameUnproved {
             class: input.class_id(),
         });
@@ -109,13 +143,13 @@ impl TypeNames {
     pub(super) fn source_type(
         &self,
         kind: Kind,
-        budget: &mut MethodBudget<'_, '_>,
+        budget: &mut RunContext<'_>,
     ) -> Result<SourceType, RequestError> {
         if let Some(name) = kind.builtin_spelling() {
             return Ok(SourceType(SourceSpelling::Builtin(name)));
         }
         for (index, name) in self.named.iter().enumerate() {
-            budget.charge_work(1)?;
+            budget.checkpoint()?;
             if name.original == kind {
                 return Ok(SourceType(SourceSpelling::Named(index)));
             }
@@ -140,13 +174,13 @@ impl TypeNames {
     pub(super) fn name<'a>(
         &'a self,
         kind: Kind,
-        budget: &mut MethodBudget<'_, '_>,
+        budget: &mut RunContext<'_>,
     ) -> Result<&'a str, RequestError> {
         if let Some(name) = kind.builtin_spelling() {
             return Ok(name);
         }
         for entry in &self.named {
-            budget.charge_work(1)?;
+            budget.checkpoint()?;
             if entry.original == kind {
                 return Ok(&entry.source);
             }
@@ -158,7 +192,7 @@ impl TypeNames {
     pub(super) fn declaration<'a>(
         &'a self,
         declaration: DeclarationType,
-        budget: &mut MethodBudget<'_, '_>,
+        budget: &mut RunContext<'_>,
     ) -> Result<&'a str, RequestError> {
         match declaration {
             DeclarationType::Narrow(kind) => Ok(kind.spelling()),
@@ -168,7 +202,7 @@ impl TypeNames {
     pub(super) fn result<'a>(
         &'a self,
         result: ResultType,
-        budget: &mut MethodBudget<'_, '_>,
+        budget: &mut RunContext<'_>,
     ) -> Result<&'a str, RequestError> {
         match result {
             ResultType::Void => Ok("void"),
@@ -177,17 +211,17 @@ impl TypeNames {
     }
     fn include(
         &mut self,
-        input: &MethodInput<'_, '_>,
+        input: &MethodSource<'_, '_>,
         _catalog: &Context,
         kind: Kind,
         cache: &OnceCell<Option<NestedIndex>>,
-        budget: &mut MethodBudget<'_, '_>,
+        budget: &mut RunContext<'_>,
     ) -> Result<bool, RequestError> {
         if kind.builtin_spelling().is_some() {
             return Ok(true);
         }
         for entry in &self.named {
-            budget.charge_work(1)?;
+            budget.checkpoint()?;
             if entry.original == kind {
                 return Ok(true);
             }
@@ -226,7 +260,7 @@ impl TypeNames {
         }
         let mut dimensions = 0usize;
         while descriptor.get(dimensions) == Some(&91) {
-            budget.charge_work(1)?;
+            budget.checkpoint()?;
             dimensions += 1;
         }
         let base = &descriptor[dimensions..];
@@ -278,21 +312,21 @@ impl TypeNames {
     }
 }
 pub(crate) fn resolve(
-    input: &MethodInput<'_, '_>,
+    input: &MethodSource<'_, '_>,
     catalog: &Context,
     storage: &StorageBody<'_>,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<Option<TypeNames>, RequestError> {
     let mut names = TypeNames::default();
     let ownership_cache: OnceCell<Option<NestedIndex>> = OnceCell::new();
     for local in &storage.locals {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         if !names.include(input, catalog, local.kind, &ownership_cache, budget)? {
             return Ok(None);
         }
     }
     for op in &storage.typed.ssa.operations {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         if let crate::p2_flow::Op::Class(_, reference) = op.op
             && !names.include(
                 input,

@@ -7,12 +7,11 @@ use std::io::{BufWriter, Write};
 use std::time::{Duration, Instant};
 
 use diana::analysis::images::ImageSet;
-use diana::analysis::input::{InputLimits, InputOptions};
+use diana::analysis::input::InputOptions;
 use diana::analysis::request::RequestScope;
 use diana_decomp::{
     ClassKey, ClassOutput, DexId, DexImage, Diagnostic, DiagnosticCause, Engine, FailureKind,
-    ImageOrigin, InputId, Limits, MethodId, MethodOutput, Options, OutputReason, Request,
-    RunContext,
+    ImageOrigin, InputId, MethodId, MethodOutput, Options, OutputReason, Request, RunContext,
 };
 use serde_json::{Value, json};
 
@@ -93,13 +92,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Err("shard-index must be less than a positive shard-count".into());
     }
     let wall = Instant::now();
-    let options = InputOptions {
-        limits: InputLimits::default(),
-        allowed_root: None,
-    };
+    let options = InputOptions { allowed_root: None };
     let scope = RequestScope::open(std::path::Path::new(&input), &options)?;
     let images = ImageSet::open(&scope)?;
-    let mut control = RunContext::new(Limits::default(), &|| false);
+    let mut control = RunContext::new_parallel(&|| false);
     let mut dex_images = Vec::new();
     for image in images.images() {
         dex_images.push(DexImage {
@@ -110,7 +106,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             },
         });
     }
-    let engine = Engine::open(dex_images, Options::default(), &mut control)?;
+    let jobs = std::thread::available_parallelism().map_or(1, |count| count.get());
+    let engine = Engine::open(dex_images, Options::default(), &mut control)?.with_method_jobs(jobs);
     let mut all = Vec::new();
     for (position, image) in images.images().iter().enumerate() {
         let dex = DexId(u32::try_from(position)?);
@@ -258,7 +255,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         );
                         if matches!(
                             error.kind(),
-                            FailureKind::Cancelled | FailureKind::BudgetExceeded
+                            FailureKind::Cancelled | FailureKind::ResourceExhausted
                         ) {
                             termination = Some(error.to_string());
                         }
@@ -285,13 +282,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 if matches!(
                     error.kind(),
-                    FailureKind::Cancelled | FailureKind::BudgetExceeded
+                    FailureKind::Cancelled | FailureKind::ResourceExhausted
                 ) {
                     termination = Some(error.to_string());
                 }
             }
         }
-        if requested.is_multiple_of(100) || last_progress.elapsed() >= Duration::from_secs(30) {
+        if requested.is_multiple_of(100) || last_progress.elapsed() >= Duration::from_secs(5) {
             if let Some(records) = records.as_mut() {
                 records.flush()?;
             }
@@ -336,7 +333,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "sampled":requested, "selected":selected_count, "selection":selection,
             "shard_index":shard_index, "shard_count":shard_count,
             "complete":requested == selected_count && termination.is_none(), "termination":termination,
-            "engine_scope":"shared", "member_counting":"selected class roots only; nested members counted on their own request",
+            "engine_scope":"shared", "method_jobs":jobs, "member_counting":"selected class roots only; nested members counted on their own request",
             "original_method_count":original_method_count, "missing_methods":totals.missing_methods,
             "unexpected_methods":totals.unexpected_methods, "enumeration_errors":totals.enumeration_errors,
             "class_errors":totals.class_errors, "render_errors":totals.render_errors,

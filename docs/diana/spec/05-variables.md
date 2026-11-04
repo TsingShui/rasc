@@ -41,7 +41,7 @@ while pending is non-empty:
     emit t=s; rewrite every source==s to t
 ```
 
-Each emitted copy or broken finite cycle terminates the loop; temps, scans and output are charged
+Each emitted copy or broken finite cycle terminates the loop; temps, scans and output grow through checked reservation
 per item, and a stable tie-break is not required.
 `a<-b,b<-a` may yield `t=b;b=a;a=t`, and a three-cycle likewise preserves the sources before they
 are overwritten.
@@ -106,8 +106,8 @@ result a=B,b=C,c=A
 
 A self-loop Identity MAY be deleted, but different conversions MUST NOT be deleted merely because
 the LocalId is the same. A simple implementation may be O(k²); every scan and replacement of an
-element is charged as work, not charged once in the outer loop; temps do not exceed the number of
-broken cycles and their capacity is charged first. The implementation need not introduce
+element has checked growth, not reserved once in the outer loop; temps do not exceed the number of
+broken cycles and their capacity is checked first. The implementation need not introduce
 coalescing or a global scheduler to reach the paper's minimum-copy goal.
 
 ### 5.4 Derivation that shadows and DA initial values are unobservable

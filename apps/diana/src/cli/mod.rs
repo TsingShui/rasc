@@ -12,14 +12,13 @@ mod xref;
 
 use std::path::PathBuf;
 
-use clap::{Args, Parser, Subcommand};
+use clap::{Parser, Subcommand};
 
 use crate::analysis::at;
-use crate::analysis::axml::ManifestLimits;
 use crate::analysis::dex::{ClassFilter, ClassKind};
 use crate::analysis::input::InputOptions;
 use crate::analysis::manifest;
-use crate::analysis::query::{Query, QueryKind, QueryLimits, QueryPlan, Row};
+use crate::analysis::query::{Query, QueryKind, QueryPlan, Row};
 use crate::analysis::request::RequestScope;
 
 use output::{Failure, Format, publish};
@@ -31,49 +30,8 @@ struct Cli {
     /// Include member uncertainty annotations and diagnostic detail
     #[arg(long, global = true)]
     verbose: bool,
-    #[command(flatten)]
-    limits: LimitArgs,
     #[command(subcommand)]
     command: Command,
-}
-
-#[derive(Args, Clone, Copy, Debug, Default)]
-struct LimitArgs {
-    /// Bound on the leased input file bytes
-    #[arg(long, global = true)]
-    max_input_bytes: Option<u64>,
-    /// Bound on bytes inflated from one archive entry
-    #[arg(long, global = true)]
-    max_inflated_bytes: Option<u64>,
-    /// Bound on cumulative request work steps
-    #[arg(long, global = true)]
-    max_request_work_steps: Option<u64>,
-    /// Bound on cumulative request allocation bytes
-    #[arg(long, global = true)]
-    max_request_allocation_bytes: Option<u64>,
-    /// Bound on per-method work steps
-    #[arg(long, global = true)]
-    max_work_steps: Option<u64>,
-    /// Bound on one rendered member's UTF-8 length
-    #[arg(long, global = true)]
-    max_method_output_bytes: Option<u64>,
-    /// Bound on the final text/JSON payload bytes
-    #[arg(long, global = true)]
-    max_report_output_bytes: Option<u64>,
-}
-
-impl LimitArgs {
-    fn limits(&self) -> crate::analysis::limits::RequestLimits {
-        crate::analysis::limits::RequestLimits {
-            max_input_bytes: self.max_input_bytes,
-            max_inflated_bytes: self.max_inflated_bytes,
-            max_request_work_steps: self.max_request_work_steps,
-            max_request_allocation_bytes: self.max_request_allocation_bytes,
-            max_work_steps: self.max_work_steps,
-            max_method_output_bytes: self.max_method_output_bytes,
-            max_report_output_bytes: self.max_report_output_bytes,
-        }
-    }
 }
 
 #[derive(Subcommand)]
@@ -307,20 +265,19 @@ enum KindArg {
 /// Runs one command and maps its classified failure to an exit code.
 pub fn run() -> std::process::ExitCode {
     let cli = Cli::parse();
-    let limits = cli.limits.limits();
     let verbose = cli.verbose;
     let result = match cli.command {
         Command::Entries {
             input,
             format,
             output,
-        } => entries(&input, format, output.as_deref(), limits),
+        } => entries(&input, format, output.as_deref()),
         Command::Manifest {
             input,
             format,
             output,
             strict,
-        } => manifest_command(&input, format, output.as_deref(), strict, limits),
+        } => manifest_command(&input, format, output.as_deref(), strict),
         Command::GetClass {
             input,
             selector,
@@ -338,7 +295,6 @@ pub fn run() -> std::process::ExitCode {
             format,
             output.as_deref(),
             verbose,
-            limits,
         ),
         Command::GetMethod {
             input,
@@ -352,7 +308,6 @@ pub fn run() -> std::process::ExitCode {
             format,
             output.as_deref(),
             verbose,
-            limits,
         ),
         Command::Extract {
             input,
@@ -362,16 +317,7 @@ pub fn run() -> std::process::ExitCode {
             raw,
             force,
             strict,
-        } => extract_cli::run(
-            &input,
-            &entry,
-            entry_index,
-            &output,
-            raw,
-            force,
-            strict,
-            limits,
-        ),
+        } => extract_cli::run(&input, &entry, entry_index, &output, raw, force, strict),
         Command::Xref {
             input,
             kind,
@@ -394,7 +340,6 @@ pub fn run() -> std::process::ExitCode {
             },
             format,
             output.as_deref(),
-            limits,
         ),
         Command::Classes {
             input,
@@ -425,7 +370,6 @@ pub fn run() -> std::process::ExitCode {
             },
             format,
             output.as_deref(),
-            limits,
         ),
         Command::Fields {
             input,
@@ -445,7 +389,6 @@ pub fn run() -> std::process::ExitCode {
             },
             format,
             output.as_deref(),
-            limits,
         ),
         Command::Methods {
             input,
@@ -465,7 +408,6 @@ pub fn run() -> std::process::ExitCode {
             },
             format,
             output.as_deref(),
-            limits,
         ),
         Command::Strings {
             input,
@@ -484,7 +426,6 @@ pub fn run() -> std::process::ExitCode {
             },
             format,
             output.as_deref(),
-            limits,
         ),
     };
     match result {
@@ -496,20 +437,16 @@ pub fn run() -> std::process::ExitCode {
     }
 }
 
-fn options(limits: crate::analysis::limits::RequestLimits) -> InputOptions {
-    InputOptions {
-        limits: limits.input(),
-        allowed_root: None,
-    }
+fn options() -> InputOptions {
+    InputOptions::default()
 }
 
 fn entries(
     input: &std::path::Path,
     format: Format,
     output: Option<&std::path::Path>,
-    limits: crate::analysis::limits::RequestLimits,
 ) -> Result<(), Failure> {
-    let scope = RequestScope::open(input, &options(limits)).map_err(Failure::input)?;
+    let scope = RequestScope::open(input, &options()).map_err(Failure::input)?;
     let query = Query::new(
         &scope,
         QueryPlan {
@@ -517,7 +454,7 @@ fn entries(
             filter: None,
             class: None,
             class_filter: Default::default(),
-            limits: QueryLimits::default(),
+
             jobs: 1,
         },
     )
@@ -564,12 +501,7 @@ fn entries(
             .to_string()
         }
     };
-    publish(
-        output,
-        text.as_bytes(),
-        format,
-        limits.max_report_output_bytes,
-    )
+    publish(output, text.as_bytes(), format)
 }
 
 fn manifest_command(
@@ -577,10 +509,9 @@ fn manifest_command(
     format: Format,
     output: Option<&std::path::Path>,
     strict: bool,
-    limits: crate::analysis::limits::RequestLimits,
 ) -> Result<(), Failure> {
-    let scope = RequestScope::open(input, &options(limits)).map_err(Failure::input)?;
-    let manifest = match manifest::read(&scope, ManifestLimits::default()) {
+    let scope = RequestScope::open(input, &options()).map_err(Failure::input)?;
+    let manifest = match manifest::read(&scope) {
         Ok(manifest) => manifest,
         Err(error) => {
             let code = match error {
@@ -616,12 +547,7 @@ fn manifest_command(
         })
         .to_string(),
     };
-    publish(
-        output,
-        text.as_bytes(),
-        format,
-        limits.max_report_output_bytes,
-    )?;
+    publish(output, text.as_bytes(), format)?;
     if strict && manifest.is_partial() {
         return Err(Failure {
             code: 1,
@@ -654,9 +580,8 @@ fn query_command(
     args: QueryArgs,
     format: Format,
     output: Option<&std::path::Path>,
-    limits: crate::analysis::limits::RequestLimits,
 ) -> Result<(), Failure> {
-    let scope = RequestScope::open(input, &options(limits)).map_err(Failure::input)?;
+    let scope = RequestScope::open(input, &options()).map_err(Failure::input)?;
     let jobs = match args.jobs {
         Some(0) => {
             return Err(Failure {
@@ -675,7 +600,7 @@ fn query_command(
             .map(|text| text.encode_utf16().collect()),
         class: args.class.as_deref().map(selector_units),
         class_filter: args.class_filter,
-        limits: QueryLimits::default(),
+
         jobs,
     };
     let query = Query::new(&scope, plan).map_err(|error| Failure::query(error, 1))?;
@@ -737,12 +662,5 @@ fn query_command(
         QueryKind::Strings => "strings",
         QueryKind::Entries => "entries",
     };
-    table::publish_records(
-        &records,
-        columns,
-        command,
-        format,
-        output,
-        limits.max_report_output_bytes,
-    )
+    table::publish_records(&records, columns, command, format, output)
 }

@@ -1,11 +1,11 @@
 use crate::context::Context;
-use crate::input::MethodInput;
+use crate::input::MethodSource;
 use crate::substrate::owned::{copy_units, reserve};
-use crate::{MethodBudget, RequestError};
+use crate::{RequestError, RunContext};
 
 pub(super) fn retain(
     declared: Option<&[Vec<u16>]>,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<Vec<Vec<u16>>, RequestError> {
     let mut result = Vec::new();
     if let Some(declared) = declared {
@@ -13,7 +13,7 @@ pub(super) fn retain(
             let mut copy = Vec::new();
             reserve(&mut copy, descriptor.len(), budget)?;
             for &unit in descriptor {
-                budget.charge_work(1)?;
+                budget.checkpoint()?;
                 copy.push(unit);
             }
             reserve(&mut result, 1, budget)?;
@@ -29,14 +29,14 @@ pub(crate) struct SourceThrows {
     pub descriptors: Vec<Vec<u16>>,
 }
 pub(crate) fn source_throws(
-    input: &MethodInput<'_, '_>,
+    input: &MethodSource<'_, '_>,
     _catalog: &Context,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<Option<SourceThrows>, RequestError> {
     let original = input.throws_metadata(budget)?;
     let mut descriptors = Vec::new();
     for exception in original.exceptions {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         reserve(&mut descriptors, 1, budget)?;
         descriptors.push(copy_units(exception, budget)?);
     }
@@ -52,7 +52,7 @@ pub(crate) struct Invocation {
 }
 
 impl SourceThrows {
-    pub(crate) fn retained(&self, budget: &mut MethodBudget<'_, '_>) -> Result<Self, RequestError> {
+    pub(crate) fn retained(&self, budget: &mut RunContext<'_>) -> Result<Self, RequestError> {
         Ok(Self {
             _sealed: (),
             descriptors: retain(Some(&self.descriptors), budget)?,

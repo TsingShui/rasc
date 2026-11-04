@@ -4,6 +4,8 @@ mod context;
 mod engine;
 #[path = "p1_input/mod.rs"]
 pub mod input;
+#[path = "p0_class/mod.rs"]
+pub mod p0;
 mod p2_flow;
 mod p3_ssa;
 mod p4_types;
@@ -65,7 +67,5 @@ pub use substrate::ids::{
     Utf16Count, Utf16Offset,
 };
 
-pub use pipeline::control::{
-    ControlError, FallbackBudget, Limits, MethodBudget, RequestLimit, ResourceUsage, RunContext,
-};
+pub use pipeline::control::{ControlError, RunContext};
 pub use pipeline::diagnostics::{DiagnosticCode, FailureKind};

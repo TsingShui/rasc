@@ -32,7 +32,7 @@ pub(crate) fn collect(
         crate::input::Cursor::bounded(bytes, crate::ByteOffset(0), crate::ByteOffset(bytes.len()))?;
     let mut interfaces = Vec::new();
     while cursor.remaining_byte().0 != 0 {
-        control.charge_work(1)?;
+        control.checkpoint()?;
         let ty = crate::TypeId(u32::from(cursor.read_u16_with(control)?));
         let name = copy_units(index.type_name(ty, control)?, control)?;
         push(&mut interfaces, name, control)?;

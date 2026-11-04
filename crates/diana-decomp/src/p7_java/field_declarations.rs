@@ -65,7 +65,7 @@ fn reconstruct_impl(
     source.push(ty.spelling(), control)?;
     source.push(" ", control)?;
     for scalar in char::decode_utf16(facts.name.iter().copied()) {
-        control.charge_work(1)?;
+        control.checkpoint()?;
         source.character(
             scalar
                 .map_err(|_| RequestError::InternalInvariant("verified field name lost scalar"))?,
@@ -90,7 +90,7 @@ fn reconstruct_impl(
         let mut preparation = TextBuffer::new();
         preparation.push("static { ", control)?;
         for scalar in char::decode_utf16(facts.name.iter().copied()) {
-            control.charge_work(1)?;
+            control.checkpoint()?;
             preparation.character(
                 scalar.map_err(|_| {
                     RequestError::InternalInvariant("verified preparation name lost scalar")

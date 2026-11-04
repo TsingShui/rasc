@@ -9,8 +9,8 @@ use crate::input::{DexContainer, InputError, InputProblem, ProgramIndex};
 use crate::substrate::owned::{copy_proto, copy_units, reserve};
 use crate::substrate::report::*;
 use crate::{
-    ByteOffset, ClassKey, DebugSourceKind, DiagnosticId, FailureKind, MethodBudget, MethodKey,
-    RequestError, RunContext,
+    ByteOffset, ClassKey, DebugSourceKind, DiagnosticId, FailureKind, MethodKey, RequestError,
+    RunContext,
 };
 
 // Phase implementations can name the credential, but only the scheduler can construct it.
@@ -104,18 +104,14 @@ impl<'a> Engine<'a> {
                 offset_byte: ByteOffset(0),
             });
         }
-        let bytes = images
+        images
             .len()
             .checked_mul(size_of::<IndexedImage<'a>>())
             .filter(|&n| n <= isize::MAX as usize)
             .ok_or(InputError::PlatformCapacity {
                 offset_byte: ByteOffset(0),
             })?;
-        control.charge_allocation(u64::try_from(bytes).map_err(|_| {
-            InputError::PlatformCapacity {
-                offset_byte: ByteOffset(0),
-            }
-        })?)?;
+        control.checkpoint()?;
         let mut indexed: Vec<IndexedImage<'a>> = Vec::new();
         indexed
             .try_reserve_exact(images.len())
@@ -130,7 +126,7 @@ impl<'a> Engine<'a> {
         for image in images {
             let mut shared = None;
             for previous in &indexed {
-                control.charge_work(1)?;
+                control.checkpoint()?;
                 if previous.image.origin == image.origin {
                     if !same_bytes(previous.image.bytes, image.bytes, control)? {
                         return Err(InputError::Malformed {
@@ -218,29 +214,26 @@ impl<'a> Engine<'a> {
         let position = usize::try_from(key.class.dex.0).map_err(|_| RequestError::UnknownDex)?;
         let image = self.images.get(position).ok_or(RequestError::UnknownDex)?;
         let ownership = image.index.ownership_cached(control)?;
+        ownership.check_class(key.class.class_def)?;
         let permit = SchedulePermit { _private: () };
-        let mut budget = control.method_budget()?;
+        let budget = &mut *control;
         let input = image
             .index
-            .method_input(key.class.class_def, key.method, &mut budget)?;
+            .method_source_at(key.class.class_def, key.method, budget)?;
         let Some(declaration) = crate::p4_types::declarations::capture::collect(
             &permit,
             &input,
             ownership,
             &self.catalog,
-            &mut budget,
+            budget,
         )?
         else {
             return Ok(None);
         };
-        let result = crate::p4_types::capture_certificate::verify(
-            &permit,
-            &input,
-            &declaration,
-            &mut budget,
-        )?;
+        let result =
+            crate::p4_types::capture_certificate::verify(&permit, &input, &declaration, budget)?;
         if let Some(proof) = &result {
-            proof.check(&input, &mut budget)?;
+            proof.check(&input, budget)?;
         }
         Ok(result)
     }
@@ -269,7 +262,7 @@ impl<'a> Engine<'a> {
                     if matches!(
                         error.kind(),
                         FailureKind::Cancelled
-                            | FailureKind::BudgetExceeded
+                            | FailureKind::ResourceExhausted
                             | FailureKind::InternalInvariant
                     ) =>
                 {
@@ -286,9 +279,10 @@ impl<'a> Engine<'a> {
         for node in closure.classes() {
             let key = node.class;
             let ownership = image.index.ownership_cached(control)?;
+            ownership.check_class(key.class_def)?;
             let mut instance = false;
             for entry in ownership.nested() {
-                control.charge_work(1)?;
+                control.checkpoint()?;
                 if entry.class() == key.class_def {
                     instance = entry.access_flags() & crate::substrate::flags::STATIC == 0;
                 }
@@ -323,7 +317,7 @@ impl<'a> Engine<'a> {
                                         if matches!(
                                             error.kind(),
                                             FailureKind::Cancelled
-                                                | FailureKind::BudgetExceeded
+                                                | FailureKind::ResourceExhausted
                                                 | FailureKind::InternalInvariant
                                         ) =>
                                     {
@@ -341,7 +335,7 @@ impl<'a> Engine<'a> {
                     if matches!(
                         error.kind(),
                         FailureKind::Cancelled
-                            | FailureKind::BudgetExceeded
+                            | FailureKind::ResourceExhausted
                             | FailureKind::InternalInvariant
                     ) {
                         return Err(error);
@@ -384,7 +378,7 @@ impl<'a> Engine<'a> {
                     if matches!(
                         error.kind(),
                         FailureKind::Cancelled
-                            | FailureKind::BudgetExceeded
+                            | FailureKind::ResourceExhausted
                             | FailureKind::InternalInvariant
                     ) =>
                 {
@@ -482,7 +476,7 @@ impl<'a> Engine<'a> {
                     if matches!(
                         error.kind(),
                         FailureKind::Cancelled
-                            | FailureKind::BudgetExceeded
+                            | FailureKind::ResourceExhausted
                             | FailureKind::InternalInvariant
                     ) =>
                 {
@@ -498,6 +492,37 @@ impl<'a> Engine<'a> {
                         control,
                     )?;
                     annotation_failure = true;
+                    None
+                }
+            }
+        } else {
+            None
+        };
+        // One class-fact product per request. It owns the original four-group
+        // member directory that the method reader consumes; a method entry is
+        // never reassembled from caller-supplied identities.
+        let class_facts = if whole_class {
+            match crate::p0::collect(&image.index, request.class, control) {
+                Ok(facts) => Some(facts),
+                Err(error)
+                    if matches!(
+                        error.kind(),
+                        FailureKind::Cancelled
+                            | FailureKind::ResourceExhausted
+                            | FailureKind::InternalInvariant
+                    ) =>
+                {
+                    return Err(error);
+                }
+                Err(error) => {
+                    add_diagnostic(
+                        &mut diagnostics,
+                        Diagnostic {
+                            method: None,
+                            cause: DiagnosticCause::Request(error),
+                        },
+                        control,
+                    )?;
                     None
                 }
             }
@@ -548,6 +573,7 @@ impl<'a> Engine<'a> {
                         MemberInputs {
                             nested: nested_context,
                             annotations: annotation_bindings.as_ref(),
+                            facts: class_facts.as_ref(),
                         },
                         control,
                     )?;
@@ -562,6 +588,7 @@ impl<'a> Engine<'a> {
                         MemberInputs {
                             nested: nested_context,
                             annotations: annotation_bindings.as_ref(),
+                            facts: class_facts.as_ref(),
                         },
                         &mut diagnostics,
                         control,
@@ -586,6 +613,7 @@ impl<'a> Engine<'a> {
                                     MemberInputs {
                                         nested: nested_context,
                                         annotations: annotation_bindings.as_ref(),
+                                        facts: class_facts.as_ref(),
                                     },
                                     control,
                                 )?;
@@ -599,7 +627,7 @@ impl<'a> Engine<'a> {
                         if matches!(
                             error.kind(),
                             FailureKind::Cancelled
-                                | FailureKind::BudgetExceeded
+                                | FailureKind::ResourceExhausted
                                 | FailureKind::InternalInvariant
                         ) {
                             return Err(error);
@@ -655,7 +683,7 @@ impl<'a> Engine<'a> {
                     if matches!(
                         error.kind(),
                         FailureKind::Cancelled
-                            | FailureKind::BudgetExceeded
+                            | FailureKind::ResourceExhausted
                             | FailureKind::InternalInvariant
                     ) =>
                 {
@@ -701,7 +729,6 @@ impl<'a> Engine<'a> {
             class,
             nested: Vec::new(),
             diagnostics: diagnostics.values,
-            stats: control.usage(),
             image: ImageFact {
                 dex: request.class.dex,
                 origin: image.image.origin,
@@ -720,19 +747,18 @@ impl<'a> Engine<'a> {
         control: &mut RunContext<'_>,
     ) -> Result<MethodOutput, RequestError> {
         if let Some(declaration) = emission.generated(key.method, control)? {
-            let mut budget = control.method_budget()?;
-            let input = index.method_input(key.class.class_def, key.method, &mut budget)?;
+            let budget = &mut *control;
+            let input = match inputs.facts {
+                Some(facts) => index.method_source(facts, key.method, budget)?,
+                None => index.method_source_at(key.class.class_def, key.method, budget)?,
+            };
             let facts = MethodFacts {
                 key,
-                name: copy_units(input.declaration().name, &mut budget)?,
-                prototype: copy_proto(&input.declaration().prototype, &mut budget)?,
+                name: copy_units(input.declaration().name, budget)?,
+                prototype: copy_proto(&input.declaration().prototype, budget)?,
                 access_flags: input.access_flags(),
             };
-            let original = index.debug_method(
-                key.class.class_def,
-                key.method,
-                &mut budget.into_fallback()?,
-            )?;
+            let original = index.debug_method(key.class.class_def, key.method, budget)?;
             Ok(MethodOutput::Generated {
                 facts,
                 declaration,
@@ -752,100 +778,75 @@ impl<'a> Engine<'a> {
         inputs: MemberInputs<'_>,
         control: &mut RunContext<'_>,
     ) -> Result<MethodOutput, RequestError> {
-        let candidate = match control.method_budget() {
-            Err(error) => Err(error),
-            Ok(mut budget) => {
-                let normal = normal_member(
-                    index,
-                    key,
-                    &self.catalog,
-                    self.representation,
-                    emission,
-                    inputs,
-                    &mut budget,
-                );
-                let (facts, cause) = match normal {
-                    Ok(NormalMember::Java {
-                        facts,
-                        declaration,
-                        source,
-                    }) => {
-                        for &uncertainty in declaration.uncertainties() {
-                            add_diagnostic(
-                                diagnostics,
-                                Diagnostic {
-                                    method: Some(key),
-                                    cause: DiagnosticCause::Unsupported(uncertainty),
-                                },
-                                &mut budget,
-                            )?;
-                        }
-                        return Ok(match crate::JavaInitializer::seal(declaration) {
-                            crate::p7_java::initializers::JavaMember::Initializer(declaration) => {
-                                MethodOutput::JavaInitializer {
-                                    facts,
-                                    declaration,
-                                    source,
-                                }
+        let candidate = {
+            let budget = &mut *control;
+            let normal = normal_member(
+                index,
+                key,
+                &self.catalog,
+                self.representation,
+                emission,
+                inputs,
+                budget,
+            );
+            let (facts, cause) = match normal {
+                Ok(NormalMember::Java {
+                    facts,
+                    declaration,
+                    source,
+                }) => {
+                    for &uncertainty in declaration.uncertainties() {
+                        add_diagnostic(
+                            diagnostics,
+                            Diagnostic {
+                                method: Some(key),
+                                cause: DiagnosticCause::Unsupported(uncertainty),
+                            },
+                            budget,
+                        )?;
+                    }
+                    return Ok(match crate::JavaInitializer::seal(declaration) {
+                        crate::p7_java::initializers::JavaMember::Initializer(declaration) => {
+                            MethodOutput::JavaInitializer {
+                                facts,
+                                declaration,
+                                source,
                             }
-                            crate::p7_java::initializers::JavaMember::Method(declaration) => {
-                                MethodOutput::Java {
-                                    facts,
-                                    declaration,
-                                    source,
-                                }
-                            }
-                        });
-                    }
-                    Ok(NormalMember::Declaration { facts, declaration }) => {
-                        return Ok(MethodOutput::DeclarationOnly { facts, declaration });
-                    }
-                    Ok(NormalMember::Raw { facts, reason }) => {
-                        (Some(facts), DiagnosticCause::Unsupported(reason))
-                    }
-                    Err(error) => {
-                        if error.kind() == FailureKind::Cancelled {
-                            return Err(error);
                         }
-                        (None, DiagnosticCause::Request(error))
-                    }
-                };
-                match self.options.recovery {
-                    RecoveryPolicy::Disabled => {}
+                        crate::p7_java::initializers::JavaMember::Method(declaration) => {
+                            MethodOutput::Java {
+                                facts,
+                                declaration,
+                                source,
+                            }
+                        }
+                    });
                 }
-                let mut fallback = budget.into_fallback()?;
-                let source =
-                    match index.debug_method(key.class.class_def, key.method, &mut fallback) {
-                        Err(error) if error.kind() == FailureKind::Cancelled => {
-                            return Err(error.into());
-                        }
-                        other => other,
-                    };
-                Ok((facts, cause, source))
+                Ok(NormalMember::Declaration { facts, declaration }) => {
+                    return Ok(MethodOutput::DeclarationOnly { facts, declaration });
+                }
+                Ok(NormalMember::Raw { facts, reason }) => {
+                    (Some(facts), DiagnosticCause::Unsupported(reason))
+                }
+                Err(error) => {
+                    if error.kind() == FailureKind::Cancelled {
+                        return Err(error);
+                    }
+                    (None, DiagnosticCause::Request(error))
+                }
+            };
+            match self.options.recovery {
+                RecoveryPolicy::Disabled => {}
             }
-        };
-        let (facts, cause, source) = match candidate {
-            Ok(candidate) => candidate,
-            Err(error) => {
-                if error.kind() == FailureKind::Cancelled {
+            let source = match index.debug_method(key.class.class_def, key.method, budget) {
+                Err(error) if error.kind() == FailureKind::Cancelled => {
                     return Err(error.into());
                 }
-                let reason = add_diagnostic(
-                    diagnostics,
-                    Diagnostic {
-                        method: Some(key),
-                        cause: DiagnosticCause::Request(error.into()),
-                    },
-                    control,
-                )?;
-                return Ok(MethodOutput::Unavailable {
-                    facts: None,
-                    key,
-                    reason,
-                    excerpt: None,
-                });
-            }
+                other => other,
+            };
+            (facts, cause, source)
         };
+        let (facts, cause, source) = candidate;
         let normal_kind = cause.kind();
         let mut reason = add_diagnostic(
             diagnostics,
@@ -970,6 +971,9 @@ enum NormalMember {
 struct MemberInputs<'a> {
     nested: bool,
     annotations: Option<&'a crate::p4_types::declarations::annotations::Bindings>,
+    /// The class-fact product this request owns. Its method entries bind the
+    /// reader to the original directory instead of a second class-data walk.
+    facts: Option<&'a crate::p0::ClassFacts>,
 }
 fn normal_member(
     index: &ProgramIndex<'_>,
@@ -978,9 +982,12 @@ fn normal_member(
     representation: RepresentationPolicy,
     _emission: &crate::p7_java::member_emission::Plan,
     inputs: MemberInputs<'_>,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<NormalMember, RequestError> {
-    let input = index.method_input(key.class.class_def, key.method, budget)?;
+    let input = match inputs.facts {
+        Some(facts) => index.method_source(facts, key.method, budget)?,
+        None => index.method_source_at(key.class.class_def, key.method, budget)?,
+    };
     let facts = MethodFacts {
         key,
         name: copy_units(input.declaration().name, budget)?,
@@ -1070,7 +1077,7 @@ fn class_fields(
             if matches!(
                 error.kind(),
                 FailureKind::Cancelled
-                    | FailureKind::BudgetExceeded
+                    | FailureKind::ResourceExhausted
                     | FailureKind::InternalInvariant
             ) =>
         {
@@ -1151,7 +1158,7 @@ fn class_fields(
                         if matches!(
                             error.kind(),
                             FailureKind::Cancelled
-                                | FailureKind::BudgetExceeded
+                                | FailureKind::ResourceExhausted
                                 | FailureKind::InternalInvariant
                         ) =>
                     {
@@ -1255,7 +1262,7 @@ fn cause_error(cause: DiagnosticCause) -> RequestError {
 fn severity(kind: FailureKind) -> u8 {
     match kind {
         FailureKind::Unsupported => 0,
-        FailureKind::BudgetExceeded => 1,
+        FailureKind::ResourceExhausted => 1,
         FailureKind::Malformed => 2,
         FailureKind::InternalInvariant => 3,
         FailureKind::Cancelled => 4,
@@ -1270,7 +1277,7 @@ fn same_bytes(left: &[u8], right: &[u8], control: &mut RunContext<'_>) -> Result
         return Ok(false);
     }
     for (a, b) in left.chunks(65536).zip(right.chunks(65536)) {
-        control.charge_work(1)?;
+        control.checkpoint()?;
         if a != b {
             return Ok(false);
         }

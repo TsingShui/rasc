@@ -50,8 +50,8 @@ pub fn roots(lease: &InputLease) -> Result<Vec<DexRoot<'_>>, InputError> {
                 if !is_root_name(entry.name()) {
                     continue;
                 }
-                let payload = read_entry(lease.bytes(), entry, lease.limits())
-                    .map_err(InputError::MalformedArchive)?;
+                let payload =
+                    read_entry(lease.bytes(), entry).map_err(InputError::MalformedArchive)?;
                 roots.try_reserve(1).map_err(InputError::Allocation)?;
                 roots.push(DexRoot {
                     label: entry.name().to_owned(),

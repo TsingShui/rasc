@@ -2,7 +2,7 @@ use super::normal::{CallId, CallSite, CallTarget, InvokeKind, InvokeResult, Op, 
 use crate::input::ProgramIndex;
 use crate::raw::{InsnLayout, OpcodeSpec, OperandReference, RawLiteral, RawOperands};
 use crate::substrate::owned::push;
-use crate::{CodeUnitOffset, MethodBudget, RequestError};
+use crate::{CodeUnitOffset, RequestError, RunContext};
 
 pub(super) fn local(spec: OpcodeSpec, operands: RawOperands) -> Result<Option<Op>, RequestError> {
     let reg = |at| {
@@ -50,7 +50,7 @@ pub(super) fn call(
     reference: crate::MethodId,
     result: InvokeResult,
     operands: RawOperands,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<CallSite, RequestError> {
     let method = index.method_reference(reference, budget)?;
     let mut widths = Vec::new();
@@ -74,13 +74,13 @@ pub(super) fn call(
         })?;
     let mut registers = Vec::new();
     for register in operands.registers().iter() {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         push(&mut registers, register, budget)?;
     }
     let mut arguments = Vec::new();
     let mut word = 0usize;
     for width in &widths {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         let low = *registers.get(word).ok_or(RequestError::InternalInvariant(
             "invoke lost argument words",
         ))?;
@@ -135,7 +135,7 @@ pub(super) fn initialization(
     layout: InsnLayout,
     operands: RawOperands,
     calls: &mut Vec<CallSite>,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<Option<Op>, RequestError> {
     if !matches!(spec.opcode, 0x70 | 0x76) {
         return Ok(None);

@@ -1,6 +1,6 @@
 use super::{Copy, CopyPlan, LocalId, LocalType, LocalTypeId, Width};
-use crate::MethodBudget;
 use crate::RequestError;
+use crate::RunContext;
 use crate::p2_flow::{BlockId, EdgeId};
 use crate::p3_ssa::{Definition, Sym};
 use crate::p4_types::Kind;
@@ -45,11 +45,11 @@ pub(crate) fn local_type(kind: Kind) -> Result<LocalType, RequestError> {
 fn kind(
     local_type_value: LocalType,
     locals: &[Local],
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<Kind, RequestError> {
     if local_type_value.identity.0 >= 16 {
         for local in locals {
-            budget.charge_work(1)?;
+            budget.checkpoint()?;
             if local_type(local.kind)? == local_type_value {
                 return Ok(local.kind);
             }
@@ -152,17 +152,17 @@ fn parallel(
     typed: &TypedBody<'_>,
     incoming: Option<EdgeId>,
     target: BlockId,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<Vec<Copy>, RequestError> {
     let mut copies = Vec::new();
     for phi in &typed.ssa.phis {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         if phi.block != target {
             continue;
         }
         let mut selected = None;
         for &(edge, value) in &phi.inputs {
-            budget.charge_work(1)?;
+            budget.checkpoint()?;
             if edge
                 == incoming.map_or(
                     crate::p3_ssa::Incoming::EntrySeed,
@@ -220,7 +220,7 @@ fn plan_edge(
     incoming: Option<EdgeId>,
     target: BlockId,
     locals: &mut Vec<Local>,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<CopyPlan, RequestError> {
     let copies = parallel(typed, incoming, target, budget)?;
     if copies.is_empty() {
@@ -232,12 +232,12 @@ fn plan_edge(
     }
     let mut types = Vec::new();
     for local in locals.iter() {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         push(&mut types, local_type(local.kind)?, budget)?;
     }
     let plan = super::plan(&copies, &types, budget)?;
     for temporary in &plan.temporaries {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         if usize::try_from(temporary.local.0).map_err(|_| RequestError::PlatformCapacity)?
             != locals.len()
         {
@@ -261,18 +261,18 @@ fn plan_edge(
 pub(crate) fn allocate<'a>(
     _schedule: &crate::engine::SchedulePermit,
     typed: TypedBody<'a>,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<crate::substrate::outcome::Outcome<StorageBody<'a>>, RequestError> {
     allocate_impl(typed, budget)
 }
 
 fn allocate_impl<'a>(
     typed: TypedBody<'a>,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<crate::substrate::outcome::Outcome<StorageBody<'a>>, RequestError> {
     let mut locals = Vec::new();
     for (index, definition) in typed.ssa.values.iter().enumerate() {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         let Some(kind) = typed.kinds[index] else {
             return Ok(crate::substrate::outcome::Outcome::Declined(
                 crate::OutputReason::JavaCheckFailed {
@@ -325,13 +325,13 @@ fn allocate_impl<'a>(
     let constructor_entry = super::constructor_entry::prove(&typed, budget)?;
     let mut object_allocations = Vec::new();
     for plan in &typed.initializations.plans {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         let proof = super::object_allocation::prove(&typed, plan, budget)?;
         push(&mut object_allocations, proof, budget)?;
     }
     let mut fresh_fills = Vec::new();
     for op in &typed.ssa.operations {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         let crate::p2_flow::Op::FreshFill(_, id) = op.op else {
             continue;
         };
@@ -346,7 +346,7 @@ fn allocate_impl<'a>(
     let mut filled_targets = Vec::new();
     if !typed.filled_arrays.is_empty() {
         for op in &typed.ssa.operations {
-            budget.charge_work(1)?;
+            budget.checkpoint()?;
             let crate::p2_flow::Op::FilledArray(id, result) = op.op else {
                 continue;
             };
@@ -400,7 +400,7 @@ fn allocate_impl<'a>(
     }
     let mut empty_fills = Vec::new();
     for op in &typed.ssa.operations {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         let crate::p2_flow::Op::EmptyFill(_, id) = op.op else {
             continue;
         };
@@ -426,7 +426,7 @@ fn allocate_impl<'a>(
     let entry = plan_edge(&typed, None, BlockId(0), &mut locals, budget)?;
     let mut normal = Vec::new();
     for (index, edge) in typed.ssa.edges.iter().enumerate() {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         let id = EdgeId(u32::try_from(index).map_err(|_| RequestError::PlatformCapacity)?);
         let plan = plan_edge(&typed, Some(id), edge.target, &mut locals, budget)?;
         push(&mut normal, plan, budget)?;

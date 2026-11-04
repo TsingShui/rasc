@@ -3,7 +3,7 @@ use crate::p2_flow::{Op, OpId};
 use crate::p3_ssa::BoundOp;
 use crate::p4_types::{Kind, TypedBody};
 use crate::p5_variables::StorageBody;
-use crate::{CodeUnitOffset, MethodBudget, RequestError};
+use crate::{CodeUnitOffset, RequestError, RunContext};
 
 pub(crate) enum Contents {
     Length(ValueUse),
@@ -29,12 +29,12 @@ fn ix(value: u32) -> Result<usize, RequestError> {
 fn spelling<'a>(
     component: crate::p2_flow::ArrayKind,
     names: &'a super::types::TypeNames,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<(&'a str, u32), RequestError> {
     let mut base = names.name(component.kind(), budget)?;
     let mut dimensions = 0u32;
     while let Some(shorter) = base.strip_suffix("[]") {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         base = shorter;
         dimensions = dimensions
             .checked_add(1)
@@ -48,10 +48,10 @@ fn spelling<'a>(
     Ok((base, trailing))
 }
 pub(super) fn validate(
-    input: &crate::input::MethodInput<'_, '_>,
+    input: &crate::input::MethodSource<'_, '_>,
     _catalog: &crate::context::Context,
     typed: &TypedBody<'_>,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<bool, RequestError> {
     let mut checked_java = false;
     let sites = typed
@@ -67,7 +67,7 @@ pub(super) fn validate(
                 .map(|site| (site.reference, site.component)),
         );
     for (reference, component) in sites {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         if matches!(
             component,
             crate::p2_flow::ArrayKind::Object | crate::p2_flow::ArrayKind::Reference(_)
@@ -90,7 +90,7 @@ pub(super) fn allocate(
     storage: &StorageBody<'_>,
     op: &BoundOp,
     names: &super::types::TypeNames,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<Allocation, RequestError> {
     let typed = &storage.typed;
     let (result, reference, component, contents) =
@@ -139,7 +139,7 @@ pub(super) fn allocate(
                 )?;
                 let mut values = Vec::new();
                 for argument in &usage.arguments {
-                    budget.charge_work(1)?;
+                    budget.checkpoint()?;
                     crate::substrate::owned::push(
                         &mut values,
                         super::values::lower(LocalId(argument.value.0), argument.conversion),
@@ -174,7 +174,7 @@ pub(super) fn allocate(
 pub(super) fn fill(
     storage: &StorageBody<'_>,
     op: &BoundOp,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<Fill, RequestError> {
     let Op::FreshFill(_, id) = op.op else {
         return Err(RequestError::InternalInvariant(
@@ -189,7 +189,7 @@ pub(super) fn fill(
         ))?;
     let mut elements = Vec::new();
     for value in &proof.elements {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         let element = value
             .kind()
             .element(value.bits())
@@ -210,14 +210,14 @@ pub(super) fn fill(
     })
 }
 pub(super) fn verify_allocation(
-    input: &crate::input::MethodInput<'_, '_>,
+    input: &crate::input::MethodSource<'_, '_>,
     storage: &StorageBody<'_>,
     op: &BoundOp,
     actual: &Allocation,
     names: &super::types::TypeNames,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<bool, RequestError> {
-    budget.charge_work(1)?;
+    budget.checkpoint()?;
     let typed = &storage.typed;
     let (base, dimensions) = spelling(actual.component, names, budget)?;
     if actual.base_type != base || actual.trailing_dimensions != dimensions {
@@ -297,7 +297,7 @@ pub(super) fn verify_allocation(
             }
             let mut words = operands.registers().iter();
             for &register in &site.registers {
-                budget.charge_work(1)?;
+                budget.checkpoint()?;
                 if words.next() != Some(register) {
                     return Ok(false);
                 }
@@ -337,7 +337,7 @@ pub(super) fn verify_allocation(
             }
             let component = site.component.element_type(input, budget)?;
             for (&source, &view) in op.inputs.iter().zip(values) {
-                budget.charge_work(1)?;
+                budget.checkpoint()?;
                 let valid = if component.field_offset() == 2 {
                     super::values::verify_reference_store(typed, view, source, component, budget)?
                 } else {
@@ -356,7 +356,7 @@ pub(super) fn verify_fill(
     storage: &StorageBody<'_>,
     op: &BoundOp,
     actual: &Fill,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<bool, RequestError> {
     let Op::FreshFill(_, id) = op.op else {
         return Ok(false);
@@ -384,7 +384,7 @@ pub(super) fn verify_fill(
         crate::input::operands::array_payload(raw.instructions(), proof.payload, layout)
             .map_err(crate::input::MethodError::Decode)?;
     for (value, expected) in actual.elements.iter().zip(&proof.elements) {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         let Some(original) = payload.next() else {
             return Ok(false);
         };

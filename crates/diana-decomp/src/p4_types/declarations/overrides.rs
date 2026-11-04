@@ -1,7 +1,7 @@
 use crate::context::Context;
-use crate::input::MethodInput;
+use crate::input::MethodSource;
 use crate::substrate::owned::{copy_proto, copy_units};
-use crate::{MethodBudget, MethodId, RequestError};
+use crate::{MethodId, RequestError, RunContext};
 
 pub(crate) struct CovariantOverride {
     target: MethodId,
@@ -22,19 +22,19 @@ impl CovariantOverride {
 
 pub(crate) fn collect(
     _permit: &crate::engine::SchedulePermit,
-    input: &MethodInput<'_, '_>,
+    input: &MethodSource<'_, '_>,
     target: MethodId,
     catalog: &Context,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<Option<CovariantOverride>, RequestError> {
     collect_impl(input, target, catalog, budget)
 }
 
 fn collect_impl(
-    input: &MethodInput<'_, '_>,
+    input: &MethodSource<'_, '_>,
     target: MethodId,
     catalog: &Context,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<Option<CovariantOverride>, RequestError> {
     let original = input.method_reference(target, budget)?;
     let name = copy_units(original.declaration.name, budget)?;
@@ -64,11 +64,12 @@ fn collect_impl(
             budget,
             crate::input::catalog::MemberSelection::AllHeaders,
             |entry, control| -> Result<(), RequestError> {
-                control.charge_work(1)?;
+                control.checkpoint()?;
                 if let crate::input::catalog::MemberEntry::MethodHeader {
                     method_idx,
                     access_flags,
                     declaration,
+                    ..
                 } = entry
                     && method_idx == target
                 {
@@ -100,7 +101,7 @@ fn collect_impl(
     }
     let mut selected = 0usize;
     for method in &class.methods {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         if method.name == name && method.prototype == prototype {
             if method.access_flags != crate::substrate::flags::PUBLIC
                 || method.generic
@@ -121,12 +122,12 @@ fn collect_impl(
             return Ok(None);
         }
         for interface in &class.interfaces {
-            budget.charge_work(1)?;
+            budget.checkpoint()?;
             let Some(interface) = catalog.class(interface, budget)? else {
                 return Ok(None);
             };
             for method in &interface.methods {
-                budget.charge_work(1)?;
+                budget.checkpoint()?;
                 if method.name == name
                     && method.prototype == bridge
                     && method.signature.as_deref()
@@ -153,7 +154,7 @@ fn collect_impl(
     };
     let mut inherited = false;
     for ancestor in hierarchy.declarations() {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         if ancestor.generic
             || ancestor.enclosing_scope
             || !matches!(
@@ -164,7 +165,7 @@ fn collect_impl(
             return Ok(None);
         }
         for method in &ancestor.methods {
-            budget.charge_work(1)?;
+            budget.checkpoint()?;
             if method.name == name && method.prototype == bridge {
                 if method.access_flags
                     & (1 | crate::substrate::flags::STATIC | crate::substrate::flags::FINAL)

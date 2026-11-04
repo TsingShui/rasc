@@ -21,7 +21,7 @@ pub(super) fn note(
     uncertainties: &mut Vec<crate::OutputReason>,
     check: &'static str,
     pc: Option<crate::CodeUnitOffset>,
-    budget: &mut crate::MethodBudget<'_, '_>,
+    budget: &mut crate::RunContext<'_>,
 ) -> Result<(), RequestError> {
     let reason = crate::OutputReason::JavaCheckFailed {
         code: crate::DiagnosticCode::JavaAnalysisUnavailable,
@@ -30,7 +30,7 @@ pub(super) fn note(
         pc,
     };
     for existing in uncertainties.iter() {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         if *existing == reason {
             return Ok(());
         }

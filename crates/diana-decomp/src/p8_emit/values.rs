@@ -3,12 +3,12 @@ use super::debug::{DebugIssue, IssueLog, local_input, missing, write_reference};
 use super::json::JsonBuffer;
 use crate::input::values::{EncodedKind, EncodedValue, EncodedValues, ValueStep};
 use crate::input::{MethodError, ProgramIndex};
-use crate::{ByteOffset, FallbackBudget};
+use crate::{ByteOffset, RunContext};
 
 pub(super) fn note(
     error: MethodError,
     issues: &mut IssueLog,
-    budget: &mut FallbackBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<(), DebugError> {
     match error {
         MethodError::Input(error) => {
@@ -24,7 +24,7 @@ pub(super) fn write_values(
     offset: ByteOffset,
     static_fields: Option<u32>,
     issues: &mut IssueLog,
-    budget: &mut FallbackBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<(), DebugError> {
     output.push(",\"static_values\":{\"file_byte_start\":", budget)?;
     output.unsigned(
@@ -63,7 +63,7 @@ pub(super) fn write_entries(
     output: &mut JsonBuffer,
     values: &mut EncodedValues<'_>,
     issues: &mut IssueLog,
-    budget: &mut FallbackBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<(bool, ByteOffset), DebugError> {
     output.push(",\"entries\":[", budget)?;
     let mut open = 0usize;
@@ -111,7 +111,7 @@ fn write_value(
     index: &ProgramIndex<'_>,
     output: &mut JsonBuffer,
     value: EncodedValue<'_>,
-    budget: &mut FallbackBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<bool, DebugError> {
     output.push("{\"tag\":", budget)?;
     output.unsigned(u64::from(value.tag), budget)?;
@@ -130,7 +130,7 @@ fn write_value(
     }
     output.push(",\"bytes\":[", budget)?;
     for (position, byte) in value.bytes.iter().enumerate() {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         if position > 0 {
             output.push(",", budget)?;
         }

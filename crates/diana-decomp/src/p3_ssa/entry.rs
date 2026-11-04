@@ -2,7 +2,7 @@ use super::normal::{self, BoundOp, Definition, SsaBody, Sym, ValueId};
 use crate::p2_flow::entry::{EntryWindow, ParameterFamily};
 use crate::p2_flow::{Op, OpId, ValueWidth, destination};
 use crate::substrate::owned::push;
-use crate::{MethodBudget, RegisterId, RequestError};
+use crate::{RegisterId, RequestError, RunContext};
 
 crate::substrate::checked::checked_product!(EntrySsa, EntrySsaData);
 pub(crate) struct EntrySsaData<'a> {
@@ -90,14 +90,14 @@ fn broken() -> RequestError {
 pub(crate) fn build<'a>(
     _schedule: &crate::engine::SchedulePermit,
     flow: EntryWindow<'a>,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<EntrySsa<'a>, RequestError> {
     build_impl(flow, budget)
 }
 
 fn build_impl<'a>(
     flow: EntryWindow<'a>,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<EntrySsa<'a>, RequestError> {
     let normal::EntrySeeds {
         mut values,
@@ -110,7 +110,7 @@ fn build_impl<'a>(
     )?;
     let mut operations = Vec::new();
     for &op in &flow.operations {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         let inputs = normal::bind_inputs(op, &flow.calls, &[], &env, budget)?;
         let result = normal::define_result(op, &flow.calls, &mut env, &mut values, budget)?;
         push(
@@ -157,12 +157,12 @@ fn literal64(value: Option<crate::raw::RawLiteral>) -> Option<i64> {
 }
 pub(crate) fn verify(
     entry: &EntrySsa<'_>,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<(), RequestError> {
     let raw = &entry.flow.raw;
     let mut widths = Vec::new();
     for definition in &entry.values {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         let width = match *definition {
             Definition::Parameter(i) => entry
                 .flow
@@ -184,7 +184,7 @@ pub(crate) fn verify(
     let mut env = Vec::new();
     let mut register = RegisterId(u32::from(raw.registers_size() - raw.ins_size()));
     for (i, parameter) in entry.flow.parameters.iter().enumerate() {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         let value = ValueId(u32::try_from(i).map_err(|_| RequestError::PlatformCapacity)?);
         if entry.values.get(i) != Some(&Definition::Parameter(value.0)) {
             return Err(broken());
@@ -200,7 +200,7 @@ pub(crate) fn verify(
     let mut pc = crate::CodeUnitOffset(0);
     let mut next_value = entry.flow.parameters.len();
     for (at, op) in entry.operations.iter().enumerate() {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         if ix(op.id.0)? != at || op.pc != pc {
             return Err(broken());
         }
@@ -254,7 +254,7 @@ pub(crate) fn verify(
                 }
                 normal::verify_call_words(site, operands, budget)?;
                 for expected in &site.registers {
-                    budget.charge_work(1)?;
+                    budget.checkpoint()?;
                     if registers.next() != Some(*expected) {
                         return Err(broken());
                     }
@@ -268,7 +268,7 @@ pub(crate) fn verify(
         }
         let mut inputs = op.op.reads(&entry.flow.calls, &[])?;
         for (index, actual) in op.inputs.iter().enumerate() {
-            budget.charge_work(1)?;
+            budget.checkpoint()?;
             let source = inputs.next().ok_or_else(broken)?;
             let width = op.op.read_width(index, &entry.flow.calls)?;
             if facts.read(&env, source, width, pc, budget)? != *actual {

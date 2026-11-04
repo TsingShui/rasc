@@ -63,22 +63,25 @@ Before changing an engine capability, contributors MUST read
 and existing independent evidence before implementation. Before
 implementation, contributors MUST also identify the consumed facts, their full or
 partial guarantees, and the classified failure/resource/cancellation behavior.
-When an implementation would contradict those contracts, contributors MUST stop the
-affected change and request a decision rather than weaken the design or add a
-bypass.
+For the pipeline refactoring, contributors follow the root
+[refactoring authority](../../AGENTS.md#pipeline-refactoring-authority). Technical
+details within the approved target have default approval; the listed prohibited
+changes do not. Stop and report concrete conflicts without weakening the design
+or adding a bypass.
 
-- Contributors MUST extend the shared ordinary-method chain: P2 CFG/effects →
+- Contributors MUST keep one shared ordinary-method chain: P2 CFG/effects →
   P3 SSA → P4 declaration constraints/evidence → P4 types/use conversions →
-  P5 storage/copies → P6 regions → P7 Java recovery. P8 MUST render existing
-  products and original facts without further analysis.
+  P5 storage/copies → P6 regions → P7 method expression. Under the approved
+  target, P8 assembles the class and plans names; P9 renders existing products
+  and original facts without further analysis.
 - Contributors MUST follow the stage-authority rules in [phases](phases.md)
   when exposing stage entries, implementation modules and product views. A
   read-only product or a passing behavior test does not establish phase ownership.
-- Before widening a phase's input access, module exports or product-construction
-  authority, contributors MUST obtain operator approval. The same approval is
-  required before adding an analysis-construction entry callable from outside its
-  owning phase or changing the phase-ownership or scheduling contract. Contributors MUST present
-  the producer/consumer need and the proposed interface change before editing it.
+- Contributors MUST document actual producer/consumer needs before implementing
+  the approved product interfaces. Root refactoring authority permits technical
+  detail decisions, not wider stage access, exports or product-construction
+  authority. Contributors MUST NOT change ownership or scheduling beyond that
+  target or treat default approval as permission for its prohibited changes.
 - Contributors MUST NOT work around a missing producer or an access restriction
   by widening visibility, forwarding internal implementations through another
   module, adding an alternate analysis route or weakening a sealed product.
@@ -98,12 +101,13 @@ bypass.
   shared products; the classified read-only raw exit MUST NOT retry analysis or
   reconstruct values.
 - Contributors MUST keep P4 constraints/binding obligations distinct from P4
-  typed uses and final P7 source binding. P6 MUST read P5 storage before Java
-  lowering, not derive its graph from a P7 AST. P8 MUST NOT select types, bindings
-  or recovery semantics.
-- Natural structure and dispatcher MUST consume the same checked operations,
-  storage and CopyPlans. Contributors MUST NOT give either representation a
-  separate capability implementation.
+  typed uses and P7 method-expression checks. P6 MUST read P5 storage before
+  lowering, not derive its graph from a P7 AST. Under the approved target, P8
+  plans display names without reselecting method types or recovery semantics;
+  P9 only renders existing products.
+- Natural regions and explicit Java-like graph transfers MUST consume the same
+  operations, storage and CopyPlans. Contributors MUST NOT add a generated
+  dispatcher or a separate method analysis for either representation.
 - Reviewers MUST reject parallel recovery implementations with their own
   complete-method decoding, SSA/type analysis or register/alias tracking.
   Operation-specific helpers and phase-owned proofs do not authorize another
@@ -182,10 +186,10 @@ unchanged artifacts; do not add whole-JDK, dependency-tree or cache scans.
   initialization order. Independent-result order, generated source or synthetic
   names are not stable; no output sorting/reordering buffer or pagination.
 - Keep cancellation, backpressure, checked ranges and allocation failure handling.
-  Resource quotas are opt-in and default to no numeric caps. Do not introduce
-  unmeasured default budgets or speculative JVM-size rejection formulas. Enforce
-  explicitly configured quotas without silent successful truncation; real format
-  limits still apply.
+  The engine keeps no work or allocation ledger and no caller-configured numeric
+  quota. Use try_reserve and report an actual allocation failure explicitly; do
+  not introduce speculative JVM-size rejection formulas. Real format limits, input
+  admission and bounded queues still apply.
 - Source semantics beat beauty; Java-unrepresentable methods retain their reason
   and available original DEX facts/debug information, or an explicit Unavailable
   with a safe excerpt. No standard-Smali/reassembly guarantee or fake successful

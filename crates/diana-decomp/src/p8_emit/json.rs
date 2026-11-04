@@ -1,6 +1,6 @@
 use super::{DebugError, kind_name};
 use crate::input::{DexString, Prototype};
-use crate::{FailureKind, FallbackBudget};
+use crate::{FailureKind, RunContext};
 use serde::Serialize;
 use std::io::Cursor as OutputCursor;
 
@@ -8,7 +8,7 @@ pub(super) fn capacity_plan(
     current: usize,
     needed: usize,
     size: usize,
-) -> Result<(usize, u64), DebugError> {
+) -> Result<usize, DebugError> {
     if size == 0 {
         return Err(DebugError::InternalInvariant(
             "debug buffer has zero-sized elements",
@@ -22,13 +22,7 @@ pub(super) fn capacity_plan(
         Some(capacity) if capacity <= maximum => capacity.max(needed),
         _ => needed,
     };
-    let bytes = (capacity - current)
-        .checked_mul(size)
-        .ok_or(DebugError::PlatformCapacity)?;
-    Ok((
-        capacity,
-        u64::try_from(bytes).map_err(|_| DebugError::PlatformCapacity)?,
-    ))
+    Ok(capacity)
 }
 
 pub(super) struct JsonBuffer {
@@ -45,19 +39,18 @@ impl JsonBuffer {
     pub(super) fn push(
         &mut self,
         mut text: &str,
-        budget: &mut FallbackBudget<'_, '_>,
+        budget: &mut RunContext<'_>,
     ) -> Result<(), DebugError> {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         let needed = self
             .text
             .len()
             .checked_add(text.len())
             .ok_or(DebugError::PlatformCapacity)?;
-        budget
-            .charge_output(u64::try_from(text.len()).map_err(|_| DebugError::PlatformCapacity)?)?;
+        budget.checkpoint()?;
         if needed > self.text.capacity() {
-            let (capacity, bytes) = capacity_plan(self.text.capacity(), needed, 1)?;
-            budget.charge_allocation(bytes)?;
+            let capacity = capacity_plan(self.text.capacity(), needed, 1)?;
+            budget.checkpoint()?;
             self.text
                 .try_reserve_exact(capacity - self.text.len())
                 .map_err(DebugError::Allocation)?;
@@ -69,7 +62,7 @@ impl JsonBuffer {
             budget.checkpoint()?;
         }
         while !text.is_empty() {
-            budget.charge_work(1)?;
+            budget.checkpoint()?;
             let mut end = text.len().min(65536);
             while !text.is_char_boundary(end) {
                 end -= 1;
@@ -83,9 +76,9 @@ impl JsonBuffer {
     fn scalar(
         &mut self,
         value: &impl Serialize,
-        budget: &mut FallbackBudget<'_, '_>,
+        budget: &mut RunContext<'_>,
     ) -> Result<(), DebugError> {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         // Only integers, booleans and individual chars call this helper. A JSON
         // scalar is at most 20 decimal digits or one 6-byte escape plus quotes.
         let mut bytes = [0; 32];
@@ -105,14 +98,14 @@ impl JsonBuffer {
     pub(super) fn unsigned(
         &mut self,
         value: u64,
-        budget: &mut FallbackBudget<'_, '_>,
+        budget: &mut RunContext<'_>,
     ) -> Result<(), DebugError> {
         self.scalar(&value, budget)
     }
     pub(super) fn signed(
         &mut self,
         value: i64,
-        budget: &mut FallbackBudget<'_, '_>,
+        budget: &mut RunContext<'_>,
     ) -> Result<(), DebugError> {
         self.scalar(&value, budget)
     }
@@ -120,7 +113,7 @@ impl JsonBuffer {
     pub(super) fn boolean(
         &mut self,
         value: bool,
-        budget: &mut FallbackBudget<'_, '_>,
+        budget: &mut RunContext<'_>,
     ) -> Result<(), DebugError> {
         self.scalar(&value, budget)
     }
@@ -128,9 +121,9 @@ impl JsonBuffer {
     pub(super) fn character(
         &mut self,
         character: char,
-        budget: &mut FallbackBudget<'_, '_>,
+        budget: &mut RunContext<'_>,
     ) -> Result<(), DebugError> {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         let mut bytes = [0; 8];
         let mut cursor = OutputCursor::new(bytes.as_mut_slice());
         serde_json::to_writer(&mut cursor, &character).map_err(|_| {
@@ -148,7 +141,7 @@ impl JsonBuffer {
     pub(super) fn text(
         &mut self,
         text: &'static str,
-        budget: &mut FallbackBudget<'_, '_>,
+        budget: &mut RunContext<'_>,
     ) -> Result<(), DebugError> {
         self.push("\"", budget)?;
         for character in text.chars() {
@@ -160,7 +153,7 @@ impl JsonBuffer {
     fn string_content(
         &mut self,
         value: DexString<'_>,
-        budget: &mut FallbackBudget<'_, '_>,
+        budget: &mut RunContext<'_>,
     ) -> Result<(), DebugError> {
         let mut units = value.reader()?;
         while let Some(unit) = units.next(budget)? {
@@ -188,7 +181,7 @@ impl JsonBuffer {
     pub(super) fn string(
         &mut self,
         value: DexString<'_>,
-        budget: &mut FallbackBudget<'_, '_>,
+        budget: &mut RunContext<'_>,
     ) -> Result<(), DebugError> {
         self.push("\"", budget)?;
         self.string_content(value, budget)?;
@@ -198,7 +191,7 @@ impl JsonBuffer {
     pub(super) fn units(
         &mut self,
         value: DexString<'_>,
-        budget: &mut FallbackBudget<'_, '_>,
+        budget: &mut RunContext<'_>,
     ) -> Result<(), DebugError> {
         self.push("[", budget)?;
         let mut units = value.reader()?;
@@ -216,7 +209,7 @@ impl JsonBuffer {
     pub(super) fn prototype(
         &mut self,
         value: &Prototype<'_, '_>,
-        budget: &mut FallbackBudget<'_, '_>,
+        budget: &mut RunContext<'_>,
     ) -> Result<(), DebugError> {
         self.push("\"(", budget)?;
         value.visit_parameter_types(budget, |name, budget| self.string_content(name, budget))?;
@@ -228,7 +221,7 @@ impl JsonBuffer {
     pub(super) fn unavailable(
         &mut self,
         kind: FailureKind,
-        budget: &mut FallbackBudget<'_, '_>,
+        budget: &mut RunContext<'_>,
     ) -> Result<(), DebugError> {
         self.push("{\"unavailable\":", budget)?;
         self.text(kind_name(kind), budget)?;

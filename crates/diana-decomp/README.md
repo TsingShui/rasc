@@ -1,9 +1,9 @@
 # diana-decomp — native engine library
 
 This is Diana's internal Rust decompiler library, imported as `diana_decomp`.
-`RunContext` implements cumulative request work/allocation charging and latched
-cancellation. Method budgets isolate normal/raw work and reserve only explicitly
-finite fallback allowances. Resource errors expose typed failure kinds and codes.
+`RunContext` carries latched request cancellation. `ControlError` distinguishes
+cancellation from internal invariants; allocation failures stay explicit and
+classified without a cumulative work or allocation ledger.
 The public `input` module implements checked DEX 035 reads and borrowed class,
 method, MUTF-8 and code-range views. Method visits preserve original IDs and local
 declaration/code failures; complete prototype matching distinguishes overloads.
@@ -15,20 +15,18 @@ checks whole-method register/reference bounds, branch/payload/exception boundari
 035 invoke prototype word counts, wide argument adjacency, result kinds and
 reachable fallthrough. Its sealed `CheckedMethodLayout` keeps structural
 checks distinct from complete raw validation. `RawMethodView::visit_layouts`
-preserves readable prefixes under the independent fallback budget.
+preserves readable prefixes under the raw read exit.
 `RawMethodView::visit_instructions` exposes borrowed original operand/payload
-facts, including literal bits and ordered invoke words, through that same budget.
+facts, including literal bits and ordered invoke words.
 The validator shares its operand decoder. `ProgramIndex::debug_method` produces
 owned original-information JSON with resolved references, UTF16 units, handler
-order and explicit missing facts. Its reader and output use the same fallback
-ledger; known malformed input remains classified even if output later exhausts
-resources. Original debug programs retain parameter names, line/PC state, ordered
+order and explicit missing facts. Known malformed input remains classified even
+if rendering the original snapshot later fails. Original debug programs retain parameter names, line/PC state, ordered
 local-variable events and encoded bytes. Their reader checks instruction
 boundaries, reference indices and local lifetimes; a failure retains the decoded
 prefix with partial coverage. Static encoded values retain original tags, signed
 integers, float/double bits, references and nested array/annotation order. Their
-explicit stack uses checked counts and fallback accounting; malformed tails
-retain their checked prefix.
+explicit stack uses checked counts; malformed tails retain their checked prefix.
 Engine exposes class/method requests and owned reports through the public library.
 Ordinary code uses the shared CFG → SSA → declaration/type → storage → region →
 Java chain. Unit verification distinguishes complete Java from Mixed results;

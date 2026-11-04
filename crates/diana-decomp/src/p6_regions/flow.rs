@@ -1,7 +1,7 @@
 use crate::p2_flow::{BlockId, EdgeId, Terminal};
 use crate::p5_variables::StorageBody;
 use crate::substrate::owned::push;
-use crate::{MethodBudget, RequestError};
+use crate::{RequestError, RunContext};
 
 #[derive(Clone, Copy)]
 pub(super) struct Edge {
@@ -24,16 +24,16 @@ pub(super) struct Flow {
 impl Flow {
     pub(super) fn build(
         storage: &StorageBody<'_>,
-        budget: &mut MethodBudget<'_, '_>,
+        budget: &mut RunContext<'_>,
     ) -> Result<Self, RequestError> {
         let ssa = &storage.typed.ssa;
         let mut cases = Vec::new();
         for (index, block) in ssa.blocks.iter().enumerate() {
-            budget.charge_work(1)?;
+            budget.checkpoint()?;
             let key = BlockId(u32::try_from(index).map_err(|_| RequestError::PlatformCapacity)?);
             let mut outgoing = Vec::new();
             for (index, edge) in ssa.edges.iter().enumerate() {
-                budget.charge_work(1)?;
+                budget.checkpoint()?;
                 if edge.source == key {
                     push(
                         &mut outgoing,

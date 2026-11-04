@@ -96,7 +96,7 @@ impl<'a> DebugProgram<'a> {
         if count != prototype.shorty.utf16_len().0 - 1 {
             return Err(invalid(cursor.position_byte()).into());
         }
-        budget.charge_metadata(u64::from(count))?;
+        budget.checkpoint()?;
         let names_start = cursor.position_byte();
         for _ in 0..count {
             string_index(index, &mut cursor, budget)?;
@@ -106,11 +106,11 @@ impl<'a> DebugProgram<'a> {
             end: cursor.position_byte(),
         };
         let length = usize::from(code.registers_size());
-        let bytes = length
+        length
             .checked_mul(size_of::<LocalState>())
+            .filter(|&size| size <= isize::MAX as usize)
             .ok_or(MethodError::PlatformCapacity)?;
-        budget
-            .charge_allocation(u64::try_from(bytes).map_err(|_| MethodError::PlatformCapacity)?)?;
+        budget.checkpoint()?;
         let mut locals = Vec::new();
         locals
             .try_reserve_exact(length)
@@ -121,7 +121,7 @@ impl<'a> DebugProgram<'a> {
             ));
         }
         while locals.len() < length {
-            budget.charge_work(1)?;
+            budget.checkpoint()?;
             locals.resize((locals.len() + 256).min(length), LocalState::Never);
         }
         let mut register = usize::from(code.registers_size() - code.ins_size());
@@ -171,7 +171,7 @@ impl<'a> DebugProgram<'a> {
             return Err(invalid(offset).into());
         }
         while self.boundary < self.pc {
-            budget.charge_work(1)?;
+            budget.checkpoint()?;
             let layout = instruction_layout(code.instructions(), self.boundary, code.version)?;
             self.boundary = self
                 .boundary
@@ -182,7 +182,7 @@ impl<'a> DebugProgram<'a> {
             return Err(invalid(offset).into());
         }
         if self.pc.0 < code.code_units().0 {
-            budget.charge_work(1)?;
+            budget.checkpoint()?;
             let layout = instruction_layout(code.instructions(), self.pc, code.version)?;
             if !matches!(layout.kind(), LayoutKind::Instruction(_)) {
                 return Err(invalid(offset).into());

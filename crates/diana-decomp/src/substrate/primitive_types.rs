@@ -1,5 +1,5 @@
 use crate::input::DexString;
-use crate::{MethodBudget, RequestError};
+use crate::{RequestError, RunContext};
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub(crate) struct IntRange {
     low: i32,
@@ -134,7 +134,7 @@ impl PrimitiveArray {
     }
     pub(crate) fn parse(
         name: DexString<'_>,
-        budget: &mut MethodBudget<'_, '_>,
+        budget: &mut RunContext<'_>,
     ) -> Result<Option<Self>, RequestError> {
         for kind in [
             Self::Boolean,

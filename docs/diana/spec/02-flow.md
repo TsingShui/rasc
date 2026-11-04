@@ -146,7 +146,7 @@ counter does not mistakenly count them as several executions of the original fil
 is taken before the whole expansion. D027 is a positive example whose int/float fresh-array
 shape and payload MUST be proven item by item by an independent input certificate; the
 implementation MUST NOT infer from Java literal text that the original DEX contained a fill.
-Runtime cost is O(count), AST and constants are charged by actual growth, only explicit quotas
+Runtime cost is O(count), AST and constants grow with checked fallible reservation
 are checked, and the JVM code cost MUST NOT be predicted.
 The payload itself borrows the original bytes and MUST NOT be copied into a huge Vec first.
 
@@ -187,7 +187,7 @@ value from before the failure.
    abrupt exit, and the implementation MUST NOT create a pseudo handler node.
 
 The base cost of the scan, boundary validation and reachability is O(I+E+X) with storage
-O(I+B+E+X); variable-length metadata and payloads are charged separately by actual elements.
+O(I+B+E+X); variable-length metadata and payloads reserve capacity per actual element.
 Charging happens before edge/leader insertion and queue operations. An unknown width stops the
 first pass: even if a later word looks like a return, it MUST NOT restore a trustworthy
 instruction boundary.
@@ -235,7 +235,7 @@ The `Effect` table is driven by fixed opcode metadata: heap read/write, call, ma
 - The builder MUST compute the normal/exception live-in requirements first, then allocate a Phi for every live-in slot of every block (a single predecessor is kept as well). A virtual EntrySeed supplies the parameters/this, so the entry back edge also has a correct first value.
 - The builder MUST scan each block once, bind uses from the entry Phi and the earlier Defs of this block, and connect each normal/exception incoming once. An exception MUST use the old environment of the corresponding site, not the successful result.
 - The builder MUST retain the Phi closure from real uses, MUST propagate Bad monotonically along Phi users, and MUST propagate grounded monotonically from parameters/OpResult/ExceptionAt. The builder MUST remove unused Phis and MUST reject an actual missing definition, a partial wide or an unrooted definition cycle explicitly.
-- **The builder MUST NOT eliminate trivial Phis and MUST NOT do alias reduction**. Every state/traversal MUST have a finite measure and be charged; the builder MUST drop the construction Env work table after sealing and MUST NOT carry the R×E matrix all the way to P7.
+- **The builder MUST NOT eliminate trivial Phis and MUST NOT do alias reduction**. Every state/traversal MUST have a finite measure; the builder MUST drop the construction Env work table after sealing and MUST NOT carry the R×E matrix all the way to P7.
 - The verifier MUST replay the locally latest definition from the raw read/write order and the edge transfer, MUST check the Phi sources, the word width and the old exception state, and MUST NOT trust a builder bool or a normal dominator.
 
 Complex exception SSA is a phase risk; the phase MAY support no handler first, then a single protected invoke, then widen. The phase support matrix MUST explain the degradation reason, and it MUST NOT claim that general SSA is complete while ignoring the exception environment.

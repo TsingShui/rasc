@@ -1,10 +1,10 @@
 use super::branch::{Assignment, Local, LocalId, copies};
-use crate::input::{MethodInput, RawPrintable};
+use crate::input::{MethodSource, RawPrintable};
 use crate::p2_flow::{BlockId, EdgeId, Terminal};
 use crate::p4_types::Kind;
 use crate::p5_variables::StorageBody;
 use crate::substrate::owned::{TextBuffer, copy_units, reserve};
-use crate::{JavaMethod, MethodBudget, RequestError};
+use crate::{JavaMethod, RequestError, RunContext};
 
 pub(crate) struct Edge {
     pub source: BlockId,
@@ -48,11 +48,7 @@ pub(crate) struct Dispatcher {
 fn ix(id: u32) -> Result<usize, RequestError> {
     usize::try_from(id).map_err(|_| RequestError::PlatformCapacity)
 }
-fn push<T>(
-    values: &mut Vec<T>,
-    value: T,
-    budget: &mut MethodBudget<'_, '_>,
-) -> Result<(), RequestError> {
+fn push<T>(values: &mut Vec<T>, value: T, budget: &mut RunContext<'_>) -> Result<(), RequestError> {
     reserve(values, 1, budget)?;
     values.push(value);
     Ok(())
@@ -62,7 +58,7 @@ fn edge(
     id: EdgeId,
     source: BlockId,
     target: BlockId,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<Edge, RequestError> {
     let ssa = &storage.typed;
     let original = ssa
@@ -97,12 +93,12 @@ pub(super) struct LoweringChecks {
 }
 
 pub(super) fn lower(
-    input: &MethodInput<'_, '_>,
+    input: &MethodSource<'_, '_>,
     catalog: &crate::context::Context,
     plan: crate::p6_regions::PlannedBody<'_>,
     type_names: &super::types::TypeNames,
     calls: &mut super::calls::SourceCalls,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
     checks: &mut LoweringChecks,
 ) -> Result<Option<JavaMethod>, RequestError> {
     let plan = plan.into_data();
@@ -216,7 +212,7 @@ pub(super) fn lower(
             .map_or(1, |index| index + 1);
         let mut name = Vec::new();
         for &unit in &owner[start..owner.len() - 1] {
-            budget.charge_work(1)?;
+            budget.checkpoint()?;
             crate::substrate::owned::push(&mut name, unit, budget)?;
         }
         name
@@ -252,11 +248,11 @@ pub(super) fn lower(
     copies(storage, None, BlockId(0), &mut entry, budget)?;
     let mut cases = Vec::new();
     for (index, block) in ssa.ssa.blocks.iter().enumerate() {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         let key = BlockId(u32::try_from(index).map_err(|_| RequestError::PlatformCapacity)?);
         let mut outgoing = Vec::new();
         for (index, original) in ssa.ssa.edges.iter().enumerate() {
-            budget.charge_work(1)?;
+            budget.checkpoint()?;
             if original.source == key {
                 push(
                     &mut outgoing,
@@ -342,7 +338,7 @@ pub(super) fn lower(
                     }
                     let mut cases = Vec::new();
                     for (index, &(case_key, target)) in table.cases.iter().enumerate() {
-                        budget.charge_work(1)?;
+                        budget.checkpoint()?;
                         push(
                             &mut cases,
                             (
@@ -467,7 +463,7 @@ pub(super) fn lower(
             .skip(ssa.ssa.frame.implicit_words() + usize::from(storage.typed.capture.is_some()))
             .enumerate()
         {
-            budget.charge_work(1)?;
+            budget.checkpoint()?;
             if index != 0 {
                 header.push(", ", budget)?;
             }
@@ -480,7 +476,7 @@ pub(super) fn lower(
         }
         header.push(")", budget)?;
         for (index, descriptor) in calls.throws.descriptors.iter().enumerate() {
-            budget.charge_work(1)?;
+            budget.checkpoint()?;
             let Some(name) = super::calls::type_name(descriptor, budget)? else {
                 checks.refused = Some("throws_type_name");
                 return Ok(None);
@@ -499,7 +495,7 @@ pub(super) fn lower(
     let syntax = if initializer {
         let mut normal_exit = false;
         for case in &body.cases {
-            budget.charge_work(1)?;
+            budget.checkpoint()?;
             normal_exit |= matches!(case.transfer, Transfer::InitializerExit);
         }
         super::initializers::MemberSyntax::Initializer {

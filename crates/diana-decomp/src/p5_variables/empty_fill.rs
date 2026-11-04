@@ -1,7 +1,7 @@
 use crate::p2_flow::Op;
 use crate::p3_ssa::{BoundOp, ValueId};
 use crate::p4_types::{Kind, TypedBody};
-use crate::{CodeUnitOffset, MethodBudget, RequestError};
+use crate::{CodeUnitOffset, RequestError, RunContext};
 
 pub(crate) struct LengthOnly {
     _sealed: (),
@@ -14,9 +14,9 @@ pub(super) fn prove(
     typed: &TypedBody<'_>,
     op: &BoundOp,
     result: super::LocalId,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<LengthOnly, RequestError> {
-    budget.charge_work(1)?;
+    budget.checkpoint()?;
     let bad = || RequestError::InternalInvariant("LengthOnly differs from original zero fill");
     let Op::EmptyFill(register, id) = op.op else {
         return Err(bad());

@@ -1,6 +1,6 @@
 use super::{CheckedMethodLayout, Cursor};
 use crate::substrate::owned::push;
-use crate::{ByteLength, ByteOffset, CodeUnitOffset, MethodBudget, RequestError, TypeId};
+use crate::{ByteLength, ByteOffset, CodeUnitOffset, RequestError, RunContext, TypeId};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum CatchType {
@@ -39,10 +39,10 @@ impl CheckedProtection {
     pub(crate) fn at(
         &self,
         pc: CodeUnitOffset,
-        budget: &mut MethodBudget<'_, '_>,
+        budget: &mut RunContext<'_>,
     ) -> Result<Option<&[CatchClause]>, RequestError> {
         for range in &self.ranges {
-            budget.charge_work(1)?;
+            budget.checkpoint()?;
             if pc >= range.start && pc < range.end {
                 return Ok(Some(&self.chains[range.chain].clauses));
             }
@@ -52,7 +52,7 @@ impl CheckedProtection {
 }
 pub(crate) fn read(
     layout: &CheckedMethodLayout<'_>,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<CheckedProtection, RequestError> {
     let raw = layout.original();
     let mut result = CheckedProtection {
@@ -66,12 +66,12 @@ pub(crate) fn read(
     let mut cursor = Cursor::bounded(raw.source_bytes(), handlers.start, handlers.end)?;
     let count = cursor.read_uleb32_with(budget)?;
     for _ in 0..count {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         let offset = cursor.position_byte();
         let size = cursor.read_sleb32_with(budget)?;
         let mut clauses = Vec::new();
         for _ in 0..i64::from(size).unsigned_abs() {
-            budget.charge_work(1)?;
+            budget.checkpoint()?;
             let kind = CatchType::Typed(TypeId(cursor.read_uleb32_with(budget)?));
             let target = CodeUnitOffset(cursor.read_uleb32_with(budget)?);
             push(&mut clauses, CatchClause { kind, target }, budget)?;
@@ -92,7 +92,7 @@ pub(crate) fn read(
     let tries = raw.try_byte_range();
     let mut cursor = Cursor::bounded(raw.source_bytes(), tries.start, tries.end)?;
     while cursor.position_byte() < tries.end {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         let start = CodeUnitOffset(cursor.read_u32_with(budget)?);
         let count = u32::from(cursor.read_u16_with(budget)?);
         let end = start
@@ -104,7 +104,7 @@ pub(crate) fn read(
             .ok_or(RequestError::PlatformCapacity)?;
         let mut found = None;
         for (index, chain) in result.chains.iter().enumerate() {
-            budget.charge_work(1)?;
+            budget.checkpoint()?;
             if chain.offset == offset {
                 found = Some(index);
                 break;

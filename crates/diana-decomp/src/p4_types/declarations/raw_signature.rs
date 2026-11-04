@@ -10,7 +10,7 @@ pub(crate) fn erases_to(
     if signature.first() == Some(&60) {
         let mut colon = None;
         for (index, &unit) in signature.iter().enumerate().skip(1) {
-            control.charge_work(1)?;
+            control.checkpoint()?;
             if unit == 58 {
                 colon = Some(index);
                 break;
@@ -37,7 +37,7 @@ pub(crate) fn erases_to(
         let mut erased = Vec::new();
         let mut at = end + 1;
         while at < signature.len() {
-            control.charge_work(1)?;
+            control.checkpoint()?;
             if signature[at] == 84 {
                 let finish = at
                     .checked_add(1)
@@ -68,7 +68,7 @@ pub(crate) fn erases_to(
     let mut argument = false;
     let mut arguments = 0usize;
     for &unit in signature {
-        control.charge_work(1)?;
+        control.checkpoint()?;
         if unit == 60 {
             if !reference {
                 return Ok(false);
@@ -143,7 +143,7 @@ pub(super) fn raw_class(
         return Ok(false);
     }
     for method in &class.methods {
-        control.charge_work(1)?;
+        control.checkpoint()?;
         if method.generic || method.signature.is_some() {
             return Ok(false);
         }
@@ -188,14 +188,14 @@ impl RawSignature {
 
 pub(crate) fn collect(
     _permit: &crate::engine::SchedulePermit,
-    input: &crate::input::MethodInput<'_, '_>,
+    input: &crate::input::MethodSource<'_, '_>,
     catalog: &crate::context::Context,
     control: &mut impl InputControl,
 ) -> Result<Option<RawSignature>, RequestError> {
     collect_impl(input, catalog, control)
 }
 fn collect_impl(
-    input: &crate::input::MethodInput<'_, '_>,
+    input: &crate::input::MethodSource<'_, '_>,
     _catalog: &crate::context::Context,
     control: &mut impl InputControl,
 ) -> Result<Option<RawSignature>, RequestError> {

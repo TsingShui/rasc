@@ -1,7 +1,7 @@
 use crate::context::Context;
-use crate::input::MethodInput;
+use crate::input::MethodSource;
 use crate::substrate::outcome::Outcome;
-use crate::{MethodBudget, OutputReason, RequestError};
+use crate::{OutputReason, RequestError, RunContext};
 
 // Consumed directly by the scheduler; boxing would add a fallible allocation per method.
 #[allow(clippy::large_enum_variant)]
@@ -13,9 +13,9 @@ pub(crate) enum Analysis<'a> {
 }
 pub(crate) fn build<'a>(
     schedule: &crate::engine::SchedulePermit,
-    input: &MethodInput<'_, 'a>,
+    input: &MethodSource<'_, 'a>,
     catalog: &Context,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<Analysis<'a>, RequestError> {
     let _p2 = crate::pipeline::phase_span("p2_flow");
     let flow = match crate::p2_flow::decode(schedule, input, budget)? {
@@ -32,6 +32,7 @@ pub(crate) fn build<'a>(
             .is_some_and(|op| matches!(op.op, crate::p2_flow::Op::FieldStore(..)))
     {
         let ownership = input.program().ownership_cached(budget)?;
+        ownership.check_class(input.class_id())?;
         match crate::p4_types::declarations::capture::collect(
             schedule, input, ownership, catalog, budget,
         )? {

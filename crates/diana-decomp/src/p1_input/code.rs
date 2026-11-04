@@ -157,7 +157,7 @@ fn check_handlers(
     if u64::from(count) > cursor.remaining_byte().0 as u64 {
         return Err(malformed(InputProblem::Truncated, cursor.position_byte()));
     }
-    control.charge_metadata(u64::from(count))?;
+    control.checkpoint()?;
     // Membership covers the format's u16 relative-byte-offset domain.
     let mut starts = [0u64; 1024];
     for _ in 0..count {
@@ -174,7 +174,7 @@ fn check_handlers(
         if minimum > cursor.remaining_byte().0 as u64 {
             return Err(malformed(InputProblem::Truncated, cursor.position_byte()));
         }
-        control.charge_metadata(typed)?;
+        control.checkpoint()?;
         for _ in 0..typed {
             let type_idx = TypeId(cursor.read_uleb32_with(control)?);
             let (_, shape) = index.type_descriptor(type_idx, control)?;
@@ -201,7 +201,7 @@ fn check_handlers(
     let mut records = Cursor::bounded(index.bytes, tries.start, tries.end)?;
     let mut previous_end = CodeUnitOffset(0);
     while records.remaining_byte() != ByteLength(0) {
-        control.charge_metadata(1)?;
+        control.checkpoint()?;
         let start = CodeUnitOffset(records.read_u32_with(control)?);
         let length = CodeUnitCount(u32::from(records.read_u16_with(control)?));
         let offset = usize::from(records.read_u16_with(control)?);

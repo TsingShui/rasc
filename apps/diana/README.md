@@ -27,8 +27,7 @@ methods     List defined methods
 help        Print help for a command
 ```
 
-Every command accepts `--format text|json`, `-o <file>` and the explicit limit
-options below. Output order is completion order, not a stable sequence. There is no
+Every command accepts `--format text|json` and `-o <file>. Output order is completion order, not a stable sequence. There is no
 pagination, cursor or preview: a successful query returns every match, and an empty
 match is a normal empty result.
 
@@ -99,7 +98,7 @@ after it is published.
 | Code | Meaning |
 |---|---|
 | 0 | A result was delivered, including a partial document |
-| 1 | Input, decode, budget, cancellation, internal or I/O failure |
+| 1 | Input, decode, cancellation, allocation, internal or I/O failure |
 | 2 | Unknown command/flag or an invalid selector |
 | 3 | The requested single object or entry does not exist |
 | 4 | The selector matches several objects |
@@ -114,15 +113,27 @@ atomic from a private temporary file in the target directory, an existing file n
 `--force`, and a directory, a symbolic link, the input itself or a hardlink alias are
 refused. Nothing is printed to stdout.
 
-## Limits and cancellation
+## Cancellation and allocation failure
 
-Every limit is unset by default; only an explicitly configured bound applies and an
-overrun is an error, never a truncated success. `--max-input-bytes` and
-`--max-inflated-bytes` bound the input side; `--max-request-work-steps`,
-`--max-request-allocation-bytes`, `--max-work-steps`, `--max-method-output-bytes` and
-`--max-report-output-bytes` bound the engine and the delivered payload. Cancellation
-is cooperative through the request ledger; a process killed by a signal is not a
-catchable cancellation guarantee.
+Diana exposes no numeric work, allocation or output quotas. Every read is range-,
+count- and arithmetic-checked, container growth uses `try_reserve`, and an actual
+allocation failure is reported as a classified error instead of a truncated result.
+Cancellation is cooperative between analysis stages; a process killed by a signal
+is not a catchable cancellation guarantee.
+
+## Internal P0 inspection
+
+Run the independent class-fact snapshot through a Cargo example:
+
+```sh
+cargo run --release --locked -p diana --example p0_debug -- \
+  sample.apk 'com.example.App' -o p0-class.json
+```
+
+The result is pretty JSON with class declarations, all fields/methods, code-entry
+integers, static preparation values and original annotations. It preserves read
+states and diagnostics. See [P0 snapshot](../../docs/diana/spec/00-class.md) for
+coverage and failure behavior.
 
 ## Agent usage
 

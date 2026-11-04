@@ -4,7 +4,7 @@ use crate::p2_flow::{MonitorKind, Op, OpId};
 use crate::p3_ssa::BoundOp;
 use crate::p4_types::TypedBody;
 use crate::p4_types::reference_roots::Root;
-use crate::{MethodBudget, RequestError};
+use crate::{RequestError, RunContext};
 pub(super) fn lower(
     typed: &TypedBody<'_>,
     id: OpId,
@@ -32,9 +32,9 @@ pub(super) fn verify(
     id: OpId,
     op: &BoundOp,
     actual: &Statement,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<bool, RequestError> {
-    budget.charge_work(1)?;
+    budget.checkpoint()?;
     let Statement::Monitor {
         operation,
         kind,

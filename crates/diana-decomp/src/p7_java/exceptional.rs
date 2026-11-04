@@ -1,16 +1,16 @@
 use crate::p5_variables::StorageBody;
 use crate::p5_variables::exceptional::{Ingress, Snapshot};
 use crate::substrate::owned::push;
-use crate::{MethodBudget, RequestError};
+use crate::{RequestError, RunContext};
 
 pub(super) fn exception_root(
     typed: &crate::p4_types::TypedBody<'_>,
     value: crate::p3_ssa::ValueId,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<Option<crate::p2_flow::BlockId>, RequestError> {
     use crate::p3_ssa::Definition;
     use crate::p4_types::reference_roots::Root;
-    budget.charge_work(1)?;
+    budget.checkpoint()?;
     let Some(Root::Definition(root)) = typed.roots.one(value)? else {
         return Ok(None);
     };
@@ -20,7 +20,7 @@ pub(super) fn exception_root(
         return Ok(None);
     };
     for binding in &typed.exceptions {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         if binding.operation == id {
             return Ok(Some(binding.handler));
         }
@@ -33,10 +33,10 @@ pub(super) fn snapshots(
     block: crate::p2_flow::BlockId,
     pc: crate::CodeUnitOffset,
     statements: &mut Vec<super::calls::Statement>,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<(), RequestError> {
     for placement in placements {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         let Placement::BeforeThrow(snapshot) = placement else {
             continue;
         };
@@ -54,10 +54,10 @@ pub(super) fn snapshots(
 pub(super) fn placed_ingress<'a>(
     placements: &[Placement<'a>],
     handler: crate::p2_flow::BlockId,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<&'a Ingress, RequestError> {
     for placement in placements {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         if let Placement::HandlerIngress(ingress) = placement
             && ingress.handler == handler
         {
@@ -72,10 +72,10 @@ pub(super) fn placed_ingress<'a>(
 pub(super) fn ingress<'a>(
     storage: &'a StorageBody<'_>,
     handler: crate::p2_flow::BlockId,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<&'a Ingress, RequestError> {
     for ingress in &storage.exceptional.ingress {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         if ingress.handler == handler {
             return Ok(ingress);
         }
@@ -92,7 +92,7 @@ pub(super) enum Placement<'a> {
 
 pub(super) fn obligations<'a>(
     storage: &'a StorageBody<'_>,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<Vec<Placement<'a>>, RequestError> {
     crate::p5_variables::exceptional::verify(
         &storage.typed,
@@ -102,15 +102,15 @@ pub(super) fn obligations<'a>(
     )?;
     let mut result = Vec::new();
     for snapshot in &storage.exceptional.snapshots {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         push(&mut result, Placement::BeforeThrow(snapshot), budget)?;
     }
     for ingress in &storage.exceptional.ingress {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         push(&mut result, Placement::HandlerIngress(ingress), budget)?;
     }
     for placement in &result {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         match placement {
             Placement::BeforeThrow(snapshot) => {
                 let edge = &storage.typed.ssa.exception_edges[usize::try_from(snapshot.edge.0)
@@ -120,7 +120,7 @@ pub(super) fn obligations<'a>(
                     [usize::try_from(edge.source.0).map_err(|_| RequestError::PlatformCapacity)?]
                 .ops
                 {
-                    budget.charge_work(1)?;
+                    budget.checkpoint()?;
                     if op.pc == snapshot.before {
                         selection = crate::p2_flow::protection::selection_pc(op.kind, op.pc)?;
                         break;

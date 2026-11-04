@@ -2,7 +2,7 @@ use super::formats::{
     Format, InsnLayout, LayoutKind, LayoutProblem, RawDecodeError, wide_word, word,
 };
 use super::{MethodError, RawMethodView};
-use crate::{ByteLength, CodeUnitDelta, CodeUnitOffset, FallbackBudget, RegisterId};
+use crate::{ByteLength, CodeUnitDelta, CodeUnitOffset, RegisterId, RunContext};
 
 /// Original literal bits, before selecting an int/float or long/double view.
 /// Arithmetic immediates retain their signed encoded width.
@@ -269,11 +269,11 @@ impl<'a> RawMethodView<'a> {
     /// supplied fallback budget. Unknown width stops before the next item.
     pub fn visit_instructions(
         &self,
-        budget: &mut FallbackBudget<'_, '_>,
-        mut visit: impl FnMut(RawCodeItem<'a>, &mut FallbackBudget<'_, '_>) -> Result<(), MethodError>,
+        budget: &mut RunContext<'_>,
+        mut visit: impl FnMut(RawCodeItem<'a>, &mut RunContext<'_>) -> Result<(), MethodError>,
     ) -> Result<(), MethodError> {
         self.visit_layouts(budget, |pc, layout, budget| {
-            let words = item_words(self.instructions(), pc, layout)?;
+            let words = payload_words(self.instructions(), pc, layout)?;
             let item = match layout.kind() {
                 LayoutKind::Instruction(_) => RawCodeItem::Instruction(RawInstruction {
                     pc,
@@ -343,7 +343,7 @@ pub(crate) fn array_payload(
     else {
         return Err(overflow(pc));
     };
-    let words = item_words(bytes, pc, layout)?;
+    let words = payload_words(bytes, pc, layout)?;
     let length = usize::try_from(element_count)
         .ok()
         .and_then(|count| count.checked_mul(element_width.0))
@@ -360,7 +360,7 @@ pub(crate) fn switch_payload(
     pc: CodeUnitOffset,
     layout: InsnLayout,
 ) -> Result<SwitchCases<'_>, RawDecodeError> {
-    let words = item_words(bytes, pc, layout)?;
+    let words = payload_words(bytes, pc, layout)?;
     let data = match layout.kind() {
         LayoutKind::PackedSwitch { .. } => PayloadData::Packed {
             first: i32::from_le_bytes(wide_word(bytes, pc, 2)?.to_le_bytes()),
@@ -392,7 +392,7 @@ fn overflow(pc: CodeUnitOffset) -> RawDecodeError {
     }
 }
 
-fn item_words(
+pub(crate) fn payload_words(
     bytes: &[u8],
     pc: CodeUnitOffset,
     layout: InsnLayout,

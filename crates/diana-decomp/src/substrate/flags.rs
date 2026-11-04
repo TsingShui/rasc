@@ -49,6 +49,180 @@ pub(crate) const DECLARED_SYNCHRONIZED: u32 = 0x20000;
 
 const VISIBILITY: u32 = PUBLIC | PRIVATE | PROTECTED;
 
+const CLASS_BITS: u32 =
+    VISIBILITY | STATIC | FINAL | INTERFACE | ABSTRACT | SYNTHETIC | ANNOTATION | ENUM;
+
+/// Visibility as an original declaration states it. No bit means package scope.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Visibility {
+    Public,
+    Private,
+    Protected,
+    Package,
+}
+
+/// Original class `access_flags`: the raw word plus kind-specific queries.
+/// Unknown bits stay visible; no query treats them as a rejection reason.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ClassAccessFlags(u32);
+
+impl ClassAccessFlags {
+    pub fn from_raw(raw: u32) -> Self {
+        Self(raw)
+    }
+    pub fn raw(self) -> u32 {
+        self.0
+    }
+    /// Bits without a defined class meaning in this format.
+    pub fn unknown_bits(self) -> u32 {
+        self.0 & !CLASS_BITS
+    }
+    pub fn visibility(self) -> Visibility {
+        visibility(self.0)
+    }
+    pub fn is_static(self) -> bool {
+        self.0 & STATIC != 0
+    }
+    pub fn is_final(self) -> bool {
+        self.0 & FINAL != 0
+    }
+    pub fn is_interface(self) -> bool {
+        self.0 & INTERFACE != 0
+    }
+    pub fn is_abstract(self) -> bool {
+        self.0 & ABSTRACT != 0
+    }
+    pub fn is_synthetic(self) -> bool {
+        self.0 & SYNTHETIC != 0
+    }
+    pub fn is_annotation(self) -> bool {
+        self.0 & ANNOTATION != 0
+    }
+    pub fn is_enum(self) -> bool {
+        self.0 & ENUM != 0
+    }
+    /// A class flag word that names no undefined or member-only bit.
+    pub fn is_valid(self) -> bool {
+        visibility_valid(self.0) && self.0 & !CLASS_BITS == 0
+    }
+}
+
+/// Original field `access_flags`: the raw word plus kind-specific queries.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct FieldAccessFlags(u32);
+
+impl FieldAccessFlags {
+    pub fn from_raw(raw: u32) -> Self {
+        Self(raw)
+    }
+    pub fn raw(self) -> u32 {
+        self.0
+    }
+    pub fn unknown_bits(self) -> u32 {
+        self.0 & !FIELD_BITS
+    }
+    pub fn visibility(self) -> Visibility {
+        visibility(self.0)
+    }
+    pub fn is_static(self) -> bool {
+        self.0 & STATIC != 0
+    }
+    pub fn is_final(self) -> bool {
+        self.0 & FINAL != 0
+    }
+    pub fn is_volatile(self) -> bool {
+        self.0 & VOLATILE != 0
+    }
+    pub fn is_transient(self) -> bool {
+        self.0 & TRANSIENT != 0
+    }
+    pub fn is_synthetic(self) -> bool {
+        self.0 & SYNTHETIC != 0
+    }
+    pub fn is_enum(self) -> bool {
+        self.0 & ENUM != 0
+    }
+    pub fn is_valid(self) -> bool {
+        field_valid(self.0)
+    }
+}
+
+/// Original method `access_flags`: the raw word plus kind-specific queries.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct MethodAccessFlags(u32);
+
+impl MethodAccessFlags {
+    pub fn from_raw(raw: u32) -> Self {
+        Self(raw)
+    }
+    pub fn raw(self) -> u32 {
+        self.0
+    }
+    pub fn unknown_bits(self) -> u32 {
+        self.0 & !METHOD_BITS
+    }
+    pub fn visibility(self) -> Visibility {
+        visibility(self.0)
+    }
+    pub fn is_static(self) -> bool {
+        self.0 & STATIC != 0
+    }
+    pub fn is_final(self) -> bool {
+        self.0 & FINAL != 0
+    }
+    pub fn is_synchronized(self) -> bool {
+        self.0 & SYNCHRONIZED != 0
+    }
+    pub fn is_declared_synchronized(self) -> bool {
+        self.0 & DECLARED_SYNCHRONIZED != 0
+    }
+    pub fn is_bridge(self) -> bool {
+        self.0 & BRIDGE != 0
+    }
+    pub fn is_varargs(self) -> bool {
+        self.0 & VARARGS != 0
+    }
+    pub fn is_native(self) -> bool {
+        self.0 & NATIVE != 0
+    }
+    pub fn is_abstract(self) -> bool {
+        self.0 & ABSTRACT != 0
+    }
+    pub fn is_strict(self) -> bool {
+        self.0 & STRICT != 0
+    }
+    pub fn is_synthetic(self) -> bool {
+        self.0 & SYNTHETIC != 0
+    }
+    /// The constructor marker, which DEX also sets on `<clinit>`.
+    pub fn is_constructor(self) -> bool {
+        self.0 & CONSTRUCTOR != 0
+    }
+    /// An instance constructor: the marker without `static`.
+    pub fn is_instance_constructor(self) -> bool {
+        instance_constructor(self.0)
+    }
+    /// A class initializer: the marker together with `static`.
+    pub fn is_static_initializer(self) -> bool {
+        static_initializer(self.0)
+    }
+    pub fn is_valid(self) -> bool {
+        method_valid(self.0)
+    }
+}
+
+fn visibility(flags: u32) -> Visibility {
+    if flags & PUBLIC != 0 {
+        Visibility::Public
+    } else if flags & PRIVATE != 0 {
+        Visibility::Private
+    } else if flags & PROTECTED != 0 {
+        Visibility::Protected
+    } else {
+        Visibility::Package
+    }
+}
+
 /// Bits with a defined method meaning. `INTERFACE`, `ANNOTATION` and `ENUM`
 /// describe classes and must not appear on a method definition.
 const METHOD_BITS: u32 = VISIBILITY

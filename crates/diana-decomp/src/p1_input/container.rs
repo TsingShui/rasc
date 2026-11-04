@@ -50,11 +50,7 @@ impl<'a> DexContainer<'a> {
             1,
             container.header_size(),
         )?;
-        control.check_image_bytes(u64::try_from(bytes.len()).map_err(|_| {
-            InputError::PlatformCapacity {
-                offset_byte: ByteOffset(0x20),
-            }
-        })?)?;
+        control.checkpoint()?;
         let mut header = ByteOffset(0);
         loop {
             let range = checked_range(ByteLength(bytes.len()), header, 1, container.header_size())?;
@@ -127,7 +123,7 @@ impl<'a> DexContainer<'a> {
     ) -> Result<ProgramIndex<'a>, InputError> {
         let mut header = ByteOffset(0);
         loop {
-            control.charge_work(1)?;
+            control.checkpoint()?;
             if header == header_offset {
                 return ProgramIndex::from_container(*self, header, control);
             }
@@ -152,7 +148,7 @@ impl<'a> DexContainer<'a> {
         let mut headers = Vec::new();
         let mut header = ByteOffset(0);
         loop {
-            control.charge_work(1)?;
+            control.checkpoint()?;
             headers.try_reserve(1).map_err(|_| InputError::Allocation {
                 offset_byte: header,
             })?;
@@ -199,7 +195,7 @@ impl<'a> DexContainer<'a> {
     ) -> Result<ByteOffset, InputError> {
         let mut header = ByteOffset(0);
         loop {
-            control.charge_work(1)?;
+            control.checkpoint()?;
             if offset < header {
                 return Ok(header);
             }

@@ -5,7 +5,7 @@ use crate::p2_flow::{BlockId, OpId};
 use crate::p3_ssa::{Definition, Incoming, Sym, ValueId};
 use crate::p4_types::TypedBody;
 use crate::substrate::owned::push;
-use crate::{CodeUnitOffset, MethodBudget, RequestError};
+use crate::{CodeUnitOffset, RequestError, RunContext};
 
 pub(crate) struct Shadow {
     pub handler: BlockId,
@@ -40,11 +40,11 @@ fn invariant(message: &'static str) -> RequestError {
 }
 fn types(
     locals: &[Local],
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<Vec<super::LocalType>, RequestError> {
     let mut result = Vec::new();
     for local in locals {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         push(&mut result, local_type(local.kind)?, budget)?;
     }
     Ok(result)
@@ -52,7 +52,7 @@ fn types(
 pub(crate) fn build(
     typed: &TypedBody<'_>,
     locals: &mut Vec<Local>,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<Option<ExceptionalStorage>, RequestError> {
     let mut result = ExceptionalStorage {
         _sealed: (),
@@ -62,10 +62,10 @@ pub(crate) fn build(
         ingress: Vec::new(),
     };
     for binding in &typed.exceptions {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         let mut copies = Vec::new();
         for phi in &typed.ssa.phis {
-            budget.charge_work(1)?;
+            budget.checkpoint()?;
             if phi.block != binding.handler {
                 continue;
             }
@@ -99,7 +99,7 @@ pub(crate) fn build(
                 budget,
             )?;
             for &(incoming, value) in &phi.inputs {
-                budget.charge_work(1)?;
+                budget.checkpoint()?;
                 let (Incoming::Exceptional(edge), Sym::Value(source)) = (incoming, value) else {
                     return Err(invariant("handler Phi has non-exceptional ingress"));
                 };
@@ -154,7 +154,7 @@ fn available(
     source: ValueId,
     block: BlockId,
     before: CodeUnitOffset,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<bool, RequestError> {
     if typed
         .initializations
@@ -168,7 +168,7 @@ fn available(
         Some(Definition::Parameter(_)) => Ok(true),
         Some(Definition::Phi) => {
             for phi in &typed.ssa.phis {
-                budget.charge_work(1)?;
+                budget.checkpoint()?;
                 if phi.result == source {
                     return Ok(phi.block == block);
                 }
@@ -177,7 +177,7 @@ fn available(
         }
         Some(Definition::OpResult(id) | Definition::ExceptionAt(id)) => {
             for &candidate in &typed.ssa.bound[ix(block.0)?].ops {
-                budget.charge_work(1)?;
+                budget.checkpoint()?;
                 if candidate == *id {
                     return Ok(typed.ssa.operation(candidate)?.pc.0 < before.0);
                 }
@@ -192,11 +192,11 @@ pub(crate) fn verify(
     typed: &TypedBody<'_>,
     locals: &[Local],
     plan: &ExceptionalStorage,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<(), RequestError> {
     let mut handlers = 0usize;
     for (index, block) in typed.ssa.bound.iter().enumerate() {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         let Some(&id) = block.ops.first() else {
             continue;
         };
@@ -210,7 +210,7 @@ pub(crate) fn verify(
         let handler = BlockId(u32::try_from(index).map_err(|_| RequestError::PlatformCapacity)?);
         let mut binding = None;
         for candidate in &typed.exceptions {
-            budget.charge_work(1)?;
+            budget.checkpoint()?;
             if candidate.handler == handler && binding.replace(candidate).is_some() {
                 return Err(invariant("duplicate typed handler binding"));
             }
@@ -251,7 +251,7 @@ pub(crate) fn verify(
         return Err(invariant("shadow arena overlaps ordinary storage"));
     }
     for (index, shadow) in plan.shadows.iter().enumerate() {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         if plan.first_shadow.checked_add(index) != Some(ix(shadow.local.0)?) {
             return Err(invariant("shadow aliases another storage slot"));
         }
@@ -262,10 +262,10 @@ pub(crate) fn verify(
         return Err(invariant("exception ingress coverage changed"));
     }
     for binding in &typed.exceptions {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         let mut ingress = None;
         for candidate in &plan.ingress {
-            budget.charge_work(1)?;
+            budget.checkpoint()?;
             if candidate.handler == binding.handler && ingress.replace(candidate).is_some() {
                 return Err(invariant("duplicate handler ingress"));
             }
@@ -281,7 +281,7 @@ pub(crate) fn verify(
         }
         let mut copies = Vec::new();
         for phi in &typed.ssa.phis {
-            budget.charge_work(1)?;
+            budget.checkpoint()?;
             if phi.block != binding.handler {
                 continue;
             }
@@ -290,7 +290,7 @@ pub(crate) fn verify(
                 .ok_or(RequestError::PlatformCapacity)?;
             let mut shadow = None;
             for candidate in &plan.shadows {
-                budget.charge_work(1)?;
+                budget.checkpoint()?;
                 if candidate.handler == phi.block
                     && candidate.phi == phi.result
                     && shadow.replace(candidate).is_some()
@@ -310,7 +310,7 @@ pub(crate) fn verify(
                 return Err(invariant("shadow overlaps a definition or changes type"));
             }
             for other in &plan.shadows {
-                budget.charge_work(1)?;
+                budget.checkpoint()?;
                 if other.local == shadow.local && !std::ptr::eq(other, shadow) {
                     return Err(invariant("handler shadows share a slot"));
                 }
@@ -324,7 +324,7 @@ pub(crate) fn verify(
                 budget,
             )?;
             for (edge_index, edge) in typed.ssa.exception_edges.iter().enumerate() {
-                budget.charge_work(1)?;
+                budget.checkpoint()?;
                 if edge.target != phi.block {
                     continue;
                 }
@@ -336,7 +336,7 @@ pub(crate) fn verify(
                 );
                 let mut source = None;
                 for &(incoming, value) in &phi.inputs {
-                    budget.charge_work(1)?;
+                    budget.checkpoint()?;
                     if incoming == Incoming::Exceptional(edge_id) && source.replace(value).is_some()
                     {
                         return Err(invariant("duplicate exceptional source"));
@@ -347,7 +347,7 @@ pub(crate) fn verify(
                 };
                 let mut snapshot = None;
                 for candidate in &plan.snapshots {
-                    budget.charge_work(1)?;
+                    budget.checkpoint()?;
                     if candidate.edge == edge_id
                         && candidate.phi == phi.result
                         && snapshot.replace(candidate).is_some()

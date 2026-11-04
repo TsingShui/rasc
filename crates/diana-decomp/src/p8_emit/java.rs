@@ -2,13 +2,13 @@ use crate::p5_variables::LocalId;
 use crate::p7_java::MethodBody;
 use crate::p7_java::{Assignment, Expression as BranchExpression};
 use crate::substrate::owned::TextBuffer;
-use crate::{JavaMethod, MethodBudget, RequestError};
+use crate::{JavaMethod, RequestError, RunContext};
 
 pub(crate) fn java(
     method: &JavaMethod,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<String, RequestError> {
-    let mut output = TextBuffer::method(budget);
+    let mut output = TextBuffer::new();
     output.push(method.source_header(), budget)?;
     output.push(" {\n", budget)?;
     if let crate::p7_java::initializers::MemberSyntax::Initializer { always_abrupt } =
@@ -45,7 +45,7 @@ pub(crate) fn java(
 pub(super) fn thrown(
     transfer: &crate::p7_java::dispatcher::Transfer,
     output: &mut TextBuffer,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<(), RequestError> {
     output.push("throw ", budget)?;
     match transfer {
@@ -66,7 +66,7 @@ pub(super) fn thrown(
 pub(super) fn returned(
     value: crate::p7_java::ValueUse,
     output: &mut TextBuffer,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<(), RequestError> {
     output.push("return ", budget)?;
     value_use(value, output, budget)?;
@@ -75,14 +75,14 @@ pub(super) fn returned(
 pub(super) fn value_use(
     value: crate::p7_java::ValueUse,
     output: &mut TextBuffer,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<(), RequestError> {
     value_with(value, output, budget, local)
 }
 pub(super) fn chain_argument(
     argument: &crate::p7_java::constructor_entry::PrologueArgument,
     output: &mut TextBuffer,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<(), RequestError> {
     value_with(
         argument.view,
@@ -105,12 +105,8 @@ pub(super) fn chain_argument(
 fn value_with(
     value: crate::p7_java::ValueUse,
     output: &mut TextBuffer,
-    budget: &mut MethodBudget<'_, '_>,
-    mut source: impl FnMut(
-        LocalId,
-        &mut TextBuffer,
-        &mut MethodBudget<'_, '_>,
-    ) -> Result<(), RequestError>,
+    budget: &mut RunContext<'_>,
+    mut source: impl FnMut(LocalId, &mut TextBuffer, &mut RunContext<'_>) -> Result<(), RequestError>,
 ) -> Result<(), RequestError> {
     use crate::p7_java::ValueUse;
     match value {
@@ -151,7 +147,7 @@ fn value_with(
 pub(super) fn local(
     id: LocalId,
     output: &mut TextBuffer,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<(), RequestError> {
     output.push("v", budget)?;
     output.unsigned(u64::from(id.0), budget)
@@ -159,10 +155,10 @@ pub(super) fn local(
 pub(super) fn assignments(
     statements: &[Assignment],
     output: &mut TextBuffer,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<(), RequestError> {
     for statement in statements {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         local(statement.target, output, budget)?;
         output.push(" = ", budget)?;
         match statement.expression {

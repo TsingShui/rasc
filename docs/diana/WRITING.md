@@ -167,11 +167,9 @@ authoritative; this table guides wording rather than redefining data or interfac
 | `claim` | Ledger reservation operation | allocation, `try_reserve` |
 | `held` | Reserved, unconsumed quantity | consumed work |
 | `fallback` | Classified one-time read-only raw exit | raw path, degradation path |
-| `budget` | Resource allowance or policy | configured bound, ledger struct |
 | `limit` | A configured bound | allowance policy |
-| `Quota` | The ledger structure | allowance, bound |
 
-`Malformed`, `Unsupported`, `BudgetExceeded`, `InternalInvariant` and `Cancelled`
+`Malformed`, `Unsupported`, `ResourceExhausted`, `InternalInvariant` and `Cancelled`
 are failure kinds in [spec/00](spec/00-overview.md). `Unavailable` is a result status there,
 not a synonym for those failure kinds. Known invalid semantics also belong under
 `Malformed`; the term is not limited to damaged byte structure. Missing evidence
@@ -204,7 +202,7 @@ the same numeral are not automatically duplicate definitions.
 Equations, worked examples, boundary cases and independent JSON inputs/expected
 values retain their concrete numbers. Authors MUST NOT replace independent expected
 values with values derived from engine output or implementation configuration.
-A translation MUST NOT introduce numeric product budgets or change existing limits.
+A translation MUST NOT introduce numeric product quotas.
 
 In prose, separate numbers from units, for example `16 bytes`. Specify whether a
 boundary includes its endpoint, using `at most`, `<` or `<=` as appropriate.

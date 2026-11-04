@@ -1,6 +1,6 @@
-use crate::input::{MethodInput, RawPrintable};
+use crate::input::{MethodSource, RawPrintable};
 use crate::substrate::owned::push;
-use crate::{MethodBudget, MethodId, RequestError};
+use crate::{MethodId, RequestError, RunContext};
 
 /// Class-owned covariant bridge evidence checked against original code and
 /// complete override declarations. This does not certify a standalone Java
@@ -63,7 +63,7 @@ impl Plan {
         control: &mut impl crate::pipeline::control::InputControl,
     ) -> Result<Option<GeneratedMember>, RequestError> {
         for entry in &self.bridges {
-            control.charge_work(1)?;
+            control.checkpoint()?;
             if entry.bridge == bridge {
                 return Ok(Some(GeneratedMember::Bridge(entry.clone())));
             }
@@ -78,14 +78,14 @@ impl Plan {
 
 pub(crate) fn candidate(
     _permit: &crate::engine::SchedulePermit,
-    input: &MethodInput<'_, '_>,
-    budget: &mut MethodBudget<'_, '_>,
+    input: &MethodSource<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<Option<MethodId>, RequestError> {
     candidate_impl(input, budget)
 }
 fn candidate_impl(
-    input: &MethodInput<'_, '_>,
-    budget: &mut MethodBudget<'_, '_>,
+    input: &MethodSource<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<Option<MethodId>, RequestError> {
     if !crate::substrate::flags::bridge(input.access_flags()) {
         return Ok(None);
@@ -131,7 +131,7 @@ fn candidate_impl(
             return Ok(None);
         }
     }
-    budget.charge_work(5)?;
+    budget.checkpoint()?;
     let layout = crate::raw::instruction_layout(instructions, invoke_pc, original.version())
         .map_err(crate::input::MethodError::Decode)?;
     if !matches!(layout.kind(),crate::raw::LayoutKind::Instruction(spec) if spec.opcode == 0x6e) {
@@ -175,9 +175,9 @@ fn candidate_impl(
 
 pub(crate) fn verify(
     _permit: &crate::engine::SchedulePermit,
-    input: &MethodInput<'_, '_>,
+    input: &MethodSource<'_, '_>,
     evidence: &crate::p4_types::declarations::overrides::CovariantOverride,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<Option<GeneratedBridge>, RequestError> {
     if candidate_impl(input, budget)? != Some(evidence.target())
         || !input

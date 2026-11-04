@@ -9,7 +9,7 @@ struct Input<'a> {
     names: &'a [CatchName],
 }
 use crate::substrate::owned::{TextBuffer, push};
-use crate::{MethodBudget, RequestError};
+use crate::{RequestError, RunContext};
 
 enum Work<'a> {
     Node(NodeId),
@@ -29,12 +29,12 @@ fn block<'a>(body: &Input<'a>, id: crate::p2_flow::BlockId) -> Result<&'a Case, 
 fn lower_into(
     body: &Input<'_>,
     output: &mut Builder,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<(), RequestError> {
     let mut todo = Vec::new();
     push(&mut todo, Work::Node(body.region.root), budget)?;
     while let Some(work) = todo.pop() {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         match work {
             Work::Step(step) => output.marker(step, budget)?,
             Work::Edge(edge) => output.copies(edge, budget)?,
@@ -45,10 +45,10 @@ fn lower_into(
             Work::Catch(catch) => {
                 let mut alternatives = Vec::new();
                 for clause in &catch.clauses {
-                    budget.charge_work(1)?;
+                    budget.checkpoint()?;
                     let mut name = None;
                     for candidate in body.names {
-                        budget.charge_work(1)?;
+                        budget.checkpoint()?;
                         if candidate.kind == clause.kind {
                             name = Some(candidate);
                             break;
@@ -84,7 +84,7 @@ fn lower_into(
                     output.statements(case, budget)?;
                     let mut lock = None;
                     for statement in &case.statements {
-                        budget.charge_work(1)?;
+                        budget.checkpoint()?;
                         if let crate::p7_java::calls::Statement::Monitor {
                             kind: crate::p2_flow::MonitorKind::Enter,
                             lock: value,
@@ -151,7 +151,7 @@ fn lower_into(
                 }
                 Node::Sequence(children) => {
                     for &child in children.iter().rev() {
-                        budget.charge_work(1)?;
+                        budget.checkpoint()?;
                         push(&mut todo, Work::Node(child), budget)?;
                     }
                 }
@@ -203,7 +203,7 @@ fn lower_into(
                     output.marker(Step::Try(id), budget)?;
                     push(&mut todo, Work::Step(Step::EndTry), budget)?;
                     for catch in catches.iter().rev() {
-                        budget.charge_work(1)?;
+                        budget.checkpoint()?;
                         push(&mut todo, Work::Step(Step::End), budget)?;
                         push(&mut todo, Work::Node(catch.body), budget)?;
                         push(&mut todo, Work::Catch(catch), budget)?;
@@ -221,7 +221,7 @@ pub(super) fn lower(
     storage: &crate::p7_java::dispatcher::Dispatcher,
     region: &Protection,
     names: &[CatchName],
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<Plan, RequestError> {
     let input = Input {
         storage,

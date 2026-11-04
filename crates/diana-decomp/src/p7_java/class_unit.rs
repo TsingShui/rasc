@@ -141,9 +141,10 @@ fn assemble_impl(
     context.values_offset?;
     context.superclass?;
     let ownership = index.ownership_cached(control)?;
+    ownership.check_class(key.class_def)?;
     let mut owns_nested = false;
     for entry in ownership.nested() {
-        control.charge_work(1)?;
+        control.checkpoint()?;
         if entry.class() == key.class_def && nested_name.is_none() {
             return Ok(None);
         }
@@ -235,7 +236,7 @@ fn assemble_impl(
                         let crate::GeneratedMember::Bridge(declaration) = declaration else { admitted = false; return Ok(()); };
                         let mut owner_present = false;
                         for other in members {
-                            control.charge_work(1)?;
+                            control.checkpoint()?;
                             owner_present |= matches!(other, MethodOutput::Java { facts, .. } if facts.key.method == declaration.target());
                         }
                         if declaration.bridge() != facts.key.method || !owner_present { admitted = false; }
@@ -347,7 +348,7 @@ fn assemble_impl(
             control,
         )?;
         for (position, descriptor) in binding.interfaces.iter().enumerate() {
-            control.charge_work(1)?;
+            control.checkpoint()?;
             if position != 0 {
                 header.push(", ", control)?;
             }

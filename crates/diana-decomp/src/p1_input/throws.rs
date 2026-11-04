@@ -2,7 +2,7 @@ use super::values::{EncodedKind, ValueStep};
 use super::{DexString, InputProblem, ProgramIndex, malformed};
 use crate::raw::OperandReference;
 use crate::substrate::owned::reserve;
-use crate::{ByteLength, ByteRange, MethodBudget, RequestError};
+use crate::{ByteLength, ByteRange, RequestError, RunContext};
 
 pub(crate) struct ThrowsMetadata<'a> {
     _sealed: (),
@@ -11,7 +11,7 @@ pub(crate) struct ThrowsMetadata<'a> {
 pub(super) fn read<'a>(
     index: &ProgramIndex<'a>,
     range: Option<ByteRange>,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<ThrowsMetadata<'a>, RequestError> {
     let mut result = ThrowsMetadata {
         _sealed: (),
@@ -23,7 +23,7 @@ pub(super) fn read<'a>(
     let mut offsets = index.annotation_offsets(0x1003, range.start, budget)?;
     let mut last = None;
     while offsets.remaining_byte() != ByteLength(0) {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         let (offset, visibility, ty, mut values) =
             index.next_annotation(&mut offsets, &mut last, budget)?;
         if !index.type_name(ty, budget)?.matches_with(
@@ -53,7 +53,7 @@ pub(super) fn read<'a>(
             return Err(invalid());
         };
         for _ in 0..count {
-            budget.charge_work(1)?;
+            budget.checkpoint()?;
             let Some(ValueStep::Value(value)) = values.next(index, budget)? else {
                 return Err(invalid());
             };

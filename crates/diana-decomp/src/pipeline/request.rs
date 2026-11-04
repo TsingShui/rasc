@@ -65,7 +65,7 @@ impl RequestError {
             Self::Method(error) => error.kind(),
             Self::Debug(error) => error.kind(),
             Self::Control(error) => error.kind(),
-            Self::Allocation(_) | Self::PlatformCapacity => FailureKind::BudgetExceeded,
+            Self::Allocation(_) | Self::PlatformCapacity => FailureKind::ResourceExhausted,
             Self::UnknownDex | Self::UndefinedRegister { .. } | Self::InvalidWideRead { .. } => {
                 FailureKind::Malformed
             }

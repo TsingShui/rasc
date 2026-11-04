@@ -1,5 +1,5 @@
 use super::archive::{EntryRecord, read_entry};
-use super::axml::{DecodedManifest, ManifestError, ManifestLimits, decode};
+use super::axml::{DecodedManifest, ManifestError, decode};
 use super::input::{ArchiveProblem, InputError, InputKind};
 use super::request::RequestScope;
 
@@ -35,10 +35,7 @@ impl ManifestSelectionError {
 fn manifest_entry_kind(problem: &ArchiveProblem) -> diana_decomp::FailureKind {
     use diana_decomp::FailureKind as Kind;
     match problem {
-        ArchiveProblem::EntryCountExceeded { .. }
-        | ArchiveProblem::TotalEntryBytesExceeded { .. }
-        | ArchiveProblem::InflatedBytesExceeded { .. }
-        | ArchiveProblem::Allocation(_) => Kind::BudgetExceeded,
+        ArchiveProblem::Allocation(_) => Kind::ResourceExhausted,
         ArchiveProblem::UnsupportedCompression(_)
         | ArchiveProblem::EncryptedEntry
         | ArchiveProblem::UnsupportedZip64
@@ -76,10 +73,7 @@ impl Manifest {
 /// A bare DEX, an archive without that entry, an unreadable entry and a damaged
 /// AXML document keep their own classified reasons. The decoder never guesses a
 /// missing record or a value outside the input.
-pub fn read(
-    scope: &RequestScope,
-    limits: ManifestLimits,
-) -> Result<Manifest, ManifestSelectionError> {
+pub fn read(scope: &RequestScope) -> Result<Manifest, ManifestSelectionError> {
     if scope.input().kind() != InputKind::Archive {
         return Err(ManifestSelectionError::NotArchive);
     }
@@ -98,8 +92,8 @@ pub fn read(
     else {
         return Err(ManifestSelectionError::Missing);
     };
-    let payload = read_entry(scope.input().bytes(), &entry, scope.input().limits())
-        .map_err(ManifestSelectionError::Entry)?;
-    let decoded = decode(payload.bytes(), limits)?;
+    let payload =
+        read_entry(scope.input().bytes(), &entry).map_err(ManifestSelectionError::Entry)?;
+    let decoded = decode(payload.bytes())?;
     Ok(Manifest { entry, decoded })
 }

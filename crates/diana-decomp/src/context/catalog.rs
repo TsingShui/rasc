@@ -10,12 +10,12 @@ pub(crate) fn same_units(
     b: &[u16],
     budget: &mut impl InputControl,
 ) -> Result<bool, InputError> {
-    budget.charge_work(1)?;
+    budget.checkpoint()?;
     if a.len() != b.len() {
         return Ok(false);
     }
     for (&a, &b) in a.iter().zip(b) {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         if a != b {
             return Ok(false);
         }
@@ -110,7 +110,7 @@ impl<'a> Context<'a> {
         }
         let mut found = None;
         for field in &class.fields {
-            budget.charge_work(1)?;
+            budget.checkpoint()?;
             if owner.matches_with(&field.owner, budget)?
                 && name.matches_with(&field.name, budget)?
                 && field_type.matches_with(&field.field_type, budget)?
@@ -131,7 +131,7 @@ impl<'a> Context<'a> {
         descriptor: &[u16],
         budget: &mut impl InputControl,
     ) -> Result<Option<&crate::input::InputClassDeclaration>, InputError> {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         let key: Vec<u16> = descriptor.to_vec();
         if self.ambiguous.contains(&key) {
             return Ok(None);

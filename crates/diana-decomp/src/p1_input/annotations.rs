@@ -21,7 +21,7 @@ fn records<'a>(
     control: &mut impl InputControl,
 ) -> Result<Cursor<'a>, InputError> {
     let range = cursor.skip(count_usize(count, cursor.position_byte())?, stride, control)?;
-    control.charge_metadata(u64::from(count))?;
+    control.checkpoint()?;
     Cursor::bounded(index.bytes, range.start, range.end)
 }
 
@@ -48,7 +48,7 @@ impl<'a> ProgramIndex<'a> {
         let mut offsets = self.annotation_offsets(0x1003, offset, control)?;
         let mut last = None;
         while offsets.remaining_byte().0 != 0 {
-            control.charge_work(1)?;
+            control.checkpoint()?;
             let (_, visibility, ty, _) = self.next_annotation(&mut offsets, &mut last, control)?;
             let name = crate::substrate::owned::copy_units(self.type_name(ty, control)?, control)?;
             let mut known = false;
@@ -57,9 +57,7 @@ impl<'a> ProgramIndex<'a> {
                 "Ldalvik/annotation/InnerClass;",
                 "Ldalvik/annotation/MemberClasses;",
             ] {
-                control.charge_work(
-                    u64::try_from(name.len()).map_err(|_| crate::RequestError::PlatformCapacity)?,
-                )?;
+                control.checkpoint()?;
                 known |= name.iter().copied().eq(allowed.encode_utf16());
             }
             if visibility != 2 || !known {
@@ -177,7 +175,7 @@ impl<'a> AnnotationMembers<'a> {
         for (group, count) in counts.iter().enumerate() {
             let start = cursor.position_byte();
             for _ in 0..*count {
-                control.charge_metadata(1)?;
+                control.checkpoint()?;
                 cursor.read_uleb32_with(control)?;
                 cursor.read_uleb32_with(control)?;
                 if group >= 2 {
@@ -223,7 +221,7 @@ impl<'a> AnnotationMembers<'a> {
                 if group.remaining == 0 {
                     break;
                 }
-                control.charge_metadata(1)?;
+                control.checkpoint()?;
                 let at = group.cursor.position_byte();
                 let delta = group.cursor.read_uleb32_with(control)?;
                 if !group.first && delta == 0 {

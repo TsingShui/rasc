@@ -2,7 +2,7 @@ use super::{ChainArgument, ChainInitialization, ChainKind, InitializationId, Uni
 use crate::p2_flow::{BlockId, CallTarget, MethodFrame, Op};
 use crate::p3_ssa::{Definition, SsaBody, Sym, ValueId};
 use crate::substrate::owned::push;
-use crate::{MethodBudget, RequestError};
+use crate::{RequestError, RunContext};
 
 fn ix(value: u32) -> Result<usize, RequestError> {
     usize::try_from(value).map_err(|_| RequestError::PlatformCapacity)
@@ -11,7 +11,7 @@ fn argument(
     ssa: &SsaBody<'_>,
     phis: &[Option<usize>],
     value: ValueId,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<Option<ChainArgument>, RequestError> {
     let graph = crate::p3_ssa::entry::Graph::Method { ssa, phis };
     Ok(
@@ -35,14 +35,14 @@ pub(super) fn solve(
     capture: Option<&crate::p4_types::capture::CaptureUse>,
     deferred: &mut [Option<InitializationId>],
     calls: &mut [Option<InitializationId>],
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<Option<ChainInitialization>, RequestError> {
     let MethodFrame::Constructor(owner) = ssa.frame else {
         return Ok(None);
     };
     let unavailable = |pc| RequestError::InitializationUnavailable { pc };
     for edge in &ssa.edges {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         if edge.target == BlockId(0) {
             return Err(unavailable(ssa.blocks[0].pc));
         }
@@ -51,7 +51,7 @@ pub(super) fn solve(
     let mut root = None;
     let mut phis = Vec::new();
     for (index, definition) in ssa.values.iter().enumerate() {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         push(&mut phis, None, budget)?;
         if *definition == Definition::Parameter(0) {
             let value = ValueId(u32::try_from(index).map_err(|_| RequestError::PlatformCapacity)?);
@@ -64,7 +64,7 @@ pub(super) fn solve(
         "constructor lost entry receiver",
     ))?;
     for (index, phi) in ssa.phis.iter().enumerate() {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         phis[ix(phi.result.0)?] = Some(index);
         if phi.block == BlockId(0)
             && phi.inputs.as_slice() == [(crate::p3_ssa::Incoming::EntrySeed, Sym::Value(root))]
@@ -74,7 +74,7 @@ pub(super) fn solve(
         }
     }
     for &id in &ssa.bound[0].ops {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         let op = ssa.operation(id)?;
         match op.op {
             Op::Nop | Op::Constant(..) | Op::ConstantWide(..) => {}
@@ -104,7 +104,7 @@ pub(super) fn solve(
                 }
                 let mut arguments = Vec::new();
                 for &value in op.inputs.iter().skip(1) {
-                    budget.charge_work(1)?;
+                    budget.checkpoint()?;
                     let Some(value) = argument(ssa, &phis, value, budget)? else {
                         return Err(unavailable(op.pc));
                     };

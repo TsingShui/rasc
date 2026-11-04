@@ -1,7 +1,7 @@
 use crate::p2_flow::Op;
 use crate::p3_ssa::{Definition, SsaBody, Sym};
 use crate::substrate::owned::push;
-use crate::{MethodBudget, RequestError};
+use crate::{RequestError, RunContext};
 
 /// Widest source kind that can hold both views, or None if Java cannot.
 fn widen(a: Kind, b: Kind) -> Option<Kind> {
@@ -171,21 +171,21 @@ fn merge_range(
 }
 pub(crate) fn solve<'a>(
     schedule: &crate::engine::SchedulePermit,
-    input: &crate::input::MethodInput<'_, '_>,
+    input: &crate::input::MethodSource<'_, '_>,
     context: &crate::context::Context,
     ssa: SsaBody<'a>,
     capture: Option<&crate::CaptureCertificate>,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<crate::substrate::outcome::Outcome<TypedBody<'a>>, RequestError> {
     let resolved = super::bindings::collect(schedule, input, context, ssa, capture, budget)?;
     solve_impl(input, resolved, capture, budget)
 }
 
 fn solve_impl<'a>(
-    input: &crate::input::MethodInput<'_, '_>,
+    input: &crate::input::MethodSource<'_, '_>,
     resolved: crate::p4_types::bindings::ResolvedBody<'a>,
     capture: Option<&crate::CaptureCertificate>,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<crate::substrate::outcome::Outcome<TypedBody<'a>>, RequestError> {
     let resolved = resolved.into_data();
     let ssa = resolved.ssa;
@@ -203,7 +203,7 @@ fn solve_impl<'a>(
     let mut ranges = Vec::new();
     let mut kinds = Vec::new();
     for definition in &ssa.values {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         let (bits, range, kind) = match *definition {
             Definition::Parameter(index) => {
                 let declaration = ssa.parameters[ix(index)?];
@@ -400,7 +400,7 @@ fn solve_impl<'a>(
             Definition::ExceptionAt(id) => {
                 let mut kind = None;
                 for binding in &exceptions {
-                    budget.charge_work(1)?;
+                    budget.checkpoint()?;
                     if binding.operation == id {
                         kind = binding.kind.map(|kind| match kind {
                             crate::p4_types::declarations::exceptions::ExceptionType::Nominal(
@@ -435,7 +435,7 @@ fn solve_impl<'a>(
     loop {
         let mut changed = false;
         for op in &ssa.operations {
-            budget.charge_work(1)?;
+            budget.checkpoint()?;
             if matches!(op.op, Op::Move(..) | Op::MoveWide(..)) {
                 let index = ix(op
                     .result
@@ -466,7 +466,7 @@ fn solve_impl<'a>(
             }
         }
         for op in &ssa.operations {
-            budget.charge_work(1)?;
+            budget.checkpoint()?;
             let Op::Binary(_, _, arithmetic, right) = op.op else {
                 continue;
             };
@@ -519,10 +519,10 @@ fn solve_impl<'a>(
             }
         }
         for phi in &ssa.phis {
-            budget.charge_work(1)?;
+            budget.checkpoint()?;
             let index = ix(phi.result.0)?;
             for &(_, input) in &phi.inputs {
-                budget.charge_work(1)?;
+                budget.checkpoint()?;
                 let Sym::Value(source) = input else {
                     return Err(RequestError::InternalInvariant(
                         "unavailable Phi entered type solving",
@@ -573,7 +573,7 @@ fn solve_impl<'a>(
         }
     }
     for (index, kind) in kinds.iter_mut().enumerate() {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         if kind.is_none()
             && zeros.contains(crate::p3_ssa::ValueId(
                 u32::try_from(index).map_err(|_| RequestError::PlatformCapacity)?,
@@ -703,7 +703,7 @@ fn solve_impl<'a>(
         ));
     };
     for (index, block) in ssa.blocks.iter().enumerate() {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         if let crate::p2_flow::Terminal::Test { opcode, .. } = block.terminal
             && matches!(opcode, 0x34..=0x37 | 0x3a..=0x3d)
         {
@@ -723,7 +723,7 @@ fn solve_impl<'a>(
     }
     let roots = super::reference_roots::solve(&ssa, &kinds, budget)?;
     for op in &ssa.operations {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         if matches!(op.op, Op::Monitor(..)) {
             let value = op.input(0)?;
             if !kinds[ix(value.0)?].is_some_and(super::reference_roots::reference)
@@ -764,11 +764,11 @@ fn solve_impl<'a>(
         field_uses,
     });
     for _ in &typed.0.ssa.values {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         push(&mut typed.0.returned_uses, None, budget)?;
     }
     for (index, block) in typed.0.ssa.blocks.iter().enumerate() {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         let thrown = if matches!(block.terminal, crate::p2_flow::Terminal::Throw(_)) {
             let value = typed.ssa.bound[index]
                 .terminal
@@ -814,16 +814,16 @@ fn solve_impl<'a>(
     Ok(crate::substrate::outcome::Outcome::Ready(typed))
 }
 fn solve_arrays(
-    input: &crate::input::MethodInput<'_, '_>,
+    input: &crate::input::MethodSource<'_, '_>,
     ssa: &SsaBody<'_>,
     zeros: &super::zero::ZeroFacts,
     kinds: &[Option<Kind>],
     bits: &[u8],
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<Option<Vec<Option<ArrayEvidence>>>, RequestError> {
     let mut result = Vec::new();
     for op in &ssa.operations {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         if !matches!(
             op.op,
             Op::ArrayLength(..) | Op::ArrayLoad(..) | Op::ArrayStore(..)
@@ -913,11 +913,11 @@ fn solve_fields(
     declarations: &[Option<crate::p4_types::bindings::FieldEvidence>],
     kinds: &[Option<Kind>],
     bits: &[u8],
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<Option<Vec<Option<FieldUse>>>, RequestError> {
     let mut uses = Vec::new();
     for op in &ssa.operations {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         let reference = match op.op {
             Op::FieldLoad(_, _, id, _)
             | Op::FieldStore(_, _, id, _)
@@ -980,11 +980,11 @@ fn solve_casts(
     ssa: &SsaBody<'_>,
     zeros: &super::zero::ZeroFacts,
     kinds: &[Option<Kind>],
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<Option<Vec<Option<crate::p4_types::calls::TypedUse>>>, RequestError> {
     let mut uses = Vec::new();
     for op in &ssa.operations {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         if !matches!(op.op, Op::Cast(..) | Op::InstanceOf(..)) {
             push(&mut uses, None, budget)?;
             continue;
@@ -1003,19 +1003,19 @@ fn solve_casts(
 }
 
 fn solve_filled_arrays(
-    input: &crate::input::MethodInput<'_, '_>,
+    input: &crate::input::MethodSource<'_, '_>,
     ssa: &SsaBody<'_>,
     zeros: &super::zero::ZeroFacts,
     kinds: &[Option<Kind>],
     bits: &[u8],
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<Option<Vec<FilledArrayUse>>, RequestError> {
     if ssa.filled_arrays.is_empty() {
         return Ok(Some(Vec::new()));
     }
     let mut result = Vec::new();
     for op in &ssa.operations {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         let Op::FilledArray(id, _) = op.op else {
             continue;
         };
@@ -1041,7 +1041,7 @@ fn solve_filled_arrays(
         let target = site.component.element_type(input, budget)?;
         let mut arguments = Vec::new();
         for &value in &op.inputs {
-            budget.charge_work(1)?;
+            budget.checkpoint()?;
             let conversion = if target.field_offset() == 2 {
                 super::references::view(kinds, zeros, value, target.kind())?
             } else {
@@ -1071,11 +1071,11 @@ fn solve_filled_arrays(
 fn solve_empty_fills(
     ssa: &SsaBody<'_>,
     kinds: &[Option<Kind>],
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<Option<Vec<PrimitiveFillUse>>, RequestError> {
     let mut uses = Vec::new();
     for op in &ssa.operations {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         let Op::EmptyFill(_, id) = op.op else {
             continue;
         };
@@ -1123,12 +1123,12 @@ struct ArrayUses {
 fn solve_new_arrays(
     ssa: &SsaBody<'_>,
     kinds: &[Option<Kind>],
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<Option<ArrayUses>, RequestError> {
     let mut lengths = Vec::new();
     let mut fills = Vec::new();
     for op in &ssa.operations {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         match op.op {
             Op::NewArray(_, _, id) => {
                 if ix(id.0)? != lengths.len() {

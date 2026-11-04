@@ -1,7 +1,7 @@
 use crate::p2_flow::{BlockId, EdgeId, Op, Terminal};
 use crate::p5_variables::StorageBody;
 use crate::substrate::owned::push;
-use crate::{MethodBudget, RequestError};
+use crate::{RequestError, RunContext};
 pub(super) struct Loop {
     pub header: BlockId,
     pub follow: BlockId,
@@ -14,10 +14,10 @@ fn ix(id: u32) -> Result<usize, RequestError> {
 fn member(
     values: &[BlockId],
     value: BlockId,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<bool, RequestError> {
     for &old in values {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         if old == value {
             return Ok(true);
         }
@@ -26,17 +26,17 @@ fn member(
 }
 pub(super) fn collect(
     storage: &StorageBody<'_>,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<Option<Vec<Loop>>, RequestError> {
     let ssa = &storage.typed.ssa;
     let mut colors = Vec::new();
     for _ in &ssa.blocks {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         push(&mut colors, 0u8, budget)?;
     }
     let mut backs = Vec::new();
     for root in 0..ssa.blocks.len() {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         if colors[root] != 0 {
             continue;
         }
@@ -51,10 +51,10 @@ pub(super) fn collect(
         )?;
         colors[root] = 1;
         while let Some((block, cursor)) = todo.pop() {
-            budget.charge_work(1)?;
+            budget.checkpoint()?;
             let mut next = None;
             for (index, edge) in ssa.edges.iter().enumerate().skip(cursor) {
-                budget.charge_work(1)?;
+                budget.checkpoint()?;
                 if edge.source == block {
                     next = Some((index, edge.target));
                     break;
@@ -88,11 +88,11 @@ pub(super) fn collect(
     }
     let mut loops: Vec<Loop> = Vec::new();
     for &back in &backs {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         let header = ssa.edges[ix(back.0)?].target;
         let mut existing = None;
         for (index, region) in loops.iter().enumerate() {
-            budget.charge_work(1)?;
+            budget.checkpoint()?;
             if region.header == header {
                 existing = Some(index);
                 break;
@@ -109,14 +109,14 @@ pub(super) fn collect(
         push(&mut owned, header, budget)?;
         let mut todo = Vec::new();
         for &edge in &backs {
-            budget.charge_work(1)?;
+            budget.checkpoint()?;
             let original = &ssa.edges[ix(edge.0)?];
             if original.target == header {
                 push(&mut todo, original.source, budget)?;
             }
         }
         while let Some(block) = todo.pop() {
-            budget.charge_work(1)?;
+            budget.checkpoint()?;
             if member(&owned, block, budget)? {
                 continue;
             }
@@ -130,7 +130,7 @@ pub(super) fn collect(
                 return Ok(None);
             }
             for edge in &ssa.edges {
-                budget.charge_work(1)?;
+                budget.checkpoint()?;
                 if edge.target == block {
                     push(&mut todo, edge.source, budget)?;
                 }
@@ -143,7 +143,7 @@ pub(super) fn collect(
         }
         let follow = if y { no } else { yes };
         for edge in &ssa.edges {
-            budget.charge_work(1)?;
+            budget.checkpoint()?;
             let source = member(&owned, edge.source, budget)?;
             let target = member(&owned, edge.target, budget)?;
             if !source && target && edge.target != header
@@ -170,11 +170,11 @@ pub(super) fn collect(
 pub(super) fn cut(
     loops: &[Loop],
     id: EdgeId,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<bool, RequestError> {
     for region in loops {
         for &edge in &region.backedges {
-            budget.charge_work(1)?;
+            budget.checkpoint()?;
             if edge == id {
                 return Ok(true);
             }

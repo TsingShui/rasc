@@ -36,18 +36,7 @@ impl Failure {
 }
 
 /// Writes a complete payload to stdout or atomically to the requested file.
-pub fn publish(
-    output: Option<&Path>,
-    bytes: &[u8],
-    format: Format,
-    maximum: Option<u64>,
-) -> Result<(), Failure> {
-    crate::analysis::limits::enforce_output(bytes, maximum, "max_report_output_bytes").map_err(
-        |error| Failure {
-            code: 1,
-            message: error.to_string(),
-        },
-    )?;
+pub fn publish(output: Option<&Path>, bytes: &[u8], format: Format) -> Result<(), Failure> {
     match output {
         Some(path) => {
             let directory = path.parent().unwrap_or_else(|| Path::new("."));

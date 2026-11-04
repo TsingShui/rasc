@@ -2,7 +2,7 @@ use crate::p2_flow::{Op, OpId};
 use crate::p4_types::initialization::Initialization;
 use crate::p4_types::{Kind, TypedBody};
 use crate::substrate::owned::push;
-use crate::{MethodBudget, RequestError};
+use crate::{RequestError, RunContext};
 
 pub(crate) struct DeferredAllocation {
     _sealed: (),
@@ -14,7 +14,7 @@ pub(crate) struct DeferredAllocation {
 pub(super) fn prove(
     typed: &TypedBody<'_>,
     plan: &Initialization,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<DeferredAllocation, RequestError> {
     let broken = || {
         RequestError::InternalInvariant("deferred initialization changed original sites or aliases")
@@ -53,7 +53,7 @@ pub(super) fn prove(
     let root = allocation.result.ok_or_else(broken)?;
     let mut aliases = Vec::new();
     for alias in &plan.aliases {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         let value = alias.value();
         if typed.kinds[usize::try_from(value.0).map_err(|_| RequestError::PlatformCapacity)?]
             != Some(Kind::Nominal(plan.object))

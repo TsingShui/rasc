@@ -1,6 +1,6 @@
 use crate::context::Context;
-use crate::input::MethodInput;
-use crate::{CodeUnitOffset, FieldId, MethodBudget, RequestError};
+use crate::input::MethodSource;
+use crate::{CodeUnitOffset, FieldId, RequestError, RunContext};
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub(crate) enum FieldUse {
@@ -34,13 +34,13 @@ pub(crate) struct FieldAccess {
     pub flags: Option<u32>,
 }
 pub(crate) fn collect_field(
-    input: &MethodInput<'_, '_>,
+    input: &MethodSource<'_, '_>,
     catalog: &Context,
     reference: FieldId,
     storage: FieldStorage,
     usage: FieldUse,
     pc: CodeUnitOffset,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<FieldAccess, RequestError> {
     let original = input.field_reference(reference, budget)?;
     let kind = crate::p2_flow::field_type(
@@ -111,11 +111,11 @@ pub(crate) fn collect_field(
 }
 
 pub(crate) fn collect_capture(
-    input: &MethodInput<'_, '_>,
+    input: &MethodSource<'_, '_>,
     catalog: &Context,
     reference: FieldId,
     pc: CodeUnitOffset,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<FieldAccess, RequestError> {
     let mut access = collect_field(
         input,
@@ -137,11 +137,11 @@ pub(crate) fn collect_capture(
 }
 
 pub(crate) fn collect_own_write(
-    input: &MethodInput<'_, '_>,
+    input: &MethodSource<'_, '_>,
     catalog: &Context,
     reference: FieldId,
     pc: CodeUnitOffset,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<FieldAccess, RequestError> {
     collect_field(
         input,

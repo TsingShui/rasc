@@ -27,9 +27,8 @@ indices. Byte offsets, code-unit offsets and UTF-16 coordinates remain distinct.
 ## Reads and original metadata
 
 Readers MUST check arithmetic, lengths, offsets and counts before slicing or
-allocating. Reads and loops consume the request's resource controls and check
-cancellation. No default numeric cap is implied; an explicitly configured limit
-MUST NOT become silent successful truncation.
+allocating. Reads and loops check cancellation. There is no numeric cap and no
+silent successful truncation.
 
 `ProgramIndex` exposes original class and member facts. `MethodInput` separates a
 checked method body from a declaration-only method. UTF-16 units and available
@@ -44,7 +43,7 @@ these locations while retaining their declaration checks.
 
 Ownership consumers reuse one checked ownership result per index. Successful
 results and deterministic malformed/unsupported input errors are cached;
-allocation, quota and cancellation failures are not cached. Cache queries still
+allocation and cancellation failures are not cached. Cache queries still
 check request control. Ownership construction indexes type relationships and
 checks parent cycles with a finite traversal without reordering original members.
 
@@ -58,7 +57,7 @@ The application file and archive contracts remain in 10-cli. These contracts do 
 implementation MUST NOT index first and check afterwards. `range(off,n,stride)` verifies through
 `n.checked_mul(stride)` and `off.checked_add(size)` and only then takes the slice.
 Fixed records keep a borrowed view; a variable-length record that needs decoding first verifies
-the remaining bytes and the minimum record size, charges the budget, and only then calls
+the remaining bytes and the minimum record size, and only then calls
 try_reserve. Offsets use `FileByte` and `CodeUnit` separately; a call site MUST NOT multiply by
 2 inline.
 
@@ -130,7 +129,7 @@ The reader first verifies map_list's `4+12*n`, type uniqueness, the offset order
 specification, and consistency of the fixed tables with the header; the reader MAY read
 references only after that. The type and proto count limit is 65535; other tables are constrained
 by the actual
-range, index width and resource quotas, and the reader MUST NOT cast a u32 count to u16 first.
+range, index width and platform capacity, and the reader MUST NOT cast a u32 count to u16 first.
 After the four class_data counts it accumulates the field and method ULEB deltas separately;
 each group starts from 0, uses checked_add, and publishes declarations only after validation of
 the index, the owner it belongs to and duplicate definitions.
@@ -305,12 +304,12 @@ The implementation first computes the division-form upper bound or checked multi
 then takes the slice; it MUST NOT compute the possibly overflowing `off+n*s<=N` first. A record
 count that satisfies the minimum byte bound is only a necessary condition: every record is then
 checked for its variable-length tail and references. Reads do not allocate; when a Vec is needed,
-the implementation checks the input facts, the semantic count and the resource quota first and
+the implementation checks the input facts and the semantic count first and
 then calls try_reserve, and none of the three substitutes for another.
 
 If the minimum byte count of an already read field directly proves an overrun of the remaining
-bytes, record Malformed first; the implementation MUST NOT report BudgetExceeded instead merely
-because the same count also exceeds the analysis limit. A cancellation or a request-admission
+bytes, record Malformed first; an allocation failure is reported only after the
+format range check has succeeded. A cancellation or a request-admission
 resource failure before that field has been read still returns its own reason, and parsing MUST
 NOT be forced to continue for diagnosis.
 
@@ -349,9 +348,9 @@ go through safe interfaces.
    terminal, and Windows rejects the device/pipe namespace. After obtaining the handle, re-check
    regular-file status, len and file identity.
 2. A small input is copied into owned bytes and a large APK into a private snapshot file; read it in
-   chunks by the entry file length and check cancellation and any explicit input quota. An early
+   chunks by the entry file length and check cancellation. An early
    EOF, bytes beyond the entry length, or a change of the original handle's identity/len/mtime
-   before or after all report INPUT_CHANGED and discard the snapshot; an unlimited quota also does
+   before or after all report INPUT_CHANGED and discard the snapshot; the reader does
    not chase a continuously growing file. This promises immutability after the copy only, and does
    not claim
    that a stat check proves an atomic version under arbitrary concurrent writes of the original
@@ -417,8 +416,8 @@ go through safe interfaces.
    handle/hardlink identity as the input. All temporary and final operations are relative to that
    Dir, and the mutable parent path is not resolved again.
 3. In that Dir, create a mode 0600 temporary file with create_new, with a fixed upper bound on
-   collision retries; publish only after the write/flush and the CRC/size/budget checks complete.
-   Writes and copies check the public request cancellation and budget in chunks of at most 64KiB,
+   collision retries; publish only after the write/flush and the CRC/size checks complete.
+   Writes and copies check the public request cancellation in chunks of at most 64KiB,
    and one large unchecked write or copy MUST NOT bypass cooperative cancellation. On error or
    cancellation only the own temp is removed, never the user target.
 4. no-force publishes atomically with **hard_link(temp, final)** in the same Dir, fails when any
@@ -442,9 +441,9 @@ go through safe interfaces.
    deliberately marked partial-failure result with a writer truncation.
 
 Domain errors keep distinguishable reasons: AmbiguousEntry, TargetExists, UnsafeTarget,
-CrcMismatch, BudgetExceeded, Cancelled, UnsupportedCompression, EncryptedEntry and I/O. The
+CrcMismatch, ResourceExhausted, Cancelled, UnsupportedCompression, EncryptedEntry and I/O. The
 snake_case names in cases are the semantic projection of these public reasons, and the
-implementation MUST NOT guess the stage from stderr or replace a specified CRC/budget/alias
+implementation MUST NOT guess the stage from stderr or replace a specified CRC/allocation/alias
 rejection with an arbitrary error.
 
 The H02/H10 core file-safety tests continue through the public domain interfaces and the established
@@ -459,8 +458,7 @@ InputLease/inflate/CRC as extraction. ResChunk_header, ResStringPool and
 ResXMLTree field layouts follow the AOSP source identified in SOURCE_MAP §7. A bare DEX or a JAR-only input is an input
 error; a structurally usable APK/ZIP with no AndroidManifest.xml is no-result.
 The manifest Module decodes bytes only after entry integrity passes. It shares
-request cancellation and explicit allocation/work/output limits; no manifest
-size or nesting quota is invented by default.
+request cancellation; no manifest size or nesting quota is invented.
 
 | Binary structure | Checked read and semantic rule |
 |---|---|
@@ -495,25 +493,24 @@ A reused decoder MUST expose the required cancellation/allocation points and
 return errors for every reachable malformed read; a skeleton precheck,
 `catch_unwind` or the existing PATCHES cannot prove that contract. A known but
 unhandled legal chunk/profile is Unsupported; a broken size/ref/stack/string is
-Malformed; cancellation/resources retain their own kinds. Extraction remains the
+Malformed; cancellation and allocation failures retain their own kinds. Extraction remains the
 way to retrieve bytes that the XML presentation cannot express.
 
-## 7. Application limits and lifecycle
+## 7. Application lifecycle and allocation failure
 
-Every numeric quota MUST be configured explicitly by the caller and is unset by default; the application MUST NOT restore an engine default limit that was cancelled by using its own fixed threshold.
+Diana exposes no numeric work, allocation or output quota, and the engine keeps no
+cumulative resource ledger. Removing quotas does not remove input safety or
+cancellation.
 
 | Layer | Contract |
 |---|---|
-| File/ZIP | input, directory count/bytes and inflated bytes are unlimited by default; Diana MUST still check the actual file range, the minimum directory record size, the end state of the compressed stream, and the actual size and CRC |
-| CLI request/decompression | an explicit quota covers held bytes, decompression, dependencies and scratch; cancellation and bounded-queue backpressure are always retained, and only the bytes this request needs are reused |
-| Engine | Limits are all None by default; the application passes only explicit configuration and MUST NOT inject numeric initial values for input/work/graph/output |
-| CLI output | a query may stream, while a decompilation report MUST be rendered completely before it is committed; text/JSON MUST be checked against their actual bytes separately, and Diana MUST NOT truncate an explicit overrun into a success |
+| File/ZIP | Diana MUST check the actual file range, the minimum directory record size, the end state of the compressed stream, and the actual size and CRC |
+| CLI request/decompression | cancellation and bounded-queue backpressure are retained, and only the bytes this request needs are reused; container growth uses checked capacity and fallible reservation |
+| Engine | no numeric limits are passed; actual allocation and platform-capacity failures stay classified |
+| CLI output | a query may stream, while a decompilation report MUST be rendered completely before it is committed; a delivery failure MUST NOT be truncated into a success |
 
-The application JSON output limit is optional configuration as well and defaults to None, with no fixed threshold such as 64MiB. The application MUST check a decompilation JSON against
-the corresponding item only when the application limit or `Limits.max_report_output_bytes` is set explicitly, and the smaller value MUST apply only when both are set;
-a lightweight query JSON MUST use only the explicit application limit. The application MUST check the configured allowance segment by segment against the final JSON bytes, and it MUST count repeated source, escapes,
-diagnostics and spans. The application MUST check text/JSON against their own length separately and MUST NOT add the two representations together; actual work/
-allocation MUST still be charged to the same request, and Diana MUST NOT claim that the cumulative ledger is RSS.
+Actual allocation failures MUST be reported explicitly and MUST NOT be converted
+into format damage or a silently truncated result.
 
 A query MUST use bounded admission and output queues and MUST NOT wait for display
 order. Without `--jobs`, the worker count is min(8, available_parallelism), or 1
@@ -525,7 +522,7 @@ silent clamping. A worker scans the 041 logical members of its admitted physical
 image under that image's lease; the pool is not recreated per member or method.
 Class decompilation uses Rayon for independent methods when the context has a
 thread-safe cancellation callback and more than one worker is selected. Methods
-share cumulative request quotas; per-method normal/raw budgets remain separate.
+share the request cancellation source; each method checks cancellation independently.
 Class setup, member diagnostic linking, assembly and final publication occur
 after joining. `get-method` runs one method. Input/declaration caches use
 thread-safe initialization; failed resource/cancellation initialization is not cached.
@@ -533,12 +530,11 @@ thread-safe initialization; failed resource/cancellation initialization is not c
 Admission holds at most one input per worker, and each worker has at most one
 pending complete output row; it waits for that row to be consumed before queuing
 the next. The sink consumes whichever worker is ready. The weight is
-the actual retained input, decompression buffer and queued row/string capacity,
-charged before growth against explicitly configured request limits. A capacity
-estimate from a ZIP header is not permission to allocate unchecked. One row or
-image larger than a transport chunk is processed with checked growth, not rejected
-by a hidden default quota. Backpressure bounds outstanding rows, not the bytes
-of an arbitrarily large single row or a retained complete JSON result.
+the actual retained input, decompression buffer and queued row/string capacity.
+A capacity estimate from a ZIP header is not permission to allocate unchecked.
+One row or image larger than a transport chunk is processed with checked growth.
+Backpressure bounds outstanding rows, not the bytes of an arbitrarily large single
+row or a retained complete JSON result.
 
 Closing the consumer stops admission and wakes blocked workers; cancellation or
 a hard producer failure stops the request and releases pending owners. Completed

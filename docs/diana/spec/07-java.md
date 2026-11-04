@@ -23,15 +23,13 @@ Each method runs exactly one analysis chain and selects a result by the followin
 1. Cancellation stops the request immediately and MUST NOT continue raw per method.
 2. A proven Malformed yields Unavailable with any safe original debug excerpt; it never becomes a normal success. An abstract, native or interface member with no code yields Java with `body: declaration` when its declaration is readable; otherwise its available declaration facts remain visible as Debug or Unavailable.
 3. P7 MUST retain a complete renderable reconstruction without requiring Java-legality qualification. It MUST NOT fabricate a missing operation or suppress other completed members. Exact operation, value, copy and control correspondence remain checked against the shared products; an InternalInvariant remains a BUG.
-4. When a declaration or source fact is unknown, P7 MUST retain an available readable reconstruction as Java with explicit uncertainty reasons and original identity. It MUST distinguish unknown facts from established facts and MUST NOT claim verified semantics or compilation. If no readable reconstruction is available, Unsupported enters the debug exit once. BudgetExceeded retains its classified failure and enters the debug exit only if resources remain. Read only facts whose original ranges/widths are checked, retain their coverage and mark unavailable regions. Any further read uses the same request resources and explicit fallback quota. A confirmed Malformed MUST NOT be revoked by re-reading.
-5. When a decoded debug view cannot be produced safely within available resources, the result is Unavailable with any safe excerpt. When raw
+4. When a declaration or source fact is unknown, P7 MUST retain an available readable reconstruction as Java with explicit uncertainty reasons and original identity. It MUST distinguish unknown facts from established facts and MUST NOT claim verified semantics or compilation. If no readable reconstruction is available, Unsupported enters the debug exit once. ResourceExhausted retains its classified failure and enters the debug exit only if that read remains possible. Read only facts whose original ranges/widths are checked, retain their coverage and mark unavailable regions. A confirmed Malformed MUST NOT be revoked by re-reading.
+5. When a decoded debug view cannot be produced safely, the result is Unavailable with any safe excerpt. When raw
    newly discovers definite damage, keep the Malformed fact; InternalInvariant keeps its BUG
-   status even with raw attached. The implementation MUST NOT rerun normal or change the engine
-   or limits.
+   status even with raw attached. The implementation MUST NOT rerun normal analysis.
 
-When the caller explicitly sets normal work to 0 and raw is still available, the result MAY be
-a decoded debug view; when the explicit fallback quota is also 0, the result is Unavailable.
-None is not 0, and an unlimited default quota MUST NOT be treated as an exhausted budget.
+When the normal reconstruction cannot be produced and the original read remains possible, the
+result MAY be a decoded debug view; when that read itself fails, the result is Unavailable.
 This is a single branch from a failure result to the read-only raw exit, not a recovery
 scheduler.
 
@@ -54,7 +52,7 @@ methods after a guess.
 The source-visible shell is validated next, and the Explicit methods are analyzed one by one; a
 failure of shell source eligibility records only a class reason, and while the original raw remains
 locatable the analysis of each method continues, so one Unsupported MUST NOT skip the remaining
-members early. Only hard terminations such as cancellation, global damage or request resources
+members early. Only hard terminations such as cancellation, global damage or allocation failure
 stop per the request rules, and an unprocessed prefix MUST NOT be passed off as a complete result.
 Class assembly checks original field and member coverage, preparation availability
 and ownership of Generated syntax. It MUST NOT require complete external hierarchy,
@@ -192,7 +190,7 @@ P7 supplies a flat owner preorder with checked depths and sealed nested emission
 plans. P8 MUST render those plans without inferring hidden fields from flags or
 splitting binary names. Original class and method spans use final UTF-8 byte
 coordinates, including nested descendants inside their owner spans. Closure work,
-depth-stack allocation and output consume request budgets; no numeric default cap
+depth-stack allocation and output remain checked and cancellable; no numeric default cap
 or recursive report tree is introduced. A rejected nested unit makes the owner
 Mixed while retaining available original nested results. A single inner fragment
 is not an independent JavaUnit.
@@ -220,7 +218,7 @@ P7 checks unique and complete original field/method coverage before sealing the
 enum unit binding. P8 renders the checked enum constants and maps generated method
 identities to the final class source span. Mixed output and standalone retrieval
 retain original snapshots. A local proof parse error remains a classified class
-issue while other members are retrieved; cancellation/resource/invariant errors
+issue while other members are retrieved; cancellation/allocation/invariant errors
 terminate without a partial successful unit.
 
 The native covariant profile accepts a no-argument Object-returning bridge to
@@ -262,7 +260,7 @@ Java syntax is the readable notation, not a promise to emit classfile 52.
 Diana MUST NOT reject readable source for JVM parameter, constant-pool, method-size,
 annotation-count or MUTF8-item limits. It MUST NOT predict compiled sizes or build
 a second JVM backend. DEX format checks, platform capacity, caller-configured
-quotas and cancellation remain applicable.
+checked reads and cancellation remain applicable.
 
 Operation/type/evaluation correspondence still applies to cmp-with-bias,
 BoolToInt, ProvenNarrow and FillExpansion. A syntax form without a semantic
@@ -283,15 +281,14 @@ scan:
 2. expr contains only int/long literals, local reads, integer unary operations, explicit integer
    conversions, add/sub/mul, bitwise operations and shifts; it contains no div/rem, FP, heap, ref
    cast, call, allocation or synchronization.
-3. Check the resources of the body copy, the replaced nodes, the re-validation and the baseline
-   complete emit only against explicitly configured finite quotas; an insufficient quota means
-   Declined, and no estimated rejection threshold is set by default. Copy one JavaBody, scan once in
-   the original AST order and replace disjoint pairs; do not run repeat,
+3. Check the capacity of the body copy, the replaced nodes and the re-validation with checked
+   arithmetic and fallible reservation; an allocation failure means Declined. Copy one JavaBody,
+   scan once in the original AST order and replace disjoint pairs; do not run repeat,
    do not try modifying the original body in place, and build no plugin/option registry.
 4. Move the expr tree unchanged into the return, preserving the source type and the Origin of both
    sites; a pure local declaration left without a use MAY be kept. Re-validate
-   type/binding/control/effects and the complete emit quota.
-5. If it passes, the result is Applied; an ordinary mismatch or a restricted budget is Declined;
+   type/binding/control/effects and the complete emit.
+5. If it passes, the result is Applied; an ordinary mismatch or an allocation failure is Declined;
    Cancelled stops; an internal invariant failure is a BUG and MUST NOT be wrapped as Declined.
    Acceptance compares the on/off results of the same fixed behavior, not the text or the local
    count.
@@ -312,7 +309,7 @@ the uncertainty rather than claim it is proven. P7 MUST NOT delete a member base
 on a missing synthetic marker alone or fabricate a replacement body. Generated
 syntax retains the original member identities and MUST NOT duplicate members.
 
-P8 is a pure printer and MUST NOT solve types or structure; its input is already sealed, but it MUST still check budget/cancellation per segment. Java expressions use the
+P8 is a pure printer and MUST NOT solve types or structure; its input is already sealed, but it MUST still check cancellation per segment. Java expressions use the
 precedence table: primary/postfix→unary/cast→mul→add→shift→relational→equality→bitwise
 and/xor/or→logical and/or→conditional→assignment. The printer MUST parenthesize an operand below the parent precedence; at equal precedence the
 right operand keeps parentheses for sub/div/rem/shift and for non-associative operations, and the printer MUST NOT reassociate FP. A simple implementation MAY add more parentheses.
@@ -331,4 +328,4 @@ Compilation and behavioral comparisons are independent evidence for their tested
 inputs and environments, not a prerequisite for displaying source. The engine
 MUST preserve original UTF-16 and floating-point facts and MUST NOT silently
 substitute fabricated method bodies or instruction widths. Real format limits,
-resource controls and cancellation remain applicable.
+checked reads and cancellation remain applicable.

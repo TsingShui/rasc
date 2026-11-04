@@ -4,14 +4,14 @@ use super::json::JsonBuffer;
 use super::values::{note, write_entries};
 use crate::input::annotations::{AnnotationMembers, AnnotationOwner, association};
 use crate::input::{ClassView, Cursor, ProgramIndex};
-use crate::{ByteLength, ByteOffset, FallbackBudget};
+use crate::{ByteLength, ByteOffset, RunContext};
 
 fn write_set(
     index: &ProgramIndex<'_>,
     output: &mut JsonBuffer,
     offset: ByteOffset,
     issues: &mut IssueLog,
-    budget: &mut FallbackBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<bool, DebugError> {
     output.push("{\"items\":[", budget)?;
     let result = index.annotation_offsets(0x1003, offset, budget);
@@ -77,7 +77,7 @@ fn write_parameters(
     offset: ByteOffset,
     count: usize,
     issues: &mut IssueLog,
-    budget: &mut FallbackBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<bool, DebugError> {
     output.push("{\"items\":[", budget)?;
     let mut complete = true;
@@ -117,7 +117,7 @@ fn write_associations(
     mut records: Cursor<'_>,
     kind: AssociationKind,
     issues: &mut IssueLog,
-    budget: &mut FallbackBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<bool, DebugError> {
     output.push("[", budget)?;
     if records.remaining_byte() == ByteLength(0) {
@@ -195,7 +195,7 @@ pub(super) fn write_directory(
     output: &mut JsonBuffer,
     offset: ByteOffset,
     issues: &mut IssueLog,
-    budget: &mut FallbackBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<(), DebugError> {
     output.push(",\"annotation_directory\":{\"file_byte_start\":", budget)?;
     output.unsigned(

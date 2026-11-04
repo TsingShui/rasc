@@ -10,8 +10,7 @@ the same result rather than selecting different recovery paths.
 
 Debug output is an analysis-oriented snapshot of original DEX facts, not Java or
 a promise of reassembly. Unknown or undecoded ranges remain explicit. P8 MUST
-respect output quotas and cancellation; errors MUST NOT be disguised as a
-complete result.
+respect cancellation; errors MUST NOT be disguised as a complete result.
 
 ## Result presentation
 
@@ -40,18 +39,18 @@ refuse to call the renderer because a class is Mixed:
    MUST NOT fabricate an independent method; Debug keeps the available original facts, their coverage and the reason;
    Unavailable keeps the identity, the reason and any available excerpt. An unexplainable shell is
    marked as such, and available methods MUST NOT be deleted because of it.
-3. The language/reason marker and the source segment are charged UTF8 bytes separately, and
+3. The language/reason marker and the source segment are counted as UTF8 bytes separately, and
    OriginSpan is relocated to the actual text of this request; the implementation MUST NOT put raw
    into a Java comment or fake body that could close accidentally, and MUST NOT use stubs to fill
    out the class. Untrusted names and messages use the established display escaping, while string
    and payload contents are still preserved completely per language. No output ordering is
    required.
 4. text and json share the same Report, and MUST NOT rerun the analysis or trigger a second
-   fallback. Complete rendering happens within the original quota, and the payload is checked
-   before writing; allowing Mixed does not allow truncation. A single Unsupported member is not a
+   fallback. Complete rendering happens before writing; allowing Mixed does not allow
+   truncation. A single Unsupported member is not a
    ban on presenting the whole class.
 5. Result completeness/language eligibility is separate from error classification: a complete
-   Unsupported result MAY be presented normally; Malformed, BudgetExceeded, InternalInvariant and
+   Unsupported result MAY be presented normally; Malformed, ResourceExhausted, InternalInvariant and
    similar keep their failure status even when a renderable Report already exists, and the
    achieved output is not cleared; Cancelled MUST NOT synthesize a Report and continue raw, and a
    render or I/O failure MUST NOT be passed off as complete delivery.
@@ -91,13 +90,11 @@ MUST NOT erase facts already read safely or completed Java from other members.
 ### One read-only exit
 
 After a normal failure, release unused analysis scratch and produce debug output
-from the original checked facts within the remaining RunContext resources and any
-explicit fallback quota. The existing fallback_* fields govern this debug work;
-there is no separate recovery subsystem. Cancellation stops immediately. A known
-Malformed or BUG remains a hard failure even when useful debug information exists.
-Insufficient resources leave an explicit Unavailable reason and any safe excerpt;
-Diana MUST NOT retry normal analysis, increase limits or silently truncate a view
-marked complete. Omitted quotas remain None, not zero or an invented default cap.
+from the original checked facts through the raw read exit. There is no separate
+recovery subsystem. Cancellation stops immediately. A known Malformed or BUG
+remains a hard failure even when useful debug information exists. A read or
+allocation failure leaves an explicit Unavailable reason and any safe excerpt;
+Diana MUST NOT retry normal analysis or silently truncate a view marked complete.
 
 ### Readable snapshot, not an assembly language
 

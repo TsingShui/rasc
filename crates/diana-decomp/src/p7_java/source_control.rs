@@ -2,7 +2,7 @@ use super::branch::ValueUse;
 use super::dispatcher::{Case, Dispatcher, Edge, Transfer};
 use crate::p2_flow::{BlockId, EdgeId};
 use crate::substrate::owned::push;
-use crate::{MethodBudget, RequestError};
+use crate::{RequestError, RunContext};
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub(crate) enum Label {
@@ -54,21 +54,21 @@ impl Builder {
     pub(super) fn marker(
         &mut self,
         step: Step,
-        budget: &mut MethodBudget<'_, '_>,
+        budget: &mut RunContext<'_>,
     ) -> Result<(), RequestError> {
         push(&mut self.steps, step, budget)
     }
     pub(super) fn statements(
         &mut self,
         case: &Case,
-        budget: &mut MethodBudget<'_, '_>,
+        budget: &mut RunContext<'_>,
     ) -> Result<(), RequestError> {
         self.marker(Step::Statements(case.key), budget)
     }
     pub(super) fn copies(
         &mut self,
         edge: &Edge,
-        budget: &mut MethodBudget<'_, '_>,
+        budget: &mut RunContext<'_>,
     ) -> Result<(), RequestError> {
         self.marker(
             Step::Copies {
@@ -81,21 +81,21 @@ impl Builder {
     pub(super) fn condition(
         &mut self,
         case: &Case,
-        budget: &mut MethodBudget<'_, '_>,
+        budget: &mut RunContext<'_>,
     ) -> Result<(), RequestError> {
         self.marker(Step::If(case.key), budget)
     }
     pub(super) fn returned(
         &mut self,
         value: ValueUse,
-        budget: &mut MethodBudget<'_, '_>,
+        budget: &mut RunContext<'_>,
     ) -> Result<(), RequestError> {
         self.marker(Step::Return(value), budget)
     }
     pub(super) fn thrown(
         &mut self,
         transfer: &Transfer,
-        budget: &mut MethodBudget<'_, '_>,
+        budget: &mut RunContext<'_>,
     ) -> Result<(), RequestError> {
         let step = match transfer {
             Transfer::Throw(value) => Step::Throw(*value),
@@ -113,7 +113,7 @@ impl Builder {
         storage: &Dispatcher,
         protection: Option<&crate::p6_regions::protection::Protection>,
         names: &[super::protected::CatchName],
-        budget: &mut MethodBudget<'_, '_>,
+        budget: &mut RunContext<'_>,
     ) -> Result<Plan, RequestError> {
         enum Scope {
             IfYes,
@@ -131,7 +131,7 @@ impl Builder {
             push(&mut statements, false, budget)?;
         }
         for step in &self.steps {
-            budget.charge_work(1)?;
+            budget.checkpoint()?;
             match step {
                 Step::Statements(id) => {
                     let at = usize::try_from(id.0).map_err(|_| RequestError::PlatformCapacity)?;
@@ -167,7 +167,7 @@ impl Builder {
                     }
                     let at = usize::try_from(edge.0).map_err(|_| RequestError::PlatformCapacity)?;
                     while copies.len() <= at {
-                        budget.charge_work(1)?;
+                        budget.checkpoint()?;
                         push(&mut copies, false, budget)?;
                     }
                     if copies[at] {
@@ -205,7 +205,7 @@ impl Builder {
                 Step::Break(label) | Step::Continue(label) => {
                     let mut found = false;
                     for scope in scopes.iter().rev() {
-                        budget.charge_work(1)?;
+                        budget.checkpoint()?;
                         if let Scope::Loop(actual) = scope
                             && (*label == Label::Nearest || label == actual)
                         {

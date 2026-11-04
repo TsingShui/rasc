@@ -8,7 +8,7 @@
 use std::path::{Path, PathBuf};
 
 use super::archive::read_entry;
-use super::axml::{ManifestLimits, ManifestWarning, decode};
+use super::axml::{ManifestWarning, decode};
 use super::input::{ArchiveProblem, EntryIndex, InputError, InputKind};
 use super::request::RequestScope;
 
@@ -60,7 +60,6 @@ pub struct Request<'a> {
     pub index: Option<usize>,
     /// Keep the original decompressed payload even when it is binary XML.
     pub raw: bool,
-    pub limits: ManifestLimits,
 }
 
 /// Selects one physical entry, validates its payload and decodes binary XML unless
@@ -101,8 +100,7 @@ pub fn prepare(scope: &RequestScope, request: &Request) -> Result<Extracted, Ext
             });
         }
     };
-    let payload = read_entry(scope.input().bytes(), selected, scope.input().limits())
-        .map_err(ExtractError::Entry)?;
+    let payload = read_entry(scope.input().bytes(), selected).map_err(ExtractError::Entry)?;
     let original = payload.bytes();
     if request.raw || !is_binary_xml(original) {
         return Ok(Extracted {
@@ -112,8 +110,8 @@ pub fn prepare(scope: &RequestScope, request: &Request) -> Result<Extracted, Ext
             warnings: Vec::new(),
         });
     }
-    let decoded = decode(original, request.limits)
-        .map_err(|_| ExtractError::Entry(ArchiveProblem::DamagedEntry))?;
+    let decoded =
+        decode(original).map_err(|_| ExtractError::Entry(ArchiveProblem::DamagedEntry))?;
     Ok(Extracted {
         entry: selected.name().to_owned(),
         bytes: decoded.xml().as_bytes().to_vec(),

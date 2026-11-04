@@ -1,8 +1,8 @@
 use crate::context::Context;
-use crate::input::MethodInput;
+use crate::input::MethodSource;
 use crate::input::catalog::{MemberEntry, MemberSelection};
 use crate::substrate::owned::{copy_units, push};
-use crate::{FieldId, MethodBudget, RequestError};
+use crate::{FieldId, RequestError, RunContext};
 
 pub(crate) struct CaptureDeclaration {
     field: FieldId,
@@ -23,22 +23,22 @@ impl CaptureDeclaration {
 
 pub(crate) fn collect(
     _permit: &crate::engine::SchedulePermit,
-    input: &MethodInput<'_, '_>,
+    input: &MethodSource<'_, '_>,
     ownership: &crate::Ownership,
     catalog: &Context,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<Option<CaptureDeclaration>, RequestError> {
     collect_impl(input, ownership, catalog, budget)
 }
 fn collect_impl(
-    input: &MethodInput<'_, '_>,
+    input: &MethodSource<'_, '_>,
     ownership: &crate::Ownership,
     catalog: &Context,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<Option<CaptureDeclaration>, RequestError> {
     let mut nested = None;
     for entry in ownership.nested() {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         if entry.class() == input.class_id() && nested.replace(entry).is_some() {
             return Ok(None);
         }
@@ -74,7 +74,7 @@ fn collect_impl(
     };
     let mut object_constructor = false;
     for method in &object.methods {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         if method.name == const { crate::substrate::owned::ascii_units(*b"<init>") }
             && method.prototype == const { crate::substrate::owned::ascii_units(*b"()V") }
         {
@@ -124,7 +124,7 @@ fn collect_impl(
     }
     let mut constructors = 0usize;
     for method in &class.methods {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         if method.name == const { crate::substrate::owned::ascii_units(*b"<init>") }
             && method.prototype == prototype
         {
@@ -158,7 +158,7 @@ fn collect_impl(
             budget,
             MemberSelection::Fields,
             |entry, budget| -> Result<(), RequestError> {
-                budget.charge_work(1)?;
+                budget.checkpoint()?;
                 let MemberEntry::Field(original) = entry else {
                     return Err(RequestError::InternalInvariant(
                         "capture field visitor returned method",
@@ -192,7 +192,7 @@ fn collect_impl(
                 let name = copy_units(declaration.name, budget)?;
                 let mut same_names = 0usize;
                 for candidate in &class.field_names {
-                    budget.charge_work(1)?;
+                    budget.checkpoint()?;
                     if crate::context::same_units(candidate, &name, budget)? {
                         same_names = same_names
                             .checked_add(1)

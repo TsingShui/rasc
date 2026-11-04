@@ -4,7 +4,7 @@ use super::{DebugError, values};
 use crate::input::values::{EncodedKind, EncodedValue, EncodedValues, ValueStep};
 use crate::input::{InputError, ProgramIndex};
 use crate::raw::OperandReference;
-use crate::{ByteOffset, FailureKind, FallbackBudget};
+use crate::{ByteOffset, FailureKind, RunContext};
 
 pub(super) enum Initializers<'a> {
     Absent,
@@ -19,7 +19,7 @@ impl<'a> Initializers<'a> {
         index: &ProgramIndex<'a>,
         offset: Result<Option<ByteOffset>, InputError>,
         issues: &mut IssueLog,
-        budget: &mut FallbackBudget<'_, '_>,
+        budget: &mut RunContext<'_>,
     ) -> Result<Self, DebugError> {
         match offset {
             Ok(Some(offset)) => match EncodedValues::open(index, offset, None, budget) {
@@ -40,7 +40,7 @@ impl<'a> Initializers<'a> {
         output: &mut JsonBuffer,
         ordinal: u32,
         issues: &mut IssueLog,
-        budget: &mut FallbackBudget<'_, '_>,
+        budget: &mut RunContext<'_>,
     ) -> Result<(), DebugError> {
         let failed = match self {
             Self::Absent => return output.push("null", budget),
@@ -94,12 +94,12 @@ fn tree(
     mut output: Option<&mut JsonBuffer>,
     ordinal: u32,
     issues: &mut IssueLog,
-    budget: &mut FallbackBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<Option<FailureKind>, DebugError> {
     let mut stack = Vec::new();
     let mut root = true;
     loop {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         match values.next(index, budget) {
             Ok(Some(ValueStep::Value(value))) => {
                 if root && value.ordinal.0 != ordinal {
@@ -131,9 +131,8 @@ fn tree(
                             .len()
                             .checked_add(1)
                             .ok_or(DebugError::PlatformCapacity)?;
-                        let (capacity, bytes) =
-                            capacity_plan(stack.capacity(), needed, size_of::<Close>())?;
-                        budget.charge_allocation(bytes)?;
+                        let capacity = capacity_plan(stack.capacity(), needed, size_of::<Close>())?;
+                        budget.checkpoint()?;
                         stack
                             .try_reserve_exact(capacity - stack.len())
                             .map_err(DebugError::Allocation)?;
@@ -167,7 +166,7 @@ fn tree(
                         output.unavailable(kind, budget)?;
                     }
                     while let Some(close) = stack.pop() {
-                        budget.charge_work(1)?;
+                        budget.checkpoint()?;
                         output.push(close.text(), budget)?;
                     }
                 }
@@ -180,7 +179,7 @@ fn semantic(
     index: &ProgramIndex<'_>,
     output: &mut JsonBuffer,
     value: EncodedValue<'_>,
-    budget: &mut FallbackBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<(), DebugError> {
     output.push("{\"tag\":", budget)?;
     output.unsigned(u64::from(value.tag), budget)?;
@@ -200,7 +199,7 @@ fn semantic(
             };
             output.push("\"", budget)?;
             for digit in (0..digits).rev() {
-                budget.charge_work(1)?;
+                budget.checkpoint()?;
                 let nibble = u8::try_from((bits >> (digit * 4)) & 15).map_err(|_| {
                     DebugError::InternalInvariant("masked float digit is not a nibble")
                 })?;

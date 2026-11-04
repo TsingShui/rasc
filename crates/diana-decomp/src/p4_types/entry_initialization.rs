@@ -2,7 +2,7 @@ use crate::p2_flow::Op;
 use crate::p2_flow::entry::ParameterFamily;
 use crate::p3_ssa::entry::{EntrySsa, Graph};
 use crate::p3_ssa::{Definition, ValueId};
-use crate::{CodeUnitOffset, MethodBudget, MethodId, RequestError};
+use crate::{CodeUnitOffset, MethodId, RequestError, RunContext};
 
 const WORD: u8 = 1;
 const REFERENCE: u8 = 2;
@@ -31,12 +31,12 @@ fn family(graph: &Graph<'_, '_>, origin: Origin) -> Result<u8, RequestError> {
 pub(super) fn origin(
     graph: &Graph<'_, '_>,
     mut value: ValueId,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<Option<Origin>, RequestError> {
     // Raw zero can flow through either word moves or object moves until its use is fixed.
     let mut allowed = WORD | REFERENCE | WIDE | ZERO | THIS;
     for _ in 0..graph.len() {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         let found = match graph.definition(value)? {
             Definition::Parameter(index) => Some(Origin::Parameter(index)),
             Definition::OpResult(id) => {
@@ -105,7 +105,7 @@ pub(crate) fn prove(
     entry: &EntrySsa<'_>,
     formals: &[ParameterFamily],
     scope: Option<crate::p4_types::declarations::allocation::ConstructorUse>,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<Option<Link>, RequestError> {
     prove_impl(entry, formals, scope, budget)
 }
@@ -114,11 +114,11 @@ fn prove_impl(
     entry: &EntrySsa<'_>,
     formals: &[ParameterFamily],
     scope: Option<crate::p4_types::declarations::allocation::ConstructorUse>,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<Option<Link>, RequestError> {
     let graph = Graph::Entry(entry);
     for op in crate::p3_ssa::entry::operations(entry) {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         match op.op {
             Op::Nop | Op::Constant(..) | Op::ConstantWide(..) => {}
             Op::Move(..) | Op::MoveWide(..) => {
@@ -150,7 +150,7 @@ fn prove_impl(
                     return Ok(None);
                 }
                 for (&value, formal) in op.inputs.iter().skip(1).zip(formals) {
-                    budget.charge_work(1)?;
+                    budget.checkpoint()?;
                     let Some(source) = origin(&graph, value, budget)? else {
                         return Ok(None);
                     };

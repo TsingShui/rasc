@@ -21,21 +21,21 @@ impl ClassLocations {
         let offset_byte = index.header.class_defs.offset_byte;
         let length = usize::try_from(index.header.type_ids.count)
             .map_err(|_| InputError::PlatformCapacity { offset_byte })?;
-        let bytes = length
+        length
             .checked_mul(size_of::<Location>())
-            .and_then(|size| u64::try_from(size).ok())
+            .filter(|&size| size <= isize::MAX as usize)
             .ok_or(InputError::PlatformCapacity { offset_byte })?;
-        control.charge_allocation(bytes)?;
+        control.checkpoint()?;
         let mut locations = Vec::new();
         locations
             .try_reserve_exact(length)
             .map_err(|_| InputError::Allocation { offset_byte })?;
         for _ in 0..length {
-            control.charge_work(1)?;
+            control.checkpoint()?;
             locations.push(Location::Missing);
         }
         for at in 0..index.header.class_defs.count {
-            control.charge_work(1)?;
+            control.checkpoint()?;
             let class = ClassDefId(at);
             let ty = index.class_type_id(class, control)?;
             // A broken unrelated definition was not a match in the original
@@ -59,7 +59,7 @@ impl ClassLocations {
         index: &ProgramIndex<'_>,
         control: &mut impl InputControl,
     ) -> Result<Option<ClassDefId>, InputError> {
-        control.charge_work(1)?;
+        control.checkpoint()?;
         let at = usize::try_from(ty.0).map_err(|_| InputError::PlatformCapacity {
             offset_byte: index.header.class_defs.offset_byte,
         })?;

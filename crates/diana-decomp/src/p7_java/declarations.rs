@@ -1,7 +1,7 @@
-use crate::input::{DexString, MethodInput, RawPrintable};
+use crate::input::{DexString, MethodSource, RawPrintable};
 use crate::pipeline::control::InputControl;
 use crate::substrate::owned::{TextBuffer, copy_units};
-use crate::{MethodBudget, RequestError};
+use crate::{RequestError, RunContext};
 
 /// An owned readable declaration for an original no-code member.
 /// This is a fragment, not a JavaUnit or an executable recovered body.
@@ -22,21 +22,21 @@ impl JavaMethodDecl {
 
 pub(crate) fn declaration(
     _schedule: &crate::engine::SchedulePermit,
-    input: &MethodInput<'_, '_>,
+    input: &MethodSource<'_, '_>,
     catalog: &crate::context::Context,
     signature: Option<&crate::p4_types::declarations::raw_signature::RawSignature>,
     annotations: Option<&crate::p4_types::declarations::annotations::Bindings>,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<Option<JavaMethodDecl>, RequestError> {
     declaration_impl(input, catalog, signature, annotations, budget)
 }
 
 fn declaration_impl(
-    input: &MethodInput<'_, '_>,
+    input: &MethodSource<'_, '_>,
     catalog: &crate::context::Context,
     signature: Option<&crate::p4_types::declarations::raw_signature::RawSignature>,
     annotations: Option<&crate::p4_types::declarations::annotations::Bindings>,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<Option<JavaMethodDecl>, RequestError> {
     let RawPrintable::Declaration(raw) = input.raw() else {
         return Ok(None);
@@ -71,7 +71,7 @@ fn declaration_impl(
     if !identifier(&name, budget)? {
         return Ok(None);
     }
-    let mut output = TextBuffer::method(budget);
+    let mut output = TextBuffer::new();
     for (bit, word) in [
         (1, "public "),
         (2, "private "),
@@ -96,7 +96,7 @@ fn declaration_impl(
             .matches_with(definition.descriptor(), budget)?
     {
         for element in definition.elements() {
-            budget.charge_work(1)?;
+            budget.checkpoint()?;
             if element.method() == input.method_id()
                 && element.prototype().get(2) == Some(&76)
                 && input
@@ -213,12 +213,12 @@ fn primitive_type(
 }
 
 fn declaration_type(
-    input: &MethodInput<'_, '_>,
+    input: &MethodSource<'_, '_>,
     name: DexString<'_>,
     raw: bool,
     catalog: &crate::context::Context,
     output: &mut TextBuffer,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<bool, RequestError> {
     let descriptor = copy_units(name, budget)?;
     if raw && input.qualifier_shadowed(&[106, 97, 118, 97], budget)? {
@@ -244,7 +244,7 @@ fn declaration_type(
 fn reference_type(
     descriptor: &[u16],
     output: &mut TextBuffer,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<bool, RequestError> {
     let mut dimensions = 0usize;
     let mut rest = descriptor;
@@ -273,7 +273,7 @@ pub(super) fn identifier(
     }
     let mut ascii = TextBuffer::new();
     for (position, scalar) in char::decode_utf16(name.iter().copied()).enumerate() {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         let Ok(scalar) = scalar else {
             return Ok(false);
         };

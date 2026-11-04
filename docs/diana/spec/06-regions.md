@@ -40,7 +40,7 @@ On the read-only CFG, compute the normal RPO, the dominators and the postdominat
 join a virtual Exit), using an explicit stack rather than unbounded recursion. The dominators MAY
 be computed with RPO iteration of the immediate dominator and an intersect over ancestor chains;
 postdominators are computed the same way on the reverse graph.
-Every change enqueues the affected nodes, an ancestor walk is charged per actual step, and SCCs
+Every change enqueues the affected nodes, an ancestor walk has finite bounded progress, and SCCs
 use an explicit-stack Tarjan; the graph is not rewritten.
 
 The private RegionArena starts with one node per block; only the following implemented schemas
@@ -72,7 +72,7 @@ are accepted, and each reduction decreases the node count:
 
 Schemas are attempted in the existing graph's readiness relation; the implementation does not
 sort for stable text and does not seek a global optimum. Before a candidate, it computes an upper
-bound for the charged nodes, transfers, conditions and copies; an over-limit candidate is not
+bound for the nodes, transfers, conditions and copies; an oversized candidate is not
 created. An ordinary mismatch continues with the next schema, and when no natural structure
 matches but the method is eligible, the dispatcher is selected; a certificate missing an edge or
 site is a BUG and MUST NOT be called an unsupported pattern.
@@ -95,7 +95,7 @@ In the normally reachable subgraph: `Dom(entry)={entry}`, and for the others
 Initializing the other nodes with the full reachable set and intersecting repeatedly gives a
 finite reference specification that only decreases; the implementation follows §6.2 with RPO
 and the idom tree instead of a resident B×B matrix. intersect walks from the node with the later
-RPO number towards its idom, each ancestor visit is charged, and the implementation MUST NOT
+RPO number towards its idom, each ancestor visit has finite bounded progress, and the implementation MUST NOT
 bound only the outer rounds while letting one ancestor chain run unbounded.
 
 Postdominators are computed only on the reverse subgraph that reaches the selected normal Exit;
@@ -176,7 +176,7 @@ T18 uses **bounded bottom-up try reduction**, not the guess that “catch-all me
   otherwise the order MUST be preserved or the method rejected, and unreachability MUST NOT be
   guessed.
 - Every reduction consumes at least one unassigned handler group; candidate counts, node visits
-  and subtype queries are charged step by step. A shared or crossing graph that does not satisfy
+  and subtype queries make finite bounded progress. A shared or crossing graph that does not satisfy
   exclusive entry/lexical containment does not expand the search further.
 
 The final validator maintains a catch stack recursively over the AST (implemented with an explicit
@@ -223,8 +223,8 @@ lock value is materialized once and then used for synchronized.
 A bounded lock stack (root+enter site) is propagated along every normal and exception transfer,
 starting empty; a successful enter pushes, a failed enter keeps the old stack, and a successful exit
 pops only the top entry with the same identity. The join requires identical stacks, and the height
-of a single propagation stack is constrained by the explicit max_nesting (if any); no numeric depth
-limit is set by default, and validation still MUST NOT use host recursion or unbounded path
+of a single propagation stack uses an explicit stack; validation still MUST NOT use host recursion
+or an unbounded path
 enumeration. The exception PC of a protected exit is determined per §2 first.
 
 A synchronized region is matched only when all of the following hold:

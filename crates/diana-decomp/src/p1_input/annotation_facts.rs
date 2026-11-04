@@ -186,7 +186,7 @@ fn bytes(
     let mut result = Vec::new();
     reserve(&mut result, source.len(), control)?;
     for &byte in source {
-        control.charge_work(1)?;
+        control.checkpoint()?;
         result.push(byte);
     }
     Ok(result)
@@ -195,7 +195,7 @@ fn hard(error: &RequestError) -> bool {
     matches!(
         error.kind(),
         crate::FailureKind::Cancelled
-            | crate::FailureKind::BudgetExceeded
+            | crate::FailureKind::ResourceExhausted
             | crate::FailureKind::InternalInvariant
     )
 }
@@ -212,7 +212,7 @@ fn read_set(
     let mut offsets = index.annotation_offsets(0x1003, offset, control)?;
     let mut last = None;
     while offsets.remaining_byte().0 != 0 {
-        control.charge_work(1)?;
+        control.checkpoint()?;
         let pointer = ByteRange {
             start: offsets.position_byte(),
             end: ByteOffset(
@@ -330,7 +330,7 @@ fn read_members(
     let mut members = AnnotationMembers::open(index, class, method, control)?;
     let mut last = None;
     while records.remaining_byte().0 != 0 {
-        control.charge_work(1)?;
+        control.checkpoint()?;
         let range = ByteRange {
             start: records.position_byte(),
             end: ByteOffset(

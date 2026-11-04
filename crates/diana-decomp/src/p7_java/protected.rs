@@ -1,9 +1,9 @@
 use crate::context::Context;
-use crate::input::{MethodInput, protection::CatchType};
+use crate::input::{MethodSource, protection::CatchType};
 use crate::p5_variables::StorageBody;
 use crate::p6_regions::protection::{Node, Protection};
 use crate::substrate::owned::{copy_units, push};
-use crate::{MethodBudget, RequestError};
+use crate::{RequestError, RunContext};
 
 pub(crate) struct CatchName {
     pub kind: CatchType,
@@ -14,24 +14,24 @@ pub(crate) struct ProtectedBody {
     pub source: super::source_control::Plan,
 }
 pub(super) fn names(
-    input: &MethodInput<'_, '_>,
+    input: &MethodSource<'_, '_>,
     catalog: &Context,
     storage: &StorageBody<'_>,
     region: &Protection,
     uncertainties: &mut Vec<crate::OutputReason>,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<Option<Vec<CatchName>>, RequestError> {
     crate::p6_regions::protection::verify(storage, region, budget)?;
     let mut result = Vec::new();
     for node in &region.nodes {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         let Node::Try { catches, .. } = node else {
             continue;
         };
         for catch in catches {
-            budget.charge_work(1)?;
+            budget.checkpoint()?;
             for clause in &catch.clauses {
-                budget.charge_work(1)?;
+                budget.checkpoint()?;
                 let descriptor = match clause.kind {
                     CatchType::All => {
                         let mut descriptor = Vec::new();

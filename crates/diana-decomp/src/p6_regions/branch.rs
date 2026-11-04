@@ -1,7 +1,7 @@
 use super::flow::{Edge, Flow, Transfer};
 use super::graph::index;
 use crate::p2_flow::{BlockId, EdgeId};
-use crate::{MethodBudget, RequestError};
+use crate::{RequestError, RunContext};
 pub(crate) struct Guard {
     pub block: BlockId,
     pub exit: EdgeId,
@@ -51,9 +51,9 @@ pub(super) fn diamond(
     block: BlockId,
     yes: &Edge,
     no: &Edge,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<Option<Diamond>, RequestError> {
-    budget.charge_work(1)?;
+    budget.checkpoint()?;
     let y = jump(storage, yes.target)?;
     let n = jump(storage, no.target)?;
     let (yes_arm, no_arm, join) = if yes.target == no.target {

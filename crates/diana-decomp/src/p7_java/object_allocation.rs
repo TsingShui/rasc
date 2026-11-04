@@ -3,7 +3,7 @@ use crate::p2_flow::{CallTarget, Op};
 use crate::p3_ssa::BoundOp;
 use crate::p4_types::initialization::InitializationId;
 use crate::p5_variables::StorageBody;
-use crate::{CodeUnitOffset, MethodBudget, RegisterId, RequestError};
+use crate::{CodeUnitOffset, RegisterId, RequestError, RunContext};
 
 pub(crate) struct Initialization {
     _sealed: (),
@@ -23,7 +23,7 @@ pub(super) fn lower(
     storage: &StorageBody<'_>,
     op: &BoundOp,
     contract: crate::p4_types::declarations::allocation::ConstructorContract,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<Option<Initialization>, RequestError> {
     let Op::Initialize(call) = op.op else {
         return Err(RequestError::InternalInvariant(
@@ -54,12 +54,12 @@ pub(super) fn lower(
     };
     let mut aliases = Vec::new();
     for &alias in &proof.aliases {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         crate::substrate::owned::push(&mut aliases, alias, budget)?;
     }
     let mut arguments = Vec::new();
     for argument in typed.call_uses[index].arguments() {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         crate::substrate::owned::push(
             &mut arguments,
             super::values::lower(LocalId(argument.value.0), argument.conversion),
@@ -87,9 +87,9 @@ pub(super) fn verify_deferred(
     storage: &StorageBody<'_>,
     op: &BoundOp,
     id: InitializationId,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<bool, RequestError> {
-    budget.charge_work(1)?;
+    budget.checkpoint()?;
     let typed = &storage.typed;
     if id == InitializationId::This {
         let chain = typed
@@ -130,7 +130,7 @@ pub(super) fn verify(
     storage: &StorageBody<'_>,
     op: &BoundOp,
     actual: &Initialization,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<bool, RequestError> {
     let Op::Initialize(call) = op.op else {
         return Ok(false);
@@ -185,7 +185,7 @@ pub(super) fn verify(
         return Ok(false);
     }
     for &unit in &original.owner[1..original.owner.len() - 1] {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         if source.next() != Some(if unit == 47 { 46 } else { unit }) {
             return Ok(false);
         }
@@ -194,7 +194,7 @@ pub(super) fn verify(
         return Ok(false);
     }
     for (&alias, &expected) in actual.aliases.iter().zip(&proof.aliases) {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         if alias != expected || typed.initializations.deferred.get(ix(alias.0)?) != Some(&Some(id))
         {
             return Ok(false);
@@ -210,7 +210,7 @@ pub(super) fn verify(
         .zip(op.inputs.iter().skip(1))
         .zip(formals)
     {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         if !super::dispatcher_verify::call_argument(typed, view, *value, formal, budget)? {
             return Ok(false);
         }

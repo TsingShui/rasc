@@ -72,7 +72,7 @@ impl<'a> Cursor<'a> {
         stride: ByteLength,
         control: &mut impl InputControl,
     ) -> Result<ByteRange, InputError> {
-        control.charge_work(1)?;
+        control.checkpoint()?;
         let range = checked_range(ByteLength(self.end.0), self.position, count, stride)?;
         self.position = range.end;
         Ok(range)
@@ -108,7 +108,7 @@ impl<'a> Cursor<'a> {
         &mut self,
         control: &mut impl InputControl,
     ) -> Result<u32, InputError> {
-        self.read_uleb32_charged(|| control.charge_work(1))
+        self.read_uleb32_charged(|| control.checkpoint())
     }
 
     pub(super) fn read_uleb32_charged(
@@ -139,7 +139,7 @@ impl<'a> Cursor<'a> {
         &mut self,
         control: &mut impl InputControl,
     ) -> Result<i32, InputError> {
-        self.read_sleb32_charged(|| control.charge_work(1))
+        self.read_sleb32_charged(|| control.checkpoint())
     }
 
     pub(super) fn read_sleb32_charged(
@@ -171,7 +171,7 @@ impl<'a> Cursor<'a> {
         &mut self,
         control: &mut impl InputControl,
     ) -> Result<[u8; N], InputError> {
-        self.read_array_charged(|| control.charge_work(1))
+        self.read_array_charged(|| control.checkpoint())
     }
 
     pub(super) fn read_array_charged<const N: usize>(

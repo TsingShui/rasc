@@ -42,7 +42,7 @@ impl<'a> ProgramIndex<'a> {
         &self,
         control: &mut impl InputControl,
     ) -> Result<&crate::input::ownership::Ownership, crate::RequestError> {
-        control.charge_work(1)?;
+        control.checkpoint()?;
         if self.ownership.get().is_none() {
             let _lock = self.cache_build.lock().map_err(|_| {
                 crate::RequestError::InternalInvariant("input cache construction poisoned")
@@ -278,7 +278,7 @@ impl<'a> ProgramIndex<'a> {
         offset_byte: ByteOffset,
         control: &mut impl InputControl,
     ) -> Result<Cursor<'a>, InputError> {
-        control.charge_work(1)?;
+        control.checkpoint()?;
         let (bit, alignment) =
             map_kind(kind).ok_or_else(|| malformed(InputProblem::InvalidReference, offset_byte))?;
         let section = self.sections[bit.trailing_zeros() as usize]
@@ -336,7 +336,7 @@ impl<'a> ProgramIndex<'a> {
         if cursor.remaining_byte().0 < stride.0 {
             return Err(malformed(InputProblem::Truncated, range.start));
         }
-        control.charge_metadata(1)?;
+        control.checkpoint()?;
         Cursor::bounded(self.bytes, range.start, range.end)
     }
 
@@ -367,7 +367,7 @@ impl<'a> ProgramIndex<'a> {
             stride,
         )?;
         let range = checked_range(ByteLength(table_end.0), prefix.end, 1, stride)?;
-        control.charge_metadata(1)?;
+        control.checkpoint()?;
         Cursor::bounded(self.bytes, range.start, range.end)
     }
 
@@ -559,6 +559,7 @@ impl<'a> ProgramIndex<'a> {
                     method_idx,
                     access_flags,
                     declaration,
+                    ..
                 } = entry
                 {
                     declaration?;
@@ -594,7 +595,7 @@ impl<'a> ProgramIndex<'a> {
         // error if no independently valid declaration matches the request.
         let mut local_error = None;
         for index in 0..self.header.method_ids.count {
-            control.charge_work(1)?;
+            control.checkpoint()?;
             let id = MethodId(index);
             let mut record = self.table(TableKey::Method(id), control)?;
             if TypeId(u32::from(record.read_u16_with(control)?)) != class.type_idx {
@@ -637,6 +638,19 @@ impl<'a> ProgramIndex<'a> {
                 )
             })
         })
+    }
+
+    pub(crate) fn source_file(
+        &self,
+        id: ClassDefId,
+        control: &mut impl InputControl,
+    ) -> Result<Option<DexString<'a>>, InputError> {
+        let mut record = self.table(TableKey::Class(id), control)?;
+        record.skip(4, ByteLength(4), control)?;
+        match record.read_u32_with(control)? {
+            u32::MAX => Ok(None),
+            id => self.string_with(StringId(id), control).map(Some),
+        }
     }
 
     pub(super) fn class_annotations_offset(
@@ -704,7 +718,7 @@ impl<'a> ProgramIndex<'a> {
         let mut list = self.item(0x1001, offset, control)?;
         let count = list.read_u32_with(control)?;
         let range = list.skip(count_usize(count, offset)?, ByteLength(2), control)?;
-        control.charge_metadata(u64::from(count))?;
+        control.checkpoint()?;
         let bytes = &self.bytes[range.as_range()];
         for word in bytes.as_chunks::<2>().0 {
             let (_, shape) =
@@ -981,10 +995,39 @@ pub enum FieldStorage {
     Instance,
 }
 
+/// Original class-data method group. It comes from the encoded group, never from
+/// `access_flags`; `ordinal` is the member's position inside that group.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum MethodGroup {
+    Direct { ordinal: u32 },
+    Virtual { ordinal: u32 },
+}
+
+/// The four original `class_data` group counts in encoded order. They describe
+/// what the header declares, not how many members were read successfully.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct ClassDataShape {
+    pub static_fields: u32,
+    pub instance_fields: u32,
+    pub direct_methods: u32,
+    pub virtual_methods: u32,
+}
+
+impl ClassDataShape {
+    pub fn declared_members(&self) -> u64 {
+        u64::from(self.static_fields)
+            + u64::from(self.instance_fields)
+            + u64::from(self.direct_methods)
+            + u64::from(self.virtual_methods)
+    }
+}
+
 pub struct FieldEntry<'a> {
     pub field_idx: FieldId,
     pub access_flags: u32,
     pub storage: FieldStorage,
+    /// Position inside the original static or instance group.
+    pub ordinal: u32,
     pub declaration: Result<FieldDeclaration<'a>, InputError>,
 }
 
@@ -1002,6 +1045,8 @@ pub(crate) enum MemberEntry<'i, 'a> {
     MethodHeader {
         method_idx: MethodId,
         access_flags: u32,
+        group: MethodGroup,
+        code_offset: Option<ByteOffset>,
         declaration: Result<MethodDeclaration<'i, 'a>, InputError>,
     },
 }
@@ -1079,15 +1124,19 @@ impl<'i, 'a> ClassView<'i, 'a> {
         )
     }
 
-    pub(crate) fn visit_members_with<C: InputControl, E: From<InputError> + From<ControlError>>(
+    /// Enumerates this definition's original members and reports how far the
+    /// class-data traversal reached. A record whose index/identity cannot be
+    /// established stops coverage without discarding the delivered prefix or any
+    /// sibling declaration; per-declaration read failures stay in each entry.
+    pub(crate) fn walk_members_with<C: InputControl, E: From<InputError> + From<ControlError>>(
         &self,
         control: &mut C,
         selection: MemberSelection,
         mut visit: impl FnMut(MemberEntry<'i, 'a>, &mut C) -> Result<(), E>,
-    ) -> Result<(), E> {
+    ) -> Result<ClassDataWalk, E> {
         let Some(offset) = self.class_data_offset else {
             control.checkpoint()?;
-            return Ok(());
+            return Ok(ClassDataWalk::default());
         };
         let mut cursor = self.index.item(0x2000, offset, control)?;
         let mut counts = [0u32; 4];
@@ -1101,7 +1150,7 @@ impl<'i, 'a> ClassView<'i, 'a> {
         if minimum > cursor.remaining_byte().0 as u64 {
             return Err(malformed(InputProblem::Truncated, cursor.position_byte()).into());
         }
-        let mut first_error = None;
+        let mut traversal_error = None;
         for (groups, kind) in [
             ([counts[0], counts[1]], MemberKind::Field),
             ([counts[2], counts[3]], MemberKind::Method),
@@ -1126,7 +1175,7 @@ impl<'i, 'a> ClassView<'i, 'a> {
             for (group, count) in groups.into_iter().enumerate() {
                 let mut previous = Some(0u32);
                 for item in 0..count {
-                    control.charge_metadata(1)?;
+                    control.checkpoint()?;
                     let record = cursor.position_byte();
                     let delta = cursor.read_uleb32_with(control)?;
                     let access_flags = cursor.read_uleb32_with(control)?;
@@ -1140,7 +1189,8 @@ impl<'i, 'a> ClassView<'i, 'a> {
                         }
                     };
                     let Some(index) = previous.and_then(|value| value.checked_add(delta)) else {
-                        first_error.get_or_insert(malformed(InputProblem::RangeOverflow, record));
+                        traversal_error
+                            .get_or_insert(malformed(InputProblem::RangeOverflow, record));
                         previous = None;
                         if group == 0 {
                             prior = PriorState::Invalid;
@@ -1158,7 +1208,10 @@ impl<'i, 'a> ClassView<'i, 'a> {
                         false
                     };
                     if invalid_index || duplicate {
-                        first_error
+                        // The record extent is known, but this member has no usable
+                        // identity. Coverage stays incomplete; the delivered prefix
+                        // and every independently valid sibling remain available.
+                        traversal_error
                             .get_or_insert(malformed(InputProblem::InvalidClassData, record));
                         if group == 0 {
                             prior = PriorState::Invalid;
@@ -1180,9 +1233,6 @@ impl<'i, 'a> ClassView<'i, 'a> {
                                 self.type_idx,
                                 control,
                             ))?;
-                            if let Err(error) = declaration {
-                                first_error.get_or_insert(error);
-                            }
                             visit(
                                 MemberEntry::Field(FieldEntry {
                                     field_idx: FieldId(index),
@@ -1192,6 +1242,7 @@ impl<'i, 'a> ClassView<'i, 'a> {
                                     } else {
                                         FieldStorage::Instance
                                     },
+                                    ordinal: item,
                                     declaration,
                                 }),
                                 control,
@@ -1217,6 +1268,12 @@ impl<'i, 'a> ClassView<'i, 'a> {
                                     MemberEntry::MethodHeader {
                                         method_idx: MethodId(index),
                                         access_flags,
+                                        group: if group == 0 {
+                                            MethodGroup::Direct { ordinal: item }
+                                        } else {
+                                            MethodGroup::Virtual { ordinal: item }
+                                        },
+                                        code_offset,
                                         declaration,
                                     },
                                     control,
@@ -1253,11 +1310,37 @@ impl<'i, 'a> ClassView<'i, 'a> {
                 }
             }
         }
-        if let Some(error) = first_error {
-            return Err(error.into());
-        }
-        Ok(())
+        Ok(ClassDataWalk {
+            shape: ClassDataShape {
+                static_fields: counts[0],
+                instance_fields: counts[1],
+                direct_methods: counts[2],
+                virtual_methods: counts[3],
+            },
+            issue: traversal_error,
+        })
     }
+
+    pub(crate) fn visit_members_with<C: InputControl, E: From<InputError> + From<ControlError>>(
+        &self,
+        control: &mut C,
+        selection: MemberSelection,
+        visit: impl FnMut(MemberEntry<'i, 'a>, &mut C) -> Result<(), E>,
+    ) -> Result<(), E> {
+        let walk = self.walk_members_with(control, selection, visit)?;
+        match walk.issue {
+            Some(error) => Err(error.into()),
+            None => Ok(()),
+        }
+    }
+}
+
+/// How far one original class-data traversal reached, together with the declared
+/// four-group counts. `issue` reports unusable coverage, never a declaration read.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub(crate) struct ClassDataWalk {
+    pub shape: ClassDataShape,
+    pub issue: Option<InputError>,
 }
 
 enum TableKey {

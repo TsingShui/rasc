@@ -2,7 +2,7 @@ use crate::input::protection::CatchType;
 use crate::p2_flow::{BlockId, Terminal};
 use crate::p5_variables::StorageBody;
 use crate::substrate::owned::push;
-use crate::{MethodBudget, RequestError};
+use crate::{RequestError, RunContext};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct NodeId(pub u32);
@@ -51,7 +51,7 @@ pub(super) fn ix(id: u32) -> Result<usize, RequestError> {
 pub(super) fn add(
     nodes: &mut Vec<Node>,
     node: Node,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<NodeId, RequestError> {
     let id = NodeId(u32::try_from(nodes.len()).map_err(|_| RequestError::PlatformCapacity)?);
     push(nodes, node, budget)?;
@@ -61,13 +61,13 @@ pub(super) fn entry(
     nodes: &[Node],
     start: NodeId,
     follow: Option<BlockId>,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<Option<BlockId>, RequestError> {
     let mut todo = Vec::new();
     push(&mut todo, start, budget)?;
     let mut visits = 0usize;
     while let Some(id) = todo.pop() {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         if visits >= nodes.len() {
             return Err(RequestError::InternalInvariant("cyclic protection entry"));
         }
@@ -82,7 +82,7 @@ pub(super) fn entry(
             Node::Try { body, .. } => push(&mut todo, *body, budget)?,
             Node::Sequence(children) => {
                 for &child in children.iter().rev() {
-                    budget.charge_work(1)?;
+                    budget.checkpoint()?;
                     push(&mut todo, child, budget)?;
                 }
             }
@@ -93,7 +93,7 @@ pub(super) fn entry(
 pub(crate) fn blocks(
     nodes: &[Node],
     roots: &[NodeId],
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<Vec<BlockId>, RequestError> {
     let mut todo = Vec::new();
     let mut result = Vec::new();
@@ -101,7 +101,7 @@ pub(crate) fn blocks(
         push(&mut todo, root, budget)?;
     }
     while let Some(id) = todo.pop() {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         match &nodes[ix(id.0)?] {
             Node::Synchronized { enter, body, .. } => {
                 push(&mut result, *enter, budget)?;
@@ -114,7 +114,7 @@ pub(crate) fn blocks(
             Node::Block(block) => push(&mut result, *block, budget)?,
             Node::Sequence(children) => {
                 for &child in children {
-                    budget.charge_work(1)?;
+                    budget.checkpoint()?;
                     push(&mut todo, child, budget)?;
                 }
             }
@@ -126,7 +126,7 @@ pub(crate) fn blocks(
             Node::Try { body, catches } => {
                 push(&mut todo, *body, budget)?;
                 for catch in catches {
-                    budget.charge_work(1)?;
+                    budget.checkpoint()?;
                     push(&mut todo, catch.body, budget)?;
                 }
             }
@@ -137,7 +137,7 @@ pub(crate) fn blocks(
 
 pub(super) fn build(
     storage: &StorageBody<'_>,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<Option<Protection>, RequestError> {
     let monitors = super::monitors::build(storage, budget)?;
     let Some((nodes, root)) = super::protection_build::build(storage, monitors.as_ref(), budget)?
@@ -172,7 +172,7 @@ pub(super) fn build(
 pub(crate) fn verify(
     storage: &StorageBody<'_>,
     plan: &Protection,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<(), RequestError> {
     if !check(storage, plan, budget)? {
         return Err(RequestError::InternalInvariant(
@@ -186,11 +186,11 @@ fn catch_stack(
     block: BlockId,
     pc: crate::CodeUnitOffset,
     expected: &[Clause],
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<bool, RequestError> {
     let mut rank = 0usize;
     for edge in &storage.typed.ssa.exception_edges {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         if edge.source != block || edge.pc != pc {
             continue;
         }
@@ -209,7 +209,7 @@ fn catch_stack(
 fn check(
     storage: &StorageBody<'_>,
     plan: &Protection,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<bool, RequestError> {
     let ssa = &storage.typed.ssa;
     if let Some(monitors) = &plan.monitors {
@@ -217,12 +217,12 @@ fn check(
     }
     let mut seen = Vec::new();
     for _ in &ssa.blocks {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         push(&mut seen, false, budget)?;
     }
     let mut visited = Vec::new();
     for _ in &plan.nodes {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         push(&mut visited, false, budget)?;
     }
     let mut contexts: Vec<Vec<Clause>> = Vec::new();
@@ -237,7 +237,7 @@ fn check(
         return Ok(false);
     }
     while let Some((id, follow, context)) = todo.pop() {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         let Some(mark) = visited.get_mut(ix(id.0)?) else {
             return Ok(false);
         };
@@ -265,7 +265,7 @@ fn check(
                 for &expected in &scope.body {
                     let mut found = false;
                     for &actual in &projected {
-                        budget.charge_work(1)?;
+                        budget.checkpoint()?;
                         found |= expected == actual;
                     }
                     if !found {
@@ -274,7 +274,7 @@ fn check(
                 }
                 let cleanup = monitors.cleanup(scope.cleanup)?;
                 for &block in &cleanup.blocks {
-                    budget.charge_work(1)?;
+                    budget.checkpoint()?;
                     if std::mem::replace(&mut seen[ix(block.0)?], true) {
                         return Ok(false);
                     }
@@ -302,7 +302,7 @@ fn check(
                 )?;
                 let mut held = Vec::new();
                 for &lock in &locks[context] {
-                    budget.charge_work(1)?;
+                    budget.checkpoint()?;
                     push(&mut held, lock, budget)?;
                 }
                 push(&mut held, scope.enter, budget)?;
@@ -338,7 +338,7 @@ fn check(
             Node::Sequence(children) => {
                 let mut next = follow;
                 for &child in children.iter().rev() {
-                    budget.charge_work(1)?;
+                    budget.checkpoint()?;
                     push(&mut todo, (child, next, context), budget)?;
                     next = entry(&plan.nodes, child, next, budget)?;
                 }
@@ -352,7 +352,7 @@ fn check(
                 }
                 let mut nested = Vec::new();
                 for catch in catches {
-                    budget.charge_work(1)?;
+                    budget.checkpoint()?;
                     let Some(first) = catch.clauses.first() else {
                         return Ok(false);
                     };
@@ -360,7 +360,7 @@ fn check(
                         return Ok(false);
                     }
                     for &clause in &catch.clauses {
-                        budget.charge_work(1)?;
+                        budget.checkpoint()?;
                         if clause.handler != first.handler {
                             return Ok(false);
                         }
@@ -369,7 +369,7 @@ fn check(
                     push(&mut todo, (catch.body, follow, context), budget)?;
                 }
                 for &clause in &contexts[context] {
-                    budget.charge_work(1)?;
+                    budget.checkpoint()?;
                     if nested
                         .last()
                         .is_some_and(|clause: &Clause| clause.kind == CatchType::All)
@@ -384,7 +384,7 @@ fn check(
                 push(&mut contexts, nested, budget)?;
                 let mut held = Vec::new();
                 for &lock in &locks[context] {
-                    budget.charge_work(1)?;
+                    budget.checkpoint()?;
                     push(&mut held, lock, budget)?;
                 }
                 push(&mut locks, held, budget)?;
@@ -451,13 +451,13 @@ fn check(
                     matches!(original.terminal, Terminal::Throw(_)).then_some(original.terminal_pc),
                 ))
             {
-                budget.charge_work(1)?;
+                budget.checkpoint()?;
                 let Some(pc) = pc else {
                     continue;
                 };
                 let mut rank = 0usize;
                 for edge in &ssa.exception_edges {
-                    budget.charge_work(1)?;
+                    budget.checkpoint()?;
                     if edge.source != block || edge.pc != pc {
                         continue;
                     }
@@ -478,7 +478,7 @@ fn check(
         }
     }
     for covered in seen {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         if !covered {
             return Ok(false);
         }

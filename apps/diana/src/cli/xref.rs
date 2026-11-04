@@ -6,8 +6,6 @@ use super::output::{Failure, Format};
 use super::table::publish_rows;
 use crate::analysis::at;
 use crate::analysis::input::InputOptions;
-use crate::analysis::limits::RequestLimits;
-use crate::analysis::query::QueryLimits;
 use crate::analysis::request::RequestScope;
 use crate::analysis::selector;
 use crate::analysis::xref::{Matched, Target, Xref, XrefPlan};
@@ -21,7 +19,6 @@ pub fn run(
     jobs: usize,
     format: Format,
     output: Option<&Path>,
-    limits: RequestLimits,
 ) -> Result<(), Failure> {
     let target = parse_target(kind, target)?;
     let class = match class {
@@ -35,20 +32,14 @@ pub fn run(
         ),
         None => None,
     };
-    let scope = RequestScope::open(
-        input,
-        &InputOptions {
-            limits: limits.input(),
-            allowed_root: None,
-        },
-    )
-    .map_err(Failure::input)?;
+    let scope =
+        RequestScope::open(input, &InputOptions { allowed_root: None }).map_err(Failure::input)?;
     let xref = Xref::new(
         &scope,
         XrefPlan {
             target,
             class,
-            limits: QueryLimits::default(),
+
             jobs,
         },
     )
@@ -90,7 +81,6 @@ pub fn run(
         "xref",
         format,
         output,
-        limits.max_report_output_bytes,
     )
 }
 

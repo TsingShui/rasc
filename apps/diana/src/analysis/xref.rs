@@ -2,11 +2,11 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use diana_decomp::input::{MethodBody, ProgramIndex, ReferenceFacts};
 use diana_decomp::raw::LayoutKind;
-use diana_decomp::{ClassDefId, Limits, MethodId, RunContext};
+use diana_decomp::{ClassDefId, MethodId, RunContext};
 
 use super::apk::DexRoot;
 use super::dex::ImageIndex;
-use super::query::{ImageInfo, QueryError, QueryLimits};
+use super::query::{ImageInfo, QueryError};
 use super::request::RequestScope;
 
 /// The exact original object a caller searches for.
@@ -69,7 +69,6 @@ pub struct XrefPlan {
     pub target: Target,
     /// Exact class descriptor restricting the referencing definition.
     pub class: Option<Vec<u16>>,
-    pub limits: QueryLimits,
     pub jobs: usize,
 }
 
@@ -117,11 +116,10 @@ impl<'a> Xref<'a> {
             self.roots.len(),
             self.plan.jobs,
             cancel,
-            self.plan.limits,
             |ordinal, cancel, emit| {
                 let root = &self.roots[ordinal];
                 let cancelled = || cancel.load(Ordering::Relaxed);
-                let mut control = RunContext::new(Limits::default(), &cancelled);
+                let mut control = RunContext::new(&cancelled);
                 scan_root(root, ImageIndex(ordinal), &self.plan, &mut control, emit)
             },
             sink,
@@ -173,9 +171,9 @@ fn scan_root(
                 };
                 let mut sites = Vec::new();
                 let collected = {
-                    let budget = control.method_budget()?;
-                    let mut fallback = budget.into_fallback()?;
-                    view.visit_layouts(&mut fallback, |code_unit, layout, _budget| {
+                    let budget = &mut *control;
+                    let fallback = &mut *budget;
+                    view.visit_layouts(fallback, |code_unit, layout, _budget| {
                         let LayoutKind::Instruction(spec) = layout.kind() else {
                             return Ok(());
                         };
@@ -237,7 +235,7 @@ fn copy(units: &[u16], control: &mut RunContext<'_>) -> Result<Vec<u16>, QueryEr
     owned
         .try_reserve_exact(units.len())
         .map_err(|_| QueryError::WorkerLost)?;
-    control.charge_allocation(u64::try_from(units.len()).map_err(|_| QueryError::WorkerLost)?)?;
+    control.checkpoint()?;
     owned.extend_from_slice(units);
     Ok(owned)
 }

@@ -1,11 +1,11 @@
 use crate::p7_java::array_ops::Statement;
 use crate::substrate::owned::TextBuffer;
-use crate::{MethodBudget, RequestError};
+use crate::{RequestError, RunContext};
 
 pub(super) fn write(
     statement: &Statement,
     output: &mut TextBuffer,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<(), RequestError> {
     match statement {
         Statement::Length { array, result } => {

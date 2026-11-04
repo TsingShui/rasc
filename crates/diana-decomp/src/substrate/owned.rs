@@ -30,10 +30,7 @@ pub(crate) fn reserve<T>(
         .filter(|&n| n <= maximum)
         .unwrap_or(needed)
         .max(needed);
-    let bytes = (capacity - values.capacity())
-        .checked_mul(size)
-        .ok_or(RequestError::PlatformCapacity)?;
-    control.charge_allocation(u64::try_from(bytes).map_err(|_| RequestError::PlatformCapacity)?)?;
+    control.checkpoint()?;
     values
         .try_reserve_exact(capacity - values.len())
         .map_err(RequestError::Allocation)?;
@@ -109,29 +106,11 @@ pub(crate) fn copy_proto(
 
 pub(crate) struct TextBuffer {
     text: String,
-    limit: Option<(u64, crate::RequestLimit)>,
 }
 impl TextBuffer {
     pub fn new() -> Self {
         Self {
             text: String::new(),
-            limit: None,
-        }
-    }
-    pub fn method(budget: &crate::MethodBudget<'_, '_>) -> Self {
-        Self {
-            text: String::new(),
-            limit: budget
-                .output_limit()
-                .map(|maximum| (maximum, crate::RequestLimit::MaxMethodOutputBytes)),
-        }
-    }
-    pub fn report(control: &crate::RunContext<'_>) -> Self {
-        Self {
-            text: String::new(),
-            limit: control
-                .report_output_limit()
-                .map(|maximum| (maximum, crate::RequestLimit::MaxReportOutputBytes)),
         }
     }
     pub fn len(&self) -> usize {
@@ -148,17 +127,6 @@ impl TextBuffer {
             .checked_add(text.len())
             .ok_or(RequestError::PlatformCapacity)?;
         control.checkpoint()?;
-        if let Some((maximum, limit)) = self.limit
-            && u64::try_from(needed).map_err(|_| RequestError::PlatformCapacity)? > maximum
-        {
-            return Err(crate::ControlError::BudgetExceeded {
-                limit,
-                maximum,
-                used: u64::try_from(self.text.len()).map_err(|_| RequestError::PlatformCapacity)?,
-                requested: u64::try_from(text.len()).map_err(|_| RequestError::PlatformCapacity)?,
-            }
-            .into());
-        }
         if needed > isize::MAX as usize {
             return Err(RequestError::PlatformCapacity);
         }
@@ -170,10 +138,7 @@ impl TextBuffer {
                 .filter(|&n| n <= isize::MAX as usize)
                 .unwrap_or(needed)
                 .max(needed);
-            control.charge_allocation(
-                u64::try_from(capacity - self.text.capacity())
-                    .map_err(|_| RequestError::PlatformCapacity)?,
-            )?;
+            control.checkpoint()?;
             self.text
                 .try_reserve_exact(capacity - self.text.len())
                 .map_err(RequestError::Allocation)?;
@@ -185,7 +150,7 @@ impl TextBuffer {
         }
         let mut remaining = text;
         while !remaining.is_empty() {
-            control.charge_work(1)?;
+            control.checkpoint()?;
             let mut end = remaining.len().min(65536);
             while !remaining.is_char_boundary(end) {
                 end -= 1;

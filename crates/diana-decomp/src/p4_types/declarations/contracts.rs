@@ -1,8 +1,8 @@
 use crate::context::Context;
-use crate::input::MethodInput;
+use crate::input::MethodSource;
 use crate::input::{DeclarationCoverage, InputClassDeclaration};
 use crate::substrate::owned::{copy_proto, copy_units, reserve};
-use crate::{MethodBudget, MethodId, RequestError};
+use crate::{MethodId, RequestError, RunContext};
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub(crate) enum StaticResult {
@@ -32,26 +32,17 @@ pub(crate) struct StaticContract {
 }
 pub(super) fn member_directory(
     class: &InputClassDeclaration,
-    caller: &[u16],
-    budget: &mut MethodBudget<'_, '_>,
+    _caller: &[u16],
+    budget: &mut RunContext<'_>,
 ) -> Result<bool, RequestError> {
-    budget.charge_work(
-        u64::try_from(
-            class
-                .descriptor
-                .len()
-                .checked_add(caller.len())
-                .ok_or(RequestError::PlatformCapacity)?,
-        )
-        .map_err(|_| RequestError::PlatformCapacity)?,
-    )?;
+    budget.checkpoint()?;
     Ok(super::raw_signature::raw_class(class, budget)?
         && matches!(class.coverage, DeclarationCoverage::AllDeclarations))
 }
 pub(super) fn directory(
     class: &InputClassDeclaration,
     caller: &[u16],
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<bool, RequestError> {
     Ok(!class.enclosing_scope && member_directory(class, caller, budget)?)
 }
@@ -59,7 +50,7 @@ pub(super) fn plain(
     catalog: &Context,
     class: &InputClassDeclaration,
     caller: &[u16],
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<bool, RequestError> {
     Ok(
         super::interface_scope::catalog_plain(catalog, class, budget)?
@@ -70,11 +61,7 @@ pub(super) fn plain(
                     && !class.generic),
     )
 }
-fn push<T>(
-    values: &mut Vec<T>,
-    value: T,
-    budget: &mut MethodBudget<'_, '_>,
-) -> Result<(), RequestError> {
+fn push<T>(values: &mut Vec<T>, value: T, budget: &mut RunContext<'_>) -> Result<(), RequestError> {
     reserve(values, 1, budget)?;
     values.push(value);
     Ok(())
@@ -91,18 +78,18 @@ pub(super) fn clear_scope(
     catalog: &Context,
     caller: &[u16],
     prefix: &[u16],
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<bool, RequestError> {
-    budget.charge_work(u64::try_from(prefix.len()).map_err(|_| RequestError::PlatformCapacity)?)?;
+    budget.checkpoint()?;
     if generated_name(prefix) {
         return Ok(false);
     }
     let mut at = caller;
     let mut seen: Vec<&[u16]> = Vec::new();
     loop {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         for old in &seen {
-            budget.charge_work(1)?;
+            budget.checkpoint()?;
             if crate::context::same_units(old, at, budget)? {
                 return Ok(false);
             }
@@ -118,7 +105,7 @@ pub(super) fn clear_scope(
             return Ok(false);
         }
         for name in &class.field_names {
-            budget.charge_work(1)?;
+            budget.checkpoint()?;
             if crate::context::same_units(name, prefix, budget)? {
                 return Ok(false);
             }
@@ -130,10 +117,10 @@ pub(super) fn clear_scope(
     }
 }
 pub(crate) fn collect_static(
-    input: &MethodInput<'_, '_>,
+    input: &MethodSource<'_, '_>,
     _catalog: &Context,
     id: MethodId,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<Option<StaticContract>, RequestError> {
     let _span = crate::pipeline::phase_span("p4_static");
     let reference = input.method_reference(id, budget)?;
@@ -152,11 +139,11 @@ pub(crate) fn collect_static(
 }
 
 pub(crate) fn binding_available(
-    input: &MethodInput<'_, '_>,
+    input: &MethodSource<'_, '_>,
     catalog: &Context,
     contract: &StaticContract,
     _invocation: &super::throws::Invocation,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<bool, RequestError> {
     // The original reference fixes the target. Overload-resolution uniqueness
     // only decides whether javac would pick the same method, so it is recorded
@@ -169,10 +156,10 @@ pub(crate) fn binding_available(
 }
 
 pub(crate) fn qualifier_available(
-    input: &MethodInput<'_, '_>,
+    input: &MethodSource<'_, '_>,
     catalog: &Context,
     prefix: &[u16],
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<bool, RequestError> {
     let caller = copy_units(input.owner(), budget)?;
     Ok(

@@ -54,7 +54,7 @@ pub(crate) fn collect(
         crate::ByteOffset(context.interfaces?.len()),
     )?;
     while cursor.remaining_byte().0 != 0 {
-        control.charge_work(1)?;
+        control.checkpoint()?;
         let ty = crate::TypeId(u32::from(cursor.read_u16_with(control)?));
         let name = copy_units(index.type_name(ty, control)?, control)?;
         let Some(interface) = catalog.class(&name, control)? else {
@@ -89,7 +89,7 @@ pub(crate) fn collect(
             }
         }
         for method in &interface.methods {
-            control.charge_work(1)?;
+            control.checkpoint()?;
             let specialized = specialization
                 && method.signature.as_deref()
                     == Some(&const { crate::substrate::owned::ascii_units(*b"(TT;)TT;") });
@@ -102,7 +102,7 @@ pub(crate) fn collect(
             }
             let mut matched = false;
             for implementation in &caller.methods {
-                control.charge_work(1)?;
+                control.checkpoint()?;
                 if implementation.name == method.name
                     && (implementation.prototype == method.prototype && !specialized
                         || specialized && implementation.prototype == string_identity())
@@ -132,7 +132,7 @@ pub(crate) fn collect(
         return Ok(None);
     }
     for (name, expected) in names.iter().zip(&caller.interfaces) {
-        control.charge_work(1)?;
+        control.checkpoint()?;
         if name != expected {
             return Ok(None);
         }
@@ -167,10 +167,10 @@ pub(super) fn string_identity() -> &'static [u16] {
 pub(super) fn catalog_plain(
     catalog: &Context,
     class: &crate::input::InputClassDeclaration,
-    budget: &mut crate::MethodBudget<'_, '_>,
+    budget: &mut crate::RunContext<'_>,
 ) -> Result<bool, RequestError> {
     for name in &class.interfaces {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         let Some(interface) = catalog.class(name, budget)? else {
             return Ok(false);
         };
@@ -203,7 +203,7 @@ pub(super) fn catalog_plain(
             }
         }
         for method in &interface.methods {
-            budget.charge_work(1)?;
+            budget.checkpoint()?;
             let specialized = method.signature.as_deref()
                 == Some(&const { crate::substrate::owned::ascii_units(*b"(TT;)TT;") })
                 && class.signature.is_some();
@@ -215,7 +215,7 @@ pub(super) fn catalog_plain(
             }
             let mut found = false;
             for own in &class.methods {
-                budget.charge_work(1)?;
+                budget.checkpoint()?;
                 found |= own.name == method.name
                     && (own.prototype == method.prototype
                         || specialized && own.prototype == string_identity())
@@ -231,10 +231,10 @@ pub(super) fn catalog_plain(
 
 #[allow(dead_code)]
 pub(super) fn owner(
-    input: &crate::input::MethodInput<'_, '_>,
+    input: &crate::input::MethodSource<'_, '_>,
     catalog: &Context,
     parent: Option<&[u16]>,
-    budget: &mut crate::MethodBudget<'_, '_>,
+    budget: &mut crate::RunContext<'_>,
 ) -> Result<bool, RequestError> {
     if super::nested_scope::plain_owner(input, catalog, parent, budget)? {
         return Ok(true);

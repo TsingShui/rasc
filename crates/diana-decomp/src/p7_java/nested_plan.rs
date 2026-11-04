@@ -60,8 +60,9 @@ pub(crate) fn admit(
     control: &mut RunContext<'_>,
 ) -> Result<bool, RequestError> {
     let ownership = index.ownership_cached(control)?;
+    ownership.check_class(key.class_def)?;
     for entry in ownership.nested() {
-        control.charge_work(1)?;
+        control.checkpoint()?;
         if entry.class() != key.class_def {
             continue;
         }
@@ -72,14 +73,14 @@ pub(crate) fn admit(
             return Ok(false);
         }
         for proof in captures {
-            control.charge_work(1)?;
+            control.checkpoint()?;
             match proof {
                 Ok(Some(proof)) if proof.class() == key.class_def => {}
                 Err(error)
                     if matches!(
                         error.kind(),
                         crate::FailureKind::Cancelled
-                            | crate::FailureKind::BudgetExceeded
+                            | crate::FailureKind::ResourceExhausted
                             | crate::FailureKind::InternalInvariant
                     ) =>
                 {
@@ -124,9 +125,10 @@ fn verify_impl(
         return Ok(None);
     };
     let ownership = index.ownership_cached(control)?;
+    ownership.check_class(key.class_def)?;
     let mut enclosing = None;
     for entry in ownership.nested() {
-        control.charge_work(1)?;
+        control.checkpoint()?;
         if entry.class() == key.class_def {
             enclosing = Some(entry.enclosing());
         }
@@ -135,7 +137,7 @@ fn verify_impl(
         let Some(parent) = enclosing else { break };
         let mut parent_metadata = None;
         for entry in ownership.nested() {
-            control.charge_work(1)?;
+            control.checkpoint()?;
             if entry.class() == parent {
                 parent_metadata = Some(entry);
                 break;
@@ -335,6 +337,7 @@ pub(crate) fn closure(
     control: &mut RunContext<'_>,
 ) -> Result<Closure, RequestError> {
     let ownership = index.ownership_cached(control)?;
+    ownership.check_class(root.class_def)?;
     let mut classes = Vec::new();
     let mut pending = Vec::new();
     push(
@@ -347,11 +350,12 @@ pub(crate) fn closure(
     )?;
     let mut fragment = false;
     for entry in ownership.nested() {
-        control.charge_work(1)?;
+        control.checkpoint()?;
         fragment |= entry.class() == root.class_def;
     }
     while let Some(node) = pending.pop() {
-        control.charge_work(1)?;
+        control.checkpoint()?;
+        ownership.check_class(node.class.class_def)?;
         let child_depth = NestingDepth(
             node.depth
                 .0
@@ -359,7 +363,7 @@ pub(crate) fn closure(
                 .ok_or(RequestError::PlatformCapacity)?,
         );
         for entry in ownership.nested().iter().rev() {
-            control.charge_work(1)?;
+            control.checkpoint()?;
             if entry.enclosing() == node.class.class_def {
                 push(
                     &mut pending,

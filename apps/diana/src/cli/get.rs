@@ -26,7 +26,6 @@ pub fn run(
     format: Format,
     output: Option<&Path>,
     verbose: bool,
-    limits: crate::analysis::limits::RequestLimits,
 ) -> Result<(), Failure> {
     let selector = match kind {
         Kind::Class { .. } => Selector::Class(selector::class(text).map_err(|error| Failure {
@@ -38,8 +37,8 @@ pub fn run(
             message: error.to_string(),
         })?),
     };
-    let scope = RequestScope::open(input, &super::options(limits)).map_err(Failure::input)?;
-    let mut control = diana_decomp::RunContext::new_parallel(limits.engine(), &|| false);
+    let scope = RequestScope::open(input, &super::options()).map_err(Failure::input)?;
+    let mut control = diana_decomp::RunContext::new_parallel(&|| false);
     let jobs = match kind {
         Kind::Class { jobs } => jobs,
         Kind::Method => 1,
@@ -55,12 +54,7 @@ pub fn run(
         Format::Text => text_payload(&decompiled, verbose),
         Format::Json => json_payload(&decompiled, verbose),
     };
-    publish(
-        output,
-        payload.as_bytes(),
-        format,
-        limits.max_report_output_bytes,
-    )
+    publish(output, payload.as_bytes(), format)
 }
 
 fn text_payload(decompiled: &Decompiled, verbose: bool) -> String {
@@ -174,9 +168,9 @@ fn language_name(kind: diana_decomp::DebugSourceKind) -> &'static str {
 
 fn severity(kind: FailureKind) -> &'static str {
     match kind {
-        FailureKind::Malformed | FailureKind::InternalInvariant | FailureKind::BudgetExceeded => {
-            "error"
-        }
+        FailureKind::Malformed
+        | FailureKind::InternalInvariant
+        | FailureKind::ResourceExhausted => "error",
         FailureKind::Unsupported | FailureKind::Cancelled => "warning",
     }
 }

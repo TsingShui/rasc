@@ -1,6 +1,6 @@
 use crate::p4_types::initialization::{ChainArgument, ChainKind};
 use crate::p5_variables::StorageBody;
-use crate::{CodeUnitOffset, MethodBudget, RegisterId, RequestError};
+use crate::{CodeUnitOffset, RegisterId, RequestError, RunContext};
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub(crate) enum Invocation {
@@ -29,7 +29,7 @@ pub(crate) struct Prologue {
 pub(super) fn lower(
     storage: &StorageBody<'_>,
     calls: &mut super::calls::SourceCalls,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<Option<Prologue>, RequestError> {
     let Some(entry) = storage.constructor_entry.as_ref() else {
         return Ok(None);
@@ -59,7 +59,7 @@ pub(super) fn lower(
         ));
     }
     for (&origin, usage) in entry.arguments.iter().zip(uses) {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         crate::substrate::owned::push(
             &mut arguments,
             PrologueArgument {
@@ -89,7 +89,7 @@ pub(super) fn lower(
 pub(super) fn verify(
     storage: &StorageBody<'_>,
     actual: Option<&Prologue>,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<bool, RequestError> {
     let (entry, actual) = match (storage.constructor_entry.as_ref(), actual) {
         (None, None) => return Ok(true),
@@ -146,7 +146,7 @@ pub(super) fn verify(
         .zip(op.inputs.iter().skip(1))
         .zip(formals)
     {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         if value.origin != expected
             || !matches!((value.source,expected),(Argument::Parameter(a),ChainArgument::Parameter(b)) if a==b)
                 && !matches!((value.source,expected),(Argument::Int(a),ChainArgument::Literal(b)) if a==b)

@@ -1,10 +1,10 @@
 use crate::context::Context;
-use crate::input::MethodInput;
+use crate::input::MethodSource;
 use crate::p2_flow::CallId;
 use crate::p3_ssa::SsaBody;
 use crate::p4_types::declarations as source;
 use crate::substrate::owned::push;
-use crate::{MethodBudget, RequestError};
+use crate::{RequestError, RunContext};
 use source::StaticContract;
 pub(crate) use source::throws::SourceThrows;
 
@@ -57,26 +57,26 @@ pub(crate) enum FieldDeclaration {
 }
 pub(super) fn collect<'a>(
     _schedule: &crate::engine::SchedulePermit,
-    input: &MethodInput<'_, '_>,
+    input: &MethodSource<'_, '_>,
     catalog: &Context,
     ssa: SsaBody<'a>,
     capture: Option<&crate::CaptureCertificate>,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<ResolvedBody<'a>, RequestError> {
     collect_impl(input, catalog, ssa, capture, budget)
 }
 
 fn collect_impl<'a>(
-    input: &MethodInput<'_, '_>,
+    input: &MethodSource<'_, '_>,
     catalog: &Context,
     ssa: SsaBody<'a>,
     capture: Option<&crate::CaptureCertificate>,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<ResolvedBody<'a>, RequestError> {
     let source_throws = source::throws::source_throws(input, catalog, budget)?;
     let mut calls = Vec::new();
     for call in &ssa.calls {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         let evidence = if call.kind != crate::p2_flow::InvokeKind::Static {
             let original = input.method_reference(call.reference, budget)?;
             let facts = ReceiverFacts {
@@ -124,7 +124,7 @@ fn collect_impl<'a>(
     }
     let mut fields = Vec::new();
     for op in &ssa.operations {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         let (reference, usage, storage) = match op.op {
             crate::p2_flow::Op::FieldLoad(_, _, id, _) => (
                 id,
@@ -198,11 +198,11 @@ fn collect_impl<'a>(
     }))
 }
 pub(crate) fn binding_available(
-    input: &MethodInput<'_, '_>,
+    input: &MethodSource<'_, '_>,
     catalog: &Context,
     contract: &StaticContract,
     invocation: &source::throws::Invocation,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<bool, RequestError> {
     source::contracts::binding_available(input, catalog, contract, invocation, budget)
 }

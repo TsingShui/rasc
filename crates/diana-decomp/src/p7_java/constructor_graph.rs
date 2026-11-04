@@ -1,22 +1,22 @@
-use crate::input::MethodInput;
+use crate::input::MethodSource;
 use crate::p4_types::entry_initialization::Link;
 use crate::p4_types::initialization::ChainKind;
 use crate::p5_variables::StorageBody;
 use crate::substrate::owned::push;
-use crate::{CodeUnitOffset, MethodBudget, MethodId, RequestError};
+use crate::{CodeUnitOffset, MethodId, RequestError, RunContext};
 
 pub(crate) struct Proof<'m, 'i, 'a> {
-    input: &'m MethodInput<'i, 'a>,
+    input: &'m MethodSource<'i, 'a>,
     entry: Option<(MethodId, CodeUnitOffset)>,
 }
 impl Proof<'_, '_, '_> {
     pub(crate) fn check(
         &self,
-        input: &MethodInput<'_, '_>,
+        input: &MethodSource<'_, '_>,
         body: &StorageBody<'_>,
-        budget: &mut MethodBudget<'_, '_>,
+        budget: &mut RunContext<'_>,
     ) -> Result<(), RequestError> {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         let entry = body
             .constructor_entry
             .as_ref()
@@ -42,16 +42,16 @@ pub(crate) struct Graph<'m, 'i, 'a> {
 impl<'m, 'i, 'a> Graph<'m, 'i, 'a> {
     pub(crate) fn new(
         _schedule: &crate::engine::SchedulePermit,
-        input: &'m MethodInput<'i, 'a>,
+        input: &'m MethodSource<'i, 'a>,
         body: &StorageBody<'_>,
-        budget: &mut MethodBudget<'_, '_>,
+        budget: &mut RunContext<'_>,
     ) -> Result<Self, RequestError> {
         Self::new_impl(input, body, budget)
     }
     fn new_impl(
-        input: &'m MethodInput<'i, 'a>,
+        input: &'m MethodSource<'i, 'a>,
         body: &StorageBody<'_>,
-        budget: &mut MethodBudget<'_, '_>,
+        budget: &mut RunContext<'_>,
     ) -> Result<Self, RequestError> {
         let entry = body
             .constructor_entry
@@ -82,14 +82,14 @@ impl<'m, 'i, 'a> Graph<'m, 'i, 'a> {
     }
     pub(crate) fn pending(
         &self,
-        budget: &mut MethodBudget<'_, '_>,
+        budget: &mut RunContext<'_>,
     ) -> Result<Option<MethodId>, RequestError> {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         let State::Need(target) = self.state else {
             return Ok(None);
         };
         for &previous in &self.seen {
-            budget.charge_work(1)?;
+            budget.checkpoint()?;
             if previous == target {
                 return Err(self.unavailable());
             }
@@ -99,7 +99,7 @@ impl<'m, 'i, 'a> Graph<'m, 'i, 'a> {
     pub(crate) fn accept(
         &mut self,
         link: &Link,
-        budget: &mut MethodBudget<'_, '_>,
+        budget: &mut RunContext<'_>,
     ) -> Result<(), RequestError> {
         let Some(source) = self.pending(budget)? else {
             return Err(RequestError::InternalInvariant(

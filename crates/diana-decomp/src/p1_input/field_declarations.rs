@@ -23,6 +23,8 @@ pub(crate) struct FieldInput {
     pub key: FieldKey,
     pub access_flags: u32,
     pub storage: FieldStorage,
+    /// Position inside the original static or instance group.
+    pub ordinal: u32,
     pub facts: Result<FieldFacts, RequestError>,
     pub initial: Option<FieldInitialValue>,
     pub default_preparation: bool,
@@ -79,6 +81,7 @@ pub(crate) fn collect(
                     },
                     access_flags: field.access_flags,
                     storage,
+                    ordinal: field.ordinal,
                     facts,
                     initial,
                     default_preparation: false,
@@ -95,7 +98,7 @@ pub(crate) fn collect(
         let context = index.class_context(key.class_def, control)?;
         let Some(offset) = context.values_offset? else {
             for field in &mut fields {
-                control.charge_work(1)?;
+                control.checkpoint()?;
                 if matches!(field.storage, FieldStorage::Static(_)) {
                     field.initial = Some(FieldInitialValue::ImplicitDefault);
                     field.default_preparation = true;
@@ -105,7 +108,7 @@ pub(crate) fn collect(
         };
         let mut values = EncodedValues::open(index, offset, Some(static_count), control)?;
         for field in &mut fields {
-            control.charge_work(1)?;
+            control.checkpoint()?;
             let FieldStorage::Static(ordinal) = field.storage else {
                 continue;
             };
@@ -134,11 +137,11 @@ pub(crate) fn collect(
             };
             let mut bytes = Vec::new();
             for &byte in value.bytes {
-                control.charge_work(1)?;
+                control.checkpoint()?;
                 push(&mut bytes, byte, control)?;
             }
             while depth != 0 {
-                control.charge_work(1)?;
+                control.checkpoint()?;
                 match values.next(index, control)? {
                     Some(ValueStep::EndContainer) => depth -= 1,
                     Some(ValueStep::Value(child)) => {
@@ -166,7 +169,7 @@ pub(crate) fn collect(
                 for &byte in index.bytes.get(value.range.end.0..range.end.0).ok_or(
                     RequestError::InternalInvariant("encoded preparation lost original bytes"),
                 )? {
-                    control.charge_work(1)?;
+                    control.checkpoint()?;
                     push(&mut bytes, byte, control)?;
                 }
             }
@@ -225,7 +228,7 @@ fn local_failure(
     if matches!(
         error.kind(),
         crate::FailureKind::Cancelled
-            | crate::FailureKind::BudgetExceeded
+            | crate::FailureKind::ResourceExhausted
             | crate::FailureKind::InternalInvariant
     ) {
         return Err(error);

@@ -3,7 +3,7 @@ use super::normal::{Kind, UseConversion};
 use crate::p2_flow::CallId;
 use crate::p3_ssa::{SsaBody, ValueId};
 use crate::substrate::owned::push;
-use crate::{MethodBudget, RequestError};
+use crate::{RequestError, RunContext};
 
 pub(crate) struct TypedUse {
     pub value: ValueId,
@@ -83,11 +83,11 @@ pub(crate) fn solve(
     kinds: &[Option<Kind>],
     bits: &[u8],
     ranges: &[Option<IntRange>],
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<Option<Vec<CallUses>>, RequestError> {
     let mut uses = Vec::new();
     for (index, site) in ssa.calls.iter().enumerate() {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         let id = CallId(u32::try_from(index).map_err(|_| RequestError::PlatformCapacity)?);
         let bound = ssa.call(id)?;
         let (receiver, values) = if site.kind == crate::p2_flow::InvokeKind::Static {
@@ -129,7 +129,7 @@ pub(crate) fn solve(
         }
         let mut arguments = Vec::new();
         for (&value, &formal) in values.iter().zip(formals) {
-            budget.charge_work(1)?;
+            budget.checkpoint()?;
             if formal.field_offset() == 2 && !initializations.available_at(ssa, value, site.pc)? {
                 return Ok(None);
             }
@@ -155,7 +155,7 @@ pub(crate) fn solve(
 pub(super) fn is_this(
     ssa: &SsaBody<'_>,
     root: ValueId,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<bool, RequestError> {
     if !matches!(
         ssa.frame,
@@ -165,16 +165,16 @@ pub(super) fn is_this(
     }
     let mut seen = Vec::new();
     for _ in &ssa.values {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         push(&mut seen, false, budget)?;
     }
     let mut phi_indices = Vec::new();
     for _ in &ssa.values {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         push(&mut phi_indices, None, budget)?;
     }
     for (index, phi) in ssa.phis.iter().enumerate() {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         let result = usize::try_from(phi.result.0).map_err(|_| RequestError::PlatformCapacity)?;
         if phi_indices[result].replace(index).is_some() {
             return Err(RequestError::InternalInvariant(
@@ -186,7 +186,7 @@ pub(super) fn is_this(
     push(&mut pending, root, budget)?;
     let mut anchored = false;
     while let Some(value) = pending.pop() {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         let index = usize::try_from(value.0).map_err(|_| RequestError::PlatformCapacity)?;
         if seen[index] {
             continue;
@@ -205,7 +205,7 @@ pub(super) fn is_this(
                 let phi_index = phi_indices[index]
                     .ok_or(RequestError::InternalInvariant("this origin lost Phi"))?;
                 for &(_, source) in &ssa.phis[phi_index].inputs {
-                    budget.charge_work(1)?;
+                    budget.checkpoint()?;
                     let crate::p3_ssa::Sym::Value(source) = source else {
                         return Ok(false);
                     };

@@ -1,7 +1,7 @@
-use crate::input::MethodInput;
+use crate::input::MethodSource;
 use crate::p2_flow::entry::ParameterFamily;
 use crate::substrate::owned::push;
-use crate::{MethodBudget, MethodId, RequestError};
+use crate::{MethodId, RequestError, RunContext};
 pub(crate) struct EntryDeclarations {
     original: super::constructor_evidence::ConstructorDeclarations,
     owner: Vec<u16>,
@@ -21,7 +21,7 @@ impl EntryDeclarations {
         reference: MethodId,
         pc: crate::CodeUnitOffset,
         kind: super::allocation::ConstructorUse,
-        budget: &mut MethodBudget<'_, '_>,
+        budget: &mut RunContext<'_>,
     ) -> Result<(), RequestError> {
         self.original
             .bind(reference, pc, &self.owner, kind, budget)?;
@@ -30,21 +30,21 @@ impl EntryDeclarations {
 }
 pub(crate) fn collect(
     _schedule: &crate::engine::SchedulePermit,
-    input: &MethodInput<'_, '_>,
+    input: &MethodSource<'_, '_>,
     catalog: &crate::context::Context,
     reference: MethodId,
     pc: crate::CodeUnitOffset,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<EntryDeclarations, RequestError> {
     collect_impl(input, catalog, reference, pc, budget)
 }
 
 fn collect_impl(
-    input: &MethodInput<'_, '_>,
+    input: &MethodSource<'_, '_>,
     catalog: &crate::context::Context,
     reference: MethodId,
     pc: crate::CodeUnitOffset,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<EntryDeclarations, RequestError> {
     let declaration = input.method_reference(reference, budget)?;
     let owner = crate::substrate::owned::copy_units(declaration.owner, budget)?;
@@ -73,9 +73,9 @@ fn collect_impl(
     })
 }
 fn formals(
-    input: &MethodInput<'_, '_>,
+    input: &MethodSource<'_, '_>,
     reference: MethodId,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<Vec<ParameterFamily>, RequestError> {
     let original = input.method_reference(reference, budget)?;
     let mut result = Vec::new();

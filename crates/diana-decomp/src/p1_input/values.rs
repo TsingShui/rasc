@@ -74,7 +74,7 @@ fn count(
     if maximum.is_some_and(|maximum| count > maximum) {
         return Err(invalid(cursor.position_byte()));
     }
-    budget.charge_metadata(u64::from(count))?;
+    budget.checkpoint()?;
     Ok(count)
 }
 
@@ -137,7 +137,7 @@ impl<'a> EncodedValues<'a> {
     }
 
     fn push(&mut self, frame: Frame, budget: &mut impl InputControl) -> Result<(), MethodError> {
-        budget.charge_metadata(1)?;
+        budget.checkpoint()?;
         if self.stack.len() == self.stack.capacity() {
             let needed = self
                 .stack
@@ -158,13 +158,11 @@ impl<'a> EncodedValues<'a> {
                     "encoded-value depth exceeds consumed bytes",
                 ));
             }
-            let increment = capacity
-                .checked_sub(self.stack.capacity())
-                .and_then(|n| n.checked_mul(size_of::<Frame>()))
+            capacity
+                .checked_mul(size_of::<Frame>())
+                .filter(|&size| size <= isize::MAX as usize)
                 .ok_or(MethodError::PlatformCapacity)?;
-            budget.charge_allocation(
-                u64::try_from(increment).map_err(|_| MethodError::PlatformCapacity)?,
-            )?;
+            budget.checkpoint()?;
             self.stack
                 .try_reserve_exact(capacity - self.stack.len())
                 .map_err(MethodError::Allocation)?;
@@ -198,7 +196,7 @@ impl<'a> EncodedValues<'a> {
         index: &ProgramIndex<'_>,
         budget: &mut impl InputControl,
     ) -> Result<Option<ValueStep<'a>>, MethodError> {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         let frame = self.stack.last_mut().unwrap_or(&mut self.root);
         if frame.remaining == 0 {
             return if self.stack.pop().is_some() {

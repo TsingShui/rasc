@@ -8,32 +8,6 @@
 
 use thiserror::Error;
 
-/// Explicit manifest bounds. Unset fields impose no numeric cap; structural
-/// checks against the actual bytes always apply.
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub struct ManifestLimits {
-    pub max_nodes: Option<u64>,
-    pub max_string_units: Option<u64>,
-    pub max_output_bytes: Option<u64>,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum ManifestLimit {
-    Nodes,
-    StringUnits,
-    OutputBytes,
-}
-
-impl std::fmt::Display for ManifestLimit {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(match self {
-            Self::Nodes => "nodes",
-            Self::StringUnits => "string_units",
-            Self::OutputBytes => "output_bytes",
-        })
-    }
-}
-
 #[derive(Debug, Error)]
 pub enum ManifestError {
     #[error("input is not an Android binary XML document")]
@@ -52,12 +26,6 @@ pub enum ManifestError {
     BrokenStringPool { offset: usize },
     #[error("typed value {data_type:#04x} of attribute {index} is not supported")]
     UnsupportedValue { index: u32, data_type: u8 },
-    #[error("{limit} exceeded: requested {requested}, maximum {maximum}")]
-    Budget {
-        limit: ManifestLimit,
-        requested: u64,
-        maximum: u64,
-    },
     #[error("manifest value is not representable on this platform")]
     PlatformCapacity,
 }
@@ -66,7 +34,7 @@ impl ManifestError {
     pub fn kind(&self) -> diana_decomp::FailureKind {
         use diana_decomp::FailureKind as Kind;
         match self {
-            Self::Budget { .. } | Self::PlatformCapacity => Kind::BudgetExceeded,
+            Self::PlatformCapacity => Kind::ResourceExhausted,
             Self::NotAxml | Self::UnsupportedChunk { .. } | Self::UnsupportedValue { .. } => {
                 Kind::Unsupported
             }
@@ -165,7 +133,7 @@ impl<'a> StringPool<'a> {
     }
 
     /// Returns the raw payload of one string: UTF-8 bytes or UTF-16LE units.
-    fn payload(&self, index: u32, budget: &mut Budget<'_>) -> Result<&'a [u8], ManifestError> {
+    fn payload(&self, index: u32) -> Result<&'a [u8], ManifestError> {
         if index >= self.count {
             return Err(ManifestError::InvalidString { index });
         }
@@ -181,10 +149,10 @@ impl<'a> StringPool<'a> {
             .ok_or(ManifestError::InvalidString { index })?;
         if self.utf8 {
             // The first prefix is the payload byte length; the second is the
-            // UTF-16 unit length used for accounting.
+            // UTF-16 unit length.
             let (byte_length, after_byte_length) = utf8_prefix(record, 0, index)?;
-            let (units, payload_start) = utf8_prefix(record, after_byte_length, index)?;
-            budget.string_units(u64::from(units))?;
+            let (_, payload_start) = utf8_prefix(record, after_byte_length, index)?;
+
             let length =
                 usize::try_from(byte_length).map_err(|_| ManifestError::PlatformCapacity)?;
             record
@@ -192,7 +160,7 @@ impl<'a> StringPool<'a> {
                 .ok_or(ManifestError::InvalidString { index })
         } else {
             let units = u32::from(u16_at(record, 0)?);
-            budget.string_units(u64::from(units))?;
+
             let length = usize::try_from(units)
                 .map_err(|_| ManifestError::PlatformCapacity)?
                 .checked_mul(2)
@@ -203,8 +171,8 @@ impl<'a> StringPool<'a> {
         }
     }
 
-    fn text(&self, index: u32, budget: &mut Budget<'_>) -> Result<String, ManifestError> {
-        let payload = self.payload(index, budget)?;
+    fn text(&self, index: u32) -> Result<String, ManifestError> {
+        let payload = self.payload(index)?;
         if self.utf8 {
             Ok(String::from_utf8_lossy(payload).into_owned())
         } else {
@@ -268,66 +236,20 @@ fn describe(kind: &ManifestWarningKind) -> String {
     }
 }
 
-struct Budget<'a> {
-    limits: ManifestLimits,
-    nodes: u64,
-    units: u64,
+struct XmlOutput {
     output: String,
-    _marker: std::marker::PhantomData<&'a ()>,
 }
 
-impl Budget<'_> {
-    fn nodes(&mut self) -> Result<(), ManifestError> {
-        self.nodes = self
-            .nodes
-            .checked_add(1)
-            .ok_or(ManifestError::PlatformCapacity)?;
-        if let Some(maximum) = self.limits.max_nodes
-            && self.nodes > maximum
-        {
-            return Err(ManifestError::Budget {
-                limit: ManifestLimit::Nodes,
-                requested: self.nodes,
-                maximum,
-            });
-        }
-        Ok(())
-    }
-
-    fn string_units(&mut self, count: u64) -> Result<(), ManifestError> {
-        self.units = self
-            .units
-            .checked_add(count)
-            .ok_or(ManifestError::PlatformCapacity)?;
-        if let Some(maximum) = self.limits.max_string_units
-            && self.units > maximum
-        {
-            return Err(ManifestError::Budget {
-                limit: ManifestLimit::StringUnits,
-                requested: self.units,
-                maximum,
-            });
-        }
-        Ok(())
-    }
-
+impl XmlOutput {
     fn write(&mut self, text: &str) -> Result<(), ManifestError> {
         let needed = self
             .output
             .len()
             .checked_add(text.len())
             .ok_or(ManifestError::PlatformCapacity)?;
-        if let Some(maximum) = self.limits.max_output_bytes
-            && u64::try_from(needed).map_err(|_| ManifestError::PlatformCapacity)? > maximum
-        {
-            return Err(ManifestError::Budget {
-                limit: ManifestLimit::OutputBytes,
-                requested: u64::try_from(needed).map_err(|_| ManifestError::PlatformCapacity)?,
-                maximum,
-            });
-        }
+
         self.output
-            .try_reserve(text.len())
+            .try_reserve(needed - self.output.len())
             .map_err(|_| ManifestError::PlatformCapacity)?;
         self.output.push_str(text);
         Ok(())
@@ -454,7 +376,7 @@ pub enum ManifestWarningKind {
 /// platform-capacity failure is fatal. Every other defect is recoverable: the
 /// reader skips the damaged record, records a warning with its byte offset and
 /// closes open elements so the produced text stays balanced XML.
-pub fn decode(bytes: &[u8], limits: ManifestLimits) -> Result<DecodedManifest, ManifestError> {
+pub fn decode(bytes: &[u8]) -> Result<DecodedManifest, ManifestError> {
     if u16_at(bytes, 0)? != RES_XML_TYPE {
         return Err(ManifestError::NotAxml);
     }
@@ -465,12 +387,8 @@ pub fn decode(bytes: &[u8], limits: ManifestLimits) -> Result<DecodedManifest, M
     }
     let mut decoder = Decoder {
         bytes,
-        budget: Budget {
-            limits,
-            nodes: 0,
-            units: 0,
+        output: XmlOutput {
             output: String::new(),
-            _marker: std::marker::PhantomData,
         },
         warnings: Vec::new(),
         pool: None,
@@ -489,7 +407,7 @@ pub fn decode(bytes: &[u8], limits: ManifestLimits) -> Result<DecodedManifest, M
     }
     decoder.run(header, end)?;
     decoder.close_open()?;
-    let mut xml = decoder.budget.output;
+    let mut xml = decoder.output.output;
     if decoder.needs_android_namespace && !decoder.declared_android_namespace {
         // Attributes named through the Android table need the bound prefix, or the
         // text is not parseable XML.
@@ -507,7 +425,7 @@ pub fn decode(bytes: &[u8], limits: ManifestLimits) -> Result<DecodedManifest, M
 
 struct Decoder<'a> {
     bytes: &'a [u8],
-    budget: Budget<'a>,
+    output: XmlOutput,
     warnings: Vec<ManifestWarning>,
     pool: Option<StringPool<'a>>,
     namespaces: Vec<(String, String)>,
@@ -535,10 +453,10 @@ impl Decoder<'_> {
         if text.contains("--") {
             text = text.replace("--", "- -");
         }
-        self.budget.indent(depth)?;
-        self.budget.write("<!-- ")?;
-        self.budget.write(&text)?;
-        self.budget.write(" -->\n")?;
+        self.output.indent(depth)?;
+        self.output.write("<!-- ")?;
+        self.output.write(&text)?;
+        self.output.write(" -->\n")?;
         self.warning(offset, kind)
     }
 
@@ -564,33 +482,29 @@ impl Decoder<'_> {
             self.warning(offset, kind)?;
         }
         let needed = self
-            .budget
+            .output
             .output
             .len()
             .checked_add(comments.len())
             .ok_or(ManifestError::PlatformCapacity)?;
-        if let Some(maximum) = self.budget.limits.max_output_bytes
-            && u64::try_from(needed).map_err(|_| ManifestError::PlatformCapacity)? > maximum
-        {
-            return Err(ManifestError::Budget {
-                limit: ManifestLimit::OutputBytes,
-                requested: u64::try_from(needed).map_err(|_| ManifestError::PlatformCapacity)?,
-                maximum,
-            });
-        }
-        self.budget.output.insert_str(at, &comments);
+
+        self.output
+            .output
+            .try_reserve(needed - self.output.output.len())
+            .map_err(|_| ManifestError::PlatformCapacity)?;
+        self.output.output.insert_str(at, &comments);
         Ok(())
     }
 
     fn text(&mut self, offset: usize, index: u32) -> Result<String, ManifestError> {
         if let Some(pool) = self.pool.as_ref() {
-            match pool.text(index, &mut self.budget) {
+            match pool.text(index) {
                 Ok(text) => return Ok(text),
                 Err(ManifestError::InvalidString { .. }) => {
                     self.warning(offset, ManifestWarningKind::InvalidString(index))?;
                     return Ok(String::new());
                 }
-                Err(ManifestError::Budget { .. }) | Err(ManifestError::PlatformCapacity) => {
+                Err(ManifestError::PlatformCapacity) => {
                     return Err(ManifestError::PlatformCapacity);
                 }
                 Err(_) => {
@@ -634,8 +548,7 @@ impl Decoder<'_> {
                 RES_STRING_POOL_TYPE => {
                     match StringPool::parse(self.bytes, offset, chunk_header, chunk_end) {
                         Ok(pool) => self.pool = Some(pool),
-                        Err(ManifestError::Budget { .. })
-                        | Err(ManifestError::PlatformCapacity) => {
+                        Err(ManifestError::PlatformCapacity) => {
                             return Err(ManifestError::PlatformCapacity);
                         }
                         Err(_) => {
@@ -669,7 +582,6 @@ impl Decoder<'_> {
                             .try_reserve(1)
                             .map_err(|_| ManifestError::PlatformCapacity)?;
                         self.namespaces.push((prefix_text, uri_text));
-                        self.budget.nodes()?;
                     }
                 }
                 RES_XML_END_NAMESPACE_TYPE => {
@@ -695,11 +607,10 @@ impl Decoder<'_> {
                         let index = u32_at(self.bytes, offset + 16)?;
                         let text = self.text(offset, index)?;
                         if !text.is_empty() {
-                            self.budget.nodes()?;
                             let depth = self.open.len();
-                            self.budget.indent(depth)?;
-                            self.budget.write_escaped(&text)?;
-                            self.budget.write("\n")?;
+                            self.output.indent(depth)?;
+                            self.output.write_escaped(&text)?;
+                            self.output.write("\n")?;
                         }
                     }
                 }
@@ -739,11 +650,11 @@ impl Decoder<'_> {
             self.skip = Some(self.raw_depth - 1);
             return Ok(());
         }
-        self.budget.nodes()?;
+
         let depth = self.open.len();
-        self.budget.indent(depth)?;
-        self.budget.write("<")?;
-        self.budget.write_escaped(&name)?;
+        self.output.indent(depth)?;
+        self.output.write("<")?;
+        self.output.write_escaped(&name)?;
         if self.open.is_empty() {
             for (prefix, uri) in self.namespaces.clone() {
                 if uri.is_empty() {
@@ -754,17 +665,17 @@ impl Decoder<'_> {
                 if prefix == "android" || uri == ANDROID_NAMESPACE {
                     self.declared_android_namespace = true;
                 }
-                self.budget.write(" xmlns")?;
+                self.output.write(" xmlns")?;
                 if !prefix.is_empty() {
-                    self.budget.write(":")?;
-                    self.budget.write_escaped(&prefix)?;
+                    self.output.write(":")?;
+                    self.output.write_escaped(&prefix)?;
                 }
-                self.budget.write("=\"")?;
-                self.budget.write_escaped(&uri)?;
-                self.budget.write("\"")?;
+                self.output.write("=\"")?;
+                self.output.write_escaped(&uri)?;
+                self.output.write("\"")?;
             }
         }
-        let start = self.budget.output.len();
+        let start = self.output.output.len();
         let mut pending: Vec<(usize, ManifestWarningKind)> = Vec::new();
         self.write_attributes(
             offset,
@@ -774,7 +685,7 @@ impl Decoder<'_> {
             end,
             &mut pending,
         )?;
-        self.budget.write(">\n")?;
+        self.output.write(">\n")?;
         if !pending.is_empty() {
             self.insert_comments(start, depth, pending)?;
         }
@@ -851,7 +762,6 @@ impl Decoder<'_> {
                 data_type,
                 data,
                 u32::try_from(index).unwrap_or(u32::MAX),
-                &mut self.budget,
             ) {
                 Ok(value) => value,
                 Err(ManifestError::UnsupportedValue { data_type, .. }) => {
@@ -864,12 +774,12 @@ impl Decoder<'_> {
                 }
                 Err(other) => return Err(other),
             };
-            self.budget.nodes()?;
-            self.budget.write(" ")?;
-            self.budget.write_escaped(&qualified)?;
-            self.budget.write("=\"")?;
-            self.budget.write_escaped(&value)?;
-            self.budget.write("\"")?;
+
+            self.output.write(" ")?;
+            self.output.write_escaped(&qualified)?;
+            self.output.write("=\"")?;
+            self.output.write_escaped(&value)?;
+            self.output.write("\"")?;
             seen.try_reserve(1)
                 .map_err(|_| ManifestError::PlatformCapacity)?;
             seen.push(qualified);
@@ -940,28 +850,28 @@ impl Decoder<'_> {
         if opened != name {
             self.warning(offset, ManifestWarningKind::UnbalancedElement)?;
         }
-        self.budget.nodes()?;
+
         let depth = self.open.len();
-        self.budget.indent(depth)?;
-        self.budget.write("</")?;
-        self.budget.write_escaped(&opened)?;
-        self.budget.write(">\n")?;
+        self.output.indent(depth)?;
+        self.output.write("</")?;
+        self.output.write_escaped(&opened)?;
+        self.output.write(">\n")?;
         Ok(())
     }
 
     fn close_open(&mut self) -> Result<(), ManifestError> {
         while let Some(name) = self.open.pop() {
             let depth = self.open.len();
-            self.budget.indent(depth)?;
-            self.budget
+            self.output.indent(depth)?;
+            self.output
                 .write("<!-- diana: missing records; this element was closed here -->\n")?;
             self.warning(0, ManifestWarningKind::UnbalancedElement)?;
-            self.budget.nodes()?;
+
             let depth = self.open.len();
-            self.budget.indent(depth)?;
-            self.budget.write("</")?;
-            self.budget.write_escaped(&name)?;
-            self.budget.write(">\n")?;
+            self.output.indent(depth)?;
+            self.output.write("</")?;
+            self.output.write_escaped(&name)?;
+            self.output.write(">\n")?;
         }
         Ok(())
     }
@@ -1037,14 +947,13 @@ fn attribute_value(
     data_type: u8,
     data: u32,
     index: u32,
-    budget: &mut Budget<'_>,
 ) -> Result<String, ManifestError> {
     let value = match data_type {
         0x00 => String::new(),
         0x01 | 0x07 | 0x08 => format!("@{data:#010x}"),
         0x02 => format!("?{data:#010x}"),
         0x03 => match pool {
-            Some(pool) => pool.text(data, budget)?,
+            Some(pool) => pool.text(data)?,
             None => return Err(ManifestError::BrokenStringPool { offset: 0 }),
         },
         0x04 => f32::from_bits(data).to_string(),

@@ -184,7 +184,7 @@ The defaults only resolve literal interpretations that no producer or use can di
 MUST NOT override a known F32 producer. When several non-literal uses require incompatible
 families, the implementation MUST NOT search cast combinations or introduce a bitcast library.
 Building the family graph is near linear (union-find amortized
-O((values+constraints)*alpha(values)), and every edge, merge and set intersection is charged.
+O((values+constraints)*alpha(values)), and every edge, merge and set intersection grows through checked reservation.
 
 ### 4.4 Producers and Known01: the second finite fixed point
 
@@ -215,9 +215,9 @@ justify deleting a branch or sealing a type.
 Component facts of array-get are derived from proven array origins by stripping one `[` to obtain
 the component; without array evidence no cast is invented. Every derived component still belongs
 to the finite descriptor closure. Reference sets may grow considerably, and constraints and bytes
-are charged per new fact; the implementation MUST NOT claim that this step is strictly linear in
+grow per new fact; the implementation MUST NOT claim that this step is strictly linear in
 the input bytes. The worst case is roughly the number of reachable facts multiplied by their
-propagation edges, and it is bounded by the method/request quotas.
+propagation edges, and it is bounded by the finite value and constraint domains.
 
 ### 4.5 Determine the source storage type once
 
@@ -305,7 +305,7 @@ MUST NOT be combined before counting the length.
 quote/backslash/CR/LF use language-specific escapes, an original backslash is output as a pair to
 avoid an unintended Unicode escape; Java source escaping is not reused for JSON debug snapshots. Classfile MUTF8 limits do not constrain readable source. The printer preserves
 all original UTF-16 units within actual platform capacity and configured output
-quotas; it does not split values, change intern identity or invent runtime helpers
+capacity checks; it does not split values, change intern identity or invent runtime helpers
 for compilation.
 
 ### 4.9 Lossless use conversion of narrow integers after a Phi
@@ -330,7 +330,7 @@ inferred.
 move copies the bounds and Phi takes the hull of the incoming closed intervals; Bottom means that
 no fact exists yet, not [0,0]. Lower bounds only descend and upper bounds only rise, and all
 endpoints come from fixed producer bounds or literals, so the closure is finite and monotone.
-Each change and propagation is charged as work; the implementation MUST NOT add a general
+Each change and propagation has bounded progress; the implementation MUST NOT add a general
 interval/widening solver.
 
 After the facts are sealed, existing Known01 evidence MAY intersect the checked range with [0,1]
@@ -466,7 +466,7 @@ P7 MUST consume the graph certificate before sealing a delegating constructor.
 Contributors MUST NOT use an entry product to admit the callee body as Java or to
 bypass that body's ordinary P1–P8 chain. A failure after the entry endpoint does
 not erase the checked link or change the callee's own classified result. The query
-uses the selected method's existing budget and cancellation control; it is not a
+uses the selected method's existing cancellation control; it is not a
 retry from the raw-output exit.
 
 ### 9.3 uninit is a state of the use position, not one globally changed ValueType

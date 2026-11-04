@@ -2,7 +2,7 @@ use super::normal::{Block, BlockId, Edge, Op, Terminal};
 use crate::input::RawMethodView;
 use crate::input::protection::{CatchType, CheckedProtection};
 use crate::substrate::owned::push;
-use crate::{CodeUnitOffset, MethodBudget, RequestError};
+use crate::{CodeUnitOffset, RequestError, RunContext};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct ExceptionEdgeId(pub u32);
@@ -40,15 +40,15 @@ fn normal_ingress(
     protection: &CheckedProtection,
     blocks: &[Block],
     normal: &[Edge],
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<bool, RequestError> {
     for edge in normal {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         let block = blocks
             .get(ix(edge.target.0)?)
             .ok_or(RequestError::InternalInvariant("foreign normal target"))?;
         for target in protection.targets() {
-            budget.charge_work(1)?;
+            budget.checkpoint()?;
             if block.pc == target {
                 return Ok(false);
             }
@@ -74,16 +74,16 @@ fn append_site(
     source: BlockId,
     site: Site,
     result: &mut Vec<ExceptionEdge>,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<(), RequestError> {
     let Some(chain) = protection.at(site.selection, budget)? else {
         return Ok(());
     };
     for (rank, clause) in chain.iter().enumerate() {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         let mut target = None;
         for (index, block) in blocks.iter().enumerate() {
-            budget.charge_work(1)?;
+            budget.checkpoint()?;
             if block.pc == clause.target {
                 target = Some(BlockId(
                     u32::try_from(index).map_err(|_| RequestError::PlatformCapacity)?,
@@ -111,7 +111,7 @@ pub(super) fn build(
     protection: &CheckedProtection,
     blocks: &[Block],
     normal: &[Edge],
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<Option<Vec<ExceptionEdge>>, RequestError> {
     if !normal_ingress(protection, blocks, normal, budget)? {
         return Ok(None);
@@ -120,7 +120,7 @@ pub(super) fn build(
     for (index, block) in blocks.iter().enumerate() {
         let source = BlockId(u32::try_from(index).map_err(|_| RequestError::PlatformCapacity)?);
         for op in &block.ops {
-            budget.charge_work(1)?;
+            budget.checkpoint()?;
             if op.kind.effects().may_throw {
                 append_site(
                     protection,
@@ -158,13 +158,13 @@ fn check_site(
     site: Site,
     edges: &[ExceptionEdge],
     cursor: &mut usize,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<(), RequestError> {
     let Some(chain) = protection.at(site.selection, budget)? else {
         return Ok(());
     };
     for (rank, clause) in chain.iter().enumerate() {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         let edge = edges
             .get(*cursor)
             .ok_or(RequestError::InternalInvariant("missing exception edge"))?;
@@ -193,7 +193,7 @@ pub(crate) fn verify(
     blocks: &[Block],
     normal: &[Edge],
     edges: &[ExceptionEdge],
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<(), RequestError> {
     if !normal_ingress(protection, blocks, normal, budget)? {
         return Err(RequestError::InternalInvariant(
@@ -203,7 +203,7 @@ pub(crate) fn verify(
     for split in protection.boundaries() {
         let projected = boundary(raw, split)?;
         for block in blocks {
-            budget.charge_work(1)?;
+            budget.checkpoint()?;
             if block.pc == projected {
                 continue;
             }
@@ -213,7 +213,7 @@ pub(crate) fn verify(
                 ));
             }
             for op in &block.ops {
-                budget.charge_work(1)?;
+                budget.checkpoint()?;
                 if op.pc == projected {
                     return Err(RequestError::InternalInvariant(
                         "protection boundary crossed an operation",
@@ -226,7 +226,7 @@ pub(crate) fn verify(
     for (index, block) in blocks.iter().enumerate() {
         let source = BlockId(u32::try_from(index).map_err(|_| RequestError::PlatformCapacity)?);
         for op in &block.ops {
-            budget.charge_work(1)?;
+            budget.checkpoint()?;
             let layout = crate::raw::instruction_layout(raw.instructions(), op.pc, raw.version())
                 .map_err(crate::input::MethodError::Decode)?;
             let crate::raw::LayoutKind::Instruction(spec) = layout.kind() else {
@@ -245,7 +245,7 @@ pub(crate) fn verify(
                         .map_err(crate::input::MethodError::Decode)?;
                 let mut found = false;
                 for target in protection.targets() {
-                    budget.charge_work(1)?;
+                    budget.checkpoint()?;
                     found |= target == op.pc;
                 }
                 if !found

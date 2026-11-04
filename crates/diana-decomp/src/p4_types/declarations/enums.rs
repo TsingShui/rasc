@@ -170,7 +170,7 @@ fn collect_impl(
         let proto = units(proto, control)?;
         let mut found = 0usize;
         for method in &parent.methods {
-            control.charge_work(1)?;
+            control.checkpoint()?;
             if method.name == name && method.prototype == proto {
                 if method.access_flags != flags
                     || method.generic != generic
@@ -192,7 +192,7 @@ fn collect_impl(
     let mut storage = None;
     let mut constants = Vec::new();
     for field in directory.fields {
-        control.charge_work(1)?;
+        control.checkpoint()?;
         let facts = field.facts?;
         if !matches!(field.storage, crate::FieldStorage::Static(_)) || !field.default_preparation {
             return Ok(None);
@@ -212,7 +212,7 @@ fn collect_impl(
         }
         let mut names = 0usize;
         for name in &class.field_names {
-            control.charge_work(1)?;
+            control.checkpoint()?;
             if *name == facts.name {
                 names = names.checked_add(1).ok_or(RequestError::PlatformCapacity)?;
             }
@@ -267,6 +267,7 @@ fn collect_impl(
                 method_idx,
                 access_flags,
                 declaration,
+                ..
             } = entry
             else {
                 return Ok(());
@@ -304,7 +305,7 @@ fn collect_impl(
                 return Ok(());
             };
             for member in &members {
-                control.charge_work(1)?;
+                control.checkpoint()?;
                 let member: &Member = member;
                 if member.role == role {
                     valid = false;
@@ -312,7 +313,7 @@ fn collect_impl(
             }
             let mut found = 0usize;
             for evidence in &class.methods {
-                control.charge_work(1)?;
+                control.checkpoint()?;
                 if evidence.name == name && evidence.prototype == proto {
                     if evidence.access_flags != access_flags & !0x10000
                         || evidence.generic != (role == Role::Constructor)

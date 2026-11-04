@@ -1,7 +1,7 @@
 use super::normal::{Definition, Incoming, SsaBody, Sym, ValueId, lookup, value};
 use crate::p2_flow::{ValueWidth, terminal_register};
 use crate::substrate::owned::push;
-use crate::{CodeUnitOffset, MethodBudget, RegisterId, RequestError};
+use crate::{CodeUnitOffset, RegisterId, RequestError, RunContext};
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 enum Fact {
@@ -39,11 +39,11 @@ pub(super) fn analyze(
     seeds: &[(RegisterId, Sym)],
     outgoing: &[Vec<(RegisterId, Sym)>],
     exceptional: &[Vec<(RegisterId, Sym)>],
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<WidthFacts, RequestError> {
     let mut widths = Vec::new();
     for definition in &ssa.values {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         let fact = match *definition {
             Definition::Parameter(index) => Fact::Known(ssa.parameters[ix(index)?].width()),
             Definition::OpResult(id) => {
@@ -57,9 +57,9 @@ pub(super) fn analyze(
     loop {
         let mut changed = false;
         for phi in &ssa.phis {
-            budget.charge_work(1)?;
+            budget.checkpoint()?;
             for &(_, input) in &phi.inputs {
-                budget.charge_work(1)?;
+                budget.checkpoint()?;
                 let source = match input {
                     Sym::Value(source) => widths[ix(source.0)?],
                     Sym::High(owner) => {
@@ -88,16 +88,16 @@ pub(super) fn analyze(
     }
     let mut broken = Vec::new();
     for &fact in &widths {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         push(&mut broken, fact == Fact::Conflict, budget)?;
     }
     for phi in &ssa.phis {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         if widths[ix(phi.result.0)?] != Fact::Known(ValueWidth::Two) {
             continue;
         }
         for &(edge, source) in &phi.inputs {
-            budget.charge_work(1)?;
+            budget.checkpoint()?;
             let env = match edge {
                 Incoming::Normal(edge) => outgoing[ix(ssa.edges[ix(edge.0)?].source.0)?].as_slice(),
                 Incoming::Exceptional(edge) => exceptional[ix(edge.0)?].as_slice(),
@@ -113,10 +113,10 @@ pub(super) fn analyze(
     loop {
         let mut changed = false;
         for op in &ssa.operations {
-            budget.charge_work(1)?;
+            budget.checkpoint()?;
             if let Some(result) = op.result {
                 for input in &op.inputs {
-                    budget.charge_work(1)?;
+                    budget.checkpoint()?;
                     if broken[ix(input.0)?] && !broken[ix(result.0)?] {
                         broken[ix(result.0)?] = true;
                         changed = true;
@@ -125,9 +125,9 @@ pub(super) fn analyze(
             }
         }
         for phi in &ssa.phis {
-            budget.charge_work(1)?;
+            budget.checkpoint()?;
             for &(_, input) in &phi.inputs {
-                budget.charge_work(1)?;
+                budget.checkpoint()?;
                 let bad = match input {
                     Sym::Value(source) => broken[ix(source.0)?],
                     Sym::High(owner) => {
@@ -151,12 +151,12 @@ pub(super) fn analyze(
 impl WidthFacts {
     pub(super) fn entry(
         source: &[ValueWidth],
-        budget: &mut MethodBudget<'_, '_>,
+        budget: &mut RunContext<'_>,
     ) -> Result<Self, RequestError> {
         let mut widths = Vec::new();
         let mut broken = Vec::new();
         for &width in source {
-            budget.charge_work(1)?;
+            budget.checkpoint()?;
             push(&mut widths, Fact::Known(width), budget)?;
             push(&mut broken, false, budget)?;
         }
@@ -169,7 +169,7 @@ impl WidthFacts {
         register: RegisterId,
         expected: ValueWidth,
         pc: CodeUnitOffset,
-        budget: &mut MethodBudget<'_, '_>,
+        budget: &mut RunContext<'_>,
     ) -> Result<ValueId, RequestError> {
         let result = value(lookup(env, register, budget)?, register, pc)?;
         let index = ix(result.0)?;

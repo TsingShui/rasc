@@ -1,7 +1,7 @@
 use crate::p4_types::Kind;
 use crate::p5_variables::{Initializer, Parameter, StorageBody};
 use crate::substrate::owned::push;
-use crate::{MethodBudget, RequestError};
+use crate::{RequestError, RunContext};
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub(crate) enum InitialValue {
@@ -21,11 +21,11 @@ pub(crate) struct Local {
 pub(super) fn lower(
     storage: &StorageBody<'_>,
     names: &super::types::TypeNames,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<Vec<Local>, RequestError> {
     let mut result = Vec::new();
     for local in &storage.locals {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         let value = match local.initializer {
             Initializer::ThisAfterChain | Initializer::Parameter(Parameter::This) => {
                 InitialValue::This
@@ -64,7 +64,7 @@ pub(super) fn lower(
 pub(super) fn verify(
     local: &Local,
     names: &super::types::TypeNames,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<bool, RequestError> {
     if names.source_name(local.source_type)? != names.name(local.kind, budget)? {
         return Ok(false);

@@ -31,7 +31,7 @@ pub(super) fn verify(
     let mut origins = Vec::new();
     for annotation in uses {
         for default in annotation.defaults() {
-            control.charge_work(1)?;
+            control.checkpoint()?;
 
             if !super::declarations::identifier(default.name(), control)?
                 || literal(default.value(), control)?.is_none()
@@ -39,7 +39,7 @@ pub(super) fn verify(
                 return Ok(None);
             }
         }
-        control.charge_work(1)?;
+        control.checkpoint()?;
 
         let descriptor = annotation.descriptor();
         let start = descriptor
@@ -61,13 +61,13 @@ pub(super) fn verify(
         source.push("(", control)?;
         let mut methods = Vec::new();
         for (index, element) in annotation.elements().iter().enumerate() {
-            control.charge_work(1)?;
+            control.checkpoint()?;
 
             if !super::declarations::identifier(element.name(), control)? {
                 return Ok(None);
             }
             for earlier in &annotation.elements()[..index] {
-                control.charge_work(1)?;
+                control.checkpoint()?;
                 if earlier.method() == element.method() || earlier.name() == element.name() {
                     return Ok(None);
                 }
@@ -129,7 +129,7 @@ fn literal(
             let mut source = TextBuffer::new();
             source.push("{", control)?;
             for (ordinal, value) in values.iter().enumerate() {
-                control.charge_work(1)?;
+                control.checkpoint()?;
                 if ordinal != 0 {
                     source.push(", ", control)?;
                 }
@@ -190,7 +190,7 @@ pub(super) fn definition(
     header.push(" {\n", control)?;
     let mut elements = Vec::new();
     for (position, element) in definition.elements().iter().enumerate() {
-        control.charge_work(1)?;
+        control.checkpoint()?;
         let crate::MethodOutput::DeclarationOnly { facts, declaration } = &members[position] else {
             return Ok(None);
         };
@@ -206,12 +206,12 @@ pub(super) fn definition(
         }
 
         for earlier in &definition.elements()[..position] {
-            control.charge_work(1)?;
+            control.checkpoint()?;
             if earlier.method() == element.method() || earlier.name() == element.name() {
                 return Ok(None);
             }
         }
-        let Some(source) = element_source(element, &mut control.method_budget()?)? else {
+        let Some(source) = element_source(element, control)? else {
             return Ok(None);
         };
         crate::substrate::owned::push(&mut elements, (element.method(), source), control)?;
@@ -223,9 +223,9 @@ pub(super) fn definition(
 }
 fn element_source(
     element: &crate::p4_types::declarations::annotations::DeclarationElement,
-    budget: &mut crate::MethodBudget<'_, '_>,
+    budget: &mut crate::RunContext<'_>,
 ) -> Result<Option<String>, RequestError> {
-    let mut source = TextBuffer::method(budget);
+    let mut source = TextBuffer::new();
     source.push(
         match element.prototype().get(2) {
             Some(76) => "java.lang.String ",

@@ -2,7 +2,7 @@ use super::formats::{InsnLayout, OpcodeSpec, OperandReference, RegisterShape};
 use super::operands::RawOperands;
 use super::structure::bad;
 use super::{MethodError, MethodProblem, ProgramIndex};
-use crate::{CodeUnitOffset, MethodBudget};
+use crate::{CodeUnitOffset, RunContext};
 
 #[derive(Clone, Copy)]
 pub(super) enum ResultKind {
@@ -30,7 +30,7 @@ pub(super) fn check_producer(
     spec: OpcodeSpec,
     layout: InsnLayout,
     operands: RawOperands,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<Option<ResultKind>, MethodError> {
     if spec.registers == RegisterShape::ArrayWords {
         return Ok(Some(ResultKind::Object));
@@ -85,18 +85,18 @@ pub(super) fn check_producer(
     };
     let mut words = operands.registers().iter();
     if receiver {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         words
             .next()
             .ok_or(MethodError::InternalInvariant("missing checked receiver"))?;
     }
     while let Some(tag) = shorty.next(budget)? {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         let first = words
             .next()
             .ok_or(MethodError::InternalInvariant("missing checked argument"))?;
         if matches!(tag, 0x4a | 0x44) {
-            budget.charge_work(1)?;
+            budget.checkpoint()?;
             let second = words
                 .next()
                 .ok_or(MethodError::InternalInvariant("missing checked wide word"))?;

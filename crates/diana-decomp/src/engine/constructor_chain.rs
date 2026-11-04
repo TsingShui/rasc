@@ -1,15 +1,15 @@
 use crate::context::Context;
-use crate::input::MethodInput;
+use crate::input::MethodSource;
 use crate::p4_types::initialization::ChainKind;
 use crate::p5_variables::StorageBody;
-use crate::{MethodBudget, RequestError};
+use crate::{RequestError, RunContext};
 
 pub(crate) fn verify<'m, 'i, 'a>(
     schedule: &crate::engine::SchedulePermit,
-    input: &'m MethodInput<'i, 'a>,
+    input: &'m MethodSource<'i, 'a>,
     catalog: &Context,
     body: &StorageBody<'_>,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<crate::p7_java::constructor_graph::Proof<'m, 'i, 'a>, RequestError> {
     let mut graph = crate::p7_java::constructor_graph::Graph::new(schedule, input, body, budget)?;
     while let Some(current) = graph.pending(budget)? {

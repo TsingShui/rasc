@@ -1,14 +1,14 @@
 use crate::substrate::owned::TextBuffer;
-use crate::{MethodBudget, RequestError};
+use crate::{RequestError, RunContext};
 
 pub(super) fn string(
     units: &[u16],
     output: &mut TextBuffer,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<(), RequestError> {
     output.push("\"", budget)?;
     for &unit in units {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         match unit {
             0 => output.push("\\000", budget)?,
             0x22 => output.push("\\\"", budget)?,
@@ -34,7 +34,7 @@ pub(super) fn fp(
     bits: u64,
     double: bool,
     output: &mut TextBuffer,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<(), RequestError> {
     let (sign, exponent, fraction, bias, maximum, suffix) = if double {
         (

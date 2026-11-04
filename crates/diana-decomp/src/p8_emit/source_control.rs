@@ -2,7 +2,7 @@ use crate::p2_flow::BlockId;
 use crate::p7_java::dispatcher::{Case, Dispatcher, Transfer};
 use crate::p7_java::source_control::{Label, Plan, Step};
 use crate::substrate::owned::TextBuffer;
-use crate::{MethodBudget, RequestError};
+use crate::{RequestError, RunContext};
 
 fn case(storage: &Dispatcher, id: BlockId) -> Result<&Case, RequestError> {
     storage
@@ -16,11 +16,11 @@ pub(super) fn write(
     plan: &Plan,
     names: &crate::p7_java::types::TypeNames,
     output: &mut TextBuffer,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<(), RequestError> {
     super::dispatcher::locals(storage, names, output, budget)?;
     for step in plan.steps() {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         match step {
             Step::Statements(id) => {
                 super::dispatcher::statements(case(storage, *id)?, output, budget)?
@@ -77,7 +77,7 @@ pub(super) fn write(
             } => {
                 output.push(" catch (", budget)?;
                 for (index, name) in alternatives.iter().enumerate() {
-                    budget.charge_work(1)?;
+                    budget.checkpoint()?;
                     if index != 0 {
                         output.push(" | ", budget)?;
                     }

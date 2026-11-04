@@ -1,5 +1,5 @@
 use super::values::{EncodedKind, ValueStep};
-use super::{MethodInput, ProgramIndex};
+use super::{MethodSource, ProgramIndex};
 use crate::pipeline::control::InputControl;
 use crate::substrate::owned::{copy_units, push};
 use crate::{ByteOffset, ByteRange, RequestError};
@@ -34,7 +34,7 @@ pub(crate) fn class(
 }
 
 pub(crate) fn method(
-    input: &MethodInput<'_, '_>,
+    input: &MethodSource<'_, '_>,
     control: &mut impl InputControl,
 ) -> Result<Option<Signature>, RequestError> {
     let raw = match input.raw() {
@@ -59,7 +59,7 @@ fn read(
     let mut last = None;
     let mut result = None;
     while offsets.remaining_byte().0 != 0 {
-        control.charge_work(1)?;
+        control.checkpoint()?;
         let (at, visibility, ty, mut values) =
             index.next_annotation(&mut offsets, &mut last, control)?;
         let descriptor = index.type_descriptor(ty, control)?.0;
@@ -98,7 +98,7 @@ fn read(
         }
         let mut units = Vec::new();
         loop {
-            control.charge_work(1)?;
+            control.checkpoint()?;
             match values.next(index, control)? {
                 Some(ValueStep::Value(value)) => {
                     let EncodedKind::Reference(crate::raw::OperandReference::String(id)) =

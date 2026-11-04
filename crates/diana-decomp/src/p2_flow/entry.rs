@@ -1,7 +1,7 @@
 use super::normal::{CallSite, Op, OpId, Operation};
 use crate::input::{ProgramIndex, RawMethodView};
 use crate::substrate::owned::push;
-use crate::{ClassDefId, CodeUnitOffset, MethodBudget, MethodId, RequestError, TypeId};
+use crate::{ClassDefId, CodeUnitOffset, MethodId, RequestError, RunContext, TypeId};
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub(crate) enum ParameterFamily {
@@ -33,7 +33,7 @@ pub(crate) fn decode<'a>(
     index: &ProgramIndex<'a>,
     class: ClassDefId,
     method: MethodId,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<Option<EntryWindow<'a>>, RequestError> {
     decode_impl(index, class, method, budget)
 }
@@ -42,7 +42,7 @@ fn decode_impl<'a>(
     index: &ProgramIndex<'a>,
     class: ClassDefId,
     method: MethodId,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<Option<EntryWindow<'a>>, RequestError> {
     let Some(envelope) = index.method_envelope(class, method, budget)? else {
         return Ok(None);
@@ -102,7 +102,7 @@ fn decode_impl<'a>(
     let mut calls = Vec::new();
     let mut pc = CodeUnitOffset(0);
     while pc.0 < raw.code_units().0 {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         let layout = crate::raw::instruction_layout(raw.instructions(), pc, raw.version())
             .map_err(crate::input::MethodError::Decode)?;
         let crate::raw::LayoutKind::Instruction(spec) = layout.kind() else {
@@ -111,7 +111,7 @@ fn decode_impl<'a>(
         let operands = crate::input::operands::instruction_operands(raw.instructions(), pc, layout)
             .map_err(crate::input::MethodError::Decode)?;
         for register in operands.registers().iter() {
-            budget.charge_work(1)?;
+            budget.checkpoint()?;
             if register.0 >= u32::from(raw.registers_size()) {
                 return Err(bad());
             }

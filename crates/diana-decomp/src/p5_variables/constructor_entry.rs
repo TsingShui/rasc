@@ -2,7 +2,7 @@ use crate::p2_flow::{MethodFrame, Op};
 use crate::p3_ssa::{Definition, Sym, ValueId};
 use crate::p4_types::TypedBody;
 use crate::p4_types::initialization::{ChainArgument, ChainKind};
-use crate::{CodeUnitOffset, MethodBudget, RegisterId, RequestError};
+use crate::{CodeUnitOffset, RegisterId, RequestError, RunContext};
 
 pub(crate) struct ConstructorEntry {
     _sealed: (),
@@ -20,10 +20,10 @@ fn original_argument(
     phis: &[Option<usize>],
     mut value: ValueId,
     expected: ChainArgument,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<bool, RequestError> {
     for _ in &typed.ssa.values {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         match typed.ssa.values[ix(value.0)?] {
             Definition::Parameter(parameter) if parameter > 0 => {
                 return Ok(
@@ -115,7 +115,7 @@ fn original_argument(
 }
 pub(super) fn prove(
     typed: &TypedBody<'_>,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<Option<ConstructorEntry>, RequestError> {
     let Some(chain) = typed.initializations.chain.as_ref() else {
         return Ok(None);
@@ -145,23 +145,23 @@ pub(super) fn prove(
     }
     let mut phis = Vec::new();
     for _ in &typed.ssa.values {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         crate::substrate::owned::push(&mut phis, None, budget)?;
     }
     for (index, phi) in typed.ssa.phis.iter().enumerate() {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         phis[ix(phi.result.0)?] = Some(index);
     }
     let mut arguments = Vec::new();
     for (&value, &expected) in op.inputs.iter().skip(1).zip(&chain.arguments) {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         if !original_argument(typed, &phis, value, expected, budget)? {
             return Err(broken());
         }
         crate::substrate::owned::push(&mut arguments, expected, budget)?;
     }
     for &id in &typed.ssa.bound[0].ops {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         let prefix = typed.ssa.operation(id)?;
         if prefix.pc.0 >= op.pc.0 {
             break;
@@ -212,7 +212,7 @@ pub(super) fn prove(
         }
     }
     for alias in &chain.aliases {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         let value = alias.value();
         match typed.ssa.values[ix(value.0)?] {
             Definition::Parameter(0) | Definition::Phi => {}

@@ -4,7 +4,7 @@ use crate::p3_ssa::BoundOp;
 use crate::p4_types::bindings::FieldDeclaration;
 use crate::p4_types::declarations::field_facts::{FieldAccess, FieldStorage, FieldUse};
 use crate::p4_types::{FieldUse as TypedFieldUse, Kind, TypedBody};
-use crate::{FieldId, MethodBudget, RequestError};
+use crate::{FieldId, RequestError, RunContext};
 
 pub(crate) enum Receiver {
     Instance(LocalId),
@@ -32,13 +32,13 @@ pub(crate) enum Statement {
 fn entry_this(
     typed: &TypedBody<'_>,
     value: crate::p3_ssa::ValueId,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<bool, RequestError> {
     use crate::p3_ssa::{Definition, Incoming, Sym};
     if matches!(typed.ssa.frame, crate::p2_flow::MethodFrame::Static) {
         return Ok(false);
     }
-    budget.charge_work(1)?;
+    budget.checkpoint()?;
     let definition = typed
         .ssa
         .values
@@ -47,7 +47,7 @@ fn entry_this(
         Some(Definition::Parameter(0)) => Ok(true),
         Some(Definition::Phi) => {
             for phi in &typed.ssa.phis {
-                budget.charge_work(1)?;
+                budget.checkpoint()?;
                 if phi.result == value {
                     if let [(Incoming::EntrySeed, Sym::Value(seed))] = phi.inputs.as_slice() {
                         return Ok(matches!(
@@ -66,10 +66,7 @@ fn entry_this(
         _ => Ok(false),
     }
 }
-fn qualifier(
-    owner: &[u16],
-    budget: &mut MethodBudget<'_, '_>,
-) -> Result<Option<String>, RequestError> {
+fn qualifier(owner: &[u16], budget: &mut RunContext<'_>) -> Result<Option<String>, RequestError> {
     if owner.len() < 3 || owner.first() != Some(&76) || owner.last() != Some(&59) {
         return Ok(None);
     }
@@ -78,7 +75,7 @@ fn qualifier(
         .split(|&unit| unit == 47)
         .enumerate()
     {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         let Some(segment) = super::calls::identifier_text(segment, budget)? else {
             return Ok(None);
         };
@@ -113,7 +110,7 @@ pub(crate) fn lower(
     typed: &TypedBody<'_>,
     names: &super::types::TypeNames,
     op: &BoundOp,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<Option<Statement>, RequestError> {
     let declaration = declaration(typed, op)?;
     let Some(name) = super::calls::identifier_text(&declaration.name, budget)? else {
@@ -204,7 +201,7 @@ pub(crate) fn verify(
     names: &super::types::TypeNames,
     op: &BoundOp,
     actual: &Statement,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<bool, RequestError> {
     let declaration = declaration(typed, op)?;
     let offset = declaration.kind.field_offset();
@@ -258,7 +255,7 @@ pub(crate) fn verify(
             .map_err(crate::input::MethodError::Decode)?;
     let mut words = operands.registers().iter();
     for register in registers.into_iter().flatten() {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         if words.next() != Some(register) {
             return Ok(false);
         }
@@ -351,7 +348,7 @@ pub(crate) fn verify(
     }
     let mut units = name.encode_utf16();
     for &expected in &declaration.name {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         if units.next() != Some(expected) {
             return Ok(false);
         }

@@ -21,7 +21,7 @@ fn push_unit(
     unit: u16,
     budget: &mut impl InputControl,
 ) -> Result<(), InputError> {
-    budget.charge_work(1)?;
+    budget.checkpoint()?;
     reserve_one(result, budget)?;
     result.push(unit);
     Ok(())
@@ -45,7 +45,7 @@ pub(crate) fn materialize(
         .transpose()?;
     let mut interfaces = Vec::new();
     for word in context.interfaces?.as_chunks::<2>().0 {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         let id = crate::TypeId(u32::from(u16::from_le_bytes(*word)));
         reserve_one(&mut interfaces, budget)?;
         interfaces.push(units(index.type_name(id, budget)?, budget)?);
@@ -175,13 +175,13 @@ fn reserve_one<T>(values: &mut Vec<T>, budget: &mut impl InputControl) -> Result
         return Ok(());
     }
     let growth = values.capacity().max(1);
-    let bytes = growth
+    growth
         .checked_mul(std::mem::size_of::<T>())
-        .and_then(|n| u64::try_from(n).ok())
+        .filter(|&size| size <= isize::MAX as usize)
         .ok_or(InputError::PlatformCapacity {
             offset_byte: ByteOffset(0),
         })?;
-    budget.charge_allocation(bytes)?;
+    budget.checkpoint()?;
     values
         .try_reserve_exact(growth)
         .map_err(|_| InputError::Allocation {

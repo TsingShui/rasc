@@ -20,7 +20,7 @@ fn lookup<'a>(
     let mut descriptor = Vec::new();
     push(&mut descriptor, 76, budget)?;
     for &unit in name {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         if matches!(unit, 0 | 46 | 59 | 91) {
             return Ok(None);
         }
@@ -35,7 +35,7 @@ fn seen(
     budget: &mut impl InputControl,
 ) -> Result<bool, RequestError> {
     for old in classes {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         if crate::context::same_units(&old.descriptor, &class.descriptor, budget)? {
             return Ok(true);
         }
@@ -63,7 +63,7 @@ pub(super) fn collect<'a>(
     let mut complete = Vec::new();
     push(&mut pending, (root, false), budget)?;
     while let Some((class, exiting)) = pending.pop() {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         if exiting {
             if active.pop().is_none() {
                 return Err(RequestError::InternalInvariant(
@@ -105,7 +105,7 @@ pub(super) fn collect<'a>(
         }
         push(&mut pending, (parent, false), budget)?;
         for interface in &class.interfaces {
-            budget.charge_work(1)?;
+            budget.checkpoint()?;
             let Some(interface) = lookup(catalog, interface, budget)? else {
                 return Ok(None);
             };
@@ -133,7 +133,7 @@ pub(super) fn subtype(
         return Ok(None);
     };
     for class in classes.declarations() {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         if crate::context::same_units(&class.descriptor, to, budget)? {
             return Ok(Some(true));
         }

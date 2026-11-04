@@ -1,10 +1,10 @@
 use crate::p7_java::array_literals::Literal;
 use crate::substrate::owned::TextBuffer;
-use crate::{MethodBudget, RequestError};
+use crate::{RequestError, RunContext};
 pub(super) fn element(
     element: &Literal,
     output: &mut TextBuffer,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<(), RequestError> {
     match *element {
         Literal::Boolean(value) => output.push(if value { "true" } else { "false" }, budget),

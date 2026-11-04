@@ -1,4 +1,4 @@
-use crate::{MethodBudget, RequestError};
+use crate::{RequestError, RunContext};
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub(crate) enum SwitchForm {
     Cases,
@@ -6,11 +6,11 @@ pub(crate) enum SwitchForm {
 }
 pub(crate) fn choose<T>(
     cases: &[(i32, T)],
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<SwitchForm, RequestError> {
     let mut bounds = None;
     for &(key, _) in cases {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         bounds = Some(match bounds {
             None => (key, key),
             Some((low, high)) => (i32::min(low, key), i32::max(high, key)),

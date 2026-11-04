@@ -9,11 +9,13 @@ use super::{
 use crate::pipeline::control::InputControl;
 use crate::raw::{LayoutKind, OperandReference};
 use crate::{
-    ByteLength, ByteOffset, ByteRange, ClassDefId, CodeUnitOffset, MethodBudget, MethodId,
+    ByteLength, ByteOffset, ByteRange, ClassDefId, CodeUnitOffset, MethodId, RequestError,
+    RunContext,
 };
 
 /// Original annotation associations checked for one selected member. Other
 /// members' annotation bodies are independent and are not sealed by this value.
+#[derive(Clone, Copy, Default)]
 pub struct CheckedAnnotations {
     method: Option<ByteRange>,
     parameters: Option<ByteRange>,
@@ -28,17 +30,25 @@ impl CheckedAnnotations {
     }
 }
 
-/// A raw executable method with checked layout, explicit reference contents,
-/// return/allocation operand kinds, debug records and selected annotations.
-/// This is not register-type, dispatch, exception-effect or Java verification.
+/// A raw executable method with checked layout, the P1 decoded instruction
+/// directory, explicit reference contents, return/allocation operand kinds,
+/// debug records and selected annotations. This is not register-type, dispatch,
+/// exception-effect or Java verification.
 pub struct ValidatedRawMethod<'a> {
     layout: CheckedMethodLayout<'a>,
+    decoded: super::DecodedMethod<'a>,
     annotations: CheckedAnnotations,
 }
 
 impl<'a> ValidatedRawMethod<'a> {
     pub fn layout(&self) -> &CheckedMethodLayout<'a> {
         &self.layout
+    }
+    /// The P1-disassembled original instruction directory. Consumers read
+    /// decoded opcode, width, operands and references from here instead of
+    /// re-running the format decoder over raw bytes.
+    pub fn decoded(&self) -> &super::DecodedMethod<'a> {
+        &self.decoded
     }
     pub fn annotations(&self) -> &CheckedAnnotations {
         &self.annotations
@@ -57,6 +67,9 @@ impl ValidatedRawDeclaration {
     }
 }
 
+// Moved once per method task and consumed by the chain; boxing the executable
+// variant would add a fallible allocation without reducing live state.
+#[allow(clippy::large_enum_variant)]
 pub enum RawPrintable<'a> {
     Method(ValidatedRawMethod<'a>),
     Declaration(ValidatedRawDeclaration),
@@ -64,7 +77,7 @@ pub enum RawPrintable<'a> {
 
 /// The input seam for one original declaration in a selected logical program.
 /// Construction is restricted to the owning input validator.
-pub struct MethodInput<'i, 'a> {
+pub struct MethodSource<'i, 'a> {
     index: &'i ProgramIndex<'a>,
     class_id: ClassDefId,
     method_id: MethodId,
@@ -74,9 +87,12 @@ pub struct MethodInput<'i, 'a> {
     owner_access_flags: u32,
     declaration: MethodDeclaration<'i, 'a>,
     raw: RawPrintable<'a>,
+    /// The independent method/parameter annotation read for this member. A
+    /// damaged set retains its own classified error and does not remove code.
+    metadata: Result<CheckedAnnotations, RequestError>,
 }
 
-impl<'i, 'a> MethodInput<'i, 'a> {
+impl<'i, 'a> MethodSource<'i, 'a> {
     pub(crate) fn program(&self) -> &'i ProgramIndex<'a> {
         self.index
     }
@@ -84,32 +100,32 @@ impl<'i, 'a> MethodInput<'i, 'a> {
     pub(crate) fn type_projection(
         &self,
         id: crate::TypeId,
-        budget: &mut MethodBudget<'_, '_>,
+        budget: &mut RunContext<'_>,
     ) -> Result<super::TypeProjection, crate::RequestError> {
         Ok(self.index.type_projection(id, budget)?)
     }
     pub(crate) fn projected_name(
         &self,
         key: super::TypeProjection,
-        budget: &mut MethodBudget<'_, '_>,
+        budget: &mut RunContext<'_>,
     ) -> Result<DexString<'a>, crate::RequestError> {
         super::type_projection::suffix(self.type_descriptor(key.root(), budget)?, key, budget)
     }
     pub(crate) fn component_projection(
         &self,
         key: super::TypeProjection,
-        budget: &mut MethodBudget<'_, '_>,
+        budget: &mut RunContext<'_>,
     ) -> Result<super::TypeProjection, crate::RequestError> {
         super::type_projection::component(self, key, budget)
     }
     pub(super) fn exact_type(
         &self,
         suffix: DexString<'_>,
-        budget: &mut MethodBudget<'_, '_>,
+        budget: &mut RunContext<'_>,
     ) -> Result<Option<crate::TypeId>, crate::RequestError> {
         let mut found = None;
         for index in 0..self.index.header.type_ids.count {
-            budget.charge_work(1)?;
+            budget.checkpoint()?;
             let id = crate::TypeId(index);
             let name = self.type_descriptor(id, budget)?;
             if name.utf16_len() != suffix.utf16_len() {
@@ -137,14 +153,14 @@ impl<'i, 'a> MethodInput<'i, 'a> {
     pub(crate) fn type_descriptor(
         &self,
         id: crate::TypeId,
-        budget: &mut MethodBudget<'_, '_>,
+        budget: &mut RunContext<'_>,
     ) -> Result<DexString<'a>, crate::RequestError> {
         Ok(self.index.type_descriptor(id, budget)?.0)
     }
 
     pub(crate) fn throws_metadata(
         &self,
-        budget: &mut MethodBudget<'_, '_>,
+        budget: &mut RunContext<'_>,
     ) -> Result<super::ThrowsMetadata<'a>, crate::RequestError> {
         let annotations = match &self.raw {
             RawPrintable::Method(raw) => raw.annotations(),
@@ -157,11 +173,11 @@ impl<'i, 'a> MethodInput<'i, 'a> {
     pub(crate) fn method_annotations_allowed(
         &self,
         allowed: &[&str],
-        budget: &mut MethodBudget<'_, '_>,
+        budget: &mut RunContext<'_>,
     ) -> Result<bool, crate::RequestError> {
-        let annotations = match &self.raw {
-            RawPrintable::Method(raw) => raw.annotations(),
-            RawPrintable::Declaration(raw) => raw.annotations(),
+        let annotations = match &self.metadata {
+            Ok(annotations) => annotations,
+            Err(_) => return Ok(false),
         };
         let Some(range) = annotations.method_range() else {
             return Ok(true);
@@ -169,7 +185,7 @@ impl<'i, 'a> MethodInput<'i, 'a> {
         let mut offsets = self.index.annotation_offsets(0x1003, range.start, budget)?;
         let mut last = None;
         while offsets.remaining_byte().0 != 0 {
-            budget.charge_work(1)?;
+            budget.checkpoint()?;
             let (_, visibility, ty, _) =
                 self.index
                     .next_annotation(&mut offsets, &mut last, budget)?;
@@ -177,9 +193,7 @@ impl<'i, 'a> MethodInput<'i, 'a> {
                 crate::substrate::owned::copy_units(self.index.type_name(ty, budget)?, budget)?;
             let mut matched = false;
             for descriptor in allowed {
-                budget.charge_work(
-                    u64::try_from(name.len()).map_err(|_| crate::RequestError::PlatformCapacity)?,
-                )?;
+                budget.checkpoint()?;
                 matched |= name.iter().copied().eq(descriptor.encode_utf16());
             }
             if visibility != 2 || !matched {
@@ -191,7 +205,7 @@ impl<'i, 'a> MethodInput<'i, 'a> {
     pub(crate) fn own_field_metadata(
         &self,
         reference: crate::FieldId,
-        budget: &mut MethodBudget<'_, '_>,
+        budget: &mut RunContext<'_>,
     ) -> Result<Option<u32>, crate::RequestError> {
         let field = self.index.field_reference(reference, budget)?;
         let owner = crate::substrate::owned::copy_units(self.owner, budget)?;
@@ -222,14 +236,14 @@ impl<'i, 'a> MethodInput<'i, 'a> {
     pub(crate) fn type_name(
         &self,
         id: crate::TypeId,
-        budget: &mut MethodBudget<'_, '_>,
+        budget: &mut RunContext<'_>,
     ) -> Result<DexString<'a>, InputError> {
         self.index.type_name(id, budget)
     }
     pub(crate) fn string_literal(
         &self,
         id: crate::StringId,
-        budget: &mut MethodBudget<'_, '_>,
+        budget: &mut RunContext<'_>,
     ) -> Result<DexString<'a>, InputError> {
         self.index.string_with(id, budget)
     }
@@ -237,28 +251,28 @@ impl<'i, 'a> MethodInput<'i, 'a> {
     pub(crate) fn local_method(
         &self,
         id: MethodId,
-        budget: &mut MethodBudget<'_, '_>,
+        budget: &mut RunContext<'_>,
     ) -> Result<Option<super::catalog::LocalMethod<'a>>, InputError> {
         self.index.local_method(id, budget)
     }
     pub(crate) fn field_reference(
         &self,
         id: crate::FieldId,
-        budget: &mut MethodBudget<'_, '_>,
+        budget: &mut RunContext<'_>,
     ) -> Result<super::catalog::FieldReference<'a>, InputError> {
         self.index.field_reference(id, budget)
     }
     pub(crate) fn method_reference(
         &self,
         id: MethodId,
-        budget: &mut MethodBudget<'_, '_>,
+        budget: &mut RunContext<'_>,
     ) -> Result<super::catalog::MethodReference<'_, 'a>, InputError> {
         self.index.method_reference(id, budget)
     }
     pub(crate) fn plain_owner_scope(
         &self,
         parent: Option<&[u16]>,
-        budget: &mut MethodBudget<'_, '_>,
+        budget: &mut RunContext<'_>,
     ) -> Result<bool, crate::RequestError> {
         let context = self.index.class_context(self.class_id, budget)?;
         if !self
@@ -277,7 +291,7 @@ impl<'i, 'a> MethodInput<'i, 'a> {
     pub(crate) fn qualifier_shadowed(
         &self,
         prefix: &[u16],
-        budget: &mut MethodBudget<'_, '_>,
+        budget: &mut RunContext<'_>,
     ) -> Result<bool, crate::RequestError> {
         let mut shadowed = false;
         self.index
@@ -323,22 +337,99 @@ impl<'i, 'a> MethodInput<'i, 'a> {
     pub fn raw(&self) -> &RawPrintable<'a> {
         &self.raw
     }
+    /// The independent annotation read. `Err` reports a damaged annotation set;
+    /// the code and declaration facts of this source stay valid.
+    pub fn metadata(&self) -> Result<&CheckedAnnotations, &RequestError> {
+        self.metadata.as_ref()
+    }
     pub fn into_raw(self) -> RawPrintable<'a> {
         self.raw
     }
 }
 
 impl<'a> ProgramIndex<'a> {
-    /// Validates a selected original method for analysis. Malformed declarations,
-    /// code, references or metadata return classified errors before a sealed
-    /// product is published. Work and fallible scratch use the normal method
-    /// budget; the original input remains available to the independent debug exit.
-    pub fn method_input<'i>(
+    /// Builds the method-source product for one original entry delivered by the
+    /// class-fact producer. The entry supplies the identity, declaration result,
+    /// encoded group and original code offset, so this never re-walks class-data.
+    /// The re-read declaration record is checked against that entry; a disagreement
+    /// is an internal invariant, not a second source of member facts.
+    pub fn method_source<'i>(
+        &'i self,
+        facts: &crate::p0::ClassFacts,
+        method_id: MethodId,
+        budget: &mut RunContext<'_>,
+    ) -> Result<MethodSource<'i, 'a>, MethodError> {
+        let class = self.class_with(facts.class_def(), budget)?;
+        if class.type_idx != facts.type_index() {
+            return Err(MethodError::InternalInvariant(
+                "class facts and class view disagree on the original type",
+            ));
+        }
+        let entry = facts.method_entry(method_id).ok_or_else(|| {
+            MethodError::Input(malformed(
+                InputProblem::InvalidReference,
+                self.header.method_ids.offset_byte,
+            ))
+        })?;
+        let access_flags = entry.access_flags().raw();
+        let declaration = self.method_declaration(method_id, class.type_idx, budget)?;
+        match entry.declaration() {
+            crate::p0::Fact::Present(delivered) => {
+                if !delivered
+                    .matches(&declaration, budget)
+                    .map_err(|error| match error {
+                        crate::RequestError::Control(error) => MethodError::Control(error),
+                        crate::RequestError::Allocation(error) => MethodError::Allocation(error),
+                        crate::RequestError::PlatformCapacity => MethodError::PlatformCapacity,
+                        crate::RequestError::InternalInvariant(message) => {
+                            MethodError::InternalInvariant(message)
+                        }
+                        crate::RequestError::Input(error) => MethodError::Input(error),
+                        _ => MethodError::InternalInvariant(
+                            "declaration comparison returned a foreign error",
+                        ),
+                    })?
+                {
+                    return Err(MethodError::InternalInvariant(
+                        "class facts and method record disagree on the declaration",
+                    ));
+                }
+            }
+            crate::p0::Fact::Unavailable(_) => {
+                return Err(MethodError::InternalInvariant(
+                    "class facts delivered an unavailable declaration to the reader",
+                ));
+            }
+            crate::p0::Fact::Absent | crate::p0::Fact::NotRead => {
+                return Err(MethodError::Input(malformed(
+                    InputProblem::InvalidClassData,
+                    self.header.class_defs.offset_byte,
+                )));
+            }
+        }
+        let body = super::code::read_code(
+            self,
+            entry.code_offset(),
+            method_id,
+            access_flags,
+            Some(crate::RegisterWordCount(
+                declaration.prototype.parameter_words.0
+                    + u64::from(access_flags & crate::substrate::flags::STATIC == 0),
+            )),
+            budget,
+        )?;
+        self.finish_method_source(class, method_id, access_flags, body, declaration, budget)
+    }
+
+    /// Locates one original method by walking its class-data directory and then
+    /// builds the same method-source product. Declaration-query consumers that
+    /// hold no class facts use this; it does not create a second analysis route.
+    pub fn method_source_at<'i>(
         &'i self,
         class_id: ClassDefId,
         method_id: MethodId,
-        budget: &mut MethodBudget<'_, '_>,
-    ) -> Result<MethodInput<'i, 'a>, MethodError> {
+        budget: &mut RunContext<'_>,
+    ) -> Result<MethodSource<'i, 'a>, MethodError> {
         let class = self.class_with(class_id, budget)?;
         let mut selected = None;
         class.visit_members_with(budget, MemberSelection::Method(method_id), |entry, _| {
@@ -361,18 +452,50 @@ impl<'a> ProgramIndex<'a> {
         })?;
         let body = method.body?;
         let declaration = method.declaration?;
-        let annotations = self.check_method_annotations(
-            class_id,
+        self.finish_method_source(
+            class,
             method_id,
-            declaration.prototype.parameters.len() / 2,
+            method.access_flags,
+            body,
+            declaration,
             budget,
-        )?;
+        )
+    }
+
+    fn finish_method_source<'i>(
+        &'i self,
+        class: super::ClassView<'_, 'a>,
+        method_id: MethodId,
+        access_flags: u32,
+        body: MethodBody<'a>,
+        declaration: MethodDeclaration<'i, 'a>,
+        budget: &mut RunContext<'_>,
+    ) -> Result<MethodSource<'i, 'a>, MethodError> {
+        let class_id = class.class_def_idx;
+        // Optional metadata is read independently: a damaged debug program or
+        // annotation set keeps its own state and never removes intact code.
+        let metadata = self
+            .check_method_metadata(
+                class_id,
+                method_id,
+                declaration.prototype.parameters.len() / 2,
+                budget,
+            )
+            .map_err(RequestError::from);
+        let annotations = match &metadata {
+            Ok(annotations) => CheckedAnnotations {
+                method: annotations.method,
+                parameters: annotations.parameters,
+            },
+            Err(_) => CheckedAnnotations::default(),
+        };
         let raw = match body {
             MethodBody::DeclarationOnly => {
                 RawPrintable::Declaration(ValidatedRawDeclaration { annotations })
             }
             MethodBody::Code(code) => {
                 let layout = self.check_method_layout(&code, budget)?;
+                let decoded = self.decode_method(&code, budget)?;
                 self.check_reference_contents(
                     &code,
                     declaration.prototype.return_type.shape(budget)?,
@@ -380,21 +503,23 @@ impl<'a> ProgramIndex<'a> {
                 )?;
                 RawPrintable::Method(ValidatedRawMethod {
                     layout,
+                    decoded,
                     annotations,
                 })
             }
         };
         budget.checkpoint()?;
-        Ok(MethodInput {
+        Ok(MethodSource {
             index: self,
             class_id,
             method_id,
             header_offset: self.header.header_offset,
             owner: class.descriptor,
-            access_flags: method.access_flags,
+            access_flags,
             owner_access_flags: class.access_flags,
             declaration,
             raw,
+            metadata,
         })
     }
 
@@ -402,11 +527,11 @@ impl<'a> ProgramIndex<'a> {
         &self,
         code: &RawMethodView<'_>,
         return_shape: TypeShape,
-        budget: &mut MethodBudget<'_, '_>,
+        budget: &mut RunContext<'_>,
     ) -> Result<(), MethodError> {
         let mut pc = CodeUnitOffset(0);
         while pc.0 < code.code_units().0 {
-            budget.charge_work(1)?;
+            budget.checkpoint()?;
             let layout = code.layout_at(pc)?;
             if let LayoutKind::Instruction(spec) = layout.kind() {
                 for reference in layout.references().into_iter().flatten() {
@@ -512,18 +637,15 @@ impl<'a> ProgramIndex<'a> {
         Ok(())
     }
 
-    fn check_method_annotations(
+    fn check_method_metadata(
         &self,
         class_id: ClassDefId,
         method_id: MethodId,
         parameters: usize,
-        budget: &mut MethodBudget<'_, '_>,
+        budget: &mut RunContext<'_>,
     ) -> Result<CheckedAnnotations, MethodError> {
         let offset = self.class_annotations_offset(class_id, budget)?;
-        let mut checked = CheckedAnnotations {
-            method: None,
-            parameters: None,
-        };
+        let mut checked = CheckedAnnotations::default();
         if offset == ByteOffset(0) {
             return Ok(checked);
         }

@@ -1,7 +1,7 @@
 use crate::context::Context;
-use crate::input::MethodInput;
+use crate::input::MethodSource;
 use crate::substrate::owned::{copy_proto, copy_units};
-use crate::{CodeUnitOffset, MethodBudget, MethodId, RequestError};
+use crate::{CodeUnitOffset, MethodId, RequestError, RunContext};
 
 pub(crate) struct ConstructorContract {
     _sealed: (),
@@ -17,12 +17,12 @@ pub(crate) enum ConstructorUse {
     This,
 }
 pub(crate) fn resolve(
-    input: &MethodInput<'_, '_>,
+    input: &MethodSource<'_, '_>,
     _catalog: &Context,
     invocation: &super::throws::Invocation,
     expected_owner: &[u16],
     _use_kind: ConstructorUse,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<ConstructorContract, RequestError> {
     // The original reference fixes the constructor; hierarchy, access and
     // throws facts are not required to bind it.
@@ -30,7 +30,7 @@ pub(crate) fn resolve(
 }
 
 impl ConstructorContract {
-    pub(super) fn retain(&self, budget: &mut MethodBudget<'_, '_>) -> Result<Self, RequestError> {
+    pub(super) fn retain(&self, budget: &mut RunContext<'_>) -> Result<Self, RequestError> {
         Ok(Self {
             _sealed: (),
             reference: self.reference,
@@ -45,10 +45,10 @@ impl ConstructorContract {
 /// reference still fixes the owner, name and prototype, so the call binds; no
 /// access, hierarchy or throws fact is asserted.
 fn reference_only(
-    input: &MethodInput<'_, '_>,
+    input: &MethodSource<'_, '_>,
     invocation: &super::throws::Invocation,
     expected_owner: &[u16],
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<ConstructorContract, RequestError> {
     let reference = invocation.reference;
     let pc = invocation.pc;

@@ -26,7 +26,7 @@ impl<'a> DexString<'a> {
         if u64::from(utf16_len) >= cursor.remaining_byte().0 as u64 {
             return Err(malformed(InputProblem::Truncated, cursor.position_byte()));
         }
-        control.check_string_units(u64::from(utf16_len))?;
+        control.checkpoint()?;
         let start_byte = cursor.position_byte();
         for _ in 0..utf16_len {
             read_unit(&mut cursor, control)?;
@@ -60,11 +60,7 @@ impl<'a> DexString<'a> {
             .map_err(|_| InputError::Allocation {
                 offset_byte: self.start_byte,
             })?;
-        control.charge_allocation(u64::try_from(length).map_err(|_| {
-            InputError::PlatformCapacity {
-                offset_byte: self.start_byte,
-            }
-        })?)?;
+        control.checkpoint()?;
         let mut reader = self.reader()?;
         while let Some(unit) = reader.next(control)? {
             units.push(unit);

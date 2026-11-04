@@ -11,7 +11,7 @@ pub fn render(
     report: &Report,
     control: &mut RunContext<'_>,
 ) -> Result<RenderedReport, RequestError> {
-    let mut output = TextBuffer::report(control);
+    let mut output = TextBuffer::new();
     let mut spans = Vec::new();
     let mut class_spans = Vec::new();
     render_class(
@@ -282,7 +282,7 @@ fn render_class(
     });
     if matches!(class, ClassOutput::JavaUnit { .. }) {
         for member in class.members() {
-            control.charge_work(1)?;
+            control.checkpoint()?;
             if let MethodOutput::Generated {
                 declaration: crate::GeneratedMember::Enum(declaration),
                 ..

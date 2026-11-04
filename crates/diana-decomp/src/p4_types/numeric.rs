@@ -4,7 +4,7 @@ use crate::p2_flow::primitives::ScalarType;
 use crate::p2_flow::{Arithmetic, Op, ResultType, Terminal};
 use crate::p3_ssa::{Definition, SsaBody, Sym, ValueId};
 use crate::substrate::owned::push;
-use crate::{MethodBudget, RequestError};
+use crate::{RequestError, RunContext};
 
 pub(crate) struct NumericUses {
     pub uses: Vec<TypedUse>,
@@ -122,13 +122,9 @@ struct Families {
     allowed: Vec<u8>,
 }
 impl Families {
-    fn root(
-        &mut self,
-        mut at: usize,
-        budget: &mut MethodBudget<'_, '_>,
-    ) -> Result<usize, RequestError> {
+    fn root(&mut self, mut at: usize, budget: &mut RunContext<'_>) -> Result<usize, RequestError> {
         loop {
-            budget.charge_work(1)?;
+            budget.checkpoint()?;
             let parent = self.parents[at];
             if parent == at {
                 return Ok(at);
@@ -141,7 +137,7 @@ impl Families {
         &mut self,
         a: usize,
         b: usize,
-        budget: &mut MethodBudget<'_, '_>,
+        budget: &mut RunContext<'_>,
     ) -> Result<bool, RequestError> {
         let mut a = self.root(a, budget)?;
         let mut b = self.root(b, budget)?;
@@ -169,7 +165,7 @@ impl Families {
         ssa: &SsaBody<'_>,
         value: ValueId,
         kind: Kind,
-        budget: &mut MethodBudget<'_, '_>,
+        budget: &mut RunContext<'_>,
     ) -> Result<bool, RequestError> {
         if let Some(literal) = literal(ssa, value)? {
             return Ok(literal.view(kind).is_some());
@@ -182,11 +178,11 @@ impl Families {
 // Direct constants have independent use views. Non-literal copies and Phi
 // families must satisfy all consumers with one storage representation.
 pub(super) fn constrain(
-    input: &crate::input::MethodInput<'_, '_>,
+    input: &crate::input::MethodSource<'_, '_>,
     ssa: &SsaBody<'_>,
     kinds: &mut [Option<Kind>],
     arrays: &super::array_components::ArrayComponents,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<bool, RequestError> {
     let mut families = Families {
         parents: Vec::new(),
@@ -194,7 +190,7 @@ pub(super) fn constrain(
         allowed: Vec::new(),
     };
     for (index, kind) in kinds.iter().enumerate() {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         let value = ValueId(u32::try_from(index).map_err(|_| RequestError::PlatformCapacity)?);
         let allowed = if let Some(literal) = literal(ssa, value)? {
             literal.allowed()
@@ -206,7 +202,7 @@ pub(super) fn constrain(
         push(&mut families.allowed, allowed, budget)?;
     }
     for op in &ssa.operations {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         if matches!(op.op, Op::Move(..) | Op::MoveWide(..))
             && literal(ssa, op.input(0)?)?.is_none()
             && !families.merge(
@@ -223,7 +219,7 @@ pub(super) fn constrain(
     }
     for phi in &ssa.phis {
         for &(_, source) in &phi.inputs {
-            budget.charge_work(1)?;
+            budget.checkpoint()?;
             let Sym::Value(source) = source else {
                 return Err(RequestError::InternalInvariant("unavailable numeric Phi"));
             };
@@ -235,9 +231,9 @@ pub(super) fn constrain(
         }
     }
     for op in &ssa.operations {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         for (index, &value) in op.inputs.iter().enumerate() {
-            budget.charge_work(1)?;
+            budget.checkpoint()?;
             let expected = if let Op::FilledArray(id, _) = op.op {
                 let component = ssa.filled_arrays[ix(id.0)?]
                     .component
@@ -269,7 +265,7 @@ pub(super) fn constrain(
         }
     }
     for (index, site) in ssa.calls.iter().enumerate() {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         let bound = ssa.call(crate::p2_flow::CallId(
             u32::try_from(index).map_err(|_| RequestError::PlatformCapacity)?,
         ))?;
@@ -284,7 +280,7 @@ pub(super) fn constrain(
             ));
         }
         for (&value, &formal) in arguments.iter().zip(&site.formals) {
-            budget.charge_work(1)?;
+            budget.checkpoint()?;
             if formal.field_offset() != 2 {
                 let kind = if matches!(
                     formal,
@@ -308,7 +304,7 @@ pub(super) fn constrain(
             Kind::Int | Kind::Boolean | Kind::Float | Kind::Long | Kind::Double
         ) {
             for (index, block) in ssa.blocks.iter().enumerate() {
-                budget.charge_work(1)?;
+                budget.checkpoint()?;
                 if matches!(block.terminal, Terminal::Return(_)) {
                     let value = ssa.bound[index]
                         .terminal
@@ -330,7 +326,7 @@ pub(super) fn constrain(
         }
     }
     for (index, kind) in kinds.iter_mut().enumerate() {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         let root = families.root(index, budget)?;
         if kind.is_none() {
             *kind = match families.allowed[root] {
@@ -346,11 +342,11 @@ pub(super) fn constrain(
 pub(crate) fn solve(
     ssa: &SsaBody<'_>,
     kinds: &[Option<Kind>],
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<Option<Vec<Option<NumericUses>>>, RequestError> {
     let mut result = Vec::new();
     for op in &ssa.operations {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         let copy_kind = if matches!(op.op, Op::Move(..) | Op::MoveWide(..)) {
             let kind = kinds[ix(op
                 .result
@@ -366,7 +362,7 @@ pub(crate) fn solve(
         }
         let mut uses = Vec::new();
         for (index, &value) in op.inputs.iter().enumerate() {
-            budget.charge_work(1)?;
+            budget.checkpoint()?;
             let kind =
                 expected(op.op, index)?
                     .or(copy_kind)

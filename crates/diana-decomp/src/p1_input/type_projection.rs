@@ -1,5 +1,5 @@
-use super::{DexString, MethodInput};
-use crate::{MethodBudget, RequestError, TypeId};
+use super::{DexString, MethodSource};
+use crate::{RequestError, RunContext, TypeId};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct TypeProjection {
@@ -21,9 +21,9 @@ pub(super) fn original(root: TypeId) -> TypeProjection {
     TypeProjection { root, removed: 0 }
 }
 pub(super) fn component(
-    input: &MethodInput<'_, '_>,
+    input: &MethodSource<'_, '_>,
     projection: TypeProjection,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<TypeProjection, RequestError> {
     let name = input.projected_name(projection, budget)?;
     if name.reader()?.next(budget)? != Some(91) {
@@ -48,7 +48,7 @@ pub(super) fn component(
 pub(super) fn suffix<'a>(
     name: DexString<'a>,
     projection: TypeProjection,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<DexString<'a>, RequestError> {
     Ok(name.array_suffix(projection.removed, budget)?)
 }

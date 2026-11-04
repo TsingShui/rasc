@@ -85,7 +85,7 @@ impl Bindings {
     }
 }
 fn same(units: &[u16], text: &str, control: &mut impl InputControl) -> Result<bool, RequestError> {
-    control.charge_work(u64::try_from(units.len()).map_err(|_| RequestError::PlatformCapacity)?)?;
+    control.checkpoint()?;
     Ok(units.iter().copied().eq(text.encode_utf16()))
 }
 fn class_contract(
@@ -122,7 +122,7 @@ fn meta_contract(
     };
     let mut matched = 0usize;
     for method in &class.methods {
-        control.charge_work(1)?;
+        control.checkpoint()?;
         if same(&method.name, "value", control)? && same(&method.prototype, prototype, control)? {
             if !crate::substrate::flags::interface_method(method.access_flags)
                 || method.generic
@@ -195,7 +195,7 @@ fn meta(
     let mut target = false;
     let mut defaults = None;
     for annotation in original.facts.records() {
-        control.charge_work(1)?;
+        control.checkpoint()?;
         if annotation.location() != crate::AnnotationLocation::Class {
             continue;
         }
@@ -318,7 +318,7 @@ fn meta(
         }
         for value in values {
             for element in elements.iter_mut() {
-                control.charge_work(1)?;
+                control.checkpoint()?;
                 if element.method == value.method {
                     element.default = Some(value.value);
                     break;
@@ -382,7 +382,7 @@ fn declaration(
         return Ok(None);
     }
     for id in 0..index.header.class_defs.count {
-        control.charge_work(1)?;
+        control.checkpoint()?;
         if index
             .class_with(crate::ClassDefId(id), control)?
             .descriptor
@@ -452,6 +452,7 @@ fn declaration(
                 method_idx,
                 access_flags,
                 declaration,
+                ..
             } = entry
             else {
                 valid = false;
@@ -473,7 +474,7 @@ fn declaration(
             }
             for parent in [object, annotation_base] {
                 for inherited in &parent.methods {
-                    control.charge_work(1)?;
+                    control.checkpoint()?;
                     if inherited.name == name
                         && inherited.prototype.starts_with(&[40, 41])
                         && inherited.access_flags & (1 | crate::substrate::flags::PROTECTED) != 0
@@ -484,7 +485,7 @@ fn declaration(
             }
             let mut count = 0usize;
             for method in &evidence.methods {
-                control.charge_work(1)?;
+                control.checkpoint()?;
                 if method.name == name && method.prototype == proto {
                     count = count.checked_add(1).ok_or(RequestError::PlatformCapacity)?;
                     if method.access_flags != access_flags
@@ -498,8 +499,8 @@ fn declaration(
             if count != 1 {
                 valid = false;
             }
-            let mut budget = control.method_budget()?;
-            let input = index.method_input(id, method_idx, &mut budget)?;
+            let budget = &mut *control;
+            let input = index.method_source_at(id, method_idx, budget)?;
             let crate::input::RawPrintable::Declaration(raw) = input.raw() else {
                 valid = false;
                 return Ok(());
@@ -517,7 +518,7 @@ fn declaration(
                     kind,
                     default: None,
                 },
-                &mut budget,
+                budget,
             )?;
             Ok(())
         },
@@ -585,8 +586,9 @@ fn source_scope(
         return Ok(false);
     }
     let ownership = index.ownership_cached(control)?;
+    ownership.check_class(owner.class_def)?;
     for nested in ownership.nested() {
-        control.charge_work(1)?;
+        control.checkpoint()?;
         if nested.enclosing() == owner.class_def
             && crate::context::same_units(nested.name(), simple, control)?
         {
@@ -611,7 +613,7 @@ fn bind_use(
     }
     let mut found = None;
     for id in 0..index.header.class_defs.count {
-        control.charge_work(1)?;
+        control.checkpoint()?;
         let class = index.class_with(crate::ClassDefId(id), control)?;
         if class.type_idx == annotation.type_id() && found.replace(crate::ClassDefId(id)).is_some()
         {
@@ -638,7 +640,7 @@ fn bind_use(
     for declaration in declaration.elements {
         let mut supplied = false;
         for element in &elements {
-            control.charge_work(1)?;
+            control.checkpoint()?;
             supplied |= element.method == declaration.method;
         }
         if !supplied {
@@ -672,7 +674,7 @@ fn bind_values(
     let mut elements: Vec<Element> = Vec::new();
     let mut tokens = values.iter();
     while let Some(token) = tokens.next() {
-        control.charge_work(1)?;
+        control.checkpoint()?;
         let AnnotationToken::Value(value) = token else {
             return Ok(None);
         };
@@ -681,7 +683,7 @@ fn bind_values(
         };
         let mut expected = None;
         for declaration in declarations {
-            control.charge_work(1)?;
+            control.checkpoint()?;
             if declaration.name == name {
                 expected = Some(declaration);
             }
@@ -690,7 +692,7 @@ fn bind_values(
             return Ok(None);
         };
         for old in &elements {
-            control.charge_work(1)?;
+            control.checkpoint()?;
             if old.method == expected.method {
                 return Ok(None);
             }
@@ -776,7 +778,7 @@ fn collect_impl(
     }
     let mut uses = Vec::new();
     for annotation in facts.records() {
-        control.charge_work(1)?;
+        control.checkpoint()?;
         if annotation.location() != crate::AnnotationLocation::Class {
             continue;
         }
@@ -804,7 +806,9 @@ fn collect_impl(
                 "Ldalvik/annotation/MemberClasses;",
                 control,
             )? {
-                index.ownership_cached(control)?;
+                index
+                    .ownership_cached(control)?
+                    .check_class(facts.owner().class_def)?;
             } else {
                 return Ok(None);
             }

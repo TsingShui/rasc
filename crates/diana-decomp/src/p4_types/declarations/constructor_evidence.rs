@@ -1,8 +1,8 @@
 use super::allocation::{ConstructorContract, ConstructorUse};
 use crate::context::Context;
-use crate::input::MethodInput;
+use crate::input::MethodSource;
 use crate::substrate::owned::copy_units;
-use crate::{CodeUnitOffset, MethodBudget, MethodId, RequestError};
+use crate::{CodeUnitOffset, MethodId, RequestError, RunContext};
 
 enum Candidate {
     Declared(ConstructorContract),
@@ -22,10 +22,10 @@ fn candidate(result: Result<ConstructorContract, RequestError>) -> Result<Candid
     }
 }
 pub(crate) fn collect(
-    input: &MethodInput<'_, '_>,
+    input: &MethodSource<'_, '_>,
     catalog: &Context,
     invocation: &super::throws::Invocation,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<ConstructorDeclarations, RequestError> {
     let reference = input.method_reference(invocation.reference, budget)?;
     let owner = copy_units(reference.owner, budget)?;
@@ -58,7 +58,7 @@ impl ConstructorDeclarations {
         pc: CodeUnitOffset,
         expected_owner: &[u16],
         kind: ConstructorUse,
-        budget: &mut MethodBudget<'_, '_>,
+        budget: &mut RunContext<'_>,
     ) -> Result<ConstructorContract, RequestError> {
         let candidate = if kind == ConstructorUse::Allocation {
             &self.allocation

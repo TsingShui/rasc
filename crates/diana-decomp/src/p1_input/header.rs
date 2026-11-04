@@ -274,7 +274,7 @@ fn check_map(
         end: entries.end,
     };
     container.check_data_range(map_range, control)?;
-    control.charge_metadata(u64::from(count))?;
+    control.checkpoint()?;
     let mut seen = 0u32;
     let mut previous_offset = None;
     let mut dynamic_end = None;

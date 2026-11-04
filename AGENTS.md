@@ -19,16 +19,46 @@ package-local `AGENTS.md` before working in either package.
   databases or network facts; treat absent facts as Unknown and keep the readable
   result with explicit uncertainty.
 - Preserve effect, instruction, argument, exception, lock and initialization
-  order, classified errors, cancellation and backpressure. Numeric quotas are
-  opt-in; never silently truncate a successful result.
+  order, classified errors, cancellation and backpressure. Cancellation and
+  bounded queues are not pagination; never silently truncate a successful result.
 - Production is native Rust, forbids `unsafe`, and has no external runtime or
   process dependency. The application owns files and ZIPs; the engine borrows
   input bytes and declaration facts.
-- Use the shared P2→P7 method analysis chain. P8 renders existing products and
-  original facts; it does not perform analysis or retry reconstruction.
-- Before changing phase access, exports, construction authority or scheduling,
-  present the producer/consumer need and obtain operator approval. Never bypass
-  a missing producer or sealed boundary with a parallel analysis route.
+- Use one shared ordinary-method analysis chain. Migrate only to the approved
+  target below; rendering consumes existing products and original facts without
+  starting analysis or retrying reconstruction.
+- Never bypass a missing producer or sealed boundary with a parallel analysis
+  route. Follow the approved refactoring authority below for interface changes.
+
+## Pipeline refactoring authority
+
+The target in [PIPELINE_DESIGN](docs/diana/PIPELINE_DESIGN.md) is approved: P0 owns
+class facts; an independent method reader prepares input; P1 disassembles; P2–P7
+process one method; P8 assembles the class and plans names; P9 renders. Engine
+holds and delivers products and schedules method-level tasks. Current phase
+chapters describe the existing implementation until migrated to this target.
+
+- Contributors MAY decide technical details within this target without repeated
+  approval: private product layout, lifetimes, algorithm invariants, classified
+  outcomes, check organization and implementation order. Prefer implementing the
+  new product structure; existing algorithms can be reused or rewritten without
+  preserving old private IR layouts or moving files one-to-one. Contributors MUST
+  document producer/consumer needs, retain safety and semantic-check obligations,
+  and remove replaced paths when the new chain enters the shared formal entry.
+  Rewriting MUST NOT introduce a second method-analysis or retry route.
+- Contributors MUST NOT change agreed output behavior, hide available members or
+  introduce a generated dispatcher. Natural and explicit Java-like expressions
+  remain readable results, not whole-method qualification gates.
+- Contributors MUST NOT introduce external declarations, new dependencies or
+  numeric resource quotas for this refactoring.
+- Contributors MUST NOT change phase ownership or scheduling beyond the approved
+  target. Stage implementations MUST NOT invoke another stage's analysis.
+- Contributors MUST NOT widen stage input access, exports or product-construction
+  authority beyond the approved producer/consumer contracts. Private fact views
+  and owning-stage constructors MUST NOT become general upstream access.
+- Default approval does not authorize these prohibited changes. If the target
+  cannot be implemented within these constraints, stop the affected work and
+  report the concrete conflict; do not add a bypass or treat silence as an exception.
 
 ## Workflow
 

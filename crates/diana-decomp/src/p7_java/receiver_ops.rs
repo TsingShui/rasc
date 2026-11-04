@@ -2,13 +2,13 @@ use crate::p2_flow::{CallId, InvokeKind};
 use crate::p4_types::TypedBody;
 use crate::p4_types::bindings::CallEvidence;
 use crate::p5_variables::LocalId;
-use crate::{MethodBudget, RequestError};
+use crate::{RequestError, RunContext};
 
 pub(super) fn verify(
     typed: &TypedBody<'_>,
     id: CallId,
     actual: &super::calls::ReceiverCall,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<bool, RequestError> {
     let index = usize::try_from(id.0).map_err(|_| RequestError::PlatformCapacity)?;
     let site = typed
@@ -86,7 +86,7 @@ pub(super) fn verify(
     }
     let mut name = actual.method.encode_utf16();
     for &unit in &facts.name {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         if name.next() != Some(unit) {
             return Ok(false);
         }
@@ -95,7 +95,7 @@ pub(super) fn verify(
         return Ok(false);
     }
     for ((&view, value), formal) in actual.arguments.iter().zip(values).zip(formals) {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         if !super::dispatcher_verify::call_argument(typed, view, *value, *formal, budget)? {
             return Ok(false);
         }

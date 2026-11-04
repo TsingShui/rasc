@@ -6,7 +6,7 @@ use super::{
 use crate::p2_flow::{BlockId, Op, Terminal};
 use crate::p5_variables::StorageBody;
 use crate::substrate::owned::push;
-use crate::{MethodBudget, RepresentationPolicy, RequestError};
+use crate::{RepresentationPolicy, RequestError, RunContext};
 
 pub(crate) enum Region {
     Sequence(BlockId),
@@ -33,7 +33,7 @@ pub(crate) struct PlannedBodyData<'a> {
 fn diamond(
     storage: &StorageBody<'_>,
     flow: &Flow,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<Option<super::branch::Diamond>, RequestError> {
     let ssa = &storage.typed.ssa;
     if flow.cases.len() != 4 || ssa.edges.len() != 4 {
@@ -75,7 +75,7 @@ pub(crate) fn build<'a>(
     _schedule: &crate::engine::SchedulePermit,
     storage: StorageBody<'a>,
     policy: RepresentationPolicy,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<PlannedBody<'a>, RequestError> {
     build_impl(storage, policy, budget)
 }
@@ -83,11 +83,11 @@ pub(crate) fn build<'a>(
 fn build_impl<'a>(
     storage: StorageBody<'a>,
     policy: RepresentationPolicy,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<PlannedBody<'a>, RequestError> {
     let mut switches = Vec::new();
     for table in &storage.typed.ssa.switches {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         push(
             &mut switches,
             super::integer_switch::choose(&table.cases, budget)?,
@@ -96,7 +96,7 @@ fn build_impl<'a>(
     }
     let mut has_monitors = false;
     for op in &storage.typed.ssa.operations {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         has_monitors |= matches!(op.op, Op::Monitor(..));
     }
     let shape = if has_monitors || !storage.typed.ssa.raw.try_byte_range().as_range().is_empty() {
@@ -110,7 +110,7 @@ fn build_impl<'a>(
             crate::p2_flow::MethodFrame::Constructor(_)
         );
         for evidence in storage.typed.field_declarations.iter().flatten() {
-            budget.charge_work(1)?;
+            budget.checkpoint()?;
             initialization |= matches!(&evidence.declaration, crate::p4_types::bindings::FieldDeclaration::Known(access) if access.assignment == crate::p4_types::declarations::field_facts::AssignmentObligation::OwnFinalInitialization);
         }
         if initialization

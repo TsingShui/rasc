@@ -1,7 +1,7 @@
 use super::DebugError;
 use super::debug::write_reference;
 use super::json::JsonBuffer;
-use crate::FallbackBudget;
+use crate::RunContext;
 use crate::input::ProgramIndex;
 use crate::input::values::{EncodedKind, ValueStep};
 use crate::raw::OperandReference;
@@ -10,7 +10,7 @@ pub(super) fn write(
     index: &ProgramIndex<'_>,
     output: &mut JsonBuffer,
     reference: OperandReference,
-    budget: &mut FallbackBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<(), DebugError> {
     match reference {
         OperandReference::MethodHandle(id) => {
@@ -58,7 +58,7 @@ fn write_handle(
     output: &mut JsonBuffer,
     kind: u16,
     member: OperandReference,
-    budget: &mut FallbackBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<(), DebugError> {
     output.push("{\"kind\":\"method_handle\",\"handle_type\":", budget)?;
     output.unsigned(u64::from(kind), budget)?;
@@ -70,12 +70,12 @@ fn write_extra(
     index: &ProgramIndex<'_>,
     output: &mut JsonBuffer,
     events: &[ValueStep<'_>],
-    budget: &mut FallbackBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<(), DebugError> {
     let mut containers = Vec::new();
     let mut first = true;
     for &event in events {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         let value = match event {
             ValueStep::EndContainer => {
                 let annotation = containers.pop().ok_or(DebugError::InternalInvariant(
@@ -140,10 +140,7 @@ fn write_extra(
                         .unwrap_or(events.len())
                         .max(1)
                         .min(events.len());
-                    budget.charge_allocation(
-                        u64::try_from(capacity - containers.capacity())
-                            .map_err(|_| DebugError::PlatformCapacity)?,
-                    )?;
+                    budget.checkpoint()?;
                     containers
                         .try_reserve_exact(capacity - containers.len())
                         .map_err(DebugError::Allocation)?;

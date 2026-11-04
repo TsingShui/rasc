@@ -4,11 +4,11 @@
 use std::time::Instant;
 
 use diana::analysis::decompile;
-use diana::analysis::input::{InputLimits, InputOptions};
-use diana::analysis::query::{Query, QueryKind, QueryLimits, QueryPlan};
+use diana::analysis::input::InputOptions;
+use diana::analysis::query::{Query, QueryKind, QueryPlan};
 use diana::analysis::request::RequestScope;
 use diana::analysis::selector::{ClassSelector, Selector};
-use diana_decomp::{Limits, RunContext};
+use diana_decomp::RunContext;
 
 fn main() {
     fastrace::set_reporter(
@@ -18,15 +18,12 @@ fn main() {
     let mut args = std::env::args().skip(1);
     let input = args.next().expect("input");
     let count: usize = args.next().expect("classes").parse().expect("classes");
-    let options = InputOptions {
-        limits: InputLimits::default(),
-        allowed_root: None,
-    };
+    let options = InputOptions { allowed_root: None };
     let scope = RequestScope::open(std::path::Path::new(&input), &options).expect("open input");
     let images = diana::analysis::images::ImageSet::open(&scope).expect("images");
     let root = fastrace::Span::root("profile", fastrace::collector::SpanContext::random());
     let _guard = root.set_local_parent();
-    let mut controls = RunContext::new(Limits::default(), &|| false);
+    let mut controls = RunContext::new(&|| false);
     let query = Query::new(
         &scope,
         QueryPlan {
@@ -34,7 +31,7 @@ fn main() {
             filter: None,
             class: None,
             class_filter: Default::default(),
-            limits: QueryLimits::default(),
+
             jobs: 1,
         },
     )

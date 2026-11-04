@@ -2,7 +2,7 @@ use crate::p2_flow::{Op, OpId};
 use crate::p3_ssa::{BoundOp, Definition, ValueId};
 use crate::p4_types::TypedBody;
 use crate::substrate::owned::push;
-use crate::{CodeUnitOffset, MethodBudget, RequestError};
+use crate::{CodeUnitOffset, RequestError, RunContext};
 
 pub(crate) struct FreshArray {
     _sealed: (),
@@ -18,10 +18,10 @@ fn ix(value: u32) -> Result<usize, RequestError> {
 fn origin<'s>(
     typed: &'s TypedBody<'_>,
     mut value: ValueId,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<Option<&'s BoundOp>, RequestError> {
     for _ in &typed.ssa.values {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         let Definition::OpResult(id) = typed.ssa.values[ix(value.0)?] else {
             return Ok(None);
         };
@@ -39,7 +39,7 @@ fn origin<'s>(
 pub(super) fn prove(
     typed: &TypedBody<'_>,
     fill: &BoundOp,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<FreshArray, RequestError> {
     let unavailable = || RequestError::ArrayFillShape { pc: fill.pc };
     let broken = || {
@@ -77,11 +77,11 @@ pub(super) fn prove(
     }
     let mut same_block = false;
     for block in &typed.ssa.blocks {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         if block.pc.0 <= allocation.pc.0 && fill.pc.0 <= block.terminal_pc.0 {
             same_block = true;
             for op in &block.ops {
-                budget.charge_work(1)?;
+                budget.checkpoint()?;
                 if allocation.pc.0 < op.pc.0
                     && op.pc.0 < fill.pc.0
                     && op.kind.effects().observable()
@@ -158,7 +158,7 @@ pub(super) fn prove(
         .map_err(crate::input::MethodError::Decode)?;
     let mut elements = Vec::new();
     for value in payload {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         if value.width.0 != usage.component.width() {
             return Err(broken());
         }

@@ -24,35 +24,6 @@ pub enum InputKind {
     Opaque,
 }
 
-/// Optional input-side bounds. Every field is unset by default; a configured
-/// value is enforced before the corresponding read or allocation.
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub struct InputLimits {
-    pub max_input_bytes: Option<u64>,
-    pub max_entries: Option<u64>,
-    pub max_total_entry_bytes: Option<u64>,
-    pub max_inflated_bytes: Option<u64>,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum InputLimit {
-    InputBytes,
-    EntryCount,
-    TotalEntryBytes,
-    InflatedBytes,
-}
-
-impl std::fmt::Display for InputLimit {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(match self {
-            Self::InputBytes => "input_bytes",
-            Self::EntryCount => "entry_count",
-            Self::TotalEntryBytes => "total_entry_bytes",
-            Self::InflatedBytes => "inflated_bytes",
-        })
-    }
-}
-
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ArchiveProblem {
     /// No end-of-central-directory record in the admissible tail.
@@ -71,14 +42,8 @@ pub enum ArchiveProblem {
     UnsupportedCompression(u16),
     /// The entry declares encryption.
     EncryptedEntry,
-    /// The directory holds more records than the configured entry bound.
-    EntryCountExceeded { requested: u64, maximum: u64 },
-    /// The declared uncompressed entry bytes exceed the configured bound.
-    TotalEntryBytesExceeded { requested: u64, maximum: u64 },
     /// ZIP64 record fields are outside the supported container profile.
     UnsupportedZip64,
-    /// The declared uncompressed size exceeds the configured inflation bound.
-    InflatedBytesExceeded { requested: u64, maximum: u64 },
     /// The deflate stream is truncated, over-long or otherwise undecodable.
     DecompressionFailed,
     /// Reserved table capacity could not be allocated.
@@ -93,12 +58,6 @@ pub enum InputError {
     NotRegularFile(PathBuf),
     #[error("input resolves outside the allowed root: {0}")]
     OutsideRoot(PathBuf),
-    #[error("{limit} exceeded: requested {requested}, maximum {maximum}")]
-    BudgetExceeded {
-        limit: InputLimit,
-        requested: u64,
-        maximum: u64,
-    },
     #[error("input changed while it was read")]
     Changed,
     #[error("archive is malformed: {0:?}")]
@@ -119,19 +78,14 @@ impl InputError {
     pub fn kind(&self) -> diana_decomp::FailureKind {
         use diana_decomp::FailureKind as Kind;
         match self {
-            Self::BudgetExceeded { .. } | Self::PlatformCapacity | Self::Allocation(_) => {
-                Kind::BudgetExceeded
-            }
+            Self::PlatformCapacity | Self::Allocation(_) => Kind::ResourceExhausted,
             Self::Io(_)
             | Self::NotRegularFile(_)
             | Self::OutsideRoot(_)
             | Self::Changed
             | Self::NotDex => Kind::Unsupported,
             Self::MalformedArchive(problem) => match problem {
-                ArchiveProblem::EntryCountExceeded { .. }
-                | ArchiveProblem::TotalEntryBytesExceeded { .. }
-                | ArchiveProblem::InflatedBytesExceeded { .. }
-                | ArchiveProblem::Allocation(_) => Kind::BudgetExceeded,
+                ArchiveProblem::Allocation(_) => Kind::ResourceExhausted,
                 ArchiveProblem::UnsupportedCompression(_)
                 | ArchiveProblem::EncryptedEntry
                 | ArchiveProblem::UnsupportedZip64
@@ -186,7 +140,6 @@ impl InputIdentity {
 pub struct InputLease {
     identity: InputIdentity,
     kind: InputKind,
-    limits: InputLimits,
     bytes: Vec<u8>,
     archive: Option<ArchiveDirectory>,
 }
@@ -210,31 +163,14 @@ impl InputLease {
     pub fn archive(&self) -> Option<&ArchiveDirectory> {
         self.archive.as_ref()
     }
-    /// The explicit input policy this lease was opened with. Unset fields stay
-    /// unset; they are not replaced by an application default bound.
-    pub fn limits(&self) -> InputLimits {
-        self.limits
-    }
 }
 
 /// Path policy and explicit bounds for one lease.
 #[derive(Clone, Debug, Default)]
 pub struct InputOptions {
-    pub limits: InputLimits,
     /// When set, the resolved input must stay inside this directory. The default
     /// is to follow the platform's normal path resolution for a regular file.
     pub allowed_root: Option<PathBuf>,
-}
-
-fn check_limit(limit: InputLimit, requested: u64, maximum: Option<u64>) -> Result<(), InputError> {
-    match maximum {
-        Some(maximum) if requested > maximum => Err(InputError::BudgetExceeded {
-            limit,
-            requested,
-            maximum,
-        }),
-        _ => Ok(()),
-    }
 }
 
 /// Leases one regular file after applying the path and size policy.
@@ -255,7 +191,6 @@ pub fn open_input(path: &Path, options: &InputOptions) -> Result<InputLease, Inp
         return Err(InputError::NotRegularFile(resolved));
     }
     let len = metadata.len();
-    check_limit(InputLimit::InputBytes, len, options.limits.max_input_bytes)?;
     let mut file = std::fs::File::open(&resolved).map_err(InputError::Io)?;
     if file.metadata().map_err(InputError::Io)?.len() != len {
         return Err(InputError::Changed);
@@ -266,10 +201,9 @@ pub fn open_input(path: &Path, options: &InputOptions) -> Result<InputLease, Inp
     }
     let kind = classify(&bytes);
     let archive = match kind {
-        InputKind::Archive => Some(
-            ArchiveDirectory::parse(&bytes, options.limits)
-                .map_err(InputError::MalformedArchive)?,
-        ),
+        InputKind::Archive => {
+            Some(ArchiveDirectory::parse(&bytes).map_err(InputError::MalformedArchive)?)
+        }
         _ => None,
     };
     Ok(InputLease {
@@ -278,7 +212,6 @@ pub fn open_input(path: &Path, options: &InputOptions) -> Result<InputLease, Inp
             len: InputByteLen(len),
         },
         kind,
-        limits: options.limits,
         bytes,
         archive,
     })

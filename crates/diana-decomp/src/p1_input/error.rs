@@ -68,7 +68,9 @@ impl InputError {
         match self {
             Self::Malformed { .. } => FailureKind::Malformed,
             Self::Unsupported { .. } => FailureKind::Unsupported,
-            Self::PlatformCapacity { .. } | Self::Allocation { .. } => FailureKind::BudgetExceeded,
+            Self::PlatformCapacity { .. } | Self::Allocation { .. } => {
+                FailureKind::ResourceExhausted
+            }
             Self::Control(error) => error.kind(),
             Self::InternalInvariant(_) => FailureKind::InternalInvariant,
         }

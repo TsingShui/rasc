@@ -1,11 +1,11 @@
 use crate::p7_java::field_ops::{Receiver, Statement};
 use crate::substrate::owned::TextBuffer;
-use crate::{MethodBudget, RequestError};
+use crate::{RequestError, RunContext};
 
 fn write_receiver(
     receiver: &Receiver,
     output: &mut TextBuffer,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<(), RequestError> {
     match receiver {
         Receiver::Instance(local) => super::java::local(*local, output, budget),
@@ -21,7 +21,7 @@ fn write_receiver(
 pub(super) fn write(
     statement: &Statement,
     output: &mut TextBuffer,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<(), RequestError> {
     match statement {
         Statement::Load {

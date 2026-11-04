@@ -43,7 +43,7 @@ pub(super) fn verify_reference_store(
     actual: ValueUse,
     source: crate::p3_ssa::ValueId,
     target: crate::p2_flow::DeclarationType,
-    budget: &mut crate::MethodBudget<'_, '_>,
+    budget: &mut crate::RunContext<'_>,
 ) -> Result<bool, crate::RequestError> {
     use crate::p4_types::Kind;
     let at = usize::try_from(source.0).map_err(|_| crate::RequestError::PlatformCapacity)?;

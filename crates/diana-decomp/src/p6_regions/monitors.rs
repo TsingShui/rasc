@@ -3,7 +3,7 @@ use crate::p3_ssa::ValueId;
 use crate::p4_types::reference_roots::Root;
 use crate::p5_variables::StorageBody;
 use crate::substrate::owned::push;
-use crate::{CodeUnitOffset, MethodBudget, RequestError};
+use crate::{CodeUnitOffset, RequestError, RunContext};
 
 #[derive(Clone, Copy)]
 pub(crate) struct CleanupId(u32);
@@ -45,7 +45,7 @@ impl Monitors {
         &self,
         block: BlockId,
         stack: &[OpId],
-        budget: &mut MethodBudget<'_, '_>,
+        budget: &mut RunContext<'_>,
     ) -> Result<bool, RequestError> {
         let Some(Some(original)) = self.states.get(ix(block.0)?) else {
             return Ok(false);
@@ -59,10 +59,10 @@ fn ix(id: u32) -> Result<usize, RequestError> {
 fn unsupported(pc: CodeUnitOffset) -> RequestError {
     RequestError::MonitorScopeUnproved { pc }
 }
-fn copy(values: &[OpId], budget: &mut MethodBudget<'_, '_>) -> Result<Vec<OpId>, RequestError> {
+fn copy(values: &[OpId], budget: &mut RunContext<'_>) -> Result<Vec<OpId>, RequestError> {
     let mut result = Vec::new();
     for &value in values {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         push(&mut result, value, budget)?;
     }
     Ok(result)
@@ -70,22 +70,22 @@ fn copy(values: &[OpId], budget: &mut MethodBudget<'_, '_>) -> Result<Vec<OpId>,
 fn contains(
     values: &[BlockId],
     value: BlockId,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<bool, RequestError> {
     for &old in values {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         if old == value {
             return Ok(true);
         }
     }
     Ok(false)
 }
-fn same(a: &[OpId], b: &[OpId], budget: &mut MethodBudget<'_, '_>) -> Result<bool, RequestError> {
+fn same(a: &[OpId], b: &[OpId], budget: &mut RunContext<'_>) -> Result<bool, RequestError> {
     if a.len() != b.len() {
         return Ok(false);
     }
     for (a, b) in a.iter().zip(b) {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         if a != b {
             return Ok(false);
         }
@@ -106,7 +106,7 @@ fn root(
 fn cleanup(
     storage: &StorageBody<'_>,
     handler: BlockId,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<Option<Cleanup>, RequestError> {
     let ssa = &storage.typed.ssa;
     let mut block = handler;
@@ -114,13 +114,13 @@ fn cleanup(
     let mut exception = None;
     let mut exit = None;
     loop {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         if contains(&blocks, block, budget)? {
             return Ok(None);
         }
         push(&mut blocks, block, budget)?;
         for &id in &ssa.bound[ix(block.0)?].ops {
-            budget.charge_work(1)?;
+            budget.checkpoint()?;
             let op = ssa.operation(id)?;
             match op.op {
                 Op::Exception(_) if block == handler && exception.is_none() => {
@@ -162,7 +162,7 @@ fn transfer(
     target: BlockId,
     stack: &[OpId],
     pc: CodeUnitOffset,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<(), RequestError> {
     match &states[ix(target.0)?] {
         Some(old) => {
@@ -186,12 +186,12 @@ fn check_fresh(
     result: Option<ValueId>,
     stack: &[OpId],
     pc: CodeUnitOffset,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<(), RequestError> {
     // A static SSA producer is not one dynamic object if it reexecutes while held.
     if let Some(result) = result {
         for &enter in stack {
-            budget.charge_work(1)?;
+            budget.checkpoint()?;
             if enter_root(storage, enter)? == Root::Definition(result) {
                 return Err(unsupported(pc));
             }
@@ -201,12 +201,12 @@ fn check_fresh(
 }
 pub(super) fn build(
     storage: &StorageBody<'_>,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<Option<Monitors>, RequestError> {
     let ssa = &storage.typed.ssa;
     let mut any = false;
     for op in &ssa.operations {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         any |= matches!(op.op, Op::Monitor(..));
     }
     if !any {
@@ -214,14 +214,14 @@ pub(super) fn build(
     }
     let mut cleanups = Vec::new();
     for binding in &storage.typed.exceptions {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         if let Some(cleanup) = cleanup(storage, binding.handler, budget)? {
             push(&mut cleanups, cleanup, budget)?;
         }
     }
     let mut states = Vec::new();
     for _ in &ssa.blocks {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         push(&mut states, None, budget)?;
     }
     let mut queue = Vec::new();
@@ -235,7 +235,7 @@ pub(super) fn build(
     )?;
     let mut cursor = 0usize;
     while cursor < queue.len() {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         let block = queue[cursor];
         cursor += 1;
         let mut stack = copy(
@@ -245,7 +245,7 @@ pub(super) fn build(
             budget,
         )?;
         for &id in &ssa.bound[ix(block.0)?].ops {
-            budget.charge_work(1)?;
+            budget.checkpoint()?;
             let op = ssa.operation(id)?;
             check_fresh(storage, op.result, &stack, op.pc, budget)?;
             if let Op::Monitor(MonitorKind::Exit, _) = op.op {
@@ -295,7 +295,7 @@ pub(super) fn build(
             return Err(unsupported(original.terminal_pc));
         }
         for edge in &ssa.edges {
-            budget.charge_work(1)?;
+            budget.checkpoint()?;
             if edge.source == block {
                 transfer(
                     &mut states,
@@ -312,7 +312,7 @@ pub(super) fn build(
     for (index, block) in ssa.bound.iter().enumerate() {
         let source = BlockId(u32::try_from(index).map_err(|_| RequestError::PlatformCapacity)?);
         for &id in &block.ops {
-            budget.charge_work(1)?;
+            budget.checkpoint()?;
             let op = ssa.operation(id)?;
             if !matches!(op.op, Op::Monitor(MonitorKind::Enter, _)) {
                 continue;
@@ -324,13 +324,13 @@ pub(super) fn build(
             let mut follow = None;
             let mut selected = None;
             for edge in &ssa.edges {
-                budget.charge_work(1)?;
+                budget.checkpoint()?;
                 if edge.source == source {
                     push(&mut pending, edge.target, budget)?;
                 }
             }
             while let Some(block) = pending.pop() {
-                budget.charge_work(1)?;
+                budget.checkpoint()?;
                 if contains(&body, block, budget)? {
                     continue;
                 }
@@ -339,7 +339,7 @@ pub(super) fn build(
                     .ok_or_else(|| unsupported(op.pc))?;
                 let mut holding = false;
                 for &enter in stack {
-                    budget.charge_work(1)?;
+                    budget.checkpoint()?;
                     holding |= enter == id;
                 }
                 if !holding {
@@ -351,19 +351,19 @@ pub(super) fn build(
                 }
                 push(&mut body, block, budget)?;
                 for edge in &ssa.edges {
-                    budget.charge_work(1)?;
+                    budget.checkpoint()?;
                     if edge.source == block {
                         push(&mut pending, edge.target, budget)?;
                     }
                 }
                 for edge in &ssa.exception_edges {
-                    budget.charge_work(1)?;
+                    budget.checkpoint()?;
                     if edge.source != block || edge.kind != crate::input::protection::CatchType::All
                     {
                         continue;
                     }
                     for (index, cleanup) in cleanups.iter().enumerate() {
-                        budget.charge_work(1)?;
+                        budget.checkpoint()?;
                         if cleanup.handler == edge.target && cleanup.root == identity {
                             // An inner reentrant cleanup is not the outer scope's release.
                             if stack.last() != Some(&id) {
@@ -372,7 +372,7 @@ pub(super) fn build(
                             if selected.is_some_and(|old| old != index) {
                                 let mut site = None;
                                 for operation in &ssa.operations {
-                                    budget.charge_work(1)?;
+                                    budget.checkpoint()?;
                                     if operation.pc == edge.pc {
                                         site = Some(operation);
                                         break;
@@ -425,11 +425,11 @@ fn exceptions(
     source: BlockId,
     pc: CodeUnitOffset,
     stack: &[OpId],
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<(), RequestError> {
     let mut all = false;
     for edge in &storage.typed.ssa.exception_edges {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         if edge.source == source && edge.pc == pc {
             all |= edge.kind == crate::input::protection::CatchType::All;
             transfer(states, queue, edge.target, stack, pc, budget)?;
@@ -444,7 +444,7 @@ fn exceptions(
 pub(crate) fn verify(
     storage: &StorageBody<'_>,
     plan: &Monitors,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<(), RequestError> {
     let bug = || {
         RequestError::InternalInvariant(
@@ -458,12 +458,12 @@ pub(crate) fn verify(
         return Err(bug());
     }
     for (index, block) in ssa.bound.iter().enumerate() {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         let source = BlockId(u32::try_from(index).map_err(|_| RequestError::PlatformCapacity)?);
         let Some(entry) = &plan.states[index] else {
             let mut covered = false;
             for cleanup in &plan.cleanups {
-                budget.charge_work(1)?;
+                budget.checkpoint()?;
                 covered |= contains(&cleanup.blocks, source, budget)?;
             }
             if !covered {
@@ -473,7 +473,7 @@ pub(crate) fn verify(
         };
         let mut stack = copy(entry, budget)?;
         for &id in &block.ops {
-            budget.charge_work(1)?;
+            budget.checkpoint()?;
             let op = ssa.operation(id)?;
             match check_fresh(storage, op.result, &stack, op.pc, budget) {
                 Ok(()) => {}
@@ -511,7 +511,7 @@ pub(crate) fn verify(
             verify_exception_states(storage, plan, source, original.terminal_pc, &stack, budget)?;
         }
         for edge in &ssa.edges {
-            budget.charge_work(1)?;
+            budget.checkpoint()?;
             if edge.source == source {
                 let Some(next) = plan.states[ix(edge.target.0)?].as_deref() else {
                     return Err(bug());
@@ -523,13 +523,13 @@ pub(crate) fn verify(
         }
     }
     for cleanup in &plan.cleanups {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         if !verify_cleanup(storage, cleanup, budget)? {
             return Err(bug());
         }
     }
     for scope in &plan.scopes {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         let op = ssa.operation(scope.enter)?;
         if !matches!(op.op, Op::Monitor(MonitorKind::Enter, _))
             || op.input(0)? != scope.lock
@@ -547,7 +547,7 @@ pub(crate) fn verify(
 fn verify_cleanup(
     storage: &StorageBody<'_>,
     proof: &Cleanup,
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<bool, RequestError> {
     let ssa = &storage.typed.ssa;
     if proof.blocks.first() != Some(&proof.handler) {
@@ -556,9 +556,9 @@ fn verify_cleanup(
     let mut exception = None;
     let mut released = false;
     for (index, &block) in proof.blocks.iter().enumerate() {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         for &id in &ssa.bound[ix(block.0)?].ops {
-            budget.charge_work(1)?;
+            budget.checkpoint()?;
             let op = ssa.operation(id)?;
             match op.op {
                 Op::Exception(_) if index == 0 && exception.is_none() => exception = op.result,
@@ -593,11 +593,11 @@ fn verify_exception_states(
     source: BlockId,
     pc: CodeUnitOffset,
     stack: &[OpId],
-    budget: &mut MethodBudget<'_, '_>,
+    budget: &mut RunContext<'_>,
 ) -> Result<(), RequestError> {
     let mut all = false;
     for edge in &storage.typed.ssa.exception_edges {
-        budget.charge_work(1)?;
+        budget.checkpoint()?;
         if edge.source != source || edge.pc != pc {
             continue;
         }

@@ -1,6 +1,4 @@
-use super::input::{
-    ArchiveProblem, BytesSource, EntryIndex, InputByteLen, InputLease, InputLimits,
-};
+use super::input::{ArchiveProblem, BytesSource, EntryIndex, InputByteLen, InputLease};
 
 /// One physical central-directory record. Names are kept as decoded metadata and
 /// never used as output paths.
@@ -54,16 +52,9 @@ impl ArchiveDirectory {
     /// Reads the end-of-central-directory record and every central-directory
     /// record inside the leased bytes. Counts, offsets and total sizes are checked
     /// against the actual input before any record is trusted.
-    pub fn parse(bytes: &[u8], limits: InputLimits) -> Result<Self, ArchiveProblem> {
+    pub fn parse(bytes: &[u8]) -> Result<Self, ArchiveProblem> {
         let (directory_offset, directory_size, entries) = end_record(bytes)?;
-        if let Some(maximum) = limits.max_entries
-            && u64::from(entries) > maximum
-        {
-            return Err(ArchiveProblem::EntryCountExceeded {
-                requested: u64::from(entries),
-                maximum,
-            });
-        }
+
         let mut result = Vec::new();
         result
             .try_reserve_exact(usize::try_from(entries).map_err(|_| ArchiveProblem::OutOfRange)?)
@@ -77,20 +68,9 @@ impl ArchiveDirectory {
         }
         let mut cursor =
             usize::try_from(directory_offset).map_err(|_| ArchiveProblem::OutOfRange)?;
-        let mut total = 0u64;
         for ordinal in 0..entries {
             let record = read_record(bytes, &mut cursor, end, ordinal)?;
-            total = total
-                .checked_add(record.uncompressed_size.0)
-                .ok_or(ArchiveProblem::OutOfRange)?;
-            if let Some(maximum) = limits.max_total_entry_bytes
-                && total > maximum
-            {
-                return Err(ArchiveProblem::TotalEntryBytesExceeded {
-                    requested: total,
-                    maximum,
-                });
-            }
+
             result.push(record);
         }
         if cursor != end {
@@ -235,7 +215,6 @@ impl EntryPayload<'_> {
 pub fn read_entry<'a>(
     bytes: &'a [u8],
     entry: &EntryRecord,
-    limits: InputLimits,
 ) -> Result<EntryPayload<'a>, ArchiveProblem> {
     let compressed = compressed_payload(bytes, entry)?;
     match entry.method {
@@ -248,25 +227,14 @@ pub fn read_entry<'a>(
             }
             Ok(EntryPayload::Borrowed(compressed))
         }
-        8 => inflate(compressed, entry, limits),
+        8 => inflate(compressed, entry),
         method => Err(ArchiveProblem::UnsupportedCompression(method)),
     }
 }
 
-fn inflate<'a>(
-    compressed: &[u8],
-    entry: &EntryRecord,
-    limits: InputLimits,
-) -> Result<EntryPayload<'a>, ArchiveProblem> {
+fn inflate<'a>(compressed: &[u8], entry: &EntryRecord) -> Result<EntryPayload<'a>, ArchiveProblem> {
     let declared = entry.uncompressed_size.0;
-    if let Some(maximum) = limits.max_inflated_bytes
-        && declared > maximum
-    {
-        return Err(ArchiveProblem::InflatedBytesExceeded {
-            requested: declared,
-            maximum,
-        });
-    }
+
     let size = usize::try_from(declared).map_err(|_| ArchiveProblem::OutOfRange)?;
     let mut output = Vec::new();
     output
@@ -286,7 +254,7 @@ fn inflate<'a>(
 /// Reads one stored entry payload. A deflate record needs `read_entry` with its
 /// configured inflation bound instead.
 pub fn entry_payload<'a>(bytes: &'a [u8], entry: &EntryRecord) -> Result<&'a [u8], ArchiveProblem> {
-    match read_entry(bytes, entry, InputLimits::default())? {
+    match read_entry(bytes, entry)? {
         EntryPayload::Borrowed(payload) => Ok(payload),
         EntryPayload::Inflated(_) => Err(ArchiveProblem::UnsupportedCompression(entry.method)),
     }
