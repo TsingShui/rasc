@@ -12,7 +12,6 @@ pub use input::annotation_facts::{
     AnnotationExtent, AnnotationLocation, AnnotationParameterIndex, AnnotationPrefix,
     AnnotationRecord, AnnotationToken, AnnotationValue, AnnotationValueKind, OriginalAnnotations,
 };
-pub use input::ownership::{NestedClass, Ownership};
 pub use pipeline::request::RequestError;
 pub use substrate::fields::{FieldStorage, StaticFieldOrdinal};
 pub use substrate::report::{Diagnostic, DiagnosticCause, ImageFact, ImageOrigin};

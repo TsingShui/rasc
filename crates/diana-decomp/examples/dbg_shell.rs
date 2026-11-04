@@ -49,7 +49,6 @@ impl Shell {
                 header_offset: ByteOffset(0),
                 origin: ImageOrigin { input: InputId(0) },
             }],
-            Options::default(),
             &mut control,
         )
         .map_err(RequestError::Input)?;

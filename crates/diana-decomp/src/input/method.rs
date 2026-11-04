@@ -53,27 +53,6 @@ impl<'i, 'a> MethodSource<'i, 'a> {
         self.index
     }
 
-    pub(crate) fn type_projection(
-        &self,
-        id: crate::TypeId,
-        budget: &mut RunContext<'_>,
-    ) -> Result<super::TypeProjection, crate::RequestError> {
-        Ok(self.index.type_projection(id, budget)?)
-    }
-    pub(crate) fn projected_name(
-        &self,
-        key: super::TypeProjection,
-        budget: &mut RunContext<'_>,
-    ) -> Result<DexString<'a>, crate::RequestError> {
-        super::type_projection::suffix(self.type_descriptor(key.root(), budget)?, key, budget)
-    }
-    pub(crate) fn component_projection(
-        &self,
-        key: super::TypeProjection,
-        budget: &mut RunContext<'_>,
-    ) -> Result<super::TypeProjection, crate::RequestError> {
-        super::type_projection::component(self, key, budget)
-    }
     pub(super) fn exact_type(
         &self,
         suffix: DexString<'_>,
@@ -114,13 +93,6 @@ impl<'i, 'a> MethodSource<'i, 'a> {
         Ok(self.index.type_descriptor(id, budget)?.0)
     }
 
-    pub(crate) fn throws_metadata(
-        &self,
-        budget: &mut RunContext<'_>,
-    ) -> Result<super::ThrowsMetadata<'a>, crate::RequestError> {
-        let annotations = self.annotations();
-        super::throws::read(self.index, annotations.method_range(), budget)
-    }
     /// Checks the types of already-validated method annotations against a
     /// consumer-owned system-metadata list, without interpreting their values.
     pub(crate) fn method_annotations_allowed(

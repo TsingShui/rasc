@@ -258,46 +258,19 @@ pub(crate) fn method_valid(flags: u32) -> bool {
 
 /// A class initializer: static, marked as a constructor, with no other
 /// kind-specific bit. Visibility and synthetic markers are permitted.
-pub(crate) fn class_initializer(flags: u32) -> bool {
-    method_valid(flags) && flags & (STATIC | CONSTRUCTOR) == (STATIC | CONSTRUCTOR)
-}
 
 /// Compiler-generated bridge method.
-pub(crate) fn bridge(flags: u32) -> bool {
-    flags & (BRIDGE | SYNTHETIC) == (BRIDGE | SYNTHETIC)
-}
 
 /// A field that holds one enum constant: `ENUM|STATIC|FINAL` with only
 /// visibility and synthetic markers as optional extra bits.
-pub(crate) fn enum_constant(flags: u32) -> bool {
-    flags & (ENUM | STATIC | FINAL) == (ENUM | STATIC | FINAL)
-        && flags & !(VISIBILITY | STATIC | FINAL | SYNTHETIC | ENUM | VOLATILE | TRANSIENT) == 0
-}
 
 /// The compiler-generated `$VALUES` table of an enum.
-pub(crate) fn enum_values_table(flags: u32) -> bool {
-    flags & (STATIC | FINAL | SYNTHETIC) == (STATIC | FINAL | SYNTHETIC)
-        && flags & !(VISIBILITY | STATIC | FINAL | SYNTHETIC | ENUM) == 0
-}
 
 /// A synthesized outer-capture field: `private final synthetic`.
-pub(crate) fn capture_field(flags: u32) -> bool {
-    flags & (PRIVATE | FINAL | SYNTHETIC) == (PRIVATE | FINAL | SYNTHETIC)
-        && flags & !(PRIVATE | FINAL | SYNTHETIC) == 0
-}
 
 /// An interface or annotation method: `public abstract` with no body.
-pub(crate) fn interface_method(flags: u32) -> bool {
-    flags & (PUBLIC | ABSTRACT) == (PUBLIC | ABSTRACT)
-        && flags & !(VISIBILITY | ABSTRACT | SYNTHETIC | VARARGS | ANNOTATION) == 0
-}
 
 /// An annotation interface class declaration.
-pub(crate) fn annotation_interface(flags: u32) -> bool {
-    flags & (PUBLIC | INTERFACE | ABSTRACT | ANNOTATION)
-        == (PUBLIC | INTERFACE | ABSTRACT | ANNOTATION)
-        && flags & !(VISIBILITY | INTERFACE | ABSTRACT | ANNOTATION | SYNTHETIC) == 0
-}
 
 /// An instance constructor: the constructor marker without `static`.
 pub(crate) fn instance_constructor(flags: u32) -> bool {
@@ -307,14 +280,4 @@ pub(crate) fn instance_constructor(flags: u32) -> bool {
 /// A class initializer (`<clinit>`).
 pub(crate) fn static_initializer(flags: u32) -> bool {
     method_valid(flags) && flags & (STATIC | CONSTRUCTOR) == (STATIC | CONSTRUCTOR)
-}
-
-/// A plain static method: `static` without the constructor marker.
-pub(crate) fn plain_static_method(flags: u32) -> bool {
-    method_valid(flags) && flags & STATIC != 0 && flags & CONSTRUCTOR == 0
-}
-
-/// A private instance constructor.
-pub(crate) fn private_instance_constructor(flags: u32) -> bool {
-    instance_constructor(flags) && flags & PRIVATE != 0
 }

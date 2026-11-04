@@ -31,7 +31,6 @@ pub struct ProgramIndex<'a> {
         >,
     >,
     facts_build: std::sync::Mutex<()>,
-    ownership: std::sync::OnceLock<Result<crate::input::ownership::Ownership, InputError>>,
     cache_build: std::sync::Mutex<()>,
     class_locations: std::sync::OnceLock<super::class_locations::ClassLocations>,
     pub(crate) header: DexHeader,
@@ -110,42 +109,6 @@ impl<'a> ProgramIndex<'a> {
                 Err(error.into())
             }
             Err(error) => Err(error),
-        }
-    }
-
-    /// Ownership metadata is immutable for this image; build it once and reuse.
-    pub(crate) fn ownership_cached(
-        &self,
-        control: &mut impl InputControl,
-    ) -> Result<&crate::input::ownership::Ownership, crate::RequestError> {
-        control.checkpoint()?;
-        if self.ownership.get().is_none() {
-            let _lock = self.cache_build.lock().map_err(|_| {
-                crate::RequestError::InternalInvariant("input cache construction poisoned")
-            })?;
-            if let Some(result) = self.ownership.get() {
-                return result.as_ref().map_err(|error| (*error).into());
-            }
-            let result = match crate::input::ownership::collect(self, control) {
-                Ok(ownership) => Ok(ownership),
-                Err(crate::RequestError::Input(error))
-                    if matches!(
-                        error.kind(),
-                        FailureKind::Malformed | FailureKind::Unsupported
-                    ) =>
-                {
-                    Err(error)
-                }
-                Err(error) => return Err(error),
-            };
-            let _ = self.ownership.set(result);
-        }
-        match self.ownership.get() {
-            Some(Ok(ownership)) => Ok(ownership),
-            Some(Err(error)) => Err((*error).into()),
-            None => Err(crate::RequestError::InternalInvariant(
-                "ownership cache was not initialized",
-            )),
         }
     }
 
@@ -248,7 +211,6 @@ impl<'a> ProgramIndex<'a> {
             dex: crate::DexId(0),
             class_facts: std::sync::Mutex::new(std::collections::HashMap::new()),
             facts_build: std::sync::Mutex::new(()),
-            ownership: std::sync::OnceLock::new(),
             cache_build: std::sync::Mutex::new(()),
             class_locations: std::sync::OnceLock::new(),
             header,
@@ -263,15 +225,6 @@ impl<'a> ProgramIndex<'a> {
         control: &mut RunContext<'_>,
     ) -> Result<DexString<'a>, InputError> {
         self.string_with(string_idx, control)
-    }
-
-    pub(crate) fn type_projection(
-        &self,
-        id: TypeId,
-        control: &mut impl InputControl,
-    ) -> Result<super::TypeProjection, InputError> {
-        self.type_descriptor(id, control)?;
-        Ok(super::type_projection::original(id))
     }
 
     pub(crate) fn string_with(

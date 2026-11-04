@@ -33,39 +33,6 @@ impl<'a> ProgramIndex<'a> {
     ) -> Result<bool, InputError> {
         Ok(directory.0 == 0 || self.annotation_directory(directory, control)?.class.0 == 0)
     }
-    pub(crate) fn only_ownership_annotations(
-        &self,
-        directory: ByteOffset,
-        control: &mut impl InputControl,
-    ) -> Result<bool, crate::RequestError> {
-        if directory.0 == 0 {
-            return Ok(true);
-        }
-        let offset = self.annotation_directory(directory, control)?.class;
-        if offset.0 == 0 {
-            return Ok(true);
-        }
-        let mut offsets = self.annotation_offsets(0x1003, offset, control)?;
-        let mut last = None;
-        while offsets.remaining_byte().0 != 0 {
-            control.checkpoint()?;
-            let (_, visibility, ty, _) = self.next_annotation(&mut offsets, &mut last, control)?;
-            let name = crate::substrate::owned::copy_units(self.type_name(ty, control)?, control)?;
-            let mut known = false;
-            for allowed in [
-                "Ldalvik/annotation/EnclosingClass;",
-                "Ldalvik/annotation/InnerClass;",
-                "Ldalvik/annotation/MemberClasses;",
-            ] {
-                control.checkpoint()?;
-                known |= name.iter().copied().eq(allowed.encode_utf16());
-            }
-            if visibility != 2 || !known {
-                return Ok(false);
-            }
-        }
-        Ok(true)
-    }
     pub(crate) fn annotation_directory(
         &self,
         offset: ByteOffset,

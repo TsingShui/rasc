@@ -2,11 +2,6 @@ use crate::input::{DexContainer, InputError, InputProblem, ProgramIndex};
 use crate::substrate::report::*;
 use crate::{ByteOffset, ClassKey, FailureKind, MethodId, MethodKey, RequestError, RunContext};
 
-// Phase implementations can name the credential, but only the scheduler can construct it.
-pub(crate) struct SchedulePermit {
-    _private: (),
-}
-
 /// Original caller-owned bytes and one logical header selection. The caller
 /// retains the physical owner until this engine is dropped.
 #[derive(Clone, Copy)]
@@ -54,7 +49,6 @@ struct IndexedImage<'a> {
 /// not to the engine; owned reports remain usable after this engine is dropped.
 pub struct Engine<'a> {
     images: Vec<IndexedImage<'a>>,
-    options: Options,
     method_jobs: usize,
     method_pool: std::sync::OnceLock<Result<rayon::ThreadPool, String>>,
 }
@@ -75,7 +69,6 @@ impl<'a> Engine<'a> {
     /// classified errors. No input copies, file access or global state occur.
     pub fn open(
         images: Vec<DexImage<'a>>,
-        options: Options,
         control: &mut RunContext<'_>,
     ) -> Result<Self, InputError> {
         control.checkpoint()?;
@@ -148,7 +141,6 @@ impl<'a> Engine<'a> {
         }
         Ok(Self {
             images: indexed,
-            options,
             method_jobs: 1,
             method_pool: std::sync::OnceLock::new(),
         })
