@@ -17,6 +17,12 @@ use diana_decomp::{
 };
 use serde_json::{Value, json};
 
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum Format {
+    Json,
+    Text,
+}
+
 struct Shell {
     dex: PathBuf,
     bytes: Vec<u8>,
@@ -336,10 +342,81 @@ fn command(line: &str) -> Result<Value, RequestError> {
     Ok(Value::Object(object))
 }
 
+fn render_text(value: &Value, indent: usize, output: &mut String) {
+    let pad = " ".repeat(indent);
+    match value {
+        Value::Object(fields) => {
+            for (key, value) in fields {
+                match value {
+                    Value::Object(inner) if !inner.is_empty() => {
+                        output.push_str(&format!("{pad}{key}:\n"));
+                        render_text(value, indent + 2, output);
+                    }
+                    Value::Array(items) if !items.is_empty() => {
+                        output.push_str(&format!("{pad}{key}:\n"));
+                        render_text(value, indent + 2, output);
+                    }
+                    _ => {
+                        output.push_str(&format!("{pad}{key}: "));
+                        render_text(value, indent, output);
+                        output.push('\n');
+                    }
+                }
+            }
+        }
+        Value::Array(items) => {
+            for item in items {
+                output.push_str(&format!("{pad}- "));
+                match item {
+                    Value::Object(_) | Value::Array(_) => {
+                        output.push('\n');
+                        render_text(item, indent + 2, output);
+                    }
+                    _ => {
+                        render_text(item, indent, output);
+                        output.push('\n');
+                    }
+                }
+            }
+        }
+        Value::String(text) => output.push_str(text),
+        other => output.push_str(&other.to_string()),
+    }
+}
+
+fn write_value(output: &mut impl Write, value: &Value, format: Format) -> std::io::Result<()> {
+    if format == Format::Json {
+        return writeln!(output, "{value}");
+    }
+    if value.get("ok").and_then(Value::as_bool) == Some(true) {
+        if let Some(result) = value.get("result") {
+            let mut text = String::new();
+            render_text(result, 0, &mut text);
+            if !text.is_empty() {
+                writeln!(output, "{text}")?;
+            }
+        }
+        writeln!(output)
+    } else {
+        let detail = value
+            .get("error")
+            .and_then(|error| error.get("detail"))
+            .and_then(Value::as_str)
+            .unwrap_or("unknown error");
+        let kind = value
+            .get("error")
+            .and_then(|error| error.get("kind"))
+            .and_then(Value::as_str)
+            .unwrap_or("error");
+        writeln!(output, "error: {kind}: {detail}")
+    }
+}
+
 fn main() -> std::process::ExitCode {
     let mut args = std::env::args().skip(1);
     let mut dex = None;
     let mut exec = Vec::new();
+    let mut explicit_format = None;
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--dex" | "-d" => {
@@ -348,6 +425,20 @@ fn main() -> std::process::ExitCode {
                     return std::process::ExitCode::from(2);
                 };
                 dex = Some(PathBuf::from(path));
+            }
+            "--format" | "-f" => {
+                let Some(value) = args.next() else {
+                    eprintln!("dbg_shell: --format needs json or text");
+                    return std::process::ExitCode::from(2);
+                };
+                explicit_format = Some(match value.as_str() {
+                    "json" => Format::Json,
+                    "text" => Format::Text,
+                    _ => {
+                        eprintln!("dbg_shell: --format must be json or text");
+                        return std::process::ExitCode::from(2);
+                    }
+                });
             }
             "--exec" | "-e" => {
                 let Some(value) = args.next() else {
@@ -359,7 +450,8 @@ fn main() -> std::process::ExitCode {
             "--help" | "-h" => {
                 eprintln!(
                     "usage: dbg_shell --dex <classes.dex> [--exec <json>]...\n\
-                     stdin: one command per line, JSON or `p1 <class> <method>`"
+                     stdin: one command per line, JSON or `p1 <class> <method>`
+                     default: text for stdin shell, json for --exec; --format overrides"
                 );
                 return std::process::ExitCode::SUCCESS;
             }
@@ -370,6 +462,11 @@ fn main() -> std::process::ExitCode {
             }
         }
     }
+    let format = explicit_format.unwrap_or(if exec.is_empty() {
+        Format::Text
+    } else {
+        Format::Json
+    });
     let Some(path) = dex else {
         eprintln!("dbg_shell: --dex is required");
         return std::process::ExitCode::from(2);
@@ -395,7 +492,7 @@ fn main() -> std::process::ExitCode {
             };
             let id = request.get("id").cloned();
             let value = response(id.as_ref(), shell.run(&request));
-            let _ = writeln!(stdout, "{value}");
+            write_value(&mut stdout, &value, format);
         }
         return std::process::ExitCode::SUCCESS;
     }
@@ -415,7 +512,7 @@ fn main() -> std::process::ExitCode {
         };
         let id = request.get("id").cloned();
         let value = response(id.as_ref(), shell.run(&request));
-        if writeln!(stdout, "{value}").is_err() {
+        if write_value(&mut stdout, &value, format).is_err() {
             break;
         }
         if request.get("cmd").and_then(Value::as_str) == Some("quit") {
