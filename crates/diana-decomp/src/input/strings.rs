@@ -205,7 +205,7 @@ impl<'a> DexString<'a> {
 }
 
 #[derive(Clone, Copy)]
-pub(super) enum TypeShape {
+pub(crate) enum TypeShape {
     Void,
     Primitive(PrimitiveType),
     Class,
@@ -220,7 +220,7 @@ impl TypeShape {
             Self::Primitive(primitive) => primitive as u8,
         }
     }
-    pub(super) fn words(self) -> u8 {
+    pub(crate) fn words(self) -> u8 {
         match self {
             Self::Void => 0,
             Self::Primitive(PrimitiveType::Long | PrimitiveType::Double) => 2,
@@ -231,7 +231,7 @@ impl TypeShape {
 
 #[derive(Clone, Copy)]
 #[repr(u8)]
-pub(super) enum PrimitiveType {
+pub(crate) enum PrimitiveType {
     Boolean = b'Z',
     Byte = b'B',
     Short = b'S',

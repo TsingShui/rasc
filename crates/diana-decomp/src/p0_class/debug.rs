@@ -77,7 +77,8 @@ struct ShapeView<'a>(&'a ClassFacts);
 impl Serialize for ShapeView<'_> {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         let shape = self.0.class_data_shape();
-        let mut record = serializer.serialize_struct("ClassData", 6)?;
+        let delivered = self.0.delivered_shape();
+        let mut record = serializer.serialize_struct("ClassData", 13)?;
         record.serialize_field("static_fields", &shape.static_fields)?;
         record.serialize_field("instance_fields", &shape.instance_fields)?;
         record.serialize_field("direct_methods", &shape.direct_methods)?;
@@ -89,6 +90,14 @@ impl Serialize for ShapeView<'_> {
         record.serialize_field(
             "method_traversal_complete",
             &self.0.method_traversal_complete(),
+        )?;
+        record.serialize_field("delivered_static_fields", &delivered.static_fields)?;
+        record.serialize_field("delivered_instance_fields", &delivered.instance_fields)?;
+        record.serialize_field("delivered_direct_methods", &delivered.direct_methods)?;
+        record.serialize_field("delivered_virtual_methods", &delivered.virtual_methods)?;
+        record.serialize_field(
+            "terminated_at_bytes",
+            &self.0.coverage_terminated_at().map(|offset| offset.0),
         )?;
         record.end()
     }
@@ -131,6 +140,7 @@ impl Serialize for FieldView<'_> {
         record.serialize_field("declaration", entry.declaration())?;
         record.serialize_field("initial_value", entry.initial_value())?;
         record.serialize_field("scalar", &entry.scalar())?;
+        record.serialize_field("default_preparation", &entry.default_preparation())?;
         record.end()
     }
 }

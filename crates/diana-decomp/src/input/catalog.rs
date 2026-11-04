@@ -22,7 +22,7 @@ struct Section {
 /// A single-image index borrowing original bytes. Variable metadata is resolved
 /// on demand; it owns neither a decoded string pool nor method result buffers.
 pub struct ProgramIndex<'a> {
-    pub(super) bytes: &'a [u8],
+    pub(crate) bytes: &'a [u8],
     dex: crate::DexId,
     class_facts: std::sync::Mutex<
         std::collections::HashMap<
@@ -377,7 +377,7 @@ impl<'a> ProgramIndex<'a> {
         Cursor::bounded(self.bytes, offset_byte, end)
     }
 
-    pub(super) fn mapped_count(&self, kind: u16) -> u32 {
+    pub(crate) fn mapped_count(&self, kind: u16) -> u32 {
         map_kind(kind)
             .and_then(|(bit, _)| self.sections[bit.trailing_zeros() as usize])
             .map_or(0, |section| section.count)
@@ -445,7 +445,7 @@ impl<'a> ProgramIndex<'a> {
         Cursor::bounded(self.bytes, range.start, range.end)
     }
 
-    pub(super) fn type_descriptor(
+    pub(crate) fn type_descriptor(
         &self,
         type_idx: TypeId,
         control: &mut impl InputControl,
@@ -1227,6 +1227,8 @@ impl<'i, 'a> ClassView<'i, 'a> {
             return Err(malformed(InputProblem::Truncated, cursor.position_byte()).into());
         }
         let mut traversal_error = None;
+        let mut terminated_at = None;
+        let mut delivered = [0u32; 4];
         for (groups, kind) in [
             ([counts[0], counts[1]], MemberKind::Field),
             ([counts[2], counts[3]], MemberKind::Method),
@@ -1267,6 +1269,7 @@ impl<'i, 'a> ClassView<'i, 'a> {
                     let Some(index) = previous.and_then(|value| value.checked_add(delta)) else {
                         traversal_error
                             .get_or_insert(malformed(InputProblem::RangeOverflow, record));
+                        terminated_at.get_or_insert(record);
                         previous = None;
                         if group == 0 {
                             prior = PriorState::Invalid;
@@ -1289,6 +1292,7 @@ impl<'i, 'a> ClassView<'i, 'a> {
                         // and every independently valid sibling remain available.
                         traversal_error
                             .get_or_insert(malformed(InputProblem::InvalidClassData, record));
+                        terminated_at.get_or_insert(record);
                         if group == 0 {
                             prior = PriorState::Invalid;
                         }
@@ -1309,6 +1313,11 @@ impl<'i, 'a> ClassView<'i, 'a> {
                                 self.type_idx,
                                 control,
                             ))?;
+                            let group_slot = match kind {
+                                MemberKind::Field => group,
+                                MemberKind::Method => group + 2,
+                            };
+                            delivered[group_slot] = delivered[group_slot].saturating_add(1);
                             visit(
                                 MemberEntry::Field(FieldEntry {
                                     field_idx: FieldId(index),
@@ -1342,6 +1351,11 @@ impl<'i, 'a> ClassView<'i, 'a> {
                                     | MemberSelection::AllHeaders
                                     | MemberSelection::AllMembers
                             ) {
+                                let group_slot = match kind {
+                                    MemberKind::Field => group,
+                                    MemberKind::Method => group + 2,
+                                };
+                                delivered[group_slot] = delivered[group_slot].saturating_add(1);
                                 visit(
                                     MemberEntry::MethodHeader {
                                         method_idx: MethodId(index),
@@ -1395,6 +1409,8 @@ impl<'i, 'a> ClassView<'i, 'a> {
                 direct_methods: counts[2],
                 virtual_methods: counts[3],
             },
+            delivered,
+            terminated_at,
             issue: traversal_error,
         })
     }
@@ -1418,6 +1434,12 @@ impl<'i, 'a> ClassView<'i, 'a> {
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub(crate) struct ClassDataWalk {
     pub shape: ClassDataShape,
+    /// Members actually delivered in each original group, including entries whose
+    /// own declaration read failed. A prefix shorter than `shape` is explicit
+    /// coverage loss, not an empty group.
+    pub delivered: [u32; 4],
+    /// First original class-data byte whose record could not be located.
+    pub terminated_at: Option<ByteOffset>,
     pub issue: Option<InputError>,
 }
 

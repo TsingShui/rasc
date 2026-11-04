@@ -508,7 +508,10 @@ impl<'a> Engine<'a> {
         // One class-fact product per request. It owns the original four-group
         // member directory that both class and method requests consume; a method
         // entry is never reassembled from caller-supplied identities.
-        let class_facts = match crate::p0::collect(&image.index, request.class, control) {
+        let class_facts = match image
+            .index
+            .class_facts_cached(request.class.class_def, control)
+        {
             Ok(facts) => Some(facts),
             Err(error)
                 if matches!(
@@ -576,7 +579,7 @@ impl<'a> Engine<'a> {
                         MemberInputs {
                             nested: nested_context,
                             annotations: annotation_bindings.as_ref(),
-                            facts: class_facts.as_ref(),
+                            facts: class_facts.as_deref(),
                         },
                         control,
                     )?;
@@ -591,7 +594,7 @@ impl<'a> Engine<'a> {
                         MemberInputs {
                             nested: nested_context,
                             annotations: annotation_bindings.as_ref(),
-                            facts: class_facts.as_ref(),
+                            facts: class_facts.as_deref(),
                         },
                         &mut diagnostics,
                         control,
@@ -616,7 +619,7 @@ impl<'a> Engine<'a> {
                                     MemberInputs {
                                         nested: nested_context,
                                         annotations: annotation_bindings.as_ref(),
-                                        facts: class_facts.as_ref(),
+                                        facts: class_facts.as_deref(),
                                     },
                                     control,
                                 )?;

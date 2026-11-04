@@ -2,10 +2,10 @@
 
 mod context;
 mod engine;
-#[path = "p1_input/mod.rs"]
 pub mod input;
 #[path = "p0_class/mod.rs"]
 pub mod p0;
+pub mod p1;
 mod p2_flow;
 mod p3_ssa;
 mod p4_types;

@@ -12,15 +12,18 @@ pub(crate) struct CatchClause {
     pub kind: CatchType,
     pub target: CodeUnitOffset,
 }
+#[derive(Clone)]
 struct Chain {
     offset: ByteOffset,
     clauses: Vec<CatchClause>,
 }
+#[derive(Clone)]
 struct Range {
     start: CodeUnitOffset,
     end: CodeUnitOffset,
     chain: usize,
 }
+#[derive(Clone)]
 pub(crate) struct CheckedProtection {
     ranges: Vec<Range>,
     chains: Vec<Chain>,

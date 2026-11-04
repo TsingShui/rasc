@@ -9,7 +9,8 @@ facts from them.
 |---|---|---|
 | Input context | `context/` | Request-level cross-DEX lookup and lazy caching of P1 declarations |
 | P0 | `p0_class/` | Class declaration, four-group member directory, static preparation and metadata facts using shared safe reads |
-| P1 | `p1_input/` | Checked DEX tables, method source reader, disassembly and original instruction associations |
+| Input | `input/` | Checked DEX tables, method source reader, metadata and declaration readers |
+| P1 | `p1/` | Disassembly, structural checks and original instruction associations |
 | P2 | `p2_flow/` | Instruction operations, effects and control-flow graph |
 | P3 | `p3_ssa/` | Definitions, uses, Phi and exceptional environments |
 | P4 | `p4_types/` | Types, declaration constraints, use conversions and initialization facts |
@@ -37,7 +38,7 @@ is [P0 class facts](spec/00-class.md). Input context and Engine scheduling are n
 | Phase / Module | Owned products | Input and responsibility | Does not own |
 |---|---|---|---|
 | Input context `context` | Cross-DEX descriptor index and lazy declaration cache | locates original logical DEX definitions and caches declarations read by P1 | does not decode declarations or perform method analysis |
-| P1 `p1_input` | `ProgramIndex`, `MethodSource`, `RawMethodView` → `DecodedMethod` | safe container and metadata, UTF-16, method-source ranges; P1 owns complete disassembly, structural checks and original reference association | does not decide control structure, does not reject a whole legal class because the source is hard to express |
+| P1 `p1` | `ProgramIndex`, `MethodSource`, `RawMethodView` → `DecodedMethod` | consumes the shared `input` reader; P1 owns complete disassembly, structural checks and original reference association | does not decide control structure, does not reject a whole legal class because the source is hard to express |
 | P2 `p2_flow` | `FlowBody` | decode, move-result binding, blocks, normal/ordered exceptional edges, effect sites | does not optimize effects, does not structure, does not speculate new call targets |
 | P3 `p3_ssa` | `SsaBody` | input parameters/this, a stable ValueId per definition, normal/exception edge environments, Phi | does not merge source locals, MUST NOT eliminate exception edges |
 | P4 `p4_types` | `TypedBody`, declaration constraints | primitive/reference/null/raw constant bits, use conversions, Phi join, finite monotonic work queue | does not have to rebuild complete generic source; does not modify CFG topology |

@@ -818,7 +818,7 @@ fn decode_impl<'a>(
         ));
     };
     let raw = decoded.original().clone();
-    let protection = crate::input::protection::read(decoded.layout(), budget)?;
+    let protection = decoded.protection().clone();
     let result = if input
         .declaration()
         .return_type

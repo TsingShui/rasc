@@ -1,7 +1,7 @@
 # 01 — Input and original facts
 
 Code: `apps/diana/src/analysis/{input,archive,apk,request,images}.rs` and
-`crates/diana-decomp/src/p1_input/`.
+`crates/diana-decomp/src/input/` and `crates/diana-decomp/src/p1/`.
 
 ## Ownership
 

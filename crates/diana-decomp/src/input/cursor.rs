@@ -111,7 +111,7 @@ impl<'a> Cursor<'a> {
         self.read_uleb32_charged(|| control.checkpoint())
     }
 
-    pub(super) fn read_uleb32_charged(
+    pub(crate) fn read_uleb32_charged(
         &mut self,
         mut charge: impl FnMut() -> Result<(), ControlError>,
     ) -> Result<u32, InputError> {
@@ -142,7 +142,7 @@ impl<'a> Cursor<'a> {
         self.read_sleb32_charged(|| control.checkpoint())
     }
 
-    pub(super) fn read_sleb32_charged(
+    pub(crate) fn read_sleb32_charged(
         &mut self,
         mut charge: impl FnMut() -> Result<(), ControlError>,
     ) -> Result<i32, InputError> {
@@ -174,7 +174,7 @@ impl<'a> Cursor<'a> {
         self.read_array_charged(|| control.checkpoint())
     }
 
-    pub(super) fn read_array_charged<const N: usize>(
+    pub(crate) fn read_array_charged<const N: usize>(
         &mut self,
         mut charge: impl FnMut() -> Result<(), ControlError>,
     ) -> Result<[u8; N], InputError> {

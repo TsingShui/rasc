@@ -164,7 +164,7 @@ pub struct FieldDeclaration {
 
 /// Static preparation bytes exactly as encoded, with the decoded scalar when the
 /// format and tag determine one. Implicit and explicit defaults stay distinct.
-#[derive(Serialize)]
+#[derive(Clone, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum InitialValue {
     ImplicitDefault,
@@ -177,7 +177,7 @@ pub enum InitialValue {
     },
 }
 
-#[derive(Serialize)]
+#[derive(Clone, Serialize)]
 #[serde(tag = "kind", content = "value", rename_all = "snake_case")]
 pub enum ScalarValue {
     Signed(i64),
@@ -228,6 +228,9 @@ pub struct FieldDirectoryEntry {
     /// Decoded preparation scalar when the tag and declaration descriptor
     /// determine one; a declaration failure leaves this empty.
     pub(super) scalar: Option<ScalarValue>,
+    /// Whether an encoded preparation equals the descriptor's default value.
+    /// Implicit defaults are also default; unavailable reads are not.
+    pub(super) default_preparation: bool,
 }
 
 impl FieldDirectoryEntry {
@@ -257,6 +260,9 @@ impl FieldDirectoryEntry {
     }
     pub fn scalar(&self) -> Option<&ScalarValue> {
         self.scalar.as_ref()
+    }
+    pub fn default_preparation(&self) -> bool {
+        self.default_preparation
     }
 }
 
@@ -307,6 +313,8 @@ pub struct ClassFacts {
     pub(super) header_offset: ByteOffset,
     pub(super) class: ClassDeclaration,
     pub(super) shape: ClassDataShape,
+    pub(super) delivered: ClassDataShape,
+    pub(super) terminated_at: Option<ByteOffset>,
     pub(super) fields: Vec<FieldDirectoryEntry>,
     pub(super) methods: Vec<MethodDirectoryEntry>,
     pub(super) fields_issue: Option<RequestError>,
@@ -348,6 +356,16 @@ impl ClassFacts {
     pub fn class_data_shape(&self) -> ClassDataShape {
         self.shape
     }
+    /// Members actually delivered in each original group. This can be a strict
+    /// prefix of `class_data_shape` when traversal stopped early.
+    pub fn delivered_shape(&self) -> ClassDataShape {
+        self.delivered
+    }
+    /// First original class-data byte that could not be located, if traversal
+    /// stopped. `None` means every declared record was located.
+    pub fn coverage_terminated_at(&self) -> Option<ByteOffset> {
+        self.terminated_at
+    }
     /// Whether the class-data traversal reached its declared end. A false value
     /// means the directory is a locatable prefix; member entries stay usable.
     pub fn field_traversal_complete(&self) -> bool {
@@ -388,6 +406,12 @@ impl ClassFacts {
     }
 
     /// The original field directory in class-data order.
+    /// Field-directory traversal or preparation issue, independent of the
+    /// per-entry declaration facts.
+    pub fn fields_issue(&self) -> Option<&RequestError> {
+        self.fields_issue.as_ref()
+    }
+
     pub fn fields(&self) -> &[FieldDirectoryEntry] {
         &self.fields
     }

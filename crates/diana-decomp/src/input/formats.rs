@@ -91,10 +91,10 @@ pub struct OpcodeSpec {
     pub format: Format,
     pub minimum_version: DexVersion,
     pub references: [Option<ReferenceKind>; 2],
-    pub(super) registers: RegisterShape,
-    pub(super) flow: FlowKind,
-    pub(super) result: ResultRole,
-    pub(super) may_throw: bool,
+    pub(crate) registers: RegisterShape,
+    pub(crate) flow: FlowKind,
+    pub(crate) result: ResultRole,
+    pub(crate) may_throw: bool,
 }
 
 impl OpcodeSpec {
@@ -104,20 +104,20 @@ impl OpcodeSpec {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(super) enum RegisterWidth {
+pub(crate) enum RegisterWidth {
     One,
     Two,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(super) enum RegisterShape {
+pub(crate) enum RegisterShape {
     Fixed([Option<RegisterWidth>; 3]),
     InvokeWords,
     ArrayWords,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(super) enum FlowKind {
+pub(crate) enum FlowKind {
     Next,
     Return,
     Throw,
@@ -129,7 +129,7 @@ pub(super) enum FlowKind {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(super) enum ResultRole {
+pub(crate) enum ResultRole {
     Ordinary,
     MoveResult,
     MoveException,
@@ -316,7 +316,7 @@ pub(super) fn word(bytes: &[u8], pc: CodeUnitOffset, delta: u32) -> Result<u16, 
     Ok(u16::from_le_bytes([data[0], data[1]]))
 }
 
-pub(super) fn wide_word(
+pub(crate) fn wide_word(
     bytes: &[u8],
     pc: CodeUnitOffset,
     delta: u32,

@@ -1,6 +1,8 @@
-use super::formats::{DexVersion, InsnLayout, LayoutKind, OpcodeSpec};
-use super::operands::{RawOperands, instruction_operands};
-use super::{CheckedMethodLayout, MethodError, ProgramIndex, RawMethodView};
+use super::{CheckedMethodLayout, MethodError};
+use crate::input::formats::{DexVersion, FlowKind, InsnLayout, LayoutKind, OpcodeSpec};
+use crate::input::operands::{RawOperands, instruction_operands};
+use crate::input::protection::CheckedProtection;
+use crate::input::{ProgramIndex, RawMethodView};
 use crate::raw::{OperandReference, ReferenceKind, ReferenceSlot};
 use crate::substrate::owned::push;
 use crate::{
@@ -25,6 +27,8 @@ pub struct DecodedInstruction {
     layout: InsnLayout,
     operands: RawOperands,
     references: [Option<DecodedReference>; 2],
+    branch_target: Option<CodeUnitOffset>,
+    payload_target: Option<CodeUnitOffset>,
 }
 
 impl DecodedInstruction {
@@ -52,6 +56,14 @@ impl DecodedInstruction {
     pub fn references(&self) -> impl Iterator<Item = DecodedReference> + '_ {
         self.references.into_iter().flatten()
     }
+    /// P1's checked normal branch target for goto/conditional instructions.
+    pub fn branch_target(&self) -> Option<CodeUnitOffset> {
+        self.branch_target
+    }
+    /// P1's checked payload target for switch/fill-array instructions.
+    pub fn payload_target(&self) -> Option<CodeUnitOffset> {
+        self.payload_target
+    }
 }
 
 /// A decoded payload extent. Switch cases and array elements stay borrowed
@@ -78,26 +90,26 @@ impl DecodedPayload {
 /// element iterator P1 established from the checked layout.
 impl<'a> DecodedPayload {
     pub fn words(&self, source: &RawMethodView<'a>) -> Result<&'a [u8], RequestError> {
-        super::operands::payload_words(source.instructions(), self.pc, self.layout)
+        crate::input::operands::payload_words(source.instructions(), self.pc, self.layout)
             .map_err(|error| RequestError::from(MethodError::Decode(error)))
     }
     pub fn switch_cases(
         &self,
         source: &RawMethodView<'a>,
-    ) -> Result<Option<super::operands::SwitchCases<'a>>, RequestError> {
-        super::operands::switch_payload(source.instructions(), self.pc, self.layout)
+    ) -> Result<Option<crate::input::operands::SwitchCases<'a>>, RequestError> {
+        crate::input::operands::switch_payload(source.instructions(), self.pc, self.layout)
             .map(Some)
             .map_err(|error| RequestError::from(MethodError::Decode(error)))
     }
     pub fn array_elements(
         &self,
         source: &RawMethodView<'a>,
-    ) -> Result<Option<super::operands::ArrayElements<'a>>, RequestError> {
+    ) -> Result<Option<crate::input::operands::ArrayElements<'a>>, RequestError> {
         if !matches!(self.layout.kind(), LayoutKind::ArrayData { .. }) {
             return Ok(None);
         }
         Ok(Some(
-            super::operands::array_payload(source.instructions(), self.pc, self.layout)
+            crate::input::operands::array_payload(source.instructions(), self.pc, self.layout)
                 .map_err(|error| RequestError::from(MethodError::Decode(error)))?,
         ))
     }
@@ -127,6 +139,7 @@ impl DecodedItem {
 pub struct DecodedMethod<'a> {
     source: RawMethodView<'a>,
     layout: CheckedMethodLayout<'a>,
+    protection: CheckedProtection,
     /// One immutable item directory, shared by every product that retains the
     /// decoded facts. Cloning the product copies a handle, not the items.
     items: std::sync::Arc<Vec<DecodedItem>>,
@@ -151,6 +164,10 @@ impl<'a> DecodedMethod<'a> {
     }
     pub fn is_reachable(&self, pc: CodeUnitOffset) -> bool {
         self.layout.is_reachable(pc)
+    }
+    /// P1's checked try ranges and handler targets in original order.
+    pub(crate) fn protection(&self) -> &CheckedProtection {
+        &self.protection
     }
     pub fn method_id(&self) -> MethodId {
         self.source.method_id
@@ -203,7 +220,7 @@ impl<'a> DecodedMethod<'a> {
     pub fn switch_cases_at(
         &self,
         pc: CodeUnitOffset,
-    ) -> Result<Option<super::operands::SwitchCases<'a>>, RequestError> {
+    ) -> Result<Option<crate::input::operands::SwitchCases<'a>>, RequestError> {
         match self.payload_at(pc) {
             Some(payload) => payload.switch_cases(&self.source),
             None => Ok(None),
@@ -214,7 +231,7 @@ impl<'a> DecodedMethod<'a> {
     pub fn array_elements_at(
         &self,
         pc: CodeUnitOffset,
-    ) -> Result<Option<super::operands::ArrayElements<'a>>, RequestError> {
+    ) -> Result<Option<crate::input::operands::ArrayElements<'a>>, RequestError> {
         match self.payload_at(pc) {
             Some(payload) => payload.array_elements(&self.source),
             None => Ok(None),
@@ -271,6 +288,7 @@ impl<'a> ProgramIndex<'a> {
         &self,
         source: &RawMethodView<'a>,
         layout: CheckedMethodLayout<'a>,
+        protection: CheckedProtection,
         budget: &mut RunContext<'_>,
     ) -> Result<DecodedMethod<'a>, MethodError> {
         budget.checkpoint()?;
@@ -299,6 +317,19 @@ impl<'a> ProgramIndex<'a> {
                             slot: reference.operand_slot,
                         });
                     }
+                    let relative = operands
+                        .offset()
+                        .map(|delta| pc.0.checked_add_signed(delta.0).map(CodeUnitOffset));
+                    let branch_target = match spec.flow {
+                        FlowKind::Goto | FlowKind::Conditional => relative.flatten(),
+                        _ => None,
+                    };
+                    let payload_target = match spec.flow {
+                        FlowKind::PackedSwitch | FlowKind::SparseSwitch | FlowKind::FillArray => {
+                            relative.flatten()
+                        }
+                        _ => None,
+                    };
                     push(
                         &mut items,
                         DecodedItem::Instruction(DecodedInstruction {
@@ -307,6 +338,8 @@ impl<'a> ProgramIndex<'a> {
                             layout,
                             operands,
                             references,
+                            branch_target,
+                            payload_target,
                         }),
                         budget,
                     )
@@ -330,6 +363,7 @@ impl<'a> ProgramIndex<'a> {
         Ok(DecodedMethod {
             source: source.clone(),
             layout,
+            protection,
             items: std::sync::Arc::new(items),
             registers_size: source.registers_size(),
             ins_size: source.ins_size(),

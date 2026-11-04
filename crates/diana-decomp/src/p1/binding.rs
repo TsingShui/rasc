@@ -1,11 +1,12 @@
-use super::formats::{InsnLayout, OpcodeSpec, OperandReference, RegisterShape};
-use super::operands::RawOperands;
 use super::structure::bad;
-use super::{MethodError, MethodProblem, ProgramIndex};
+use super::{MethodError, MethodProblem};
+use crate::input::ProgramIndex;
+use crate::input::formats::{InsnLayout, OpcodeSpec, OperandReference, RegisterShape};
+use crate::input::operands::RawOperands;
 use crate::{CodeUnitOffset, RunContext};
 
 #[derive(Clone, Copy)]
-pub(super) enum ResultKind {
+pub(crate) enum ResultKind {
     Void,
     Scalar,
     Wide,
@@ -24,7 +25,7 @@ impl ResultKind {
 /// Checks ordinary/custom invoke words against original prototypes, without resolving
 /// dispatch or assigning types to register values. All reads use the normal
 /// method ledger; borrowed iterators require no scratch allocation.
-pub(super) fn check_producer(
+pub(crate) fn check_producer(
     index: &ProgramIndex<'_>,
     pc: CodeUnitOffset,
     spec: OpcodeSpec,

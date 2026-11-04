@@ -39,7 +39,7 @@ impl<'i, 'a> CheckedCallSite<'i, 'a> {
     pub(crate) fn extra(&self) -> &[ValueStep<'a>] {
         &self.extra
     }
-    pub(super) fn into_prototype(self) -> Prototype<'i, 'a> {
+    pub(crate) fn into_prototype(self) -> Prototype<'i, 'a> {
         self.prototype
     }
 }

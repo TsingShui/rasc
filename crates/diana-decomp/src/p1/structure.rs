@@ -3,10 +3,10 @@ use std::collections::TryReserveError;
 use thiserror::Error;
 
 use super::binding::{ResultKind, check_producer};
-use super::debug_program::DebugProgram;
-use super::formats::{FlowKind, RegisterShape, RegisterWidth, ResultRole, wide_word};
-use super::operands::{RawOperands, RegisterEncoding, instruction_operands};
-use super::{Cursor, InputError, ProgramIndex, RawMethodView};
+use crate::input::debug_program::DebugProgram;
+use crate::input::formats::{FlowKind, RegisterShape, RegisterWidth, ResultRole, wide_word};
+use crate::input::operands::{RawOperands, RegisterEncoding, instruction_operands};
+use crate::input::{Cursor, InputError, ProgramIndex, RawMethodView};
 use crate::raw::{
     Format, InsnLayout, LayoutKind, OpcodeSpec, OperandReference, RawDecodeError,
     instruction_layout,

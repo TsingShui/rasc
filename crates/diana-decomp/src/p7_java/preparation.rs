@@ -1,11 +1,11 @@
 use crate::RequestError;
-use crate::input::field_declarations::PreparationValue;
+use crate::p0::ScalarValue;
 use crate::pipeline::control::InputControl;
 use crate::substrate::owned::TextBuffer;
 
 pub(super) fn expression(
     descriptor: &[u16],
-    value: Option<&PreparationValue>,
+    value: Option<&ScalarValue>,
     default: bool,
     control: &mut impl InputControl,
 ) -> Result<Option<String>, RequestError> {
@@ -25,10 +25,10 @@ pub(super) fn expression(
         return Ok(Some(output.finish()));
     }
     match (descriptor, value) {
-        ([90], Some(PreparationValue::Boolean(value))) => {
+        ([90], Some(ScalarValue::Boolean(value))) => {
             output.push(if *value { "true" } else { "false" }, control)?
         }
-        ([66 | 83 | 73], Some(PreparationValue::Signed(value))) => {
+        ([66 | 83 | 73], Some(ScalarValue::Signed(value))) => {
             if descriptor == [66] && i8::try_from(*value).is_err()
                 || descriptor == [83] && i16::try_from(*value).is_err()
                 || i32::try_from(*value).is_err()
@@ -37,32 +37,32 @@ pub(super) fn expression(
             }
             output.arguments(format_args!("{value}"), control)?;
         }
-        ([74], Some(PreparationValue::Signed(value))) => {
+        ([74], Some(ScalarValue::Signed(value))) => {
             output.arguments(format_args!("{value}L"), control)?
         }
-        ([67], Some(PreparationValue::Unsigned(value))) if u16::try_from(*value).is_ok() => {
+        ([67], Some(ScalarValue::Unsigned(value))) if u16::try_from(*value).is_ok() => {
             output.arguments(format_args!("(char){value}"), control)?
         }
-        ([70], Some(PreparationValue::Float(bits))) => {
+        ([70], Some(ScalarValue::FloatBits(bits))) => {
             if !fp(u64::from(*bits), false, &mut output, control)? {
                 return Ok(None);
             }
         }
-        ([68], Some(PreparationValue::Double(bits))) => {
+        ([68], Some(ScalarValue::DoubleBits(bits))) => {
             if !fp(*bits, true, &mut output, control)? {
                 return Ok(None);
             }
         }
-        (_, Some(PreparationValue::Null))
+        (_, Some(ScalarValue::Null))
             if descriptor.first() == Some(&76) || descriptor.first() == Some(&91) =>
         {
             output.push("null", control)?
         }
-        (_, Some(PreparationValue::String(units)))
+        (_, Some(ScalarValue::String(units)))
             if descriptor == crate::p4_types::BuiltinReference::String.descriptor() =>
         {
             output.push("\"", control)?;
-            for &unit in units {
+            for &unit in units.units() {
                 control.checkpoint()?;
                 match unit {
                     0 => output.push("\\000", control)?,

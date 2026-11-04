@@ -248,8 +248,8 @@ A phase is an ownership/responsibility split and does not require one file per r
 
 | Module | First actual files / main functions | Owner |
 |---|---|---|
-| Engine/input | engine.rs, p1_input/{mod,cursor,header,catalog,code}.rs; open/index/method_input | T01/T02/T04 |
-| Raw format | p1_input/formats.rs, p2_flow/decode.rs; decode/validate_raw | T03/T04 |
+| Engine/input | engine.rs, input/{mod,cursor,header,catalog,code}.rs; open/index/method source | T01/T02/T04 |
+| Raw format | input/formats.rs, p1/{disassembly,structure}.rs; decode/validate_raw | T03/T04 |
 | Flow | p2_flow/{mod,build,effects,results,protection}.rs; decode_and_bind | T06/T16 |
 | SSA | p3_ssa/{mod,inputs,liveness,build,verify}.rs; build_ssa | T06/T07/T16 |
 | Calls | p4_types/declarations/{mod,members,allocation,contracts}.rs; resolve_calls | T11/T12 |

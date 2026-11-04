@@ -16,10 +16,10 @@ pub enum MethodBody<'a> {
 /// boundaries, references and control-flow semantics require later validation.
 #[derive(Clone, Debug)]
 pub struct RawMethodView<'a> {
-    pub(super) source_bytes: &'a [u8],
-    pub(super) header_offset: ByteOffset,
-    pub(super) version: super::formats::DexVersion,
-    pub(super) method_id: crate::MethodId,
+    pub(crate) source_bytes: &'a [u8],
+    pub(crate) header_offset: ByteOffset,
+    pub(crate) version: super::formats::DexVersion,
+    pub(crate) method_id: crate::MethodId,
     registers_size: u16,
     ins_size: u16,
     outs_size: u16,

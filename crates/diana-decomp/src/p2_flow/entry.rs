@@ -56,7 +56,6 @@ fn decode_impl<'a>(
         )?
         || !envelope
             .declaration
-            .prototype
             .return_type
             .matches_with(&[86], budget)?
     {
@@ -74,30 +73,22 @@ fn decode_impl<'a>(
             offset_byte: raw.code_byte_range().start,
         })
     };
-    if envelope
-        .declaration
-        .prototype
-        .parameter_words
-        .0
-        .checked_add(1)
-        != Some(u64::from(raw.ins_size()))
+    if envelope.declaration.parameter_words.checked_add(1) != Some(u64::from(raw.ins_size()))
         || raw.ins_size() > raw.registers_size()
     {
         return Err(bad());
     }
     let mut parameters = Vec::new();
     push(&mut parameters, ParameterFamily::Reference, budget)?;
-    envelope
-        .declaration
-        .prototype
-        .visit_parameter_types(budget, |name, budget| {
-            let family = match name.reader()?.next(budget)? {
-                Some(74 | 68) => ParameterFamily::Wide,
-                Some(76 | 91) => ParameterFamily::Reference,
-                _ => ParameterFamily::Word,
-            };
-            push(&mut parameters, family, budget)
-        })?;
+    for name in &envelope.declaration.parameter_types {
+        budget.checkpoint()?;
+        let family = match name.units().first() {
+            Some(74 | 68) => ParameterFamily::Wide,
+            Some(76 | 91) => ParameterFamily::Reference,
+            _ => ParameterFamily::Word,
+        };
+        push(&mut parameters, family, budget)?;
+    }
     let mut operations = Vec::new();
     let mut calls = Vec::new();
     let mut pc = CodeUnitOffset(0);

@@ -1,10 +1,11 @@
 use super::facts::*;
-use crate::input::catalog::{ClassDataWalk, MemberEntry, MemberSelection};
-use crate::input::field_declarations::PreparationValue;
+use crate::input::catalog::{ClassDataShape, ClassDataWalk, MemberEntry, MemberSelection};
+
+use crate::input::values::{EncodedKind, EncodedValues, ValueStep};
 use crate::input::{InputError, ProgramIndex};
 use crate::substrate::flags;
 use crate::substrate::owned::{copy_proto, copy_units, push};
-use crate::{ClassKey, FailureKind, FieldInitialValue, MethodId, RequestError, RunContext};
+use crate::{ClassKey, FailureKind, MethodId, RequestError, RunContext};
 
 /// A declaration or metadata read that damaged only its own member entry.
 fn local<T>(value: Result<T, RequestError>) -> Result<Fact<T>, RequestError> {
@@ -102,15 +103,175 @@ enum MemberKind {
     Method,
 }
 
-fn scalar_value_ref(value: &PreparationValue) -> ScalarValue {
-    match value {
-        PreparationValue::Signed(value) => ScalarValue::Signed(*value),
-        PreparationValue::Unsigned(value) => ScalarValue::Unsigned(*value),
-        PreparationValue::Float(value) => ScalarValue::FloatBits(*value),
-        PreparationValue::Double(value) => ScalarValue::DoubleBits(*value),
-        PreparationValue::Boolean(value) => ScalarValue::Boolean(*value),
-        PreparationValue::Null => ScalarValue::Null,
-        PreparationValue::String(value) => ScalarValue::String(OriginalText::new(value.clone())),
+pub(super) struct FieldPreparation {
+    pub initial: InitialValue,
+    pub value: Option<ScalarValue>,
+}
+
+/// Reads the original static preparation array once, indexed by static ordinal.
+/// A missing encoded entry is an implicit default; a damaged suffix retains the
+/// independently decoded prefix and its classified issue.
+pub(super) fn read_preparations(
+    index: &ProgramIndex<'_>,
+    offset: Option<crate::ByteOffset>,
+    static_count: u32,
+    control: &mut RunContext<'_>,
+) -> Result<(Vec<FieldPreparation>, Option<RequestError>), RequestError> {
+    let count = usize::try_from(static_count).map_err(|_| RequestError::PlatformCapacity)?;
+    let mut prepared = Vec::new();
+    crate::substrate::owned::reserve(&mut prepared, count, control)?;
+    let Some(offset) = offset else {
+        for _ in 0..count {
+            control.checkpoint()?;
+            prepared.push(FieldPreparation {
+                initial: InitialValue::ImplicitDefault,
+                value: None,
+            });
+        }
+        return Ok((prepared, None));
+    };
+    let mut values = match EncodedValues::open(index, offset, Some(static_count), control) {
+        Ok(values) => values,
+        Err(error) => return local_preparations(prepared, error.into()),
+    };
+    let result = (|| -> Result<(), RequestError> {
+        for ordinal in 0..static_count {
+            control.checkpoint()?;
+            if ordinal >= values.count {
+                prepared.push(FieldPreparation {
+                    initial: InitialValue::ImplicitDefault,
+                    value: None,
+                });
+                continue;
+            }
+            let Some(ValueStep::Value(value)) = values.next(index, control)? else {
+                return Err(RequestError::InternalInvariant(
+                    "encoded preparation lost root",
+                ));
+            };
+            if value.ordinal.0 != ordinal {
+                return Err(RequestError::InternalInvariant(
+                    "encoded preparation changed static ordinal",
+                ));
+            }
+            let mut depth = if matches!(
+                value.kind,
+                EncodedKind::Array { .. } | EncodedKind::Annotation { .. }
+            ) {
+                1usize
+            } else {
+                0
+            };
+            let mut bytes = Vec::new();
+            for &byte in value.bytes {
+                control.checkpoint()?;
+                push(&mut bytes, byte, control)?;
+            }
+            while depth != 0 {
+                control.checkpoint()?;
+                match values.next(index, control)? {
+                    Some(ValueStep::EndContainer) => depth -= 1,
+                    Some(ValueStep::Value(child)) => {
+                        if matches!(
+                            child.kind,
+                            EncodedKind::Array { .. } | EncodedKind::Annotation { .. }
+                        ) {
+                            depth = depth.checked_add(1).ok_or(RequestError::PlatformCapacity)?;
+                        }
+                    }
+                    None => {
+                        return Err(RequestError::InternalInvariant(
+                            "encoded preparation container ended early",
+                        ));
+                    }
+                }
+            }
+            let range = crate::ByteRange {
+                start: value.range.start,
+                end: values.position(),
+            };
+            if range != value.range {
+                for &byte in index.bytes().get(value.range.end.0..range.end.0).ok_or(
+                    RequestError::InternalInvariant("encoded preparation lost original bytes"),
+                )? {
+                    control.checkpoint()?;
+                    push(&mut bytes, byte, control)?;
+                }
+            }
+            let value_kind = match &value.kind {
+                EncodedKind::Signed(value) => Some(ScalarValue::Signed(*value)),
+                EncodedKind::Unsigned(value) => Some(ScalarValue::Unsigned(*value)),
+                EncodedKind::Bits { bits, .. } if value.tag == 0x10 => {
+                    Some(ScalarValue::FloatBits(u32::try_from(*bits).map_err(
+                        |_| RequestError::InternalInvariant("float preparation lost width"),
+                    )?))
+                }
+                EncodedKind::Bits { bits, .. } if value.tag == 0x11 => {
+                    Some(ScalarValue::DoubleBits(*bits))
+                }
+                EncodedKind::Boolean(value) => Some(ScalarValue::Boolean(*value)),
+                EncodedKind::Null => Some(ScalarValue::Null),
+                EncodedKind::Reference(crate::raw::OperandReference::String(id)) => {
+                    Some(ScalarValue::String(OriginalText::new(copy_units(
+                        index.string_with(*id, control)?,
+                        control,
+                    )?)))
+                }
+                _ => None,
+            };
+            prepared.push(FieldPreparation {
+                initial: InitialValue::Encoded {
+                    tag: value.tag,
+                    value_arg: value.arg,
+                    range_bytes: [range.start.0, range.end.0],
+                    bytes,
+                    scalar: None,
+                },
+                value: value_kind,
+            });
+        }
+        if values.next(index, control)?.is_some() {
+            return Err(RequestError::InternalInvariant(
+                "encoded preparation has extra root",
+            ));
+        }
+        Ok(())
+    })();
+    match result {
+        Ok(()) => Ok((prepared, None)),
+        Err(error) => local_preparations(prepared, error),
+    }
+}
+
+fn local_preparations(
+    prepared: Vec<FieldPreparation>,
+    error: RequestError,
+) -> Result<(Vec<FieldPreparation>, Option<RequestError>), RequestError> {
+    if matches!(
+        error.kind(),
+        crate::FailureKind::Cancelled
+            | crate::FailureKind::ResourceExhausted
+            | crate::FailureKind::InternalInvariant
+    ) {
+        return Err(error);
+    }
+    Ok((prepared, Some(error)))
+}
+
+fn preparation_is_default(descriptor: &[u16], tag: u8, scalar: Option<&ScalarValue>) -> bool {
+    match (descriptor, tag, scalar) {
+        ([90], 0x1f, Some(ScalarValue::Boolean(false))) => true,
+        ([66], 0, Some(ScalarValue::Signed(0)))
+        | ([83], 2, Some(ScalarValue::Signed(0)))
+        | ([73], 4, Some(ScalarValue::Signed(0)))
+        | ([74], 6, Some(ScalarValue::Signed(0))) => true,
+        ([67], 3, Some(ScalarValue::Unsigned(0))) => true,
+        ([70], 0x10, Some(ScalarValue::FloatBits(0)))
+        | ([68], 0x11, Some(ScalarValue::DoubleBits(0))) => true,
+        (_, 0x1e, Some(ScalarValue::Null)) => {
+            matches!(descriptor.first(), Some(76 | 91))
+        }
+        _ => false,
     }
 }
 
@@ -237,6 +398,7 @@ pub fn collect(
                             declaration,
                             initial: Fact::NotRead,
                             scalar: None,
+                            default_preparation: false,
                         },
                         control,
                     )
@@ -274,12 +436,7 @@ pub fn collect(
         })?;
     let mut fields_issue = walk.issue.map(RequestError::from);
     let (prepared, preparation_issue) = match context.values_offset {
-        Ok(offset) => crate::input::field_declarations::read_preparations(
-            index,
-            offset,
-            walk.shape.static_fields,
-            control,
-        )?,
+        Ok(offset) => read_preparations(index, offset, walk.shape.static_fields, control)?,
         Err(error) => {
             fields_issue.get_or_insert(error.into());
             (Vec::new(), None)
@@ -298,27 +455,14 @@ pub fn collect(
         else {
             continue;
         };
-        field.scalar = preparation.value.as_ref().map(scalar_value_ref);
-        field.initial = match &preparation.initial {
-            FieldInitialValue::Encoded {
-                tag,
-                arg,
-                range,
-                bytes,
-            } => Fact::Present(InitialValue::Encoded {
-                tag: *tag,
-                value_arg: *arg,
-                range_bytes: [range.start.0, range.end.0],
-                bytes: bytes.clone(),
-                scalar: None,
-            }),
-            FieldInitialValue::ImplicitDefault => Fact::Present(InitialValue::ImplicitDefault),
-            FieldInitialValue::InstanceDefault => Fact::Absent,
-            FieldInitialValue::Unavailable(_) => {
-                return Err(RequestError::InternalInvariant(
-                    "field preparation produced a diagnostic identity",
-                ));
+        field.scalar = preparation.value.clone();
+        field.initial = Fact::Present(preparation.initial.clone());
+        field.default_preparation = match (&field.initial, field.declaration()) {
+            (Fact::Present(InitialValue::ImplicitDefault), _) => true,
+            (Fact::Present(InitialValue::Encoded { tag, .. }), Fact::Present(declaration)) => {
+                preparation_is_default(declaration.descriptor.units(), *tag, field.scalar.as_ref())
             }
+            _ => false,
         };
     }
     let methods_issue = walk.issue.map(RequestError::from);
@@ -328,6 +472,13 @@ pub fn collect(
         header_offset: index.header.header_offset,
         class: declaration,
         shape: walk.shape,
+        delivered: ClassDataShape {
+            static_fields: walk.delivered[0],
+            instance_fields: walk.delivered[1],
+            direct_methods: walk.delivered[2],
+            virtual_methods: walk.delivered[3],
+        },
+        terminated_at: walk.terminated_at,
         fields,
         methods,
         fields_issue,

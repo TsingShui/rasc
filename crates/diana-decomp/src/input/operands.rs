@@ -15,7 +15,7 @@ pub enum RawLiteral {
 }
 
 #[derive(Clone, Copy, Debug)]
-pub(super) enum RegisterEncoding {
+pub(crate) enum RegisterEncoding {
     List { values: [RegisterId; 5], count: u8 },
     Range { first: RegisterId, count: u8 },
 }
@@ -23,7 +23,7 @@ pub(super) enum RegisterEncoding {
 /// Encoded operands, not source arguments. Wide invoke arguments keep both words.
 #[derive(Clone, Copy, Debug)]
 pub struct RawRegisters {
-    pub(super) encoding: RegisterEncoding,
+    pub(crate) encoding: RegisterEncoding,
 }
 
 impl RawRegisters {

@@ -118,8 +118,8 @@ fn literal(
             }
             super::preparation::expression(
                 crate::p4_types::BuiltinReference::String.descriptor(),
-                Some(&crate::input::field_declarations::PreparationValue::String(
-                    copy,
+                Some(&crate::p0::ScalarValue::String(
+                    crate::p0::OriginalText::new(copy),
                 )),
                 false,
                 control,

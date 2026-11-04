@@ -4,7 +4,6 @@
 pub(crate) mod annotations;
 mod throws;
 pub(crate) use throws::ThrowsMetadata;
-mod binding;
 pub(crate) mod catalog;
 mod class_locations;
 mod code;
@@ -13,7 +12,6 @@ mod cursor;
 pub(crate) mod debug_program;
 pub(crate) mod declaration_facts;
 mod declaration_types;
-mod disassembly;
 mod dynamic;
 pub(crate) use declaration_types::{
     DeclarationCoverage, InputClassDeclaration, InputMethodDeclaration,
@@ -33,10 +31,13 @@ pub(crate) use field_evidence::InputFieldEvidence;
 pub(crate) mod operands;
 pub(crate) mod ownership;
 pub(crate) mod signature;
-mod strings;
-mod structure;
+pub(crate) mod strings;
 pub(crate) mod values;
 
+pub use crate::p1::{
+    CheckedMethodLayout, DecodedInstruction, DecodedItem, DecodedMethod, DecodedPayload,
+    DecodedReference, MethodError, MethodProblem,
+};
 pub use catalog::{
     ClassHierarchy, ClassView, FieldDeclaration, FieldEntry, FieldStorage, MethodDeclaration,
     MethodEntry, ProgramIndex, Prototype, ReferenceFacts,
@@ -44,12 +45,8 @@ pub use catalog::{
 pub use code::{MethodBody, RawMethodView};
 pub use container::DexContainer;
 pub use cursor::{Cursor, checked_range};
-pub use disassembly::{
-    DecodedInstruction, DecodedItem, DecodedMethod, DecodedPayload, DecodedReference,
-};
 pub use error::{InputError, InputProblem, UnsupportedInput};
 use error::{count_usize, file_length, file_offset, malformed};
 pub use header::{DexHeader, TableSection, read_header};
 pub use method::{CheckedAnnotations, MethodSource, RawPrintable};
 pub use strings::DexString;
-pub use structure::{CheckedMethodLayout, MethodError, MethodProblem};
