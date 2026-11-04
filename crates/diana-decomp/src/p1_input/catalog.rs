@@ -7,8 +7,8 @@ use super::{
 };
 use crate::pipeline::control::InputControl;
 use crate::{
-    ByteLength, ByteOffset, ClassDefId, ControlError, FailureKind, FieldId, MethodId, ProtoId,
-    RegisterWordCount, RunContext, StringId, TypeId, Utf16Offset,
+    ByteLength, ByteOffset, ClassDefId, ClassKey, ControlError, FailureKind, FieldId, MethodId,
+    ProtoId, RegisterWordCount, RunContext, StringId, TypeId, Utf16Offset,
 };
 
 #[derive(Clone, Copy)]
@@ -23,6 +23,14 @@ struct Section {
 /// on demand; it owns neither a decoded string pool nor method result buffers.
 pub struct ProgramIndex<'a> {
     pub(super) bytes: &'a [u8],
+    dex: crate::DexId,
+    class_facts: std::sync::Mutex<
+        std::collections::HashMap<
+            ClassDefId,
+            Result<std::sync::Arc<crate::p0::ClassFacts>, InputError>,
+        >,
+    >,
+    facts_build: std::sync::Mutex<()>,
     ownership: std::sync::OnceLock<Result<crate::input::ownership::Ownership, InputError>>,
     cache_build: std::sync::Mutex<()>,
     class_locations: std::sync::OnceLock<super::class_locations::ClassLocations>,
@@ -35,6 +43,69 @@ impl<'a> ProgramIndex<'a> {
     /// Original physical bytes this index borrows.
     pub(crate) fn bytes(&self) -> &'a [u8] {
         self.bytes
+    }
+
+    /// Binds the logical DEX identity used for original class keys.
+    pub(crate) fn with_dex(mut self, dex: crate::DexId) -> Self {
+        self.dex = dex;
+        self
+    }
+
+    /// The current class's P0 facts, built once per logical class and shared by
+    /// later declaration queries. Deterministic input failures are cached;
+    /// cancellation and resource failures are not.
+    pub(crate) fn class_facts_cached(
+        &self,
+        class: ClassDefId,
+        control: &mut RunContext<'_>,
+    ) -> Result<std::sync::Arc<crate::p0::ClassFacts>, crate::RequestError> {
+        control.checkpoint()?;
+        {
+            let cache = self.class_facts.lock().map_err(|_| {
+                crate::RequestError::InternalInvariant("class-fact cache was poisoned")
+            })?;
+            if let Some(entry) = cache.get(&class) {
+                return match entry {
+                    Ok(facts) => Ok(std::sync::Arc::clone(facts)),
+                    Err(error) => Err((*error).into()),
+                };
+            }
+        }
+        let _build = self.facts_build.lock().map_err(|_| {
+            crate::RequestError::InternalInvariant("class-fact build lock was poisoned")
+        })?;
+        {
+            let cache = self.class_facts.lock().map_err(|_| {
+                crate::RequestError::InternalInvariant("class-fact cache was poisoned")
+            })?;
+            if let Some(entry) = cache.get(&class) {
+                return match entry {
+                    Ok(facts) => Ok(std::sync::Arc::clone(facts)),
+                    Err(error) => Err((*error).into()),
+                };
+            }
+        }
+        let key = ClassKey {
+            dex: self.dex,
+            class_def: class,
+        };
+        let result = crate::p0::collect(self, key, control);
+        let mut cache = self
+            .class_facts
+            .lock()
+            .map_err(|_| crate::RequestError::InternalInvariant("class-fact cache was poisoned"))?;
+        match result {
+            Ok(facts) => {
+                let facts = std::sync::Arc::new(facts);
+                cache.insert(class, Ok(std::sync::Arc::clone(&facts)));
+                Ok(facts)
+            }
+            Err(crate::RequestError::Input(error)) => {
+                cache.insert(class, Err(error));
+                Err(error.into())
+            }
+            Err(error) => Err(error),
+        }
     }
 
     /// Ownership metadata is immutable for this image; build it once and reuse.
@@ -169,6 +240,9 @@ impl<'a> ProgramIndex<'a> {
         }
         Ok(Self {
             bytes,
+            dex: crate::DexId(0),
+            class_facts: std::sync::Mutex::new(std::collections::HashMap::new()),
+            facts_build: std::sync::Mutex::new(()),
             ownership: std::sync::OnceLock::new(),
             cache_build: std::sync::Mutex::new(()),
             class_locations: std::sync::OnceLock::new(),
@@ -1036,6 +1110,8 @@ pub(crate) enum MemberSelection {
     Method(MethodId),
     Header(MethodId),
     AllHeaders,
+    /// Every field and method header in original group order, without reading code.
+    AllMembers,
     Fields,
 }
 
@@ -1262,7 +1338,9 @@ impl<'i, 'a> ClassView<'i, 'a> {
                             ))?;
                             if matches!(
                                 selection,
-                                MemberSelection::Header(_) | MemberSelection::AllHeaders
+                                MemberSelection::Header(_)
+                                    | MemberSelection::AllHeaders
+                                    | MemberSelection::AllMembers
                             ) {
                                 visit(
                                     MemberEntry::MethodHeader {

@@ -501,12 +501,12 @@ fn declaration(
             }
             let budget = &mut *control;
             let input = index.method_source_at(id, method_idx, budget)?;
-            let crate::input::RawPrintable::Declaration(raw) = input.raw() else {
+            let crate::input::RawPrintable::Declaration = input.raw() else {
                 valid = false;
                 return Ok(());
             };
-            if raw.annotations().method_range().is_some()
-                || raw.annotations().parameter_range().is_some()
+            if input.annotations().method_range().is_some()
+                || input.annotations().parameter_range().is_some()
             {
                 valid = false;
             }

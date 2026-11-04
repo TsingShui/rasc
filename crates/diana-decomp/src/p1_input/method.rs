@@ -3,8 +3,8 @@ use super::formats::FlowKind;
 use super::strings::TypeShape;
 use super::values::EncodedValues;
 use super::{
-    CheckedMethodLayout, Cursor, DexString, InputError, InputProblem, MethodBody,
-    MethodDeclaration, MethodError, ProgramIndex, RawMethodView, file_offset, malformed,
+    Cursor, DexString, InputError, InputProblem, MethodBody, MethodError, ProgramIndex,
+    RawMethodView, file_offset, malformed,
 };
 use crate::pipeline::control::InputControl;
 use crate::raw::{LayoutKind, OperandReference};
@@ -30,49 +30,11 @@ impl CheckedAnnotations {
     }
 }
 
-/// A raw executable method with checked layout, the P1 decoded instruction
-/// directory, explicit reference contents, return/allocation operand kinds,
-/// debug records and selected annotations. This is not register-type, dispatch,
-/// exception-effect or Java verification.
-pub struct ValidatedRawMethod<'a> {
-    layout: CheckedMethodLayout<'a>,
-    decoded: super::DecodedMethod<'a>,
-    annotations: CheckedAnnotations,
-}
-
-impl<'a> ValidatedRawMethod<'a> {
-    pub fn layout(&self) -> &CheckedMethodLayout<'a> {
-        &self.layout
-    }
-    /// The P1-disassembled original instruction directory. Consumers read
-    /// decoded opcode, width, operands and references from here instead of
-    /// re-running the format decoder over raw bytes.
-    pub fn decoded(&self) -> &super::DecodedMethod<'a> {
-        &self.decoded
-    }
-    pub fn annotations(&self) -> &CheckedAnnotations {
-        &self.annotations
-    }
-}
-
-/// A checked no-code declaration. Code absence follows the original native or
-/// abstract flags; annotations are checked without fabricating an empty body.
-pub struct ValidatedRawDeclaration {
-    annotations: CheckedAnnotations,
-}
-
-impl ValidatedRawDeclaration {
-    pub fn annotations(&self) -> &CheckedAnnotations {
-        &self.annotations
-    }
-}
-
-// Moved once per method task and consumed by the chain; boxing the executable
-// variant would add a fallible allocation without reducing live state.
-#[allow(clippy::large_enum_variant)]
+/// A reader product: the original code item view and its independently checked
+/// metadata. P1 adds the decoded instruction directory and structural layout.
 pub enum RawPrintable<'a> {
-    Method(ValidatedRawMethod<'a>),
-    Declaration(ValidatedRawDeclaration),
+    Method(RawMethodView<'a>),
+    Declaration,
 }
 
 /// The input seam for one original declaration in a selected logical program.
@@ -85,8 +47,12 @@ pub struct MethodSource<'i, 'a> {
     owner: DexString<'a>,
     access_flags: u32,
     owner_access_flags: u32,
-    declaration: MethodDeclaration<'i, 'a>,
+    declaration: crate::p0::MethodDeclaration,
     raw: RawPrintable<'a>,
+    /// P1's decoded instruction and structural product, absent until P1 runs.
+    /// The reader does not create it and downstream analysis MUST NOT run
+    /// without it.
+    decoded: Option<super::DecodedMethod<'a>>,
     /// The independent method/parameter annotation read for this member. A
     /// damaged set retains its own classified error and does not remove code.
     metadata: Result<CheckedAnnotations, RequestError>,
@@ -162,10 +128,7 @@ impl<'i, 'a> MethodSource<'i, 'a> {
         &self,
         budget: &mut RunContext<'_>,
     ) -> Result<super::ThrowsMetadata<'a>, crate::RequestError> {
-        let annotations = match &self.raw {
-            RawPrintable::Method(raw) => raw.annotations(),
-            RawPrintable::Declaration(raw) => raw.annotations(),
-        };
+        let annotations = self.annotations();
         super::throws::read(self.index, annotations.method_range(), budget)
     }
     /// Checks the types of already-validated method annotations against a
@@ -331,11 +294,34 @@ impl<'i, 'a> MethodSource<'i, 'a> {
     pub fn owner_access_flags(&self) -> u32 {
         self.owner_access_flags
     }
-    pub fn declaration(&self) -> &MethodDeclaration<'i, 'a> {
+    pub fn declaration(&self) -> &crate::p0::MethodDeclaration {
         &self.declaration
     }
     pub fn raw(&self) -> &RawPrintable<'a> {
         &self.raw
+    }
+    /// The P1 product. `None` means the scheduler has not run P1 for this
+    /// source; it is not an empty or declaration-only method.
+    pub fn decoded(&self) -> Option<&super::DecodedMethod<'a>> {
+        self.decoded.as_ref()
+    }
+    pub(crate) fn with_decoded(mut self, decoded: super::DecodedMethod<'a>) -> Self {
+        self.decoded = Some(decoded);
+        self
+    }
+    /// Runs P1 for this reader product and returns the same source carrying the
+    /// decoded product. A declaration-only source is not decoded.
+    pub fn decode(self, budget: &mut RunContext<'_>) -> Result<Self, MethodError> {
+        let decoded = self.program().decode_method_source(&self, budget)?;
+        Ok(self.with_decoded(decoded))
+    }
+    /// Checked annotation locations, or defaults when that optional read
+    /// failed. Code and declaration facts remain valid.
+    pub fn annotations(&self) -> CheckedAnnotations {
+        match &self.metadata {
+            Ok(annotations) => *annotations,
+            Err(_) => CheckedAnnotations::default(),
+        }
     }
     /// The independent annotation read. `Err` reports a damaged annotation set;
     /// the code and declaration facts of this source stay valid.
@@ -372,32 +358,17 @@ impl<'a> ProgramIndex<'a> {
             ))
         })?;
         let access_flags = entry.access_flags().raw();
-        let declaration = self.method_declaration(method_id, class.type_idx, budget)?;
-        match entry.declaration() {
-            crate::p0::Fact::Present(delivered) => {
-                if !delivered
-                    .matches(&declaration, budget)
-                    .map_err(|error| match error {
-                        crate::RequestError::Control(error) => MethodError::Control(error),
-                        crate::RequestError::Allocation(error) => MethodError::Allocation(error),
-                        crate::RequestError::PlatformCapacity => MethodError::PlatformCapacity,
-                        crate::RequestError::InternalInvariant(message) => {
-                            MethodError::InternalInvariant(message)
-                        }
-                        crate::RequestError::Input(error) => MethodError::Input(error),
-                        _ => MethodError::InternalInvariant(
-                            "declaration comparison returned a foreign error",
-                        ),
-                    })?
-                {
-                    return Err(MethodError::InternalInvariant(
-                        "class facts and method record disagree on the declaration",
-                    ));
-                }
+        // The declaration is P0's product. The reader binds the entry identity
+        // and opens only the original code item; it never resolves the
+        // declaration record again.
+        let declaration = match entry.declaration() {
+            crate::p0::Fact::Present(declaration) => declaration.clone(),
+            crate::p0::Fact::Unavailable(crate::RequestError::Input(error)) => {
+                return Err(MethodError::Input(*error));
             }
             crate::p0::Fact::Unavailable(_) => {
                 return Err(MethodError::InternalInvariant(
-                    "class facts delivered an unavailable declaration to the reader",
+                    "P0 declaration failure was not a classified input error",
                 ));
             }
             crate::p0::Fact::Absent | crate::p0::Fact::NotRead => {
@@ -406,14 +377,14 @@ impl<'a> ProgramIndex<'a> {
                     self.header.class_defs.offset_byte,
                 )));
             }
-        }
+        };
         let body = super::code::read_code(
             self,
             entry.code_offset(),
             method_id,
             access_flags,
             Some(crate::RegisterWordCount(
-                declaration.prototype.parameter_words.0
+                declaration.parameter_words
                     + u64::from(access_flags & crate::substrate::flags::STATIC == 0),
             )),
             budget,
@@ -430,36 +401,12 @@ impl<'a> ProgramIndex<'a> {
         method_id: MethodId,
         budget: &mut RunContext<'_>,
     ) -> Result<MethodSource<'i, 'a>, MethodError> {
-        let class = self.class_with(class_id, budget)?;
-        let mut selected = None;
-        class.visit_members_with(budget, MemberSelection::Method(method_id), |entry, _| {
-            if let MemberEntry::Method(method) = entry {
-                if selected.is_some() {
-                    return Err(MethodError::Input(malformed(
-                        InputProblem::InvalidClassData,
-                        self.header.class_defs.offset_byte,
-                    )));
-                }
-                selected = Some(method);
-            }
-            Ok(())
-        })?;
-        let method = selected.ok_or_else(|| {
-            malformed(
-                InputProblem::InvalidReference,
-                self.header.method_ids.offset_byte,
-            )
-        })?;
-        let body = method.body?;
-        let declaration = method.declaration?;
-        self.finish_method_source(
-            class,
-            method_id,
-            method.access_flags,
-            body,
-            declaration,
-            budget,
-        )
+        // Declaration-query consumers reuse the same P0 class production as
+        // request scheduling; they do not perform a second class-data walk.
+        let facts = self
+            .class_facts_cached(class_id, budget)
+            .map_err(method_error)?;
+        self.method_source(&facts, method_id, budget)
     }
 
     fn finish_method_source<'i>(
@@ -468,45 +415,21 @@ impl<'a> ProgramIndex<'a> {
         method_id: MethodId,
         access_flags: u32,
         body: MethodBody<'a>,
-        declaration: MethodDeclaration<'i, 'a>,
+        declaration: crate::p0::MethodDeclaration,
         budget: &mut RunContext<'_>,
     ) -> Result<MethodSource<'i, 'a>, MethodError> {
         let class_id = class.class_def_idx;
         // Optional metadata is read independently: a damaged debug program or
         // annotation set keeps its own state and never removes intact code.
         let metadata = self
-            .check_method_metadata(
-                class_id,
-                method_id,
-                declaration.prototype.parameters.len() / 2,
-                budget,
-            )
+            .check_method_metadata(class_id, method_id, declaration.parameter_count(), budget)
             .map_err(RequestError::from);
-        let annotations = match &metadata {
-            Ok(annotations) => CheckedAnnotations {
-                method: annotations.method,
-                parameters: annotations.parameters,
-            },
-            Err(_) => CheckedAnnotations::default(),
-        };
+        // The reader establishes only safe original ranges and independent
+        // metadata. P1 owns instruction decoding, structural checks and
+        // reference-content association.
         let raw = match body {
-            MethodBody::DeclarationOnly => {
-                RawPrintable::Declaration(ValidatedRawDeclaration { annotations })
-            }
-            MethodBody::Code(code) => {
-                let layout = self.check_method_layout(&code, budget)?;
-                let decoded = self.decode_method(&code, budget)?;
-                self.check_reference_contents(
-                    &code,
-                    declaration.prototype.return_type.shape(budget)?,
-                    budget,
-                )?;
-                RawPrintable::Method(ValidatedRawMethod {
-                    layout,
-                    decoded,
-                    annotations,
-                })
-            }
+            MethodBody::DeclarationOnly => RawPrintable::Declaration,
+            MethodBody::Code(code) => RawPrintable::Method(code),
         };
         budget.checkpoint()?;
         Ok(MethodSource {
@@ -519,8 +442,31 @@ impl<'a> ProgramIndex<'a> {
             owner_access_flags: class.access_flags,
             declaration,
             raw,
+            decoded: None,
             metadata,
         })
+    }
+
+    /// P1: validates the original instruction structure, decodes the complete
+    /// instruction/payload directory and associates original references with
+    /// checked targets. Consumes only the reader product and returns the P1
+    /// product; it never selects members or reads class-data.
+    pub fn decode_method_source(
+        &self,
+        source: &MethodSource<'_, 'a>,
+        budget: &mut RunContext<'_>,
+    ) -> Result<super::DecodedMethod<'a>, MethodError> {
+        let RawPrintable::Method(code) = source.raw() else {
+            return Err(MethodError::InternalInvariant(
+                "P1 was asked to decode a declaration-only source",
+            ));
+        };
+        let layout = self.check_method_layout(code, budget)?;
+        let decoded = self.decode_method(code, layout, budget)?;
+        let (_, return_shape) =
+            self.type_descriptor(crate::TypeId(source.declaration.return_type_id), budget)?;
+        self.check_reference_contents(code, return_shape, budget)?;
+        Ok(decoded)
     }
 
     fn check_reference_contents(
@@ -721,4 +667,16 @@ fn selected_offset(
 
 fn bad_type(pc: CodeUnitOffset) -> MethodError {
     super::structure::bad(pc, super::MethodProblem::InvalidTypeOperand)
+}
+
+fn method_error(error: RequestError) -> MethodError {
+    match error {
+        RequestError::Input(error) => MethodError::Input(error),
+        RequestError::Method(error) => error,
+        RequestError::Control(error) => MethodError::Control(error),
+        RequestError::Allocation(error) => MethodError::Allocation(error),
+        RequestError::PlatformCapacity => MethodError::PlatformCapacity,
+        RequestError::InternalInvariant(message) => MethodError::InternalInvariant(message),
+        _ => MethodError::InternalInvariant("method reader returned a foreign error"),
+    }
 }

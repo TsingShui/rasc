@@ -1,6 +1,6 @@
-use crate::input::{DexString, MethodSource, RawPrintable};
+use crate::input::{MethodSource, RawPrintable};
 use crate::pipeline::control::InputControl;
-use crate::substrate::owned::{TextBuffer, copy_units};
+use crate::substrate::owned::TextBuffer;
 use crate::{RequestError, RunContext};
 
 /// An owned readable declaration for an original no-code member.
@@ -38,13 +38,14 @@ fn declaration_impl(
     annotations: Option<&crate::p4_types::declarations::annotations::Bindings>,
     budget: &mut RunContext<'_>,
 ) -> Result<Option<JavaMethodDecl>, RequestError> {
-    let RawPrintable::Declaration(raw) = input.raw() else {
+    let RawPrintable::Declaration = input.raw() else {
         return Ok(None);
     };
-    if raw.annotations().parameter_range().is_some() {
+    let checked_annotations = input.annotations();
+    if checked_annotations.parameter_range().is_some() {
         return Ok(None);
     }
-    let raw_generic = raw.annotations().method_range().is_some();
+    let raw_generic = checked_annotations.method_range().is_some();
     if raw_generic && signature.is_none() {
         return Ok(None);
     }
@@ -67,7 +68,7 @@ fn declaration_impl(
     {
         return Ok(None);
     }
-    let name = copy_units(input.declaration().name, budget)?;
+    let name = crate::substrate::owned::copy_slice_units(input.declaration().name_units(), budget)?;
     if !identifier(&name, budget)? {
         return Ok(None);
     }
@@ -116,7 +117,7 @@ fn declaration_impl(
         output.push("java.lang.String", budget)?;
     } else if !declaration_type(
         input,
-        input.declaration().prototype.return_type,
+        input.declaration().return_type.units(),
         raw_generic,
         catalog,
         &mut output,
@@ -135,21 +136,25 @@ fn declaration_impl(
     output.push("(", budget)?;
     let mut parameter = 0u64;
     let mut supported = true;
-    input.declaration().prototype.visit_parameter_types(
-        budget,
-        |name, budget| -> Result<(), RequestError> {
-            if parameter != 0 {
-                output.push(", ", budget)?;
-            }
-            supported &= declaration_type(input, name, raw_generic, catalog, &mut output, budget)?;
-            output.push(" p", budget)?;
-            output.unsigned(parameter, budget)?;
-            parameter = parameter
-                .checked_add(1)
-                .ok_or(RequestError::PlatformCapacity)?;
-            Ok(())
-        },
-    )?;
+    for name in &input.declaration().parameter_types {
+        budget.checkpoint()?;
+        if parameter != 0 {
+            output.push(", ", budget)?;
+        }
+        supported &= declaration_type(
+            input,
+            name.units(),
+            raw_generic,
+            catalog,
+            &mut output,
+            budget,
+        )?;
+        output.push(" p", budget)?;
+        output.unsigned(parameter, budget)?;
+        parameter = parameter
+            .checked_add(1)
+            .ok_or(RequestError::PlatformCapacity)?;
+    }
     if !supported {
         return Ok(None);
     }
@@ -175,18 +180,18 @@ fn declaration_impl(
 }
 
 fn primitive_type(
-    name: DexString<'_>,
+    name: &[u16],
     output: &mut TextBuffer,
     budget: &mut impl InputControl,
 ) -> Result<bool, RequestError> {
-    let mut units = name.reader()?;
+    let mut units = name.iter().copied();
     let mut dimensions = 0usize;
-    let mut tag = units.next(budget)?;
+    let mut tag = units.next();
     while tag == Some(u16::from(b'[')) {
         dimensions = dimensions
             .checked_add(1)
             .ok_or(RequestError::PlatformCapacity)?;
-        tag = units.next(budget)?;
+        tag = units.next();
     }
     let spelling = match tag {
         Some(0x56) => "void",
@@ -200,7 +205,7 @@ fn primitive_type(
         Some(0x44) => "double",
         _ => return Ok(false),
     };
-    if units.next(budget)?.is_some() {
+    if units.next().is_some() {
         return Err(RequestError::InternalInvariant(
             "checked primitive descriptor has trailing units",
         ));
@@ -214,13 +219,13 @@ fn primitive_type(
 
 fn declaration_type(
     input: &MethodSource<'_, '_>,
-    name: DexString<'_>,
+    name: &[u16],
     raw: bool,
     catalog: &crate::context::Context,
     output: &mut TextBuffer,
     budget: &mut RunContext<'_>,
 ) -> Result<bool, RequestError> {
-    let descriptor = copy_units(name, budget)?;
+    let descriptor = crate::substrate::owned::copy_slice_units(name, budget)?;
     if raw && input.qualifier_shadowed(&[106, 97, 118, 97], budget)? {
         return Ok(false);
     }

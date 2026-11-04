@@ -102,22 +102,15 @@ enum MemberKind {
     Method,
 }
 
-fn field_declaration(facts: crate::FieldFacts) -> FieldDeclaration {
-    FieldDeclaration {
-        name: OriginalText::new(facts.name),
-        descriptor: OriginalText::new(facts.descriptor),
-    }
-}
-
-fn scalar_value(value: PreparationValue) -> ScalarValue {
+fn scalar_value_ref(value: &PreparationValue) -> ScalarValue {
     match value {
-        PreparationValue::Signed(value) => ScalarValue::Signed(value),
-        PreparationValue::Unsigned(value) => ScalarValue::Unsigned(value),
-        PreparationValue::Float(value) => ScalarValue::FloatBits(value),
-        PreparationValue::Double(value) => ScalarValue::DoubleBits(value),
-        PreparationValue::Boolean(value) => ScalarValue::Boolean(value),
+        PreparationValue::Signed(value) => ScalarValue::Signed(*value),
+        PreparationValue::Unsigned(value) => ScalarValue::Unsigned(*value),
+        PreparationValue::Float(value) => ScalarValue::FloatBits(*value),
+        PreparationValue::Double(value) => ScalarValue::DoubleBits(*value),
+        PreparationValue::Boolean(value) => ScalarValue::Boolean(*value),
         PreparationValue::Null => ScalarValue::Null,
-        PreparationValue::String(value) => ScalarValue::String(OriginalText::new(value)),
+        PreparationValue::String(value) => ScalarValue::String(OriginalText::new(value.clone())),
     }
 }
 
@@ -128,18 +121,24 @@ fn method_declaration(
     local((|| -> Result<_, RequestError> {
         let declaration = declaration?;
         let mut parameter_types = Vec::new();
-        declaration.prototype.visit_parameter_types(
+        let mut parameter_type_ids = Vec::new();
+        declaration.prototype.visit_parameter_type_ids(
             control,
-            |name, control| -> Result<(), RequestError> {
+            |id, name, control| -> Result<(), RequestError> {
                 let name = OriginalText::new(copy_units(name, control)?);
-                push(&mut parameter_types, name, control)
+                push(&mut parameter_types, name, control)?;
+                push(&mut parameter_type_ids, id.0, control)
             },
         )?;
         Ok(MethodDeclaration {
             name: OriginalText::new(copy_units(declaration.name, control)?),
             prototype: OriginalText::new(copy_proto(&declaration.prototype, control)?),
+            shorty: OriginalText::new(copy_units(declaration.prototype.shorty, control)?),
             parameter_types,
+            parameter_type_ids,
             return_type: OriginalText::new(copy_units(declaration.prototype.return_type, control)?),
+            return_type_id: declaration.prototype.return_type_idx.0,
+            parameter_words: declaration.prototype.parameter_words.0,
         })
     })())
 }
@@ -156,15 +155,35 @@ pub fn collect(
     let class = index.class(owner.class_def, control)?;
     let context = index.class_context(owner.class_def, control)?;
     let superclass = optional_text(context.superclass, control)?;
-    let interfaces = local((|| -> Result<_, RequestError> {
-        let mut result = Vec::new();
-        for word in context.interfaces?.as_chunks::<2>().0 {
-            let id = crate::TypeId(u32::from(u16::from_le_bytes(*word)));
-            let name = OriginalText::new(copy_units(index.type_name(id, control)?, control)?);
-            push(&mut result, name, control)?;
+    let interfaces = match context.interfaces {
+        Ok(list) => {
+            let mut result = Vec::new();
+            for word in list.as_chunks::<2>().0 {
+                control.checkpoint()?;
+                let id = crate::TypeId(u32::from(u16::from_le_bytes(*word)));
+                let name = (|| -> Result<OriginalText, RequestError> {
+                    Ok(OriginalText::new(copy_units(
+                        index.type_name(id, control)?,
+                        control,
+                    )?))
+                })();
+                match name {
+                    Ok(name) => push(&mut result, Fact::Present(name), control)?,
+                    Err(error)
+                        if matches!(
+                            error.kind(),
+                            crate::FailureKind::Malformed | crate::FailureKind::Unsupported
+                        ) =>
+                    {
+                        push(&mut result, Fact::Unavailable(error), control)?;
+                    }
+                    Err(error) => return Err(error),
+                }
+            }
+            Fact::Present(result)
         }
-        Ok(result)
-    })())?;
+        Err(error) => Fact::Unavailable(error.into()),
+    };
     let source_file = optional_text(index.source_file(owner.class_def, control), control)?;
     let declaration = ClassDeclaration {
         type_index: class.type_idx.0,
@@ -175,85 +194,133 @@ pub fn collect(
         source_file,
     };
 
-    let directory = crate::input::field_declarations::collect(index, owner, control)?;
+    // One class-data traversal produces both original member groups. Per-member
+    // declaration failures remain in their entries; only unusable traversal
+    // coverage is reported separately.
     let mut fields = Vec::new();
-    for field in directory.fields {
-        let scalar = field.value.map(scalar_value);
-        let initial = match field.initial {
-            Some(FieldInitialValue::InstanceDefault) => Fact::Absent,
-            Some(FieldInitialValue::ImplicitDefault) => {
-                Fact::Present(InitialValue::ImplicitDefault)
+    let mut methods = Vec::new();
+    let class_view = index.class_with(owner.class_def, control)?;
+    let walk: ClassDataWalk =
+        class_view.walk_members_with(control, MemberSelection::AllMembers, |entry, control| {
+            match entry {
+                MemberEntry::Field(field) => {
+                    let storage = match field.storage {
+                        crate::input::catalog::FieldStorage::Instance => {
+                            crate::FieldStorage::Instance
+                        }
+                        crate::input::catalog::FieldStorage::Static { ordinal } => {
+                            crate::FieldStorage::Static(crate::StaticFieldOrdinal(ordinal))
+                        }
+                    };
+                    let declaration = match field.declaration {
+                        Ok(declaration) => Ok(FieldDeclaration {
+                            name: OriginalText::new(copy_units(declaration.name, control)?),
+                            descriptor: OriginalText::new(copy_units(
+                                declaration.field_type,
+                                control,
+                            )?),
+                        }),
+                        Err(error) => Err(RequestError::from(error)),
+                    };
+                    let declaration = local(declaration)?;
+                    push(
+                        &mut fields,
+                        FieldDirectoryEntry {
+                            field: crate::FieldId(field.field_idx.0),
+                            access_flags: access_flags(
+                                field.access_flags,
+                                MemberKind::Field,
+                                control,
+                            )?,
+                            storage,
+                            group_ordinal: field.ordinal,
+                            declaration,
+                            initial: Fact::NotRead,
+                            scalar: None,
+                        },
+                        control,
+                    )
+                }
+                MemberEntry::MethodHeader {
+                    method_idx,
+                    access_flags: raw_flags,
+                    group,
+                    code_offset,
+                    declaration,
+                } => {
+                    let declaration = method_declaration(declaration, control)?;
+                    let code = if code_offset.is_some() {
+                        Fact::NotRead
+                    } else {
+                        Fact::Absent
+                    };
+                    push(
+                        &mut methods,
+                        MethodDirectoryEntry {
+                            method: MethodId(method_idx.0),
+                            access_flags: access_flags(raw_flags, MemberKind::Method, control)?,
+                            group,
+                            code_offset,
+                            declaration,
+                            code,
+                        },
+                        control,
+                    )
+                }
+                MemberEntry::Method(_) => Err(RequestError::InternalInvariant(
+                    "P0 header traversal acquired another member entry",
+                )),
             }
-            Some(FieldInitialValue::Encoded {
+        })?;
+    let mut fields_issue = walk.issue.map(RequestError::from);
+    let (prepared, preparation_issue) = match context.values_offset {
+        Ok(offset) => crate::input::field_declarations::read_preparations(
+            index,
+            offset,
+            walk.shape.static_fields,
+            control,
+        )?,
+        Err(error) => {
+            fields_issue.get_or_insert(error.into());
+            (Vec::new(), None)
+        }
+    };
+    if fields_issue.is_none() {
+        fields_issue = preparation_issue;
+    }
+    for field in &mut fields {
+        let crate::FieldStorage::Static(crate::StaticFieldOrdinal(ordinal)) = field.storage else {
+            field.initial = Fact::Absent;
+            continue;
+        };
+        let Some(preparation) =
+            prepared.get(usize::try_from(ordinal).map_err(|_| RequestError::PlatformCapacity)?)
+        else {
+            continue;
+        };
+        field.scalar = preparation.value.as_ref().map(scalar_value_ref);
+        field.initial = match &preparation.initial {
+            FieldInitialValue::Encoded {
                 tag,
                 arg,
                 range,
                 bytes,
-            }) => Fact::Present(InitialValue::Encoded {
-                tag,
-                value_arg: arg,
+            } => Fact::Present(InitialValue::Encoded {
+                tag: *tag,
+                value_arg: *arg,
                 range_bytes: [range.start.0, range.end.0],
-                bytes,
+                bytes: bytes.clone(),
                 scalar: None,
             }),
-            Some(FieldInitialValue::Unavailable(_)) => {
+            FieldInitialValue::ImplicitDefault => Fact::Present(InitialValue::ImplicitDefault),
+            FieldInitialValue::InstanceDefault => Fact::Absent,
+            FieldInitialValue::Unavailable(_) => {
                 return Err(RequestError::InternalInvariant(
-                    "field directory reported a diagnostic identity as preparation",
+                    "field preparation produced a diagnostic identity",
                 ));
             }
-            None => Fact::NotRead,
         };
-        let declaration = local(field.facts.map(field_declaration))?;
-        push(
-            &mut fields,
-            FieldDirectoryEntry {
-                field: field.key.field,
-                access_flags: access_flags(field.access_flags, MemberKind::Field, control)?,
-                storage: field.storage,
-                group_ordinal: field.ordinal,
-                declaration,
-                initial,
-                scalar,
-            },
-            control,
-        )?;
     }
-
-    let mut methods = Vec::new();
-    let class_view = index.class_with(owner.class_def, control)?;
-    let walk: ClassDataWalk =
-        class_view.walk_members_with(control, MemberSelection::AllHeaders, |entry, control| {
-            let MemberEntry::MethodHeader {
-                method_idx,
-                access_flags: raw_flags,
-                group,
-                code_offset,
-                declaration,
-            } = entry
-            else {
-                return Err(RequestError::InternalInvariant(
-                    "P0 header traversal acquired method code",
-                ));
-            };
-            let declaration = method_declaration(declaration, control)?;
-            let code = if code_offset.is_some() {
-                Fact::NotRead
-            } else {
-                Fact::Absent
-            };
-            push(
-                &mut methods,
-                MethodDirectoryEntry {
-                    method: MethodId(method_idx.0),
-                    access_flags: access_flags(raw_flags, MemberKind::Method, control)?,
-                    group,
-                    code_offset,
-                    declaration,
-                    code,
-                },
-                control,
-            )
-        })?;
     let methods_issue = walk.issue.map(RequestError::from);
     let annotations = crate::input::annotation_facts::collect(index, owner, control)?;
     Ok(ClassFacts {
@@ -263,7 +330,7 @@ pub fn collect(
         shape: walk.shape,
         fields,
         methods,
-        fields_issue: directory.issue,
+        fields_issue,
         methods_issue,
         annotations: annotations.facts,
         annotations_issue: annotations.issue,

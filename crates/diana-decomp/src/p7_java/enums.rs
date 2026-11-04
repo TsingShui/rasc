@@ -1,4 +1,4 @@
-use crate::input::{MethodSource, RawPrintable};
+use crate::input::MethodSource;
 use crate::p4_types::declarations::enums::{Declaration, Role};
 use crate::raw::{LayoutKind, OperandReference};
 use crate::substrate::owned::{TextBuffer, push};
@@ -115,7 +115,7 @@ fn step(
     budget: &mut RunContext<'_>,
 ) -> Result<Option<Step>, RequestError> {
     budget.checkpoint()?;
-    let RawPrintable::Method(raw) = input.raw() else {
+    let Some(raw) = input.decoded() else {
         return Ok(None);
     };
     let original = raw.layout().original();
@@ -173,7 +173,7 @@ fn registers(step: &Step, expected: &[RegisterId]) -> bool {
     step.registers.iter().eq(expected.iter().copied())
 }
 fn end(input: &MethodSource<'_, '_>, pc: CodeUnitOffset) -> Result<bool, RequestError> {
-    let RawPrintable::Method(raw) = input.raw() else {
+    let Some(raw) = input.decoded() else {
         return Ok(false);
     };
     Ok(usize::try_from(pc.0)
@@ -233,7 +233,7 @@ fn common(
     role: Role,
     budget: &mut RunContext<'_>,
 ) -> Result<bool, RequestError> {
-    let RawPrintable::Method(raw) = input.raw() else {
+    let Some(raw) = input.decoded() else {
         return Ok(false);
     };
     let original = raw.layout().original();
@@ -255,7 +255,7 @@ fn common(
         .try_byte_range()
         .as_range()
         .is_empty()
-        || raw.annotations().parameter_range().is_some()
+        || input.annotations().parameter_range().is_some()
     {
         return Ok(false);
     }
@@ -279,7 +279,7 @@ fn constructor(
     input: &MethodSource<'_, '_>,
     budget: &mut RunContext<'_>,
 ) -> Result<bool, RequestError> {
-    let RawPrintable::Method(raw) = input.raw() else {
+    let Some(raw) = input.decoded() else {
         return Ok(false);
     };
     let original = raw.layout().original();
@@ -569,7 +569,7 @@ fn value_of(
     declaration: &Declaration,
     budget: &mut RunContext<'_>,
 ) -> Result<bool, RequestError> {
-    let RawPrintable::Method(raw) = input.raw() else {
+    let Some(raw) = input.decoded() else {
         return Ok(false);
     };
     let original = raw.layout().original();
@@ -641,9 +641,10 @@ fn storage_escapes(
                         return Ok(());
                     };
                     let budget = &mut *control;
-                    let input =
-                        index.method_source_at(crate::ClassDefId(class), method_idx, budget)?;
-                    let RawPrintable::Method(raw) = input.raw() else {
+                    let input = index
+                        .method_source_at(crate::ClassDefId(class), method_idx, budget)?
+                        .decode(budget)?;
+                    let Some(raw) = input.decoded() else {
                         return Ok(());
                     };
                     let raw = raw.layout().original();
@@ -687,11 +688,13 @@ fn verify_impl(
     }
     let order = {
         let budget = &mut *control;
-        let input = index.method_source_at(
-            declaration.owner().class_def,
-            declaration.method(Role::Initializer)?,
-            budget,
-        )?;
+        let input = index
+            .method_source_at(
+                declaration.owner().class_def,
+                declaration.method(Role::Initializer)?,
+                budget,
+            )?
+            .decode(budget)?;
         if !common(&input, Role::Initializer, budget)? {
             return Ok(None);
         }
@@ -702,7 +705,9 @@ fn verify_impl(
     };
     for member in declaration.members() {
         let budget = &mut *control;
-        let input = index.method_source_at(declaration.owner().class_def, member.method, budget)?;
+        let input = index
+            .method_source_at(declaration.owner().class_def, member.method, budget)?
+            .decode(budget)?;
         if !common(&input, member.role, budget)? {
             return Ok(None);
         }

@@ -1,6 +1,6 @@
 use super::formats::{DexVersion, InsnLayout, LayoutKind, OpcodeSpec};
 use super::operands::{RawOperands, instruction_operands};
-use super::{MethodError, ProgramIndex, RawMethodView};
+use super::{CheckedMethodLayout, MethodError, ProgramIndex, RawMethodView};
 use crate::raw::{OperandReference, ReferenceKind, ReferenceSlot};
 use crate::substrate::owned::push;
 use crate::{
@@ -126,6 +126,7 @@ impl DecodedItem {
 #[derive(Clone)]
 pub struct DecodedMethod<'a> {
     source: RawMethodView<'a>,
+    layout: CheckedMethodLayout<'a>,
     /// One immutable item directory, shared by every product that retains the
     /// decoded facts. Cloning the product copies a handle, not the items.
     items: std::sync::Arc<Vec<DecodedItem>>,
@@ -139,6 +140,17 @@ pub struct DecodedMethod<'a> {
 impl<'a> DecodedMethod<'a> {
     pub fn source(&self) -> &RawMethodView<'a> {
         &self.source
+    }
+    /// The original view with P1's structural boundary checks.
+    pub fn original(&self) -> &RawMethodView<'a> {
+        self.layout.original()
+    }
+    /// P1 structural checks over the original instruction directory.
+    pub fn layout(&self) -> &CheckedMethodLayout<'a> {
+        &self.layout
+    }
+    pub fn is_reachable(&self, pc: CodeUnitOffset) -> bool {
+        self.layout.is_reachable(pc)
     }
     pub fn method_id(&self) -> MethodId {
         self.source.method_id
@@ -258,6 +270,7 @@ impl<'a> ProgramIndex<'a> {
     pub(crate) fn decode_method(
         &self,
         source: &RawMethodView<'a>,
+        layout: CheckedMethodLayout<'a>,
         budget: &mut RunContext<'_>,
     ) -> Result<DecodedMethod<'a>, MethodError> {
         budget.checkpoint()?;
@@ -316,6 +329,7 @@ impl<'a> ProgramIndex<'a> {
         }
         Ok(DecodedMethod {
             source: source.clone(),
+            layout,
             items: std::sync::Arc::new(items),
             registers_size: source.registers_size(),
             ins_size: source.ins_size(),

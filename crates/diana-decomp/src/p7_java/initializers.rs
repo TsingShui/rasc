@@ -38,10 +38,10 @@ pub(super) fn is_initializer(
     input: &MethodSource<'_, '_>,
     budget: &mut RunContext<'_>,
 ) -> Result<bool, RequestError> {
-    Ok(input.declaration().name.matches_with(
+    input.declaration().name.matches_with(
         &const { crate::substrate::owned::ascii_units(*b"<clinit>") },
         budget,
-    )?)
+    )
 }
 pub(super) fn header_admitted(
     input: &MethodSource<'_, '_>,

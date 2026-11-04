@@ -1,4 +1,4 @@
-use crate::input::{MethodSource, RawPrintable};
+use crate::input::MethodSource;
 use crate::substrate::owned::push;
 use crate::{MethodId, RequestError, RunContext};
 
@@ -90,7 +90,7 @@ fn candidate_impl(
     if !crate::substrate::flags::bridge(input.access_flags()) {
         return Ok(None);
     }
-    let RawPrintable::Method(raw) = input.raw() else {
+    let Some(raw) = input.decoded() else {
         return Ok(None);
     };
     let original = raw.layout().original();

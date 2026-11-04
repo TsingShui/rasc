@@ -51,7 +51,7 @@ struct SnapshotView<'a>(&'a ClassFacts);
 impl Serialize for SnapshotView<'_> {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         let facts = self.0;
-        let mut record = serializer.serialize_struct("ClassSnapshot", 9)?;
+        let mut record = serializer.serialize_struct("ClassFacts", 9)?;
         record.serialize_field("schema_version", &1)?;
         record.serialize_field("stage", "p0")?;
         record.serialize_field("identity", &IdentityView(facts))?;

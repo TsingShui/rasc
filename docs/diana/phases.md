@@ -8,8 +8,8 @@ facts from them.
 | Phase | Engine directory | Current responsibility |
 |---|---|---|
 | Input context | `context/` | Request-level cross-DEX lookup and lazy caching of P1 declarations |
-| P0 | `p0_class/` | Independently callable class declaration and metadata snapshot using P1 safe reads |
-| P1 | `p1_input/` | Checked DEX tables, method input and original facts |
+| P0 | `p0_class/` | Class declaration, four-group member directory, static preparation and metadata facts using shared safe reads |
+| P1 | `p1_input/` | Checked DEX tables, method source reader, disassembly and original instruction associations |
 | P2 | `p2_flow/` | Instruction operations, effects and control-flow graph |
 | P3 | `p3_ssa/` | Definitions, uses, Phi and exceptional environments |
 | P4 | `p4_types/` | Types, declaration constraints, use conversions and initialization facts |
@@ -30,15 +30,14 @@ to debug. The [stage chapters](README.md) describe each phase.
 
 ## 4. Phases, products and actual order
 
-The method chain has eight numbered phases, P1–P8. P0 is an independently callable
-class-fact collection entry and is not part of that scheduler. It consumes P1
-read-only declarations without constructing method inputs. Its snapshot contract
+The method chain has eight numbered phases, P1–P8. P0 produces the current class's
+facts before method work and the Engine passes them to the method reader. Its class-fact contract
 is [P0 class facts](spec/00-class.md). Input context and Engine scheduling are not analysis phases.
 
 | Phase / Module | Owned products | Input and responsibility | Does not own |
 |---|---|---|---|
 | Input context `context` | Cross-DEX descriptor index and lazy declaration cache | locates original logical DEX definitions and caches declarations read by P1 | does not decode declarations or perform method analysis |
-| P1 `p1_input` | `ProgramIndex`, `MethodInput`, `RawMethodView` → `ValidatedRawMethod` | safe container and metadata, UTF-16, raw coverage of the version/opcode format; range checking is graded separately from complete structure validation | does not decide control structure, does not reject a whole legal class because the source is hard to express |
+| P1 `p1_input` | `ProgramIndex`, `MethodSource`, `RawMethodView` → `DecodedMethod` | safe container and metadata, UTF-16, method-source ranges; P1 owns complete disassembly, structural checks and original reference association | does not decide control structure, does not reject a whole legal class because the source is hard to express |
 | P2 `p2_flow` | `FlowBody` | decode, move-result binding, blocks, normal/ordered exceptional edges, effect sites | does not optimize effects, does not structure, does not speculate new call targets |
 | P3 `p3_ssa` | `SsaBody` | input parameters/this, a stable ValueId per definition, normal/exception edge environments, Phi | does not merge source locals, MUST NOT eliminate exception edges |
 | P4 `p4_types` | `TypedBody`, declaration constraints | primitive/reference/null/raw constant bits, use conversions, Phi join, finite monotonic work queue | does not have to rebuild complete generic source; does not modify CFG topology |
@@ -52,7 +51,7 @@ is [P0 class facts](spec/00-class.md). Input context and Engine scheduling are n
 ```text
 ProgramIndex(P1) ──→ Context(request-level lookup, lazy P1 declarations)
 class request: fix owner/MemberEmission first (P7, direct template proof from P1 raw + declaration facts)
-per Explicit method: ValidatedRawMethod(P1)
+per Explicit method: DecodedMethod(P1)
   → decode_and_bind(P2) → verify_flow
   → build_ssa(P3)       → verify_ssa
   → solve_types(P4)     → verify_types

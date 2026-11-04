@@ -39,7 +39,8 @@ fn collect_impl(
     let original = input.method_reference(target, budget)?;
     let name = copy_units(original.declaration.name, budget)?;
     let prototype = copy_proto(&original.declaration.prototype, budget)?;
-    let bridge = copy_proto(&input.declaration().prototype, budget)?;
+    let bridge =
+        crate::substrate::owned::copy_slice_units(input.declaration().prototype.units(), budget)?;
     let owner = copy_units(input.owner(), budget)?;
     if !original.owner.matches_with(&owner, budget)?
         || !input.declaration().name.matches_with(&name, budget)?

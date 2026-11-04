@@ -30,14 +30,19 @@ Readers MUST check arithmetic, lengths, offsets and counts before slicing or
 allocating. Reads and loops check cancellation. There is no numeric cap and no
 silent successful truncation.
 
-`ProgramIndex` exposes original class and member facts. `MethodInput` separates a
-checked method body from a declaration-only method. UTF-16 units and available
-annotations, debug information, references and raw instruction coverage remain
-available without pretending an incomplete decode is complete. A local damaged
-member MUST NOT erase independently available members.
+`ProgramIndex` exposes original class and member facts. P0 delivers the original
+method declaration, including prototype type identities and parameter word layout.
+The method reader builds `MethodSource` from that P0 entry: original identity,
+delivered declaration, flags, safely ranged code item facts, raw try/handler
+records and independent metadata state. It MUST NOT resolve the declaration record
+again. The reader separates a checked code item from a declaration-only method. P1 consumes `MethodSource` and
+produces `DecodedMethod` with the complete instruction/payload directory and
+structural associations. A local damaged member MUST NOT erase independently
+available members.
 
-`ProgramIndex` lazily caches class-def locations by original TypeId within its
-selected logical DEX. Missing and duplicate definitions remain distinct; a
+`ProgramIndex` lazily caches class-def locations by original TypeId and the P0
+class facts of each definition within its selected logical DEX. Declaration-query
+consumers reuse that cached P0 production instead of walking class-data again. Missing and duplicate definitions remain distinct; a
 location does not validate declaration contents. Field and method queries reuse
 these locations while retaining their declaration checks.
 
@@ -258,7 +263,7 @@ pass1:
 pass2:
   check register spans, index kinds, branch/payload targets and alignment
   check try/debug boundaries, handler entries, invoke word/proto and result/exception adjacency
-  seal ValidatedRawMethod only after everything passes
+  seal DecodedMethod only after P1 structure and reference association pass
 ```
 
 Unreachable code is also validated for width and explicit references; the implementation MUST

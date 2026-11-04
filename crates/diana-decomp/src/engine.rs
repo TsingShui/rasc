@@ -6,7 +6,7 @@ mod parallel_methods;
 use crate::context::Context;
 use crate::input::catalog::{MemberEntry, MemberSelection};
 use crate::input::{DexContainer, InputError, InputProblem, ProgramIndex};
-use crate::substrate::owned::{copy_proto, copy_units, reserve};
+use crate::substrate::owned::{copy_units, reserve};
 use crate::substrate::report::*;
 use crate::{
     ByteOffset, ClassKey, DebugSourceKind, DiagnosticId, FailureKind, MethodKey, RequestError,
@@ -152,7 +152,13 @@ impl<'a> Engine<'a> {
                 Some(container) => container,
                 None => DexContainer::open(image.bytes, control)?,
             };
-            let index = container.program(image.header_offset, control)?;
+            let index = container
+                .program(image.header_offset, control)?
+                .with_dex(crate::DexId(u32::try_from(indexed.len()).map_err(
+                    |_| InputError::PlatformCapacity {
+                        offset_byte: image.header_offset,
+                    },
+                )?));
             indexed.push(IndexedImage {
                 image,
                 container,
@@ -219,7 +225,8 @@ impl<'a> Engine<'a> {
         let budget = &mut *control;
         let input = image
             .index
-            .method_source_at(key.class.class_def, key.method, budget)?;
+            .method_source_at(key.class.class_def, key.method, budget)?
+            .decode(budget)?;
         let Some(declaration) = crate::p4_types::declarations::capture::collect(
             &permit,
             &input,
@@ -499,35 +506,31 @@ impl<'a> Engine<'a> {
             None
         };
         // One class-fact product per request. It owns the original four-group
-        // member directory that the method reader consumes; a method entry is
-        // never reassembled from caller-supplied identities.
-        let class_facts = if whole_class {
-            match crate::p0::collect(&image.index, request.class, control) {
-                Ok(facts) => Some(facts),
-                Err(error)
-                    if matches!(
-                        error.kind(),
-                        FailureKind::Cancelled
-                            | FailureKind::ResourceExhausted
-                            | FailureKind::InternalInvariant
-                    ) =>
-                {
-                    return Err(error);
-                }
-                Err(error) => {
-                    add_diagnostic(
-                        &mut diagnostics,
-                        Diagnostic {
-                            method: None,
-                            cause: DiagnosticCause::Request(error),
-                        },
-                        control,
-                    )?;
-                    None
-                }
+        // member directory that both class and method requests consume; a method
+        // entry is never reassembled from caller-supplied identities.
+        let class_facts = match crate::p0::collect(&image.index, request.class, control) {
+            Ok(facts) => Some(facts),
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    FailureKind::Cancelled
+                        | FailureKind::ResourceExhausted
+                        | FailureKind::InternalInvariant
+                ) =>
+            {
+                return Err(error);
             }
-        } else {
-            None
+            Err(error) => {
+                add_diagnostic(
+                    &mut diagnostics,
+                    Diagnostic {
+                        method: None,
+                        cause: DiagnosticCause::Request(error),
+                    },
+                    control,
+                )?;
+                None
+            }
         };
         let mut emission = if whole_class {
             crate::engine::member_emission::collect(
@@ -754,8 +757,14 @@ impl<'a> Engine<'a> {
             };
             let facts = MethodFacts {
                 key,
-                name: copy_units(input.declaration().name, budget)?,
-                prototype: copy_proto(&input.declaration().prototype, budget)?,
+                name: crate::substrate::owned::copy_slice_units(
+                    input.declaration().name_units(),
+                    budget,
+                )?,
+                prototype: crate::substrate::owned::copy_slice_units(
+                    input.declaration().prototype_units(),
+                    budget,
+                )?,
                 access_flags: input.access_flags(),
             };
             let original = index.debug_method(key.class.class_def, key.method, budget)?;
@@ -987,11 +996,15 @@ fn normal_member(
     let input = match inputs.facts {
         Some(facts) => index.method_source(facts, key.method, budget)?,
         None => index.method_source_at(key.class.class_def, key.method, budget)?,
-    };
+    }
+    .decode(budget)?;
     let facts = MethodFacts {
         key,
-        name: copy_units(input.declaration().name, budget)?,
-        prototype: copy_proto(&input.declaration().prototype, budget)?,
+        name: crate::substrate::owned::copy_slice_units(input.declaration().name_units(), budget)?,
+        prototype: crate::substrate::owned::copy_slice_units(
+            input.declaration().prototype_units(),
+            budget,
+        )?,
         access_flags: input.access_flags(),
     };
     let signature = crate::p4_types::declarations::raw_signature::collect(

@@ -281,10 +281,9 @@ The helper MUST check only the format, padding and the complete word/payload ran
 
 ```text
 RawMethodView { key, checked code/try/debug ranges }
-RawPrintable = ValidatedRawMethod | ValidatedRawDeclaration
-ValidatedRawMethod { raw_view, raw_insns, payloads, checked metadata }
-ValidatedRawDeclaration { key, checked flags/proto/annotations, code_off: Zero }
-MethodInput { key, raw, decl }
+MethodSource { key, raw code or declaration-only, declaration, flags, metadata state }
+DecodedMethod { raw_view, structural layout, instruction/payload directory, references }
+ClassFacts { class declaration, four-group member directory, static preparation, metadata }
 FlowBody { raw, cfg, origins }
 SsaBody { flow, values, phis, bound_uses }
 ResolvedBody { ssa, bindings, allocations }

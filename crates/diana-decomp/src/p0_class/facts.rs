@@ -79,14 +79,21 @@ impl<T: fmt::Display> Serialize for DisplayValue<T> {
 }
 
 /// Exact original UTF-16. Display escapes isolated surrogates; units retain identity.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct OriginalText(Vec<u16>);
 impl OriginalText {
-    pub(super) fn new(units: Vec<u16>) -> Self {
+    pub(crate) fn new(units: Vec<u16>) -> Self {
         Self(units)
     }
     pub fn units(&self) -> &[u16] {
         &self.0
+    }
+    pub(crate) fn matches_with(
+        &self,
+        other: &[u16],
+        control: &mut impl crate::pipeline::control::InputControl,
+    ) -> Result<bool, crate::RequestError> {
+        crate::context::same_units(self.units(), other, control).map_err(crate::RequestError::from)
     }
 }
 impl fmt::Display for OriginalText {
@@ -145,7 +152,7 @@ pub struct ClassDeclaration {
     pub descriptor: OriginalText,
     pub access_flags: OriginalFlags,
     pub superclass: Fact<OriginalText>,
-    pub interfaces: Fact<Vec<OriginalText>>,
+    pub interfaces: Fact<Vec<Fact<OriginalText>>>,
     pub source_file: Fact<OriginalText>,
 }
 
@@ -182,27 +189,30 @@ pub enum ScalarValue {
     String(OriginalText),
 }
 
-#[derive(Serialize)]
+/// The original method declaration as P0 read it: exact text, prototype type
+/// identities, parameter word layout and return type. Downstream consumers use
+/// this product instead of resolving the declaration record again.
+#[derive(Clone, Serialize)]
 pub struct MethodDeclaration {
     pub name: OriginalText,
     pub prototype: OriginalText,
+    pub shorty: OriginalText,
     pub parameter_types: Vec<OriginalText>,
+    pub parameter_type_ids: Vec<u32>,
     pub return_type: OriginalText,
+    pub return_type_id: u32,
+    pub parameter_words: u64,
 }
 
 impl MethodDeclaration {
-    /// Whether this delivered declaration is the same original declaration the
-    /// input reader resolves for the same member identity. A disagreement is a
-    /// product invariant failure, not a new source of declaration facts.
-    pub(crate) fn matches(
-        &self,
-        declaration: &crate::input::MethodDeclaration<'_, '_>,
-        control: &mut impl crate::pipeline::control::InputControl,
-    ) -> Result<bool, crate::RequestError> {
-        Ok(self.name.units().to_vec()
-            == crate::substrate::owned::copy_units(declaration.name, control)?
-            && self.prototype.units().to_vec()
-                == crate::substrate::owned::copy_proto(&declaration.prototype, control)?)
+    pub fn name_units(&self) -> &[u16] {
+        self.name.units()
+    }
+    pub fn prototype_units(&self) -> &[u16] {
+        self.prototype.units()
+    }
+    pub fn parameter_count(&self) -> usize {
+        self.parameter_types.len()
     }
 }
 
@@ -327,7 +337,7 @@ impl ClassFacts {
     pub fn superclass(&self) -> &Fact<OriginalText> {
         &self.class.superclass
     }
-    pub fn interfaces(&self) -> &Fact<Vec<OriginalText>> {
+    pub fn interfaces(&self) -> &Fact<Vec<Fact<OriginalText>>> {
         &self.class.interfaces
     }
     pub fn source_file(&self) -> &Fact<OriginalText> {
@@ -360,6 +370,12 @@ impl ClassFacts {
             || self.annotations_issue.is_some()
             || self.class.superclass.unavailable().is_some()
             || self.class.interfaces.unavailable().is_some()
+            || match &self.class.interfaces {
+                Fact::Present(interfaces) => interfaces
+                    .iter()
+                    .any(|interface| interface.unavailable().is_some()),
+                _ => false,
+            }
             || self.class.source_file.unavailable().is_some()
             || self
                 .fields

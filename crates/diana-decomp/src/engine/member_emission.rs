@@ -47,7 +47,9 @@ pub(crate) fn collect(
             }
             let result = (|| -> Result<Option<crate::p7_java::GeneratedBridge>, RequestError> {
                 let budget = &mut *control;
-                let input = index.method_source_at(key.class_def, method_idx, budget)?;
+                let input = index
+                    .method_source_at(key.class_def, method_idx, budget)?
+                    .decode(budget)?;
                 let Some(target) =
                     crate::p7_java::member_emission::candidate(permit, &input, budget)?
                 else {

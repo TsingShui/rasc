@@ -1,4 +1,4 @@
-use crate::input::{MethodSource, RawPrintable};
+use crate::input::MethodSource;
 use crate::{CodeUnitOffset, FieldId, MethodId, RegisterId, RequestError, RunContext};
 
 /// Checked compiler-owned outer capture prefix. The remaining constructor and
@@ -52,7 +52,7 @@ fn verify_impl(
     declaration: &crate::p4_types::declarations::capture::CaptureDeclaration,
     budget: &mut RunContext<'_>,
 ) -> Result<Option<CaptureCertificate>, RequestError> {
-    let RawPrintable::Method(validated) = input.raw() else {
+    let Some(validated) = input.decoded() else {
         return Ok(None);
     };
     let raw = validated.layout().original();
@@ -143,7 +143,7 @@ fn replay(
     proof: &CaptureCertificate,
     budget: &mut RunContext<'_>,
 ) -> Result<(), RequestError> {
-    let RawPrintable::Method(validated) = input.raw() else {
+    let Some(validated) = input.decoded() else {
         return Err(RequestError::InternalInvariant(
             "capture replay lost method",
         ));

@@ -50,8 +50,6 @@ pub use disassembly::{
 pub use error::{InputError, InputProblem, UnsupportedInput};
 use error::{count_usize, file_length, file_offset, malformed};
 pub use header::{DexHeader, TableSection, read_header};
-pub use method::{
-    CheckedAnnotations, MethodSource, RawPrintable, ValidatedRawDeclaration, ValidatedRawMethod,
-};
+pub use method::{CheckedAnnotations, MethodSource, RawPrintable};
 pub use strings::DexString;
 pub use structure::{CheckedMethodLayout, MethodError, MethodProblem};

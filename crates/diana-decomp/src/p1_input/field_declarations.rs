@@ -23,8 +23,6 @@ pub(crate) struct FieldInput {
     pub key: FieldKey,
     pub access_flags: u32,
     pub storage: FieldStorage,
-    /// Position inside the original static or instance group.
-    pub ordinal: u32,
     pub facts: Result<FieldFacts, RequestError>,
     pub initial: Option<FieldInitialValue>,
     pub default_preparation: bool,
@@ -34,6 +32,160 @@ pub(crate) struct FieldInput {
 pub(crate) struct FieldDirectory {
     pub fields: Vec<FieldInput>,
     pub issue: Option<RequestError>,
+}
+
+pub(crate) struct FieldPreparation {
+    pub initial: FieldInitialValue,
+    pub value: Option<PreparationValue>,
+}
+
+/// Reads the original static preparation array once, indexed by static ordinal.
+/// A missing encoded entry is an implicit default; a damaged suffix retains the
+/// independently decoded prefix and its classified issue.
+pub(crate) fn read_preparations(
+    index: &ProgramIndex<'_>,
+    offset: Option<crate::ByteOffset>,
+    static_count: u32,
+    control: &mut impl InputControl,
+) -> Result<(Vec<FieldPreparation>, Option<RequestError>), RequestError> {
+    let count = usize::try_from(static_count).map_err(|_| RequestError::PlatformCapacity)?;
+    let mut prepared = Vec::new();
+    crate::substrate::owned::reserve(&mut prepared, count, control)?;
+    let Some(offset) = offset else {
+        for _ in 0..count {
+            control.checkpoint()?;
+            prepared.push(FieldPreparation {
+                initial: FieldInitialValue::ImplicitDefault,
+                value: None,
+            });
+        }
+        return Ok((prepared, None));
+    };
+    let mut values = match EncodedValues::open(index, offset, Some(static_count), control) {
+        Ok(values) => values,
+        Err(error) => return local_preparations(prepared, error.into()),
+    };
+    let result = (|| -> Result<(), RequestError> {
+        for ordinal in 0..static_count {
+            control.checkpoint()?;
+            if ordinal >= values.count {
+                prepared.push(FieldPreparation {
+                    initial: FieldInitialValue::ImplicitDefault,
+                    value: None,
+                });
+                continue;
+            }
+            let Some(ValueStep::Value(value)) = values.next(index, control)? else {
+                return Err(RequestError::InternalInvariant(
+                    "encoded preparation lost root",
+                ));
+            };
+            if value.ordinal.0 != ordinal {
+                return Err(RequestError::InternalInvariant(
+                    "encoded preparation changed static ordinal",
+                ));
+            }
+            let mut depth = if matches!(
+                value.kind,
+                EncodedKind::Array { .. } | EncodedKind::Annotation { .. }
+            ) {
+                1usize
+            } else {
+                0
+            };
+            let mut bytes = Vec::new();
+            for &byte in value.bytes {
+                control.checkpoint()?;
+                push(&mut bytes, byte, control)?;
+            }
+            while depth != 0 {
+                control.checkpoint()?;
+                match values.next(index, control)? {
+                    Some(ValueStep::EndContainer) => depth -= 1,
+                    Some(ValueStep::Value(child)) => {
+                        if matches!(
+                            child.kind,
+                            EncodedKind::Array { .. } | EncodedKind::Annotation { .. }
+                        ) {
+                            depth = depth.checked_add(1).ok_or(RequestError::PlatformCapacity)?;
+                        }
+                    }
+                    None => {
+                        return Err(RequestError::InternalInvariant(
+                            "encoded preparation container ended early",
+                        ));
+                    }
+                }
+            }
+            let range = crate::ByteRange {
+                start: value.range.start,
+                end: values.position(),
+            };
+            if range != value.range {
+                for &byte in index.bytes.get(value.range.end.0..range.end.0).ok_or(
+                    RequestError::InternalInvariant("encoded preparation lost original bytes"),
+                )? {
+                    control.checkpoint()?;
+                    push(&mut bytes, byte, control)?;
+                }
+            }
+            let value_kind = match &value.kind {
+                EncodedKind::Signed(value) => Some(PreparationValue::Signed(*value)),
+                EncodedKind::Unsigned(value) => Some(PreparationValue::Unsigned(*value)),
+                EncodedKind::Bits { bits, .. } if value.tag == 0x10 => {
+                    Some(PreparationValue::Float(u32::try_from(*bits).map_err(
+                        |_| RequestError::InternalInvariant("float preparation lost width"),
+                    )?))
+                }
+                EncodedKind::Bits { bits, .. } if value.tag == 0x11 => {
+                    Some(PreparationValue::Double(*bits))
+                }
+                EncodedKind::Boolean(value) => Some(PreparationValue::Boolean(*value)),
+                EncodedKind::Null => Some(PreparationValue::Null),
+                EncodedKind::Reference(crate::raw::OperandReference::String(id)) => {
+                    Some(PreparationValue::String(copy_units(
+                        index.string_with(*id, control)?,
+                        control,
+                    )?))
+                }
+                _ => None,
+            };
+            prepared.push(FieldPreparation {
+                initial: FieldInitialValue::Encoded {
+                    tag: value.tag,
+                    arg: value.arg,
+                    range,
+                    bytes,
+                },
+                value: value_kind,
+            });
+        }
+        if values.next(index, control)?.is_some() {
+            return Err(RequestError::InternalInvariant(
+                "encoded preparation has extra root",
+            ));
+        }
+        Ok(())
+    })();
+    match result {
+        Ok(()) => Ok((prepared, None)),
+        Err(error) => local_preparations(prepared, error),
+    }
+}
+
+fn local_preparations(
+    prepared: Vec<FieldPreparation>,
+    error: RequestError,
+) -> Result<(Vec<FieldPreparation>, Option<RequestError>), RequestError> {
+    if matches!(
+        error.kind(),
+        crate::FailureKind::Cancelled
+            | crate::FailureKind::ResourceExhausted
+            | crate::FailureKind::InternalInvariant
+    ) {
+        return Err(error);
+    }
+    Ok((prepared, Some(error)))
 }
 
 pub(crate) fn collect(
@@ -81,7 +233,6 @@ pub(crate) fn collect(
                     },
                     access_flags: field.access_flags,
                     storage,
-                    ordinal: field.ordinal,
                     facts,
                     initial,
                     default_preparation: false,

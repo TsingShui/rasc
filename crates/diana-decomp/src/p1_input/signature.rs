@@ -37,11 +37,8 @@ pub(crate) fn method(
     input: &MethodSource<'_, '_>,
     control: &mut impl InputControl,
 ) -> Result<Option<Signature>, RequestError> {
-    let raw = match input.raw() {
-        super::RawPrintable::Method(raw) => raw.annotations(),
-        super::RawPrintable::Declaration(raw) => raw.annotations(),
-    };
-    let Some(range) = raw.method_range() else {
+    let annotations = input.annotations();
+    let Some(range) = annotations.method_range() else {
         return Ok(None);
     };
     read(input.program(), range.start, true, control)

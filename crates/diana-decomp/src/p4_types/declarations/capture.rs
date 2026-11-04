@@ -117,8 +117,10 @@ fn collect_impl(
     if !input.declaration().name.matches_with(
         &const { crate::substrate::owned::ascii_units(*b"<init>") },
         budget,
-    )? || crate::substrate::owned::copy_proto(&input.declaration().prototype, budget)?
-        != prototype
+    )? || crate::substrate::owned::copy_slice_units(
+        input.declaration().prototype.units(),
+        budget,
+    )? != prototype
     {
         return Ok(None);
     }

@@ -1,4 +1,4 @@
-use crate::input::{MethodSource, RawMethodView, RawPrintable};
+use crate::input::{MethodSource, RawMethodView};
 use crate::raw::{LayoutKind, RawLiteral};
 use crate::substrate::owned::push;
 use crate::{CodeUnitOffset, RegisterId, RequestError, RunContext};
@@ -762,7 +762,6 @@ pub(super) fn declaration_from_descriptor(
 }
 pub(crate) fn reference_type(
     input: &MethodSource<'_, '_>,
-    _descriptor: crate::input::DexString<'_>,
     id: crate::TypeId,
     budget: &mut RunContext<'_>,
 ) -> Result<Option<DeclarationType>, RequestError> {
@@ -813,17 +812,15 @@ fn decode_impl<'a>(
     input: &MethodSource<'_, 'a>,
     budget: &mut RunContext<'_>,
 ) -> Result<crate::substrate::outcome::Outcome<FlowBody<'a>>, RequestError> {
-    let RawPrintable::Method(checked) = input.raw() else {
+    let Some(decoded) = input.decoded() else {
         return Ok(crate::substrate::outcome::Outcome::Declined(
-            crate::OutputReason::JavaDeclarationUnsupported,
+            crate::OutputReason::JavaAnalysisUnavailable,
         ));
     };
-    let raw = checked.layout().original().clone();
-    let decoded = checked.decoded();
-    let protection = crate::input::protection::read(checked.layout(), budget)?;
+    let raw = decoded.original().clone();
+    let protection = crate::input::protection::read(decoded.layout(), budget)?;
     let result = if input
         .declaration()
-        .prototype
         .return_type
         .matches_with(&[86], budget)?
     {
@@ -832,64 +829,55 @@ fn decode_impl<'a>(
         ResultType::Value(
             if input
                 .declaration()
-                .prototype
                 .return_type
                 .matches_with(&[73], budget)?
             {
                 DeclarationType::Int
             } else if input
                 .declaration()
-                .prototype
                 .return_type
                 .matches_with(&[90], budget)?
             {
                 DeclarationType::Boolean
             } else if input
                 .declaration()
-                .prototype
                 .return_type
                 .matches_with(&[70], budget)?
             {
                 DeclarationType::Float
             } else if input
                 .declaration()
-                .prototype
                 .return_type
                 .matches_with(&[74], budget)?
             {
                 DeclarationType::Long
             } else if input
                 .declaration()
-                .prototype
                 .return_type
                 .matches_with(&[68], budget)?
             {
                 DeclarationType::Double
             } else if input
                 .declaration()
-                .prototype
                 .return_type
                 .matches_with(&[66], budget)?
             {
                 DeclarationType::Narrow(crate::substrate::primitive_types::Narrow::Byte)
             } else if input
                 .declaration()
-                .prototype
                 .return_type
                 .matches_with(&[83], budget)?
             {
                 DeclarationType::Narrow(crate::substrate::primitive_types::Narrow::Short)
             } else if input
                 .declaration()
-                .prototype
                 .return_type
                 .matches_with(&[67], budget)?
             {
                 DeclarationType::Narrow(crate::substrate::primitive_types::Narrow::Char)
             } else if let Some(kind) = reference_type(
                 input,
-                input.declaration().prototype.return_type,
-                input.declaration().prototype.return_type_idx,
+                crate::TypeId(input.declaration().return_type_id),
                 budget,
             )? {
                 kind
@@ -922,15 +910,24 @@ fn decode_impl<'a>(
         push(&mut parameters, DeclarationType::Nominal(owner), budget)?;
     }
     let mut supported = true;
-    input.declaration().prototype.visit_parameter_type_ids(
-        budget,
-        |id, name, budget| -> Result<(), RequestError> {
+    for (name, id) in input
+        .declaration()
+        .parameter_types
+        .iter()
+        .zip(&input.declaration().parameter_type_ids)
+    {
+        budget.checkpoint()?;
+        let id = crate::TypeId(*id);
+        let kind = (|| -> Result<Option<DeclarationType>, RequestError> {
             let kind = if name.matches_with(&[73], budget)? {
                 DeclarationType::Int
             } else if name.matches_with(&[90], budget)? {
                 DeclarationType::Boolean
             } else if let Some(kind) =
-                crate::substrate::primitive_types::PrimitiveArray::parse(name, budget)?
+                crate::substrate::primitive_types::PrimitiveArray::parse_units(
+                    name.units(),
+                    budget,
+                )?
             {
                 DeclarationType::PrimitiveArray(kind)
             } else if name.matches_with(
@@ -963,15 +960,20 @@ fn decode_impl<'a>(
                 budget,
             )? {
                 DeclarationType::String
-            } else if let Some(kind) = reference_type(input, name, id, budget)? {
+            } else if let Some(kind) = reference_type(input, id, budget)? {
                 kind
             } else {
                 supported = false;
-                return Ok(());
+                return Ok(None);
             };
-            push(&mut parameters, kind, budget)
-        },
-    )?;
+            Ok(Some(kind))
+        })()?;
+        let Some(kind) = kind else {
+            supported = false;
+            continue;
+        };
+        push(&mut parameters, kind, budget)?;
+    }
     if !supported {
         return Ok(crate::substrate::outcome::Outcome::Declined(
             crate::OutputReason::JavaCheckFailed {
@@ -1004,7 +1006,7 @@ fn decode_impl<'a>(
     }
     for target in protection.targets() {
         budget.checkpoint()?;
-        if checked.layout().is_reachable(target) {
+        if decoded.is_reachable(target) {
             push(&mut leaders, target, budget)?;
         }
     }
@@ -1015,7 +1017,7 @@ fn decode_impl<'a>(
         let mut next = pc
             .checked_advance(layout.width())
             .ok_or(RequestError::PlatformCapacity)?;
-        if checked.layout().is_reachable(pc) {
+        if decoded.is_reachable(pc) {
             let LayoutKind::Instruction(spec) = layout.kind() else {
                 return Ok(crate::substrate::outcome::Outcome::Declined(
                     crate::OutputReason::JavaCheckFailed {
@@ -1437,8 +1439,7 @@ fn decode_impl<'a>(
                             "cast changed reference domain",
                         ));
                     };
-                    let descriptor = input.type_name(reference, budget)?;
-                    let Some(kind) = reference_type(input, descriptor, reference, budget)? else {
+                    let Some(kind) = reference_type(input, reference, budget)? else {
                         return Ok(crate::substrate::outcome::Outcome::Declined(
                             crate::OutputReason::JavaCheckFailed {
                                 code: crate::DiagnosticCode::JavaAnalysisUnavailable,
@@ -1599,7 +1600,6 @@ fn decode_impl<'a>(
                         Some(68) => InvokeResult::Wide(DeclarationType::Double),
                         Some(76 | 91) => InvokeResult::Reference(reference_type(
                             input,
-                            descriptor,
                             method.declaration.prototype.return_type_idx,
                             budget,
                         )?),

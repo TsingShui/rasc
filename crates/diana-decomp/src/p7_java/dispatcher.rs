@@ -1,5 +1,5 @@
 use super::branch::{Assignment, Local, LocalId, copies};
-use crate::input::{MethodSource, RawPrintable};
+use crate::input::MethodSource;
 use crate::p2_flow::{BlockId, EdgeId, Terminal};
 use crate::p4_types::Kind;
 use crate::p5_variables::StorageBody;
@@ -110,7 +110,7 @@ pub(super) fn lower(
         return Ok(None);
     }
     let ssa = &storage.typed;
-    let RawPrintable::Method(raw) = input.raw() else {
+    let Some(raw) = input.decoded() else {
         return Err(RequestError::InternalInvariant(
             "dispatcher has no original method",
         ));
@@ -217,7 +217,7 @@ pub(super) fn lower(
         }
         name
     } else {
-        copy_units(input.declaration().name, budget)?
+        crate::substrate::owned::copy_slice_units(input.declaration().name_units(), budget)?
     };
     if !initializer && !super::declarations::identifier(&name, budget)? {
         checks.refused = Some("identifier_name");

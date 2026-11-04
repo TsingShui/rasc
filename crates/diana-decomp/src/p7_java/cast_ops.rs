@@ -54,13 +54,7 @@ pub(super) fn validate(
             }
             checked_qualifier = true;
         }
-        if crate::p2_flow::reference_type(
-            input,
-            input.type_name(reference, budget)?,
-            reference,
-            budget,
-        )? != Some(kind)
-        {
+        if crate::p2_flow::reference_type(input, reference, budget)? != Some(kind) {
             return Err(RequestError::InternalInvariant(
                 "type check changed original target",
             ));

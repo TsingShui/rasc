@@ -70,6 +70,16 @@ pub(crate) fn copy_units(
     Ok(result)
 }
 
+pub(crate) fn copy_slice_units(
+    value: &[u16],
+    control: &mut impl InputControl,
+) -> Result<Vec<u16>, RequestError> {
+    let mut result = Vec::new();
+    reserve(&mut result, value.len(), control)?;
+    result.extend_from_slice(value);
+    Ok(result)
+}
+
 pub(crate) fn copy_proto(
     value: &Prototype<'_, '_>,
     control: &mut impl InputControl,

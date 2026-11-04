@@ -89,7 +89,7 @@ pub(super) fn bad(pc: CodeUnitOffset, problem: MethodProblem) -> MethodError {
 /// This also checks original debug addresses and local records. Declaration
 /// annotations, reference contents and register definition/type analysis retain
 /// their own validation obligations.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct CheckedMethodLayout<'a> {
     original: RawMethodView<'a>,
     boundaries: Boundaries,
@@ -274,7 +274,7 @@ enum Start {
     Payload,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct Boundaries {
     units: CodeUnitCount,
     // A nibble per code unit: start kind (2 bits), handler entry, reached.
