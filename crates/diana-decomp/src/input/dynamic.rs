@@ -4,6 +4,17 @@ use crate::pipeline::control::InputControl;
 use crate::raw::OperandReference;
 use crate::{ByteLength, ByteOffset, CallSiteId, FieldId, MethodHandleId, MethodId, ProtoId};
 
+pub(crate) struct CheckedMethodHandle {
+    pub kind: u16,
+    pub member: OperandReference,
+}
+
+pub(crate) struct CheckedCallSite<'i, 'a> {
+    pub name: super::DexString<'a>,
+    pub handle: CheckedMethodHandle,
+    pub prototype: Prototype<'i, 'a>,
+}
+
 fn invalid(at: ByteOffset) -> InputError {
     malformed(InputProblem::InvalidReference, at)
 }
@@ -13,7 +24,7 @@ impl<'a> ProgramIndex<'a> {
         &self,
         id: MethodHandleId,
         control: &mut impl InputControl,
-    ) -> Result<(), InputError> {
+    ) -> Result<CheckedMethodHandle, InputError> {
         let mut record = self.mapped_entry(8, id.0, ByteLength(8), control)?;
         let at = record.position_byte();
         let kind = record.read_u16_with(control)?;
@@ -24,8 +35,9 @@ impl<'a> ProgramIndex<'a> {
         if kind > 8 {
             return Err(invalid(at));
         }
-        if kind <= 3 {
+        let member = if kind <= 3 {
             self.field_reference(FieldId(target), control)?;
+            OperandReference::Field(FieldId(target))
         } else {
             let method = self.method_reference(MethodId(target), control)?;
             let constructor = method.declaration.name.matches_with(
@@ -46,15 +58,16 @@ impl<'a> ProgramIndex<'a> {
             {
                 return Err(invalid(at));
             }
-        }
-        Ok(())
+            OperandReference::Method(MethodId(target))
+        };
+        Ok(CheckedMethodHandle { kind, member })
     }
 
     pub(crate) fn call_site(
         &self,
         id: CallSiteId,
         control: &mut impl InputControl,
-    ) -> Result<Prototype<'_, 'a>, MethodError> {
+    ) -> Result<CheckedCallSite<'_, 'a>, MethodError> {
         let mut record = self.mapped_entry(7, id.0, ByteLength(4), control)?;
         let offset = ByteOffset(
             usize::try_from(record.read_u32_with(control)?)
@@ -70,7 +83,7 @@ impl<'a> ProgramIndex<'a> {
         let EncodedKind::Reference(OperandReference::MethodHandle(handle_id)) = handle.kind else {
             return Err(invalid(handle.range.start).into());
         };
-        self.method_handle(handle_id, control)?;
+        let handle = self.method_handle(handle_id, control)?;
         let Some(ValueStep::Value(name)) = values.next(self, control)? else {
             return Err(invalid(offset).into());
         };
@@ -96,7 +109,11 @@ impl<'a> ProgramIndex<'a> {
         };
         let prototype = self.prototype(proto_id, control)?;
         while values.next(self, control)?.is_some() {}
-        Ok(prototype)
+        Ok(CheckedCallSite {
+            name,
+            handle,
+            prototype,
+        })
     }
 
     pub(super) fn encoded_dynamic_reference(

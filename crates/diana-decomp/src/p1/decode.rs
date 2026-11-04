@@ -1,8 +1,15 @@
 use crate::input::{MethodSource, ProgramIndex, RawPrintable, strings::TypeShape};
 use crate::raw::OperandReference;
-use crate::{CodeUnitOffset, RequestError, RunContext};
+use crate::substrate::flags::STATIC;
+use crate::substrate::owned::push;
+use crate::substrate::slots::{RegisterSlot, SlotWidth};
+use crate::{CodeUnitOffset, RegisterId, RequestError, RunContext, TypeId};
 
-use super::{DecodedOutcome, MethodError, MethodProblem};
+use super::disassembly::DecodedFacts;
+use super::reference::{
+    CheckedMethodHandleFact, CheckedPrototype, CheckedReferenceFact, ReferenceFactEntry, type_form,
+};
+use super::{DecodedOutcome, EntryLayout, EntryParameter, MethodError, MethodProblem};
 
 impl<'a> ProgramIndex<'a> {
     /// P1: validates the original instruction structure, decodes the complete
@@ -30,7 +37,11 @@ impl<'a> ProgramIndex<'a> {
             Ok(layout) => layout,
             Err(error) => return outcome(items, error),
         };
-        if let Err(error) = self.check_reference_contents(&items, return_shape, budget) {
+        let reference_facts = match self.check_reference_contents(&items, return_shape, budget) {
+            Ok(facts) => facts,
+            Err(error) => return outcome(items, error),
+        };
+        if let Err(error) = check_reference_coverage(&items, &reference_facts) {
             return outcome(items, error);
         }
         let protection = match crate::input::protection::read(&layout, budget).map_err(method_error)
@@ -38,9 +49,25 @@ impl<'a> ProgramIndex<'a> {
             Ok(protection) => protection,
             Err(error) => return outcome(items, error),
         };
+        let entry = match build_entry_layout(source, code, budget) {
+            Ok(entry) => entry,
+            Err(error) => return outcome(items, error),
+        };
         Ok(DecodedOutcome {
             decoded: Some(crate::input::ProgramIndex::assemble_decoded(
-                code, layout, protection, items,
+                code,
+                layout,
+                protection,
+                items,
+                DecodedFacts {
+                    class_id: source.class_id(),
+                    declaration: source.declaration().clone(),
+                    access_flags: source.access_flags(),
+                    entry,
+                    annotations: source.annotations(),
+                    metadata_issue: source.metadata().is_err(),
+                    reference_facts,
+                },
             )),
             prefix: Vec::new(),
             error: None,
@@ -52,7 +79,8 @@ impl<'a> ProgramIndex<'a> {
         items: &[super::DecodedItem],
         return_shape: TypeShape,
         budget: &mut RunContext<'_>,
-    ) -> Result<(), MethodError> {
+    ) -> Result<Vec<ReferenceFactEntry<'a>>, MethodError> {
+        let mut facts = Vec::new();
         for item in items {
             budget.checkpoint()?;
             let super::DecodedItem::Instruction(instruction) = item else {
@@ -61,10 +89,10 @@ impl<'a> ProgramIndex<'a> {
             let pc = instruction.pc();
             let spec = instruction.spec();
             for reference in instruction.references() {
-                match reference.target {
-                    OperandReference::String(id) => {
-                        self.string_with(id, budget)?;
-                    }
+                let fact = match reference.target {
+                    OperandReference::String(id) => CheckedReferenceFact::String {
+                        value: self.string_with(id, budget)?,
+                    },
                     OperandReference::Type(id) => {
                         let (descriptor, shape) = self.type_descriptor(id, budget)?;
                         let valid = match spec.opcode {
@@ -82,6 +110,11 @@ impl<'a> ProgramIndex<'a> {
                             if matches!(units.next(budget)?, Some(0x4a | 0x44)) {
                                 return Err(bad_type(pc));
                             }
+                        }
+                        CheckedReferenceFact::Type {
+                            descriptor,
+                            form: type_form(shape),
+                            words: shape.words(),
                         }
                     }
                     OperandReference::Field(id) => {
@@ -114,9 +147,16 @@ impl<'a> ProgramIndex<'a> {
                                 problem: MethodProblem::InvalidFieldKind,
                             });
                         }
+                        CheckedReferenceFact::Field {
+                            owner: field.owner,
+                            owner_type: field.owner_type,
+                            name: field.declaration.name,
+                            field_type: field.declaration.field_type,
+                            field_type_id: field.declaration.field_type_idx,
+                        }
                     }
                     OperandReference::Method(id) => {
-                        self.method_reference(id, budget)?;
+                        let method = self.method_reference(id, budget)?;
                         if matches!(spec.opcode, 0x6e..=0x72 | 0x74..=0x78)
                             && let Some(target) = self.local_method(id, budget)?
                             && (target.access_flags & crate::substrate::flags::STATIC != 0)
@@ -127,17 +167,54 @@ impl<'a> ProgramIndex<'a> {
                                 problem: MethodProblem::InvalidInvokeKind,
                             });
                         }
+                        let prototype = CheckedPrototype::from_prototype(
+                            &method.declaration.prototype,
+                            budget,
+                        )?;
+                        CheckedReferenceFact::Method {
+                            owner: method.owner,
+                            owner_type: method.owner_type,
+                            name: method.declaration.name,
+                            prototype,
+                        }
                     }
                     OperandReference::Proto(id) => {
-                        self.prototype(id, budget)?;
+                        let proto = self.prototype(id, budget)?;
+                        CheckedReferenceFact::Proto {
+                            prototype: CheckedPrototype::from_prototype(&proto, budget)?,
+                        }
                     }
                     OperandReference::CallSite(id) => {
-                        self.call_site(id, budget)?;
+                        let callsite = self.call_site(id, budget)?;
+                        CheckedReferenceFact::CallSite {
+                            name: callsite.name,
+                            handle: CheckedMethodHandleFact::new(
+                                callsite.handle.kind,
+                                callsite.handle.member,
+                            ),
+                            prototype: CheckedPrototype::from_prototype(
+                                &callsite.prototype,
+                                budget,
+                            )?,
+                        }
                     }
                     OperandReference::MethodHandle(id) => {
-                        self.method_handle(id, budget)?;
+                        let handle = self.method_handle(id, budget)?;
+                        CheckedReferenceFact::MethodHandle {
+                            handle: CheckedMethodHandleFact::new(handle.kind, handle.member),
+                        }
                     }
-                }
+                };
+                push(
+                    &mut facts,
+                    ReferenceFactEntry {
+                        pc,
+                        slot: reference.slot,
+                        fact,
+                    },
+                    budget,
+                )
+                .map_err(method_error)?;
             }
             if matches!(spec.flow, crate::input::formats::FlowKind::Return) {
                 let expected = match return_shape {
@@ -154,7 +231,104 @@ impl<'a> ProgramIndex<'a> {
                 }
             }
         }
-        Ok(())
+        Ok(facts)
+    }
+}
+
+fn check_reference_coverage(
+    items: &[super::DecodedItem],
+    facts: &[ReferenceFactEntry<'_>],
+) -> Result<(), MethodError> {
+    let mut index = 0usize;
+    for item in items {
+        let super::DecodedItem::Instruction(instruction) = item else {
+            continue;
+        };
+        for reference in instruction.references() {
+            let Some(fact) = facts.get(index) else {
+                return Err(MethodError::InternalInvariant(
+                    "P1 reference facts lost an instruction reference",
+                ));
+            };
+            if fact.pc != instruction.pc() || fact.slot != reference.slot {
+                return Err(MethodError::InternalInvariant(
+                    "P1 reference facts are not aligned with their instruction sites",
+                ));
+            }
+            index += 1;
+        }
+    }
+    if index != facts.len() {
+        return Err(MethodError::InternalInvariant(
+            "P1 reference facts contain a foreign site",
+        ));
+    }
+    Ok(())
+}
+
+fn build_entry_layout(
+    source: &MethodSource<'_, '_>,
+    code: &crate::input::RawMethodView<'_>,
+    budget: &mut RunContext<'_>,
+) -> Result<EntryLayout, MethodError> {
+    let declaration = source.declaration();
+    if declaration.parameter_types.len() != declaration.parameter_type_ids.len() {
+        return Err(MethodError::InternalInvariant(
+            "entry parameter type facts disagree",
+        ));
+    }
+    let start = u32::from(code.registers_size())
+        .checked_sub(u32::from(code.ins_size()))
+        .ok_or(MethodError::InternalInvariant(
+            "checked code has ins_size above registers_size",
+        ))?;
+    let mut cursor = start;
+    let this = if source.access_flags() & STATIC == 0 {
+        let slot = RegisterSlot::new(RegisterId(cursor), SlotWidth::One);
+        cursor = cursor.checked_add(1).ok_or(MethodError::PlatformCapacity)?;
+        Some(slot)
+    } else {
+        None
+    };
+    let mut parameters = Vec::new();
+    for (index, type_id) in declaration.parameter_type_ids.iter().enumerate() {
+        budget.checkpoint()?;
+        let descriptor =
+            declaration
+                .parameter_types
+                .get(index)
+                .ok_or(MethodError::InternalInvariant(
+                    "entry parameter descriptor is missing",
+                ))?;
+        let width = match descriptor.units().first() {
+            Some(0x4a | 0x44) => SlotWidth::Two,
+            Some(0x4c | 0x5b) => SlotWidth::One,
+            Some(0x5a | 0x42 | 0x53 | 0x43 | 0x49 | 0x46) => SlotWidth::One,
+            _ => return Err(bad_entry()),
+        };
+        let slot = RegisterSlot::new(RegisterId(cursor), width);
+        cursor = cursor
+            .checked_add(width.words())
+            .ok_or(MethodError::PlatformCapacity)?;
+        push(
+            &mut parameters,
+            EntryParameter::new(TypeId(*type_id), slot),
+            budget,
+        )
+        .map_err(method_error)?;
+    }
+    if cursor != u32::from(code.registers_size()) {
+        return Err(MethodError::InternalInvariant(
+            "entry layout does not cover the checked incoming window",
+        ));
+    }
+    Ok(EntryLayout::new(this, parameters, RegisterId(start)))
+}
+
+fn bad_entry() -> MethodError {
+    MethodError::Malformed {
+        pc: CodeUnitOffset(0),
+        problem: MethodProblem::InvalidEntryLayout,
     }
 }
 

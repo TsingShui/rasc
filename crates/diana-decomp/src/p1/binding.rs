@@ -3,7 +3,14 @@ use super::{MethodError, MethodProblem};
 use crate::input::ProgramIndex;
 use crate::input::formats::{InsnLayout, OpcodeSpec, OperandReference, RegisterShape};
 use crate::input::operands::RawOperands;
+use crate::substrate::slots::SlotWidth;
 use crate::{CodeUnitOffset, RunContext};
+
+#[derive(Clone)]
+pub(crate) struct ProducerFact {
+    pub result: ResultKind,
+    pub invoke: Option<super::InvokeLayout>,
+}
 
 #[derive(Clone, Copy)]
 pub(crate) enum ResultKind {
@@ -32,9 +39,12 @@ pub(crate) fn check_producer(
     layout: InsnLayout,
     operands: RawOperands,
     budget: &mut RunContext<'_>,
-) -> Result<Option<ResultKind>, MethodError> {
+) -> Result<Option<ProducerFact>, MethodError> {
     if spec.registers == RegisterShape::ArrayWords {
-        return Ok(Some(ResultKind::Object));
+        return Ok(Some(ProducerFact {
+            result: ResultKind::Object,
+            invoke: None,
+        }));
     }
     if !matches!(
         spec.opcode,
@@ -58,7 +68,7 @@ pub(crate) fn check_producer(
         (_, Some(OperandReference::Method(id))) => {
             index.method_reference(id, budget)?.declaration.prototype
         }
-        (_, Some(OperandReference::CallSite(id))) => index.call_site(id, budget)?,
+        (_, Some(OperandReference::CallSite(id))) => index.call_site(id, budget)?.prototype,
         _ => {
             return Err(MethodError::InternalInvariant(
                 "invoke has no checked target reference",
@@ -91,12 +101,13 @@ pub(crate) fn check_producer(
             .next()
             .ok_or(MethodError::InternalInvariant("missing checked receiver"))?;
     }
+    let mut arguments = Vec::new();
     while let Some(tag) = shorty.next(budget)? {
         budget.checkpoint()?;
         let first = words
             .next()
             .ok_or(MethodError::InternalInvariant("missing checked argument"))?;
-        if matches!(tag, 0x4a | 0x44) {
+        let width = if matches!(tag, 0x4a | 0x44) {
             budget.checkpoint()?;
             let second = words
                 .next()
@@ -104,12 +115,25 @@ pub(crate) fn check_producer(
             if first.0.checked_add(1) != Some(second.0) {
                 return Err(bad(pc, MethodProblem::NonAdjacentWideArgument));
             }
-        }
+            SlotWidth::Two
+        } else {
+            SlotWidth::One
+        };
+        crate::substrate::owned::push(&mut arguments, width, budget)
+            .map_err(super::disassembly::scratch)?;
     }
     if words.next().is_some() {
         return Err(MethodError::InternalInvariant(
             "checked argument words remain",
         ));
     }
-    Ok(Some(result))
+    let result_width = match result {
+        ResultKind::Void => None,
+        ResultKind::Scalar | ResultKind::Object => Some(SlotWidth::One),
+        ResultKind::Wide => Some(SlotWidth::Two),
+    };
+    Ok(Some(ProducerFact {
+        result,
+        invoke: Some(super::InvokeLayout::new(receiver, arguments, result_width)),
+    }))
 }

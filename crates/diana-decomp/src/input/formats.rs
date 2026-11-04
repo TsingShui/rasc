@@ -129,7 +129,7 @@ pub(crate) enum ResultRole {
     MoveException,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub enum ReferenceSlot {
     First,
     Second,

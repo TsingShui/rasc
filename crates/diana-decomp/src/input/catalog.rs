@@ -733,6 +733,7 @@ impl<'a> ProgramIndex<'a> {
         }
         Ok(MethodReference {
             owner,
+            owner_type: owner_idx,
             declaration: self.method_declaration(id, owner_idx, control)?,
         })
     }
@@ -753,6 +754,7 @@ impl<'a> ProgramIndex<'a> {
         }
         Ok(FieldReference {
             owner,
+            owner_type: owner_idx,
             declaration: self.validate_field(id, owner_idx, control)?,
         })
     }
@@ -853,11 +855,13 @@ pub(crate) struct LocalMethod<'a> {
 }
 pub(crate) struct MethodReference<'i, 'a> {
     pub owner: DexString<'a>,
+    pub owner_type: TypeId,
     pub declaration: MethodDeclaration<'i, 'a>,
 }
 
 pub(crate) struct FieldReference<'a> {
     pub owner: DexString<'a>,
+    pub owner_type: TypeId,
     pub declaration: FieldDeclaration<'a>,
 }
 

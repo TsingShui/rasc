@@ -3,10 +3,14 @@
 pub(crate) mod binding;
 mod decode;
 mod disassembly;
+mod reference;
 mod structure;
 
 pub use disassembly::{
     DecodedInstruction, DecodedItem, DecodedMethod, DecodedOutcome, DecodedPayload,
-    DecodedReference,
+    DecodedReference, EntryLayout, EntryParameter, InvokeLayout,
+};
+pub use reference::{
+    CheckedMethodHandleFact, CheckedParameter, CheckedPrototype, CheckedReferenceFact, TypeForm,
 };
 pub use structure::{CheckedMethodLayout, MethodError, MethodProblem};

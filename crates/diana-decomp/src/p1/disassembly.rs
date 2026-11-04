@@ -1,3 +1,4 @@
+use super::reference::{CheckedReferenceFact, ReferenceFactEntry};
 use super::{CheckedMethodLayout, MethodError};
 use crate::input::formats::{DexVersion, FlowKind, InsnLayout, LayoutKind, OpcodeSpec};
 use crate::input::operands::{RawOperands, instruction_operands};
@@ -5,9 +6,10 @@ use crate::input::protection::CheckedProtection;
 use crate::input::{ProgramIndex, RawMethodView};
 use crate::raw::{OperandReference, ReferenceKind, ReferenceSlot};
 use crate::substrate::owned::push;
+use crate::substrate::slots::{RegisterSlot, SlotWidth};
 use crate::{
     ByteRange, CodeUnitCount, CodeUnitOffset, MethodId, RegisterId, RegisterWordCount,
-    RequestError, RunContext,
+    RequestError, RunContext, TypeId,
 };
 
 /// One original operand reference with its table domain and slot.
@@ -149,6 +151,105 @@ impl DecodedItem {
     }
 }
 
+/// The method's checked incoming register layout: an optional `this` and one
+/// exact slot per declared parameter. P2 consumes this instead of inferring
+/// entry roles from `ins_size` or re-reading the declaration.
+#[derive(Clone, Debug)]
+pub struct EntryLayout {
+    this: Option<RegisterSlot>,
+    parameters: Vec<EntryParameter>,
+    incoming_start: RegisterId,
+}
+
+/// One checked method parameter and its original declaration type.
+#[derive(Clone, Debug)]
+pub struct EntryParameter {
+    type_id: TypeId,
+    slot: RegisterSlot,
+}
+
+impl EntryParameter {
+    pub(crate) fn new(type_id: TypeId, slot: RegisterSlot) -> Self {
+        Self { type_id, slot }
+    }
+
+    pub fn type_id(&self) -> TypeId {
+        self.type_id
+    }
+    pub fn slot(&self) -> RegisterSlot {
+        self.slot
+    }
+}
+
+impl EntryLayout {
+    pub(crate) fn new(
+        this: Option<RegisterSlot>,
+        parameters: Vec<EntryParameter>,
+        incoming_start: RegisterId,
+    ) -> Self {
+        Self {
+            this,
+            parameters,
+            incoming_start,
+        }
+    }
+
+    pub fn this(&self) -> Option<RegisterSlot> {
+        self.this
+    }
+    pub fn parameters(&self) -> &[EntryParameter] {
+        &self.parameters
+    }
+    /// First register word occupied by the incoming arguments.
+    pub fn incoming_start(&self) -> RegisterId {
+        self.incoming_start
+    }
+}
+
+/// P1's checked invoke word layout. `arguments` excludes the receiver and keeps
+/// the declared parameter order; a wide parameter is one Two-word entry.
+#[derive(Clone, Debug)]
+pub struct InvokeLayout {
+    receiver: bool,
+    arguments: Vec<SlotWidth>,
+    result: Option<SlotWidth>,
+}
+
+impl InvokeLayout {
+    pub(crate) fn new(
+        receiver: bool,
+        arguments: Vec<SlotWidth>,
+        result: Option<SlotWidth>,
+    ) -> Self {
+        Self {
+            receiver,
+            arguments,
+            result,
+        }
+    }
+
+    pub fn has_receiver(&self) -> bool {
+        self.receiver
+    }
+    pub fn arguments(&self) -> &[SlotWidth] {
+        &self.arguments
+    }
+    /// `None` for a void invoke; otherwise the width committed by move-result.
+    pub fn result(&self) -> Option<SlotWidth> {
+        self.result
+    }
+}
+
+pub(crate) struct DecodedFacts<'a> {
+    pub class_id: crate::ClassDefId,
+    pub declaration: crate::p0::MethodDeclaration,
+    pub access_flags: u32,
+    pub entry: EntryLayout,
+    pub annotations: crate::input::CheckedAnnotations,
+    pub metadata_issue: bool,
+    pub reference_facts: Vec<ReferenceFactEntry<'a>>,
+}
+
 /// P1's decoded original instruction directory. Every instruction the reader
 /// safely ranged is represented with its opcode, width, operands and reference
 /// domains. Branch, switch, handler and producer/result association is added by
@@ -161,6 +262,14 @@ pub struct DecodedMethod<'a> {
     /// One immutable item directory, shared by every product that retains the
     /// decoded facts. Cloning the product copies a handle, not the items.
     items: std::sync::Arc<Vec<DecodedItem>>,
+    class_id: crate::ClassDefId,
+    declaration: crate::p0::MethodDeclaration,
+    access_flags: u32,
+    entry: EntryLayout,
+    annotations: crate::input::CheckedAnnotations,
+    metadata_issue: bool,
+    /// Checked target declarations for every original operand reference.
+    reference_facts: std::sync::Arc<Vec<ReferenceFactEntry<'a>>>,
     registers_size: u16,
     ins_size: u16,
     outs_size: u16,
@@ -179,6 +288,57 @@ impl<'a> DecodedMethod<'a> {
     /// P1 structural checks over the original instruction directory.
     pub fn layout(&self) -> &CheckedMethodLayout<'a> {
         &self.layout
+    }
+    /// The original class definition this method belongs to.
+    pub fn class_id(&self) -> crate::ClassDefId {
+        self.class_id
+    }
+    /// The original P0 declaration retained for later declaration consumers.
+    pub fn declaration(&self) -> &crate::p0::MethodDeclaration {
+        &self.declaration
+    }
+    /// Checked method/parameter annotation ranges, independent of code.
+    pub fn annotations(&self) -> crate::input::CheckedAnnotations {
+        self.annotations
+    }
+    /// Whether the optional method/parameter annotation read was damaged.
+    pub fn metadata_issue(&self) -> bool {
+        self.metadata_issue
+    }
+    /// The original method access word.
+    pub fn access_flags(&self) -> u32 {
+        self.access_flags
+    }
+    /// Checked incoming register layout for `this` and every parameter.
+    pub fn entry(&self) -> &EntryLayout {
+        &self.entry
+    }
+    /// P1's checked invoke layout at `pc`, when that instruction is an invoke.
+    pub fn invoke_layout_at(&self, pc: CodeUnitOffset) -> Option<&InvokeLayout> {
+        self.layout.invoke_layout_at(pc)
+    }
+    /// All checked invoke layouts in original PC order.
+    pub fn invoke_layouts(&self) -> impl Iterator<Item = (CodeUnitOffset, &InvokeLayout)> + '_ {
+        self.layout.invoke_layouts()
+    }
+    /// Checked declaration facts for one original reference site.
+    pub fn reference_fact(
+        &self,
+        pc: CodeUnitOffset,
+        slot: ReferenceSlot,
+    ) -> Option<&CheckedReferenceFact<'a>> {
+        self.reference_facts
+            .binary_search_by(|entry| (entry.pc, entry.slot).cmp(&(pc, slot)))
+            .ok()
+            .map(|index| &self.reference_facts[index].fact)
+    }
+    /// All checked reference facts in original site order.
+    pub fn reference_facts(
+        &self,
+    ) -> impl Iterator<Item = (CodeUnitOffset, ReferenceSlot, &CheckedReferenceFact<'a>)> + '_ {
+        self.reference_facts
+            .iter()
+            .map(|entry| (entry.pc, entry.slot, &entry.fact))
     }
     pub fn is_reachable(&self, pc: CodeUnitOffset) -> bool {
         self.layout.is_reachable(pc)
@@ -415,6 +575,7 @@ impl<'a> ProgramIndex<'a> {
         layout: CheckedMethodLayout<'a>,
         protection: CheckedProtection,
         mut items: Vec<DecodedItem>,
+        facts: DecodedFacts<'a>,
     ) -> DecodedMethod<'a> {
         link_results(&mut items);
         DecodedMethod {
@@ -422,6 +583,13 @@ impl<'a> ProgramIndex<'a> {
             layout,
             protection,
             items: std::sync::Arc::new(items),
+            class_id: facts.class_id,
+            declaration: facts.declaration,
+            access_flags: facts.access_flags,
+            entry: facts.entry,
+            annotations: facts.annotations,
+            metadata_issue: facts.metadata_issue,
+            reference_facts: std::sync::Arc::new(facts.reference_facts),
             registers_size: source.registers_size(),
             ins_size: source.ins_size(),
             outs_size: source.outs_size(),
@@ -454,7 +622,7 @@ fn link_results(items: &mut [DecodedItem]) {
 
 /// Decoding scratch uses the method budget; only its control/allocation
 /// classification crosses into `MethodError`, whose variants stay owner-specific.
-fn scratch(error: RequestError) -> MethodError {
+pub(super) fn scratch(error: RequestError) -> MethodError {
     match error {
         RequestError::Control(error) => MethodError::Control(error),
         RequestError::Allocation(error) => MethodError::Allocation(error),

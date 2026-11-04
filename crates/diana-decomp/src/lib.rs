@@ -15,6 +15,7 @@ pub use input::annotation_facts::{
 pub use pipeline::request::RequestError;
 pub use substrate::fields::{FieldStorage, StaticFieldOrdinal};
 pub use substrate::report::{Diagnostic, DiagnosticCause, ImageFact, ImageOrigin};
+pub use substrate::slots::{RegisterSlot, SlotWidth};
 mod pipeline;
 
 mod substrate;

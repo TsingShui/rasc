@@ -494,10 +494,64 @@ impl Shell {
                         catch_targets.push(json!({"try_start": boundary, "clauses": clauses}));
                     }
                 }
+                let entry = decoded.entry();
+                let slot_json = |slot: diana_decomp::RegisterSlot| json!({"start": slot.start.0, "width": format!("{:?}", slot.width)});
+                let parameters = entry
+                    .parameters()
+                    .iter()
+                    .map(|parameter| {
+                        json!({
+                            "type_id": parameter.type_id().0,
+                            "slot": slot_json(parameter.slot()),
+                        })
+                    })
+                    .collect::<Vec<_>>();
+                let reference_facts = decoded
+                    .reference_facts()
+                    .map(|(pc, slot, fact)| {
+                        json!({
+                            "pc": pc.0,
+                            "slot": format!("{slot:?}"),
+                            "fact": format!("{fact:?}"),
+                        })
+                    })
+                    .collect::<Vec<_>>();
+                let invokes = decoded
+                    .invoke_layouts()
+                    .map(|(pc, layout)| {
+                        json!({
+                            "pc": pc.0,
+                            "receiver": layout.has_receiver(),
+                            "arguments": layout.arguments().iter()
+                                .map(|width| format!("{width:?}"))
+                                .collect::<Vec<_>>(),
+                            "result": layout.result().map(|width| format!("{width:?}")),
+                        })
+                    })
+                    .collect::<Vec<_>>();
                 Ok(json!({
                     "class_def": class,
                     "method": method,
                     "catch_targets": catch_targets,
+                    "class_id": decoded.class_id().0,
+                    "access_flags": decoded.access_flags(),
+                    "annotations": {
+                        "method": decoded.annotations().method_range().map(|range| format!("{range:?}")),
+                        "parameters": decoded.annotations().parameter_range().map(|range| format!("{range:?}")),
+                    },
+                    "metadata_issue": decoded.metadata_issue(),
+                    "declaration": {
+                        "name": decoded.declaration().name.to_string(),
+                        "prototype": decoded.declaration().prototype.to_string(),
+                        "parameter_type_ids": decoded.declaration().parameter_type_ids,
+                    },
+                    "entry": {
+                        "incoming_start": entry.incoming_start().0,
+                        "this": entry.this().map(slot_json),
+                        "parameters": parameters,
+                    },
+                    "invokes": invokes,
+                    "reference_facts": reference_facts,
                     "instruction_bytes": [
                         decoded.instruction_bytes().start.0,
                         decoded.instruction_bytes().end.0,

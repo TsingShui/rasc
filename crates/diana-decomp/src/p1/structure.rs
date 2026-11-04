@@ -2,6 +2,7 @@ use std::collections::TryReserveError;
 
 use thiserror::Error;
 
+use super::InvokeLayout;
 use super::binding::{ResultKind, check_producer};
 use crate::input::formats::{FlowKind, RegisterShape, RegisterWidth, ResultRole, wide_word};
 use crate::input::operands::{RawOperands, RegisterEncoding};
@@ -35,6 +36,7 @@ pub enum MethodProblem {
     InvalidResultEntry,
     InvalidExceptionEntry,
     InvalidFallthrough,
+    InvalidEntryLayout,
 }
 
 #[derive(Debug, Error)]
@@ -84,6 +86,12 @@ pub(super) fn bad(pc: CodeUnitOffset, problem: MethodProblem) -> MethodError {
     MethodError::Malformed { pc, problem }
 }
 
+#[derive(Clone, Debug)]
+struct InvokeFact {
+    pc: CodeUnitOffset,
+    layout: InvokeLayout,
+}
+
 /// Structural checks over all original words, including dead instructions.
 /// This also checks original debug addresses and local records. Declaration
 /// annotations, reference contents and register definition/type analysis retain
@@ -92,6 +100,7 @@ pub(super) fn bad(pc: CodeUnitOffset, problem: MethodProblem) -> MethodError {
 pub struct CheckedMethodLayout<'a> {
     original: RawMethodView<'a>,
     boundaries: Boundaries,
+    invokes: Vec<InvokeFact>,
 }
 
 impl<'a> CheckedMethodLayout<'a> {
@@ -101,6 +110,19 @@ impl<'a> CheckedMethodLayout<'a> {
 
     pub fn original(&self) -> &RawMethodView<'a> {
         &self.original
+    }
+
+    /// Checked invoke layout at `pc`, in original PC order.
+    pub fn invoke_layout_at(&self, pc: CodeUnitOffset) -> Option<&InvokeLayout> {
+        self.invokes
+            .binary_search_by_key(&pc, |fact| fact.pc)
+            .ok()
+            .map(|index| &self.invokes[index].layout)
+    }
+
+    /// All checked invoke layouts in original PC order.
+    pub fn invoke_layouts(&self) -> impl Iterator<Item = (CodeUnitOffset, &InvokeLayout)> + '_ {
+        self.invokes.iter().map(|fact| (fact.pc, &fact.layout))
     }
 
     /// Queries an original instruction boundary, not a semantic CFG leader.
@@ -150,6 +172,7 @@ impl<'a> ProgramIndex<'a> {
             original,
             items,
             boundaries,
+            invokes: Vec::new(),
         };
         checker.check_exceptions(budget)?;
         checker.check_instructions(self, budget)?;
@@ -158,6 +181,7 @@ impl<'a> ProgramIndex<'a> {
         Ok(CheckedMethodLayout {
             original: original.clone(),
             boundaries: checker.boundaries,
+            invokes: checker.invokes,
         })
     }
 
@@ -355,6 +379,7 @@ struct Checker<'m, 'a> {
     original: &'m RawMethodView<'a>,
     items: &'m [super::DecodedItem],
     boundaries: Boundaries,
+    invokes: Vec<InvokeFact>,
 }
 
 impl<'a> Checker<'_, 'a> {
@@ -526,7 +551,7 @@ impl<'a> Checker<'_, 'a> {
     }
 
     fn check_instructions(
-        &self,
+        &mut self,
         index: &ProgramIndex<'_>,
         budget: &mut RunContext<'_>,
     ) -> Result<(), MethodError> {
@@ -577,7 +602,22 @@ impl<'a> Checker<'_, 'a> {
                     }
                     _ => {}
                 }
-                previous = check_producer(index, pc, spec, layout, operands, budget)?;
+                let producer = check_producer(index, pc, spec, layout, operands, budget)?;
+                if let Some(invoke) = producer
+                    .as_ref()
+                    .and_then(|producer| producer.invoke.as_ref())
+                {
+                    crate::substrate::owned::push(
+                        &mut self.invokes,
+                        InvokeFact {
+                            pc,
+                            layout: invoke.clone(),
+                        },
+                        budget,
+                    )
+                    .map_err(super::disassembly::scratch)?;
+                }
+                previous = producer.map(|producer| producer.result);
             } else {
                 previous = None;
             }

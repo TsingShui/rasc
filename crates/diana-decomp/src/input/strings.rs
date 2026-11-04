@@ -1,15 +1,28 @@
+use std::fmt;
+
 use super::{Cursor, InputError, InputProblem, malformed};
 use crate::pipeline::control::InputControl;
 use crate::{ByteOffset, RunContext, Utf16Count, Utf16Offset};
 
 /// A validated, borrowed MUTF-8 string. Literal surrogate units remain intact;
 /// declaration names and descriptors undergo additional syntax checks.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy)]
 pub struct DexString<'a> {
     bytes: &'a [u8],
     start_byte: ByteOffset,
     end_byte: ByteOffset,
     utf16_len: Utf16Count,
+}
+
+impl fmt::Debug for DexString<'_> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("DexString")
+            .field("start_byte", &self.start_byte)
+            .field("end_byte", &self.end_byte)
+            .field("utf16_len", &self.utf16_len)
+            .finish()
+    }
 }
 
 impl<'a> DexString<'a> {
