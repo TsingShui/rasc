@@ -1,13 +1,13 @@
 use std::collections::TryReserveError;
-use std::collections::{BTreeMap, BTreeSet};
 
 use thiserror::Error;
 
+use super::transfer::*;
 use super::{
     ArrayAccess, BinaryForm, BinaryOp, Block, BlockId, BranchOp, CommitRule, CompareOp, Coverage,
-    Edge, EdgeId, EdgeRole, EdgeTarget, Effects, ExceptionSelection, Exit, ExitId, ExitKind,
-    FieldAccess, FlowMethod, InvokeKind, MoveKind, NormalEdge, OpId, OpKind, Operation, SlotSpan,
-    SwitchKind, Terminal, UnaryOp, ValueKind,
+    Edge, EdgeId, EdgeRole, EdgeTarget, Effects, Exit, ExitId, ExitKind, FieldAccess, FlowMethod,
+    InvokeKind, MoveKind, NormalEdge, OpId, OpKind, Operation, SlotSpan, SwitchKind, Terminal,
+    UnaryOp, ValueKind,
 };
 use crate::input::formats::FlowKind;
 use crate::p1::{DecodedInstruction, DecodedItem, DecodedMethod};
@@ -33,6 +33,11 @@ pub enum FlowError {
         opcode: u8,
         reason: &'static str,
     },
+    #[error("P2 correspondence failed at {pc:?}: {obligation}")]
+    Correspondence {
+        pc: CodeUnitOffset,
+        obligation: &'static str,
+    },
     #[error("BUG: {0}")]
     InternalInvariant(&'static str),
 }
@@ -43,7 +48,9 @@ impl FlowError {
             Self::Control(error) => error.kind(),
             Self::Allocation(_) | Self::PlatformCapacity => FailureKind::ResourceExhausted,
             Self::Unsupported { .. } => FailureKind::Unsupported,
-            Self::InternalInvariant(_) => FailureKind::InternalInvariant,
+            Self::InternalInvariant(_) | Self::Correspondence { .. } => {
+                FailureKind::InternalInvariant
+            }
         }
     }
 }
@@ -71,14 +78,10 @@ struct Atom {
 struct Builder<'a, 'd> {
     decoded: &'d DecodedMethod<'a>,
     instructions: Vec<&'d DecodedInstruction>,
-    instruction_by_pc: BTreeMap<CodeUnitOffset, usize>,
-    item_by_pc: BTreeMap<CodeUnitOffset, usize>,
     atoms: Vec<Atom>,
-    atom_by_pc: BTreeMap<CodeUnitOffset, usize>,
     slots: Vec<RegisterSlot>,
     operations: Vec<Operation>,
     blocks: Vec<Block>,
-    block_by_pc: BTreeMap<CodeUnitOffset, BlockId>,
     edges: Vec<Edge>,
     exits: Vec<Exit>,
     coverage: Vec<Coverage>,
@@ -93,15 +96,42 @@ struct FlowParts {
     coverage: Vec<Coverage>,
 }
 
-pub fn build_flow<'a>(
+pub(crate) enum FlowBuild<'a> {
+    Ready(FlowMethod<'a>),
+    Stopped(super::FlowStop<'a>),
+}
+
+pub(crate) fn build_flow<'a>(
+    _task: &crate::engine::MethodTask,
     decoded: DecodedMethod<'a>,
     control: &mut RunContext<'_>,
-) -> Result<FlowMethod<'a>, FlowError> {
-    let parts = {
-        let mut builder = Builder::new(&decoded)?;
-        builder.build(control)?;
-        builder.finish()
+) -> FlowBuild<'a> {
+    let mut builder = match Builder::new(&decoded, control) {
+        Ok(builder) => builder,
+        Err(error) => {
+            return FlowBuild::Stopped(super::FlowStop {
+                input: decoded,
+                error,
+                partial: None,
+            });
+        }
     };
+    let result = builder.build(control);
+    let parts = builder.finish();
+    if let Err(error) = result {
+        return FlowBuild::Stopped(super::FlowStop {
+            input: decoded,
+            error,
+            partial: Some(super::FlowPartial {
+                slots: parts.slots,
+                operations: parts.operations,
+                blocks: parts.blocks,
+                edges: parts.edges,
+                exits: parts.exits,
+                coverage: parts.coverage,
+            }),
+        });
+    }
     let flow = FlowMethod {
         decoded,
         slots: parts.slots,
@@ -111,69 +141,79 @@ pub fn build_flow<'a>(
         exits: parts.exits,
         coverage: parts.coverage,
     };
-    super::check::verify(&flow, control)?;
-    Ok(flow)
+    if let Err(error) = super::check::verify(&flow, control) {
+        return FlowBuild::Stopped(super::FlowStop {
+            input: flow.decoded,
+            error,
+            partial: Some(super::FlowPartial {
+                slots: flow.slots,
+                operations: flow.operations,
+                blocks: flow.blocks,
+                edges: flow.edges,
+                exits: flow.exits,
+                coverage: flow.coverage,
+            }),
+        });
+    }
+    FlowBuild::Ready(flow)
 }
 
 impl<'a, 'd> Builder<'a, 'd> {
-    fn new(decoded: &'d DecodedMethod<'a>) -> Result<Self, FlowError> {
-        let instructions: Vec<&DecodedInstruction> = decoded.instructions().collect();
-        let mut instruction_by_pc = BTreeMap::new();
-        for (index, instruction) in instructions.iter().enumerate() {
-            instruction_by_pc.insert(instruction.pc(), index);
+    fn new(
+        decoded: &'d DecodedMethod<'a>,
+        control: &mut RunContext<'_>,
+    ) -> Result<Self, FlowError> {
+        let mut instructions = Vec::new();
+        let mut coverage = Vec::new();
+        for item in decoded.items() {
+            control.checkpoint()?;
+            match item {
+                DecodedItem::Instruction(instruction) => {
+                    push(&mut instructions, instruction, control).map_err(request_error)?;
+                    push(&mut coverage, Coverage::Unreachable, control).map_err(request_error)?;
+                }
+                DecodedItem::Payload(_) => {
+                    push(&mut coverage, Coverage::Payload, control).map_err(request_error)?;
+                }
+            }
         }
-        let mut item_by_pc = BTreeMap::new();
-        for (index, item) in decoded.items().iter().enumerate() {
-            item_by_pc.insert(item.pc(), index);
-        }
-        let coverage = decoded
-            .items()
-            .iter()
-            .map(|item| match item {
-                DecodedItem::Instruction(_) => Coverage::Unreachable,
-                DecodedItem::Payload(_) => Coverage::Payload,
-            })
-            .collect();
         Ok(Self {
             decoded,
             instructions,
-            instruction_by_pc,
-            item_by_pc,
+            coverage,
             atoms: Vec::new(),
-            atom_by_pc: BTreeMap::new(),
             slots: Vec::new(),
             operations: Vec::new(),
             blocks: Vec::new(),
-            block_by_pc: BTreeMap::new(),
             edges: Vec::new(),
             exits: Vec::new(),
-            coverage,
         })
     }
 
     fn build(&mut self, control: &mut RunContext<'_>) -> Result<(), FlowError> {
-        self.build_atoms()?;
+        self.build_atoms(control)?;
         let leaders = self.leaders(control)?;
         self.build_blocks(&leaders, control)?;
         self.build_edges(control)?;
         Ok(())
     }
 
-    fn build_atoms(&mut self) -> Result<(), FlowError> {
+    fn build_atoms(&mut self, control: &mut RunContext<'_>) -> Result<(), FlowError> {
         for (index, instruction) in self.instructions.iter().enumerate() {
+            control.checkpoint()?;
             if matches!(instruction.opcode(), 0x0a..=0x0c) {
                 let producer_pc = instruction
                     .producer_pc()
                     .ok_or(internal("move-result has no checked producer"))?;
-                let producer = *self
-                    .instruction_by_pc
-                    .get(&producer_pc)
-                    .ok_or(internal("move-result producer is not an instruction"))?;
                 let atom = self
-                    .atom_by_pc
-                    .get(&producer_pc)
-                    .copied()
-                    .ok_or(internal("move-result producer has no atom"))?;
+                    .atoms
+                    .len()
+                    .checked_sub(1)
+                    .ok_or(internal("result has no preceding atom"))?;
+                let producer = self.atoms[atom].producer;
+                if self.instructions[producer].pc() != producer_pc {
+                    return Err(internal("result does not follow its original producer"));
+                }
                 if self.atoms[atom].result.is_some() {
                     return Err(internal("producer has two move-result atoms"));
                 }
@@ -187,14 +227,18 @@ impl<'a, 'd> Builder<'a, 'd> {
             if instruction.producer_pc().is_some() {
                 return Err(internal("non-result instruction names a producer"));
             }
-            let atom = self.atoms.len();
-            self.atoms.push(Atom {
-                producer: index,
-                result: None,
-            });
-            self.atom_by_pc.insert(instruction.pc(), atom);
+            push(
+                &mut self.atoms,
+                Atom {
+                    producer: index,
+                    result: None,
+                },
+                control,
+            )
+            .map_err(request_error)?;
         }
         for atom in &self.atoms {
+            control.checkpoint()?;
             let producer = self.instructions[atom.producer];
             if producer.result_pc().is_some() != atom.result.is_some() {
                 return Err(internal("P1 producer/result association is incomplete"));
@@ -203,38 +247,36 @@ impl<'a, 'd> Builder<'a, 'd> {
         Ok(())
     }
 
-    fn leaders(
-        &mut self,
-        control: &mut RunContext<'_>,
-    ) -> Result<BTreeSet<CodeUnitOffset>, FlowError> {
-        let mut leaders = BTreeSet::new();
+    fn leaders(&mut self, control: &mut RunContext<'_>) -> Result<Vec<CodeUnitOffset>, FlowError> {
+        let mut leaders = Vec::new();
         if self.decoded.is_reachable(CodeUnitOffset(0)) {
-            leaders.insert(CodeUnitOffset(0));
+            push(&mut leaders, CodeUnitOffset(0), control).map_err(request_error)?;
         }
         for target in self.decoded.handler_targets() {
+            control.checkpoint()?;
             let target = CodeUnitOffset(target);
             if self.decoded.is_reachable(target) {
-                leaders.insert(target);
+                push(&mut leaders, target, control).map_err(request_error)?;
             }
         }
         for instruction in &self.instructions {
+            control.checkpoint()?;
             let pc = instruction.pc();
             if !self.decoded.is_reachable(pc) {
                 continue;
             }
-            control.checkpoint()?;
             match instruction.spec().flow {
                 FlowKind::Goto | FlowKind::Conditional => {
                     if let Some(target) = instruction.branch_target()
                         && self.decoded.is_reachable(target)
                     {
-                        leaders.insert(target);
+                        push(&mut leaders, target, control).map_err(request_error)?;
                     }
                 }
                 FlowKind::PackedSwitch | FlowKind::SparseSwitch => {
                     for (_, target) in self.switch_cases(instruction, control)? {
                         if self.decoded.is_reachable(target) {
-                            leaders.insert(target);
+                            push(&mut leaders, target, control).map_err(request_error)?;
                         }
                     }
                 }
@@ -246,10 +288,21 @@ impl<'a, 'd> Builder<'a, 'd> {
             ) && let Some(next) = pc.checked_advance(instruction.width())
                 && self.decoded.is_reachable(next)
             {
-                leaders.insert(next);
+                push(&mut leaders, next, control).map_err(request_error)?;
             }
         }
+        super::scratch::sort_by_key(&mut leaders, |pc| *pc, control)?;
+        let mut unique = 0;
+        for index in 0..leaders.len() {
+            control.checkpoint()?;
+            if unique == 0 || leaders[unique - 1] != leaders[index] {
+                leaders[unique] = leaders[index];
+                unique += 1;
+            }
+        }
+        leaders.truncate(unique);
         for leader in &leaders {
+            control.checkpoint()?;
             if self
                 .instruction_at(*leader)
                 .is_some_and(|instruction| matches!(instruction.opcode(), 0x0a..=0x0c))
@@ -262,37 +315,39 @@ impl<'a, 'd> Builder<'a, 'd> {
 
     fn build_blocks(
         &mut self,
-        leaders: &BTreeSet<CodeUnitOffset>,
+        leaders: &[CodeUnitOffset],
         control: &mut RunContext<'_>,
     ) -> Result<(), FlowError> {
         let mut current: Option<usize> = None;
         for atom_index in 0..self.atoms.len() {
+            control.checkpoint()?;
             let atom = self.atoms[atom_index];
             let producer = self.instructions[atom.producer];
             let pc = producer.pc();
             if !self.decoded.is_reachable(pc) {
                 continue;
             }
-            control.checkpoint()?;
-            let starts_block = leaders.contains(&pc) || current.is_none();
+            let starts_block = leaders.binary_search(&pc).is_ok() || current.is_none();
             if starts_block {
-                if self.block_by_pc.contains_key(&pc) {
-                    return Err(internal("two blocks start at the same pc"));
-                }
                 let block_index = self.blocks.len();
                 let block_id =
                     BlockId(u32::try_from(block_index).map_err(|_| FlowError::PlatformCapacity)?);
                 let operation_start = u32::try_from(self.operations.len())
                     .map_err(|_| FlowError::PlatformCapacity)?;
-                self.blocks.push(Block {
-                    id: block_id,
-                    start_pc: pc,
-                    operations: operation_start..operation_start,
-                    terminal: None,
-                    terminal_pc: None,
-                    terminal_reads: SlotSpan::new(0, 0),
-                });
-                self.block_by_pc.insert(pc, block_id);
+                push(
+                    &mut self.blocks,
+                    Block {
+                        id: block_id,
+                        start_pc: pc,
+                        operations: operation_start..operation_start,
+                        terminal: None,
+                        terminal_pc: None,
+                        exceptional: None,
+                        terminal_reads: SlotSpan::new(0, 0),
+                    },
+                    control,
+                )
+                .map_err(request_error)?;
                 current = Some(block_index);
             }
             let block_index = current.ok_or(internal("reachable atom has no block"))?;
@@ -313,15 +368,23 @@ impl<'a, 'd> Builder<'a, 'd> {
                 let block_id = self.blocks[block_index].id;
                 self.blocks[block_index].terminal = Some(terminal);
                 self.blocks[block_index].terminal_pc = Some(pc);
+                if producer.opcode() == 0x27 {
+                    self.blocks[block_index].exceptional = Some(ExceptionCompletion {
+                        throw_pc: pc,
+                        selection_pc: pc,
+                        frame: ExceptionFrame::PreserveBeforeOperation,
+                        heap: HeapTransfer::Preserve,
+                        lock: LockTransfer::Preserve,
+                    });
+                }
                 self.blocks[block_index].set_terminal_reads(reads);
                 let item = self.item_index(pc)?;
                 self.coverage[item] = Coverage::Terminal(block_id);
             } else {
                 let operation = self.operation(&atom, producer, block_index, control)?;
                 let id = operation.id;
-                let block_id = operation.block;
                 let start = self.blocks[block_index].operations.start;
-                self.operations.push(operation);
+                push(&mut self.operations, operation, control).map_err(request_error)?;
                 let end = u32::try_from(self.operations.len())
                     .map_err(|_| FlowError::PlatformCapacity)?;
                 self.blocks[block_index].operations = start..end;
@@ -332,9 +395,7 @@ impl<'a, 'd> Builder<'a, 'd> {
                     let result_item = self.item_index(result_pc)?;
                     self.coverage[result_item] = Coverage::MergedResult(id);
                 }
-                let _ = block_id;
             }
-            let _ = atom_index;
         }
         // After a terminal or before a leader, the next atom must start a block.
         Ok(())
@@ -441,7 +502,7 @@ impl<'a, 'd> Builder<'a, 'd> {
                     OpKind::ConstClass { type_id },
                     self.empty_span(),
                     writes,
-                    Effects::MAY_THROW.with(Effects::CLASS_INIT),
+                    Effects::MAY_THROW,
                     CommitRule::AtOperation,
                     None,
                 )
@@ -552,7 +613,9 @@ impl<'a, 'd> Builder<'a, 'd> {
                     OpKind::FilledNewArray { type_id },
                     reads,
                     self.empty_span(),
-                    Effects::MAY_THROW.with(Effects::ALLOCATION),
+                    Effects::MAY_THROW
+                        .with(Effects::ALLOCATION)
+                        .with(Effects::HEAP_WRITE),
                     CommitRule::None,
                     None,
                 )
@@ -606,17 +669,27 @@ impl<'a, 'd> Builder<'a, 'd> {
             }
             0x44..=0x51 => {
                 let (dest, array, index) = self.three_regs(instruction)?;
-                let get = opcode < 0x4c;
+                let get = matches!(opcode, 0x44..=0x4a);
                 let kind = self.array_kind(opcode);
                 let width = kind.width();
-                let mut reads = vec![
-                    RegisterSlot::new(array, SlotWidth::One),
-                    RegisterSlot::new(index, SlotWidth::One),
-                ];
-                if !get {
-                    reads.insert(0, RegisterSlot::new(dest, width));
-                }
-                let reads = self.slots_vec(reads, control)?;
+                let reads = if get {
+                    self.slots_for(
+                        [
+                            RegisterSlot::new(array, SlotWidth::One),
+                            RegisterSlot::new(index, SlotWidth::One),
+                        ],
+                        control,
+                    )?
+                } else {
+                    self.slots_for(
+                        [
+                            RegisterSlot::new(dest, width),
+                            RegisterSlot::new(array, SlotWidth::One),
+                            RegisterSlot::new(index, SlotWidth::One),
+                        ],
+                        control,
+                    )?
+                };
                 let writes = if get {
                     self.slots_for([RegisterSlot::new(dest, width)], control)?
                 } else {
@@ -633,9 +706,11 @@ impl<'a, 'd> Builder<'a, 'd> {
                     },
                     reads,
                     writes,
-                    Effects::MAY_THROW
-                        .with(Effects::HEAP_READ)
-                        .with(Effects::HEAP_WRITE),
+                    Effects::MAY_THROW.with(if get {
+                        Effects::HEAP_READ
+                    } else {
+                        Effects::HEAP_WRITE
+                    }),
                     if get {
                         CommitRule::AtOperation
                     } else {
@@ -659,12 +734,16 @@ impl<'a, 'd> Builder<'a, 'd> {
                 let width = kind.width();
                 let mut reads = Vec::new();
                 if !static_field {
-                    reads.push(RegisterSlot::new(
-                        self.register(instruction, 1)?,
-                        SlotWidth::One,
-                    ));
+                    push(
+                        &mut reads,
+                        RegisterSlot::new(self.register(instruction, 1)?, SlotWidth::One),
+                        control,
+                    )
+                    .map_err(request_error)?;
                 }
                 if !get {
+                    crate::substrate::owned::reserve(&mut reads, 1, control)
+                        .map_err(request_error)?;
                     reads.insert(0, RegisterSlot::new(dest, width));
                 }
                 let reads = self.slots_vec(reads, control)?;
@@ -673,9 +752,11 @@ impl<'a, 'd> Builder<'a, 'd> {
                 } else {
                     self.empty_span()
                 };
-                let mut effects = Effects::MAY_THROW
-                    .with(Effects::HEAP_READ)
-                    .with(Effects::HEAP_WRITE);
+                let mut effects = Effects::MAY_THROW.with(if get {
+                    Effects::HEAP_READ
+                } else {
+                    Effects::HEAP_WRITE
+                });
                 if static_field {
                     effects = effects.with(Effects::CLASS_INIT);
                 }
@@ -710,6 +791,18 @@ impl<'a, 'd> Builder<'a, 'd> {
                     _ => return Err(internal("invoke has no checked target reference")),
                 };
                 let kind = self.invoke_kind(opcode);
+                let prototype = if kind == InvokeKind::Polymorphic {
+                    match instruction
+                        .references()
+                        .find(|reference| reference.slot == crate::raw::ReferenceSlot::Second)
+                        .map(|reference| reference.target)
+                    {
+                        Some(OperandReference::Proto(id)) => Some(id),
+                        _ => return Err(internal("polymorphic call has no checked prototype")),
+                    }
+                } else {
+                    None
+                };
                 let layout = self
                     .decoded
                     .invoke_layout_at(pc)
@@ -720,6 +813,7 @@ impl<'a, 'd> Builder<'a, 'd> {
                     OpKind::Invoke {
                         kind,
                         target,
+                        prototype,
                         result,
                     },
                     reads,
@@ -900,6 +994,45 @@ impl<'a, 'd> Builder<'a, 'd> {
         } else {
             CommitRule::AtOperation
         };
+        let commit_pc = match commit {
+            CommitRule::None => None,
+            CommitRule::AtOperation => Some(pc),
+            CommitRule::AfterResult => result_pc,
+        };
+        let heap = if effects.contains(Effects::HEAP_WRITE)
+            || effects.contains(Effects::ALLOCATION)
+            || effects.contains(Effects::CLASS_INIT)
+            || effects.contains(Effects::MONITOR)
+        {
+            HeapTransfer::EventOutcome
+        } else {
+            HeapTransfer::Preserve
+        };
+        let lock = match kind {
+            OpKind::Monitor { enter: true } => LockTransfer::Acquire,
+            OpKind::Monitor { enter: false } => LockTransfer::Release,
+            _ => LockTransfer::Preserve,
+        };
+        let exceptional = if effects.may_throw() {
+            Some(ExceptionCompletion {
+                throw_pc: pc,
+                selection_pc: if opcode == 0x1e {
+                    pc.checked_advance(instruction.width())
+                        .ok_or(FlowError::PlatformCapacity)?
+                } else {
+                    pc
+                },
+                frame: ExceptionFrame::PreserveBeforeOperation,
+                heap,
+                lock: if opcode == 0x1e {
+                    LockTransfer::ReleaseOutcome
+                } else {
+                    LockTransfer::Preserve
+                },
+            })
+        } else {
+            None
+        };
         Ok(Operation {
             id,
             block,
@@ -909,12 +1042,14 @@ impl<'a, 'd> Builder<'a, 'd> {
             reads,
             writes,
             effects,
-            commit,
-            exception_selection: if opcode == 0x1e {
-                ExceptionSelection::Advanced
-            } else {
-                ExceptionSelection::Operation
+            normal: NormalCompletion {
+                reads: ReadOrder::CaptureAllBeforeCommit,
+                commit,
+                commit_pc,
+                heap,
+                lock,
             },
+            exceptional,
         })
     }
 
@@ -942,10 +1077,12 @@ impl<'a, 'd> Builder<'a, 'd> {
                 let count = if instruction.opcode() < 0x38 { 2 } else { 1 };
                 let mut slots = Vec::new();
                 for index in 0..count {
-                    slots.push(RegisterSlot::new(
-                        self.register(instruction, index)?,
-                        SlotWidth::One,
-                    ));
+                    push(
+                        &mut slots,
+                        RegisterSlot::new(self.register(instruction, index)?, SlotWidth::One),
+                        control,
+                    )
+                    .map_err(request_error)?;
                 }
                 let fallthrough = pc
                     .checked_advance(instruction.width())
@@ -1014,81 +1151,74 @@ impl<'a, 'd> Builder<'a, 'd> {
     }
 
     fn build_edges(&mut self, control: &mut RunContext<'_>) -> Result<(), FlowError> {
-        let block_count = self.blocks.len();
-        for index in 0..block_count {
+        for index in 0..self.blocks.len() {
             control.checkpoint()?;
-            let block = self.blocks[index].clone();
-            if let Some(terminal) = &block.terminal {
-                match terminal {
-                    Terminal::Goto { target } => {
-                        let target = self.block_at_pc(*target)?;
-                        self.normal_edge(block.id, NormalEdge::Goto, target)?;
-                    }
-                    Terminal::Branch {
-                        target,
-                        fallthrough,
-                        ..
-                    } => {
-                        let target_block = self.block_at_pc(*target)?;
-                        self.normal_edge(block.id, NormalEdge::ConditionalTrue, target_block)?;
-                        let fallthrough = self.block_at_pc(*fallthrough)?;
-                        self.normal_edge(block.id, NormalEdge::ConditionalFalse, fallthrough)?;
-                    }
-                    Terminal::Switch { default, cases, .. } => {
-                        let default_block = self.block_at_pc(*default)?;
-                        self.normal_edge(block.id, NormalEdge::SwitchDefault, default_block)?;
-                        for (index, (key, target)) in cases.iter().enumerate() {
-                            let target_block = self.block_at_pc(*target)?;
-                            self.normal_edge(
-                                block.id,
-                                NormalEdge::SwitchCase {
-                                    key: *key,
-                                    index: u32::try_from(index)
-                                        .map_err(|_| FlowError::PlatformCapacity)?,
-                                },
-                                target_block,
-                            )?;
-                        }
-                    }
-                    Terminal::Return { pc, .. } => {
-                        self.exit(block.id, *pc, ExitKind::Return)?;
-                    }
-                    Terminal::Throw { pc } => {
-                        self.exception_edges(block.id, None, *pc, *pc, control)?;
+            let id = self.blocks[index].id;
+            match &self.blocks[index].terminal {
+                Some(Terminal::Goto { target }) => {
+                    self.normal_edge(id, NormalEdge::Goto, self.block_at_pc(*target)?, control)?;
+                }
+                Some(Terminal::Branch {
+                    target,
+                    fallthrough,
+                    ..
+                }) => {
+                    let target = self.block_at_pc(*target)?;
+                    let fallthrough = self.block_at_pc(*fallthrough)?;
+                    self.normal_edge(id, NormalEdge::ConditionalTrue, target, control)?;
+                    self.normal_edge(id, NormalEdge::ConditionalFalse, fallthrough, control)?;
+                }
+                Some(Terminal::Switch { default, cases, .. }) => {
+                    let default = self.block_at_pc(*default)?;
+                    let count = cases.len();
+                    self.normal_edge(id, NormalEdge::SwitchDefault, default, control)?;
+                    for ordinal in 0..count {
+                        control.checkpoint()?;
+                        let Some(Terminal::Switch { cases, .. }) = &self.blocks[index].terminal
+                        else {
+                            return Err(internal("switch terminal changed while building edges"));
+                        };
+                        let (key, target) = cases[ordinal];
+                        let target = self.block_at_pc(target)?;
+                        let case_index =
+                            u32::try_from(ordinal).map_err(|_| FlowError::PlatformCapacity)?;
+                        self.normal_edge(
+                            id,
+                            NormalEdge::SwitchCase {
+                                key,
+                                index: case_index,
+                            },
+                            target,
+                            control,
+                        )?;
                     }
                 }
+                Some(Terminal::Return { pc, .. }) => {
+                    self.exit(id, *pc, ExitKind::Return, control)?;
+                }
+                Some(Terminal::Throw { pc }) => {
+                    self.exception_edges(id, None, *pc, *pc, control)?;
+                }
+                None => {
+                    let target = self.next_block(&self.blocks[index])?;
+                    self.normal_edge(id, NormalEdge::Fallthrough, target, control)?;
+                }
+            }
+        }
+        for index in 0..self.operations.len() {
+            control.checkpoint()?;
+            let operation = &self.operations[index];
+            if !operation.effects.may_throw() {
                 continue;
             }
-            let next = self.next_block(&block)?;
-            self.normal_edge(block.id, NormalEdge::Fallthrough, next)?;
-        }
-        // Every may-throw operation gets its own ordered exception exits.
-        for block in self.blocks.clone() {
-            for operation_index in block.operations.clone() {
-                let operation = &self.operations[operation_index as usize];
-                if !operation.effects.may_throw() {
-                    continue;
-                }
-                let selection = match operation.exception_selection {
-                    ExceptionSelection::Operation => operation.pc,
-                    ExceptionSelection::Advanced => {
-                        let instruction = self
-                            .instruction_at(operation.pc)
-                            .ok_or(internal("throwing operation has no instruction"))?;
-                        operation
-                            .pc
-                            .checked_advance(instruction.width())
-                            .ok_or(FlowError::PlatformCapacity)?
-                    }
-                };
-                self.exception_edges(
-                    block.id,
-                    Some(operation.id),
-                    operation.pc,
-                    selection,
-                    control,
-                )?;
-            }
+            let pc = operation.pc;
+            let id = operation.id;
+            let block = operation.block;
+            let selection = operation
+                .exceptional
+                .ok_or(internal("throwing operation lacks transfer"))?
+                .selection_pc;
+            self.exception_edges(block, Some(id), pc, selection, control)?;
         }
         Ok(())
     }
@@ -1106,19 +1236,22 @@ impl<'a, 'd> Builder<'a, 'd> {
             .catch_clauses_at(selection_pc, control)
             .map_err(request_error)?;
         if clauses.is_empty() {
-            let exit = self.exit(block, throw_pc, ExitKind::Uncaught)?;
-            self.push_edge(Edge {
-                id: self.next_edge_id()?,
-                from: block,
-                source_op,
-                role: EdgeRole::Exception {
-                    throw_pc,
-                    selection_pc,
-                    order: 0,
-                    catch: None,
+            let exit = self.exit(block, throw_pc, ExitKind::Uncaught, control)?;
+            self.push_edge(
+                Edge {
+                    id: self.next_edge_id()?,
+                    from: block,
+                    source_op,
+                    role: EdgeRole::Exception {
+                        throw_pc,
+                        selection_pc,
+                        order: 0,
+                        catch: None,
+                    },
+                    target: EdgeTarget::Exit(exit),
                 },
-                target: EdgeTarget::Exit(exit),
-            })?;
+                control,
+            )?;
             return Ok(());
         }
         let clause_count = clauses.len();
@@ -1129,33 +1262,40 @@ impl<'a, 'd> Builder<'a, 'd> {
                 has_catch_all = true;
             }
             let target = self.block_at_pc(CodeUnitOffset(target))?;
-            self.push_edge(Edge {
-                id: self.next_edge_id()?,
-                from: block,
-                source_op,
-                role: EdgeRole::Exception {
-                    throw_pc,
-                    selection_pc,
-                    order: u32::try_from(order).map_err(|_| FlowError::PlatformCapacity)?,
-                    catch: catch.map(TypeId),
+            self.push_edge(
+                Edge {
+                    id: self.next_edge_id()?,
+                    from: block,
+                    source_op,
+                    role: EdgeRole::Exception {
+                        throw_pc,
+                        selection_pc,
+                        order: u32::try_from(order).map_err(|_| FlowError::PlatformCapacity)?,
+                        catch: catch.map(TypeId),
+                    },
+                    target: EdgeTarget::Block(target),
                 },
-                target: EdgeTarget::Block(target),
-            })?;
+                control,
+            )?;
         }
         if !has_catch_all {
-            let exit = self.exit(block, throw_pc, ExitKind::Uncaught)?;
-            self.push_edge(Edge {
-                id: self.next_edge_id()?,
-                from: block,
-                source_op,
-                role: EdgeRole::Exception {
-                    throw_pc,
-                    selection_pc,
-                    order: u32::try_from(clause_count).map_err(|_| FlowError::PlatformCapacity)?,
-                    catch: None,
+            let exit = self.exit(block, throw_pc, ExitKind::Uncaught, control)?;
+            self.push_edge(
+                Edge {
+                    id: self.next_edge_id()?,
+                    from: block,
+                    source_op,
+                    role: EdgeRole::Exception {
+                        throw_pc,
+                        selection_pc,
+                        order: u32::try_from(clause_count)
+                            .map_err(|_| FlowError::PlatformCapacity)?,
+                        catch: None,
+                    },
+                    target: EdgeTarget::Exit(exit),
                 },
-                target: EdgeTarget::Exit(exit),
-            })?;
+                control,
+            )?;
         }
         Ok(())
     }
@@ -1165,14 +1305,18 @@ impl<'a, 'd> Builder<'a, 'd> {
         from: BlockId,
         role: NormalEdge,
         target: BlockId,
+        control: &mut RunContext<'_>,
     ) -> Result<(), FlowError> {
-        self.push_edge(Edge {
-            id: self.next_edge_id()?,
-            from,
-            source_op: None,
-            role: EdgeRole::Normal(role),
-            target: EdgeTarget::Block(target),
-        })
+        self.push_edge(
+            Edge {
+                id: self.next_edge_id()?,
+                from,
+                source_op: None,
+                role: EdgeRole::Normal(role),
+                target: EdgeTarget::Block(target),
+            },
+            control,
+        )
     }
 
     fn exit(
@@ -1180,21 +1324,25 @@ impl<'a, 'd> Builder<'a, 'd> {
         block: BlockId,
         pc: CodeUnitOffset,
         kind: ExitKind,
+        control: &mut RunContext<'_>,
     ) -> Result<ExitId, FlowError> {
         let id = ExitId(u32::try_from(self.exits.len()).map_err(|_| FlowError::PlatformCapacity)?);
-        self.exits.push(Exit {
-            id,
-            block,
-            pc,
-            kind,
-        });
+        push(
+            &mut self.exits,
+            Exit {
+                id,
+                block,
+                pc,
+                kind,
+            },
+            control,
+        )
+        .map_err(request_error)?;
         Ok(id)
     }
 
-    fn push_edge(&mut self, edge: Edge) -> Result<(), FlowError> {
-        self.edges.try_reserve(1).map_err(FlowError::Allocation)?;
-        self.edges.push(edge);
-        Ok(())
+    fn push_edge(&mut self, edge: Edge, control: &mut RunContext<'_>) -> Result<(), FlowError> {
+        push(&mut self.edges, edge, control).map_err(request_error)
     }
 
     fn next_edge_id(&self) -> Result<EdgeId, FlowError> {
@@ -1222,10 +1370,10 @@ impl<'a, 'd> Builder<'a, 'd> {
         self.block_at_pc(pc)
     }
     fn block_at_pc(&self, pc: CodeUnitOffset) -> Result<BlockId, FlowError> {
-        self.block_by_pc
-            .get(&pc)
-            .copied()
-            .ok_or(internal("checked target has no block"))
+        self.blocks
+            .binary_search_by_key(&pc, |block| block.start_pc)
+            .map(|index| self.blocks[index].id)
+            .map_err(|_| internal("checked target has no block"))
     }
 
     fn switch_cases(
@@ -1236,11 +1384,10 @@ impl<'a, 'd> Builder<'a, 'd> {
         let payload_pc = instruction
             .payload_target()
             .ok_or(internal("switch has no checked payload"))?;
-        let payload = self
-            .decoded
-            .payloads()
-            .find(|payload| payload.pc() == payload_pc)
-            .ok_or(internal("switch payload is not in the P1 directory"))?;
+        let index = self.item_index(payload_pc)?;
+        let DecodedItem::Payload(payload) = &self.decoded.items()[index] else {
+            return Err(internal("switch target is not a P1 payload"));
+        };
         let cases = payload
             .switch_cases(self.decoded.source())
             .map_err(request_error)?
@@ -1263,14 +1410,15 @@ impl<'a, 'd> Builder<'a, 'd> {
     }
 
     fn item_index(&self, pc: CodeUnitOffset) -> Result<usize, FlowError> {
-        self.item_by_pc
-            .get(&pc)
-            .copied()
-            .ok_or(internal("coverage pc is not a P1 item"))
+        self.decoded
+            .items()
+            .binary_search_by_key(&pc, DecodedItem::pc)
+            .map_err(|_| internal("coverage pc is not a P1 item"))
     }
 
     fn empty_span(&self) -> SlotSpan {
-        SlotSpan::new(u32::try_from(self.slots.len()).unwrap_or(u32::MAX), 0)
+        // Empty spans need no arena address. Nonempty spans use checked IDs.
+        SlotSpan::new(0, 0)
     }
 
     fn slots_for<const N: usize>(
@@ -1280,6 +1428,7 @@ impl<'a, 'd> Builder<'a, 'd> {
     ) -> Result<SlotSpan, FlowError> {
         let start = u32::try_from(self.slots.len()).map_err(|_| FlowError::PlatformCapacity)?;
         for slot in slots {
+            control.checkpoint()?;
             push(&mut self.slots, slot, control).map_err(request_error)?;
         }
         let len = u32::try_from(self.slots.len())
@@ -1296,6 +1445,7 @@ impl<'a, 'd> Builder<'a, 'd> {
     ) -> Result<SlotSpan, FlowError> {
         let start = u32::try_from(self.slots.len()).map_err(|_| FlowError::PlatformCapacity)?;
         for slot in slots {
+            control.checkpoint()?;
             push(&mut self.slots, slot, control).map_err(request_error)?;
         }
         let len = u32::try_from(self.slots.len())
@@ -1370,11 +1520,14 @@ impl<'a, 'd> Builder<'a, 'd> {
         width: SlotWidth,
         control: &mut RunContext<'_>,
     ) -> Result<SlotSpan, FlowError> {
-        let slots: Vec<RegisterSlot> = instruction
-            .registers()
-            .map(|register| RegisterSlot::new(register, width))
-            .collect();
-        self.slots_vec(slots, control)
+        let start = u32::try_from(self.slots.len()).map_err(|_| FlowError::PlatformCapacity)?;
+        for register in instruction.registers() {
+            control.checkpoint()?;
+            push(&mut self.slots, RegisterSlot::new(register, width), control)
+                .map_err(request_error)?;
+        }
+        let end = u32::try_from(self.slots.len()).map_err(|_| FlowError::PlatformCapacity)?;
+        Ok(SlotSpan::new(start, end - start))
     }
 
     fn invoke_reads(
@@ -1386,17 +1539,24 @@ impl<'a, 'd> Builder<'a, 'd> {
         let mut regs = instruction.registers();
         let mut slots = Vec::new();
         if layout.has_receiver() {
-            slots.push(RegisterSlot::new(
-                regs.next()
-                    .ok_or(internal("invoke lost its checked receiver"))?,
-                SlotWidth::One,
-            ));
+            push(
+                &mut slots,
+                RegisterSlot::new(
+                    regs.next()
+                        .ok_or(internal("invoke lost its checked receiver"))?,
+                    SlotWidth::One,
+                ),
+                control,
+            )
+            .map_err(request_error)?;
         }
         for width in layout.arguments() {
+            control.checkpoint()?;
             let register = regs
                 .next()
                 .ok_or(internal("invoke lost a checked argument"))?;
-            slots.push(RegisterSlot::new(register, *width));
+            push(&mut slots, RegisterSlot::new(register, *width), control)
+                .map_err(request_error)?;
             if *width == SlotWidth::Two {
                 let second = regs
                     .next()

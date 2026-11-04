@@ -361,18 +361,16 @@ impl<'a> DecodedMethod<'a> {
         let Some(clauses) = self.protection.at(pc, budget)? else {
             return Ok(Vec::new());
         };
-        Ok(clauses
-            .iter()
-            .map(|clause| {
-                (
-                    match clause.kind {
-                        crate::input::protection::CatchType::Typed(id) => Some(id.0),
-                        crate::input::protection::CatchType::All => None,
-                    },
-                    clause.target.0,
-                )
-            })
-            .collect())
+        let mut result = Vec::new();
+        for clause in clauses {
+            budget.checkpoint()?;
+            let kind = match clause.kind {
+                crate::input::protection::CatchType::Typed(id) => Some(id.0),
+                crate::input::protection::CatchType::All => None,
+            };
+            push(&mut result, (kind, clause.target.0), budget)?;
+        }
+        Ok(result)
     }
     pub fn method_id(&self) -> MethodId {
         self.source.method_id

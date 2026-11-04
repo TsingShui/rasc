@@ -10,7 +10,7 @@ use std::collections::BTreeMap;
 use std::io::{BufRead, Write};
 use std::path::PathBuf;
 
-use diana_decomp::input::{ProgramIndex, RawPrintable};
+use diana_decomp::input::ProgramIndex;
 use diana_decomp::p1::{DecodedInstruction, DecodedItem, DecodedPayload};
 use diana_decomp::raw::{Format as DexFormat, RawLiteral, ReferenceSlot};
 use diana_decomp::{
@@ -195,49 +195,36 @@ impl Shell {
                 let mut skipped_formats: BTreeMap<String, u64> = BTreeMap::new();
                 for class in 0..classes {
                     control.checkpoint()?;
-                    let facts = match diana_decomp::p0::collect(
-                        &index,
-                        ClassKey {
-                            dex: DexId(0),
-                            class_def: ClassDefId(class),
+                    let analysis = match engine.analyze(
+                        Request {
+                            class: class_key(class),
+                            method: None,
                         },
                         &mut control,
                     ) {
-                        Ok(facts) => facts,
+                        Ok(analysis) => analysis,
                         Err(error) if error.kind() == FailureKind::Cancelled => return Err(error),
                         Err(_) => {
                             class_errors += 1;
                             continue;
                         }
                     };
-                    let base = facts.descriptor().units();
-                    let _ = base;
-                    for entry in facts.methods() {
+                    for entry in &analysis.methods {
                         control.checkpoint()?;
                         methods += 1;
-                        let method = entry.method();
-                        let source = match index.method_source(&facts, method, &mut control) {
-                            Ok(source) => source,
+                        let method = entry.key.method;
+                        let outcome = match &entry.result {
+                            Ok(outcome) => outcome,
                             Err(_) => {
                                 method_errors += 1;
                                 continue;
                             }
                         };
-                        if matches!(source.raw(), RawPrintable::Declaration) {
+                        if matches!(outcome, MethodOutcome::DeclarationOnly) {
                             no_code += 1;
                             continue;
                         }
-                        let outcome = match index.decode_method_source(&source, &mut control) {
-                            Ok(outcome) => outcome,
-                            Err(error) if error.kind() == FailureKind::Cancelled => {
-                                return Err(RequestError::from(error));
-                            }
-                            Err(_) => {
-                                method_errors += 1;
-                                continue;
-                            }
-                        };
-                        let Some(decoded) = outcome.decoded else {
+                        let Some(decoded) = outcome.evidence() else {
                             method_errors += 1;
                             continue;
                         };
@@ -328,6 +315,12 @@ impl Shell {
                             }
                         }
                     }
+                    if let Some(kind) = analysis.terminated {
+                        return Ok(
+                            json!({"terminated": format!("{kind:?}"), "methods": methods,
+                            "checked": checked, "failures": failures}),
+                        );
+                    }
                 }
                 Ok(json!({
                     "classes": classes,
@@ -347,35 +340,15 @@ impl Shell {
             "roundtrip" => {
                 let class = class_id(request)?;
                 let method = method_id(request)?;
-                let mut analysis = engine.analyze(
-                    Request {
-                        class: class_key(class),
-                        method: None,
-                    },
-                    &mut control,
-                )?;
-                let Some(index) = analysis
-                    .methods
-                    .iter()
-                    .position(|entry| entry.key.method == MethodId(method))
-                else {
-                    return Err(RequestError::InternalInvariant(
-                        "method is not in the P0 directory",
-                    ));
-                };
-                let outcome = match analysis.methods.swap_remove(index).result? {
-                    MethodOutcome::Decoded(outcome) => *outcome,
-                    MethodOutcome::DeclarationOnly => {
-                        return Ok(json!({"declaration_only": true}));
-                    }
-                };
-                let Some(decoded) = outcome.decoded else {
-                    return Ok(json!({
-                        "decoded": false,
-                        "prefix": outcome.prefix.len(),
-                        "error": outcome.error.map(|error| format!("{error}")),
-                    }));
-                };
+                let analysis =
+                    engine.analyze_method(class_key(class), MethodId(method), &mut control)?;
+                let outcome = analysis.result?;
+                if let Some(response) = inspection_stop(&outcome) {
+                    return Ok(response);
+                }
+                let decoded = outcome
+                    .evidence()
+                    .ok_or(RequestError::InternalInvariant("method has no evidence"))?;
                 let base = decoded.instruction_bytes().start.0;
                 let mut checked = 0usize;
                 let mut skipped = Vec::new();
@@ -429,37 +402,15 @@ impl Shell {
             "p1" | "decoded" => {
                 let class = class_id(request)?;
                 let method = method_id(request)?;
-                let mut analysis = engine.analyze(
-                    Request {
-                        class: class_key(class),
-                        method: None,
-                    },
-                    &mut control,
-                )?;
-                let Some(index) = analysis
-                    .methods
-                    .iter()
-                    .position(|entry| entry.key.method == MethodId(method))
-                else {
-                    return Err(RequestError::InternalInvariant(
-                        "method is not in the P0 directory",
-                    ));
-                };
-                let outcome = match analysis.methods.swap_remove(index).result? {
-                    MethodOutcome::Decoded(outcome) => *outcome,
-                    MethodOutcome::DeclarationOnly => {
-                        return Ok(json!({"declaration_only": true}));
-                    }
-                };
-                let Some(decoded) = outcome.decoded else {
-                    return Ok(json!({
-                        "class_def": class,
-                        "method": method,
-                        "decoded": false,
-                        "prefix": outcome.prefix.len(),
-                        "error": outcome.error.map(|error| format!("{error}")),
-                    }));
-                };
+                let analysis =
+                    engine.analyze_method(class_key(class), MethodId(method), &mut control)?;
+                let outcome = analysis.result?;
+                if let Some(response) = inspection_stop(&outcome) {
+                    return Ok(response);
+                }
+                let decoded = outcome
+                    .evidence()
+                    .ok_or(RequestError::InternalInvariant("method has no evidence"))?;
                 let mut items = Vec::new();
                 for item in decoded.items() {
                     items.push(match item {
@@ -585,68 +536,69 @@ impl Shell {
                 let mut terminals = 0u64;
                 let mut payloads = 0u64;
                 let mut unreachable = 0u64;
+                let mut replay_opcodes = BTreeMap::<String, u64>::new();
                 let mut failures = Vec::new();
                 for class in 0..classes {
                     control.checkpoint()?;
-                    let facts = match diana_decomp::p0::collect(
-                        &index,
-                        ClassKey {
-                            dex: DexId(0),
-                            class_def: ClassDefId(class),
+                    let analysis = match engine.analyze(
+                        Request {
+                            class: class_key(class),
+                            method: None,
                         },
                         &mut control,
                     ) {
-                        Ok(facts) => facts,
-                        Err(error) if error.kind() == FailureKind::Cancelled => {
-                            return Err(error);
-                        }
+                        Ok(analysis) => analysis,
+                        Err(error) if error.kind() == FailureKind::Cancelled => return Err(error),
                         Err(_) => {
                             class_errors += 1;
                             continue;
                         }
                     };
-                    for entry in facts.methods() {
+                    for entry in &analysis.methods {
                         control.checkpoint()?;
                         methods += 1;
-                        let method = entry.method();
-                        let source = match index.method_source(&facts, method, &mut control) {
-                            Ok(source) => source,
-                            Err(error) if error.kind() == FailureKind::Cancelled => {
-                                return Err(RequestError::from(error));
-                            }
-                            Err(_) => {
-                                p1_errors += 1;
-                                continue;
-                            }
-                        };
-                        if matches!(source.raw(), RawPrintable::Declaration) {
-                            no_code += 1;
-                            continue;
-                        }
-                        let outcome = match index.decode_method_source(&source, &mut control) {
+                        let method = entry.key.method;
+                        let outcome = match &entry.result {
                             Ok(outcome) => outcome,
-                            Err(error) if error.kind() == FailureKind::Cancelled => {
-                                return Err(RequestError::from(error));
-                            }
                             Err(_) => {
                                 p1_errors += 1;
                                 continue;
                             }
                         };
-                        let Some(decoded) = outcome.decoded else {
-                            p1_errors += 1;
-                            continue;
+                        let result = match outcome {
+                            MethodOutcome::DeclarationOnly => {
+                                no_code += 1;
+                                continue;
+                            }
+                            MethodOutcome::DisassemblyStopped(_) => {
+                                p1_errors += 1;
+                                continue;
+                            }
+                            MethodOutcome::Flowed(flow) => Ok(flow),
+                            MethodOutcome::FlowStopped(stop) => Err(stop.error()),
                         };
-                        match diana_decomp::p2::build_flow(decoded, &mut control) {
+                        match result {
                             Ok(flow) => {
                                 flowed += 1;
+                                for operation in flow.operations() {
+                                    control.checkpoint()?;
+                                    let original = flow
+                                        .evidence()
+                                        .instruction_at(operation.pc())
+                                        .ok_or(RequestError::InternalInvariant(
+                                        "replayed operation lost its source",
+                                    ))?;
+                                    *replay_opcodes
+                                        .entry(original.spec().mnemonic.to_owned())
+                                        .or_default() += 1;
+                                }
                                 blocks += u64::try_from(flow.blocks().len()).unwrap_or(u64::MAX);
                                 operations +=
                                     u64::try_from(flow.operations().len()).unwrap_or(u64::MAX);
                                 edges += u64::try_from(flow.edges().len()).unwrap_or(u64::MAX);
                                 exits += u64::try_from(flow.exits().len()).unwrap_or(u64::MAX);
                                 for edge in flow.edges() {
-                                    match edge.role {
+                                    match edge.role() {
                                         diana_decomp::p2::EdgeRole::Normal(_) => {
                                             normal_edges += 1;
                                         }
@@ -669,9 +621,6 @@ impl Shell {
                                     }
                                 }
                             }
-                            Err(error) if error.kind() == FailureKind::Cancelled => {
-                                return Err(RequestError::from(error));
-                            }
                             Err(error) => {
                                 failed += 1;
                                 match error.kind() {
@@ -679,7 +628,7 @@ impl Shell {
                                     FailureKind::Unsupported => unsupported += 1,
                                     FailureKind::Malformed => malformed += 1,
                                     FailureKind::ResourceExhausted => resource += 1,
-                                    FailureKind::Cancelled => unreachable!(),
+                                    FailureKind::Cancelled => {}
                                 }
                                 if failures.len() < 100 {
                                     failures.push(json!({
@@ -691,6 +640,12 @@ impl Shell {
                                 }
                             }
                         }
+                    }
+                    if let Some(kind) = analysis.terminated {
+                        return Ok(
+                            json!({"terminated": format!("{kind:?}"), "methods": methods,
+                            "failures": failures, "flowed": flowed}),
+                        );
                     }
                 }
                 Ok(json!({
@@ -716,6 +671,7 @@ impl Shell {
                     "terminals": terminals,
                     "payloads": payloads,
                     "unreachable": unreachable,
+                    "replay_opcodes": replay_opcodes,
                     "failures": failures,
                     "failures_truncated": failed > u64::try_from(failures.len()).unwrap_or(u64::MAX),
                     "elapsed_ms": started.elapsed().as_millis(),
@@ -724,40 +680,48 @@ impl Shell {
             "p2" => {
                 let class = class_id(request)?;
                 let method = method_id(request)?;
-                let mut analysis = engine.analyze(
-                    Request {
-                        class: class_key(class),
-                        method: None,
-                    },
-                    &mut control,
-                )?;
-                let Some(index) = analysis
-                    .methods
-                    .iter()
-                    .position(|entry| entry.key.method == MethodId(method))
-                else {
-                    return Err(RequestError::InternalInvariant(
-                        "method is not in the P0 directory",
-                    ));
+                let analysis =
+                    engine.analyze_method(class_key(class), MethodId(method), &mut control)?;
+                let outcome = analysis.result?;
+                if let Some(response) = inspection_stop(&outcome) {
+                    return Ok(response);
+                }
+                let MethodOutcome::Flowed(flow) = outcome else {
+                    return Err(RequestError::InternalInvariant("method has no flow"));
                 };
-                let outcome = match analysis.methods.swap_remove(index).result? {
-                    MethodOutcome::Decoded(outcome) => *outcome,
-                    MethodOutcome::DeclarationOnly => {
-                        return Ok(json!({"declaration_only": true}));
-                    }
+                let details = if request.get("details").and_then(Value::as_bool) == Some(true) {
+                    Some(json!({
+                        "operations": flow.operations().iter().map(|operation| json!({
+                            "id": operation.id().0,
+                            "pc": operation.pc().0,
+                            "block": operation.block().0,
+                            "kind": format!("{:?}", operation.kind()),
+                            "reads": flow.reads(operation).iter().map(|slot| json!({
+                                "start": slot.start.0, "words": slot.words(),
+                            })).collect::<Vec<_>>(),
+                            "writes": flow.writes(operation).iter().map(|slot| json!({
+                                "start": slot.start.0, "words": slot.words(),
+                            })).collect::<Vec<_>>(),
+                            "effects": format!("{:?}", operation.effects()),
+                            "commit": format!("{:?}", operation.normal().commit()),
+                            "normal": format!("{:?}", operation.normal()),
+                            "exceptional": operation.exceptional().map(|completion| format!("{completion:?}")),
+                            "result_pc": operation.result_pc().map(|pc| pc.0),
+                        })).collect::<Vec<_>>(),
+                        "edges": flow.edges().iter().map(|edge| json!({
+                            "id": edge.id().0, "from": edge.from().0,
+                            "source_op": edge.source_op().map(|id| id.0),
+                            "role": format!("{:?}", edge.role()),
+                            "target": format!("{:?}", edge.target()),
+                        })).collect::<Vec<_>>(),
+                    }))
+                } else {
+                    None
                 };
-                let Some(decoded) = outcome.decoded else {
-                    return Ok(json!({
-                        "decoded": false,
-                        "prefix": outcome.prefix.len(),
-                        "error": outcome.error.map(|error| format!("{error}")),
-                    }));
-                };
-                let flow = diana_decomp::p2::build_flow(decoded, &mut control)?;
                 let mut normal_edges = 0usize;
                 let mut exception_edges = 0usize;
                 for edge in flow.edges() {
-                    match edge.role {
+                    match edge.role() {
                         diana_decomp::p2::EdgeRole::Normal(_) => normal_edges += 1,
                         diana_decomp::p2::EdgeRole::Exception { .. } => exception_edges += 1,
                     }
@@ -779,6 +743,7 @@ impl Shell {
                     "decoded": true,
                     "blocks": flow.blocks().len(),
                     "operations": flow.operations().len(),
+                    "details": details,
                     "edges": flow.edges().len(),
                     "normal_edges": normal_edges,
                     "exception_edges": exception_edges,
@@ -797,6 +762,26 @@ impl Shell {
                 _ => "unknown command",
             })),
         }
+    }
+}
+
+fn inspection_stop(outcome: &MethodOutcome<'_>) -> Option<Value> {
+    match outcome {
+        MethodOutcome::DeclarationOnly => Some(json!({"declaration_only": true})),
+        MethodOutcome::DisassemblyStopped(outcome) => Some(json!({
+            "decoded": false, "prefix": outcome.prefix.len(),
+            "error": outcome.error.as_ref().map(|error| format!("{error}")),
+        })),
+        MethodOutcome::FlowStopped(stop) => Some(json!({
+            "decoded": true, "flowed": false,
+            "error": { "kind": format!("{:?}", stop.error().kind()), "detail": format!("{}", stop.error()) },
+            "retained_items": stop.evidence().items().len(),
+            "partial": stop.partial().map(|partial| json!({
+                "validated": false, "operations": partial.operations().len(),
+                "blocks": partial.blocks().len(), "edges": partial.edges().len(),
+            })),
+        })),
+        MethodOutcome::Flowed(_) => None,
     }
 }
 

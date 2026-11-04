@@ -1,59 +1,53 @@
 # diana-decomp — native engine library
 
-This is Diana's internal Rust decompiler library, imported as `diana_decomp`.
-`RunContext` carries latched request cancellation. `ControlError` distinguishes
-cancellation from internal invariants; allocation failures stay explicit and
-classified without a cumulative work or allocation ledger.
-The public `input` module implements checked DEX 035 reads and borrowed class,
-method, MUTF-8 and code-range views. Method visits preserve original IDs and local
-declaration/code failures; complete prototype matching distinguishes overloads.
-Byte/UTF16/code-unit coordinates and table IDs use distinct types. Method-body
-states are explicit, and range-checked code views are read-only.
-`raw::instruction_layout` checks instruction/payload extents and preserves typed
-operand references using one opcode specification. `ProgramIndex::check_method_layout`
-checks whole-method register/reference bounds, branch/payload/exception boundaries,
-035 invoke prototype word counts, wide argument adjacency, result kinds and
-reachable fallthrough. Its sealed `CheckedMethodLayout` keeps structural
-checks distinct from complete raw validation. `RawMethodView::visit_layouts`
-preserves readable prefixes under the raw read exit.
-`RawMethodView::visit_instructions` exposes borrowed original operand/payload
-facts, including literal bits and ordered invoke words.
-The validator shares its operand decoder. `ProgramIndex::debug_method` produces
-owned original-information JSON with resolved references, UTF16 units, handler
-order and explicit missing facts. Known malformed input remains classified even
-if rendering the original snapshot later fails. Original debug programs retain parameter names, line/PC state, ordered
-local-variable events and encoded bytes. Their reader checks instruction
-boundaries, reference indices and local lifetimes; a failure retains the decoded
-prefix with partial coverage. Static encoded values retain original tags, signed
-integers, float/double bits, references and nested array/annotation order. Their
-explicit stack uses checked counts; malformed tails retain their checked prefix.
-Engine exposes class/method requests and owned reports through the public library.
-Ordinary code uses the shared CFG → SSA → declaration/type → storage → region →
-Java chain. Unit verification distinguishes complete Java from Mixed results;
-independent members and original metadata remain available after local failure.
-P1 checks dynamic call-site/handle encodings and original references; invoke-custom
-retains a classified unsupported exit and a readable original snapshot. P8 renders
-existing products and maps source slices to original identities. Historical acceptance records are available in git history.
+Diana's independent native Rust engine borrows caller-owned DEX bytes. Files,
+ZIPs, network access and output ownership belong to the application. Production
+forbids unsafe code and external runtime/process dependencies; declarations come
+only from the analyzed input.
 
-From the repository root:
+The active method chain is P0 class facts → method reader → P1 disassembly → P2
+execution model. `Engine::analyze_method` and class requests use one method task.
+P3–P9 are not yet active; the application decompilation interface is being rebuilt.
+The approved architecture is [PIPELINE_DESIGN](../../docs/diana/PIPELINE_DESIGN.md).
+
+P1 retains complete instruction/payload facts, original references, entry layout
+and structural associations. P2 owns ordered operations, exact slots, explicit
+normal/exception frame/heap/lock completion rules, transfers, exits and coverage.
+It does not expose its complete P1 predecessor. Read-only `MethodEvidence` supports
+original inspection and checks without product extraction or construction access.
+P2 constructors are internal and require Engine's method-task authority.
+
+A P2 stop retains the complete P1 input, classified error and available unvalidated
+construction facts. Class requests retain delivered members and mark request-level
+termination explicitly. Cancellation is latched in `RunContext`; range/capacity
+checks and fallible allocation remain mandatory. There are no numeric quotas.
+
+Translation checking compares ordered local symbolic behavior and completion
+rules and matches every original transfer/coverage owner. It does not prove ART
+admission or concrete external-call behavior. The two local corpora exercise
+ordinary operations but do not provide execution evidence for custom/polymorphic
+invokes or method-handle/type constants. Fault-injected cancellation/allocation
+execution has not been performed; failure retention is currently code-reviewed.
+
+Use the single engine inspection entry from the repository root:
 
 ```sh
-cargo build --locked -p diana-decomp
-cargo clippy --locked -p diana-decomp --all-targets -- -D warnings
+cargo run -p diana-decomp --release --example dbg_shell --locked -- \
+  --dex <classes.dex> --exec '{"cmd":"p2","class":0,"method":0,"details":true}'
 ```
 
-Dependency choices are recorded in the root and package AGENTS.md files; the
-manifest and root lockfile own versions. The engine remains independent of rasc,
-dexdec, rusty-dex, Kuna and radguard implementations. Inputs are borrowed
-DEX bytes; the engine derives declaration facts from them and the application
-supplies no external declarations. File/ZIP loading and CLI dispatch do not
-belong here. Production code stays native Rust, with unsafe
-code forbidden and no external runtime/process dependency.
+`p2-all` observes the Engine chain and reports classified outcomes and encountered
+opcode variants. `roundtrip-all` checks independent byte re-encoding over retained
+P1 evidence. No phase-specific debug binary or unit-test fixture is required.
 
-Only create modules when an implemented capability needs them. Do not pre-create
-P1–P8 directories, fake Engine results, pass registries or tests for placeholder
-getters. See the [specification chapters](../../docs/diana/spec/00-overview.md).
+Applicable engine gates:
 
-The `0.0.0` version is an unpublished scaffold marker. rasc and its release
-tooling were removed at commit 5cb156c and remain in git history only. Test cases
-and fixtures have been removed; the root AGENTS.md prohibits unit-test development.
+```sh
+cargo fmt --all -- --check
+cargo clippy -p diana-decomp --all-targets --all-features --locked -- -D warnings
+cargo build -p diana-decomp --release --locked
+```
+
+Dependency, reference-isolation and unit-test policies are owned by root/package
+AGENTS.md and [CONTRIBUTING](../../docs/diana/CONTRIBUTING.md). The crate remains
+unpublished (`publish=false`, version `0.0.0`).

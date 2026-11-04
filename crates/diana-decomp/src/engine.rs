@@ -152,6 +152,8 @@ pub struct ClassAnalysis<'a> {
     pub facts: std::sync::Arc<crate::p0::ClassFacts>,
     pub methods: Vec<MethodAnalysis<'a>>,
     pub diagnostics: Vec<Diagnostic>,
+    /// Request-level stop after the retained method prefix; not successful truncation.
+    pub terminated: Option<FailureKind>,
 }
 
 pub struct MethodAnalysis<'a> {
@@ -159,10 +161,51 @@ pub struct MethodAnalysis<'a> {
     pub result: Result<MethodOutcome<'a>, RequestError>,
 }
 
-/// A method entry either has no code or has a P1 product/prefix.
+/// The sole executable method path advances P1 -> P2 or retains a classified stop.
 pub enum MethodOutcome<'a> {
     DeclarationOnly,
-    Decoded(Box<crate::p1::DecodedOutcome<'a>>),
+    DisassemblyStopped(crate::p1::DecodedOutcome<'a>),
+    Flowed(crate::p2::FlowMethod<'a>),
+    FlowStopped(crate::p2::FlowStop<'a>),
+}
+
+impl MethodOutcome<'_> {
+    /// Original read-only evidence for debugging; no stage constructor is exposed.
+    pub fn evidence(&self) -> Option<crate::p2::MethodEvidence<'_, '_>> {
+        match self {
+            Self::Flowed(flow) => Some(flow.evidence()),
+            Self::FlowStopped(stop) => Some(stop.evidence()),
+            _ => None,
+        }
+    }
+}
+
+/// Only the engine's method-task scheduler can issue construction authority.
+pub(crate) struct MethodTask {
+    _sealed: (),
+}
+
+impl MethodTask {
+    fn run<'a>(
+        index: &ProgramIndex<'a>,
+        facts: &crate::p0::ClassFacts,
+        method: MethodId,
+        control: &mut RunContext<'_>,
+    ) -> Result<MethodOutcome<'a>, RequestError> {
+        let task = Self { _sealed: () };
+        let source = index.method_source(facts, method, control)?;
+        if matches!(source.raw(), crate::input::RawPrintable::Declaration) {
+            return Ok(MethodOutcome::DeclarationOnly);
+        }
+        let mut outcome = index.decode_method_source(&source, control)?;
+        let Some(decoded) = outcome.decoded.take() else {
+            return Ok(MethodOutcome::DisassemblyStopped(outcome));
+        };
+        match crate::p2::build_flow(&task, decoded, control) {
+            crate::p2::FlowBuild::Ready(flow) => Ok(MethodOutcome::Flowed(flow)),
+            crate::p2::FlowBuild::Stopped(stop) => Ok(MethodOutcome::FlowStopped(stop)),
+        }
+    }
 }
 
 impl<'a> Engine<'a> {
@@ -178,7 +221,7 @@ impl<'a> Engine<'a> {
         image.index.class_facts_cached(class.class_def, control)
     }
 
-    /// Runs P0, the method reader and P1 for one method entry only.
+    /// Runs P0, the method reader, P1 and P2 for one method entry only.
     pub fn analyze_method(
         &self,
         class: ClassKey,
@@ -188,24 +231,14 @@ impl<'a> Engine<'a> {
         let facts = self.class_facts(class, control)?;
         let position = usize::try_from(class.dex.0).map_err(|_| RequestError::UnknownDex)?;
         let image = self.images.get(position).ok_or(RequestError::UnknownDex)?;
-        let result = (|| -> Result<MethodOutcome<'a>, RequestError> {
-            let source = image.index.method_source(&facts, method, control)?;
-            match source.raw() {
-                crate::input::RawPrintable::Declaration => Ok(MethodOutcome::DeclarationOnly),
-                crate::input::RawPrintable::Method(_) => image
-                    .index
-                    .decode_method_source(&source, control)
-                    .map(|outcome| MethodOutcome::Decoded(Box::new(outcome)))
-                    .map_err(RequestError::from),
-            }
-        })();
+        let result = MethodTask::run(&image.index, &facts, method, control);
         Ok(MethodAnalysis {
             key: MethodKey { class, method },
             result,
         })
     }
 
-    /// Runs P0, the method reader and P1 for one class request. Class assembly
+    /// Runs P0, the method reader, P1 and P2 for one class request. Class assembly
     /// and rendering belong to P8/P9 and are not part of this boundary.
     pub fn analyze(
         &self,
@@ -219,29 +252,32 @@ impl<'a> Engine<'a> {
         let facts = image
             .index
             .class_facts_cached(request.class.class_def, control)?;
-        let entries: Vec<MethodId> = match &request.method {
-            Some(selector) => vec![facts.resolve_method(&selector.name, &selector.prototype)?],
-            None => facts.methods().iter().map(|entry| entry.method()).collect(),
-        };
+        let mut entries = Vec::new();
+        match &request.method {
+            Some(selector) => crate::substrate::owned::push(
+                &mut entries,
+                facts.resolve_method(&selector.name, &selector.prototype)?,
+                control,
+            )?,
+            None => {
+                for entry in facts.methods() {
+                    control.checkpoint()?;
+                    crate::substrate::owned::push(&mut entries, entry.method(), control)?;
+                }
+            }
+        }
         let mut methods = Vec::new();
+        crate::substrate::owned::reserve(&mut methods, entries.len(), control)?;
+        let mut terminated = None;
         for method in entries {
-            control.checkpoint()?;
+            // The method reader observes cancellation and returns the classified
+            // error. Keep that stop alongside already delivered siblings.
             let key = MethodKey {
                 class: request.class,
                 method,
             };
-            let result = (|| -> Result<MethodOutcome<'a>, RequestError> {
-                let source = image.index.method_source(&facts, method, control)?;
-                match source.raw() {
-                    crate::input::RawPrintable::Declaration => Ok(MethodOutcome::DeclarationOnly),
-                    crate::input::RawPrintable::Method(_) => image
-                        .index
-                        .decode_method_source(&source, control)
-                        .map(|outcome| MethodOutcome::Decoded(Box::new(outcome)))
-                        .map_err(RequestError::from),
-                }
-            })();
-            match result {
+            let result = MethodTask::run(&image.index, &facts, method, control);
+            let terminal = match &result {
                 Err(error)
                     if matches!(
                         error.kind(),
@@ -250,9 +286,28 @@ impl<'a> Engine<'a> {
                             | FailureKind::InternalInvariant
                     ) =>
                 {
-                    return Err(error);
+                    Some(error.kind())
                 }
-                result => methods.push(MethodAnalysis { key, result }),
+                Ok(MethodOutcome::FlowStopped(stop))
+                    if matches!(
+                        stop.error().kind(),
+                        FailureKind::Cancelled
+                            | FailureKind::ResourceExhausted
+                            | FailureKind::InternalInvariant
+                    ) =>
+                {
+                    Some(stop.error().kind())
+                }
+                _ => None,
+            };
+            // Capacity was reserved for all selected entries before starting work.
+            // Preserve a cancelled method's input without rechecking cancellation.
+            methods.push(MethodAnalysis { key, result });
+            // Return the retained prefix and stop; never silently skip subsequent
+            // siblings after request-level cancellation/resource/invariant failure.
+            if let Some(kind) = terminal {
+                terminated = Some(kind);
+                break;
             }
         }
         Ok(ClassAnalysis {
@@ -264,6 +319,7 @@ impl<'a> Engine<'a> {
             facts,
             methods,
             diagnostics: Vec::new(),
+            terminated,
         })
     }
 }

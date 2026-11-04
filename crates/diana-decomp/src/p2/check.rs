@@ -1,843 +1,639 @@
-use std::collections::BTreeMap;
+//! Translation validation over immutable P1/P2 products. Coverage is a bijection
+//! and transfers are matched by source site and role, not by aggregate counts.
 
+use super::scratch::{filled, push, sort_by_key};
 use super::{
-    BinaryForm, BlockId, Coverage, Edge, EdgeRole, EdgeTarget, ExceptionSelection, FieldAccess,
-    FlowError, FlowMethod, NormalEdge, OpKind, Terminal,
+    BlockId, Coverage, EdgeRole, EdgeTarget, ExitId, ExitKind, FlowError, FlowMethod, NormalEdge,
+    OpId,
 };
-use crate::{CodeUnitOffset, RunContext};
+use crate::p1::{DecodedInstruction, DecodedItem};
+use crate::{CodeUnitOffset, RunContext, TypeId};
+
+fn bug(message: &'static str) -> FlowError {
+    FlowError::InternalInvariant(message)
+}
 
 pub(crate) fn verify(flow: &FlowMethod<'_>, control: &mut RunContext<'_>) -> Result<(), FlowError> {
-    if flow.blocks().is_empty() {
-        return Err(FlowError::InternalInvariant("flow has no entry block"));
-    }
-    if flow.blocks()[0].start_pc != crate::CodeUnitOffset(0) {
-        return Err(FlowError::InternalInvariant(
-            "flow entry block does not start at pc zero",
-        ));
-    }
-    let block_count = flow.blocks().len();
-    if flow.coverage().len() != flow.decoded().items().len() {
-        return Err(FlowError::InternalInvariant(
-            "coverage directory does not align with P1 items",
-        ));
-    }
-    for (index, edge) in flow.edges().iter().enumerate() {
-        if edge.id.0 as usize != index {
-            return Err(FlowError::InternalInvariant(
-                "edge identity is not its construction index",
-            ));
-        }
-    }
+    check_coverage_and_order(flow, control)?;
+    let mut transfers = Transfers::new(flow, control)?;
     for block in flow.blocks() {
-        if block.id.0 as usize >= block_count {
-            return Err(FlowError::InternalInvariant(
-                "block identity is out of range",
-            ));
-        }
-        if block.operations.start > block.operations.end
-            || block.operations.end as usize > flow.operations().len()
-        {
-            return Err(FlowError::InternalInvariant(
-                "block operation range is invalid",
-            ));
-        }
-        for operation_index in block.operations.clone() {
-            let operation = &flow.operations()[operation_index as usize];
-            if operation.block != block.id {
-                return Err(FlowError::InternalInvariant(
-                    "operation belongs to a different block",
-                ));
+        control.checkpoint()?;
+        for index in block.operations.clone() {
+            let operation = &flow.operations()[index as usize];
+            let instruction = instruction(flow, operation.pc)?;
+            super::oracle::verify_operation(flow, instruction, operation, control)?;
+            // The selection comes from the original instruction, never the P2 enum.
+            let advanced = instruction.opcode() == 0x1e;
+            let selection = if advanced {
+                next(instruction)?
+            } else {
+                instruction.pc()
+            };
+            if operation.exceptional.is_some() != operation.effects.may_throw() {
+                return Err(bug("operation throwability and completion disagree"));
             }
-            if operation.reads().start as usize + operation.reads().len() as usize
-                > flow.slots().len()
-                || operation.writes().start as usize + operation.writes().len() as usize
-                    > flow.slots().len()
-            {
-                return Err(FlowError::InternalInvariant(
-                    "operation slot span is outside the slot arena",
-                ));
-            }
-        }
-        if block.terminal_reads().start as usize + block.terminal_reads().len() as usize
-            > flow.slots().len()
-        {
-            return Err(FlowError::InternalInvariant(
-                "terminal slot span is outside the slot arena",
-            ));
-        }
-    }
-    for block in flow.blocks() {
-        if block.terminal.is_some() != block.terminal_pc.is_some() {
-            return Err(FlowError::InternalInvariant(
-                "block terminal and terminal pc disagree",
-            ));
-        }
-    }
-    let mut reachable_blocks = vec![false; block_count];
-    let mut pending = vec![BlockId(0)];
-    while let Some(block) = pending.pop() {
-        if block.0 as usize >= block_count || reachable_blocks[block.0 as usize] {
-            continue;
-        }
-        reachable_blocks[block.0 as usize] = true;
-        for edge in flow.edges() {
-            if edge.from != block {
-                continue;
-            }
-            if let EdgeTarget::Block(target) = edge.target {
-                pending.push(target);
-            }
-        }
-    }
-    if reachable_blocks.iter().any(|reachable| !reachable) {
-        for reachable in &reachable_blocks {
-            if !reachable {}
-        }
-        return Err(FlowError::InternalInvariant(
-            "flow contains a block unreachable from the entry",
-        ));
-    }
-    let mut covered_ops = Vec::new();
-    for coverage in flow.coverage() {
-        if let Coverage::Operation(id) | Coverage::MergedResult(id) = coverage {
-            if id.0 as usize >= flow.operations().len() {
-                return Err(FlowError::InternalInvariant(
-                    "coverage names a foreign operation",
-                ));
-            }
-            covered_ops.push(*id);
-        }
-    }
-    for (index, item) in flow.decoded().items().iter().enumerate() {
-        let coverage = flow.coverage()[index];
-        let reachable = flow.decoded().is_reachable(item.pc());
-        match coverage {
-            Coverage::Payload => {
-                if !matches!(item, crate::p1::DecodedItem::Payload(_)) {
-                    return Err(FlowError::InternalInvariant(
-                        "instruction is marked as a payload",
-                    ));
-                }
-            }
-            Coverage::Unreachable => {
-                if reachable {
-                    return Err(FlowError::InternalInvariant(
-                        "reachable item has no execution fact",
-                    ));
-                }
-            }
-            Coverage::Operation(_) | Coverage::MergedResult(_) | Coverage::Terminal(_) => {
-                if !reachable {
-                    return Err(FlowError::InternalInvariant(
-                        "unreachable item has an execution fact",
-                    ));
-                }
-            }
-        }
-    }
-    for edge in flow.edges() {
-        if edge.id.0 as usize >= flow.edges().len() {
-            return Err(FlowError::InternalInvariant(
-                "edge identity is out of range",
-            ));
-        }
-        if edge.from.0 as usize >= block_count {
-            return Err(FlowError::InternalInvariant("edge source is not a block"));
-        }
-        match edge.target {
-            EdgeTarget::Block(id) => {
-                if id.0 as usize >= block_count {
-                    return Err(FlowError::InternalInvariant("edge target is not a block"));
-                }
-            }
-            EdgeTarget::Exit(id) => {
-                if id.0 as usize >= flow.exits().len() {
-                    return Err(FlowError::InternalInvariant("edge target is not an exit"));
-                }
-            }
-        }
-        if let EdgeRole::Exception {
-            throw_pc,
-            selection_pc,
-            ..
-        } = edge.role
-            && selection_pc.0 < throw_pc.0
-        {
-            return Err(FlowError::InternalInvariant(
-                "exception selection precedes its throw site",
-            ));
-        }
-    }
-    let _ = covered_ops;
-    check_normal_edges(flow)?;
-    check_exception_edges(flow, control)?;
-    check_entry_slots(flow)?;
-    check_terminal_reads(flow)?;
-    check_result_operations(flow)?;
-    check_operation_slots(flow)?;
-    super::oracle::verify(flow, control)?;
-    Ok(())
-}
-
-fn check_terminal_reads(flow: &FlowMethod<'_>) -> Result<(), FlowError> {
-    for block in flow.blocks() {
-        let Some(pc) = block.terminal_pc else {
-            continue;
-        };
-        let Some(instruction) = flow.decoded().instruction_at(pc) else {
-            return Err(FlowError::InternalInvariant(
-                "terminal pc does not name an instruction",
-            ));
-        };
-        let expected = match instruction.opcode() {
-            0x28..=0x2a => Vec::new(),
-            0x32..=0x37 => vec![
-                crate::RegisterSlot::new(
-                    instruction
-                        .registers()
-                        .next()
-                        .ok_or(FlowError::InternalInvariant(
-                            "conditional lost its first read",
-                        ))?,
-                    crate::SlotWidth::One,
-                ),
-                crate::RegisterSlot::new(
-                    instruction
-                        .registers()
-                        .nth(1)
-                        .ok_or(FlowError::InternalInvariant(
-                            "conditional lost its second read",
-                        ))?,
-                    crate::SlotWidth::One,
-                ),
-            ],
-            0x38..=0x3d | 0x2b | 0x2c | 0x27 => vec![crate::RegisterSlot::new(
-                instruction
-                    .registers()
-                    .next()
-                    .ok_or(FlowError::InternalInvariant("terminal lost its read"))?,
-                crate::SlotWidth::One,
-            )],
-            0x0e => Vec::new(),
-            0x0f => vec![crate::RegisterSlot::new(
-                instruction
-                    .registers()
-                    .next()
-                    .ok_or(FlowError::InternalInvariant("return lost its read"))?,
-                crate::SlotWidth::One,
-            )],
-            0x10 => vec![crate::RegisterSlot::new(
-                instruction
-                    .registers()
-                    .next()
-                    .ok_or(FlowError::InternalInvariant("return-wide lost its read"))?,
-                crate::SlotWidth::Two,
-            )],
-            0x11 => vec![crate::RegisterSlot::new(
-                instruction
-                    .registers()
-                    .next()
-                    .ok_or(FlowError::InternalInvariant("return-object lost its read"))?,
-                crate::SlotWidth::One,
-            )],
-            _ => {
-                return Err(FlowError::InternalInvariant(
-                    "terminal pc does not name a terminal instruction",
-                ));
-            }
-        };
-        if flow.terminal_reads(block) != expected.as_slice() {
-            return Err(FlowError::InternalInvariant(
-                "terminal reads disagree with the original instruction",
-            ));
-        }
-    }
-    Ok(())
-}
-
-fn slot_width(slot: crate::RegisterSlot) -> crate::SlotWidth {
-    slot.width
-}
-
-fn check_operation_slots(flow: &FlowMethod<'_>) -> Result<(), FlowError> {
-    let limit = flow.decoded().registers_size().0;
-    for operation in flow.operations() {
-        for slot in flow
-            .reads(operation)
-            .iter()
-            .chain(flow.writes(operation).iter())
-        {
-            if slot
-                .start
-                .0
-                .checked_add(slot.words())
-                .is_none_or(|end| u64::from(end) > limit)
-            {
-                return Err(FlowError::InternalInvariant(
-                    "operation slot is outside the register frame",
-                ));
-            }
-        }
-        let reads = flow.reads(operation);
-        let writes = flow.writes(operation);
-        let expect = |reads_len: usize, writes_len: usize| -> Result<(), FlowError> {
-            if reads.len() != reads_len || writes.len() != writes_len {
-                return Err(FlowError::InternalInvariant(
-                    "operation read/write count disagrees with its semantics",
-                ));
-            }
-            Ok(())
-        };
-        match &operation.kind {
-            OpKind::Nop => expect(0, 0)?,
-            OpKind::Move { kind } => {
-                expect(1, 1)?;
-                let width = match kind {
-                    super::MoveKind::Wide => crate::SlotWidth::Two,
-                    _ => crate::SlotWidth::One,
-                };
-                if slot_width(reads[0]) != width || slot_width(writes[0]) != width {
-                    return Err(FlowError::InternalInvariant("move width disagrees"));
-                }
-            }
-            OpKind::Const { width, .. } => {
-                expect(0, 1)?;
-                if slot_width(writes[0]) != *width {
-                    return Err(FlowError::InternalInvariant("constant width disagrees"));
-                }
-            }
-            OpKind::ConstString { .. }
-            | OpKind::ConstClass { .. }
-            | OpKind::ConstMethodHandle { .. }
-            | OpKind::ConstMethodType { .. }
-            | OpKind::MoveException => {
-                expect(0, 1)?;
-            }
-            OpKind::Unary { op } => {
-                expect(1, 1)?;
-                if slot_width(reads[0]) != op.source_width()
-                    || slot_width(writes[0]) != op.dest_width()
-                {
-                    return Err(FlowError::InternalInvariant("unary width disagrees"));
-                }
-            }
-            OpKind::Binary { op, form, .. } => {
-                let count = match form {
-                    BinaryForm::ThreeAddress | BinaryForm::TwoAddress => 2,
-                    BinaryForm::Literal => 1,
-                };
-                expect(count, 1)?;
-                match form {
-                    BinaryForm::ThreeAddress | BinaryForm::TwoAddress => {
-                        if slot_width(reads[0]) != op.left_width()
-                            || slot_width(reads[1]) != op.right_width()
-                        {
-                            return Err(FlowError::InternalInvariant(
-                                "binary operand width disagrees",
-                            ));
-                        }
-                    }
-                    BinaryForm::Literal => {
-                        if slot_width(reads[0]) != crate::SlotWidth::One {
-                            return Err(FlowError::InternalInvariant(
-                                "literal operand width disagrees",
-                            ));
-                        }
-                    }
-                }
-                if slot_width(writes[0]) != op.width() {
-                    return Err(FlowError::InternalInvariant(
-                        "binary result width disagrees",
-                    ));
-                }
-            }
-            OpKind::Compare { op } => {
-                expect(2, 1)?;
-                let width = match op {
-                    super::CompareOp::CmplDouble
-                    | super::CompareOp::CmpgDouble
-                    | super::CompareOp::CmpLong => crate::SlotWidth::Two,
-                    _ => crate::SlotWidth::One,
-                };
-                if reads.iter().any(|slot| slot_width(*slot) != width)
-                    || slot_width(writes[0]) != crate::SlotWidth::One
-                {
-                    return Err(FlowError::InternalInvariant("compare width disagrees"));
-                }
-            }
-            OpKind::Field {
-                access,
-                static_field,
-                kind,
-                ..
-            } => {
-                let width = kind.width();
-                match access {
-                    FieldAccess::Get => {
-                        expect(if *static_field { 0 } else { 1 }, 1)?;
-                        if !*static_field && slot_width(reads[0]) != crate::SlotWidth::One {
-                            return Err(FlowError::InternalInvariant(
-                                "field receiver is not one word",
-                            ));
-                        }
-                        if slot_width(writes[0]) != width {
-                            return Err(FlowError::InternalInvariant(
-                                "field result width disagrees",
-                            ));
-                        }
-                    }
-                    FieldAccess::Put => {
-                        expect(if *static_field { 1 } else { 2 }, 0)?;
-                        if slot_width(reads[0]) != width {
-                            return Err(FlowError::InternalInvariant(
-                                "field value width disagrees",
-                            ));
-                        }
-                        if !*static_field && slot_width(reads[1]) != crate::SlotWidth::One {
-                            return Err(FlowError::InternalInvariant(
-                                "field receiver is not one word",
-                            ));
-                        }
-                    }
-                }
-            }
-            OpKind::Array { access, kind } => match access {
-                super::ArrayAccess::Get => {
-                    expect(2, 1)?;
-                    if slot_width(reads[0]) != crate::SlotWidth::One
-                        || slot_width(reads[1]) != crate::SlotWidth::One
-                        || slot_width(writes[0]) != kind.width()
-                    {
-                        return Err(FlowError::InternalInvariant("array get width disagrees"));
-                    }
-                }
-                super::ArrayAccess::Put => {
-                    expect(3, 0)?;
-                    if slot_width(reads[0]) != kind.width()
-                        || slot_width(reads[1]) != crate::SlotWidth::One
-                        || slot_width(reads[2]) != crate::SlotWidth::One
-                    {
-                        return Err(FlowError::InternalInvariant("array put width disagrees"));
-                    }
-                }
-            },
-            OpKind::ArrayLength | OpKind::InstanceOf { .. } => {
-                expect(1, 1)?;
-                if slot_width(reads[0]) != crate::SlotWidth::One
-                    || slot_width(writes[0]) != crate::SlotWidth::One
-                {
-                    return Err(FlowError::InternalInvariant(
-                        "array-length/instance-of width disagrees",
-                    ));
-                }
-            }
-            OpKind::Cast { .. } => expect(1, 0)?,
-            OpKind::NewInstance { .. } => expect(0, 1)?,
-            OpKind::NewArray { .. } => expect(1, 1)?,
-            OpKind::FilledNewArray { .. } => {
-                if writes.len() > 1 {
-                    return Err(FlowError::InternalInvariant(
-                        "filled array has too many writes",
-                    ));
-                }
-            }
-            OpKind::FillArrayData { .. } => expect(1, 0)?,
-            OpKind::Monitor { .. } => expect(1, 0)?,
-            OpKind::Invoke { .. } => {
-                let layout = flow
-                    .decoded()
-                    .invoke_layout_at(operation.pc)
-                    .ok_or(FlowError::InternalInvariant("invoke has no checked layout"))?;
-                let instruction = flow.decoded().instruction_at(operation.pc).ok_or(
-                    FlowError::InternalInvariant("invoke pc is not an instruction"),
+            if operation.effects.may_throw() {
+                let completion = operation
+                    .exceptional
+                    .ok_or(bug("missing exception completion"))?;
+                check_exception_completion(
+                    completion,
+                    operation.pc,
+                    selection,
+                    operation.normal.heap,
+                    if advanced {
+                        super::LockTransfer::ReleaseOutcome
+                    } else {
+                        super::LockTransfer::Preserve
+                    },
                 )?;
-                let mut expected = Vec::new();
-                let mut registers = instruction.registers();
-                if layout.has_receiver() {
-                    expected.push(crate::RegisterSlot::new(
-                        registers
-                            .next()
-                            .ok_or(FlowError::InternalInvariant("invoke receiver missing"))?,
-                        crate::SlotWidth::One,
-                    ));
-                }
-                for width in layout.arguments() {
-                    let first = registers
-                        .next()
-                        .ok_or(FlowError::InternalInvariant("invoke argument missing"))?;
-                    expected.push(crate::RegisterSlot::new(first, *width));
-                    if *width == crate::SlotWidth::Two {
-                        let second = registers
-                            .next()
-                            .ok_or(FlowError::InternalInvariant("invoke wide word missing"))?;
-                        if first.0.checked_add(1) != Some(second.0) {
-                            return Err(FlowError::InternalInvariant(
-                                "invoke wide argument is not adjacent",
-                            ));
-                        }
-                    }
-                }
-                if registers.next().is_some() || reads != expected.as_slice() {
-                    return Err(FlowError::InternalInvariant(
-                        "invoke reads disagree with P1 argument layout",
-                    ));
-                }
+                transfers.exceptions(
+                    block.id,
+                    Some(operation.id),
+                    operation.pc,
+                    selection,
+                    control,
+                )?;
             }
         }
-        if operation.commit == super::CommitRule::None && !writes.is_empty() {
-            return Err(FlowError::InternalInvariant(
-                "operation writes without a commit",
-            ));
-        }
-        if operation.commit == super::CommitRule::AfterResult && operation.result_pc.is_none() {
-            return Err(FlowError::InternalInvariant(
-                "operation commits after a missing result",
-            ));
-        }
-    }
-    Ok(())
-}
-
-fn check_result_operations(flow: &FlowMethod<'_>) -> Result<(), FlowError> {
-    for operation in flow.operations() {
-        let Some(result_pc) = operation.result_pc else {
-            continue;
-        };
-        let result =
-            flow.decoded()
-                .instruction_at(result_pc)
-                .ok_or(FlowError::InternalInvariant(
-                    "producer result pc does not name an instruction",
-                ))?;
-        if !matches!(result.opcode(), 0x0a..=0x0c) {
-            return Err(FlowError::InternalInvariant(
-                "producer result is not a move-result",
-            ));
-        }
-        let dest = result
-            .registers()
-            .next()
-            .ok_or(FlowError::InternalInvariant(
-                "move-result lost its destination",
-            ))?;
-        let width = if result.opcode() == 0x0b {
-            crate::SlotWidth::Two
+        if let Some(pc) = block.terminal_pc {
+            let original = instruction(flow, pc)?;
+            super::oracle::verify_terminal(flow, block, original, control)?;
+            if original.opcode() == 0x27 {
+                check_exception_completion(
+                    block.exceptional.ok_or(bug("throw lacks completion"))?,
+                    pc,
+                    pc,
+                    super::HeapTransfer::Preserve,
+                    super::LockTransfer::Preserve,
+                )?;
+            } else if block.exceptional.is_some() {
+                return Err(bug("non-throw terminal has an exception completion"));
+            }
+            match original.opcode() {
+                0x0e..=0x11 => transfers.exit(block.id, pc, ExitKind::Return)?,
+                0x27 => transfers.exceptions(block.id, None, pc, pc, control)?,
+                0x28..=0x2a => transfers.normal(
+                    block.id,
+                    pc,
+                    NormalEdge::Goto,
+                    original
+                        .branch_target()
+                        .ok_or(bug("goto lost checked target"))?,
+                )?,
+                0x32..=0x3d => {
+                    transfers.normal(
+                        block.id,
+                        pc,
+                        NormalEdge::ConditionalTrue,
+                        original
+                            .branch_target()
+                            .ok_or(bug("branch lost checked target"))?,
+                    )?;
+                    transfers.normal(
+                        block.id,
+                        pc,
+                        NormalEdge::ConditionalFalse,
+                        next(original)?,
+                    )?;
+                }
+                0x2b | 0x2c => {
+                    transfers.normal(block.id, pc, NormalEdge::SwitchDefault, next(original)?)?;
+                    let payload = original
+                        .payload_target()
+                        .ok_or(bug("switch lost payload"))?;
+                    let item = item_index(flow, payload)?;
+                    let DecodedItem::Payload(payload) = &flow.decoded().items()[item] else {
+                        return Err(bug("switch target is not a payload"));
+                    };
+                    let cases = payload
+                        .switch_cases(flow.decoded().source())
+                        .map_err(super::build::request_error)?
+                        .ok_or(bug("switch payload has no cases"))?;
+                    for (index, case) in cases.enumerate() {
+                        control.checkpoint()?;
+                        let target = relative(pc, case.offset.0)?;
+                        transfers.normal(
+                            block.id,
+                            pc,
+                            NormalEdge::SwitchCase {
+                                key: case.key,
+                                index: u32::try_from(index)
+                                    .map_err(|_| FlowError::PlatformCapacity)?,
+                            },
+                            target,
+                        )?;
+                    }
+                }
+                _ => return Err(bug("terminal source is not a terminal opcode")),
+            }
         } else {
-            crate::SlotWidth::One
-        };
-        let expected = crate::RegisterSlot::new(dest, width);
-        let writes = flow.writes(operation);
-        if writes != [expected] {
-            return Err(FlowError::InternalInvariant(
-                "producer normal write disagrees with its move-result",
-            ));
+            if block.exceptional.is_some() {
+                return Err(bug("non-terminal block has phantom exception completion"));
+            }
+            let index = block
+                .operations
+                .end
+                .checked_sub(1)
+                .ok_or(bug("empty fallthrough block"))?;
+            let operation = &flow.operations()[index as usize];
+            let last = instruction(flow, operation.result_pc.unwrap_or(operation.pc))?;
+            transfers.normal(block.id, operation.pc, NormalEdge::Fallthrough, next(last)?)?;
         }
-        if operation.commit != super::CommitRule::AfterResult {
-            return Err(FlowError::InternalInvariant(
-                "producer result does not commit after move-result",
-            ));
-        }
+    }
+    transfers.finish(control)
+}
+
+pub(super) fn instruction<'f, 'a>(
+    flow: &'f FlowMethod<'a>,
+    pc: CodeUnitOffset,
+) -> Result<&'f DecodedInstruction, FlowError> {
+    flow.decoded()
+        .instruction_at(pc)
+        .ok_or(bug("execution site is not a P1 instruction"))
+}
+
+pub(super) fn next(instruction: &DecodedInstruction) -> Result<CodeUnitOffset, FlowError> {
+    instruction
+        .pc()
+        .checked_advance(instruction.width())
+        .ok_or(bug("checked instruction end overflowed"))
+}
+
+pub(super) fn relative(pc: CodeUnitOffset, delta: i32) -> Result<CodeUnitOffset, FlowError> {
+    u32::try_from(i64::from(pc.0) + i64::from(delta))
+        .map(CodeUnitOffset)
+        .map_err(|_| bug("checked relative target overflowed"))
+}
+
+fn item_index(flow: &FlowMethod<'_>, pc: CodeUnitOffset) -> Result<usize, FlowError> {
+    flow.decoded()
+        .items()
+        .binary_search_by_key(&pc, DecodedItem::pc)
+        .map_err(|_| bug("execution site is not a P1 item"))
+}
+
+fn claim(
+    flow: &FlowMethod<'_>,
+    claims: &mut [Option<Coverage>],
+    pc: CodeUnitOffset,
+    coverage: Coverage,
+) -> Result<(), FlowError> {
+    let index = item_index(flow, pc)?;
+    if claims[index].replace(coverage).is_some() {
+        return Err(bug("original instruction has multiple execution owners"));
     }
     Ok(())
 }
 
-fn block_at_pc(flow: &FlowMethod<'_>, pc: CodeUnitOffset) -> Result<BlockId, FlowError> {
-    flow.blocks()
-        .iter()
-        .find(|block| block.start_pc == pc)
-        .map(|block| block.id)
-        .ok_or(FlowError::InternalInvariant(
-            "checked target does not name a block start",
-        ))
-}
-
-fn normal_edges<'a>(flow: &'a FlowMethod<'_>, block: BlockId) -> Vec<&'a Edge> {
-    flow.edges()
-        .iter()
-        .filter(|edge| edge.from == block && matches!(edge.role, EdgeRole::Normal(_)))
-        .collect()
-}
-
-fn expected_fallthrough(flow: &FlowMethod<'_>, block: &super::Block) -> Option<CodeUnitOffset> {
-    let last = flow
-        .operations()
-        .get(block.operations.end.checked_sub(1)? as usize)?;
-    let after = last.result_pc.unwrap_or(last.pc);
-    let instruction = flow.decoded().instruction_at(after)?;
-    after.checked_advance(instruction.width())
-}
-
-fn check_normal_edges(flow: &FlowMethod<'_>) -> Result<(), FlowError> {
-    for block in flow.blocks() {
-        let edges = normal_edges(flow, block.id);
-        match &block.terminal {
-            Some(Terminal::Goto { target }) => {
-                if edges.len() != 1
-                    || !matches!(edges[0].role, EdgeRole::Normal(NormalEdge::Goto))
-                    || edges[0].target != EdgeTarget::Block(block_at_pc(flow, *target)?)
-                {
-                    return Err(FlowError::InternalInvariant(
-                        "goto block has an invalid normal edge",
-                    ));
-                }
-            }
-            Some(Terminal::Branch {
-                target,
-                fallthrough,
-                ..
-            }) => {
-                if edges.len() != 2 {
-                    return Err(FlowError::InternalInvariant(
-                        "conditional block must have two normal edges",
-                    ));
-                }
-                let mut true_target = None;
-                let mut false_target = None;
-                for edge in edges {
-                    match edge.role {
-                        EdgeRole::Normal(NormalEdge::ConditionalTrue) => {
-                            true_target = Some(edge.target)
-                        }
-                        EdgeRole::Normal(NormalEdge::ConditionalFalse) => {
-                            false_target = Some(edge.target)
-                        }
-                        _ => {
-                            return Err(FlowError::InternalInvariant(
-                                "conditional block has a foreign edge role",
-                            ));
-                        }
-                    }
-                }
-                if true_target != Some(EdgeTarget::Block(block_at_pc(flow, *target)?))
-                    || false_target != Some(EdgeTarget::Block(block_at_pc(flow, *fallthrough)?))
-                {
-                    return Err(FlowError::InternalInvariant(
-                        "conditional block edge targets disagree with P1",
-                    ));
-                }
-            }
-            Some(Terminal::Switch {
-                kind,
-                default,
-                cases,
-                ..
-            }) => {
-                if edges.len() != cases.len() + 1 {
-                    return Err(FlowError::InternalInvariant(
-                        "switch normal edge count disagrees with its cases",
-                    ));
-                }
-                let default_block = block_at_pc(flow, *default)?;
-                let mut default_seen = false;
-                for edge in edges {
-                    match edge.role {
-                        EdgeRole::Normal(NormalEdge::SwitchDefault) => {
-                            if edge.target != EdgeTarget::Block(default_block) {
-                                return Err(FlowError::InternalInvariant(
-                                    "switch default target disagrees with P2",
-                                ));
-                            }
-                            default_seen = true;
-                        }
-                        EdgeRole::Normal(NormalEdge::SwitchCase { key, index }) => {
-                            let Some((expected_key, expected_target)) = cases.get(index as usize)
-                            else {
-                                return Err(FlowError::InternalInvariant(
-                                    "switch case index is outside the terminal cases",
-                                ));
-                            };
-                            if key != *expected_key
-                                || edge.target
-                                    != EdgeTarget::Block(block_at_pc(flow, *expected_target)?)
-                            {
-                                return Err(FlowError::InternalInvariant(
-                                    "switch case edge disagrees with its terminal",
-                                ));
-                            }
-                        }
-                        _ => {
-                            return Err(FlowError::InternalInvariant(
-                                "switch block has a foreign edge role",
-                            ));
-                        }
-                    }
-                }
-                if !default_seen {
-                    return Err(FlowError::InternalInvariant(
-                        "switch block has no default edge",
-                    ));
-                }
-                let _ = kind;
-            }
-            Some(Terminal::Return { .. }) | Some(Terminal::Throw { .. }) => {
-                if !edges.is_empty() {
-                    return Err(FlowError::InternalInvariant(
-                        "abrupt block has a normal successor",
-                    ));
-                }
-            }
-            None => {
-                if edges.len() != 1
-                    || !matches!(edges[0].role, EdgeRole::Normal(NormalEdge::Fallthrough))
-                {
-                    return Err(FlowError::InternalInvariant(
-                        "fallthrough block must have one normal edge",
-                    ));
-                }
-                let expected = expected_fallthrough(flow, block)
-                    .ok_or(FlowError::InternalInvariant("fallthrough has no next pc"))?;
-                if edges[0].target != EdgeTarget::Block(block_at_pc(flow, expected)?) {
-                    return Err(FlowError::InternalInvariant(
-                        "fallthrough edge target disagrees with P1",
-                    ));
-                }
-            }
-        }
+fn check_span(flow: &FlowMethod<'_>, span: super::SlotSpan) -> Result<(), FlowError> {
+    let end = (span.start as usize)
+        .checked_add(span.len as usize)
+        .ok_or(bug("slot span arithmetic overflowed"))?;
+    if end > flow.slots().len() {
+        return Err(bug("slot span is outside the arena"));
     }
     Ok(())
 }
 
-fn check_exception_edges(
+fn check_coverage_and_order(
     flow: &FlowMethod<'_>,
     control: &mut RunContext<'_>,
 ) -> Result<(), FlowError> {
-    let mut expected =
-        BTreeMap::<(BlockId, Option<super::OpId>), Vec<(u32, Option<u32>, Option<u32>)>>::new();
-    for block in flow.blocks() {
+    if flow
+        .blocks()
+        .first()
+        .is_none_or(|block| block.start_pc != CodeUnitOffset(0))
+    {
+        return Err(bug("flow has no pc-zero entry block"));
+    }
+    if flow.coverage().len() != flow.decoded().items().len() {
+        return Err(bug("coverage does not align with P1 items"));
+    }
+    let mut claims = filled(flow.coverage().len(), None, control)?;
+    let mut operation_cursor = 0usize;
+    let mut previous_start = None;
+    for (index, block) in flow.blocks().iter().enumerate() {
+        control.checkpoint()?;
+        if block.id.0 as usize != index || previous_start.is_some_and(|pc| pc >= block.start_pc) {
+            return Err(bug("block identities or PC order disagree"));
+        }
+        previous_start = Some(block.start_pc);
+        if block.operations.start as usize != operation_cursor
+            || block.operations.end < block.operations.start
+            || block.operations.end as usize > flow.operations().len()
+        {
+            return Err(bug("block ranges do not partition the operation arena"));
+        }
+        let mut pc = block.start_pc;
         for index in block.operations.clone() {
+            control.checkpoint()?;
             let operation = &flow.operations()[index as usize];
-            if !operation.effects.may_throw() {
-                continue;
+            if operation.normal.reads != super::ReadOrder::CaptureAllBeforeCommit {
+                return Err(bug("operation does not capture inputs before committing"));
             }
-            let selection = match operation.exception_selection {
-                ExceptionSelection::Operation => operation.pc,
-                ExceptionSelection::Advanced => {
-                    let instruction = flow.decoded().instruction_at(operation.pc).ok_or(
-                        FlowError::InternalInvariant("throwing operation has no instruction"),
-                    )?;
-                    operation
-                        .pc
-                        .checked_advance(instruction.width())
-                        .ok_or(FlowError::PlatformCapacity)?
-                }
-            };
-            let clauses = flow
-                .decoded()
-                .catch_clauses_at(selection, control)
-                .map_err(super::build::request_error)?;
-            let list = expected.entry((block.id, Some(operation.id))).or_default();
-            let mut catch_all = false;
-            for (order, (catch, target)) in clauses.into_iter().enumerate() {
-                catch_all |= catch.is_none();
-                list.push((
-                    u32::try_from(order).map_err(|_| FlowError::PlatformCapacity)?,
-                    catch,
-                    Some(target),
+            if operation.id.0 != index || operation.block != block.id || operation.pc != pc {
+                return Err(bug(
+                    "operation identity, owner or execution order disagrees",
                 ));
             }
-            if !catch_all {
-                let order = u32::try_from(list.len()).map_err(|_| FlowError::PlatformCapacity)?;
-                list.push((order, None, None));
+            check_span(flow, operation.reads())?;
+            check_span(flow, operation.writes())?;
+            let original = instruction(flow, pc)?;
+            if operation.result_pc != original.result_pc() {
+                return Err(bug("P2 result site disagrees with its original producer"));
+            }
+            claim(flow, &mut claims, pc, Coverage::Operation(operation.id))?;
+            pc = next(original)?;
+            if let Some(result_pc) = operation.result_pc {
+                let result = instruction(flow, result_pc)?;
+                if result_pc != pc
+                    || result.producer_pc() != Some(operation.pc)
+                    || !matches!(result.opcode(), 0x0a..=0x0c)
+                {
+                    return Err(bug(
+                        "producer/result atom is not the original adjacent pair",
+                    ));
+                }
+                claim(
+                    flow,
+                    &mut claims,
+                    result_pc,
+                    Coverage::MergedResult(operation.id),
+                )?;
+                pc = next(result)?;
             }
         }
-        if let Some(Terminal::Throw { pc }) = block.terminal {
-            let clauses = flow
-                .decoded()
-                .catch_clauses_at(pc, control)
-                .map_err(super::build::request_error)?;
-            let list = expected.entry((block.id, None)).or_default();
-            let mut catch_all = false;
-            for (order, (catch, target)) in clauses.into_iter().enumerate() {
-                catch_all |= catch.is_none();
-                list.push((
-                    u32::try_from(order).map_err(|_| FlowError::PlatformCapacity)?,
-                    catch,
-                    Some(target),
-                ));
+        operation_cursor = block.operations.end as usize;
+        if block.terminal.is_some() != block.terminal_pc.is_some() {
+            return Err(bug("terminal and source site disagree"));
+        }
+        if let Some(terminal_pc) = block.terminal_pc {
+            if terminal_pc != pc {
+                return Err(bug("terminal is not after the block's ordered operations"));
             }
-            if !catch_all {
-                let order = u32::try_from(list.len()).map_err(|_| FlowError::PlatformCapacity)?;
-                list.push((order, None, None));
-            }
+            claim(flow, &mut claims, pc, Coverage::Terminal(block.id))?;
+        } else if block.operations.is_empty() {
+            return Err(bug("empty non-terminal block"));
+        }
+        check_span(flow, block.terminal_reads())?;
+        if block.terminal.is_none() && !block.terminal_reads().is_empty() {
+            return Err(bug("non-terminal block contains phantom terminal reads"));
         }
     }
-    for block in flow.blocks() {
-        let mut seen = 0usize;
-        for edge in flow.edges() {
-            let EdgeRole::Exception { order, catch, .. } = edge.role else {
-                continue;
-            };
-            if edge.from != block.id {
-                continue;
-            }
-            let Some(list) = expected.get(&(block.id, edge.source_op)) else {
-                return Err(FlowError::InternalInvariant(
-                    "exception edge has no may-throw source",
-                ));
-            };
-            let Some((expected_order, expected_catch, expected_target)) = list.get(order as usize)
-            else {
-                return Err(FlowError::InternalInvariant(
-                    "exception edge order is outside its catch chain",
-                ));
-            };
-            let expected_target = match expected_target {
-                Some(target) => EdgeTarget::Block(block_at_pc(flow, CodeUnitOffset(*target))?),
-                None => {
-                    let EdgeTarget::Exit(id) = edge.target else {
-                        return Err(FlowError::InternalInvariant(
-                            "uncaught exception edge has a block target",
-                        ));
-                    };
-                    EdgeTarget::Exit(id)
+    if operation_cursor != flow.operations().len() {
+        return Err(bug("operation arena contains unowned operations"));
+    }
+    for (index, item) in flow.decoded().items().iter().enumerate() {
+        control.checkpoint()?;
+        let expected = match item {
+            DecodedItem::Payload(_) => {
+                if claims[index].is_some() {
+                    return Err(bug("payload has an execution owner"));
                 }
-            };
-            if *expected_order != order
-                || *expected_catch != catch.map(|id| id.0)
-                || edge.target != expected_target
-            {
-                return Err(FlowError::InternalInvariant(
-                    "exception edge disagrees with P1 protection",
-                ));
+                Coverage::Payload
             }
-            seen += 1;
+            DecodedItem::Instruction(_) if flow.decoded().is_reachable(item.pc()) => {
+                claims[index].ok_or(bug("reachable instruction has no execution owner"))?
+            }
+            DecodedItem::Instruction(_) => {
+                if claims[index].is_some() {
+                    return Err(bug("unreachable instruction has an execution owner"));
+                }
+                Coverage::Unreachable
+            }
+        };
+        if flow.coverage()[index] != expected {
+            return Err(bug("coverage points to the wrong execution owner"));
         }
-        let expected_count = expected
-            .iter()
-            .filter(|((block_id, _), _)| *block_id == block.id)
-            .map(|(_, list)| {
-                list.len() + usize::from(!list.iter().any(|(_, catch, _)| catch.is_none()))
-            })
-            .sum::<usize>();
-        if seen != expected_count {
-            return Err(FlowError::InternalInvariant(
-                "exception edge count disagrees with P1 protection",
-            ));
+    }
+    for slot in flow.slots() {
+        control.checkpoint()?;
+        if slot
+            .end()
+            .is_none_or(|end| u64::from(end.0) > flow.decoded().registers_size().0)
+        {
+            return Err(bug("slot is outside the original register frame"));
         }
     }
     Ok(())
 }
 
-fn check_entry_slots(flow: &FlowMethod<'_>) -> Result<(), FlowError> {
-    let limit = flow.decoded().registers_size().0;
-    let check = |slot: crate::RegisterSlot| -> Result<(), FlowError> {
-        if slot
-            .start
-            .0
-            .checked_add(slot.words())
-            .is_none_or(|end| u64::from(end) > limit)
+// EdgeId is excluded: identity must be unique, while these keys express the
+// semantic identity of each original branch/case/handler transfer.
+#[derive(Clone, Copy, Eq, Ord, PartialEq, PartialOrd)]
+struct Key {
+    block: BlockId,
+    site: CodeUnitOffset,
+    family: u8,
+    ordinal: u32,
+}
+
+fn normal_key(block: BlockId, site: CodeUnitOffset, role: NormalEdge) -> Key {
+    let (family, ordinal) = match role {
+        NormalEdge::Fallthrough => (0, 0),
+        NormalEdge::Goto => (1, 0),
+        NormalEdge::ConditionalTrue => (2, 0),
+        NormalEdge::ConditionalFalse => (3, 0),
+        NormalEdge::SwitchDefault => (4, 0),
+        NormalEdge::SwitchCase { index, .. } => (5, index),
+    };
+    Key {
+        block,
+        site,
+        family,
+        ordinal,
+    }
+}
+
+struct Transfers<'f, 'a> {
+    flow: &'f FlowMethod<'a>,
+    keys: Vec<(Key, usize)>,
+    seen: Vec<bool>,
+    exit_keys: Vec<((BlockId, CodeUnitOffset, u8), ExitId)>,
+    exits_seen: Vec<bool>,
+}
+
+impl<'f, 'a> Transfers<'f, 'a> {
+    fn new(flow: &'f FlowMethod<'a>, control: &mut RunContext<'_>) -> Result<Self, FlowError> {
+        let mut keys = Vec::new();
+        for (index, edge) in flow.edges().iter().enumerate() {
+            control.checkpoint()?;
+            if edge.id.0 as usize != index {
+                return Err(bug("edge identity is not its arena index"));
+            }
+            let block = flow
+                .block(edge.from)
+                .ok_or(bug("edge source is a foreign block"))?;
+            let key = match edge.role {
+                EdgeRole::Normal(role) => {
+                    let site = if let Some(pc) = block.terminal_pc {
+                        pc
+                    } else {
+                        let last = block
+                            .operations
+                            .end
+                            .checked_sub(1)
+                            .ok_or(bug("edge leaves empty block"))?;
+                        flow.operations()[last as usize].pc
+                    };
+                    normal_key(edge.from, site, role)
+                }
+                EdgeRole::Exception {
+                    throw_pc, order, ..
+                } => Key {
+                    block: edge.from,
+                    site: throw_pc,
+                    family: 6,
+                    ordinal: order,
+                },
+            };
+            push(&mut keys, (key, index), control)?;
+        }
+        sort_by_key(&mut keys, |(key, _)| *key, control)?;
+        control.checkpoint()?;
+        for pair in keys.windows(2) {
+            control.checkpoint()?;
+            if pair[0].0 == pair[1].0 {
+                return Err(bug("duplicate semantic edge replaces an original transfer"));
+            }
+        }
+        let mut exit_keys = Vec::new();
+        for (index, exit) in flow.exits().iter().enumerate() {
+            control.checkpoint()?;
+            if exit.id.0 as usize != index || flow.block(exit.block).is_none() {
+                return Err(bug("exit identity or owner is foreign"));
+            }
+            let kind = if exit.kind == ExitKind::Return { 0 } else { 1 };
+            push(
+                &mut exit_keys,
+                ((exit.block, exit.pc, kind), exit.id),
+                control,
+            )?;
+        }
+        sort_by_key(&mut exit_keys, |(key, _)| *key, control)?;
+        control.checkpoint()?;
+        for pair in exit_keys.windows(2) {
+            control.checkpoint()?;
+            if pair[0].0 == pair[1].0 {
+                return Err(bug("duplicate exit for the same original site"));
+            }
+        }
+        Ok(Self {
+            flow,
+            keys,
+            exit_keys,
+            seen: filled(flow.edges().len(), false, control)?,
+            exits_seen: filled(flow.exits().len(), false, control)?,
+        })
+    }
+
+    fn block_at(&self, pc: CodeUnitOffset) -> Result<BlockId, FlowError> {
+        self.flow
+            .blocks()
+            .binary_search_by_key(&pc, |block| block.start_pc)
+            .map(|index| self.flow.blocks()[index].id)
+            .map_err(|_| bug("transfer enters inside a block/atom"))
+    }
+
+    fn exit(
+        &mut self,
+        block: BlockId,
+        pc: CodeUnitOffset,
+        kind: ExitKind,
+    ) -> Result<(), FlowError> {
+        self.exit_id(block, pc, kind).map(|_| ())
+    }
+
+    fn exit_id(
+        &mut self,
+        block: BlockId,
+        pc: CodeUnitOffset,
+        kind: ExitKind,
+    ) -> Result<ExitId, FlowError> {
+        let key = (block, pc, if kind == ExitKind::Return { 0 } else { 1 });
+        let index = self
+            .exit_keys
+            .binary_search_by_key(&key, |(key, _)| *key)
+            .map_err(|_| bug("original exit has no matching P2 exit"))?;
+        let id = self.exit_keys[index].1;
+        if std::mem::replace(&mut self.exits_seen[id.0 as usize], true) {
+            return Err(bug("exit has multiple transfer owners"));
+        }
+        Ok(id)
+    }
+
+    fn edge(
+        &mut self,
+        key: Key,
+        source: Option<OpId>,
+        role: EdgeRole,
+        target: EdgeTarget,
+    ) -> Result<(), FlowError> {
+        let index = self
+            .keys
+            .binary_search_by_key(&key, |(key, _)| *key)
+            .map_err(|_| bug("original transfer has no matching P2 edge"))?;
+        let edge_index = self.keys[index].1;
+        let edge = &self.flow.edges()[edge_index];
+        if edge.from != key.block
+            || edge.source_op != source
+            || edge.role != role
+            || edge.target != target
         {
-            return Err(FlowError::InternalInvariant(
-                "entry slot is outside the register frame",
+            return Err(bug(
+                "P2 transfer source, role, selection or target disagrees",
             ));
         }
+        if std::mem::replace(&mut self.seen[edge_index], true) {
+            return Err(bug("edge has multiple original transfer owners"));
+        }
         Ok(())
-    };
-    if let Some(slot) = flow.entry().this() {
-        check(slot)?;
     }
-    for parameter in flow.entry().parameters() {
-        check(parameter.slot())?;
+
+    fn normal(
+        &mut self,
+        block: BlockId,
+        site: CodeUnitOffset,
+        role: NormalEdge,
+        target: CodeUnitOffset,
+    ) -> Result<(), FlowError> {
+        self.edge(
+            normal_key(block, site, role),
+            None,
+            EdgeRole::Normal(role),
+            EdgeTarget::Block(self.block_at(target)?),
+        )
+    }
+
+    fn exceptions(
+        &mut self,
+        block: BlockId,
+        source: Option<OpId>,
+        throw_pc: CodeUnitOffset,
+        selection_pc: CodeUnitOffset,
+        control: &mut RunContext<'_>,
+    ) -> Result<(), FlowError> {
+        let clauses = self
+            .flow
+            .decoded()
+            .catch_clauses_at(selection_pc, control)
+            .map_err(super::build::request_error)?;
+        let mut catch_all = false;
+        for (ordinal, (catch, target)) in clauses.iter().enumerate() {
+            control.checkpoint()?;
+            let order = u32::try_from(ordinal).map_err(|_| FlowError::PlatformCapacity)?;
+            catch_all |= catch.is_none();
+            let key = Key {
+                block,
+                site: throw_pc,
+                family: 6,
+                ordinal: order,
+            };
+            self.edge(
+                key,
+                source,
+                EdgeRole::Exception {
+                    throw_pc,
+                    selection_pc,
+                    order,
+                    catch: catch.map(TypeId),
+                },
+                EdgeTarget::Block(self.block_at(CodeUnitOffset(*target))?),
+            )?;
+        }
+        if !catch_all {
+            let order = u32::try_from(clauses.len()).map_err(|_| FlowError::PlatformCapacity)?;
+            let exit = self.exit_id(block, throw_pc, ExitKind::Uncaught)?;
+            self.edge(
+                Key {
+                    block,
+                    site: throw_pc,
+                    family: 6,
+                    ordinal: order,
+                },
+                source,
+                EdgeRole::Exception {
+                    throw_pc,
+                    selection_pc,
+                    order,
+                    catch: None,
+                },
+                EdgeTarget::Exit(exit),
+            )?;
+        }
+        Ok(())
+    }
+
+    fn finish(self, control: &mut RunContext<'_>) -> Result<(), FlowError> {
+        for seen in self.seen.iter().chain(self.exits_seen.iter()) {
+            control.checkpoint()?;
+            if !seen {
+                return Err(bug("P2 edge/exit has no original transfer owner"));
+            }
+        }
+        // keys are grouped by source block. Walk the actual graph once, with
+        // discovery marking to bound the worklist by the block count.
+        let count = self
+            .flow
+            .blocks()
+            .len()
+            .checked_add(1)
+            .ok_or(FlowError::PlatformCapacity)?;
+        let mut offsets = filled(count, 0usize, control)?;
+        for (key, _) in &self.keys {
+            control.checkpoint()?;
+            let offset = &mut offsets[key.block.0 as usize + 1];
+            *offset = offset.checked_add(1).ok_or(FlowError::PlatformCapacity)?;
+        }
+        for index in 1..offsets.len() {
+            control.checkpoint()?;
+            offsets[index] = offsets[index]
+                .checked_add(offsets[index - 1])
+                .ok_or(FlowError::PlatformCapacity)?;
+        }
+        let mut visited = filled(self.flow.blocks().len(), false, control)?;
+        let mut pending = Vec::new();
+        visited[0] = true;
+        push(&mut pending, BlockId(0), control)?;
+        while let Some(block) = pending.pop() {
+            control.checkpoint()?;
+            let range = offsets[block.0 as usize]..offsets[block.0 as usize + 1];
+            for (_, index) in &self.keys[range] {
+                control.checkpoint()?;
+                if let EdgeTarget::Block(target) = self.flow.edges()[*index].target
+                    && !std::mem::replace(&mut visited[target.0 as usize], true)
+                {
+                    push(&mut pending, target, control)?;
+                }
+            }
+        }
+        for seen in visited {
+            control.checkpoint()?;
+            if !seen {
+                return Err(bug("flow has an unreachable block"));
+            }
+        }
+        Ok(())
+    }
+}
+
+fn check_exception_completion(
+    actual: super::ExceptionCompletion,
+    site: CodeUnitOffset,
+    selection: CodeUnitOffset,
+    heap: super::HeapTransfer,
+    lock: super::LockTransfer,
+) -> Result<(), FlowError> {
+    if actual.throw_pc != site
+        || actual.selection_pc != selection
+        || actual.frame != super::ExceptionFrame::PreserveBeforeOperation
+        || actual.heap != heap
+        || actual.lock != lock
+    {
+        return Err(bug(
+            "exceptional frame/heap/lock completion differs from DEX",
+        ));
     }
     Ok(())
 }

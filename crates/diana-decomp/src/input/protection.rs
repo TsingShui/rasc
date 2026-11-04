@@ -44,9 +44,18 @@ impl CheckedProtection {
         pc: CodeUnitOffset,
         budget: &mut RunContext<'_>,
     ) -> Result<Option<&[CatchClause]>, RequestError> {
-        for range in &self.ranges {
+        // P1 guarantees sorted, non-overlapping original try ranges.
+        let mut lower = 0;
+        let mut upper = self.ranges.len();
+        while lower < upper {
             budget.checkpoint()?;
-            if pc >= range.start && pc < range.end {
+            let middle = lower + (upper - lower) / 2;
+            let range = &self.ranges[middle];
+            if pc < range.start {
+                upper = middle;
+            } else if pc >= range.end {
+                lower = middle + 1;
+            } else {
                 return Ok(Some(&self.chains[range.chain].clauses));
             }
         }
