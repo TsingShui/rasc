@@ -169,6 +169,15 @@ impl<'a> DecodedMethod<'a> {
     pub(crate) fn protection(&self) -> &CheckedProtection {
         &self.protection
     }
+    /// Checked original try boundaries in code units.
+    pub fn try_boundaries(&self) -> impl Iterator<Item = u32> + '_ {
+        self.protection.boundaries().map(|value| value.0)
+    }
+
+    /// Checked original handler entry targets in code units.
+    pub fn handler_targets(&self) -> impl Iterator<Item = u32> + '_ {
+        self.protection.targets().map(|value| value.0)
+    }
     pub fn method_id(&self) -> MethodId {
         self.source.method_id
     }

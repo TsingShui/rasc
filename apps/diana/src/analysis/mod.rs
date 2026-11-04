@@ -16,7 +16,6 @@ pub mod extract;
 pub mod images;
 pub mod input;
 pub mod manifest;
-pub mod p0;
 pub mod query;
 pub mod request;
 mod runner;

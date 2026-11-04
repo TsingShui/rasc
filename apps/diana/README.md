@@ -121,19 +121,19 @@ allocation failure is reported as a classified error instead of a truncated resu
 Cancellation is cooperative between analysis stages; a process killed by a signal
 is not a catchable cancellation guarantee.
 
-## Internal P0 inspection
+## Internal P0/P1 inspection
 
-Run the independent class-fact snapshot through a Cargo example:
+Use the engine development shell with a bare DEX:
 
 ```sh
-cargo run --release --locked -p diana --example p0_debug -- \
-  sample.apk 'com.example.App' -o p0-class.json
+cargo run -p diana-decomp --example dbg_shell --locked -- \
+  --dex classes.dex \
+  --exec '{"id":1,"cmd":"p0","class":0}' \
+  --exec '{"id":2,"cmd":"p1","class":0,"method":0}'
 ```
 
-The result is pretty JSON with class declarations, all fields/methods, code-entry
-integers, static preparation values and original annotations. It preserves read
-states and diagnostics. See [P0 snapshot](../../docs/diana/spec/00-class.md) for
-coverage and failure behavior.
+It writes one JSON response per command. See the engine package for the
+supported `class`, `p0`, `methods`, `p1` and `decoded` commands.
 
 ## Agent usage
 

@@ -1,7 +1,7 @@
 # P0 — Class facts
 
 Code: `crates/diana-decomp/src/p0_class/`, with the application adapter in
-`apps/diana/src/analysis/p0.rs` and the internal `p0_debug` Cargo example.
+the engine development shell `crates/diana-decomp/examples/dbg_shell.rs`.
 
 ## Input and ownership
 
@@ -55,27 +55,14 @@ Copies and JSON growth check capacity, then reserve fallibly. No numeric quota i
 introduced by P0. All offsets address the original physical DEX, including DEX 041
 shared data; the logical header offset remains part of identity.
 
-## Debug presentation
+## Development inspection
 
-`p0::render_json` renders the existing snapshot through `serde_json` as pretty JSON
-with `schema_version: 1` and `stage: p0`. It does not re-read the input. Original
-text is displayed as readable `text`, with isolated surrogates escaped; internal
-UTF-16 units are not duplicated in the debug output. Original access flags include
-the raw word, per-kind names and unknown bits.
-
-The top-level sections are `identity`, `status`, `class`, `fields`, `methods`,
-`annotations` and `diagnostics`. Annotation locations use original member IDs and
-prototype parameter positions.
-
-The internal debug entry is a Cargo example, not a Diana CLI command:
+The engine development shell is the single P0/P1 observation entry:
 
 ```sh
-cargo run --release --locked -p diana --example p0_debug -- \
-  sample.apk 'com.example.App' -o p0-class.json
+cargo run -p diana-decomp --example dbg_shell --locked -- \
+  --dex classes.dex --exec '{"cmd":"p0","class":0}'
 ```
 
-The example accepts the existing exact class selector. `-o` uses the application
-atomic publisher and refuses an existing target or an input alias. Without `-o`,
-pretty JSON goes to stdout. A complete declaration snapshot exits zero; a partial
-snapshot is published with its fact states and diagnostics and exits non-zero.
-Errors that prevent collection or rendering produce no new output file.
+It reads a bare DEX, emits one JSON response per command and does not re-read the
+input for presentation. P0 no longer has a separate debug renderer or example.
