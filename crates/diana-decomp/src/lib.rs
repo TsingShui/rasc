@@ -1,4 +1,4 @@
-//! Native DEX analysis with caller-owned input and request-scoped resource control.
+//! Native DEX analysis with caller-owned input and classified failures.
 
 mod engine;
 pub mod input;
@@ -39,5 +39,4 @@ pub use substrate::ids::{
     Utf16Count, Utf16Offset,
 };
 
-pub use pipeline::control::{ControlError, RunContext};
 pub use pipeline::diagnostics::{DiagnosticCode, FailureKind};

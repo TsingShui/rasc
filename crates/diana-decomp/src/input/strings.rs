@@ -1,8 +1,8 @@
 use std::fmt;
 
 use super::{Cursor, InputError, InputProblem, malformed};
-use crate::pipeline::control::InputControl;
-use crate::{ByteOffset, RunContext, Utf16Count, Utf16Offset};
+
+use crate::{ByteOffset, Utf16Count, Utf16Offset};
 
 /// A validated, borrowed MUTF-8 string. Literal surrogate units remain intact;
 /// declaration names and descriptors undergo additional syntax checks.
@@ -30,22 +30,18 @@ impl<'a> DexString<'a> {
         self.utf16_len
     }
 
-    pub(super) fn read(
-        bytes: &'a [u8],
-        mut cursor: Cursor<'a>,
-        control: &mut impl InputControl,
-    ) -> Result<Self, InputError> {
-        let utf16_len = cursor.read_uleb32_with(control)?;
+    pub(super) fn read(bytes: &'a [u8], mut cursor: Cursor<'a>) -> Result<Self, InputError> {
+        let utf16_len = cursor.read_uleb32()?;
         if u64::from(utf16_len) >= cursor.remaining_byte().0 as u64 {
             return Err(malformed(InputProblem::Truncated, cursor.position_byte()));
         }
-        control.checkpoint()?;
+
         let start_byte = cursor.position_byte();
         for _ in 0..utf16_len {
-            read_unit(&mut cursor, control)?;
+            read_unit(&mut cursor)?;
         }
         let end_byte = cursor.position_byte();
-        if cursor.read_array::<1>(control)? != [0] {
+        if cursor.read_array::<1>()? != [0] {
             return Err(malformed(InputProblem::InvalidMutf8, end_byte));
         }
         Ok(Self {
@@ -61,8 +57,7 @@ impl<'a> DexString<'a> {
     /// The copy is owned so a caller can display or match a name without holding
     /// the borrow; surrogate units are preserved exactly. Allocation and work are
     /// charged before the copy grows.
-    pub fn units(&self, control: &mut RunContext<'_>) -> Result<Vec<u16>, InputError> {
-        control.checkpoint()?;
+    pub fn units(&self) -> Result<Vec<u16>, InputError> {
         let length =
             usize::try_from(self.utf16_len.0).map_err(|_| InputError::PlatformCapacity {
                 offset_byte: self.start_byte,
@@ -73,9 +68,9 @@ impl<'a> DexString<'a> {
             .map_err(|_| InputError::Allocation {
                 offset_byte: self.start_byte,
             })?;
-        control.checkpoint()?;
+
         let mut reader = self.reader()?;
-        while let Some(unit) = reader.next(control)? {
+        while let Some(unit) = reader.next()? {
             units.push(unit);
         }
         if units.len() != length {
@@ -86,30 +81,20 @@ impl<'a> DexString<'a> {
         Ok(units)
     }
 
-    pub fn matches(&self, units: &[u16], control: &mut RunContext<'_>) -> Result<bool, InputError> {
-        self.matches_with(units, control)
-    }
-
-    pub(crate) fn matches_with(
-        &self,
-        units: &[u16],
-        control: &mut impl InputControl,
-    ) -> Result<bool, InputError> {
-        control.checkpoint()?;
+    pub fn matches(&self, units: &[u16]) -> Result<bool, InputError> {
         if u64::from(self.utf16_len.0) != units.len() as u64 {
             return Ok(false);
         }
-        Ok(self.matches_prefix(units, Utf16Offset(0), control)? == Some(Utf16Offset(units.len())))
+        Ok(self.matches_prefix(units, Utf16Offset(0))? == Some(Utf16Offset(units.len())))
     }
 
     pub(super) fn matches_prefix(
         &self,
         units: &[u16],
         mut position: Utf16Offset,
-        control: &mut impl InputControl,
     ) -> Result<Option<Utf16Offset>, InputError> {
         let mut reader = self.reader()?;
-        while let Some(unit) = reader.next(control)? {
+        while let Some(unit) = reader.next()? {
             if units.get(position.0) != Some(&unit) {
                 return Ok(None);
             }
@@ -125,7 +110,7 @@ impl<'a> DexString<'a> {
         })
     }
 
-    pub(super) fn validate_name(&self, control: &mut impl InputControl) -> Result<(), InputError> {
+    pub(super) fn validate_name(&self) -> Result<(), InputError> {
         let mut reader = self.reader()?;
         if self.bytes.get(self.start_byte.0) == Some(&b'<') {
             if self.utf16_len.0 < 3 || self.bytes.get(self.end_byte.0 - 1) != Some(&b'>') {
@@ -140,13 +125,13 @@ impl<'a> DexString<'a> {
                 left: self.utf16_len.0 - 2,
             };
         }
-        validate_name_units(reader, NameSyntax::Simple, control)
+        validate_name_units(reader, NameSyntax::Simple)
     }
 
-    pub(super) fn shape(&self, control: &mut impl InputControl) -> Result<TypeShape, InputError> {
+    pub(super) fn shape(&self) -> Result<TypeShape, InputError> {
         let mut reader = self.reader()?;
         let mut tag = reader
-            .next(control)?
+            .next()?
             .ok_or_else(|| malformed(InputProblem::InvalidDescriptor, self.start_byte))?;
         let mut dimensions = 0;
         while tag == u16::from(b'[') {
@@ -155,7 +140,7 @@ impl<'a> DexString<'a> {
                 return Err(malformed(InputProblem::InvalidDescriptor, self.start_byte));
             }
             tag = reader
-                .next(control)?
+                .next()?
                 .ok_or_else(|| malformed(InputProblem::InvalidDescriptor, self.start_byte))?;
         }
         if tag == u16::from(b'L') {
@@ -168,7 +153,7 @@ impl<'a> DexString<'a> {
                 reader.cursor.position_byte(),
                 ByteOffset(self.end_byte.0 - 1),
             )?;
-            validate_name_units(reader, NameSyntax::ClassPath, control)?;
+            validate_name_units(reader, NameSyntax::ClassPath)?;
             return Ok(if dimensions == 0 {
                 TypeShape::Class
             } else {
@@ -251,25 +236,22 @@ pub(crate) struct Units<'a> {
 }
 
 impl Units<'_> {
-    pub(crate) fn next(
-        &mut self,
-        control: &mut impl InputControl,
-    ) -> Result<Option<u16>, InputError> {
+    pub(crate) fn next(&mut self) -> Result<Option<u16>, InputError> {
         if self.left == 0 {
             return Ok(None);
         }
         self.left -= 1;
-        Ok(Some(read_unit(&mut self.cursor, control)?))
+        Ok(Some(read_unit(&mut self.cursor)?))
     }
 }
 
-fn read_unit(cursor: &mut Cursor<'_>, control: &mut impl InputControl) -> Result<u16, InputError> {
+fn read_unit(cursor: &mut Cursor<'_>) -> Result<u16, InputError> {
     let start = cursor.position_byte();
-    let [first] = cursor.read_array(control)?;
+    let [first] = cursor.read_array()?;
     match first {
         1..=0x7f => Ok(u16::from(first)),
         0xc0..=0xdf => {
-            let [second] = cursor.read_array(control)?;
+            let [second] = cursor.read_array()?;
             let unit = (u16::from(first & 31) << 6) | u16::from(second & 63);
             if second & 0xc0 != 0x80 || (unit < 0x80 && (first != 0xc0 || second != 0x80)) {
                 return Err(malformed(InputProblem::InvalidMutf8, start));
@@ -277,7 +259,7 @@ fn read_unit(cursor: &mut Cursor<'_>, control: &mut impl InputControl) -> Result
             Ok(unit)
         }
         0xe0..=0xef => {
-            let [second, third] = cursor.read_array(control)?;
+            let [second, third] = cursor.read_array()?;
             let unit = (u16::from(first & 15) << 12)
                 | (u16::from(second & 63) << 6)
                 | u16::from(third & 63);
@@ -295,13 +277,9 @@ enum NameSyntax {
     ClassPath,
 }
 
-fn validate_name_units(
-    mut reader: Units<'_>,
-    syntax: NameSyntax,
-    control: &mut impl InputControl,
-) -> Result<(), InputError> {
+fn validate_name_units(mut reader: Units<'_>, syntax: NameSyntax) -> Result<(), InputError> {
     let mut component = false;
-    while let Some(unit) = reader.next(control)? {
+    while let Some(unit) = reader.next()? {
         if matches!(syntax, NameSyntax::ClassPath) && unit == u16::from(b'/') {
             if !component {
                 return Err(malformed(
@@ -313,7 +291,7 @@ fn validate_name_units(
             continue;
         }
         let scalar = if (0xd800..=0xdbff).contains(&unit) {
-            let low = reader.next(control)?.ok_or_else(|| {
+            let low = reader.next()?.ok_or_else(|| {
                 malformed(InputProblem::InvalidName, reader.cursor.position_byte())
             })?;
             if !(0xdc00..=0xdfff).contains(&low) {

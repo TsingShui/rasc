@@ -2,7 +2,7 @@
 //! This view cannot be consumed to construct another analysis product.
 
 use crate::p1::{DecodedInstruction, DecodedItem, DecodedMethod, DecodedPayload, InvokeLayout};
-use crate::{ByteRange, ClassDefId, CodeUnitOffset, MethodId, RequestError, RunContext};
+use crate::{ByteRange, ClassDefId, CodeUnitOffset, MethodId, RequestError};
 
 #[derive(Clone, Copy)]
 pub struct MethodEvidence<'f, 'a> {
@@ -55,9 +55,8 @@ impl<'f, 'a> MethodEvidence<'f, 'a> {
     pub fn catch_clauses_at(
         self,
         pc: CodeUnitOffset,
-        control: &mut RunContext<'_>,
     ) -> Result<Vec<(Option<u32>, u32)>, RequestError> {
-        self.decoded.catch_clauses_at(pc, control)
+        self.decoded.catch_clauses_at(pc)
     }
     pub fn invoke_layouts(self) -> impl Iterator<Item = (CodeUnitOffset, &'f InvokeLayout)> + 'f {
         self.decoded.invoke_layouts()

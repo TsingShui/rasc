@@ -11,7 +11,7 @@ use crate::raw::{
     Format, InsnLayout, LayoutKind, OpcodeSpec, OperandReference, RawDecodeError,
     instruction_layout,
 };
-use crate::{ByteLength, CodeUnitCount, CodeUnitOffset, ControlError, FailureKind, RunContext};
+use crate::{ByteLength, CodeUnitCount, CodeUnitOffset, FailureKind};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum MethodProblem {
@@ -45,8 +45,6 @@ pub enum MethodError {
     Input(#[from] InputError),
     #[error(transparent)]
     Decode(#[from] RawDecodeError),
-    #[error(transparent)]
-    Control(#[from] ControlError),
     #[error("method view belongs to another input image")]
     ForeignInput,
     #[error("malformed method at {pc:?}: {problem:?}")]
@@ -72,7 +70,7 @@ impl MethodError {
         match self {
             Self::Input(error) => error.kind(),
             Self::Decode(error) => error.kind(),
-            Self::Control(error) => error.kind(),
+
             Self::ForeignInput | Self::Malformed { .. } | Self::ReferenceOutOfBounds { .. } => {
                 FailureKind::Malformed
             }
@@ -141,20 +139,16 @@ impl<'a> ProgramIndex<'a> {
         &self,
         original: &RawMethodView<'a>,
         items: &[super::DecodedItem],
-        budget: &mut RunContext<'_>,
     ) -> Result<CheckedMethodLayout<'a>, MethodError> {
-        budget.checkpoint()?;
         if !std::ptr::eq(self.bytes, original.source_bytes)
             || self.header.header_offset != original.header_offset
         {
             return Err(MethodError::ForeignInput);
         }
-        budget.checkpoint()?;
-        budget.checkpoint()?;
-        let mut boundaries = Boundaries::new(original.code_units(), budget)?;
+
+        let mut boundaries = Boundaries::new(original.code_units())?;
         let mut instruction_count = 0usize;
         for item in items {
-            budget.checkpoint()?;
             match item {
                 super::DecodedItem::Instruction(_) => {
                     instruction_count = instruction_count
@@ -163,7 +157,7 @@ impl<'a> ProgramIndex<'a> {
                     boundaries.set_start(item.pc(), Start::Instruction)?;
                 }
                 super::DecodedItem::Payload(payload) => {
-                    check_keys(original, item.pc(), payload.layout().kind(), budget)?;
+                    check_keys(original, item.pc(), payload.layout().kind())?;
                     boundaries.set_start(item.pc(), Start::Payload)?;
                 }
             }
@@ -174,10 +168,10 @@ impl<'a> ProgramIndex<'a> {
             boundaries,
             invokes: Vec::new(),
         };
-        checker.check_exceptions(budget)?;
-        checker.check_instructions(self, budget)?;
-        checker.check_reachability(instruction_count, budget)?;
-        budget.checkpoint()?;
+        checker.check_exceptions()?;
+        checker.check_instructions(self)?;
+        checker.check_reachability(instruction_count)?;
+
         Ok(CheckedMethodLayout {
             original: original.clone(),
             boundaries: checker.boundaries,
@@ -201,27 +195,19 @@ impl<'a> ProgramIndex<'a> {
 impl RawMethodView<'_> {
     /// Visits original layouts in PC order using independent fallback work.
     /// A decoding failure retains the delivered prefix, but never guesses a
-    /// width or claims semantic validation. Callback output uses the supplied
-    /// fallback budget. Cancellation stops before the next layout/callback.
+    /// width or claims semantic validation. A callback error stops visitation.
     pub fn visit_layouts(
         &self,
-        budget: &mut RunContext<'_>,
-        mut visit: impl FnMut(
-            CodeUnitOffset,
-            InsnLayout,
-            &mut RunContext<'_>,
-        ) -> Result<(), MethodError>,
+        mut visit: impl FnMut(CodeUnitOffset, InsnLayout) -> Result<(), MethodError>,
     ) -> Result<(), MethodError> {
-        budget.checkpoint()?;
         let mut pc = CodeUnitOffset(0);
         while pc.0 < self.code_units().0 {
-            budget.checkpoint()?;
             let layout = self.layout_at(pc)?;
-            budget.checkpoint()?;
-            visit(pc, layout, budget)?;
+
+            visit(pc, layout)?;
             pc = advance(pc, layout)?;
         }
-        budget.checkpoint()?;
+
         Ok(())
     }
 
@@ -249,14 +235,14 @@ fn relative(pc: CodeUnitOffset, delta: i32) -> Result<CodeUnitOffset, MethodErro
         .map_err(|_| bad(pc, MethodProblem::InvalidBranchTarget))
 }
 
-fn exact_buffer<T>(count: usize, budget: &mut RunContext<'_>) -> Result<Vec<T>, MethodError> {
+fn exact_buffer<T>(count: usize) -> Result<Vec<T>, MethodError> {
     let bytes = count
         .checked_mul(size_of::<T>())
         .ok_or(MethodError::PlatformCapacity)?;
     if bytes > isize::MAX as usize {
         return Err(MethodError::PlatformCapacity);
     }
-    budget.checkpoint()?;
+
     let mut buffer = Vec::new();
     buffer
         .try_reserve_exact(count)
@@ -286,16 +272,12 @@ struct Boundaries {
 }
 
 impl Boundaries {
-    fn new(units: CodeUnitCount, budget: &mut RunContext<'_>) -> Result<Self, MethodError> {
+    fn new(units: CodeUnitCount) -> Result<Self, MethodError> {
         let count = usize::try_from(units.0)
             .map_err(|_| MethodError::PlatformCapacity)?
             .div_ceil(2);
-        let mut bits = exact_buffer(count, budget)?;
-        while bits.len() < count {
-            budget.checkpoint()?;
-            let end = bits.len() + (count - bits.len()).min(65536);
-            bits.resize(end, 0);
-        }
+        let mut bits = exact_buffer(count)?;
+        bits.resize(count, 0);
         Ok(Self { units, bits })
     }
 
@@ -350,7 +332,6 @@ fn check_keys(
     original: &RawMethodView<'_>,
     pc: CodeUnitOffset,
     kind: LayoutKind,
-    budget: &mut RunContext<'_>,
 ) -> Result<(), MethodError> {
     match kind {
         LayoutKind::PackedSwitch { entries } if entries > 0 => {
@@ -362,7 +343,6 @@ fn check_keys(
         LayoutKind::SparseSwitch { entries } => {
             let mut previous = None;
             for index in 0..u32::from(entries) {
-                budget.checkpoint()?;
                 let key = original.signed_word(pc, 2 + 2 * index)?;
                 if previous.is_some_and(|old| old >= key) {
                     return Err(bad(pc, MethodProblem::UnorderedSwitchKeys));
@@ -383,16 +363,15 @@ struct Checker<'m, 'a> {
 }
 
 impl<'a> Checker<'_, 'a> {
-    fn check_exceptions(&mut self, budget: &mut RunContext<'_>) -> Result<(), MethodError> {
+    fn check_exceptions(&mut self) -> Result<(), MethodError> {
         let range = self.original.handler_byte_range();
         if range.start == range.end {
             return Ok(());
         }
         let mut handlers = Cursor::bounded(self.original.source_bytes, range.start, range.end)?;
-        let count = handlers.read_uleb32_charged(|| budget.checkpoint())?;
+        let count = handlers.read_uleb32()?;
         for _ in 0..count {
-            budget.checkpoint()?;
-            visit_handler(&mut handlers, budget, |pc| {
+            visit_handler(&mut handlers, |pc| {
                 if self.boundaries.start(pc)? != Start::Instruction
                     || self.spec_at(pc)?.result == ResultRole::MoveResult
                 {
@@ -404,8 +383,7 @@ impl<'a> Checker<'_, 'a> {
         let tries = self.original.try_byte_range();
         let mut cursor = Cursor::bounded(self.original.source_bytes, tries.start, tries.end)?;
         while cursor.remaining_byte() != ByteLength(0) {
-            budget.checkpoint()?;
-            let record = read_try(&mut cursor, budget)?;
+            let record = read_try(&mut cursor)?;
             if self.boundaries.start(record.start)? != Start::Instruction
                 || (record.end.0 != self.original.code_units().0
                     && self.boundaries.start(record.end)? == Start::Absent)
@@ -550,21 +528,15 @@ impl<'a> Checker<'_, 'a> {
         })
     }
 
-    fn check_instructions(
-        &mut self,
-        index: &ProgramIndex<'_>,
-        budget: &mut RunContext<'_>,
-    ) -> Result<(), MethodError> {
+    fn check_instructions(&mut self, index: &ProgramIndex<'_>) -> Result<(), MethodError> {
         let mut pc = CodeUnitOffset(0);
         let mut previous: Option<ResultKind> = None;
         while pc.0 < self.original.code_units().0 {
-            budget.checkpoint()?;
             let layout = self.layout_at(pc)?;
             if let LayoutKind::Instruction(spec) = layout.kind() {
                 let operands = self.operands_at(pc)?;
-                check_registers(self.original, pc, spec, operands, budget)?;
+                check_registers(self.original, pc, spec, operands)?;
                 for reference in layout.references().into_iter().flatten() {
-                    budget.checkpoint()?;
                     if !index.reference_in_bounds(reference.target) {
                         return Err(MethodError::ReferenceOutOfBounds {
                             pc,
@@ -593,7 +565,6 @@ impl<'a> Checker<'_, 'a> {
                     FlowKind::PackedSwitch | FlowKind::SparseSwitch => {
                         let targets = self.switch_targets(pc, spec.flow)?;
                         for index in 0..targets.entries {
-                            budget.checkpoint()?;
                             self.normal_target(pc, targets.at(index)?, true)?;
                         }
                     }
@@ -602,7 +573,7 @@ impl<'a> Checker<'_, 'a> {
                     }
                     _ => {}
                 }
-                let producer = check_producer(index, pc, spec, layout, operands, budget)?;
+                let producer = check_producer(index, pc, spec, layout, operands)?;
                 if let Some(invoke) = producer
                     .as_ref()
                     .and_then(|producer| producer.invoke.as_ref())
@@ -613,7 +584,6 @@ impl<'a> Checker<'_, 'a> {
                             pc,
                             layout: invoke.clone(),
                         },
-                        budget,
                     )
                     .map_err(super::disassembly::scratch)?;
                 }
@@ -643,20 +613,15 @@ impl<'a> Checker<'_, 'a> {
         Ok(())
     }
 
-    fn check_reachability(
-        &mut self,
-        instruction_count: usize,
-        budget: &mut RunContext<'_>,
-    ) -> Result<(), MethodError> {
+    fn check_reachability(&mut self, instruction_count: usize) -> Result<(), MethodError> {
         let entry = CodeUnitOffset(0);
         if self.boundaries.start(entry)? != Start::Instruction {
             return Err(bad(entry, MethodProblem::MissingEntryInstruction));
         }
         self.normal_target(entry, entry, true)?;
-        let mut pending = exact_buffer(instruction_count, budget)?;
+        let mut pending = exact_buffer(instruction_count)?;
         self.enqueue(entry, &mut pending)?;
         while let Some(pc) = pending.pop() {
-            budget.checkpoint()?;
             let layout = self.layout_at(pc)?;
             let LayoutKind::Instruction(spec) = layout.kind() else {
                 return Err(MethodError::InternalInvariant(
@@ -671,7 +636,6 @@ impl<'a> Checker<'_, 'a> {
                 FlowKind::PackedSwitch | FlowKind::SparseSwitch => {
                     let targets = self.switch_targets(pc, spec.flow)?;
                     for index in 0..targets.entries {
-                        budget.checkpoint()?;
                         self.enqueue(targets.at(index)?, &mut pending)?;
                     }
                 }
@@ -692,7 +656,7 @@ impl<'a> Checker<'_, 'a> {
                 } else {
                     pc
                 };
-                self.enqueue_handlers(selection, &mut pending, budget)?;
+                self.enqueue_handlers(selection, &mut pending)?;
             }
         }
         Ok(())
@@ -702,20 +666,18 @@ impl<'a> Checker<'_, 'a> {
         &mut self,
         pc: CodeUnitOffset,
         pending: &mut Vec<CodeUnitOffset>,
-        budget: &mut RunContext<'_>,
     ) -> Result<(), MethodError> {
         let range = self.original.try_byte_range();
         let mut lower = 0;
         let mut upper = (range.end.0 - range.start.0) / 8;
         while lower < upper {
-            budget.checkpoint()?;
             let middle = lower + (upper - lower) / 2;
             let start = range
                 .start
                 .checked_advance(ByteLength(middle * 8))
                 .ok_or(MethodError::InternalInvariant("try offset overflow"))?;
             let mut cursor = Cursor::bounded(self.original.source_bytes, start, range.end)?;
-            let record = read_try(&mut cursor, budget)?;
+            let record = read_try(&mut cursor)?;
             if pc < record.start {
                 upper = middle;
             } else if pc >= record.end {
@@ -727,7 +689,7 @@ impl<'a> Checker<'_, 'a> {
                     .checked_advance(ByteLength(usize::from(record.handler_offset)))
                     .ok_or(MethodError::InternalInvariant("handler offset overflow"))?;
                 let mut cursor = Cursor::bounded(self.original.source_bytes, start, handlers.end)?;
-                return visit_handler(&mut cursor, budget, |target| self.enqueue(target, pending));
+                return visit_handler(&mut cursor, |target| self.enqueue(target, pending));
             }
         }
         Ok(())
@@ -739,7 +701,6 @@ fn check_registers(
     pc: CodeUnitOffset,
     spec: OpcodeSpec,
     operands: RawOperands,
-    budget: &mut RunContext<'_>,
 ) -> Result<(), MethodError> {
     let span = |start: u32, count: u8| -> Result<(), MethodError> {
         if count != 0 && u64::from(start) + u64::from(count) > u64::from(original.registers_size())
@@ -765,7 +726,6 @@ fn check_registers(
                 RegisterEncoding::Range { first, count } => span(first.0, count)?,
                 RegisterEncoding::List { .. } => {
                     for register in operands.registers().iter() {
-                        budget.checkpoint()?;
                         span(register.0, 1)?;
                     }
                 }
@@ -774,7 +734,6 @@ fn check_registers(
         RegisterShape::Fixed(widths) => {
             let mut registers = operands.registers().iter();
             for width in widths {
-                budget.checkpoint()?;
                 match (registers.next(), width) {
                     (Some(register), Some(width)) => span(
                         register.0,
@@ -828,15 +787,10 @@ struct TryRecord {
     handler_offset: u16,
 }
 
-fn read_try(
-    cursor: &mut Cursor<'_>,
-    budget: &mut RunContext<'_>,
-) -> Result<TryRecord, MethodError> {
-    let start = CodeUnitOffset(u32::from_le_bytes(
-        cursor.read_array_charged(|| budget.checkpoint())?,
-    ));
-    let count = u16::from_le_bytes(cursor.read_array_charged(|| budget.checkpoint())?);
-    let handler_offset = u16::from_le_bytes(cursor.read_array_charged(|| budget.checkpoint())?);
+fn read_try(cursor: &mut Cursor<'_>) -> Result<TryRecord, MethodError> {
+    let start = CodeUnitOffset(u32::from_le_bytes(cursor.read_array()?));
+    let count = u16::from_le_bytes(cursor.read_array()?);
+    let handler_offset = u16::from_le_bytes(cursor.read_array()?);
     let end = start
         .checked_advance(CodeUnitCount(u32::from(count)))
         .ok_or(MethodError::InternalInvariant(
@@ -851,20 +805,16 @@ fn read_try(
 
 fn visit_handler(
     cursor: &mut Cursor<'_>,
-    budget: &mut RunContext<'_>,
     mut visit: impl FnMut(CodeUnitOffset) -> Result<(), MethodError>,
 ) -> Result<(), MethodError> {
-    let size = cursor.read_sleb32_charged(|| budget.checkpoint())?;
+    let size = cursor.read_sleb32()?;
     for _ in 0..i64::from(size).unsigned_abs() {
-        budget.checkpoint()?;
-        cursor.read_uleb32_charged(|| budget.checkpoint())?;
-        let target = CodeUnitOffset(cursor.read_uleb32_charged(|| budget.checkpoint())?);
+        cursor.read_uleb32()?;
+        let target = CodeUnitOffset(cursor.read_uleb32()?);
         visit(target)?;
     }
     if size <= 0 {
-        visit(CodeUnitOffset(
-            cursor.read_uleb32_charged(|| budget.checkpoint())?,
-        ))?;
+        visit(CodeUnitOffset(cursor.read_uleb32()?))?;
     }
     Ok(())
 }

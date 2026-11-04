@@ -3,8 +3,8 @@ use super::{
     Cursor, DexContainer, InputError, InputProblem, UnsupportedInput, checked_range, count_usize,
     file_offset, malformed,
 };
-use crate::pipeline::control::InputControl;
-use crate::{ByteLength, ByteOffset, ByteRange, RunContext};
+
+use crate::{ByteLength, ByteOffset, ByteRange};
 
 pub(super) const SUPPORTED_MAP_KINDS: usize = 20;
 const TABLE_STRIDES: [ByteLength; 6] = [
@@ -46,41 +46,27 @@ pub struct DexHeader {
 
 /// Reads the first logical envelope after checking the physical header chain.
 /// Original bytes and integrity fields remain unchanged; no authentication is
-/// claimed. Returns typed input, resource and cancellation errors.
-pub fn read_header(bytes: &[u8], control: &mut RunContext<'_>) -> Result<DexHeader, InputError> {
-    read_header_with(bytes, control)
-}
-
-pub(crate) fn read_header_with(
-    bytes: &[u8],
-    control: &mut impl InputControl,
-) -> Result<DexHeader, InputError> {
-    let container = DexContainer::open_with(bytes, control)?;
-    read_member_header(container, ByteOffset(0), control)
+/// claimed. Returns typed input and resource errors.
+pub fn read_header(bytes: &[u8]) -> Result<DexHeader, InputError> {
+    let container = DexContainer::open(bytes)?;
+    read_member_header(container, ByteOffset(0))
 }
 
 pub(super) fn read_member_header(
     container: DexContainer<'_>,
     header_offset: ByteOffset,
-    control: &mut impl InputControl,
 ) -> Result<DexHeader, InputError> {
     let bytes = container.bytes;
     let header_end = header_offset
         .checked_advance(container.header_size())
         .ok_or_else(|| malformed(InputProblem::RangeOverflow, header_offset))?;
     let mut cursor = Cursor::bounded(bytes, header_offset, header_end)?;
-    cursor.read_array::<8>(control)?;
-    let checksum = cursor.read_u32_with(control)?;
-    let signature = cursor.read_array(control)?;
-    cursor.skip(3, ByteLength(4), control)?;
-    let link_size = count_usize(
-        cursor.read_u32_with(control)?,
-        ByteOffset(header_offset.0 + 0x2c),
-    )?;
-    let link_offset = file_offset(
-        cursor.read_u32_with(control)?,
-        ByteOffset(header_offset.0 + 0x30),
-    )?;
+    cursor.read_array::<8>()?;
+    let checksum = cursor.read_u32()?;
+    let signature = cursor.read_array()?;
+    cursor.skip(3, ByteLength(4))?;
+    let link_size = count_usize(cursor.read_u32()?, ByteOffset(header_offset.0 + 0x2c))?;
+    let link_offset = file_offset(cursor.read_u32()?, ByteOffset(header_offset.0 + 0x30))?;
     let link_byte_range = section(
         ByteLength(bytes.len()),
         link_offset,
@@ -90,11 +76,8 @@ pub(super) fn read_member_header(
         ByteOffset(header_offset.0 + 0x2c),
         header_end,
     )?;
-    container.check_data_range(link_byte_range, control)?;
-    let map_offset = file_offset(
-        cursor.read_u32_with(control)?,
-        ByteOffset(header_offset.0 + 0x34),
-    )?;
+    container.check_data_range(link_byte_range)?;
+    let map_offset = file_offset(cursor.read_u32()?, ByteOffset(header_offset.0 + 0x34))?;
     let mut tables = [TableSection {
         count: 0,
         offset_byte: ByteOffset(0),
@@ -102,8 +85,8 @@ pub(super) fn read_member_header(
     }; 6];
     for (index, table) in tables.iter_mut().enumerate() {
         let field = ByteOffset(header_offset.0 + 0x38 + index * 8);
-        let count = cursor.read_u32_with(control)?;
-        let offset = file_offset(cursor.read_u32_with(control)?, ByteOffset(field.0 + 4))?;
+        let count = cursor.read_u32()?;
+        let offset = file_offset(cursor.read_u32()?, ByteOffset(field.0 + 4))?;
         let range = section(
             ByteLength(bytes.len()),
             offset,
@@ -113,7 +96,7 @@ pub(super) fn read_member_header(
             field,
             header_end,
         )?;
-        container.check_data_range(range, control)?;
+        container.check_data_range(range)?;
         if matches!(index, 1 | 2) && count > 65535 {
             return Err(malformed(InputProblem::InvalidTableCount, field));
         }
@@ -123,8 +106,8 @@ pub(super) fn read_member_header(
             size_byte: ByteLength(range.end.0 - range.start.0),
         };
     }
-    let data_size = cursor.read_u32_with(control)?;
-    let data_raw = cursor.read_u32_with(control)?;
+    let data_size = cursor.read_u32()?;
+    let data_raw = cursor.read_u32()?;
     let native_container = container.version == DexVersion::V041;
     let data_byte_range = if native_container {
         ByteRange {
@@ -165,7 +148,6 @@ pub(super) fn read_member_header(
         map_offset,
         data_byte_range,
         &tables,
-        control,
     )?;
     check_fixed_overlap(&tables, link_byte_range, Some(map_byte_range))?;
     let [
@@ -258,11 +240,10 @@ fn check_map(
     offset: ByteOffset,
     data: ByteRange,
     tables: &[TableSection; 6],
-    control: &mut impl InputControl,
 ) -> Result<ByteRange, InputError> {
     let prefix = checked_range(ByteLength(data.end.0), offset, 1, ByteLength(4))?;
     let mut cursor = Cursor::at(container.bytes, offset)?;
-    let count = cursor.read_u32_with(control)?;
+    let count = cursor.read_u32()?;
     let entries = checked_range(
         ByteLength(data.end.0),
         prefix.end,
@@ -273,17 +254,17 @@ fn check_map(
         start: offset,
         end: entries.end,
     };
-    container.check_data_range(map_range, control)?;
-    control.checkpoint()?;
+    container.check_data_range(map_range)?;
+
     let mut seen = 0u32;
     let mut previous_offset = None;
     let mut dynamic_end = None;
     for _ in 0..count {
         let record = cursor.position_byte();
-        let kind = cursor.read_u16_with(control)?;
-        let unused = cursor.read_u16_with(control)?;
-        let size = cursor.read_u32_with(control)?;
-        let item_offset = file_offset(cursor.read_u32_with(control)?, ByteOffset(record.0 + 8))?;
+        let kind = cursor.read_u16()?;
+        let unused = cursor.read_u16()?;
+        let size = cursor.read_u32()?;
+        let item_offset = file_offset(cursor.read_u32()?, ByteOffset(record.0 + 8))?;
         if matches!(kind, 7 | 8) && container.version < DexVersion::V038 {
             return Err(InputError::Unsupported {
                 reason: UnsupportedInput::MapType(kind),
@@ -316,7 +297,7 @@ fn check_map(
                 count_usize(size, record)?,
                 ByteLength(if kind == 7 { 4 } else { 8 }),
             )?;
-            container.check_data_range(range, control)?;
+            container.check_data_range(range)?;
             dynamic_end = Some(range.end);
             if overlaps(range, map_range) {
                 return Err(malformed(InputProblem::OverlappingSections, item_offset));
@@ -352,7 +333,7 @@ fn check_map(
                 {
                     return Err(malformed(InputProblem::InvalidMap, record));
                 }
-                container.item_end(item_offset, control)?;
+                container.item_end(item_offset)?;
                 for table in tables {
                     let range = table_range(*table)?;
                     if item_offset >= range.start && item_offset < range.end {

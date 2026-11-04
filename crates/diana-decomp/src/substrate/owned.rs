@@ -1,12 +1,7 @@
 use crate::RequestError;
 use crate::input::{DexString, Prototype};
-use crate::pipeline::control::InputControl;
 
-pub(crate) fn reserve<T>(
-    values: &mut Vec<T>,
-    additional: usize,
-    control: &mut impl InputControl,
-) -> Result<(), RequestError> {
+pub(crate) fn reserve<T>(values: &mut Vec<T>, additional: usize) -> Result<(), RequestError> {
     let needed = values
         .len()
         .checked_add(additional)
@@ -30,7 +25,7 @@ pub(crate) fn reserve<T>(
         .filter(|&n| n <= maximum)
         .unwrap_or(needed)
         .max(needed);
-    control.checkpoint()?;
+
     values
         .try_reserve_exact(capacity - values.len())
         .map_err(RequestError::Allocation)?;
@@ -39,66 +34,53 @@ pub(crate) fn reserve<T>(
             "owned result reservation changed capacity",
         ));
     }
-    control.checkpoint()?;
+
     Ok(())
 }
 
-pub(crate) fn push<T>(
-    values: &mut Vec<T>,
-    value: T,
-    control: &mut impl InputControl,
-) -> Result<(), RequestError> {
-    reserve(values, 1, control)?;
+pub(crate) fn push<T>(values: &mut Vec<T>, value: T) -> Result<(), RequestError> {
+    reserve(values, 1)?;
     values.push(value);
     Ok(())
 }
 
-pub(crate) fn copy_units(
-    value: DexString<'_>,
-    control: &mut impl InputControl,
-) -> Result<Vec<u16>, RequestError> {
+pub(crate) fn copy_units(value: DexString<'_>) -> Result<Vec<u16>, RequestError> {
     let mut result = Vec::new();
     reserve(
         &mut result,
         usize::try_from(value.utf16_len().0).map_err(|_| RequestError::PlatformCapacity)?,
-        control,
     )?;
     let mut units = value.reader()?;
-    while let Some(unit) = units.next(control)? {
+    while let Some(unit) = units.next()? {
         result.push(unit);
     }
     Ok(result)
 }
 
-pub(crate) fn copy_proto(
-    value: &Prototype<'_, '_>,
-    control: &mut impl InputControl,
-) -> Result<Vec<u16>, RequestError> {
+pub(crate) fn copy_proto(value: &Prototype<'_, '_>) -> Result<Vec<u16>, RequestError> {
     let mut result = Vec::new();
-    reserve(&mut result, 1, control)?;
+    reserve(&mut result, 1)?;
     result.push(u16::from(b'('));
-    value.visit_parameter_types(control, |name, control| -> Result<(), RequestError> {
+    value.visit_parameter_types(|name| -> Result<(), RequestError> {
         reserve(
             &mut result,
             usize::try_from(name.utf16_len().0).map_err(|_| RequestError::PlatformCapacity)?,
-            control,
         )?;
         let mut units = name.reader()?;
-        while let Some(unit) = units.next(control)? {
+        while let Some(unit) = units.next()? {
             result.push(unit);
         }
         Ok(())
     })?;
-    reserve(&mut result, 1, control)?;
+    reserve(&mut result, 1)?;
     result.push(u16::from(b')'));
     reserve(
         &mut result,
         usize::try_from(value.return_type.utf16_len().0)
             .map_err(|_| RequestError::PlatformCapacity)?,
-        control,
     )?;
     let mut units = value.return_type.reader()?;
-    while let Some(unit) = units.next(control)? {
+    while let Some(unit) = units.next()? {
         result.push(unit);
     }
     Ok(result)

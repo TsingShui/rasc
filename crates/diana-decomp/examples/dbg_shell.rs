@@ -15,7 +15,7 @@ use diana_decomp::p1::{DecodedInstruction, DecodedItem, DecodedPayload};
 use diana_decomp::raw::{Format as DexFormat, RawLiteral, ReferenceSlot};
 use diana_decomp::{
     ByteOffset, ClassDefId, ClassKey, DexId, DexImage, Engine, FailureKind, ImageOrigin, InputId,
-    MethodId, MethodOutcome, Request, RequestError, RunContext,
+    MethodId, MethodOutcome, Request, RequestError,
 };
 use serde_json::{Value, json};
 
@@ -40,17 +40,12 @@ impl Shell {
     }
 
     fn run(&mut self, request: &Value) -> Result<Value, RequestError> {
-        let cancel = || false;
-        let mut control = RunContext::new(&cancel);
-        let index = ProgramIndex::open(&self.bytes, &mut control).map_err(RequestError::Input)?;
-        let engine = Engine::open(
-            vec![DexImage {
-                bytes: &self.bytes,
-                header_offset: ByteOffset(0),
-                origin: ImageOrigin { input: InputId(0) },
-            }],
-            &mut control,
-        )
+        let index = ProgramIndex::open(&self.bytes).map_err(RequestError::Input)?;
+        let engine = Engine::open(vec![DexImage {
+            bytes: &self.bytes,
+            header_offset: ByteOffset(0),
+            origin: ImageOrigin { input: InputId(0) },
+        }])
         .map_err(RequestError::Input)?;
         let command = request
             .get("cmd")
@@ -60,13 +55,13 @@ impl Shell {
             "classes" => {
                 let mut values = Vec::new();
                 let mut class = 0u32;
-                while let Ok(view) = index.class(ClassDefId(class), &mut control) {
+                while let Ok(view) = index.class(ClassDefId(class)) {
                     if class >= 4096 {
                         break;
                     }
                     values.push(json!({
                         "class_def": class,
-                        "descriptor": String::from_utf16_lossy(&view.descriptor.units(&mut control)?),
+                        "descriptor": String::from_utf16_lossy(&view.descriptor.units()?),
                     }));
                     class += 1;
                     if values.len() >= 64 {
@@ -77,7 +72,7 @@ impl Shell {
             }
             "class" => {
                 let class = class_id(request)?;
-                let facts = engine.class_facts(class_key(class), &mut control)?;
+                let facts = engine.class_facts(class_key(class))?;
                 let declared = facts.class_data_shape();
                 let delivered = facts.delivered_shape();
                 Ok(json!({
@@ -102,7 +97,7 @@ impl Shell {
             }
             "p0" => {
                 let class = class_id(request)?;
-                let facts = engine.class_facts(class_key(class), &mut control)?;
+                let facts = engine.class_facts(class_key(class))?;
                 let declared = facts.class_data_shape();
                 let delivered = facts.delivered_shape();
                 let fields: Vec<Value> = facts
@@ -165,7 +160,7 @@ impl Shell {
             }
             "methods" => {
                 let class = class_id(request)?;
-                let facts = engine.class_facts(class_key(class), &mut control)?;
+                let facts = engine.class_facts(class_key(class))?;
                 let values: Vec<Value> = facts
                     .methods()
                     .iter()
@@ -194,23 +189,18 @@ impl Shell {
                 let mut failures = Vec::new();
                 let mut skipped_formats: BTreeMap<String, u64> = BTreeMap::new();
                 for class in 0..classes {
-                    control.checkpoint()?;
-                    let analysis = match engine.analyze(
-                        Request {
-                            class: class_key(class),
-                            method: None,
-                        },
-                        &mut control,
-                    ) {
+                    let analysis = match engine.analyze(Request {
+                        class: class_key(class),
+                        method: None,
+                    }) {
                         Ok(analysis) => analysis,
-                        Err(error) if error.kind() == FailureKind::Cancelled => return Err(error),
+
                         Err(_) => {
                             class_errors += 1;
                             continue;
                         }
                     };
                     for entry in &analysis.methods {
-                        control.checkpoint()?;
                         methods += 1;
                         let method = entry.key.method;
                         let outcome = match &entry.result {
@@ -340,8 +330,7 @@ impl Shell {
             "roundtrip" => {
                 let class = class_id(request)?;
                 let method = method_id(request)?;
-                let analysis =
-                    engine.analyze_method(class_key(class), MethodId(method), &mut control)?;
+                let analysis = engine.analyze_method(class_key(class), MethodId(method))?;
                 let outcome = analysis.result?;
                 if let Some(response) = inspection_stop(&outcome) {
                     return Ok(response);
@@ -402,8 +391,7 @@ impl Shell {
             "p1" | "decoded" => {
                 let class = class_id(request)?;
                 let method = method_id(request)?;
-                let analysis =
-                    engine.analyze_method(class_key(class), MethodId(method), &mut control)?;
+                let analysis = engine.analyze_method(class_key(class), MethodId(method))?;
                 let outcome = analysis.result?;
                 if let Some(response) = inspection_stop(&outcome) {
                     return Ok(response);
@@ -439,8 +427,8 @@ impl Shell {
                 }
                 let mut catch_targets = Vec::new();
                 for boundary in decoded.try_boundaries().collect::<Vec<_>>() {
-                    let clauses = decoded
-                        .catch_clauses_at(diana_decomp::CodeUnitOffset(boundary), &mut control)?;
+                    let clauses =
+                        decoded.catch_clauses_at(diana_decomp::CodeUnitOffset(boundary))?;
                     if !clauses.is_empty() {
                         catch_targets.push(json!({"try_start": boundary, "clauses": clauses}));
                     }
@@ -539,23 +527,18 @@ impl Shell {
                 let mut replay_opcodes = BTreeMap::<String, u64>::new();
                 let mut failures = Vec::new();
                 for class in 0..classes {
-                    control.checkpoint()?;
-                    let analysis = match engine.analyze(
-                        Request {
-                            class: class_key(class),
-                            method: None,
-                        },
-                        &mut control,
-                    ) {
+                    let analysis = match engine.analyze(Request {
+                        class: class_key(class),
+                        method: None,
+                    }) {
                         Ok(analysis) => analysis,
-                        Err(error) if error.kind() == FailureKind::Cancelled => return Err(error),
+
                         Err(_) => {
                             class_errors += 1;
                             continue;
                         }
                     };
                     for entry in &analysis.methods {
-                        control.checkpoint()?;
                         methods += 1;
                         let method = entry.key.method;
                         let outcome = match &entry.result {
@@ -581,7 +564,6 @@ impl Shell {
                             Ok(flow) => {
                                 flowed += 1;
                                 for operation in flow.operations() {
-                                    control.checkpoint()?;
                                     let original = flow
                                         .evidence()
                                         .instruction_at(operation.pc())
@@ -628,7 +610,6 @@ impl Shell {
                                     FailureKind::Unsupported => unsupported += 1,
                                     FailureKind::Malformed => malformed += 1,
                                     FailureKind::ResourceExhausted => resource += 1,
-                                    FailureKind::Cancelled => {}
                                 }
                                 if failures.len() < 100 {
                                     failures.push(json!({
@@ -680,8 +661,7 @@ impl Shell {
             "p2" => {
                 let class = class_id(request)?;
                 let method = method_id(request)?;
-                let analysis =
-                    engine.analyze_method(class_key(class), MethodId(method), &mut control)?;
+                let analysis = engine.analyze_method(class_key(class), MethodId(method))?;
                 let outcome = analysis.result?;
                 if let Some(response) = inspection_stop(&outcome) {
                     return Ok(response);
@@ -1057,7 +1037,7 @@ fn kind(error: &RequestError) -> &'static str {
         FailureKind::Malformed => "malformed",
         FailureKind::Unsupported => "unsupported",
         FailureKind::ResourceExhausted => "resource_exhausted",
-        FailureKind::Cancelled => "cancelled",
+
         FailureKind::InternalInvariant => "internal_invariant",
     }
 }

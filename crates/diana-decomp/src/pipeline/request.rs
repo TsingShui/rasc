@@ -1,5 +1,5 @@
+use crate::FailureKind;
 use crate::input::{InputError, MethodError};
-use crate::{ControlError, FailureKind};
 use std::collections::TryReserveError;
 use thiserror::Error;
 
@@ -11,8 +11,6 @@ pub enum RequestError {
     Method(#[from] MethodError),
     #[error(transparent)]
     Flow(#[from] crate::p2::FlowError),
-    #[error(transparent)]
-    Control(#[from] ControlError),
     #[error("request allocation failed: {0}")]
     Allocation(#[source] TryReserveError),
     #[error("request capacity is not representable on this platform")]
@@ -64,7 +62,7 @@ impl RequestError {
             Self::Input(error) => error.kind(),
             Self::Method(error) => error.kind(),
             Self::Flow(error) => error.kind(),
-            Self::Control(error) => error.kind(),
+
             Self::Allocation(_) | Self::PlatformCapacity => FailureKind::ResourceExhausted,
             Self::UnknownDex | Self::UndefinedRegister { .. } | Self::InvalidWideRead { .. } => {
                 FailureKind::Malformed

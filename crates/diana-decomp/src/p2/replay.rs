@@ -10,7 +10,7 @@ use super::{
 };
 use crate::p1::{DecodedInstruction, DecodedMethod};
 use crate::raw::{OperandReference, RawLiteral, ReferenceSlot};
-use crate::{CodeUnitOffset, RegisterId, RegisterSlot, RunContext, SlotWidth};
+use crate::{CodeUnitOffset, RegisterId, RegisterSlot, SlotWidth};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum Number {
@@ -200,19 +200,14 @@ impl LocalStep {
         }
     }
 
-    fn read(
-        &mut self,
-        register: RegisterId,
-        width: SlotWidth,
-        control: &mut RunContext<'_>,
-    ) -> Result<Symbol, FlowError> {
+    fn read(&mut self, register: RegisterId, width: SlotWidth) -> Result<Symbol, FlowError> {
         let slot = RegisterSlot::new(register, width);
-        push(&mut self.reads, slot, control)?;
+        push(&mut self.reads, slot)?;
         Ok(Symbol::Old(slot))
     }
 
-    fn arg(&mut self, symbol: Symbol, control: &mut RunContext<'_>) -> Result<(), FlowError> {
-        push(&mut self.arguments, symbol, control)
+    fn arg(&mut self, symbol: Symbol) -> Result<(), FlowError> {
+        push(&mut self.arguments, symbol)
     }
 
     fn destination(&mut self, register: RegisterId, width: SlotWidth) {
@@ -224,16 +219,11 @@ impl LocalStep {
 // interpreter (see spec/02-flow.md). The lowered side independently interprets
 // published fields; neither side manufactures missing products or propagates
 // state into another instruction.
-fn dex_relation(
-    step: LocalStep,
-    instruction: &DecodedInstruction,
-    control: &mut RunContext<'_>,
-) -> Result<Relation, FlowError> {
+fn dex_relation(step: LocalStep, instruction: &DecodedInstruction) -> Result<Relation, FlowError> {
     let site = instruction.pc();
     let mut writes = Vec::new();
     if let Some(destination) = step.destination {
         for word in 0..destination.words() {
-            control.checkpoint()?;
             let register = destination
                 .start
                 .0
@@ -249,7 +239,7 @@ fn dex_relation(
                 (Behavior::Constant, Some(Symbol::Bits64(bits))) => WordValue::Literal(*bits, word),
                 _ => WordValue::Result(word),
             };
-            push(&mut writes, WordWrite { register, value }, control)?;
+            push(&mut writes, WordWrite { register, value })?;
         }
     }
     let commit = if step.destination.is_some() {
@@ -313,7 +303,6 @@ fn flow_relation(
     step: LocalStep,
     flow: &FlowMethod<'_>,
     operation: &Operation,
-    control: &mut RunContext<'_>,
 ) -> Result<Relation, FlowError> {
     let site = operation.pc;
     let destination = flow.writes(operation).first().copied();
@@ -336,7 +325,6 @@ fn flow_relation(
     // from a progressively modified frame, so overlapping move-wide is atomic.
     let mut writes = Vec::new();
     for destination in flow.writes(operation) {
-        control.checkpoint()?;
         let source = match operation.kind {
             OpKind::Move { .. } => {
                 Some(*step.arguments.first().ok_or(FlowError::Correspondence {
@@ -372,7 +360,7 @@ fn flow_relation(
                 .checked_add(word)
                 .map(RegisterId)
                 .ok_or(FlowError::PlatformCapacity)?;
-            push(&mut writes, WordWrite { register, value }, control)?;
+            push(&mut writes, WordWrite { register, value })?;
         }
     }
     if commit != operation.normal.commit_pc {
@@ -446,7 +434,6 @@ pub(super) fn verify(
     flow: &FlowMethod<'_>,
     instruction: &DecodedInstruction,
     operation: &Operation,
-    control: &mut RunContext<'_>,
 ) -> Result<(), FlowError> {
     if let OpKind::Binary { form, .. } = operation.kind {
         let expected = match instruction.opcode() {
@@ -467,17 +454,8 @@ pub(super) fn verify(
             });
         }
     }
-    let original = dex_relation(
-        dex_step(flow.decoded(), instruction, control)?,
-        instruction,
-        control,
-    )?;
-    let lowered = flow_relation(
-        flow_step(flow, operation, control)?,
-        flow,
-        operation,
-        control,
-    )?;
+    let original = dex_relation(dex_step(flow.decoded(), instruction)?, instruction)?;
+    let lowered = flow_relation(flow_step(flow, operation)?, flow, operation)?;
     if original != lowered {
         return Err(FlowError::Correspondence {
             pc: instruction.pc(),
@@ -520,9 +498,7 @@ fn literal(instruction: &DecodedInstruction) -> Result<Symbol, FlowError> {
 fn dex_step(
     decoded: &DecodedMethod<'_>,
     instruction: &DecodedInstruction,
-    control: &mut RunContext<'_>,
 ) -> Result<LocalStep, FlowError> {
-    control.checkpoint()?;
     let opcode = instruction.opcode();
     let mut step = LocalStep::new();
     match opcode {
@@ -539,8 +515,8 @@ fn dex_step(
             } else {
                 SlotWidth::One
             };
-            let input = step.read(register(instruction, 1)?, width, control)?;
-            step.arg(input, control)?;
+            let input = step.read(register(instruction, 1)?, width)?;
+            step.arg(input)?;
             step.destination(register(instruction, 0)?, width);
         }
         0x0d => {
@@ -549,7 +525,7 @@ fn dex_step(
         }
         0x12..=0x19 => {
             step.behavior = Behavior::Constant;
-            step.arg(literal(instruction)?, control)?;
+            step.arg(literal(instruction)?)?;
             step.destination(
                 register(instruction, 0)?,
                 if opcode >= 0x16 {
@@ -574,8 +550,8 @@ fn dex_step(
                         .ok_or(FlowError::InternalInvariant("fill lost payload"))?,
                 ),
             };
-            let input = step.read(register(instruction, 0)?, SlotWidth::One, control)?;
-            step.arg(input, control)?;
+            let input = step.read(register(instruction, 0)?, SlotWidth::One)?;
+            step.arg(input)?;
         }
         0x20 | 0x21 | 0x23 => {
             step.behavior = match opcode {
@@ -583,8 +559,8 @@ fn dex_step(
                 0x21 => Behavior::ArrayLength,
                 _ => Behavior::NewArray(reference(instruction, ReferenceSlot::First)?),
             };
-            let input = step.read(register(instruction, 1)?, SlotWidth::One, control)?;
-            step.arg(input, control)?;
+            let input = step.read(register(instruction, 1)?, SlotWidth::One)?;
+            step.arg(input)?;
             step.destination(register(instruction, 0)?, SlotWidth::One);
         }
         0x22 => {
@@ -594,8 +570,8 @@ fn dex_step(
         0x24 | 0x25 => {
             step.behavior = Behavior::FilledArray(reference(instruction, ReferenceSlot::First)?);
             for register in instruction.registers() {
-                let input = step.read(register, SlotWidth::One, control)?;
-                step.arg(input, control)?;
+                let input = step.read(register, SlotWidth::One)?;
+                step.arg(input)?;
             }
         }
         0x2d..=0x31 => {
@@ -608,8 +584,8 @@ fn dex_step(
             };
             step.behavior = Behavior::Compute(Compute::Compare(number, nan));
             for index in 1..=2 {
-                let input = step.read(register(instruction, index)?, number.width(), control)?;
-                step.arg(input, control)?;
+                let input = step.read(register(instruction, index)?, number.width())?;
+                step.arg(input)?;
             }
             step.destination(register(instruction, 0)?, SlotWidth::One);
         }
@@ -624,14 +600,14 @@ fn dex_step(
             let value = if get {
                 None
             } else {
-                Some(step.read(register(instruction, 0)?, element.width(), control)?)
+                Some(step.read(register(instruction, 0)?, element.width())?)
             };
-            let array = step.read(register(instruction, 1)?, SlotWidth::One, control)?;
-            let index = step.read(register(instruction, 2)?, SlotWidth::One, control)?;
-            step.arg(array, control)?;
-            step.arg(index, control)?;
+            let array = step.read(register(instruction, 1)?, SlotWidth::One)?;
+            let index = step.read(register(instruction, 2)?, SlotWidth::One)?;
+            step.arg(array)?;
+            step.arg(index)?;
             if let Some(value) = value {
-                step.arg(value, control)?;
+                step.arg(value)?;
             }
             if get {
                 step.destination(register(instruction, 0)?, element.width());
@@ -650,14 +626,14 @@ fn dex_step(
             let value = if get {
                 None
             } else {
-                Some(step.read(register(instruction, 0)?, element.width(), control)?)
+                Some(step.read(register(instruction, 0)?, element.width())?)
             };
             if !static_field {
-                let receiver = step.read(register(instruction, 1)?, SlotWidth::One, control)?;
-                step.arg(receiver, control)?;
+                let receiver = step.read(register(instruction, 1)?, SlotWidth::One)?;
+                step.arg(receiver)?;
             }
             if let Some(value) = value {
-                step.arg(value, control)?;
+                step.arg(value)?;
             }
             if get {
                 step.destination(register(instruction, 0)?, element.width());
@@ -692,15 +668,15 @@ fn dex_step(
                 let first = registers
                     .next()
                     .ok_or(FlowError::InternalInvariant("call lost receiver"))?;
-                let input = step.read(first, SlotWidth::One, control)?;
-                step.arg(input, control)?;
+                let input = step.read(first, SlotWidth::One)?;
+                step.arg(input)?;
             }
             for width in layout.arguments() {
                 let first = registers
                     .next()
                     .ok_or(FlowError::InternalInvariant("call lost argument"))?;
-                let input = step.read(first, *width, control)?;
-                step.arg(input, control)?;
+                let input = step.read(first, *width)?;
+                step.arg(input)?;
                 if *width == SlotWidth::Two {
                     registers
                         .next()
@@ -712,8 +688,8 @@ fn dex_step(
             let compute = dex_unary(opcode)?;
             let (source, target) = unary_domains(compute)?;
             step.behavior = Behavior::Compute(compute);
-            let input = step.read(register(instruction, 1)?, source.width(), control)?;
-            step.arg(input, control)?;
+            let input = step.read(register(instruction, 1)?, source.width())?;
+            step.arg(input)?;
             step.destination(register(instruction, 0)?, target.width());
         }
         0x90..=0xcf => {
@@ -730,14 +706,10 @@ fn dex_step(
                 number.width()
             };
             step.behavior = Behavior::Compute(Compute::Binary(number, arithmetic));
-            let left = step.read(register(instruction, first_index)?, number.width(), control)?;
-            let right = step.read(
-                register(instruction, first_index + 1)?,
-                right_width,
-                control,
-            )?;
-            step.arg(left, control)?;
-            step.arg(right, control)?;
+            let left = step.read(register(instruction, first_index)?, number.width())?;
+            let right = step.read(register(instruction, first_index + 1)?, right_width)?;
+            step.arg(left)?;
+            step.arg(right)?;
             step.destination(register(instruction, 0)?, number.width());
         }
         0xd0..=0xe2 => {
@@ -760,14 +732,14 @@ fn dex_step(
                 _ => Arithmetic::UnsignedShiftRight,
             };
             step.behavior = Behavior::Compute(Compute::Binary(Number::Int, arithmetic));
-            let input = step.read(register(instruction, 1)?, SlotWidth::One, control)?;
+            let input = step.read(register(instruction, 1)?, SlotWidth::One)?;
             let bits = literal(instruction)?;
             if index == 1 {
-                step.arg(bits, control)?;
-                step.arg(input, control)?;
+                step.arg(bits)?;
+                step.arg(input)?;
             } else {
-                step.arg(input, control)?;
-                step.arg(bits, control)?;
+                step.arg(input)?;
+                step.arg(bits)?;
             }
             step.destination(register(instruction, 0)?, SlotWidth::One);
         }
@@ -804,16 +776,12 @@ fn dex_step(
     Ok(step)
 }
 
-fn flow_step(
-    flow: &FlowMethod<'_>,
-    operation: &Operation,
-    control: &mut RunContext<'_>,
-) -> Result<LocalStep, FlowError> {
+fn flow_step(flow: &FlowMethod<'_>, operation: &Operation) -> Result<LocalStep, FlowError> {
     let mut step = LocalStep::new();
     let mut inputs = Vec::new();
     for slot in flow.reads(operation) {
-        let input = step.read(slot.start, slot.width, control)?;
-        push(&mut inputs, input, control)?;
+        let input = step.read(slot.start, slot.width)?;
+        push(&mut inputs, input)?;
     }
     let input = |index: usize| -> Result<Symbol, FlowError> {
         inputs
@@ -896,17 +864,14 @@ fn flow_step(
     };
     match operation.kind {
         OpKind::Const { bits, width } => {
-            step.arg(
-                if width == SlotWidth::Two {
-                    Symbol::Bits64(bits)
-                } else {
-                    Symbol::Bits32(u32::try_from(bits).map_err(|_| FlowError::Correspondence {
-                        pc: operation.pc,
-                        obligation: "word literal exceeds 32 bits",
-                    })?)
-                },
-                control,
-            )?;
+            step.arg(if width == SlotWidth::Two {
+                Symbol::Bits64(bits)
+            } else {
+                Symbol::Bits32(u32::try_from(bits).map_err(|_| FlowError::Correspondence {
+                    pc: operation.pc,
+                    obligation: "word literal exceeds 32 bits",
+                })?)
+            })?;
         }
         OpKind::Binary {
             op,
@@ -919,20 +884,20 @@ fn flow_step(
                     obligation: "arithmetic immediate exceeds int",
                 })? as u32);
             if op == BinaryOp::RsubInt {
-                step.arg(bits, control)?;
-                step.arg(input(0)?, control)?;
+                step.arg(bits)?;
+                step.arg(input(0)?)?;
             } else {
-                step.arg(input(0)?, control)?;
-                step.arg(bits, control)?;
+                step.arg(input(0)?)?;
+                step.arg(bits)?;
             }
         }
         OpKind::Array {
             access: ArrayAccess::Put,
             ..
         } => {
-            step.arg(input(1)?, control)?;
-            step.arg(input(2)?, control)?;
-            step.arg(input(0)?, control)?;
+            step.arg(input(1)?)?;
+            step.arg(input(2)?)?;
+            step.arg(input(0)?)?;
         }
         OpKind::Field {
             access: FieldAccess::Put,
@@ -940,13 +905,13 @@ fn flow_step(
             ..
         } => {
             if !static_field {
-                step.arg(input(1)?, control)?;
+                step.arg(input(1)?)?;
             }
-            step.arg(input(0)?, control)?;
+            step.arg(input(0)?)?;
         }
         _ => {
             for input in inputs {
-                step.arg(input, control)?;
+                step.arg(input)?;
             }
         }
     }

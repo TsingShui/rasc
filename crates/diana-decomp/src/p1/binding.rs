@@ -1,10 +1,10 @@
 use super::structure::bad;
 use super::{MethodError, MethodProblem};
+use crate::CodeUnitOffset;
 use crate::input::ProgramIndex;
 use crate::input::formats::{InsnLayout, OpcodeSpec, OperandReference, RegisterShape};
 use crate::input::operands::RawOperands;
 use crate::substrate::slots::SlotWidth;
-use crate::{CodeUnitOffset, RunContext};
 
 #[derive(Clone)]
 pub(crate) struct ProducerFact {
@@ -38,7 +38,6 @@ pub(crate) fn check_producer(
     spec: OpcodeSpec,
     layout: InsnLayout,
     operands: RawOperands,
-    budget: &mut RunContext<'_>,
 ) -> Result<Option<ProducerFact>, MethodError> {
     if spec.registers == RegisterShape::ArrayWords {
         return Ok(Some(ProducerFact {
@@ -56,19 +55,19 @@ pub(crate) fn check_producer(
         // A polymorphic call's own declaration describes the receiver only; the
         // second reference supplies the actual argument/result prototype.
         (0xfa | 0xfb, Some(OperandReference::Method(id))) => {
-            index.method_reference(id, budget)?;
+            index.method_reference(id)?;
             let Some(OperandReference::Proto(proto)) = layout.references()[1].map(|r| r.target)
             else {
                 return Err(MethodError::InternalInvariant(
                     "polymorphic invoke has no checked prototype reference",
                 ));
             };
-            index.prototype(proto, budget)?
+            index.prototype(proto)?
         }
         (_, Some(OperandReference::Method(id))) => {
-            index.method_reference(id, budget)?.declaration.prototype
+            index.method_reference(id)?.declaration.prototype
         }
-        (_, Some(OperandReference::CallSite(id))) => index.call_site(id, budget)?.prototype,
+        (_, Some(OperandReference::CallSite(id))) => index.call_site(id)?.prototype,
         _ => {
             return Err(MethodError::InternalInvariant(
                 "invoke has no checked target reference",
@@ -83,7 +82,7 @@ pub(crate) fn check_producer(
         return Err(bad(pc, MethodProblem::InvalidInvokeWordCount));
     }
     let mut shorty = prototype.shorty.reader()?;
-    let result = match shorty.next(budget)? {
+    let result = match shorty.next()? {
         Some(0x56) => ResultKind::Void,
         Some(0x4a | 0x44) => ResultKind::Wide,
         Some(0x4c) => ResultKind::Object,
@@ -96,19 +95,16 @@ pub(crate) fn check_producer(
     };
     let mut words = operands.registers().iter();
     if receiver {
-        budget.checkpoint()?;
         words
             .next()
             .ok_or(MethodError::InternalInvariant("missing checked receiver"))?;
     }
     let mut arguments = Vec::new();
-    while let Some(tag) = shorty.next(budget)? {
-        budget.checkpoint()?;
+    while let Some(tag) = shorty.next()? {
         let first = words
             .next()
             .ok_or(MethodError::InternalInvariant("missing checked argument"))?;
         let width = if matches!(tag, 0x4a | 0x44) {
-            budget.checkpoint()?;
             let second = words
                 .next()
                 .ok_or(MethodError::InternalInvariant("missing checked wide word"))?;
@@ -119,7 +115,7 @@ pub(crate) fn check_producer(
         } else {
             SlotWidth::One
         };
-        crate::substrate::owned::push(&mut arguments, width, budget)
+        crate::substrate::owned::push(&mut arguments, width)
             .map_err(super::disassembly::scratch)?;
     }
     if words.next().is_some() {

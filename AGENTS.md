@@ -19,8 +19,10 @@ package-local `AGENTS.md` before working in either package.
   databases or network facts; treat absent facts as Unknown and keep the readable
   result with explicit uncertainty.
 - Preserve effect, instruction, argument, exception, lock and initialization
-  order, classified errors, cancellation and backpressure. Cancellation and
-  bounded queues are not pagination; never silently truncate a successful result.
+  order, classified errors and backpressure. Bounded queues are not pagination;
+  never silently truncate a successful result. Request cancellation callbacks and
+  tokens are not part of the CLI-oriented engine API; process termination belongs
+  to the CLI/host.
 - Production is native Rust, forbids `unsafe`, and has no external runtime or
   process dependency. The application owns files and ZIPs; the engine borrows
   input bytes and declaration facts.

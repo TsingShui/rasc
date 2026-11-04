@@ -62,7 +62,7 @@ Before changing an engine capability, contributors MUST read
 [phases](phases.md) and the owning stage chapter. Contributors MUST identify the owning phase, actual producer/consumer, invariant
 and existing independent evidence before implementation. Before
 implementation, contributors MUST also identify the consumed facts, their full or
-partial guarantees, and the classified failure/resource/cancellation behavior.
+partial guarantees, and the classified failure/resource behavior.
 For the pipeline refactoring, contributors follow the root
 [refactoring authority](../../AGENTS.md#pipeline-refactoring-authority). Technical
 details within the approved target have default approval; the listed prohibited
@@ -113,7 +113,7 @@ or adding a bypass.
   Operation-specific helpers and phase-owned proofs do not authorize another
   method entry path. Independent replay remains a verifier obligation.
 - A migration MUST preserve available members, original identities, classified
-  failures, raw completeness, effect order and resource/cancellation behavior.
+  failures, raw completeness, effect order and resource behavior.
   Contributors MUST remove replaced paths before reporting the migration
   complete. Passing behavior cases alone does not establish architecture
   compliance.
@@ -185,7 +185,9 @@ unchanged artifacts; do not add whole-JDK, dependency-tree or cache scans.
 - Preserve raw identity and program instruction/argument/effect/catch/lock/
   initialization order. Independent-result order, generated source or synthetic
   names are not stable; no output sorting/reordering buffer or pagination.
-- Keep cancellation, backpressure, checked ranges and allocation failure handling.
+- Keep backpressure, checked ranges and allocation failure handling. Request
+  cancellation callbacks/tokens are not an engine API; the CLI/host owns process
+  termination.
   The engine keeps no work or allocation ledger and no caller-configured numeric
   quota. Use try_reserve and report an actual allocation failure explicitly; do
   not introduce speculative JVM-size rejection formulas. Real format limits, input
@@ -269,7 +271,7 @@ names and smaller functions over explanatory comments for avoidable complexity.
 
 Public API documentation MUST describe the contract needed by callers, including
 relevant errors, any panic preconditions, safety requirements, and resource or
-cancellation behavior, without duplicating the design documents. Contributors MUST preserve comments that carry still-valid
+failure behavior, without duplicating the design documents. Contributors MUST preserve comments that carry still-valid
 correctness or safety reasoning and MUST update or remove comments made stale by
 a code change. Comment edits MUST NOT weaken technical requirements.
 

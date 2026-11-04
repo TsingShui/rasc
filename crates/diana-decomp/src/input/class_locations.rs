@@ -1,5 +1,5 @@
 use super::{InputError, InputProblem, ProgramIndex, malformed};
-use crate::pipeline::control::InputControl;
+
 use crate::{ClassDefId, TypeId};
 
 #[derive(Clone, Copy)]
@@ -14,10 +14,7 @@ pub(super) struct ClassLocations {
     locations: Vec<Location>,
 }
 impl ClassLocations {
-    pub(super) fn build(
-        index: &ProgramIndex<'_>,
-        control: &mut impl InputControl,
-    ) -> Result<Self, InputError> {
+    pub(super) fn build(index: &ProgramIndex<'_>) -> Result<Self, InputError> {
         let offset_byte = index.header.class_defs.offset_byte;
         let length = usize::try_from(index.header.type_ids.count)
             .map_err(|_| InputError::PlatformCapacity { offset_byte })?;
@@ -25,19 +22,17 @@ impl ClassLocations {
             .checked_mul(size_of::<Location>())
             .filter(|&size| size <= isize::MAX as usize)
             .ok_or(InputError::PlatformCapacity { offset_byte })?;
-        control.checkpoint()?;
+
         let mut locations = Vec::new();
         locations
             .try_reserve_exact(length)
             .map_err(|_| InputError::Allocation { offset_byte })?;
         for _ in 0..length {
-            control.checkpoint()?;
             locations.push(Location::Missing);
         }
         for at in 0..index.header.class_defs.count {
-            control.checkpoint()?;
             let class = ClassDefId(at);
-            let ty = index.class_type_id(class, control)?;
+            let ty = index.class_type_id(class)?;
             // A broken unrelated definition was not a match in the original
             // table scan. Its declaration query retains the local input error.
             let Some(location) = locations.get_mut(
@@ -57,9 +52,7 @@ impl ClassLocations {
         &self,
         ty: TypeId,
         index: &ProgramIndex<'_>,
-        control: &mut impl InputControl,
     ) -> Result<Option<ClassDefId>, InputError> {
-        control.checkpoint()?;
         let at = usize::try_from(ty.0).map_err(|_| InputError::PlatformCapacity {
             offset_byte: index.header.class_defs.offset_byte,
         })?;

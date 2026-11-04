@@ -1,6 +1,6 @@
 use super::ProgramIndex;
 use super::values::{EncodedKind, ValueStep};
-use crate::pipeline::control::InputControl;
+
 use crate::substrate::owned::{copy_units, push, reserve};
 use crate::{ByteOffset, ByteRange, ClassKey, RequestError, StringId, TypeId};
 
@@ -171,11 +171,7 @@ pub(crate) struct ReadAnnotations {
     pub(crate) facts: OriginalAnnotations,
     pub(crate) issue: Option<RequestError>,
 }
-fn bytes(
-    index: &ProgramIndex<'_>,
-    range: ByteRange,
-    control: &mut impl InputControl,
-) -> Result<Vec<u8>, RequestError> {
+fn bytes(index: &ProgramIndex<'_>, range: ByteRange) -> Result<Vec<u8>, RequestError> {
     let source =
         index
             .bytes
@@ -184,9 +180,8 @@ fn bytes(
                 "annotation reader lost checked range",
             ))?;
     let mut result = Vec::new();
-    reserve(&mut result, source.len(), control)?;
+    reserve(&mut result, source.len())?;
     for &byte in source {
-        control.checkpoint()?;
         result.push(byte);
     }
     Ok(result)
@@ -194,9 +189,7 @@ fn bytes(
 fn hard(error: &RequestError) -> bool {
     matches!(
         error.kind(),
-        crate::FailureKind::Cancelled
-            | crate::FailureKind::ResourceExhausted
-            | crate::FailureKind::InternalInvariant
+        crate::FailureKind::ResourceExhausted | crate::FailureKind::InternalInvariant
     )
 }
 fn read_set(
@@ -204,15 +197,13 @@ fn read_set(
     offset: ByteOffset,
     location: AnnotationLocation,
     facts: &mut OriginalAnnotations,
-    control: &mut impl InputControl,
 ) -> Result<(), RequestError> {
     if offset.0 == 0 {
         return Ok(());
     }
-    let mut offsets = index.annotation_offsets(0x1003, offset, control)?;
+    let mut offsets = index.annotation_offsets(0x1003, offset)?;
     let mut last = None;
     while offsets.remaining_byte().0 != 0 {
-        control.checkpoint()?;
         let pointer = ByteRange {
             start: offsets.position_byte(),
             end: ByteOffset(
@@ -225,18 +216,18 @@ fn read_set(
         };
         facts.prefix = Some(AnnotationPrefix {
             range: pointer,
-            bytes: bytes(index, pointer, control)?,
+            bytes: bytes(index, pointer)?,
         });
         let (offset, visibility, type_id, mut values) =
-            index.next_annotation(&mut offsets, &mut last, control)?;
+            index.next_annotation(&mut offsets, &mut last)?;
         let mut tokens = Vec::new();
         let body = (|| -> Result<(), RequestError> {
-            while let Some(step) = values.next(index, control)? {
+            while let Some(step) = values.next(index)? {
                 let token = match step {
                     ValueStep::EndContainer => AnnotationToken::EndContainer,
                     ValueStep::Value(value) => {
                         let name = match value.name {
-                            Some(id) => Some(copy_units(index.string_with(id, control)?, control)?),
+                            Some(id) => Some(copy_units(index.string(id)?)?),
                             None => None,
                         };
                         let kind = match value.kind {
@@ -249,7 +240,7 @@ fn read_set(
                                 reference,
                             )) => AnnotationValueKind::String {
                                 reference,
-                                units: copy_units(index.string_with(reference, control)?, control)?,
+                                units: copy_units(index.string(reference)?)?,
                             },
                             EncodedKind::Reference(reference) => {
                                 AnnotationValueKind::Reference(reference)
@@ -271,7 +262,7 @@ fn read_set(
                         })
                     }
                 };
-                push(&mut tokens, token, control)?;
+                push(&mut tokens, token)?;
             }
             Ok(())
         })();
@@ -290,9 +281,9 @@ fn read_set(
             location,
             visibility,
             type_id,
-            descriptor: copy_units(index.type_name(type_id, control)?, control)?,
+            descriptor: copy_units(index.type_name(type_id)?)?,
             range,
-            bytes: bytes(index, range, control)?,
+            bytes: bytes(index, range)?,
             tokens,
             extent: if body.is_ok() {
                 AnnotationExtent::Complete
@@ -300,7 +291,7 @@ fn read_set(
                 AnnotationExtent::Prefix
             },
         };
-        push(&mut facts.records, record, control)?;
+        push(&mut facts.records, record)?;
         body?;
         facts.prefix = None;
     }
@@ -320,17 +311,15 @@ fn read_members(
     records: &mut super::Cursor<'_>,
     kind: AssociationKind,
     facts: &mut OriginalAnnotations,
-    control: &mut impl InputControl,
 ) -> Result<(), RequestError> {
     use super::annotations::{AnnotationMembers, AnnotationOwner, association};
     if records.remaining_byte().0 == 0 {
         return Ok(());
     }
     let method = !matches!(kind, AssociationKind::Field);
-    let mut members = AnnotationMembers::open(index, class, method, control)?;
+    let mut members = AnnotationMembers::open(index, class, method)?;
     let mut last = None;
     while records.remaining_byte().0 != 0 {
-        control.checkpoint()?;
         let range = ByteRange {
             start: records.position_byte(),
             end: ByteOffset(
@@ -343,33 +332,22 @@ fn read_members(
         };
         facts.prefix = Some(AnnotationPrefix {
             range,
-            bytes: bytes(index, range, control)?,
+            bytes: bytes(index, range)?,
         });
-        let (owner, offset, parameters) = association(
-            index,
-            class,
-            &mut members,
-            records,
-            &mut last,
-            method,
-            control,
-        )?;
+        let (owner, offset, parameters) =
+            association(index, class, &mut members, records, &mut last, method)?;
         match (matches!(kind, AssociationKind::Parameter), owner) {
             (false, AnnotationOwner::Field(id)) => {
-                read_set(index, offset, AnnotationLocation::Field(id), facts, control)?
+                read_set(index, offset, AnnotationLocation::Field(id), facts)?
             }
-            (false, AnnotationOwner::Method(id)) => read_set(
-                index,
-                offset,
-                AnnotationLocation::Method(id),
-                facts,
-                control,
-            )?,
+            (false, AnnotationOwner::Method(id)) => {
+                read_set(index, offset, AnnotationLocation::Method(id), facts)?
+            }
             (true, AnnotationOwner::Method(id)) => {
-                let mut references = index.annotation_parameters(offset, parameters, control)?;
+                let mut references = index.annotation_parameters(offset, parameters)?;
                 for parameter in 0..parameters {
                     let at = references.position_byte();
-                    let offset = super::file_offset(references.read_u32_with(control)?, at)?;
+                    let offset = super::file_offset(references.read_u32()?, at)?;
                     read_set(
                         index,
                         offset,
@@ -381,7 +359,6 @@ fn read_members(
                             ),
                         },
                         facts,
-                        control,
                     )?;
                 }
             }
@@ -399,9 +376,8 @@ fn read_members(
 pub(crate) fn collect(
     index: &ProgramIndex<'_>,
     owner: ClassKey,
-    control: &mut impl InputControl,
 ) -> Result<ReadAnnotations, RequestError> {
-    let context = index.class_context(owner.class_def, control)?;
+    let context = index.class_context(owner.class_def)?;
     let mut result = ReadAnnotations {
         facts: OriginalAnnotations {
             owner,
@@ -416,22 +392,20 @@ pub(crate) fn collect(
         if context.annotations_offset.0 == 0 {
             return Ok(());
         }
-        let mut directory = index.annotation_directory(context.annotations_offset, control)?;
+        let mut directory = index.annotation_directory(context.annotations_offset)?;
         read_set(
             index,
             directory.class,
             AnnotationLocation::Class,
             &mut result.facts,
-            control,
         )?;
-        let class = index.class_with(owner.class_def, control)?;
+        let class = index.class(owner.class_def)?;
         read_members(
             index,
             &class,
             &mut directory.fields,
             AssociationKind::Field,
             &mut result.facts,
-            control,
         )?;
         read_members(
             index,
@@ -439,7 +413,6 @@ pub(crate) fn collect(
             &mut directory.methods,
             AssociationKind::Method,
             &mut result.facts,
-            control,
         )?;
         read_members(
             index,
@@ -447,7 +420,6 @@ pub(crate) fn collect(
             &mut directory.parameters,
             AssociationKind::Parameter,
             &mut result.facts,
-            control,
         )?;
         Ok(())
     })();

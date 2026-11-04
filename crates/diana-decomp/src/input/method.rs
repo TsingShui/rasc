@@ -3,8 +3,8 @@ use super::{
     Cursor, DexString, InputError, InputProblem, MethodBody, MethodError, ProgramIndex,
     RawMethodView, file_offset, malformed,
 };
-use crate::pipeline::control::InputControl;
-use crate::{ByteLength, ByteOffset, ByteRange, ClassDefId, MethodId, RequestError, RunContext};
+
+use crate::{ByteLength, ByteOffset, ByteRange, ClassDefId, MethodId, RequestError};
 
 /// Original annotation associations checked for one selected member. Other
 /// members' annotation bodies are independent and are not sealed by this value.
@@ -105,9 +105,8 @@ impl<'a> ProgramIndex<'a> {
         &'i self,
         facts: &crate::p0::ClassFacts,
         method_id: MethodId,
-        budget: &mut RunContext<'_>,
     ) -> Result<MethodSource<'i, 'a>, MethodError> {
-        let class = self.class_with(facts.class_def(), budget)?;
+        let class = self.class(facts.class_def())?;
         if class.type_idx != facts.type_index() {
             return Err(MethodError::InternalInvariant(
                 "class facts and class view disagree on the original type",
@@ -149,9 +148,8 @@ impl<'a> ProgramIndex<'a> {
                 declaration.parameter_words
                     + u64::from(access_flags & crate::substrate::flags::STATIC == 0),
             )),
-            budget,
         )?;
-        self.finish_method_source(class, method_id, access_flags, body, declaration, budget)
+        self.finish_method_source(class, method_id, access_flags, body, declaration)
     }
 
     /// Locates one original method by walking its class-data directory and then
@@ -161,14 +159,11 @@ impl<'a> ProgramIndex<'a> {
         &'i self,
         class_id: ClassDefId,
         method_id: MethodId,
-        budget: &mut RunContext<'_>,
     ) -> Result<MethodSource<'i, 'a>, MethodError> {
         // Declaration-query consumers reuse the same P0 class production as
         // request scheduling; they do not perform a second class-data walk.
-        let facts = self
-            .class_facts_cached(class_id, budget)
-            .map_err(method_error)?;
-        self.method_source(&facts, method_id, budget)
+        let facts = self.class_facts_cached(class_id).map_err(method_error)?;
+        self.method_source(&facts, method_id)
     }
 
     fn finish_method_source<'i>(
@@ -178,13 +173,12 @@ impl<'a> ProgramIndex<'a> {
         access_flags: u32,
         body: MethodBody<'a>,
         declaration: crate::p0::MethodDeclaration,
-        budget: &mut RunContext<'_>,
     ) -> Result<MethodSource<'i, 'a>, MethodError> {
         let class_id = class.class_def_idx;
         // Optional metadata is read independently: a damaged debug program or
         // annotation set keeps its own state and never removes intact code.
         let metadata = self
-            .check_method_metadata(class_id, method_id, declaration.parameter_count(), budget)
+            .check_method_metadata(class_id, method_id, declaration.parameter_count())
             .map_err(RequestError::from);
         // The reader establishes only safe original ranges and independent
         // metadata. P1 owns instruction decoding, structural checks and
@@ -193,7 +187,7 @@ impl<'a> ProgramIndex<'a> {
             MethodBody::DeclarationOnly => RawPrintable::Declaration,
             MethodBody::Code(code) => RawPrintable::Method(code),
         };
-        budget.checkpoint()?;
+
         Ok(MethodSource {
             index: self,
             class_id,
@@ -213,24 +207,23 @@ impl<'a> ProgramIndex<'a> {
         class_id: ClassDefId,
         method_id: MethodId,
         parameters: usize,
-        budget: &mut RunContext<'_>,
     ) -> Result<CheckedAnnotations, MethodError> {
-        let offset = self.class_annotations_offset(class_id, budget)?;
+        let offset = self.class_annotations_offset(class_id)?;
         let mut checked = CheckedAnnotations::default();
         if offset == ByteOffset(0) {
             return Ok(checked);
         }
-        let directory = self.annotation_directory(offset, budget)?;
-        if let Some(offset) = selected_offset(directory.methods, method_id, budget)? {
-            checked.method = Some(self.check_annotation_set(offset, budget)?);
+        let directory = self.annotation_directory(offset)?;
+        if let Some(offset) = selected_offset(directory.methods, method_id)? {
+            checked.method = Some(self.check_annotation_set(offset)?);
         }
-        if let Some(offset) = selected_offset(directory.parameters, method_id, budget)? {
-            let mut list = self.annotation_parameters(offset, parameters, budget)?;
+        if let Some(offset) = selected_offset(directory.parameters, method_id)? {
+            let mut list = self.annotation_parameters(offset, parameters)?;
             while list.remaining_byte() != ByteLength(0) {
                 let at = list.position_byte();
-                let set = file_offset(list.read_u32_with(budget)?, at)?;
+                let set = file_offset(list.read_u32()?, at)?;
                 if set != ByteOffset(0) {
-                    self.check_annotation_set(set, budget)?;
+                    self.check_annotation_set(set)?;
                 }
             }
             checked.parameters = Some(ByteRange {
@@ -241,16 +234,12 @@ impl<'a> ProgramIndex<'a> {
         Ok(checked)
     }
 
-    fn check_annotation_set(
-        &self,
-        offset: ByteOffset,
-        budget: &mut impl InputControl,
-    ) -> Result<ByteRange, MethodError> {
-        let mut offsets = self.annotation_offsets(0x1003, offset, budget)?;
+    fn check_annotation_set(&self, offset: ByteOffset) -> Result<ByteRange, MethodError> {
+        let mut offsets = self.annotation_offsets(0x1003, offset)?;
         let mut last = None;
         while offsets.remaining_byte() != ByteLength(0) {
-            let (_, _, _, mut values) = self.next_annotation(&mut offsets, &mut last, budget)?;
-            consume_values(self, &mut values, budget)?;
+            let (_, _, _, mut values) = self.next_annotation(&mut offsets, &mut last)?;
+            consume_values(self, &mut values)?;
         }
         Ok(ByteRange {
             start: offset,
@@ -262,23 +251,21 @@ impl<'a> ProgramIndex<'a> {
 fn consume_values(
     index: &ProgramIndex<'_>,
     values: &mut EncodedValues<'_>,
-    budget: &mut impl InputControl,
 ) -> Result<(), MethodError> {
-    while values.next(index, budget)?.is_some() {}
+    while values.next(index)?.is_some() {}
     Ok(())
 }
 
 fn selected_offset(
     mut records: Cursor<'_>,
     method_id: MethodId,
-    budget: &mut impl InputControl,
 ) -> Result<Option<ByteOffset>, InputError> {
     let mut previous = None;
     let mut selected = None;
     while records.remaining_byte() != ByteLength(0) {
         let at = records.position_byte();
-        let id = MethodId(records.read_u32_with(budget)?);
-        let offset = file_offset(records.read_u32_with(budget)?, at)?;
+        let id = MethodId(records.read_u32()?);
+        let offset = file_offset(records.read_u32()?, at)?;
         if previous.is_some_and(|previous| previous >= id) {
             return Err(malformed(InputProblem::InvalidReference, at));
         }
@@ -294,7 +281,7 @@ fn method_error(error: RequestError) -> MethodError {
     match error {
         RequestError::Input(error) => MethodError::Input(error),
         RequestError::Method(error) => error,
-        RequestError::Control(error) => MethodError::Control(error),
+
         RequestError::Allocation(error) => MethodError::Allocation(error),
         RequestError::PlatformCapacity => MethodError::PlatformCapacity,
         RequestError::InternalInvariant(message) => MethodError::InternalInvariant(message),

@@ -19,15 +19,15 @@ P2 constructors are internal and require Engine's method-task authority.
 
 A P2 stop retains the complete P1 input, classified error and available unvalidated
 construction facts. Class requests retain delivered members and mark request-level
-termination explicitly. Cancellation is latched in `RunContext`; range/capacity
-checks and fallible allocation remain mandatory. There are no numeric quotas.
+termination explicitly. Range/capacity checks and fallible allocation remain
+mandatory. The CLI/host owns process termination; Engine has no request
+cancellation callback/token or checkpoint parameter. There are no numeric quotas.
 
 Translation checking compares ordered local symbolic behavior and completion
 rules and matches every original transfer/coverage owner. It does not prove ART
 admission or concrete external-call behavior. The two local corpora exercise
 ordinary operations but do not provide execution evidence for custom/polymorphic
-invokes or method-handle/type constants. Fault-injected cancellation/allocation
-execution has not been performed; failure retention is currently code-reviewed.
+invokes or method-handle/type constants. Fault-injected allocation execution has not been performed; failure retention is currently code-reviewed.
 
 Use the single engine inspection entry from the repository root:
 

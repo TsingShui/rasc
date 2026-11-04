@@ -45,9 +45,9 @@ pub fn run(
     )
     .map_err(|error| Failure::query(error, 1))?;
     let images = xref.images().to_vec();
-    let cancel = std::sync::atomic::AtomicBool::new(false);
+
     let mut rows = Vec::new();
-    xref.run(&cancel, &mut |row| {
+    xref.run(&mut |row| {
         rows.push(row);
         Ok(())
     })

@@ -155,7 +155,7 @@ authoritative; this table guides wording rather than redefining data or interfac
 |---|---|---|
 | `origin` | Mapping back to original input | source code, reference attribution |
 | `identity` | Original declaration identity | request-local ID, `ClassKey` spelling |
-| `scope` | Ownership and lifetime range | `RunContext`, session, context |
+| `scope` | Ownership and lifetime range | session, context |
 | `register` | DEX physical register | analysis interval |
 | `slot` | Analysis register-word interval | source span, byte range |
 | `definition` | Static definition site | heap write, artifact producer |
@@ -169,7 +169,7 @@ authoritative; this table guides wording rather than redefining data or interfac
 | `fallback` | Classified one-time read-only raw exit | raw path, degradation path |
 | `limit` | A configured bound | allowance policy |
 
-`Malformed`, `Unsupported`, `ResourceExhausted`, `InternalInvariant` and `Cancelled`
+`Malformed`, `Unsupported`, `ResourceExhausted` and `InternalInvariant`
 are failure kinds in [spec/00](spec/00-overview.md). `Unavailable` is a result status there,
 not a synonym for those failure kinds. Known invalid semantics also belong under
 `Malformed`; the term is not limited to damaged byte structure. Missing evidence

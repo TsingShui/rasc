@@ -1,7 +1,7 @@
 use super::catalog::ProgramIndex;
 use super::strings::TypeShape;
 use super::{Cursor, InputError, InputProblem, file_offset, malformed};
-use crate::pipeline::control::InputControl;
+
 use crate::{
     ByteLength, ByteOffset, ByteRange, CodeUnitCount, CodeUnitOffset, RegisterWordCount, TypeId,
 };
@@ -81,7 +81,6 @@ pub(super) fn read_code<'a>(
     method_id: crate::MethodId,
     access_flags: u32,
     expected_words: Option<RegisterWordCount>,
-    control: &mut impl InputControl,
 ) -> Result<MethodBody<'a>, InputError> {
     let offset = match (
         code_offset,
@@ -92,20 +91,17 @@ pub(super) fn read_code<'a>(
         (None, false) => return Err(malformed(InputProblem::InvalidCode, ByteOffset(0))),
         (Some(offset), true) => return Err(malformed(InputProblem::InvalidCode, offset)),
     };
-    let mut cursor = index.item(0x2001, offset, control)?;
-    let registers_size = cursor.read_u16_with(control)?;
-    let ins_size = cursor.read_u16_with(control)?;
-    let outs_size = cursor.read_u16_with(control)?;
-    let tries_size = cursor.read_u16_with(control)?;
-    let debug_offset = file_offset(
-        cursor.read_u32_with(control)?,
-        ByteOffset(cursor.position_byte().0 - 4),
-    )?;
-    let code_units = CodeUnitCount(cursor.read_u32_with(control)?);
+    let mut cursor = index.item(0x2001, offset)?;
+    let registers_size = cursor.read_u16()?;
+    let ins_size = cursor.read_u16()?;
+    let outs_size = cursor.read_u16()?;
+    let tries_size = cursor.read_u16()?;
+    let debug_offset = file_offset(cursor.read_u32()?, ByteOffset(cursor.position_byte().0 - 4))?;
+    let code_units = CodeUnitCount(cursor.read_u32()?);
     let byte_length = code_units
         .checked_byte_length()
         .ok_or_else(|| malformed(InputProblem::RangeOverflow, ByteOffset(offset.0 + 12)))?;
-    let instructions = cursor.skip(1, byte_length, control)?;
+    let instructions = cursor.skip(1, byte_length)?;
     if ins_size > registers_size
         || expected_words.is_some_and(|words| words.0 != u64::from(ins_size))
     {
@@ -115,18 +111,18 @@ pub(super) fn read_code<'a>(
         ));
     }
     if debug_offset != ByteOffset(0) {
-        index.item(0x2003, debug_offset, control)?;
+        index.item(0x2003, debug_offset)?;
     }
-    if tries_size != 0 && !code_units.0.is_multiple_of(2) && cursor.read_u16_with(control)? != 0 {
+    if tries_size != 0 && !code_units.0.is_multiple_of(2) && cursor.read_u16()? != 0 {
         return Err(malformed(
             InputProblem::InvalidCode,
             ByteOffset(cursor.position_byte().0 - 2),
         ));
     }
-    let tries = cursor.skip(usize::from(tries_size), ByteLength(8), control)?;
+    let tries = cursor.skip(usize::from(tries_size), ByteLength(8))?;
     let handler_start = cursor.position_byte();
     if tries_size != 0 {
-        check_handlers(index, &mut cursor, tries, code_units, control)?;
+        check_handlers(index, &mut cursor, tries, code_units)?;
     }
     Ok(MethodBody::Code(RawMethodView {
         source_bytes: index.bytes,
@@ -160,14 +156,13 @@ fn check_handlers(
     cursor: &mut Cursor<'_>,
     tries: ByteRange,
     code_units: CodeUnitCount,
-    control: &mut impl InputControl,
 ) -> Result<(), InputError> {
     let list_start = cursor.position_byte();
-    let count = cursor.read_uleb32_with(control)?;
+    let count = cursor.read_uleb32()?;
     if u64::from(count) > cursor.remaining_byte().0 as u64 {
         return Err(malformed(InputProblem::Truncated, cursor.position_byte()));
     }
-    control.checkpoint()?;
+
     // Membership covers the format's u16 relative-byte-offset domain.
     let mut starts = [0u64; 1024];
     for _ in 0..count {
@@ -178,30 +173,30 @@ fn check_handlers(
         if relative.0 <= usize::from(u16::MAX) {
             starts[relative.0 / 64] |= 1u64 << (relative.0 % 64);
         }
-        let size = cursor.read_sleb32_with(control)?;
+        let size = cursor.read_sleb32()?;
         let typed = i64::from(size).unsigned_abs();
         let minimum = typed * 2 + u64::from(size <= 0);
         if minimum > cursor.remaining_byte().0 as u64 {
             return Err(malformed(InputProblem::Truncated, cursor.position_byte()));
         }
-        control.checkpoint()?;
+
         for _ in 0..typed {
-            let type_idx = TypeId(cursor.read_uleb32_with(control)?);
-            let (_, shape) = index.type_descriptor(type_idx, control)?;
+            let type_idx = TypeId(cursor.read_uleb32()?);
+            let (_, shape) = index.type_descriptor(type_idx)?;
             if !matches!(shape, TypeShape::Class) {
                 return Err(malformed(
                     InputProblem::InvalidHandler,
                     cursor.position_byte(),
                 ));
             }
-            if CodeUnitOffset(cursor.read_uleb32_with(control)?).0 >= code_units.0 {
+            if CodeUnitOffset(cursor.read_uleb32()?).0 >= code_units.0 {
                 return Err(malformed(
                     InputProblem::InvalidHandler,
                     cursor.position_byte(),
                 ));
             }
         }
-        if size <= 0 && CodeUnitOffset(cursor.read_uleb32_with(control)?).0 >= code_units.0 {
+        if size <= 0 && CodeUnitOffset(cursor.read_uleb32()?).0 >= code_units.0 {
             return Err(malformed(
                 InputProblem::InvalidHandler,
                 cursor.position_byte(),
@@ -211,10 +206,9 @@ fn check_handlers(
     let mut records = Cursor::bounded(index.bytes, tries.start, tries.end)?;
     let mut previous_end = CodeUnitOffset(0);
     while records.remaining_byte() != ByteLength(0) {
-        control.checkpoint()?;
-        let start = CodeUnitOffset(records.read_u32_with(control)?);
-        let length = CodeUnitCount(u32::from(records.read_u16_with(control)?));
-        let offset = usize::from(records.read_u16_with(control)?);
+        let start = CodeUnitOffset(records.read_u32()?);
+        let length = CodeUnitCount(u32::from(records.read_u16()?));
+        let offset = usize::from(records.read_u16()?);
         let end = start.checked_advance(length).ok_or_else(|| {
             malformed(
                 InputProblem::RangeOverflow,

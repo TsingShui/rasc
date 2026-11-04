@@ -5,10 +5,10 @@ use super::{
     Cursor, DexContainer, DexHeader, InputError, InputProblem, checked_range, count_usize,
     file_offset, malformed,
 };
-use crate::pipeline::control::InputControl;
+
 use crate::{
-    ByteLength, ByteOffset, ClassDefId, ClassKey, ControlError, FailureKind, FieldId, MethodId,
-    ProtoId, RegisterWordCount, RunContext, StringId, TypeId, Utf16Offset,
+    ByteLength, ByteOffset, ClassDefId, ClassKey, FailureKind, FieldId, MethodId, ProtoId,
+    RegisterWordCount, StringId, TypeId, Utf16Offset,
 };
 
 #[derive(Clone, Copy)]
@@ -57,13 +57,11 @@ impl<'a> ProgramIndex<'a> {
 
     /// The current class's P0 facts, built once per logical class and shared by
     /// later declaration queries. Deterministic input failures are cached;
-    /// cancellation and resource failures are not.
+    /// resource failures are not.
     pub(crate) fn class_facts_cached(
         &self,
         class: ClassDefId,
-        control: &mut RunContext<'_>,
     ) -> Result<std::sync::Arc<crate::p0::ClassFacts>, crate::RequestError> {
-        control.checkpoint()?;
         {
             let cache = self.class_facts.lock().map_err(|_| {
                 crate::RequestError::InternalInvariant("class-fact cache was poisoned")
@@ -93,7 +91,7 @@ impl<'a> ProgramIndex<'a> {
             dex: self.dex,
             class_def: class,
         };
-        let result = crate::p0::collect(self, key, control);
+        let result = crate::p0::collect(self, key);
         let mut cache = self
             .class_facts
             .lock()
@@ -112,29 +110,21 @@ impl<'a> ProgramIndex<'a> {
         }
     }
 
-    pub(super) fn class_type_id(
-        &self,
-        class: ClassDefId,
-        control: &mut impl InputControl,
-    ) -> Result<TypeId, InputError> {
-        let mut record = self.table(TableKey::Class(class), control)?;
-        Ok(TypeId(record.read_u32_with(control)?))
+    pub(super) fn class_type_id(&self, class: ClassDefId) -> Result<TypeId, InputError> {
+        let mut record = self.table(TableKey::Class(class))?;
+        Ok(TypeId(record.read_u32()?))
     }
 
-    fn class_location(
-        &self,
-        ty: TypeId,
-        control: &mut impl InputControl,
-    ) -> Result<Option<ClassDefId>, InputError> {
+    fn class_location(&self, ty: TypeId) -> Result<Option<ClassDefId>, InputError> {
         if self.class_locations.get().is_none() {
             let _lock = self
                 .cache_build
                 .lock()
                 .map_err(|_| InputError::InternalInvariant("input cache construction poisoned"))?;
             if let Some(locations) = self.class_locations.get() {
-                return locations.get(ty, self, control);
+                return locations.get(ty, self);
             }
-            let locations = super::class_locations::ClassLocations::build(self, control)?;
+            let locations = super::class_locations::ClassLocations::build(self)?;
             let _ = self.class_locations.set(locations);
         }
         self.class_locations
@@ -142,34 +132,26 @@ impl<'a> ProgramIndex<'a> {
             .ok_or(InputError::InternalInvariant(
                 "class location cache was not initialized",
             ))?
-            .get(ty, self, control)
+            .get(ty, self)
     }
 
-    pub fn open(bytes: &'a [u8], control: &mut RunContext<'_>) -> Result<Self, InputError> {
-        Self::open_with(bytes, control)
-    }
-
-    pub(crate) fn open_with(
-        bytes: &'a [u8],
-        control: &mut impl InputControl,
-    ) -> Result<Self, InputError> {
-        let container = DexContainer::open_with(bytes, control)?;
-        Self::from_container(container, ByteOffset(0), control)
+    pub fn open(bytes: &'a [u8]) -> Result<Self, InputError> {
+        let container = DexContainer::open(bytes)?;
+        Self::from_container(container, ByteOffset(0))
     }
 
     pub(crate) fn from_container(
         container: DexContainer<'a>,
         header_offset: ByteOffset,
-        control: &mut impl InputControl,
     ) -> Result<Self, InputError> {
         let bytes = container.bytes;
-        let header = super::header::read_member_header(container, header_offset, control)?;
+        let header = super::header::read_member_header(container, header_offset)?;
         let mut cursor = Cursor::bounded(
             bytes,
             header.map_byte_range.start,
             header.map_byte_range.end,
         )?;
-        let count = count_usize(cursor.read_u32_with(control)?, header.map_byte_range.start)?;
+        let count = count_usize(cursor.read_u32()?, header.map_byte_range.start)?;
         let mut sections = [Section {
             kind: 0,
             count: 0,
@@ -183,13 +165,11 @@ impl<'a> ProgramIndex<'a> {
             ));
         }
         for index in 0..count {
-            let kind = cursor.read_u16_with(control)?;
-            cursor.read_u16_with(control)?;
-            let item_count = cursor.read_u32_with(control)?;
-            let start_byte = file_offset(
-                cursor.read_u32_with(control)?,
-                ByteOffset(cursor.position_byte().0 - 4),
-            )?;
+            let kind = cursor.read_u16()?;
+            cursor.read_u16()?;
+            let item_count = cursor.read_u32()?;
+            let start_byte =
+                file_offset(cursor.read_u32()?, ByteOffset(cursor.position_byte().0 - 4))?;
             if index > 0 {
                 sections[index - 1].end_byte = start_byte;
             }
@@ -219,50 +199,21 @@ impl<'a> ProgramIndex<'a> {
         })
     }
 
-    pub fn string(
-        &self,
-        string_idx: StringId,
-        control: &mut RunContext<'_>,
-    ) -> Result<DexString<'a>, InputError> {
-        self.string_with(string_idx, control)
+    pub fn string(&self, string_idx: StringId) -> Result<DexString<'a>, InputError> {
+        let mut record = self.table(TableKey::String(string_idx))?;
+        let offset = file_offset(record.read_u32()?, ByteOffset(record.position_byte().0 - 4))?;
+        DexString::read(self.bytes, self.item(0x2002, offset)?)
     }
 
-    pub(crate) fn string_with(
-        &self,
-        string_idx: StringId,
-        control: &mut impl InputControl,
-    ) -> Result<DexString<'a>, InputError> {
-        let mut record = self.table(TableKey::String(string_idx), control)?;
-        let offset = file_offset(
-            record.read_u32_with(control)?,
-            ByteOffset(record.position_byte().0 - 4),
-        )?;
-        DexString::read(self.bytes, self.item(0x2002, offset, control)?, control)
-    }
-
-    pub fn class(
-        &self,
-        class_def_idx: ClassDefId,
-        control: &mut RunContext<'_>,
-    ) -> Result<ClassView<'_, 'a>, InputError> {
-        self.class_with(class_def_idx, control)
-    }
-
-    pub(crate) fn class_with(
-        &self,
-        class_def_idx: ClassDefId,
-        control: &mut impl InputControl,
-    ) -> Result<ClassView<'_, 'a>, InputError> {
-        let mut record = self.table(TableKey::Class(class_def_idx), control)?;
-        let type_idx = TypeId(record.read_u32_with(control)?);
-        let access_flags = record.read_u32_with(control)?;
-        record.skip(4, ByteLength(4), control)?;
-        let class_data_offset = file_offset(
-            record.read_u32_with(control)?,
-            ByteOffset(record.position_byte().0 - 4),
-        )?;
-        record.read_u32_with(control)?;
-        let (descriptor, shape) = self.type_descriptor(type_idx, control)?;
+    pub fn class(&self, class_def_idx: ClassDefId) -> Result<ClassView<'_, 'a>, InputError> {
+        let mut record = self.table(TableKey::Class(class_def_idx))?;
+        let type_idx = TypeId(record.read_u32()?);
+        let access_flags = record.read_u32()?;
+        record.skip(4, ByteLength(4))?;
+        let class_data_offset =
+            file_offset(record.read_u32()?, ByteOffset(record.position_byte().0 - 4))?;
+        record.read_u32()?;
+        let (descriptor, shape) = self.type_descriptor(type_idx)?;
         if !matches!(shape, TypeShape::Class) {
             return Err(malformed(
                 InputProblem::InvalidDescriptor,
@@ -286,20 +237,17 @@ impl<'a> ProgramIndex<'a> {
     }
 
     /// Visits original class_def identities independently. Malformed class
-    /// metadata is delivered locally; cancellation/resources stop the request.
+    /// metadata is delivered locally; resource failures stop the request.
     pub fn visit_classes(
         &self,
-        control: &mut RunContext<'_>,
         mut visit: impl FnMut(
             ClassDefId,
             Result<ClassView<'_, 'a>, InputError>,
-            &mut RunContext<'_>,
         ) -> Result<(), InputError>,
     ) -> Result<(), InputError> {
         for index in 0..self.header.class_defs.count {
-            control.checkpoint()?;
-            let class = local(self.class(ClassDefId(index), control))?;
-            visit(ClassDefId(index), class, control)?;
+            let class = local(self.class(ClassDefId(index)))?;
+            visit(ClassDefId(index), class)?;
         }
         Ok(())
     }
@@ -308,9 +256,7 @@ impl<'a> ProgramIndex<'a> {
         &self,
         kind: u16,
         offset_byte: ByteOffset,
-        control: &mut impl InputControl,
     ) -> Result<Cursor<'a>, InputError> {
-        control.checkpoint()?;
         let (bit, alignment) =
             map_kind(kind).ok_or_else(|| malformed(InputProblem::InvalidReference, offset_byte))?;
         let section = self.sections[bit.trailing_zeros() as usize]
@@ -321,10 +267,7 @@ impl<'a> ProgramIndex<'a> {
         if !offset_byte.0.is_multiple_of(alignment) {
             return Err(malformed(InputProblem::InvalidAlignment, offset_byte));
         }
-        let mut end = self
-            .container
-            .item_end(offset_byte, control)?
-            .min(section.end_byte);
+        let mut end = self.container.item_end(offset_byte)?.min(section.end_byte);
         let link = self.header.link_byte_range;
         if offset_byte >= link.start && offset_byte < link.end {
             return Err(malformed(InputProblem::OverlappingSections, offset_byte));
@@ -345,7 +288,6 @@ impl<'a> ProgramIndex<'a> {
         kind: u16,
         id: u32,
         stride: ByteLength,
-        control: &mut impl InputControl,
     ) -> Result<Cursor<'a>, InputError> {
         let (bit, _) = map_kind(kind)
             .ok_or_else(|| malformed(InputProblem::InvalidReference, self.header.header_offset))?;
@@ -364,19 +306,15 @@ impl<'a> ProgramIndex<'a> {
             stride,
         )?;
         let range = checked_range(ByteLength(section.end_byte.0), prefix.end, 1, stride)?;
-        let cursor = self.item(kind, range.start, control)?;
+        let cursor = self.item(kind, range.start)?;
         if cursor.remaining_byte().0 < stride.0 {
             return Err(malformed(InputProblem::Truncated, range.start));
         }
-        control.checkpoint()?;
+
         Cursor::bounded(self.bytes, range.start, range.end)
     }
 
-    fn table(
-        &self,
-        key: TableKey,
-        control: &mut impl InputControl,
-    ) -> Result<Cursor<'a>, InputError> {
+    fn table(&self, key: TableKey) -> Result<Cursor<'a>, InputError> {
         let (table, index, stride) = match key {
             TableKey::String(id) => (self.header.string_ids, id.0, ByteLength(4)),
             TableKey::Type(id) => (self.header.type_ids, id.0, ByteLength(4)),
@@ -399,60 +337,48 @@ impl<'a> ProgramIndex<'a> {
             stride,
         )?;
         let range = checked_range(ByteLength(table_end.0), prefix.end, 1, stride)?;
-        control.checkpoint()?;
+
         Cursor::bounded(self.bytes, range.start, range.end)
     }
 
     pub(crate) fn type_descriptor(
         &self,
         type_idx: TypeId,
-        control: &mut impl InputControl,
     ) -> Result<(DexString<'a>, TypeShape), InputError> {
-        let mut record = self.table(TableKey::Type(type_idx), control)?;
-        let string_idx = StringId(record.read_u32_with(control)?);
-        let descriptor = self.string_with(string_idx, control)?;
-        let shape = descriptor.shape(control)?;
+        let mut record = self.table(TableKey::Type(type_idx))?;
+        let string_idx = StringId(record.read_u32()?);
+        let descriptor = self.string(string_idx)?;
+        let shape = descriptor.shape()?;
         Ok((descriptor, shape))
     }
 
-    pub(crate) fn prototype(
-        &self,
-        proto_idx: ProtoId,
-        control: &mut impl InputControl,
-    ) -> Result<Prototype<'_, 'a>, InputError> {
-        let mut record = self.table(TableKey::Proto(proto_idx), control)?;
-        let shorty = self.string_with(StringId(record.read_u32_with(control)?), control)?;
-        let return_type_idx = TypeId(record.read_u32_with(control)?);
-        let (return_type, return_shape) = self.type_descriptor(return_type_idx, control)?;
-        let parameters_offset = file_offset(
-            record.read_u32_with(control)?,
-            ByteOffset(record.position_byte().0 - 4),
-        )?;
+    pub(crate) fn prototype(&self, proto_idx: ProtoId) -> Result<Prototype<'_, 'a>, InputError> {
+        let mut record = self.table(TableKey::Proto(proto_idx))?;
+        let shorty = self.string(StringId(record.read_u32()?))?;
+        let return_type_idx = TypeId(record.read_u32()?);
+        let (return_type, return_shape) = self.type_descriptor(return_type_idx)?;
+        let parameters_offset =
+            file_offset(record.read_u32()?, ByteOffset(record.position_byte().0 - 4))?;
         let parameters = if parameters_offset == ByteOffset(0) {
             &self.bytes[0..0]
         } else {
-            let mut parameters = self.item(0x1001, parameters_offset, control)?;
-            let count = parameters.read_u32_with(control)?;
-            let range = parameters.skip(
-                count_usize(count, parameters_offset)?,
-                ByteLength(2),
-                control,
-            )?;
+            let mut parameters = self.item(0x1001, parameters_offset)?;
+            let count = parameters.read_u32()?;
+            let range = parameters.skip(count_usize(count, parameters_offset)?, ByteLength(2))?;
             &self.bytes[range.as_range()]
         };
         if u64::from(shorty.utf16_len().0) != (parameters.len() / 2) as u64 + 1 {
             return Err(malformed(InputProblem::InvalidPrototype, parameters_offset));
         }
         let mut shorty_units = shorty.reader()?;
-        if shorty_units.next(control)? != Some(u16::from(return_shape.shorty())) {
+        if shorty_units.next()? != Some(u16::from(return_shape.shorty())) {
             return Err(malformed(InputProblem::InvalidPrototype, parameters_offset));
         }
         let mut parameter_words = RegisterWordCount(0);
         for word in parameters.as_chunks::<2>().0 {
             let type_idx = TypeId(u32::from(u16::from_le_bytes(*word)));
-            let (_, shape) = self.type_descriptor(type_idx, control)?;
-            if shape.words() == 0 || shorty_units.next(control)? != Some(u16::from(shape.shorty()))
-            {
+            let (_, shape) = self.type_descriptor(type_idx)?;
+            if shape.words() == 0 || shorty_units.next()? != Some(u16::from(shape.shorty())) {
                 return Err(malformed(InputProblem::InvalidPrototype, parameters_offset));
             }
             parameter_words.0 += u64::from(shape.words());
@@ -471,10 +397,9 @@ impl<'a> ProgramIndex<'a> {
         &self,
         method_idx: MethodId,
         owner: TypeId,
-        control: &mut impl InputControl,
     ) -> Result<MethodDeclaration<'_, 'a>, InputError> {
-        let (name, proto_idx) = self.method_header(method_idx, owner, control)?;
-        let prototype = self.prototype(proto_idx, control)?;
+        let (name, proto_idx) = self.method_header(method_idx, owner)?;
+        let prototype = self.prototype(proto_idx)?;
         Ok(MethodDeclaration { name, prototype })
     }
 
@@ -482,18 +407,17 @@ impl<'a> ProgramIndex<'a> {
         &self,
         method_idx: MethodId,
         owner: TypeId,
-        control: &mut impl InputControl,
     ) -> Result<(DexString<'a>, ProtoId), InputError> {
-        let mut record = self.table(TableKey::Method(method_idx), control)?;
-        if TypeId(u32::from(record.read_u16_with(control)?)) != owner {
+        let mut record = self.table(TableKey::Method(method_idx))?;
+        if TypeId(u32::from(record.read_u16()?)) != owner {
             return Err(malformed(
                 InputProblem::InvalidReference,
                 ByteOffset(record.position_byte().0 - 2),
             ));
         }
-        let proto_idx = ProtoId(u32::from(record.read_u16_with(control)?));
-        let name = self.string_with(StringId(record.read_u32_with(control)?), control)?;
-        name.validate_name(control)?;
+        let proto_idx = ProtoId(u32::from(record.read_u16()?));
+        let name = self.string(StringId(record.read_u32()?))?;
+        name.validate_name()?;
         Ok((name, proto_idx))
     }
 
@@ -501,19 +425,18 @@ impl<'a> ProgramIndex<'a> {
         &self,
         field_idx: FieldId,
         owner: TypeId,
-        control: &mut impl InputControl,
     ) -> Result<FieldDeclaration<'a>, InputError> {
-        let mut record = self.table(TableKey::Field(field_idx), control)?;
-        if TypeId(u32::from(record.read_u16_with(control)?)) != owner {
+        let mut record = self.table(TableKey::Field(field_idx))?;
+        if TypeId(u32::from(record.read_u16()?)) != owner {
             return Err(malformed(
                 InputProblem::InvalidReference,
                 ByteOffset(record.position_byte().0 - 2),
             ));
         }
-        let field_type_idx = TypeId(u32::from(record.read_u16_with(control)?));
-        let (field_type, shape) = self.type_descriptor(field_type_idx, control)?;
-        let name = self.string_with(StringId(record.read_u32_with(control)?), control)?;
-        name.validate_name(control)?;
+        let field_type_idx = TypeId(u32::from(record.read_u16()?));
+        let (field_type, shape) = self.type_descriptor(field_type_idx)?;
+        let name = self.string(StringId(record.read_u32()?))?;
+        name.validate_name()?;
         if shape.words() == 0 {
             return Err(malformed(
                 InputProblem::InvalidDescriptor,
@@ -529,29 +452,20 @@ impl<'a> ProgramIndex<'a> {
 }
 
 impl<'a> ProgramIndex<'a> {
-    pub(crate) fn type_name(
-        &self,
-        id: TypeId,
-        control: &mut impl InputControl,
-    ) -> Result<DexString<'a>, InputError> {
-        Ok(self.type_descriptor(id, control)?.0)
+    pub(crate) fn type_name(&self, id: TypeId) -> Result<DexString<'a>, InputError> {
+        Ok(self.type_descriptor(id)?.0)
     }
 
-    pub(crate) fn local_field_flags(
-        &self,
-        field_id: FieldId,
-        control: &mut impl InputControl,
-    ) -> Result<Option<u32>, InputError> {
-        let mut record = self.table(TableKey::Field(field_id), control)?;
-        let owner = TypeId(u32::from(record.read_u16_with(control)?));
-        let Some(class_id) = self.class_location(owner, control)? else {
+    pub(crate) fn local_field_flags(&self, field_id: FieldId) -> Result<Option<u32>, InputError> {
+        let mut record = self.table(TableKey::Field(field_id))?;
+        let owner = TypeId(u32::from(record.read_u16()?));
+        let Some(class_id) = self.class_location(owner)? else {
             return Ok(None);
         };
         let mut found = None;
-        self.class_with(class_id, control)?.visit_members_with(
-            control,
+        self.class(class_id)?.visit_members_with(
             MemberSelection::Fields,
-            |entry, _| -> Result<(), InputError> {
+            |entry| -> Result<(), InputError> {
                 let MemberEntry::Field(field) = entry else {
                     return Err(InputError::InternalInvariant(
                         "local field lookup acquired another member",
@@ -575,18 +489,16 @@ impl<'a> ProgramIndex<'a> {
     pub(crate) fn local_method(
         &self,
         method_id: MethodId,
-        control: &mut impl InputControl,
     ) -> Result<Option<LocalMethod<'a>>, InputError> {
-        let mut method = self.table(TableKey::Method(method_id), control)?;
-        let owner = TypeId(u32::from(method.read_u16_with(control)?));
-        let Some(class_id) = self.class_location(owner, control)? else {
+        let mut method = self.table(TableKey::Method(method_id))?;
+        let owner = TypeId(u32::from(method.read_u16()?));
+        let Some(class_id) = self.class_location(owner)? else {
             return Ok(None);
         };
         let mut found = None;
-        self.class_with(class_id, control)?.visit_members_with(
-            control,
+        self.class(class_id)?.visit_members_with(
             MemberSelection::AllMembers,
-            |entry, control| -> Result<(), InputError> {
+            |entry| -> Result<(), InputError> {
                 if let MemberEntry::MethodHeader {
                     method_idx,
                     access_flags,
@@ -596,14 +508,13 @@ impl<'a> ProgramIndex<'a> {
                 {
                     declaration?;
                     if method_idx == method_id {
-                        let class = self.class_with(class_id, control)?;
-                        let context = self.class_context(class_id, control)?;
+                        let class = self.class(class_id)?;
+                        let context = self.class_context(class_id)?;
                         found = Some(LocalMethod {
                             access_flags,
                             owner_access_flags: class.access_flags,
                             parent: context.superclass?,
-                            plain_scope: self
-                                .no_class_annotations(context.annotations_offset, control)?
+                            plain_scope: self.no_class_annotations(context.annotations_offset)?
                                 && context.interfaces?.is_empty(),
                         });
                     }
@@ -614,46 +525,37 @@ impl<'a> ProgramIndex<'a> {
         Ok(found)
     }
 
-    pub(crate) fn source_file(
-        &self,
-        id: ClassDefId,
-        control: &mut impl InputControl,
-    ) -> Result<Option<DexString<'a>>, InputError> {
-        let mut record = self.table(TableKey::Class(id), control)?;
-        record.skip(4, ByteLength(4), control)?;
-        match record.read_u32_with(control)? {
+    pub(crate) fn source_file(&self, id: ClassDefId) -> Result<Option<DexString<'a>>, InputError> {
+        let mut record = self.table(TableKey::Class(id))?;
+        record.skip(4, ByteLength(4))?;
+        match record.read_u32()? {
             u32::MAX => Ok(None),
-            id => self.string_with(StringId(id), control).map(Some),
+            id => self.string(StringId(id)).map(Some),
         }
     }
 
     pub(super) fn class_annotations_offset(
         &self,
         id: ClassDefId,
-        control: &mut impl InputControl,
     ) -> Result<ByteOffset, InputError> {
-        let mut record = self.table(TableKey::Class(id), control)?;
-        record.skip(5, ByteLength(4), control)?;
+        let mut record = self.table(TableKey::Class(id))?;
+        record.skip(5, ByteLength(4))?;
         let at = record.position_byte();
-        file_offset(record.read_u32_with(control)?, at)
+        file_offset(record.read_u32()?, at)
     }
 
-    pub(crate) fn class_context(
-        &self,
-        id: ClassDefId,
-        control: &mut impl InputControl,
-    ) -> Result<ClassContext<'a>, InputError> {
-        let mut record = self.table(TableKey::Class(id), control)?;
-        record.skip(2, ByteLength(4), control)?;
-        let super_idx = record.read_u32_with(control)?;
-        let interfaces_raw = record.read_u32_with(control)?;
-        record.read_u32_with(control)?;
-        let annotations_raw = record.read_u32_with(control)?;
-        record.read_u32_with(control)?;
-        let values_raw = record.read_u32_with(control)?;
-        let superclass = local(self.superclass(super_idx, control))?;
-        let interfaces = local(self.interfaces(interfaces_raw, control))?;
-        let values_offset = local(self.values_offset(values_raw, control))?;
+    pub(crate) fn class_context(&self, id: ClassDefId) -> Result<ClassContext<'a>, InputError> {
+        let mut record = self.table(TableKey::Class(id))?;
+        record.skip(2, ByteLength(4))?;
+        let super_idx = record.read_u32()?;
+        let interfaces_raw = record.read_u32()?;
+        record.read_u32()?;
+        let annotations_raw = record.read_u32()?;
+        record.read_u32()?;
+        let values_raw = record.read_u32()?;
+        let superclass = local(self.superclass(super_idx))?;
+        let interfaces = local(self.interfaces(interfaces_raw))?;
+        let values_offset = local(self.values_offset(values_raw))?;
         Ok(ClassContext {
             superclass,
             interfaces,
@@ -662,15 +564,11 @@ impl<'a> ProgramIndex<'a> {
         })
     }
 
-    fn superclass(
-        &self,
-        index: u32,
-        control: &mut impl InputControl,
-    ) -> Result<Option<DexString<'a>>, InputError> {
+    fn superclass(&self, index: u32) -> Result<Option<DexString<'a>>, InputError> {
         if index == u32::MAX {
             return Ok(None);
         }
-        let (name, shape) = self.type_descriptor(TypeId(index), control)?;
+        let (name, shape) = self.type_descriptor(TypeId(index))?;
         if !matches!(shape, TypeShape::Class) {
             return Err(malformed(
                 InputProblem::InvalidDescriptor,
@@ -680,23 +578,18 @@ impl<'a> ProgramIndex<'a> {
         Ok(Some(name))
     }
 
-    fn interfaces(
-        &self,
-        raw: u32,
-        control: &mut impl InputControl,
-    ) -> Result<&'a [u8], InputError> {
+    fn interfaces(&self, raw: u32) -> Result<&'a [u8], InputError> {
         let offset = file_offset(raw, self.header.class_defs.offset_byte)?;
         if offset == ByteOffset(0) {
             return Ok(&self.bytes[0..0]);
         }
-        let mut list = self.item(0x1001, offset, control)?;
-        let count = list.read_u32_with(control)?;
-        let range = list.skip(count_usize(count, offset)?, ByteLength(2), control)?;
-        control.checkpoint()?;
+        let mut list = self.item(0x1001, offset)?;
+        let count = list.read_u32()?;
+        let range = list.skip(count_usize(count, offset)?, ByteLength(2))?;
+
         let bytes = &self.bytes[range.as_range()];
         for word in bytes.as_chunks::<2>().0 {
-            let (_, shape) =
-                self.type_descriptor(TypeId(u32::from(u16::from_le_bytes(*word))), control)?;
+            let (_, shape) = self.type_descriptor(TypeId(u32::from(u16::from_le_bytes(*word))))?;
             if !matches!(shape, TypeShape::Class) {
                 return Err(malformed(InputProblem::InvalidDescriptor, offset));
             }
@@ -704,27 +597,22 @@ impl<'a> ProgramIndex<'a> {
         Ok(bytes)
     }
 
-    fn values_offset(
-        &self,
-        raw: u32,
-        control: &mut impl InputControl,
-    ) -> Result<Option<ByteOffset>, InputError> {
+    fn values_offset(&self, raw: u32) -> Result<Option<ByteOffset>, InputError> {
         let offset = file_offset(raw, self.header.class_defs.offset_byte)?;
         if offset == ByteOffset(0) {
             return Ok(None);
         }
-        self.item(0x2005, offset, control)?;
+        self.item(0x2005, offset)?;
         Ok(Some(offset))
     }
 
     pub(crate) fn method_reference(
         &self,
         id: MethodId,
-        control: &mut impl InputControl,
     ) -> Result<MethodReference<'_, 'a>, InputError> {
-        let mut record = self.table(TableKey::Method(id), control)?;
-        let owner_idx = TypeId(u32::from(record.read_u16_with(control)?));
-        let (owner, shape) = self.type_descriptor(owner_idx, control)?;
+        let mut record = self.table(TableKey::Method(id))?;
+        let owner_idx = TypeId(u32::from(record.read_u16()?));
+        let (owner, shape) = self.type_descriptor(owner_idx)?;
         if !matches!(shape, TypeShape::Class | TypeShape::Array) {
             return Err(malformed(
                 InputProblem::InvalidDescriptor,
@@ -734,18 +622,14 @@ impl<'a> ProgramIndex<'a> {
         Ok(MethodReference {
             owner,
             owner_type: owner_idx,
-            declaration: self.method_declaration(id, owner_idx, control)?,
+            declaration: self.method_declaration(id, owner_idx)?,
         })
     }
 
-    pub(crate) fn field_reference(
-        &self,
-        id: FieldId,
-        control: &mut impl InputControl,
-    ) -> Result<FieldReference<'a>, InputError> {
-        let mut record = self.table(TableKey::Field(id), control)?;
-        let owner_idx = TypeId(u32::from(record.read_u16_with(control)?));
-        let (owner, shape) = self.type_descriptor(owner_idx, control)?;
+    pub(crate) fn field_reference(&self, id: FieldId) -> Result<FieldReference<'a>, InputError> {
+        let mut record = self.table(TableKey::Field(id))?;
+        let owner_idx = TypeId(u32::from(record.read_u16()?));
+        let (owner, shape) = self.type_descriptor(owner_idx)?;
         if !matches!(shape, TypeShape::Class) {
             return Err(malformed(
                 InputProblem::InvalidDescriptor,
@@ -755,7 +639,7 @@ impl<'a> ProgramIndex<'a> {
         Ok(FieldReference {
             owner,
             owner_type: owner_idx,
-            declaration: self.validate_field(id, owner_idx, control)?,
+            declaration: self.validate_field(id, owner_idx)?,
         })
     }
 }
@@ -807,16 +691,13 @@ impl<'a> ProgramIndex<'a> {
     pub fn reference_facts(
         &self,
         reference: crate::raw::OperandReference,
-        control: &mut RunContext<'_>,
     ) -> Result<ReferenceFacts<'_, 'a>, InputError> {
         use crate::raw::OperandReference;
         Ok(match reference {
-            OperandReference::String(id) => ReferenceFacts::String(self.string(id, control)?),
-            OperandReference::Type(id) => {
-                ReferenceFacts::Type(self.type_descriptor(id, control)?.0)
-            }
+            OperandReference::String(id) => ReferenceFacts::String(self.string(id)?),
+            OperandReference::Type(id) => ReferenceFacts::Type(self.type_descriptor(id)?.0),
             OperandReference::Method(id) => {
-                let method = self.method_reference(id, control)?;
+                let method = self.method_reference(id)?;
                 ReferenceFacts::Method {
                     owner: method.owner,
                     name: method.declaration.name,
@@ -824,14 +705,14 @@ impl<'a> ProgramIndex<'a> {
                 }
             }
             OperandReference::Field(id) => {
-                let field = self.field_reference(id, control)?;
+                let field = self.field_reference(id)?;
                 ReferenceFacts::Field {
                     owner: field.owner,
                     name: field.declaration.name,
                     field_type: field.declaration.field_type,
                 }
             }
-            OperandReference::Proto(id) => ReferenceFacts::Proto(self.prototype(id, control)?),
+            OperandReference::Proto(id) => ReferenceFacts::Proto(self.prototype(id)?),
             OperandReference::CallSite(_) | OperandReference::MethodHandle(_) => {
                 ReferenceFacts::Unsupported
             }
@@ -889,51 +770,34 @@ pub struct Prototype<'i, 'a> {
 }
 
 impl<'a> Prototype<'_, 'a> {
-    pub(crate) fn visit_parameter_type_ids<C: InputControl, E: From<InputError>>(
+    pub(crate) fn visit_parameter_type_ids<E: From<InputError>>(
         &self,
-        control: &mut C,
-        mut visit: impl FnMut(TypeId, DexString<'a>, &mut C) -> Result<(), E>,
+        mut visit: impl FnMut(TypeId, DexString<'a>) -> Result<(), E>,
     ) -> Result<(), E> {
-        control.checkpoint().map_err(InputError::from)?;
         for word in self.parameters.as_chunks::<2>().0 {
             let id = TypeId(u32::from(u16::from_le_bytes(*word)));
-            let (name, _) = self.index.type_descriptor(id, control)?;
-            visit(id, name, control)?;
+            let (name, _) = self.index.type_descriptor(id)?;
+            visit(id, name)?;
         }
         Ok(())
     }
-    pub(crate) fn visit_parameter_types<C: InputControl, E: From<InputError>>(
+    pub(crate) fn visit_parameter_types<E: From<InputError>>(
         &self,
-        control: &mut C,
-        mut visit: impl FnMut(DexString<'a>, &mut C) -> Result<(), E>,
+        mut visit: impl FnMut(DexString<'a>) -> Result<(), E>,
     ) -> Result<(), E> {
-        self.visit_parameter_type_ids(control, |_, name, control| visit(name, control))
+        self.visit_parameter_type_ids(|_, name| visit(name))
     }
 
     /// Visits the original parameter descriptors in declaration order.
     pub fn visit_parameters(
         &self,
-        control: &mut RunContext<'_>,
-        mut visit: impl FnMut(DexString<'a>, &mut RunContext<'_>) -> Result<(), InputError>,
+        visit: impl FnMut(DexString<'a>) -> Result<(), InputError>,
     ) -> Result<(), InputError> {
-        self.visit_parameter_types(control, |name, control| visit(name, control))
+        self.visit_parameter_types(visit)
     }
 
     /// Compares a complete DEX descriptor, including the return type.
-    pub fn matches(
-        &self,
-        descriptor: &[u16],
-        control: &mut RunContext<'_>,
-    ) -> Result<bool, InputError> {
-        self.matches_with(descriptor, control)
-    }
-
-    pub(crate) fn matches_with(
-        &self,
-        descriptor: &[u16],
-        control: &mut impl InputControl,
-    ) -> Result<bool, InputError> {
-        control.checkpoint()?;
+    pub fn matches(&self, descriptor: &[u16]) -> Result<bool, InputError> {
         if descriptor.first() != Some(&u16::from(b'(')) {
             return Ok(false);
         }
@@ -941,8 +805,8 @@ impl<'a> Prototype<'_, 'a> {
         for word in self.parameters.as_chunks::<2>().0 {
             let (name, _) = self
                 .index
-                .type_descriptor(TypeId(u32::from(u16::from_le_bytes(*word))), control)?;
-            let Some(next) = name.matches_prefix(descriptor, position, control)? else {
+                .type_descriptor(TypeId(u32::from(u16::from_le_bytes(*word))))?;
+            let Some(next) = name.matches_prefix(descriptor, position)? else {
                 return Ok(false);
             };
             position = next;
@@ -952,7 +816,7 @@ impl<'a> Prototype<'_, 'a> {
         }
         Ok(self
             .return_type
-            .matches_prefix(descriptor, Utf16Offset(position.0 + 1), control)?
+            .matches_prefix(descriptor, Utf16Offset(position.0 + 1))?
             == Some(Utf16Offset(descriptor.len())))
     }
 }
@@ -1035,11 +899,8 @@ impl<'i, 'a> ClassView<'i, 'a> {
     /// Read-only original type relations of this definition: the declared
     /// superclass and the interface list in their original order. It describes
     /// direct edges only and performs no closure or hierarchy analysis.
-    pub fn hierarchy(
-        &self,
-        control: &mut RunContext<'_>,
-    ) -> Result<ClassHierarchy<'a>, InputError> {
-        let context = self.index.class_context(self.class_def_idx, control)?;
+    pub fn hierarchy(&self) -> Result<ClassHierarchy<'a>, InputError> {
+        let context = self.index.class_context(self.class_def_idx)?;
         let superclass = context.superclass?;
         let mut interfaces = Vec::new();
         for word in context.interfaces?.as_chunks::<2>().0 {
@@ -1049,7 +910,7 @@ impl<'i, 'a> ClassView<'i, 'a> {
                 .map_err(|_| InputError::Allocation {
                     offset_byte: self.index.header.class_defs.offset_byte,
                 })?;
-            interfaces.push(self.index.type_descriptor(id, control)?.0);
+            interfaces.push(self.index.type_descriptor(id)?.0);
         }
         Ok(ClassHierarchy {
             superclass,
@@ -1062,59 +923,47 @@ impl<'i, 'a> ClassView<'i, 'a> {
     /// after the delivered prefix; callers retain that prefix.
     pub fn visit_fields(
         &self,
-        control: &mut RunContext<'_>,
-        mut visit: impl FnMut(FieldEntry<'a>, &mut RunContext<'_>) -> Result<(), InputError>,
+        mut visit: impl FnMut(FieldEntry<'a>) -> Result<(), InputError>,
     ) -> Result<(), InputError> {
-        self.visit_members_with(
-            control,
-            MemberSelection::Fields,
-            |entry, control| match entry {
-                MemberEntry::Field(field) => visit(field, control),
-                _ => Err(InputError::InternalInvariant(
-                    "field traversal delivered a method",
-                )),
-            },
-        )
+        self.visit_members_with(MemberSelection::Fields, |entry| match entry {
+            MemberEntry::Field(field) => visit(field),
+            _ => Err(InputError::InternalInvariant(
+                "field traversal delivered a method",
+            )),
+        })
     }
 
     /// Per-member failures retain their original IDs. A class-data boundary
     /// error returns after the delivered prefix; callers retain that prefix.
     pub fn visit_methods(
         &self,
-        control: &mut RunContext<'_>,
-        mut visit: impl FnMut(MethodEntry<'i, 'a>, &mut RunContext<'_>) -> Result<(), InputError>,
+        mut visit: impl FnMut(MethodEntry<'i, 'a>) -> Result<(), InputError>,
     ) -> Result<(), InputError> {
-        self.visit_members_with(
-            control,
-            MemberSelection::AllMethods,
-            |entry, control| match entry {
-                MemberEntry::Method(method) => visit(method, control),
-                MemberEntry::Field(_) => Ok(()),
-                MemberEntry::MethodHeader { .. } => Err(InputError::InternalInvariant(
-                    "header-only selection reached code visitation",
-                )),
-            },
-        )
+        self.visit_members_with(MemberSelection::AllMethods, |entry| match entry {
+            MemberEntry::Method(method) => visit(method),
+            MemberEntry::Field(_) => Ok(()),
+            MemberEntry::MethodHeader { .. } => Err(InputError::InternalInvariant(
+                "header-only selection reached code visitation",
+            )),
+        })
     }
 
     /// Enumerates this definition's original members and reports how far the
     /// class-data traversal reached. A record whose index/identity cannot be
     /// established stops coverage without discarding the delivered prefix or any
     /// sibling declaration; per-declaration read failures stay in each entry.
-    pub(crate) fn walk_members_with<C: InputControl, E: From<InputError> + From<ControlError>>(
+    pub(crate) fn walk_members_with<E: From<InputError>>(
         &self,
-        control: &mut C,
         selection: MemberSelection,
-        mut visit: impl FnMut(MemberEntry<'i, 'a>, &mut C) -> Result<(), E>,
+        mut visit: impl FnMut(MemberEntry<'i, 'a>) -> Result<(), E>,
     ) -> Result<ClassDataWalk, E> {
         let Some(offset) = self.class_data_offset else {
-            control.checkpoint()?;
             return Ok(ClassDataWalk::default());
         };
-        let mut cursor = self.index.item(0x2000, offset, control)?;
+        let mut cursor = self.index.item(0x2000, offset)?;
         let mut counts = [0u32; 4];
         for count in &mut counts {
-            *count = cursor.read_uleb32_with(control)?;
+            *count = cursor.read_uleb32()?;
         }
         let minimum = u64::from(counts[0]) * 2
             + u64::from(counts[1]) * 2
@@ -1141,7 +990,7 @@ impl<'i, 'a> ClassView<'i, 'a> {
                 MemberKind::Method => self.index.header.method_ids.count,
             };
             let mut prior = PriorState::Comparable(PriorGroup {
-                cursor: self.index.item(0x2000, cursor.position_byte(), control)?,
+                cursor: self.index.item(0x2000, cursor.position_byte())?,
                 remaining: groups[0],
                 next: None,
                 index: 0,
@@ -1150,14 +999,13 @@ impl<'i, 'a> ClassView<'i, 'a> {
             for (group, count) in groups.into_iter().enumerate() {
                 let mut previous = Some(0u32);
                 for item in 0..count {
-                    control.checkpoint()?;
                     let record = cursor.position_byte();
-                    let delta = cursor.read_uleb32_with(control)?;
-                    let access_flags = cursor.read_uleb32_with(control)?;
+                    let delta = cursor.read_uleb32()?;
+                    let access_flags = cursor.read_uleb32()?;
                     let member = match kind {
                         MemberKind::Field => EncodedMember::Field,
                         MemberKind::Method => {
-                            let offset = file_offset(cursor.read_uleb32_with(control)?, record)?;
+                            let offset = file_offset(cursor.read_uleb32()?, record)?;
                             EncodedMember::Method {
                                 code_offset: (offset != ByteOffset(0)).then_some(offset),
                             }
@@ -1177,7 +1025,7 @@ impl<'i, 'a> ClassView<'i, 'a> {
                     let invalid_index = index >= table_count || (item != 0 && delta == 0);
                     let duplicate = if !invalid_index && group == 1 {
                         match &mut prior {
-                            PriorState::Comparable(prior) => prior.contains(index, control)?,
+                            PriorState::Comparable(prior) => prior.contains(index)?,
                             PriorState::Invalid => false,
                         }
                     } else {
@@ -1200,57 +1048,47 @@ impl<'i, 'a> ClassView<'i, 'a> {
                             if matches!(selection, MemberSelection::AllMethods) {
                                 continue;
                             }
-                            let declaration = local(self.index.validate_field(
-                                FieldId(index),
-                                self.type_idx,
-                                control,
-                            ))?;
+                            let declaration =
+                                local(self.index.validate_field(FieldId(index), self.type_idx))?;
                             let group_slot = match kind {
                                 MemberKind::Field => group,
                                 MemberKind::Method => group + 2,
                             };
                             delivered[group_slot] = delivered[group_slot].saturating_add(1);
-                            visit(
-                                MemberEntry::Field(FieldEntry {
-                                    field_idx: FieldId(index),
-                                    access_flags,
-                                    storage: if group == 0 {
-                                        FieldStorage::Static { ordinal: item }
-                                    } else {
-                                        FieldStorage::Instance
-                                    },
-                                    ordinal: item,
-                                    declaration,
-                                }),
-                                control,
-                            )?;
+                            visit(MemberEntry::Field(FieldEntry {
+                                field_idx: FieldId(index),
+                                access_flags,
+                                storage: if group == 0 {
+                                    FieldStorage::Static { ordinal: item }
+                                } else {
+                                    FieldStorage::Instance
+                                },
+                                ordinal: item,
+                                declaration,
+                            }))?;
                         }
                         EncodedMember::Method { code_offset } => {
-                            let declaration = local(self.index.method_declaration(
-                                MethodId(index),
-                                self.type_idx,
-                                control,
-                            ))?;
+                            let declaration = local(
+                                self.index
+                                    .method_declaration(MethodId(index), self.type_idx),
+                            )?;
                             if matches!(selection, MemberSelection::AllMembers) {
                                 let group_slot = match kind {
                                     MemberKind::Field => group,
                                     MemberKind::Method => group + 2,
                                 };
                                 delivered[group_slot] = delivered[group_slot].saturating_add(1);
-                                visit(
-                                    MemberEntry::MethodHeader {
-                                        method_idx: MethodId(index),
-                                        access_flags,
-                                        group: if group == 0 {
-                                            MethodGroup::Direct { ordinal: item }
-                                        } else {
-                                            MethodGroup::Virtual { ordinal: item }
-                                        },
-                                        code_offset,
-                                        declaration,
+                                visit(MemberEntry::MethodHeader {
+                                    method_idx: MethodId(index),
+                                    access_flags,
+                                    group: if group == 0 {
+                                        MethodGroup::Direct { ordinal: item }
+                                    } else {
+                                        MethodGroup::Virtual { ordinal: item }
                                     },
-                                    control,
-                                )?;
+                                    code_offset,
+                                    declaration,
+                                })?;
                                 continue;
                             }
                             let words = declaration.as_ref().ok().map(|declaration| {
@@ -1267,17 +1105,13 @@ impl<'i, 'a> ClassView<'i, 'a> {
                                 MethodId(index),
                                 access_flags,
                                 words,
-                                control,
                             ))?;
-                            visit(
-                                MemberEntry::Method(MethodEntry {
-                                    method_idx: MethodId(index),
-                                    access_flags,
-                                    declaration,
-                                    body,
-                                }),
-                                control,
-                            )?;
+                            visit(MemberEntry::Method(MethodEntry {
+                                method_idx: MethodId(index),
+                                access_flags,
+                                declaration,
+                                body,
+                            }))?;
                         }
                     }
                 }
@@ -1296,13 +1130,12 @@ impl<'i, 'a> ClassView<'i, 'a> {
         })
     }
 
-    pub(crate) fn visit_members_with<C: InputControl, E: From<InputError> + From<ControlError>>(
+    pub(crate) fn visit_members_with<E: From<InputError>>(
         &self,
-        control: &mut C,
         selection: MemberSelection,
-        visit: impl FnMut(MemberEntry<'i, 'a>, &mut C) -> Result<(), E>,
+        visit: impl FnMut(MemberEntry<'i, 'a>) -> Result<(), E>,
     ) -> Result<(), E> {
-        let walk = self.walk_members_with(control, selection, visit)?;
+        let walk = self.walk_members_with(selection, visit)?;
         match walk.issue {
             Some(error) => Err(error.into()),
             None => Ok(()),
@@ -1359,11 +1192,7 @@ struct PriorGroup<'a> {
 
 impl PriorGroup<'_> {
     // Sorted group replay detects cross-group duplicates in linear time.
-    fn contains(
-        &mut self,
-        target: u32,
-        control: &mut impl InputControl,
-    ) -> Result<bool, InputError> {
+    fn contains(&mut self, target: u32) -> Result<bool, InputError> {
         loop {
             if let Some(next) = self.next {
                 if next >= target {
@@ -1376,13 +1205,13 @@ impl PriorGroup<'_> {
             }
             self.index = self
                 .index
-                .checked_add(self.cursor.read_uleb32_with(control)?)
+                .checked_add(self.cursor.read_uleb32()?)
                 .ok_or_else(|| {
                     malformed(InputProblem::RangeOverflow, self.cursor.position_byte())
                 })?;
-            self.cursor.read_uleb32_with(control)?;
+            self.cursor.read_uleb32()?;
             if matches!(self.kind, MemberKind::Method) {
-                self.cursor.read_uleb32_with(control)?;
+                self.cursor.read_uleb32()?;
             }
             self.remaining -= 1;
             self.next = Some(self.index);

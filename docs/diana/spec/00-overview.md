@@ -41,7 +41,6 @@ are not current APIs. Application command descriptions belong to the
 | `Malformed` | A known input-format or semantic constraint is violated. |
 | `Unsupported` | A format or required capability is not supported; this does not prove that the input is invalid. |
 | `ResourceExhausted` | Actual allocation or platform-capacity failure. |
-| `Cancelled` | Cooperative request cancellation has been observed and latched. |
 | `InternalInvariant` | The implementation violates its own product or construction invariant. |
 
 A failure kind is not a presentation status. `Unavailable` describes a fact or
@@ -52,8 +51,7 @@ producer did not read that fact. Complete directory coverage does not imply that
 every member declaration or method body is valid.
 
 Stage stops MUST retain original identity, concrete reasons and available facts.
-They MUST NOT promote an incomplete product to success. Cancellation/resource/
-invariant termination is distinct from a local unsupported member. See
+They MUST NOT promote an incomplete product to success. Resource/invariant termination is distinct from a local unsupported member. See
 [PIPELINE_DESIGN §4.5](../PIPELINE_DESIGN.md#45-独立读取状态阶段停止与诊断)
 and the actual P2 outcome contract in [02-flow](02-flow.md).
 
@@ -61,7 +59,9 @@ and the actual P2 outcome contract in [02-flow](02-flow.md).
 
 Shared readers MUST check ranges, counts and arithmetic before slicing or
 allocating. Derived container growth MUST be fallible and preserve classified
-errors. Long work MUST observe cancellation and have a finite traversal measure.
+errors. Long work MUST have a finite traversal measure. The CLI/host owns process
+termination; request cancellation callbacks and tokens are not part of the engine
+API.
 There are no numeric work, allocation or output quotas and no successful silent
 truncation. Original input facts, platform capacity and bounded queues are not
 optional safety checks.

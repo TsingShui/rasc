@@ -1,6 +1,6 @@
 use super::strings::TypeShape;
 use super::{Cursor, InputError, InputProblem, MethodError, ProgramIndex, malformed};
-use crate::pipeline::control::InputControl;
+
 use crate::raw::OperandReference;
 use crate::{ByteLength, ByteOffset, ByteRange, FieldId, MethodId, StringId, TypeId};
 
@@ -61,20 +61,15 @@ fn invalid(offset: ByteOffset) -> InputError {
     malformed(InputProblem::InvalidEncodedValue, offset)
 }
 
-fn count(
-    cursor: &mut Cursor<'_>,
-    minimum: u64,
-    maximum: Option<u32>,
-    budget: &mut impl InputControl,
-) -> Result<u32, InputError> {
-    let count = cursor.read_uleb32_with(budget)?;
+fn count(cursor: &mut Cursor<'_>, minimum: u64, maximum: Option<u32>) -> Result<u32, InputError> {
+    let count = cursor.read_uleb32()?;
     if u64::from(count) * minimum > cursor.remaining_byte().0 as u64 {
         return Err(malformed(InputProblem::Truncated, cursor.position_byte()));
     }
     if maximum.is_some_and(|maximum| count > maximum) {
         return Err(invalid(cursor.position_byte()));
     }
-    budget.checkpoint()?;
+
     Ok(count)
 }
 
@@ -83,10 +78,9 @@ impl<'a> EncodedValues<'a> {
         index: &ProgramIndex<'a>,
         offset: ByteOffset,
         static_fields: Option<u32>,
-        budget: &mut impl InputControl,
     ) -> Result<Self, MethodError> {
-        let mut cursor = index.item(0x2005, offset, budget)?;
-        let count = count(&mut cursor, 1, static_fields, budget)?;
+        let mut cursor = index.item(0x2005, offset)?;
+        let count = count(&mut cursor, 1, static_fields)?;
         Ok(Self {
             cursor,
             bytes: index.bytes,
@@ -103,18 +97,17 @@ impl<'a> EncodedValues<'a> {
     pub fn annotation(
         index: &ProgramIndex<'a>,
         offset: ByteOffset,
-        budget: &mut impl InputControl,
     ) -> Result<(u8, TypeId, Self), MethodError> {
-        let mut cursor = index.item(0x2004, offset, budget)?;
-        let visibility = cursor.read_array::<1>(budget)?[0];
+        let mut cursor = index.item(0x2004, offset)?;
+        let visibility = cursor.read_array::<1>()?[0];
         if visibility > 2 {
             return Err(invalid(offset).into());
         }
-        let type_id = TypeId(cursor.read_uleb32_with(budget)?);
-        if !matches!(index.type_descriptor(type_id, budget)?.1, TypeShape::Class) {
+        let type_id = TypeId(cursor.read_uleb32()?);
+        if !matches!(index.type_descriptor(type_id)?.1, TypeShape::Class) {
             return Err(invalid(offset).into());
         }
-        let count = count(&mut cursor, 2, None, budget)?;
+        let count = count(&mut cursor, 2, None)?;
         Ok((
             visibility,
             type_id,
@@ -136,8 +129,7 @@ impl<'a> EncodedValues<'a> {
         self.cursor.position_byte()
     }
 
-    fn push(&mut self, frame: Frame, budget: &mut impl InputControl) -> Result<(), MethodError> {
-        budget.checkpoint()?;
+    fn push(&mut self, frame: Frame) -> Result<(), MethodError> {
         if self.stack.len() == self.stack.capacity() {
             let needed = self
                 .stack
@@ -162,7 +154,7 @@ impl<'a> EncodedValues<'a> {
                 .checked_mul(size_of::<Frame>())
                 .filter(|&size| size <= isize::MAX as usize)
                 .ok_or(MethodError::PlatformCapacity)?;
-            budget.checkpoint()?;
+
             self.stack
                 .try_reserve_exact(capacity - self.stack.len())
                 .map_err(MethodError::Allocation)?;
@@ -171,13 +163,12 @@ impl<'a> EncodedValues<'a> {
                     "encoded-value stack reservation changed capacity",
                 ));
             }
-            budget.checkpoint()?;
         }
         self.stack.push(frame);
         Ok(())
     }
 
-    fn bits(&mut self, width: u8, budget: &mut impl InputControl) -> Result<u64, InputError> {
+    fn bits(&mut self, width: u8) -> Result<u64, InputError> {
         if usize::from(width) > self.cursor.remaining_byte().0 {
             return Err(malformed(
                 InputProblem::Truncated,
@@ -186,17 +177,12 @@ impl<'a> EncodedValues<'a> {
         }
         let mut bits = 0u64;
         for byte in 0..width {
-            bits |= u64::from(self.cursor.read_array::<1>(budget)?[0]) << (u32::from(byte) * 8);
+            bits |= u64::from(self.cursor.read_array::<1>()?[0]) << (u32::from(byte) * 8);
         }
         Ok(bits)
     }
 
-    pub fn next(
-        &mut self,
-        index: &ProgramIndex<'_>,
-        budget: &mut impl InputControl,
-    ) -> Result<Option<ValueStep<'a>>, MethodError> {
-        budget.checkpoint()?;
+    pub fn next(&mut self, index: &ProgramIndex<'_>) -> Result<Option<ValueStep<'a>>, MethodError> {
         let frame = self.stack.last_mut().unwrap_or(&mut self.root);
         if frame.remaining == 0 {
             return if self.stack.pop().is_some() {
@@ -208,8 +194,8 @@ impl<'a> EncodedValues<'a> {
         let name = match &mut frame.kind {
             FrameKind::Array => None,
             FrameKind::Annotation { last_name } => {
-                let id = StringId(self.cursor.read_uleb32_with(budget)?);
-                index.string_with(id, budget)?.validate_name(budget)?;
+                let id = StringId(self.cursor.read_uleb32()?);
+                index.string(id)?.validate_name()?;
                 if last_name.is_some_and(|last| last >= id) {
                     return Err(invalid(self.cursor.position_byte()).into());
                 }
@@ -225,7 +211,7 @@ impl<'a> EncodedValues<'a> {
             .ok_or_else(|| invalid(self.cursor.position_byte()))?;
         frame.remaining -= 1;
         let start = self.cursor.position_byte();
-        let header = self.cursor.read_array::<1>(budget)?[0];
+        let header = self.cursor.read_array::<1>()?[0];
         let tag = header & 31;
         let arg = header >> 5;
         let maximum = match tag {
@@ -241,14 +227,14 @@ impl<'a> EncodedValues<'a> {
         let width = arg + 1;
         let kind = match tag {
             0x00 | 0x02 | 0x04 | 0x06 => {
-                let bits = self.bits(width, budget)?;
+                let bits = self.bits(width)?;
                 let shift = 64 - u32::from(width) * 8;
                 EncodedKind::Signed(i64::from_le_bytes((bits << shift).to_le_bytes()) >> shift)
             }
-            0x03 => EncodedKind::Unsigned(self.bits(width, budget)?),
+            0x03 => EncodedKind::Unsigned(self.bits(width)?),
             0x10 | 0x11 => {
                 let full = if tag == 0x10 { 4 } else { 8 };
-                let bits = self.bits(width, budget)? << (u32::from(full - width) * 8);
+                let bits = self.bits(width)? << (u32::from(full - width) * 8);
                 EncodedKind::Bits {
                     width: ByteLength(usize::from(full)),
                     bits,
@@ -262,27 +248,27 @@ impl<'a> EncodedValues<'a> {
                     }
                     .into());
                 }
-                let id = u32::try_from(self.bits(width, budget)?).map_err(|_| invalid(start))?;
-                EncodedKind::Reference(index.encoded_dynamic_reference(tag, id, start, budget)?)
+                let id = u32::try_from(self.bits(width)?).map_err(|_| invalid(start))?;
+                EncodedKind::Reference(index.encoded_dynamic_reference(tag, id, start)?)
             }
             0x17..=0x1b => {
                 // The validated maximum width is four bytes.
-                let id = u32::try_from(self.bits(width, budget)?).map_err(|_| invalid(start))?;
+                let id = u32::try_from(self.bits(width)?).map_err(|_| invalid(start))?;
                 let reference = match tag {
                     0x17 => {
-                        index.string_with(StringId(id), budget)?;
+                        index.string(StringId(id))?;
                         OperandReference::String(StringId(id))
                     }
                     0x18 => {
-                        index.type_name(TypeId(id), budget)?;
+                        index.type_name(TypeId(id))?;
                         OperandReference::Type(TypeId(id))
                     }
                     0x19 | 0x1b => {
-                        index.field_reference(FieldId(id), budget)?;
+                        index.field_reference(FieldId(id))?;
                         OperandReference::Field(FieldId(id))
                     }
                     0x1a => {
-                        index.method_reference(MethodId(id), budget)?;
+                        index.method_reference(MethodId(id))?;
                         OperandReference::Method(MethodId(id))
                     }
                     _ => {
@@ -294,31 +280,25 @@ impl<'a> EncodedValues<'a> {
                 EncodedKind::Reference(reference)
             }
             0x1c => {
-                let count = count(&mut self.cursor, 1, None, budget)?;
-                self.push(
-                    Frame {
-                        kind: FrameKind::Array,
-                        remaining: count,
-                        next: ValueOrdinal(0),
-                    },
-                    budget,
-                )?;
+                let count = count(&mut self.cursor, 1, None)?;
+                self.push(Frame {
+                    kind: FrameKind::Array,
+                    remaining: count,
+                    next: ValueOrdinal(0),
+                })?;
                 EncodedKind::Array { count }
             }
             0x1d => {
-                let type_id = TypeId(self.cursor.read_uleb32_with(budget)?);
-                if !matches!(index.type_descriptor(type_id, budget)?.1, TypeShape::Class) {
+                let type_id = TypeId(self.cursor.read_uleb32()?);
+                if !matches!(index.type_descriptor(type_id)?.1, TypeShape::Class) {
                     return Err(invalid(start).into());
                 }
-                let count = count(&mut self.cursor, 2, None, budget)?;
-                self.push(
-                    Frame {
-                        kind: FrameKind::Annotation { last_name: None },
-                        remaining: count,
-                        next: ValueOrdinal(0),
-                    },
-                    budget,
-                )?;
+                let count = count(&mut self.cursor, 2, None)?;
+                self.push(Frame {
+                    kind: FrameKind::Annotation { last_name: None },
+                    remaining: count,
+                    next: ValueOrdinal(0),
+                })?;
                 EncodedKind::Annotation { type_id, count }
             }
             0x1e => EncodedKind::Null,

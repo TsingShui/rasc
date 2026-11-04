@@ -1,6 +1,6 @@
 use super::{CheckedMethodLayout, Cursor};
 use crate::substrate::owned::push;
-use crate::{ByteLength, ByteOffset, CodeUnitOffset, RequestError, RunContext, TypeId};
+use crate::{ByteLength, ByteOffset, CodeUnitOffset, RequestError, TypeId};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum CatchType {
@@ -39,16 +39,11 @@ impl CheckedProtection {
             .iter()
             .flat_map(|chain| chain.clauses.iter().map(|clause| clause.target))
     }
-    pub(crate) fn at(
-        &self,
-        pc: CodeUnitOffset,
-        budget: &mut RunContext<'_>,
-    ) -> Result<Option<&[CatchClause]>, RequestError> {
+    pub(crate) fn at(&self, pc: CodeUnitOffset) -> Result<Option<&[CatchClause]>, RequestError> {
         // P1 guarantees sorted, non-overlapping original try ranges.
         let mut lower = 0;
         let mut upper = self.ranges.len();
         while lower < upper {
-            budget.checkpoint()?;
             let middle = lower + (upper - lower) / 2;
             let range = &self.ranges[middle];
             if pc < range.start {
@@ -62,10 +57,7 @@ impl CheckedProtection {
         Ok(None)
     }
 }
-pub(crate) fn read(
-    layout: &CheckedMethodLayout<'_>,
-    budget: &mut RunContext<'_>,
-) -> Result<CheckedProtection, RequestError> {
+pub(crate) fn read(layout: &CheckedMethodLayout<'_>) -> Result<CheckedProtection, RequestError> {
     let raw = layout.original();
     let mut result = CheckedProtection {
         ranges: Vec::new(),
@@ -76,47 +68,42 @@ pub(crate) fn read(
     }
     let handlers = raw.handler_byte_range();
     let mut cursor = Cursor::bounded(raw.source_bytes(), handlers.start, handlers.end)?;
-    let count = cursor.read_uleb32_with(budget)?;
+    let count = cursor.read_uleb32()?;
     for _ in 0..count {
-        budget.checkpoint()?;
         let offset = cursor.position_byte();
-        let size = cursor.read_sleb32_with(budget)?;
+        let size = cursor.read_sleb32()?;
         let mut clauses = Vec::new();
         for _ in 0..i64::from(size).unsigned_abs() {
-            budget.checkpoint()?;
-            let kind = CatchType::Typed(TypeId(cursor.read_uleb32_with(budget)?));
-            let target = CodeUnitOffset(cursor.read_uleb32_with(budget)?);
-            push(&mut clauses, CatchClause { kind, target }, budget)?;
+            let kind = CatchType::Typed(TypeId(cursor.read_uleb32()?));
+            let target = CodeUnitOffset(cursor.read_uleb32()?);
+            push(&mut clauses, CatchClause { kind, target })?;
         }
         if size <= 0 {
-            let target = CodeUnitOffset(cursor.read_uleb32_with(budget)?);
+            let target = CodeUnitOffset(cursor.read_uleb32()?);
             push(
                 &mut clauses,
                 CatchClause {
                     kind: CatchType::All,
                     target,
                 },
-                budget,
             )?;
         }
-        push(&mut result.chains, Chain { offset, clauses }, budget)?;
+        push(&mut result.chains, Chain { offset, clauses })?;
     }
     let tries = raw.try_byte_range();
     let mut cursor = Cursor::bounded(raw.source_bytes(), tries.start, tries.end)?;
     while cursor.position_byte() < tries.end {
-        budget.checkpoint()?;
-        let start = CodeUnitOffset(cursor.read_u32_with(budget)?);
-        let count = u32::from(cursor.read_u16_with(budget)?);
+        let start = CodeUnitOffset(cursor.read_u32()?);
+        let count = u32::from(cursor.read_u16()?);
         let end = start
             .checked_advance(crate::CodeUnitCount(count))
             .ok_or(RequestError::PlatformCapacity)?;
         let offset = handlers
             .start
-            .checked_advance(ByteLength(usize::from(cursor.read_u16_with(budget)?)))
+            .checked_advance(ByteLength(usize::from(cursor.read_u16()?)))
             .ok_or(RequestError::PlatformCapacity)?;
         let mut found = None;
         for (index, chain) in result.chains.iter().enumerate() {
-            budget.checkpoint()?;
             if chain.offset == offset {
                 found = Some(index);
                 break;
@@ -125,7 +112,7 @@ pub(crate) fn read(
         let chain = found.ok_or(RequestError::InternalInvariant(
             "checked try lost its handler chain",
         ))?;
-        push(&mut result.ranges, Range { start, end, chain }, budget)?;
+        push(&mut result.ranges, Range { start, end, chain })?;
     }
     Ok(result)
 }

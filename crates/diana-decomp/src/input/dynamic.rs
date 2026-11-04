@@ -1,6 +1,6 @@
 use super::values::{EncodedKind, EncodedValues, ValueStep};
 use super::{InputError, InputProblem, MethodError, ProgramIndex, Prototype, malformed};
-use crate::pipeline::control::InputControl;
+
 use crate::raw::OperandReference;
 use crate::{ByteLength, ByteOffset, CallSiteId, FieldId, MethodHandleId, MethodId, ProtoId};
 
@@ -23,38 +23,32 @@ impl<'a> ProgramIndex<'a> {
     pub(crate) fn method_handle(
         &self,
         id: MethodHandleId,
-        control: &mut impl InputControl,
     ) -> Result<CheckedMethodHandle, InputError> {
-        let mut record = self.mapped_entry(8, id.0, ByteLength(8), control)?;
+        let mut record = self.mapped_entry(8, id.0, ByteLength(8))?;
         let at = record.position_byte();
-        let kind = record.read_u16_with(control)?;
-        let _first_unused = record.read_u16_with(control)?;
-        let target = u32::from(record.read_u16_with(control)?);
-        let _second_unused = record.read_u16_with(control)?;
+        let kind = record.read_u16()?;
+        let _first_unused = record.read_u16()?;
+        let target = u32::from(record.read_u16()?);
+        let _second_unused = record.read_u16()?;
         // DEX calls these words unused; it does not require their contents to be zero.
         if kind > 8 {
             return Err(invalid(at));
         }
         let member = if kind <= 3 {
-            self.field_reference(FieldId(target), control)?;
+            self.field_reference(FieldId(target))?;
             OperandReference::Field(FieldId(target))
         } else {
-            let method = self.method_reference(MethodId(target), control)?;
-            let constructor = method.declaration.name.matches_with(
-                &const { crate::substrate::owned::ascii_units(*b"<init>") },
-                control,
-            )?;
+            let method = self.method_reference(MethodId(target))?;
+            let constructor = method
+                .declaration
+                .name
+                .matches(&const { crate::substrate::owned::ascii_units(*b"<init>") })?;
             if constructor != (kind == 6)
-                || method.declaration.name.matches_with(
-                    &const { crate::substrate::owned::ascii_units(*b"<clinit>") },
-                    control,
-                )?
-                || constructor
-                    && !method
-                        .declaration
-                        .prototype
-                        .return_type
-                        .matches_with(&[86], control)?
+                || method
+                    .declaration
+                    .name
+                    .matches(&const { crate::substrate::owned::ascii_units(*b"<clinit>") })?
+                || constructor && !method.declaration.prototype.return_type.matches(&[86])?
             {
                 return Err(invalid(at));
             }
@@ -63,52 +57,43 @@ impl<'a> ProgramIndex<'a> {
         Ok(CheckedMethodHandle { kind, member })
     }
 
-    pub(crate) fn call_site(
-        &self,
-        id: CallSiteId,
-        control: &mut impl InputControl,
-    ) -> Result<CheckedCallSite<'_, 'a>, MethodError> {
-        let mut record = self.mapped_entry(7, id.0, ByteLength(4), control)?;
+    pub(crate) fn call_site(&self, id: CallSiteId) -> Result<CheckedCallSite<'_, 'a>, MethodError> {
+        let mut record = self.mapped_entry(7, id.0, ByteLength(4))?;
         let offset = ByteOffset(
-            usize::try_from(record.read_u32_with(control)?)
-                .map_err(|_| MethodError::PlatformCapacity)?,
+            usize::try_from(record.read_u32()?).map_err(|_| MethodError::PlatformCapacity)?,
         );
-        let mut values = EncodedValues::open(self, offset, None, control)?;
+        let mut values = EncodedValues::open(self, offset, None)?;
         if values.count < 3 {
             return Err(invalid(offset).into());
         }
-        let Some(ValueStep::Value(handle)) = values.next(self, control)? else {
+        let Some(ValueStep::Value(handle)) = values.next(self)? else {
             return Err(invalid(offset).into());
         };
         let EncodedKind::Reference(OperandReference::MethodHandle(handle_id)) = handle.kind else {
             return Err(invalid(handle.range.start).into());
         };
-        let handle = self.method_handle(handle_id, control)?;
-        let Some(ValueStep::Value(name)) = values.next(self, control)? else {
+        let handle = self.method_handle(handle_id)?;
+        let Some(ValueStep::Value(name)) = values.next(self)? else {
             return Err(invalid(offset).into());
         };
         let EncodedKind::Reference(OperandReference::String(name_id)) = name.kind else {
             return Err(invalid(name.range.start).into());
         };
-        let name = self.string_with(name_id, control)?;
-        name.validate_name(control)?;
-        if name.matches_with(
-            &const { crate::substrate::owned::ascii_units(*b"<init>") },
-            control,
-        )? || name.matches_with(
-            &const { crate::substrate::owned::ascii_units(*b"<clinit>") },
-            control,
-        )? {
+        let name = self.string(name_id)?;
+        name.validate_name()?;
+        if name.matches(&const { crate::substrate::owned::ascii_units(*b"<init>") })?
+            || name.matches(&const { crate::substrate::owned::ascii_units(*b"<clinit>") })?
+        {
             return Err(invalid(offset).into());
         }
-        let Some(ValueStep::Value(proto)) = values.next(self, control)? else {
+        let Some(ValueStep::Value(proto)) = values.next(self)? else {
             return Err(invalid(offset).into());
         };
         let EncodedKind::Reference(OperandReference::Proto(proto_id)) = proto.kind else {
             return Err(invalid(proto.range.start).into());
         };
-        let prototype = self.prototype(proto_id, control)?;
-        while values.next(self, control)?.is_some() {}
+        let prototype = self.prototype(proto_id)?;
+        while values.next(self)?.is_some() {}
         Ok(CheckedCallSite {
             name,
             handle,
@@ -121,7 +106,6 @@ impl<'a> ProgramIndex<'a> {
         tag: u8,
         id: u32,
         at: ByteOffset,
-        control: &mut impl InputControl,
     ) -> Result<OperandReference, InputError> {
         if self.header.version < super::formats::DexVersion::V038 {
             return Err(InputError::Unsupported {
@@ -131,11 +115,11 @@ impl<'a> ProgramIndex<'a> {
         }
         match tag {
             0x15 => {
-                self.prototype(ProtoId(id), control)?;
+                self.prototype(ProtoId(id))?;
                 Ok(OperandReference::Proto(ProtoId(id)))
             }
             0x16 => {
-                self.method_handle(MethodHandleId(id), control)?;
+                self.method_handle(MethodHandleId(id))?;
                 Ok(OperandReference::MethodHandle(MethodHandleId(id)))
             }
             _ => Err(InputError::InternalInvariant(

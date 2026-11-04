@@ -28,7 +28,7 @@ surrogates; declaration syntax checks are distinct from readable string display.
 Original DEX declarations and references are the only symbol facts. Missing target
 class definitions do not erase a readable reference's owner/name/prototype.
 Class location and P0 caches remain local to the selected logical index;
-cancellation/allocation failures MUST NOT be cached as member absence.
+allocation failures MUST NOT be cached as member absence.
 
 ## Method source preparation
 
@@ -86,7 +86,7 @@ not a whole-method legality badge.
 
 A failed P1 decode retains decoded prefix items and a classified error in
 `DecodedOutcome`; an incomplete prefix MUST NOT be used as a complete method.
-Cancellation/resource/invariant errors retain their request classification.
+Resource/invariant errors retain their request classification.
 Engine moves only a complete P1 product into P2. P2 failures retain that product
 and local construction facts without upgrading them to success.
 
@@ -110,8 +110,8 @@ partial content with explicit diagnostics rather than silently removing records.
 See the [CLI README](../../../apps/diana/README.md) for current selectors,
 publication options and output behavior.
 
-All native reads, growth, decompression and publication MUST preserve cancellation,
-classified failures and backpressure. There are no numeric resource quotas.
+All native reads, growth, decompression and publication MUST preserve classified
+failures and backpressure. There are no numeric resource quotas.
 Changes require concrete original-input and semantic evidence under
 [CONTRIBUTING](../CONTRIBUTING.md); removed test/fixture contracts are not active
 acceptance jobs.

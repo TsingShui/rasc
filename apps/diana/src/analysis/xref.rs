@@ -1,8 +1,6 @@
-use std::sync::atomic::{AtomicBool, Ordering};
-
 use diana_decomp::input::{MethodBody, ProgramIndex, ReferenceFacts};
 use diana_decomp::raw::LayoutKind;
-use diana_decomp::{ClassDefId, MethodId, RunContext};
+use diana_decomp::{ClassDefId, MethodId};
 
 use super::apk::DexRoot;
 use super::dex::ImageIndex;
@@ -109,18 +107,15 @@ impl<'a> Xref<'a> {
     /// declaration or a hierarchy edge.
     pub fn run(
         &self,
-        cancel: &AtomicBool,
         sink: &mut impl FnMut(XrefRow) -> Result<(), QueryError>,
     ) -> Result<(), QueryError> {
         super::runner::run(
             self.roots.len(),
             self.plan.jobs,
-            cancel,
-            |ordinal, cancel, emit| {
+            |ordinal, emit| {
                 let root = &self.roots[ordinal];
-                let cancelled = || cancel.load(Ordering::Relaxed);
-                let mut control = RunContext::new(&cancelled);
-                scan_root(root, ImageIndex(ordinal), &self.plan, &mut control, emit)
+
+                scan_root(root, ImageIndex(ordinal), &self.plan, emit)
             },
             sink,
         )
@@ -131,49 +126,45 @@ fn scan_root(
     root: &DexRoot<'_>,
     image: ImageIndex,
     plan: &XrefPlan,
-    control: &mut RunContext<'_>,
     emit: &mut dyn FnMut(XrefRow) -> Result<(), QueryError>,
 ) -> Result<(), QueryError> {
-    let index = ProgramIndex::open(root.bytes(), control)?;
+    let index = ProgramIndex::open(root.bytes())?;
     let failure: std::cell::RefCell<Option<QueryError>> = std::cell::RefCell::new(None);
     let result = {
         let mut forward = |row: XrefRow| -> Result<(), diana_decomp::input::InputError> {
-            if failure.borrow().is_none()
-                && let Err(error) = emit(row)
-            {
+            if let Err(error) = emit(row) {
                 *failure.borrow_mut() = Some(error);
+                return Err(diana_decomp::input::InputError::InternalInvariant(
+                    "xref sink stopped",
+                ));
             }
             Ok(())
         };
-        index.visit_classes(control, |class_def, class, control| {
+        index.visit_classes(|class_def, class| {
             let class = class?;
             if let Some(target) = plan.class.as_deref()
-                && !class.descriptor.matches(target, control)?
+                && !class.descriptor.matches(target)?
             {
                 return Ok(());
             }
-            let class_descriptor = class.descriptor.units(control)?;
-            class.visit_methods(control, |method, control| {
+            let class_descriptor = class.descriptor.units()?;
+            class.visit_methods(|method| {
                 let declaration = method.declaration?;
-                let name = declaration.name.units(control)?;
+                let name = declaration.name.units()?;
                 let mut prototype = Vec::new();
                 prototype.push(u16::from(b'('));
-                declaration
-                    .prototype
-                    .visit_parameters(control, |parameter, control| {
-                        prototype.extend(parameter.units(control)?);
-                        Ok(())
-                    })?;
+                declaration.prototype.visit_parameters(|parameter| {
+                    prototype.extend(parameter.units()?);
+                    Ok(())
+                })?;
                 prototype.push(u16::from(b')'));
-                prototype.extend(declaration.prototype.return_type.units(control)?);
+                prototype.extend(declaration.prototype.return_type.units()?);
                 let Ok(MethodBody::Code(view)) = &method.body else {
                     return Ok(());
                 };
                 let mut sites = Vec::new();
                 let collected = {
-                    let budget = &mut *control;
-                    let fallback = &mut *budget;
-                    view.visit_layouts(fallback, |code_unit, layout, _budget| {
+                    view.visit_layouts(|code_unit, layout| {
                         let LayoutKind::Instruction(spec) = layout.kind() else {
                             return Ok(());
                         };
@@ -188,20 +179,23 @@ fn scan_root(
                 };
                 if let Err(error) = collected {
                     *failure.borrow_mut() = Some(error.into());
-                    return Ok(());
+                    return Err(diana_decomp::input::InputError::InternalInvariant(
+                        "xref producer stopped",
+                    ));
                 }
                 for (code_unit, mnemonic, reference) in sites {
-                    control.checkpoint()?;
-                    let facts = index.reference_facts(reference, control)?;
-                    let found = match matched(facts, &plan.target, control) {
+                    let facts = index.reference_facts(reference)?;
+                    let found = match matched(facts, &plan.target) {
                         Ok(found) => found,
                         Err(error) => {
                             *failure.borrow_mut() = Some(error);
-                            return Ok(());
+                            return Err(diana_decomp::input::InputError::InternalInvariant(
+                                "xref producer stopped",
+                            ));
                         }
                     };
                     let Some(matched) = found else { continue };
-                    let row = match (copy(&name, control), copy(&prototype, control)) {
+                    let row = match (copy(&name), copy(&prototype)) {
                         (Ok(method_name), Ok(method_prototype)) => XrefRow {
                             image,
                             class_def,
@@ -215,7 +209,9 @@ fn scan_root(
                         },
                         (Err(error), _) | (_, Err(error)) => {
                             *failure.borrow_mut() = Some(error);
-                            return Ok(());
+                            return Err(diana_decomp::input::InputError::InternalInvariant(
+                                "xref producer stopped",
+                            ));
                         }
                     };
                     forward(row)?;
@@ -230,28 +226,24 @@ fn scan_root(
     }
 }
 
-fn copy(units: &[u16], control: &mut RunContext<'_>) -> Result<Vec<u16>, QueryError> {
+fn copy(units: &[u16]) -> Result<Vec<u16>, QueryError> {
     let mut owned = Vec::new();
     owned
         .try_reserve_exact(units.len())
         .map_err(|_| QueryError::WorkerLost)?;
-    control.checkpoint()?;
+
     owned.extend_from_slice(units);
     Ok(owned)
 }
 
-fn matched(
-    facts: ReferenceFacts<'_, '_>,
-    target: &Target,
-    control: &mut RunContext<'_>,
-) -> Result<Option<Matched>, QueryError> {
+fn matched(facts: ReferenceFacts<'_, '_>, target: &Target) -> Result<Option<Matched>, QueryError> {
     Ok(match (facts, target) {
-        (ReferenceFacts::String(name), Target::String(units)) => name
-            .matches(units, control)?
-            .then(|| Matched::String(units.clone())),
-        (ReferenceFacts::Type(name), Target::Type(units)) => name
-            .matches(units, control)?
-            .then(|| Matched::Type(units.clone())),
+        (ReferenceFacts::String(name), Target::String(units)) => {
+            name.matches(units)?.then(|| Matched::String(units.clone()))
+        }
+        (ReferenceFacts::Type(name), Target::Type(units)) => {
+            name.matches(units)?.then(|| Matched::Type(units.clone()))
+        }
         (
             ReferenceFacts::Method {
                 owner,
@@ -264,15 +256,15 @@ fn matched(
                 prototype: prototype_units,
             },
         ) => {
-            if !owner.matches(owner_units, control)?
-                || !name.matches(name_units, control)?
-                || !prototype.matches(prototype_units, control)?
+            if !owner.matches(owner_units)?
+                || !name.matches(name_units)?
+                || !prototype.matches(prototype_units)?
             {
                 return Ok(None);
             }
             Some(Matched::Method {
-                owner: owner.units(control)?,
-                name: name.units(control)?,
+                owner: owner.units()?,
+                name: name.units()?,
                 prototype: prototype_units.clone(),
             })
         }
@@ -288,16 +280,16 @@ fn matched(
                 field_type: field_units,
             },
         ) => {
-            if !owner.matches(owner_units, control)?
-                || !name.matches(name_units, control)?
-                || !field_type.matches(field_units, control)?
+            if !owner.matches(owner_units)?
+                || !name.matches(name_units)?
+                || !field_type.matches(field_units)?
             {
                 return Ok(None);
             }
             Some(Matched::Field {
-                owner: owner.units(control)?,
-                name: name.units(control)?,
-                field_type: field_type.units(control)?,
+                owner: owner.units()?,
+                name: name.units()?,
+                field_type: field_type.units()?,
             })
         }
         _ => None,

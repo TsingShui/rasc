@@ -67,7 +67,6 @@ pub(super) fn kind_name(kind: crate::FailureKind) -> &'static str {
         crate::FailureKind::Unsupported => "unsupported",
         crate::FailureKind::ResourceExhausted => "resource_exhausted",
         crate::FailureKind::InternalInvariant => "internal_invariant",
-        crate::FailureKind::Cancelled => "cancelled",
     }
 }
 

@@ -5,7 +5,7 @@ use crate::input::values::{EncodedKind, EncodedValues, ValueStep};
 use crate::input::{InputError, ProgramIndex};
 use crate::substrate::flags;
 use crate::substrate::owned::{copy_proto, copy_units, push};
-use crate::{ClassKey, FailureKind, MethodId, RequestError, RunContext};
+use crate::{ClassKey, FailureKind, MethodId, RequestError};
 
 /// A declaration or metadata read that damaged only its own member entry.
 fn local<T>(value: Result<T, RequestError>) -> Result<Fact<T>, RequestError> {
@@ -25,12 +25,9 @@ fn local<T>(value: Result<T, RequestError>) -> Result<Fact<T>, RequestError> {
 
 fn optional_text(
     value: Result<Option<crate::input::DexString<'_>>, InputError>,
-    control: &mut RunContext<'_>,
 ) -> Result<Fact<OriginalText>, RequestError> {
     match value {
-        Ok(Some(value)) => Ok(Fact::Present(OriginalText::new(copy_units(
-            value, control,
-        )?))),
+        Ok(Some(value)) => Ok(Fact::Present(OriginalText::new(copy_units(value)?))),
         Ok(None) => Ok(Fact::Absent),
         Err(error) => local(Err(error.into())),
     }
@@ -38,11 +35,7 @@ fn optional_text(
 
 /// Per-kind flag names and unknown bits. Names come from the shared semantic
 /// flag definitions, never from a whole-word comparison against one sample.
-fn access_flags(
-    raw: u32,
-    kind: MemberKind,
-    control: &mut RunContext<'_>,
-) -> Result<OriginalFlags, RequestError> {
+fn access_flags(raw: u32, kind: MemberKind) -> Result<OriginalFlags, RequestError> {
     let mut names = Vec::new();
     let mut known = 0;
     let entries: &[(u32, &'static str)] = match kind {
@@ -87,10 +80,9 @@ fn access_flags(
         ],
     };
     for (bit, name) in entries {
-        control.checkpoint()?;
         known |= bit;
         if raw & bit != 0 {
-            push(&mut names, *name, control)?;
+            push(&mut names, *name)?;
         }
     }
     Ok(OriginalFlags::new(raw, names, raw & !known))
@@ -115,14 +107,12 @@ pub(super) fn read_preparations(
     index: &ProgramIndex<'_>,
     offset: Option<crate::ByteOffset>,
     static_count: u32,
-    control: &mut RunContext<'_>,
 ) -> Result<(Vec<FieldPreparation>, Option<RequestError>), RequestError> {
     let count = usize::try_from(static_count).map_err(|_| RequestError::PlatformCapacity)?;
     let mut prepared = Vec::new();
-    crate::substrate::owned::reserve(&mut prepared, count, control)?;
+    crate::substrate::owned::reserve(&mut prepared, count)?;
     let Some(offset) = offset else {
         for _ in 0..count {
-            control.checkpoint()?;
             prepared.push(FieldPreparation {
                 initial: InitialValue::ImplicitDefault,
                 value: None,
@@ -130,13 +120,12 @@ pub(super) fn read_preparations(
         }
         return Ok((prepared, None));
     };
-    let mut values = match EncodedValues::open(index, offset, Some(static_count), control) {
+    let mut values = match EncodedValues::open(index, offset, Some(static_count)) {
         Ok(values) => values,
         Err(error) => return local_preparations(prepared, error.into()),
     };
     let result = (|| -> Result<(), RequestError> {
         for ordinal in 0..static_count {
-            control.checkpoint()?;
             if ordinal >= values.count {
                 prepared.push(FieldPreparation {
                     initial: InitialValue::ImplicitDefault,
@@ -144,7 +133,7 @@ pub(super) fn read_preparations(
                 });
                 continue;
             }
-            let Some(ValueStep::Value(value)) = values.next(index, control)? else {
+            let Some(ValueStep::Value(value)) = values.next(index)? else {
                 return Err(RequestError::InternalInvariant(
                     "encoded preparation lost root",
                 ));
@@ -164,12 +153,10 @@ pub(super) fn read_preparations(
             };
             let mut bytes = Vec::new();
             for &byte in value.bytes {
-                control.checkpoint()?;
-                push(&mut bytes, byte, control)?;
+                push(&mut bytes, byte)?;
             }
             while depth != 0 {
-                control.checkpoint()?;
-                match values.next(index, control)? {
+                match values.next(index)? {
                     Some(ValueStep::EndContainer) => depth -= 1,
                     Some(ValueStep::Value(child)) => {
                         if matches!(
@@ -194,8 +181,7 @@ pub(super) fn read_preparations(
                 for &byte in index.bytes().get(value.range.end.0..range.end.0).ok_or(
                     RequestError::InternalInvariant("encoded preparation lost original bytes"),
                 )? {
-                    control.checkpoint()?;
-                    push(&mut bytes, byte, control)?;
+                    push(&mut bytes, byte)?;
                 }
             }
             let value_kind = match &value.kind {
@@ -211,12 +197,9 @@ pub(super) fn read_preparations(
                 }
                 EncodedKind::Boolean(value) => Some(ScalarValue::Boolean(*value)),
                 EncodedKind::Null => Some(ScalarValue::Null),
-                EncodedKind::Reference(crate::raw::OperandReference::String(id)) => {
-                    Some(ScalarValue::String(OriginalText::new(copy_units(
-                        index.string_with(*id, control)?,
-                        control,
-                    )?)))
-                }
+                EncodedKind::Reference(crate::raw::OperandReference::String(id)) => Some(
+                    ScalarValue::String(OriginalText::new(copy_units(index.string(*id)?)?)),
+                ),
                 _ => None,
             };
             prepared.push(FieldPreparation {
@@ -230,7 +213,7 @@ pub(super) fn read_preparations(
                 value: value_kind,
             });
         }
-        if values.next(index, control)?.is_some() {
+        if values.next(index)?.is_some() {
             return Err(RequestError::InternalInvariant(
                 "encoded preparation has extra root",
             ));
@@ -249,9 +232,7 @@ fn local_preparations(
 ) -> Result<(Vec<FieldPreparation>, Option<RequestError>), RequestError> {
     if matches!(
         error.kind(),
-        crate::FailureKind::Cancelled
-            | crate::FailureKind::ResourceExhausted
-            | crate::FailureKind::InternalInvariant
+        crate::FailureKind::ResourceExhausted | crate::FailureKind::InternalInvariant
     ) {
         return Err(error);
     }
@@ -277,27 +258,25 @@ fn preparation_is_default(descriptor: &[u16], tag: u8, scalar: Option<&ScalarVal
 
 fn method_declaration(
     declaration: Result<crate::input::MethodDeclaration<'_, '_>, InputError>,
-    control: &mut RunContext<'_>,
 ) -> Result<Fact<MethodDeclaration>, RequestError> {
     local((|| -> Result<_, RequestError> {
         let declaration = declaration?;
         let mut parameter_types = Vec::new();
         let mut parameter_type_ids = Vec::new();
-        declaration.prototype.visit_parameter_type_ids(
-            control,
-            |id, name, control| -> Result<(), RequestError> {
-                let name = OriginalText::new(copy_units(name, control)?);
-                push(&mut parameter_types, name, control)?;
-                push(&mut parameter_type_ids, id.0, control)
-            },
-        )?;
+        declaration
+            .prototype
+            .visit_parameter_type_ids(|id, name| -> Result<(), RequestError> {
+                let name = OriginalText::new(copy_units(name)?);
+                push(&mut parameter_types, name)?;
+                push(&mut parameter_type_ids, id.0)
+            })?;
         Ok(MethodDeclaration {
-            name: OriginalText::new(copy_units(declaration.name, control)?),
-            prototype: OriginalText::new(copy_proto(&declaration.prototype, control)?),
-            shorty: OriginalText::new(copy_units(declaration.prototype.shorty, control)?),
+            name: OriginalText::new(copy_units(declaration.name)?),
+            prototype: OriginalText::new(copy_proto(&declaration.prototype)?),
+            shorty: OriginalText::new(copy_units(declaration.prototype.shorty)?),
             parameter_types,
             parameter_type_ids,
-            return_type: OriginalText::new(copy_units(declaration.prototype.return_type, control)?),
+            return_type: OriginalText::new(copy_units(declaration.prototype.return_type)?),
             return_type_id: declaration.prototype.return_type_idx.0,
             parameter_words: declaration.prototype.parameter_words.0,
         })
@@ -307,36 +286,28 @@ fn method_declaration(
 /// Collects this definition's original declarations and metadata using the shared
 /// checked input reader. It does not open code items, decide member visibility,
 /// or call the method analysis chain. Local declaration and metadata damage stays
-/// in its own entry; cancellation, allocation/quota and invariant errors stop.
-pub fn collect(
-    index: &ProgramIndex<'_>,
-    owner: ClassKey,
-    control: &mut RunContext<'_>,
-) -> Result<ClassFacts, RequestError> {
-    let class = index.class(owner.class_def, control)?;
-    let context = index.class_context(owner.class_def, control)?;
-    let superclass = optional_text(context.superclass, control)?;
+/// in its own entry; allocation and invariant errors stop.
+pub fn collect(index: &ProgramIndex<'_>, owner: ClassKey) -> Result<ClassFacts, RequestError> {
+    let class = index.class(owner.class_def)?;
+    let context = index.class_context(owner.class_def)?;
+    let superclass = optional_text(context.superclass)?;
     let interfaces = match context.interfaces {
         Ok(list) => {
             let mut result = Vec::new();
             for word in list.as_chunks::<2>().0 {
-                control.checkpoint()?;
                 let id = crate::TypeId(u32::from(u16::from_le_bytes(*word)));
                 let name = (|| -> Result<OriginalText, RequestError> {
-                    Ok(OriginalText::new(copy_units(
-                        index.type_name(id, control)?,
-                        control,
-                    )?))
+                    Ok(OriginalText::new(copy_units(index.type_name(id)?)?))
                 })();
                 match name {
-                    Ok(name) => push(&mut result, Fact::Present(name), control)?,
+                    Ok(name) => push(&mut result, Fact::Present(name))?,
                     Err(error)
                         if matches!(
                             error.kind(),
                             crate::FailureKind::Malformed | crate::FailureKind::Unsupported
                         ) =>
                     {
-                        push(&mut result, Fact::Unavailable(error), control)?;
+                        push(&mut result, Fact::Unavailable(error))?;
                     }
                     Err(error) => return Err(error),
                 }
@@ -345,11 +316,11 @@ pub fn collect(
         }
         Err(error) => Fact::Unavailable(error.into()),
     };
-    let source_file = optional_text(index.source_file(owner.class_def, control), control)?;
+    let source_file = optional_text(index.source_file(owner.class_def))?;
     let declaration = ClassDeclaration {
         type_index: class.type_idx.0,
-        descriptor: OriginalText::new(copy_units(class.descriptor, control)?),
-        access_flags: access_flags(class.access_flags, MemberKind::Class, control)?,
+        descriptor: OriginalText::new(copy_units(class.descriptor)?),
+        access_flags: access_flags(class.access_flags, MemberKind::Class)?,
         superclass,
         interfaces,
         source_file,
@@ -360,83 +331,70 @@ pub fn collect(
     // coverage is reported separately.
     let mut fields = Vec::new();
     let mut methods = Vec::new();
-    let class_view = index.class_with(owner.class_def, control)?;
+    let class_view = index.class(owner.class_def)?;
     let walk: ClassDataWalk =
-        class_view.walk_members_with(control, MemberSelection::AllMembers, |entry, control| {
-            match entry {
-                MemberEntry::Field(field) => {
-                    let storage = match field.storage {
-                        crate::input::catalog::FieldStorage::Instance => {
-                            crate::FieldStorage::Instance
-                        }
-                        crate::input::catalog::FieldStorage::Static { ordinal } => {
-                            crate::FieldStorage::Static(crate::StaticFieldOrdinal(ordinal))
-                        }
-                    };
-                    let declaration = match field.declaration {
-                        Ok(declaration) => Ok(FieldDeclaration {
-                            name: OriginalText::new(copy_units(declaration.name, control)?),
-                            descriptor: OriginalText::new(copy_units(
-                                declaration.field_type,
-                                control,
-                            )?),
-                        }),
-                        Err(error) => Err(RequestError::from(error)),
-                    };
-                    let declaration = local(declaration)?;
-                    push(
-                        &mut fields,
-                        FieldDirectoryEntry {
-                            field: crate::FieldId(field.field_idx.0),
-                            access_flags: access_flags(
-                                field.access_flags,
-                                MemberKind::Field,
-                                control,
-                            )?,
-                            storage,
-                            group_ordinal: field.ordinal,
-                            declaration,
-                            initial: Fact::NotRead,
-                            scalar: None,
-                            default_preparation: false,
-                        },
-                        control,
-                    )
-                }
-                MemberEntry::MethodHeader {
-                    method_idx,
-                    access_flags: raw_flags,
-                    group,
-                    code_offset,
-                    declaration,
-                } => {
-                    let declaration = method_declaration(declaration, control)?;
-                    let code = if code_offset.is_some() {
-                        Fact::NotRead
-                    } else {
-                        Fact::Absent
-                    };
-                    push(
-                        &mut methods,
-                        MethodDirectoryEntry {
-                            method: MethodId(method_idx.0),
-                            access_flags: access_flags(raw_flags, MemberKind::Method, control)?,
-                            group,
-                            code_offset,
-                            declaration,
-                            code,
-                        },
-                        control,
-                    )
-                }
-                MemberEntry::Method(_) => Err(RequestError::InternalInvariant(
-                    "P0 header traversal acquired another member entry",
-                )),
+        class_view.walk_members_with(MemberSelection::AllMembers, |entry| match entry {
+            MemberEntry::Field(field) => {
+                let storage = match field.storage {
+                    crate::input::catalog::FieldStorage::Instance => crate::FieldStorage::Instance,
+                    crate::input::catalog::FieldStorage::Static { ordinal } => {
+                        crate::FieldStorage::Static(crate::StaticFieldOrdinal(ordinal))
+                    }
+                };
+                let declaration = match field.declaration {
+                    Ok(declaration) => Ok(FieldDeclaration {
+                        name: OriginalText::new(copy_units(declaration.name)?),
+                        descriptor: OriginalText::new(copy_units(declaration.field_type)?),
+                    }),
+                    Err(error) => Err(RequestError::from(error)),
+                };
+                let declaration = local(declaration)?;
+                push(
+                    &mut fields,
+                    FieldDirectoryEntry {
+                        field: crate::FieldId(field.field_idx.0),
+                        access_flags: access_flags(field.access_flags, MemberKind::Field)?,
+                        storage,
+                        group_ordinal: field.ordinal,
+                        declaration,
+                        initial: Fact::NotRead,
+                        scalar: None,
+                        default_preparation: false,
+                    },
+                )
             }
+            MemberEntry::MethodHeader {
+                method_idx,
+                access_flags: raw_flags,
+                group,
+                code_offset,
+                declaration,
+            } => {
+                let declaration = method_declaration(declaration)?;
+                let code = if code_offset.is_some() {
+                    Fact::NotRead
+                } else {
+                    Fact::Absent
+                };
+                push(
+                    &mut methods,
+                    MethodDirectoryEntry {
+                        method: MethodId(method_idx.0),
+                        access_flags: access_flags(raw_flags, MemberKind::Method)?,
+                        group,
+                        code_offset,
+                        declaration,
+                        code,
+                    },
+                )
+            }
+            MemberEntry::Method(_) => Err(RequestError::InternalInvariant(
+                "P0 header traversal acquired another member entry",
+            )),
         })?;
     let mut fields_issue = walk.issue.map(RequestError::from);
     let (prepared, preparation_issue) = match context.values_offset {
-        Ok(offset) => read_preparations(index, offset, walk.shape.static_fields, control)?,
+        Ok(offset) => read_preparations(index, offset, walk.shape.static_fields)?,
         Err(error) => {
             fields_issue.get_or_insert(error.into());
             (Vec::new(), None)
@@ -466,7 +424,7 @@ pub fn collect(
         };
     }
     let methods_issue = walk.issue.map(RequestError::from);
-    let annotations = crate::input::annotation_facts::collect(index, owner, control)?;
+    let annotations = crate::input::annotation_facts::collect(index, owner)?;
     Ok(ClassFacts {
         owner,
         header_offset: index.header.header_offset,

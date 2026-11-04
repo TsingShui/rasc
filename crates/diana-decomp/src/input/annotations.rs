@@ -3,7 +3,7 @@ use super::values::EncodedValues;
 use super::{
     ClassView, Cursor, InputError, InputProblem, ProgramIndex, count_usize, file_offset, malformed,
 };
-use crate::pipeline::control::InputControl;
+
 use crate::{ByteLength, ByteOffset, ByteRange, FieldId, MethodId, TypeId};
 
 pub(crate) struct AnnotationDirectory<'a> {
@@ -18,40 +18,34 @@ fn records<'a>(
     cursor: &mut Cursor<'a>,
     count: u32,
     stride: ByteLength,
-    control: &mut impl InputControl,
 ) -> Result<Cursor<'a>, InputError> {
-    let range = cursor.skip(count_usize(count, cursor.position_byte())?, stride, control)?;
-    control.checkpoint()?;
+    let range = cursor.skip(count_usize(count, cursor.position_byte())?, stride)?;
+
     Cursor::bounded(index.bytes, range.start, range.end)
 }
 
 impl<'a> ProgramIndex<'a> {
-    pub(crate) fn no_class_annotations(
-        &self,
-        directory: ByteOffset,
-        control: &mut impl InputControl,
-    ) -> Result<bool, InputError> {
-        Ok(directory.0 == 0 || self.annotation_directory(directory, control)?.class.0 == 0)
+    pub(crate) fn no_class_annotations(&self, directory: ByteOffset) -> Result<bool, InputError> {
+        Ok(directory.0 == 0 || self.annotation_directory(directory)?.class.0 == 0)
     }
     pub(crate) fn annotation_directory(
         &self,
         offset: ByteOffset,
-        control: &mut impl InputControl,
     ) -> Result<AnnotationDirectory<'a>, InputError> {
-        let mut cursor = self.item(0x2006, offset, control)?;
-        let class = file_offset(cursor.read_u32_with(control)?, offset)?;
-        let fields = cursor.read_u32_with(control)?;
-        let methods = cursor.read_u32_with(control)?;
-        let parameters = cursor.read_u32_with(control)?;
+        let mut cursor = self.item(0x2006, offset)?;
+        let class = file_offset(cursor.read_u32()?, offset)?;
+        let fields = cursor.read_u32()?;
+        let methods = cursor.read_u32()?;
+        let parameters = cursor.read_u32()?;
         let total = u64::from(fields) + u64::from(methods) + u64::from(parameters);
         if total > (cursor.remaining_byte().0 / 8) as u64 {
             return Err(malformed(InputProblem::Truncated, cursor.position_byte()));
         }
         Ok(AnnotationDirectory {
             class,
-            fields: records(self, &mut cursor, fields, ByteLength(8), control)?,
-            methods: records(self, &mut cursor, methods, ByteLength(8), control)?,
-            parameters: records(self, &mut cursor, parameters, ByteLength(8), control)?,
+            fields: records(self, &mut cursor, fields, ByteLength(8))?,
+            methods: records(self, &mut cursor, methods, ByteLength(8))?,
+            parameters: records(self, &mut cursor, parameters, ByteLength(8))?,
         })
     }
 
@@ -59,9 +53,8 @@ impl<'a> ProgramIndex<'a> {
         &self,
         offset: ByteOffset,
         count: usize,
-        control: &mut impl InputControl,
     ) -> Result<Cursor<'a>, InputError> {
-        let cursor = self.annotation_offsets(0x1002, offset, control)?;
+        let cursor = self.annotation_offsets(0x1002, offset)?;
         if cursor.remaining_byte().0 / 4 != count {
             return Err(malformed(InputProblem::InvalidEncodedValue, offset));
         }
@@ -72,11 +65,10 @@ impl<'a> ProgramIndex<'a> {
         &self,
         offsets: &mut Cursor<'_>,
         last: &mut Option<TypeId>,
-        budget: &mut impl InputControl,
     ) -> Result<(ByteOffset, u8, TypeId, EncodedValues<'a>), MethodError> {
         let at = offsets.position_byte();
-        let offset = file_offset(offsets.read_u32_with(budget)?, at)?;
-        let (visibility, type_id, values) = EncodedValues::annotation(self, offset, budget)?;
+        let offset = file_offset(offsets.read_u32()?, at)?;
+        let (visibility, type_id, values) = EncodedValues::annotation(self, offset)?;
         if last.is_some_and(|last| last >= type_id) {
             return Err(malformed(InputProblem::InvalidEncodedValue, at).into());
         }
@@ -88,11 +80,10 @@ impl<'a> ProgramIndex<'a> {
         &self,
         kind: u16,
         offset: ByteOffset,
-        control: &mut impl InputControl,
     ) -> Result<Cursor<'a>, InputError> {
-        let mut cursor = self.item(kind, offset, control)?;
-        let count = cursor.read_u32_with(control)?;
-        records(self, &mut cursor, count, ByteLength(4), control)
+        let mut cursor = self.item(kind, offset)?;
+        let count = cursor.read_u32()?;
+        records(self, &mut cursor, count, ByteLength(4))
     }
 }
 
@@ -116,16 +107,15 @@ impl<'a> AnnotationMembers<'a> {
         index: &ProgramIndex<'a>,
         class: &ClassView<'_, 'a>,
         method: bool,
-        control: &mut impl InputControl,
     ) -> Result<Self, InputError> {
         let mut cursor = match class.class_data_offset {
-            Some(offset) => index.item(0x2000, offset, control)?,
+            Some(offset) => index.item(0x2000, offset)?,
             None => Cursor::bounded(index.bytes, ByteOffset(0), ByteOffset(0))?,
         };
         let mut counts = [0; 4];
         if class.class_data_offset.is_some() {
             for count in &mut counts {
-                *count = cursor.read_uleb32_with(control)?;
+                *count = cursor.read_uleb32()?;
             }
         }
         let minimum = u64::from(counts[0]) * 2
@@ -142,11 +132,10 @@ impl<'a> AnnotationMembers<'a> {
         for (group, count) in counts.iter().enumerate() {
             let start = cursor.position_byte();
             for _ in 0..*count {
-                control.checkpoint()?;
-                cursor.read_uleb32_with(control)?;
-                cursor.read_uleb32_with(control)?;
+                cursor.read_uleb32()?;
+                cursor.read_uleb32()?;
                 if group >= 2 {
-                    cursor.read_uleb32_with(control)?;
+                    cursor.read_uleb32()?;
                 }
             }
             ranges[group] = ByteRange {
@@ -170,11 +159,7 @@ impl<'a> AnnotationMembers<'a> {
         })
     }
 
-    pub fn check(
-        &mut self,
-        target: u32,
-        control: &mut impl InputControl,
-    ) -> Result<(), InputError> {
+    pub fn check(&mut self, target: u32) -> Result<(), InputError> {
         let mut matches = 0;
         for group in &mut self.groups {
             loop {
@@ -188,9 +173,9 @@ impl<'a> AnnotationMembers<'a> {
                 if group.remaining == 0 {
                     break;
                 }
-                control.checkpoint()?;
+
                 let at = group.cursor.position_byte();
-                let delta = group.cursor.read_uleb32_with(control)?;
+                let delta = group.cursor.read_uleb32()?;
                 if !group.first && delta == 0 {
                     return Err(malformed(InputProblem::InvalidClassData, at));
                 }
@@ -199,9 +184,9 @@ impl<'a> AnnotationMembers<'a> {
                     .index
                     .checked_add(delta)
                     .ok_or_else(|| malformed(InputProblem::RangeOverflow, at))?;
-                group.cursor.read_uleb32_with(control)?;
+                group.cursor.read_uleb32()?;
                 if group.method {
-                    group.cursor.read_uleb32_with(control)?;
+                    group.cursor.read_uleb32()?;
                 }
                 group.remaining -= 1;
                 group.next = Some(group.index);
@@ -229,25 +214,24 @@ pub(crate) fn association(
     records: &mut Cursor<'_>,
     last: &mut Option<u32>,
     method: bool,
-    control: &mut impl InputControl,
 ) -> Result<(AnnotationOwner, ByteOffset, usize), InputError> {
     let at = records.position_byte();
-    let id = records.read_u32_with(control)?;
-    let offset = file_offset(records.read_u32_with(control)?, at)?;
+    let id = records.read_u32()?;
+    let offset = file_offset(records.read_u32()?, at)?;
     if last.is_some_and(|last| last >= id) {
         return Err(malformed(InputProblem::InvalidReference, at));
     }
     *last = Some(id);
-    members.check(id, control)?;
+    members.check(id)?;
     let parameters = if method {
         index
-            .method_declaration(MethodId(id), class.type_idx, control)?
+            .method_declaration(MethodId(id), class.type_idx)?
             .prototype
             .parameters
             .len()
             / 2
     } else {
-        index.validate_field(FieldId(id), class.type_idx, control)?;
+        index.validate_field(FieldId(id), class.type_idx)?;
         0
     };
     let owner = if method {

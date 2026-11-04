@@ -9,7 +9,7 @@ use crate::substrate::owned::push;
 use crate::substrate::slots::{RegisterSlot, SlotWidth};
 use crate::{
     ByteRange, CodeUnitCount, CodeUnitOffset, MethodId, RegisterId, RegisterWordCount,
-    RequestError, RunContext, TypeId,
+    RequestError, TypeId,
 };
 
 /// One original operand reference with its table domain and slot.
@@ -356,19 +356,17 @@ impl<'a> DecodedMethod<'a> {
     pub fn catch_clauses_at(
         &self,
         pc: CodeUnitOffset,
-        budget: &mut RunContext<'_>,
     ) -> Result<Vec<(Option<u32>, u32)>, RequestError> {
-        let Some(clauses) = self.protection.at(pc, budget)? else {
+        let Some(clauses) = self.protection.at(pc)? else {
             return Ok(Vec::new());
         };
         let mut result = Vec::new();
         for clause in clauses {
-            budget.checkpoint()?;
             let kind = match clause.kind {
                 crate::input::protection::CatchType::Typed(id) => Some(id.0),
                 crate::input::protection::CatchType::All => None,
             };
-            push(&mut result, (kind, clause.target.0), budget)?;
+            push(&mut result, (kind, clause.target.0))?;
         }
         Ok(result)
     }
@@ -488,14 +486,12 @@ impl<'a> ProgramIndex<'a> {
     pub(crate) fn build_items(
         &self,
         source: &RawMethodView<'a>,
-        budget: &mut RunContext<'_>,
     ) -> Result<Vec<DecodedItem>, (Vec<DecodedItem>, MethodError)> {
         let mut items = Vec::new();
         let result =
             (|| -> Result<(), MethodError> {
                 let mut pc = CodeUnitOffset(0);
                 while pc.0 < source.code_units().0 {
-                    budget.checkpoint()?;
                     let layout = instruction_layout_of(source, pc)?;
                     match layout.kind() {
                         LayoutKind::Instruction(spec) => {
@@ -543,7 +539,6 @@ impl<'a> ProgramIndex<'a> {
                                     result_pc: None,
                                     producer_pc: None,
                                 }),
-                                budget,
                             )
                             .map_err(scratch)?;
                         }
@@ -551,7 +546,6 @@ impl<'a> ProgramIndex<'a> {
                             push(
                                 &mut items,
                                 DecodedItem::Payload(DecodedPayload { pc, layout }),
-                                budget,
                             )
                             .map_err(scratch)?;
                         }
@@ -622,7 +616,6 @@ fn link_results(items: &mut [DecodedItem]) {
 /// classification crosses into `MethodError`, whose variants stay owner-specific.
 pub(super) fn scratch(error: RequestError) -> MethodError {
     match error {
-        RequestError::Control(error) => MethodError::Control(error),
         RequestError::Allocation(error) => MethodError::Allocation(error),
         RequestError::PlatformCapacity => MethodError::PlatformCapacity,
         RequestError::InternalInvariant(message) => MethodError::InternalInvariant(message),

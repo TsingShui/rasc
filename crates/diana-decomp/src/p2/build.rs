@@ -15,14 +15,10 @@ use crate::raw::OperandReference;
 use crate::raw::RawLiteral;
 use crate::substrate::owned::push;
 use crate::substrate::slots::{RegisterSlot, SlotWidth};
-use crate::{
-    CodeUnitOffset, ControlError, FailureKind, RegisterId, RequestError, RunContext, TypeId,
-};
+use crate::{CodeUnitOffset, FailureKind, RegisterId, RequestError, TypeId};
 
 #[derive(Debug, Error)]
 pub enum FlowError {
-    #[error(transparent)]
-    Control(#[from] ControlError),
     #[error("flow allocation failed: {0}")]
     Allocation(#[source] TryReserveError),
     #[error("flow capacity is not representable on this platform")]
@@ -45,7 +41,6 @@ pub enum FlowError {
 impl FlowError {
     pub fn kind(&self) -> FailureKind {
         match self {
-            Self::Control(error) => error.kind(),
             Self::Allocation(_) | Self::PlatformCapacity => FailureKind::ResourceExhausted,
             Self::Unsupported { .. } => FailureKind::Unsupported,
             Self::InternalInvariant(_) | Self::Correspondence { .. } => {
@@ -57,7 +52,6 @@ impl FlowError {
 
 pub(crate) fn request_error(error: RequestError) -> FlowError {
     match error {
-        RequestError::Control(error) => FlowError::Control(error),
         RequestError::Allocation(error) => FlowError::Allocation(error),
         RequestError::PlatformCapacity => FlowError::PlatformCapacity,
         RequestError::InternalInvariant(message) => FlowError::InternalInvariant(message),
@@ -104,9 +98,8 @@ pub(crate) enum FlowBuild<'a> {
 pub(crate) fn build_flow<'a>(
     _task: &crate::engine::MethodTask,
     decoded: DecodedMethod<'a>,
-    control: &mut RunContext<'_>,
 ) -> FlowBuild<'a> {
-    let mut builder = match Builder::new(&decoded, control) {
+    let mut builder = match Builder::new(&decoded) {
         Ok(builder) => builder,
         Err(error) => {
             return FlowBuild::Stopped(super::FlowStop {
@@ -116,7 +109,7 @@ pub(crate) fn build_flow<'a>(
             });
         }
     };
-    let result = builder.build(control);
+    let result = builder.build();
     let parts = builder.finish();
     if let Err(error) = result {
         return FlowBuild::Stopped(super::FlowStop {
@@ -141,7 +134,7 @@ pub(crate) fn build_flow<'a>(
         exits: parts.exits,
         coverage: parts.coverage,
     };
-    if let Err(error) = super::check::verify(&flow, control) {
+    if let Err(error) = super::check::verify(&flow) {
         return FlowBuild::Stopped(super::FlowStop {
             input: flow.decoded,
             error,
@@ -159,21 +152,17 @@ pub(crate) fn build_flow<'a>(
 }
 
 impl<'a, 'd> Builder<'a, 'd> {
-    fn new(
-        decoded: &'d DecodedMethod<'a>,
-        control: &mut RunContext<'_>,
-    ) -> Result<Self, FlowError> {
+    fn new(decoded: &'d DecodedMethod<'a>) -> Result<Self, FlowError> {
         let mut instructions = Vec::new();
         let mut coverage = Vec::new();
         for item in decoded.items() {
-            control.checkpoint()?;
             match item {
                 DecodedItem::Instruction(instruction) => {
-                    push(&mut instructions, instruction, control).map_err(request_error)?;
-                    push(&mut coverage, Coverage::Unreachable, control).map_err(request_error)?;
+                    push(&mut instructions, instruction).map_err(request_error)?;
+                    push(&mut coverage, Coverage::Unreachable).map_err(request_error)?;
                 }
                 DecodedItem::Payload(_) => {
-                    push(&mut coverage, Coverage::Payload, control).map_err(request_error)?;
+                    push(&mut coverage, Coverage::Payload).map_err(request_error)?;
                 }
             }
         }
@@ -190,17 +179,16 @@ impl<'a, 'd> Builder<'a, 'd> {
         })
     }
 
-    fn build(&mut self, control: &mut RunContext<'_>) -> Result<(), FlowError> {
-        self.build_atoms(control)?;
-        let leaders = self.leaders(control)?;
-        self.build_blocks(&leaders, control)?;
-        self.build_edges(control)?;
+    fn build(&mut self) -> Result<(), FlowError> {
+        self.build_atoms()?;
+        let leaders = self.leaders()?;
+        self.build_blocks(&leaders)?;
+        self.build_edges()?;
         Ok(())
     }
 
-    fn build_atoms(&mut self, control: &mut RunContext<'_>) -> Result<(), FlowError> {
+    fn build_atoms(&mut self) -> Result<(), FlowError> {
         for (index, instruction) in self.instructions.iter().enumerate() {
-            control.checkpoint()?;
             if matches!(instruction.opcode(), 0x0a..=0x0c) {
                 let producer_pc = instruction
                     .producer_pc()
@@ -233,12 +221,10 @@ impl<'a, 'd> Builder<'a, 'd> {
                     producer: index,
                     result: None,
                 },
-                control,
             )
             .map_err(request_error)?;
         }
         for atom in &self.atoms {
-            control.checkpoint()?;
             let producer = self.instructions[atom.producer];
             if producer.result_pc().is_some() != atom.result.is_some() {
                 return Err(internal("P1 producer/result association is incomplete"));
@@ -247,20 +233,18 @@ impl<'a, 'd> Builder<'a, 'd> {
         Ok(())
     }
 
-    fn leaders(&mut self, control: &mut RunContext<'_>) -> Result<Vec<CodeUnitOffset>, FlowError> {
+    fn leaders(&mut self) -> Result<Vec<CodeUnitOffset>, FlowError> {
         let mut leaders = Vec::new();
         if self.decoded.is_reachable(CodeUnitOffset(0)) {
-            push(&mut leaders, CodeUnitOffset(0), control).map_err(request_error)?;
+            push(&mut leaders, CodeUnitOffset(0)).map_err(request_error)?;
         }
         for target in self.decoded.handler_targets() {
-            control.checkpoint()?;
             let target = CodeUnitOffset(target);
             if self.decoded.is_reachable(target) {
-                push(&mut leaders, target, control).map_err(request_error)?;
+                push(&mut leaders, target).map_err(request_error)?;
             }
         }
         for instruction in &self.instructions {
-            control.checkpoint()?;
             let pc = instruction.pc();
             if !self.decoded.is_reachable(pc) {
                 continue;
@@ -270,13 +254,13 @@ impl<'a, 'd> Builder<'a, 'd> {
                     if let Some(target) = instruction.branch_target()
                         && self.decoded.is_reachable(target)
                     {
-                        push(&mut leaders, target, control).map_err(request_error)?;
+                        push(&mut leaders, target).map_err(request_error)?;
                     }
                 }
                 FlowKind::PackedSwitch | FlowKind::SparseSwitch => {
-                    for (_, target) in self.switch_cases(instruction, control)? {
+                    for (_, target) in self.switch_cases(instruction)? {
                         if self.decoded.is_reachable(target) {
-                            push(&mut leaders, target, control).map_err(request_error)?;
+                            push(&mut leaders, target).map_err(request_error)?;
                         }
                     }
                 }
@@ -288,13 +272,12 @@ impl<'a, 'd> Builder<'a, 'd> {
             ) && let Some(next) = pc.checked_advance(instruction.width())
                 && self.decoded.is_reachable(next)
             {
-                push(&mut leaders, next, control).map_err(request_error)?;
+                push(&mut leaders, next).map_err(request_error)?;
             }
         }
-        super::scratch::sort_by_key(&mut leaders, |pc| *pc, control)?;
+        leaders.sort_unstable();
         let mut unique = 0;
         for index in 0..leaders.len() {
-            control.checkpoint()?;
             if unique == 0 || leaders[unique - 1] != leaders[index] {
                 leaders[unique] = leaders[index];
                 unique += 1;
@@ -302,7 +285,6 @@ impl<'a, 'd> Builder<'a, 'd> {
         }
         leaders.truncate(unique);
         for leader in &leaders {
-            control.checkpoint()?;
             if self
                 .instruction_at(*leader)
                 .is_some_and(|instruction| matches!(instruction.opcode(), 0x0a..=0x0c))
@@ -313,14 +295,9 @@ impl<'a, 'd> Builder<'a, 'd> {
         Ok(leaders)
     }
 
-    fn build_blocks(
-        &mut self,
-        leaders: &[CodeUnitOffset],
-        control: &mut RunContext<'_>,
-    ) -> Result<(), FlowError> {
+    fn build_blocks(&mut self, leaders: &[CodeUnitOffset]) -> Result<(), FlowError> {
         let mut current: Option<usize> = None;
         for atom_index in 0..self.atoms.len() {
-            control.checkpoint()?;
             let atom = self.atoms[atom_index];
             let producer = self.instructions[atom.producer];
             let pc = producer.pc();
@@ -345,7 +322,6 @@ impl<'a, 'd> Builder<'a, 'd> {
                         exceptional: None,
                         terminal_reads: SlotSpan::new(0, 0),
                     },
-                    control,
                 )
                 .map_err(request_error)?;
                 current = Some(block_index);
@@ -364,7 +340,7 @@ impl<'a, 'd> Builder<'a, 'd> {
                     | FlowKind::SparseSwitch
             );
             if terminal {
-                let (terminal, reads) = self.terminal(&atom, producer, control)?;
+                let (terminal, reads) = self.terminal(&atom, producer)?;
                 let block_id = self.blocks[block_index].id;
                 self.blocks[block_index].terminal = Some(terminal);
                 self.blocks[block_index].terminal_pc = Some(pc);
@@ -381,10 +357,10 @@ impl<'a, 'd> Builder<'a, 'd> {
                 let item = self.item_index(pc)?;
                 self.coverage[item] = Coverage::Terminal(block_id);
             } else {
-                let operation = self.operation(&atom, producer, block_index, control)?;
+                let operation = self.operation(&atom, producer, block_index)?;
                 let id = operation.id;
                 let start = self.blocks[block_index].operations.start;
-                push(&mut self.operations, operation, control).map_err(request_error)?;
+                push(&mut self.operations, operation).map_err(request_error)?;
                 let end = u32::try_from(self.operations.len())
                     .map_err(|_| FlowError::PlatformCapacity)?;
                 self.blocks[block_index].operations = start..end;
@@ -406,7 +382,6 @@ impl<'a, 'd> Builder<'a, 'd> {
         atom: &Atom,
         instruction: &DecodedInstruction,
         block_index: usize,
-        control: &mut RunContext<'_>,
     ) -> Result<Operation, FlowError> {
         let pc = instruction.pc();
         let spec = instruction.spec();
@@ -434,8 +409,8 @@ impl<'a, 'd> Builder<'a, 'd> {
                     MoveKind::Wide => SlotWidth::Two,
                     _ => SlotWidth::One,
                 };
-                let reads = self.slots_for([RegisterSlot::new(source, width)], control)?;
-                let writes = self.slots_for([RegisterSlot::new(dest, width)], control)?;
+                let reads = self.slots_for([RegisterSlot::new(source, width)])?;
+                let writes = self.slots_for([RegisterSlot::new(dest, width)])?;
                 (
                     OpKind::Move { kind },
                     reads,
@@ -447,7 +422,7 @@ impl<'a, 'd> Builder<'a, 'd> {
             }
             0x0d => {
                 let dest = self.register(instruction, 0)?;
-                let writes = self.slots_for([RegisterSlot::new(dest, SlotWidth::One)], control)?;
+                let writes = self.slots_for([RegisterSlot::new(dest, SlotWidth::One)])?;
                 (
                     OpKind::MoveException,
                     self.empty_span(),
@@ -465,7 +440,7 @@ impl<'a, 'd> Builder<'a, 'd> {
                     SlotWidth::One
                 };
                 let bits = self.literal_bits(instruction)?;
-                let writes = self.slots_for([RegisterSlot::new(dest, width)], control)?;
+                let writes = self.slots_for([RegisterSlot::new(dest, width)])?;
                 (
                     OpKind::Const { bits, width },
                     self.empty_span(),
@@ -481,7 +456,7 @@ impl<'a, 'd> Builder<'a, 'd> {
                     Some(OperandReference::String(value)) => value,
                     _ => return Err(internal("const-string has no string reference")),
                 };
-                let writes = self.slots_for([RegisterSlot::new(dest, SlotWidth::One)], control)?;
+                let writes = self.slots_for([RegisterSlot::new(dest, SlotWidth::One)])?;
                 (
                     OpKind::ConstString { value },
                     self.empty_span(),
@@ -497,7 +472,7 @@ impl<'a, 'd> Builder<'a, 'd> {
                     Some(OperandReference::Type(value)) => value,
                     _ => return Err(internal("const-class has no type reference")),
                 };
-                let writes = self.slots_for([RegisterSlot::new(dest, SlotWidth::One)], control)?;
+                let writes = self.slots_for([RegisterSlot::new(dest, SlotWidth::One)])?;
                 (
                     OpKind::ConstClass { type_id },
                     self.empty_span(),
@@ -509,7 +484,7 @@ impl<'a, 'd> Builder<'a, 'd> {
             }
             0x1d | 0x1e => {
                 let reg = self.register(instruction, 0)?;
-                let reads = self.slots_for([RegisterSlot::new(reg, SlotWidth::One)], control)?;
+                let reads = self.slots_for([RegisterSlot::new(reg, SlotWidth::One)])?;
                 let effects = Effects::MONITOR.with(Effects::MAY_THROW);
                 (
                     OpKind::Monitor {
@@ -528,7 +503,7 @@ impl<'a, 'd> Builder<'a, 'd> {
                     Some(OperandReference::Type(value)) => value,
                     _ => return Err(internal("check-cast has no type reference")),
                 };
-                let reads = self.slots_for([RegisterSlot::new(reg, SlotWidth::One)], control)?;
+                let reads = self.slots_for([RegisterSlot::new(reg, SlotWidth::One)])?;
                 (
                     OpKind::Cast { type_id },
                     reads,
@@ -544,8 +519,8 @@ impl<'a, 'd> Builder<'a, 'd> {
                     Some(OperandReference::Type(value)) => value,
                     _ => return Err(internal("instance-of has no type reference")),
                 };
-                let reads = self.slots_for([RegisterSlot::new(source, SlotWidth::One)], control)?;
-                let writes = self.slots_for([RegisterSlot::new(dest, SlotWidth::One)], control)?;
+                let reads = self.slots_for([RegisterSlot::new(source, SlotWidth::One)])?;
+                let writes = self.slots_for([RegisterSlot::new(dest, SlotWidth::One)])?;
                 (
                     OpKind::InstanceOf { type_id },
                     reads,
@@ -557,8 +532,8 @@ impl<'a, 'd> Builder<'a, 'd> {
             }
             0x21 => {
                 let (dest, source) = self.two_regs(instruction)?;
-                let reads = self.slots_for([RegisterSlot::new(source, SlotWidth::One)], control)?;
-                let writes = self.slots_for([RegisterSlot::new(dest, SlotWidth::One)], control)?;
+                let reads = self.slots_for([RegisterSlot::new(source, SlotWidth::One)])?;
+                let writes = self.slots_for([RegisterSlot::new(dest, SlotWidth::One)])?;
                 (
                     OpKind::ArrayLength,
                     reads,
@@ -574,7 +549,7 @@ impl<'a, 'd> Builder<'a, 'd> {
                     Some(OperandReference::Type(value)) => value,
                     _ => return Err(internal("new-instance has no type reference")),
                 };
-                let writes = self.slots_for([RegisterSlot::new(dest, SlotWidth::One)], control)?;
+                let writes = self.slots_for([RegisterSlot::new(dest, SlotWidth::One)])?;
                 (
                     OpKind::NewInstance { type_id },
                     self.empty_span(),
@@ -592,8 +567,8 @@ impl<'a, 'd> Builder<'a, 'd> {
                     Some(OperandReference::Type(value)) => value,
                     _ => return Err(internal("new-array has no type reference")),
                 };
-                let reads = self.slots_for([RegisterSlot::new(size, SlotWidth::One)], control)?;
-                let writes = self.slots_for([RegisterSlot::new(dest, SlotWidth::One)], control)?;
+                let reads = self.slots_for([RegisterSlot::new(size, SlotWidth::One)])?;
+                let writes = self.slots_for([RegisterSlot::new(dest, SlotWidth::One)])?;
                 (
                     OpKind::NewArray { type_id },
                     reads,
@@ -608,7 +583,7 @@ impl<'a, 'd> Builder<'a, 'd> {
                     Some(OperandReference::Type(value)) => value,
                     _ => return Err(internal("filled-new-array has no type reference")),
                 };
-                let reads = self.all_register_slots(instruction, SlotWidth::One, control)?;
+                let reads = self.all_register_slots(instruction, SlotWidth::One)?;
                 (
                     OpKind::FilledNewArray { type_id },
                     reads,
@@ -625,7 +600,7 @@ impl<'a, 'd> Builder<'a, 'd> {
                 let payload = instruction
                     .payload_target()
                     .ok_or(internal("fill-array-data has no checked payload"))?;
-                let reads = self.slots_for([RegisterSlot::new(array, SlotWidth::One)], control)?;
+                let reads = self.slots_for([RegisterSlot::new(array, SlotWidth::One)])?;
                 (
                     OpKind::FillArrayData { payload },
                     reads,
@@ -650,14 +625,11 @@ impl<'a, 'd> Builder<'a, 'd> {
                     }
                     _ => SlotWidth::One,
                 };
-                let reads = self.slots_for(
-                    [
-                        RegisterSlot::new(left, left_width),
-                        RegisterSlot::new(right, left_width),
-                    ],
-                    control,
-                )?;
-                let writes = self.slots_for([RegisterSlot::new(dest, SlotWidth::One)], control)?;
+                let reads = self.slots_for([
+                    RegisterSlot::new(left, left_width),
+                    RegisterSlot::new(right, left_width),
+                ])?;
+                let writes = self.slots_for([RegisterSlot::new(dest, SlotWidth::One)])?;
                 (
                     OpKind::Compare { op },
                     reads,
@@ -673,25 +645,19 @@ impl<'a, 'd> Builder<'a, 'd> {
                 let kind = self.array_kind(opcode);
                 let width = kind.width();
                 let reads = if get {
-                    self.slots_for(
-                        [
-                            RegisterSlot::new(array, SlotWidth::One),
-                            RegisterSlot::new(index, SlotWidth::One),
-                        ],
-                        control,
-                    )?
+                    self.slots_for([
+                        RegisterSlot::new(array, SlotWidth::One),
+                        RegisterSlot::new(index, SlotWidth::One),
+                    ])?
                 } else {
-                    self.slots_for(
-                        [
-                            RegisterSlot::new(dest, width),
-                            RegisterSlot::new(array, SlotWidth::One),
-                            RegisterSlot::new(index, SlotWidth::One),
-                        ],
-                        control,
-                    )?
+                    self.slots_for([
+                        RegisterSlot::new(dest, width),
+                        RegisterSlot::new(array, SlotWidth::One),
+                        RegisterSlot::new(index, SlotWidth::One),
+                    ])?
                 };
                 let writes = if get {
-                    self.slots_for([RegisterSlot::new(dest, width)], control)?
+                    self.slots_for([RegisterSlot::new(dest, width)])?
                 } else {
                     self.empty_span()
                 };
@@ -737,18 +703,16 @@ impl<'a, 'd> Builder<'a, 'd> {
                     push(
                         &mut reads,
                         RegisterSlot::new(self.register(instruction, 1)?, SlotWidth::One),
-                        control,
                     )
                     .map_err(request_error)?;
                 }
                 if !get {
-                    crate::substrate::owned::reserve(&mut reads, 1, control)
-                        .map_err(request_error)?;
+                    crate::substrate::owned::reserve(&mut reads, 1).map_err(request_error)?;
                     reads.insert(0, RegisterSlot::new(dest, width));
                 }
-                let reads = self.slots_vec(reads, control)?;
+                let reads = self.slots_vec(reads)?;
                 let writes = if get {
-                    self.slots_for([RegisterSlot::new(dest, width)], control)?
+                    self.slots_for([RegisterSlot::new(dest, width)])?
                 } else {
                     self.empty_span()
                 };
@@ -807,7 +771,7 @@ impl<'a, 'd> Builder<'a, 'd> {
                     .decoded
                     .invoke_layout_at(pc)
                     .ok_or(internal("invoke has no checked P1 layout"))?;
-                let reads = self.invoke_reads(instruction, layout, control)?;
+                let reads = self.invoke_reads(instruction, layout)?;
                 let result = layout.result();
                 (
                     OpKind::Invoke {
@@ -830,9 +794,8 @@ impl<'a, 'd> Builder<'a, 'd> {
             0x7b..=0x8f => {
                 let (dest, source) = self.two_regs(instruction)?;
                 let op = self.unary_op(opcode)?;
-                let reads =
-                    self.slots_for([RegisterSlot::new(source, op.source_width())], control)?;
-                let writes = self.slots_for([RegisterSlot::new(dest, op.dest_width())], control)?;
+                let reads = self.slots_for([RegisterSlot::new(source, op.source_width())])?;
+                let writes = self.slots_for([RegisterSlot::new(dest, op.dest_width())])?;
                 (
                     OpKind::Unary { op },
                     reads,
@@ -846,14 +809,11 @@ impl<'a, 'd> Builder<'a, 'd> {
                 let (dest, left, right) = self.three_regs(instruction)?;
                 let op = binary_op((opcode - 0x90) % 32)?;
                 let width = op.width();
-                let reads = self.slots_for(
-                    [
-                        RegisterSlot::new(left, op.left_width()),
-                        RegisterSlot::new(right, op.right_width()),
-                    ],
-                    control,
-                )?;
-                let writes = self.slots_for([RegisterSlot::new(dest, width)], control)?;
+                let reads = self.slots_for([
+                    RegisterSlot::new(left, op.left_width()),
+                    RegisterSlot::new(right, op.right_width()),
+                ])?;
+                let writes = self.slots_for([RegisterSlot::new(dest, width)])?;
                 (
                     OpKind::Binary {
                         op,
@@ -871,14 +831,11 @@ impl<'a, 'd> Builder<'a, 'd> {
                 let (dest, right) = self.two_regs(instruction)?;
                 let op = binary_op((opcode - 0xb0) % 32)?;
                 let width = op.width();
-                let reads = self.slots_for(
-                    [
-                        RegisterSlot::new(dest, op.left_width()),
-                        RegisterSlot::new(right, op.right_width()),
-                    ],
-                    control,
-                )?;
-                let writes = self.slots_for([RegisterSlot::new(dest, width)], control)?;
+                let reads = self.slots_for([
+                    RegisterSlot::new(dest, op.left_width()),
+                    RegisterSlot::new(right, op.right_width()),
+                ])?;
+                let writes = self.slots_for([RegisterSlot::new(dest, width)])?;
                 (
                     OpKind::Binary {
                         op,
@@ -896,8 +853,8 @@ impl<'a, 'd> Builder<'a, 'd> {
                 let (dest, source) = self.two_regs(instruction)?;
                 let op = lit16_op((opcode - 0xd0) % 8)?;
                 let literal = self.signed_literal(instruction)?;
-                let reads = self.slots_for([RegisterSlot::new(source, SlotWidth::One)], control)?;
-                let writes = self.slots_for([RegisterSlot::new(dest, SlotWidth::One)], control)?;
+                let reads = self.slots_for([RegisterSlot::new(source, SlotWidth::One)])?;
+                let writes = self.slots_for([RegisterSlot::new(dest, SlotWidth::One)])?;
                 (
                     OpKind::Binary {
                         op,
@@ -915,8 +872,8 @@ impl<'a, 'd> Builder<'a, 'd> {
                 let (dest, source) = self.two_regs(instruction)?;
                 let op = lit8_op((opcode - 0xd8) % 11)?;
                 let literal = self.signed_literal(instruction)?;
-                let reads = self.slots_for([RegisterSlot::new(source, SlotWidth::One)], control)?;
-                let writes = self.slots_for([RegisterSlot::new(dest, SlotWidth::One)], control)?;
+                let reads = self.slots_for([RegisterSlot::new(source, SlotWidth::One)])?;
+                let writes = self.slots_for([RegisterSlot::new(dest, SlotWidth::One)])?;
                 (
                     OpKind::Binary {
                         op,
@@ -940,7 +897,7 @@ impl<'a, 'd> Builder<'a, 'd> {
                         ));
                     }
                 };
-                let writes = self.slots_for([RegisterSlot::new(dest, SlotWidth::One)], control)?;
+                let writes = self.slots_for([RegisterSlot::new(dest, SlotWidth::One)])?;
                 (
                     OpKind::ConstMethodHandle { handle },
                     self.empty_span(),
@@ -956,7 +913,7 @@ impl<'a, 'd> Builder<'a, 'd> {
                     Some(OperandReference::Proto(value)) => value,
                     _ => return Err(internal("const-method-type has no proto reference")),
                 };
-                let writes = self.slots_for([RegisterSlot::new(dest, SlotWidth::One)], control)?;
+                let writes = self.slots_for([RegisterSlot::new(dest, SlotWidth::One)])?;
                 (
                     OpKind::ConstMethodType { proto },
                     self.empty_span(),
@@ -985,7 +942,7 @@ impl<'a, 'd> Builder<'a, 'd> {
                 0x0b => SlotWidth::Two,
                 _ => SlotWidth::One,
             };
-            writes = self.slots_for([RegisterSlot::new(dest, width)], control)?;
+            writes = self.slots_for([RegisterSlot::new(dest, width)])?;
         }
         let commit = if atom.result.is_some() {
             CommitRule::AfterResult
@@ -1057,7 +1014,6 @@ impl<'a, 'd> Builder<'a, 'd> {
         &mut self,
         _atom: &Atom,
         instruction: &DecodedInstruction,
-        control: &mut RunContext<'_>,
     ) -> Result<(Terminal, SlotSpan), FlowError> {
         let pc = instruction.pc();
         match instruction.spec().flow {
@@ -1080,7 +1036,6 @@ impl<'a, 'd> Builder<'a, 'd> {
                     push(
                         &mut slots,
                         RegisterSlot::new(self.register(instruction, index)?, SlotWidth::One),
-                        control,
                     )
                     .map_err(request_error)?;
                 }
@@ -1093,7 +1048,7 @@ impl<'a, 'd> Builder<'a, 'd> {
                         target,
                         fallthrough,
                     },
-                    self.slots_vec(slots, control)?,
+                    self.slots_vec(slots)?,
                 ))
             }
             FlowKind::PackedSwitch | FlowKind::SparseSwitch => {
@@ -1104,7 +1059,7 @@ impl<'a, 'd> Builder<'a, 'd> {
                 let default = pc
                     .checked_advance(instruction.width())
                     .ok_or(FlowError::PlatformCapacity)?;
-                let cases = self.switch_cases(instruction, control)?;
+                let cases = self.switch_cases(instruction)?;
                 Ok((
                     Terminal::Switch {
                         kind: if instruction.opcode() == 0x2b {
@@ -1116,7 +1071,7 @@ impl<'a, 'd> Builder<'a, 'd> {
                         default,
                         cases,
                     },
-                    self.slots_for([RegisterSlot::new(selector, SlotWidth::One)], control)?,
+                    self.slots_for([RegisterSlot::new(selector, SlotWidth::One)])?,
                 ))
             }
             FlowKind::Return => {
@@ -1126,22 +1081,18 @@ impl<'a, 'd> Builder<'a, 'd> {
                     _ => Some(SlotWidth::One),
                 };
                 let reads = match width {
-                    Some(width) => self.slots_for(
-                        [RegisterSlot::new(self.register(instruction, 0)?, width)],
-                        control,
-                    )?,
+                    Some(width) => {
+                        self.slots_for([RegisterSlot::new(self.register(instruction, 0)?, width)])?
+                    }
                     None => self.empty_span(),
                 };
                 Ok((Terminal::Return { width, pc }, reads))
             }
             FlowKind::Throw => {
-                let reads = self.slots_for(
-                    [RegisterSlot::new(
-                        self.register(instruction, 0)?,
-                        SlotWidth::One,
-                    )],
-                    control,
-                )?;
+                let reads = self.slots_for([RegisterSlot::new(
+                    self.register(instruction, 0)?,
+                    SlotWidth::One,
+                )])?;
                 Ok((Terminal::Throw { pc }, reads))
             }
             _ => Err(internal(
@@ -1150,13 +1101,12 @@ impl<'a, 'd> Builder<'a, 'd> {
         }
     }
 
-    fn build_edges(&mut self, control: &mut RunContext<'_>) -> Result<(), FlowError> {
+    fn build_edges(&mut self) -> Result<(), FlowError> {
         for index in 0..self.blocks.len() {
-            control.checkpoint()?;
             let id = self.blocks[index].id;
             match &self.blocks[index].terminal {
                 Some(Terminal::Goto { target }) => {
-                    self.normal_edge(id, NormalEdge::Goto, self.block_at_pc(*target)?, control)?;
+                    self.normal_edge(id, NormalEdge::Goto, self.block_at_pc(*target)?)?;
                 }
                 Some(Terminal::Branch {
                     target,
@@ -1165,15 +1115,14 @@ impl<'a, 'd> Builder<'a, 'd> {
                 }) => {
                     let target = self.block_at_pc(*target)?;
                     let fallthrough = self.block_at_pc(*fallthrough)?;
-                    self.normal_edge(id, NormalEdge::ConditionalTrue, target, control)?;
-                    self.normal_edge(id, NormalEdge::ConditionalFalse, fallthrough, control)?;
+                    self.normal_edge(id, NormalEdge::ConditionalTrue, target)?;
+                    self.normal_edge(id, NormalEdge::ConditionalFalse, fallthrough)?;
                 }
                 Some(Terminal::Switch { default, cases, .. }) => {
                     let default = self.block_at_pc(*default)?;
                     let count = cases.len();
-                    self.normal_edge(id, NormalEdge::SwitchDefault, default, control)?;
+                    self.normal_edge(id, NormalEdge::SwitchDefault, default)?;
                     for ordinal in 0..count {
-                        control.checkpoint()?;
                         let Some(Terminal::Switch { cases, .. }) = &self.blocks[index].terminal
                         else {
                             return Err(internal("switch terminal changed while building edges"));
@@ -1189,24 +1138,22 @@ impl<'a, 'd> Builder<'a, 'd> {
                                 index: case_index,
                             },
                             target,
-                            control,
                         )?;
                     }
                 }
                 Some(Terminal::Return { pc, .. }) => {
-                    self.exit(id, *pc, ExitKind::Return, control)?;
+                    self.exit(id, *pc, ExitKind::Return)?;
                 }
                 Some(Terminal::Throw { pc }) => {
-                    self.exception_edges(id, None, *pc, *pc, control)?;
+                    self.exception_edges(id, None, *pc, *pc)?;
                 }
                 None => {
                     let target = self.next_block(&self.blocks[index])?;
-                    self.normal_edge(id, NormalEdge::Fallthrough, target, control)?;
+                    self.normal_edge(id, NormalEdge::Fallthrough, target)?;
                 }
             }
         }
         for index in 0..self.operations.len() {
-            control.checkpoint()?;
             let operation = &self.operations[index];
             if !operation.effects.may_throw() {
                 continue;
@@ -1218,7 +1165,7 @@ impl<'a, 'd> Builder<'a, 'd> {
                 .exceptional
                 .ok_or(internal("throwing operation lacks transfer"))?
                 .selection_pc;
-            self.exception_edges(block, Some(id), pc, selection, control)?;
+            self.exception_edges(block, Some(id), pc, selection)?;
         }
         Ok(())
     }
@@ -1229,73 +1176,61 @@ impl<'a, 'd> Builder<'a, 'd> {
         source_op: Option<OpId>,
         throw_pc: CodeUnitOffset,
         selection_pc: CodeUnitOffset,
-        control: &mut RunContext<'_>,
     ) -> Result<(), FlowError> {
         let clauses = self
             .decoded
-            .catch_clauses_at(selection_pc, control)
+            .catch_clauses_at(selection_pc)
             .map_err(request_error)?;
         if clauses.is_empty() {
-            let exit = self.exit(block, throw_pc, ExitKind::Uncaught, control)?;
-            self.push_edge(
-                Edge {
-                    id: self.next_edge_id()?,
-                    from: block,
-                    source_op,
-                    role: EdgeRole::Exception {
-                        throw_pc,
-                        selection_pc,
-                        order: 0,
-                        catch: None,
-                    },
-                    target: EdgeTarget::Exit(exit),
+            let exit = self.exit(block, throw_pc, ExitKind::Uncaught)?;
+            self.push_edge(Edge {
+                id: self.next_edge_id()?,
+                from: block,
+                source_op,
+                role: EdgeRole::Exception {
+                    throw_pc,
+                    selection_pc,
+                    order: 0,
+                    catch: None,
                 },
-                control,
-            )?;
+                target: EdgeTarget::Exit(exit),
+            })?;
             return Ok(());
         }
         let clause_count = clauses.len();
         let mut has_catch_all = false;
         for (order, (catch, target)) in clauses.into_iter().enumerate() {
-            control.checkpoint()?;
             if catch.is_none() {
                 has_catch_all = true;
             }
             let target = self.block_at_pc(CodeUnitOffset(target))?;
-            self.push_edge(
-                Edge {
-                    id: self.next_edge_id()?,
-                    from: block,
-                    source_op,
-                    role: EdgeRole::Exception {
-                        throw_pc,
-                        selection_pc,
-                        order: u32::try_from(order).map_err(|_| FlowError::PlatformCapacity)?,
-                        catch: catch.map(TypeId),
-                    },
-                    target: EdgeTarget::Block(target),
+            self.push_edge(Edge {
+                id: self.next_edge_id()?,
+                from: block,
+                source_op,
+                role: EdgeRole::Exception {
+                    throw_pc,
+                    selection_pc,
+                    order: u32::try_from(order).map_err(|_| FlowError::PlatformCapacity)?,
+                    catch: catch.map(TypeId),
                 },
-                control,
-            )?;
+                target: EdgeTarget::Block(target),
+            })?;
         }
         if !has_catch_all {
-            let exit = self.exit(block, throw_pc, ExitKind::Uncaught, control)?;
-            self.push_edge(
-                Edge {
-                    id: self.next_edge_id()?,
-                    from: block,
-                    source_op,
-                    role: EdgeRole::Exception {
-                        throw_pc,
-                        selection_pc,
-                        order: u32::try_from(clause_count)
-                            .map_err(|_| FlowError::PlatformCapacity)?,
-                        catch: None,
-                    },
-                    target: EdgeTarget::Exit(exit),
+            let exit = self.exit(block, throw_pc, ExitKind::Uncaught)?;
+            self.push_edge(Edge {
+                id: self.next_edge_id()?,
+                from: block,
+                source_op,
+                role: EdgeRole::Exception {
+                    throw_pc,
+                    selection_pc,
+                    order: u32::try_from(clause_count).map_err(|_| FlowError::PlatformCapacity)?,
+                    catch: None,
                 },
-                control,
-            )?;
+                target: EdgeTarget::Exit(exit),
+            })?;
         }
         Ok(())
     }
@@ -1305,18 +1240,14 @@ impl<'a, 'd> Builder<'a, 'd> {
         from: BlockId,
         role: NormalEdge,
         target: BlockId,
-        control: &mut RunContext<'_>,
     ) -> Result<(), FlowError> {
-        self.push_edge(
-            Edge {
-                id: self.next_edge_id()?,
-                from,
-                source_op: None,
-                role: EdgeRole::Normal(role),
-                target: EdgeTarget::Block(target),
-            },
-            control,
-        )
+        self.push_edge(Edge {
+            id: self.next_edge_id()?,
+            from,
+            source_op: None,
+            role: EdgeRole::Normal(role),
+            target: EdgeTarget::Block(target),
+        })
     }
 
     fn exit(
@@ -1324,7 +1255,6 @@ impl<'a, 'd> Builder<'a, 'd> {
         block: BlockId,
         pc: CodeUnitOffset,
         kind: ExitKind,
-        control: &mut RunContext<'_>,
     ) -> Result<ExitId, FlowError> {
         let id = ExitId(u32::try_from(self.exits.len()).map_err(|_| FlowError::PlatformCapacity)?);
         push(
@@ -1335,14 +1265,13 @@ impl<'a, 'd> Builder<'a, 'd> {
                 pc,
                 kind,
             },
-            control,
         )
         .map_err(request_error)?;
         Ok(id)
     }
 
-    fn push_edge(&mut self, edge: Edge, control: &mut RunContext<'_>) -> Result<(), FlowError> {
-        push(&mut self.edges, edge, control).map_err(request_error)
+    fn push_edge(&mut self, edge: Edge) -> Result<(), FlowError> {
+        push(&mut self.edges, edge).map_err(request_error)
     }
 
     fn next_edge_id(&self) -> Result<EdgeId, FlowError> {
@@ -1379,7 +1308,6 @@ impl<'a, 'd> Builder<'a, 'd> {
     fn switch_cases(
         &self,
         instruction: &DecodedInstruction,
-        control: &mut RunContext<'_>,
     ) -> Result<Vec<(i64, CodeUnitOffset)>, FlowError> {
         let payload_pc = instruction
             .payload_target()
@@ -1394,13 +1322,12 @@ impl<'a, 'd> Builder<'a, 'd> {
             .ok_or(internal("switch payload has no cases"))?;
         let mut result = Vec::new();
         for case in cases {
-            control.checkpoint()?;
             let target = i64::from(instruction.pc().0)
                 .checked_add(i64::from(case.offset.0))
                 .and_then(|value| u32::try_from(value).ok())
                 .map(CodeUnitOffset)
                 .ok_or(FlowError::PlatformCapacity)?;
-            push(&mut result, (case.key, target), control).map_err(request_error)?;
+            push(&mut result, (case.key, target)).map_err(request_error)?;
         }
         Ok(result)
     }
@@ -1424,12 +1351,10 @@ impl<'a, 'd> Builder<'a, 'd> {
     fn slots_for<const N: usize>(
         &mut self,
         slots: [RegisterSlot; N],
-        control: &mut RunContext<'_>,
     ) -> Result<SlotSpan, FlowError> {
         let start = u32::try_from(self.slots.len()).map_err(|_| FlowError::PlatformCapacity)?;
         for slot in slots {
-            control.checkpoint()?;
-            push(&mut self.slots, slot, control).map_err(request_error)?;
+            push(&mut self.slots, slot).map_err(request_error)?;
         }
         let len = u32::try_from(self.slots.len())
             .map_err(|_| FlowError::PlatformCapacity)?
@@ -1438,15 +1363,10 @@ impl<'a, 'd> Builder<'a, 'd> {
         Ok(SlotSpan::new(start, len))
     }
 
-    fn slots_vec(
-        &mut self,
-        slots: Vec<RegisterSlot>,
-        control: &mut RunContext<'_>,
-    ) -> Result<SlotSpan, FlowError> {
+    fn slots_vec(&mut self, slots: Vec<RegisterSlot>) -> Result<SlotSpan, FlowError> {
         let start = u32::try_from(self.slots.len()).map_err(|_| FlowError::PlatformCapacity)?;
         for slot in slots {
-            control.checkpoint()?;
-            push(&mut self.slots, slot, control).map_err(request_error)?;
+            push(&mut self.slots, slot).map_err(request_error)?;
         }
         let len = u32::try_from(self.slots.len())
             .map_err(|_| FlowError::PlatformCapacity)?
@@ -1518,13 +1438,10 @@ impl<'a, 'd> Builder<'a, 'd> {
         &mut self,
         instruction: &DecodedInstruction,
         width: SlotWidth,
-        control: &mut RunContext<'_>,
     ) -> Result<SlotSpan, FlowError> {
         let start = u32::try_from(self.slots.len()).map_err(|_| FlowError::PlatformCapacity)?;
         for register in instruction.registers() {
-            control.checkpoint()?;
-            push(&mut self.slots, RegisterSlot::new(register, width), control)
-                .map_err(request_error)?;
+            push(&mut self.slots, RegisterSlot::new(register, width)).map_err(request_error)?;
         }
         let end = u32::try_from(self.slots.len()).map_err(|_| FlowError::PlatformCapacity)?;
         Ok(SlotSpan::new(start, end - start))
@@ -1534,7 +1451,6 @@ impl<'a, 'd> Builder<'a, 'd> {
         &mut self,
         instruction: &DecodedInstruction,
         layout: &crate::p1::InvokeLayout,
-        control: &mut RunContext<'_>,
     ) -> Result<SlotSpan, FlowError> {
         let mut regs = instruction.registers();
         let mut slots = Vec::new();
@@ -1546,17 +1462,14 @@ impl<'a, 'd> Builder<'a, 'd> {
                         .ok_or(internal("invoke lost its checked receiver"))?,
                     SlotWidth::One,
                 ),
-                control,
             )
             .map_err(request_error)?;
         }
         for width in layout.arguments() {
-            control.checkpoint()?;
             let register = regs
                 .next()
                 .ok_or(internal("invoke lost a checked argument"))?;
-            push(&mut slots, RegisterSlot::new(register, *width), control)
-                .map_err(request_error)?;
+            push(&mut slots, RegisterSlot::new(register, *width)).map_err(request_error)?;
             if *width == SlotWidth::Two {
                 let second = regs
                     .next()
@@ -1569,7 +1482,7 @@ impl<'a, 'd> Builder<'a, 'd> {
         if regs.next().is_some() {
             return Err(internal("invoke has unclaimed register words"));
         }
-        self.slots_vec(slots, control)
+        self.slots_vec(slots)
     }
 
     fn unary_op(&self, opcode: u8) -> Result<UnaryOp, FlowError> {

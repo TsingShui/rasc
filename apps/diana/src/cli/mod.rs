@@ -459,10 +459,10 @@ fn entries(
         },
     )
     .map_err(|error| Failure::query(error, 1))?;
-    let cancel = std::sync::atomic::AtomicBool::new(false);
+
     let mut rows = Vec::new();
     query
-        .run(&cancel, &mut |row| {
+        .run(&mut |row| {
             rows.push(row);
             Ok(())
         })
@@ -605,10 +605,10 @@ fn query_command(
     };
     let query = Query::new(&scope, plan).map_err(|error| Failure::query(error, 1))?;
     let images = query.images().to_vec();
-    let cancel = std::sync::atomic::AtomicBool::new(false);
+
     let mut rows = Vec::new();
     query
-        .run(&cancel, &mut |row| {
+        .run(&mut |row| {
             rows.push(row);
             Ok(())
         })

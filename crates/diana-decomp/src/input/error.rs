@@ -1,6 +1,6 @@
 use thiserror::Error;
 
-use crate::{ByteLength, ByteOffset, ControlError, FailureKind, TypeId};
+use crate::{ByteLength, ByteOffset, FailureKind, TypeId};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum InputProblem {
@@ -59,8 +59,6 @@ pub enum InputError {
     Allocation { offset_byte: ByteOffset },
     #[error("BUG: {0}")]
     InternalInvariant(&'static str),
-    #[error(transparent)]
-    Control(#[from] ControlError),
 }
 
 impl InputError {
@@ -71,7 +69,7 @@ impl InputError {
             Self::PlatformCapacity { .. } | Self::Allocation { .. } => {
                 FailureKind::ResourceExhausted
             }
-            Self::Control(error) => error.kind(),
+
             Self::InternalInvariant(_) => FailureKind::InternalInvariant,
         }
     }

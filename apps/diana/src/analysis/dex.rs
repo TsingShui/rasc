@@ -1,5 +1,5 @@
 use diana_decomp::input::{ClassView, FieldStorage, ProgramIndex};
-use diana_decomp::{ClassDefId, FieldId, MethodId, RunContext, StringId};
+use diana_decomp::{ClassDefId, FieldId, MethodId, StringId};
 
 use super::query::{QueryError, Row};
 
@@ -81,11 +81,7 @@ impl ClassFilter {
             && self.kind.is_none()
     }
 
-    fn admits(
-        &self,
-        class: &ClassView<'_, '_>,
-        control: &mut RunContext<'_>,
-    ) -> Result<bool, diana_decomp::input::InputError> {
+    fn admits(&self, class: &ClassView<'_, '_>) -> Result<bool, diana_decomp::input::InputError> {
         let interface = class.access_flags & 0x200 != 0;
         if let Some(kind) = self.kind
             && interface != (kind == ClassKind::Interface)
@@ -95,9 +91,9 @@ impl ClassFilter {
         if self.is_empty() {
             return Ok(true);
         }
-        let hierarchy = class.hierarchy(control)?;
+        let hierarchy = class.hierarchy()?;
         if let Some(target) = &self.extends
-            && !matches!(&hierarchy.superclass, Some(parent) if parent.matches(target, control)?)
+            && !matches!(&hierarchy.superclass, Some(parent) if parent.matches(target)?)
         {
             return Ok(false);
         }
@@ -107,8 +103,7 @@ impl ClassFilter {
             }
             let mut listed = false;
             for name in &hierarchy.interfaces {
-                control.checkpoint()?;
-                listed |= name.matches(target, control)?;
+                listed |= name.matches(target)?;
             }
             if !listed {
                 return Ok(false);
@@ -120,8 +115,7 @@ impl ClassFilter {
             }
             let mut listed = false;
             for name in &hierarchy.interfaces {
-                control.checkpoint()?;
-                listed |= name.matches(target, control)?;
+                listed |= name.matches(target)?;
             }
             if !listed {
                 return Ok(false);
@@ -133,11 +127,8 @@ impl ClassFilter {
 
 /// Opens one root image for read-only table queries. No method body or analysis
 /// product is built here.
-pub(super) fn open<'a>(
-    bytes: &'a [u8],
-    control: &mut RunContext<'_>,
-) -> Result<ProgramIndex<'a>, QueryError> {
-    Ok(ProgramIndex::open(bytes, control)?)
+pub(super) fn open<'a>(bytes: &'a [u8]) -> Result<ProgramIndex<'a>, QueryError> {
+    Ok(ProgramIndex::open(bytes)?)
 }
 
 pub(super) fn classes(
@@ -145,28 +136,28 @@ pub(super) fn classes(
     image: ImageIndex,
     filter: Option<&[u16]>,
     relation: &ClassFilter,
-    control: &mut RunContext<'_>,
     emit: &mut dyn FnMut(Row) -> Result<(), QueryError>,
 ) -> Result<(), QueryError> {
     let mut failure: Option<QueryError> = None;
     let result = {
         let mut forward = |row: Row| -> Result<(), diana_decomp::input::InputError> {
-            if failure.is_none()
-                && let Err(error) = emit(row)
-            {
+            if let Err(error) = emit(row) {
                 failure = Some(error);
+                return Err(diana_decomp::input::InputError::InternalInvariant(
+                    "query sink stopped",
+                ));
             }
             Ok(())
         };
-        index.visit_classes(control, |class_def, class, control| {
+        index.visit_classes(|class_def, class| {
             let class = class?;
-            let descriptor = class.descriptor.units(control)?;
+            let descriptor = class.descriptor.units()?;
             if let Some(needle) = filter
                 && !contains(&descriptor, needle)
             {
                 return Ok(());
             }
-            if !relation.admits(&class, control)? {
+            if !relation.admits(&class)? {
                 return Ok(());
             }
             forward(Row::Class(ClassRow {
@@ -189,30 +180,30 @@ pub(super) fn methods(
     image: ImageIndex,
     class_filter: Option<&[u16]>,
     filter: Option<&[u16]>,
-    control: &mut RunContext<'_>,
     emit: &mut dyn FnMut(Row) -> Result<(), QueryError>,
 ) -> Result<(), QueryError> {
     let mut failure: Option<QueryError> = None;
     let result = {
         let mut forward = |row: Row| -> Result<(), diana_decomp::input::InputError> {
-            if failure.is_none()
-                && let Err(error) = emit(row)
-            {
+            if let Err(error) = emit(row) {
                 failure = Some(error);
+                return Err(diana_decomp::input::InputError::InternalInvariant(
+                    "query sink stopped",
+                ));
             }
             Ok(())
         };
-        index.visit_classes(control, |class_def, class, control| {
+        index.visit_classes(|class_def, class| {
             let class = class?;
             if let Some(target) = class_filter
-                && !class.descriptor.matches(target, control)?
+                && !class.descriptor.matches(target)?
             {
                 return Ok(());
             }
-            let class_descriptor = class.descriptor.units(control)?;
-            class.visit_methods(control, |method, control| {
+            let class_descriptor = class.descriptor.units()?;
+            class.visit_methods(|method| {
                 let declaration = method.declaration?;
-                let name = declaration.name.units(control)?;
+                let name = declaration.name.units()?;
                 if let Some(needle) = filter
                     && !contains_ignore_case(&name, needle)
                 {
@@ -220,14 +211,12 @@ pub(super) fn methods(
                 }
                 let mut prototype = Vec::new();
                 prototype.push(u16::from(b'('));
-                declaration
-                    .prototype
-                    .visit_parameters(control, |parameter, control| {
-                        prototype.extend(parameter.units(control)?);
-                        Ok(())
-                    })?;
+                declaration.prototype.visit_parameters(|parameter| {
+                    prototype.extend(parameter.units()?);
+                    Ok(())
+                })?;
                 prototype.push(u16::from(b')'));
-                prototype.extend(declaration.prototype.return_type.units(control)?);
+                prototype.extend(declaration.prototype.return_type.units()?);
                 forward(Row::Method(MethodRow {
                     image,
                     class_def,
@@ -251,30 +240,30 @@ pub(super) fn fields(
     image: ImageIndex,
     class_filter: Option<&[u16]>,
     filter: Option<&[u16]>,
-    control: &mut RunContext<'_>,
     emit: &mut dyn FnMut(Row) -> Result<(), QueryError>,
 ) -> Result<(), QueryError> {
     let mut failure: Option<QueryError> = None;
     let result = {
         let mut forward = |row: Row| -> Result<(), diana_decomp::input::InputError> {
-            if failure.is_none()
-                && let Err(error) = emit(row)
-            {
+            if let Err(error) = emit(row) {
                 failure = Some(error);
+                return Err(diana_decomp::input::InputError::InternalInvariant(
+                    "query sink stopped",
+                ));
             }
             Ok(())
         };
-        index.visit_classes(control, |class_def, class, control| {
+        index.visit_classes(|class_def, class| {
             let class = class?;
             if let Some(target) = class_filter
-                && !class.descriptor.matches(target, control)?
+                && !class.descriptor.matches(target)?
             {
                 return Ok(());
             }
-            let class_descriptor = class.descriptor.units(control)?;
-            class.visit_fields(control, |field, control| {
+            let class_descriptor = class.descriptor.units()?;
+            class.visit_fields(|field| {
                 let declaration = field.declaration?;
-                let name = declaration.name.units(control)?;
+                let name = declaration.name.units()?;
                 if let Some(needle) = filter
                     && !contains_ignore_case(&name, needle)
                 {
@@ -286,7 +275,7 @@ pub(super) fn fields(
                     class_descriptor: class_descriptor.clone(),
                     field: field.field_idx,
                     name,
-                    field_type: declaration.field_type.units(control)?,
+                    field_type: declaration.field_type.units()?,
                     access_flags: field.access_flags,
                     storage: field.storage,
                 }))
@@ -303,37 +292,23 @@ pub(super) fn strings(
     index: &ProgramIndex<'_>,
     image: ImageIndex,
     filter: Option<&[u16]>,
-    control: &mut RunContext<'_>,
     emit: &mut dyn FnMut(Row) -> Result<(), QueryError>,
 ) -> Result<(), QueryError> {
-    let mut failure: Option<QueryError> = None;
-    let mut forward = |row: Row| -> Result<(), QueryError> {
-        if failure.is_none()
-            && let Err(error) = emit(row)
-        {
-            failure = Some(error);
-        }
-        Ok(())
-    };
     for ordinal in 0..index.string_ids_len() {
-        control.checkpoint()?;
         let string = StringId(ordinal);
-        let units = index.string(string, control)?.units(control)?;
+        let units = index.string(string)?.units()?;
         if let Some(needle) = filter
             && !contains_ignore_case(&units, needle)
         {
             continue;
         }
-        forward(Row::String(StringRow {
+        emit(Row::String(StringRow {
             image,
             string,
             units,
         }))?;
     }
-    match failure {
-        Some(error) => Err(error),
-        None => Ok(()),
-    }
+    Ok(())
 }
 
 /// Converts a class name in dotted form to an original descriptor. A value that is

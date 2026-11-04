@@ -161,7 +161,7 @@ AOSP Android 15 [ResourceTypes.h](https://android.googlesource.com/platform/fram
 defines ResChunk_header, ResStringPool and ResXMLTree field layouts. These are
 online source anchors, not new downloaded tool assets or a claim of round-trip
 certification. The archived AXML PATCHES and `src/analysis/manifest.rs` are reuse
-evidence only; neither certifies Diana allocation, cancellation or malformed-read
+evidence only; neither certifies Diana allocation or malformed-read
 safety.
 
 Choose at most one main algorithm reference and one implementation reference per batch, producing a decision, invariant or counterexample. Do not turn close reading of every paper or building whole projects into a new prerequisite. Pin the URL/commit of a new reference in the script first, record its use and applicability limits, and do not automatically update existing expectations or expand implementation scope. Downloaded material is for development review only; public availability does not imply permission to copy or redistribute code/fixtures.
@@ -250,7 +250,7 @@ This section connects sources to concrete implementation rules. DESIGN/ALGORITHM
 | R04 JLS/JMM / ART | Preserve volatile/init/lock order; lock roots require dynamic freshness; avoid constant field initializers on final fields that would inline sget. | [PIPELINE_DESIGN §§5.4–5.7](PIPELINE_DESIGN.md#54-p4值事实与使用解释产出-typedmethod); no new concurrency platform. |
 | R05 DEX / ART / EverParse / wasmparser | Explicit checked ranges/ULEB/MUTF16/metadata and 041 physical addressing; distinguish raw-valid/Java-profile/resource/BUG classifications. | [01-input](spec/01-input.md), [00-overview](spec/00-overview.md); do not copy upstream panic or unsafe behavior. |
 | R06 Java research / fidelity taxonomy | Generated executable members are not DeclarationOnly; finite behavior is not equivalent to “compilation implies equivalence.” | [00-overview](spec/00-overview.md) and [PIPELINE_DESIGN](PIPELINE_DESIGN.md). |
-| R07 R8 lifetime / concrete call chain | Preserve request cancellation and fallible allocation, release scratch after its consumer, and keep only required result facts; Diana has no cumulative work/allocation ledger. | [00-overview](spec/00-overview.md). |
+| R07 R8 lifetime / concrete call chain | Preserve fallible allocation and original-result delivery, release scratch after its consumer, and keep only required result facts; Diana has no cumulative work/allocation ledger. | [00-overview](spec/00-overview.md). |
 | R08 Dalvik fill / ART verifier | Filling an existing primitive array can accept null under static type verification; do not remove the NPE of a zero-element operation. Java uses a length read and proven FreshArray stores. | [02-flow](spec/02-flow.md); [bytecode](https://source.android.com/docs/core/runtime/dalvik-bytecode), FILL_ARRAY_DATA branch of pinned ART method_verifier.cc. |
 | R09 JVMS 8 format limits | JVMS limits describe compiled artifacts, not Diana readable-output admission. DEX format, platform capacity and configured resource limits remain enforced; production does not qualify source against classfile limits. | [01-input](spec/01-input.md); [JVMS 4.3.3](https://docs.oracle.com/javase/specs/jvms/se8/html/jvms-4.html#jvms-4.3.3), [4.7.3](https://docs.oracle.com/javase/specs/jvms/se8/html/jvms-4.html#jvms-4.7.3). |
 

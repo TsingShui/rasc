@@ -8,7 +8,7 @@ P2 consumes a complete `DecodedMethod`. It produces ordered operations,
 terminals, normal and exceptional transfers, exits and original-item coverage.
 P2 MUST NOT decode instructions again, resolve declarations through a program
 index, construct SSA or choose Java expressions. Numeric quotas are not used.
-Cancellation, platform capacity and allocation failures retain their classifications.
+Platform capacity and allocation failures retain their classifications.
 
 ## Execution obligations
 
@@ -87,8 +87,9 @@ values, aliases or feasible paths into another operation.
 
 Acceptance: every published operation has matching behavior, ordered arguments,
 normal register patch and exceptional selection/frame obligations, and every
-published transfer has one original owner. All loops observe cancellation and
-scratch allocation is fallible. Sorting uses in-place interruptible heapsort.
+published transfer has one original owner. Traversals have finite measures and
+scratch allocation is fallible. Scratch indexing uses standard in-place unstable
+sorting; no request cancellation callback participates in the algorithm.
 The transfer index costs O(E log E + X log X) to order, followed by indexed
 matching and an O(B + E) reachability walk; it does not scan all edges per block.
 
@@ -117,7 +118,7 @@ facts, with no product extraction, mutable access or construction entry.
 
 A P2 stop retains its complete P1 input, classified error and available unvalidated
 construction snapshot as `FlowStop`; it is not a successful partial FlowMethod.
-A class-level cancellation/resource/invariant stop returns the collected prefix
+A class-level resource/invariant stop returns the collected prefix
 with an explicit `terminated` kind. Local unsupported stops do not suppress
 subsequent members. Product records are privately constructed and consumers use
 immutable queries; later stages cannot assemble a substitute success product.

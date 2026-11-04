@@ -2,7 +2,7 @@ use super::formats::{
     Format, InsnLayout, LayoutKind, LayoutProblem, RawDecodeError, wide_word, word,
 };
 use super::{MethodError, RawMethodView};
-use crate::{ByteLength, CodeUnitDelta, CodeUnitOffset, RegisterId, RunContext};
+use crate::{ByteLength, CodeUnitDelta, CodeUnitOffset, RegisterId};
 
 /// Original literal bits, before selecting an int/float or long/double view.
 /// Arithmetic immediates retain their signed encoded width.
@@ -285,10 +285,9 @@ impl<'a> RawMethodView<'a> {
     /// supplied fallback budget. Unknown width stops before the next item.
     pub fn visit_instructions(
         &self,
-        budget: &mut RunContext<'_>,
-        mut visit: impl FnMut(RawCodeItem<'a>, &mut RunContext<'_>) -> Result<(), MethodError>,
+        mut visit: impl FnMut(RawCodeItem<'a>) -> Result<(), MethodError>,
     ) -> Result<(), MethodError> {
-        self.visit_layouts(budget, |pc, layout, budget| {
+        self.visit_layouts(|pc, layout| {
             let words = payload_words(self.instructions(), pc, layout)?;
             let item = match layout.kind() {
                 LayoutKind::Instruction(_) => RawCodeItem::Instruction(RawInstruction {
@@ -342,7 +341,7 @@ impl<'a> RawMethodView<'a> {
                     })
                 }
             };
-            visit(item, budget)
+            visit(item)
         })
     }
 }

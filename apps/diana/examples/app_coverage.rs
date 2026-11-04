@@ -11,7 +11,7 @@ use diana::analysis::input::InputOptions;
 use diana::analysis::request::RequestScope;
 use diana_decomp::{
     ClassKey, ClassOutput, DexId, DexImage, Diagnostic, DiagnosticCause, Engine, FailureKind,
-    ImageOrigin, InputId, MethodId, MethodOutput, Options, OutputReason, Request, RunContext,
+    ImageOrigin, InputId, MethodId, MethodOutput, Options, OutputReason, Request,
 };
 use serde_json::{Value, json};
 
@@ -95,7 +95,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let options = InputOptions { allowed_root: None };
     let scope = RequestScope::open(std::path::Path::new(&input), &options)?;
     let images = ImageSet::open(&scope)?;
-    let mut control = RunContext::new_parallel(&|| false);
+
     let mut dex_images = Vec::new();
     for image in images.images() {
         dex_images.push(DexImage {
@@ -107,15 +107,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         });
     }
     let jobs = std::thread::available_parallelism().map_or(1, |count| count.get());
-    let engine = Engine::open(dex_images, Options::default(), &mut control)?.with_method_jobs(jobs);
+    let engine = Engine::open(dex_images, Options::default())?.with_method_jobs(jobs);
     let mut all = Vec::new();
     for (position, image) in images.images().iter().enumerate() {
         let dex = DexId(u32::try_from(position)?);
-        let program = images.program(image, &mut control)?;
-        program.visit_classes(&mut control, |id, class, control| {
+        let program = images.program(image)?;
+        program.visit_classes(|id, class| {
             let class = class?;
             let mut methods = HashSet::new();
-            let enumeration = class.visit_methods(control, |method, _| {
+            let enumeration = class.visit_methods(|method, _| {
                 methods.insert(method.method_idx);
                 Ok(())
             });
@@ -126,7 +126,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             };
             all.push(SelectedClass {
                 key: ClassKey { dex, class_def: id },
-                descriptor: class.descriptor.units(control)?,
+                descriptor: class.descriptor.units()?,
                 methods,
                 enumeration_error,
             });
@@ -165,13 +165,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             totals.enumeration_errors += 1;
         }
         let started = Instant::now();
-        let result = engine.decompile(
-            Request {
-                class: class.key,
-                method: None,
-            },
-            &mut control,
-        );
+        let result = engine.decompile(Request {
+            class: class.key,
+            method: None,
+        });
         let elapsed = started.elapsed();
         durations.push(elapsed);
         slow.push((elapsed, class.key.dex.0, class.key.class_def.0));
@@ -245,7 +242,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 totals.missing_methods += class.methods.difference(&actual_methods).count() as u64;
                 totals.unexpected_methods +=
                     actual_methods.difference(&class.methods).count() as u64;
-                match diana_decomp::render(&report, &mut control) {
+                match diana_decomp::render(&report) {
                     Ok(rendered) => totals.rendered_bytes += u64::try_from(rendered.source.len())?,
                     Err(error) => {
                         totals.render_errors += 1;
@@ -253,10 +250,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             "render error dex={} class={}: {error}",
                             class.key.dex.0, class.key.class_def.0
                         );
-                        if matches!(
-                            error.kind(),
-                            FailureKind::Cancelled | FailureKind::ResourceExhausted
-                        ) {
+                        if matches!(error.kind(), FailureKind::ResourceExhausted) {
                             termination = Some(error.to_string());
                         }
                     }
@@ -280,10 +274,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         json!({"scope":"class", "dex":class.key.dex.0, "class":class.key.class_def.0, "reason":error.to_string(), "kind":format!("{:?}",error.kind()), "known_methods":class.methods.len()})
                     )?;
                 }
-                if matches!(
-                    error.kind(),
-                    FailureKind::Cancelled | FailureKind::ResourceExhausted
-                ) {
+                if matches!(error.kind(), FailureKind::ResourceExhausted) {
                     termination = Some(error.to_string());
                 }
             }

@@ -3,7 +3,7 @@ use crate::raw::OperandReference;
 use crate::substrate::flags::STATIC;
 use crate::substrate::owned::push;
 use crate::substrate::slots::{RegisterSlot, SlotWidth};
-use crate::{CodeUnitOffset, RegisterId, RequestError, RunContext, TypeId};
+use crate::{CodeUnitOffset, RegisterId, RequestError, TypeId};
 
 use super::disassembly::DecodedFacts;
 use super::reference::{
@@ -19,7 +19,6 @@ impl<'a> ProgramIndex<'a> {
     pub fn decode_method_source(
         &self,
         source: &MethodSource<'_, 'a>,
-        budget: &mut RunContext<'_>,
     ) -> Result<DecodedOutcome<'a>, MethodError> {
         let RawPrintable::Method(code) = source.raw() else {
             return Err(MethodError::InternalInvariant(
@@ -28,28 +27,27 @@ impl<'a> ProgramIndex<'a> {
         };
         let (_, return_shape) = source
             .program()
-            .type_descriptor(crate::TypeId(source.declaration().return_type_id), budget)?;
-        let items = match self.build_items(code, budget) {
+            .type_descriptor(crate::TypeId(source.declaration().return_type_id))?;
+        let items = match self.build_items(code) {
             Ok(items) => items,
             Err((prefix, error)) => return outcome(prefix, error),
         };
-        let layout = match self.check_method_layout(code, &items, budget) {
+        let layout = match self.check_method_layout(code, &items) {
             Ok(layout) => layout,
             Err(error) => return outcome(items, error),
         };
-        let reference_facts = match self.check_reference_contents(&items, return_shape, budget) {
+        let reference_facts = match self.check_reference_contents(&items, return_shape) {
             Ok(facts) => facts,
             Err(error) => return outcome(items, error),
         };
         if let Err(error) = check_reference_coverage(&items, &reference_facts) {
             return outcome(items, error);
         }
-        let protection = match crate::input::protection::read(&layout, budget).map_err(method_error)
-        {
+        let protection = match crate::input::protection::read(&layout).map_err(method_error) {
             Ok(protection) => protection,
             Err(error) => return outcome(items, error),
         };
-        let entry = match build_entry_layout(source, code, budget) {
+        let entry = match build_entry_layout(source, code) {
             Ok(entry) => entry,
             Err(error) => return outcome(items, error),
         };
@@ -78,11 +76,9 @@ impl<'a> ProgramIndex<'a> {
         &self,
         items: &[super::DecodedItem],
         return_shape: TypeShape,
-        budget: &mut RunContext<'_>,
     ) -> Result<Vec<ReferenceFactEntry<'a>>, MethodError> {
         let mut facts = Vec::new();
         for item in items {
-            budget.checkpoint()?;
             let super::DecodedItem::Instruction(instruction) = item else {
                 continue;
             };
@@ -91,10 +87,10 @@ impl<'a> ProgramIndex<'a> {
             for reference in instruction.references() {
                 let fact = match reference.target {
                     OperandReference::String(id) => CheckedReferenceFact::String {
-                        value: self.string_with(id, budget)?,
+                        value: self.string(id)?,
                     },
                     OperandReference::Type(id) => {
-                        let (descriptor, shape) = self.type_descriptor(id, budget)?;
+                        let (descriptor, shape) = self.type_descriptor(id)?;
                         let valid = match spec.opcode {
                             0x1f | 0x20 => matches!(shape, TypeShape::Class | TypeShape::Array),
                             0x22 => matches!(shape, TypeShape::Class),
@@ -106,8 +102,8 @@ impl<'a> ProgramIndex<'a> {
                         }
                         if matches!(spec.opcode, 0x24 | 0x25) {
                             let mut units = descriptor.reader()?;
-                            units.next(budget)?;
-                            if matches!(units.next(budget)?, Some(0x4a | 0x44)) {
+                            units.next()?;
+                            if matches!(units.next()?, Some(0x4a | 0x44)) {
                                 return Err(bad_type(pc));
                             }
                         }
@@ -118,9 +114,9 @@ impl<'a> ProgramIndex<'a> {
                         }
                     }
                     OperandReference::Field(id) => {
-                        let field = self.field_reference(id, budget)?;
+                        let field = self.field_reference(id)?;
                         if matches!(spec.opcode, 0x52..=0x6d) {
-                            let first = field.declaration.field_type.reader()?.next(budget)?;
+                            let first = field.declaration.field_type.reader()?.next()?;
                             let matches_kind = match (spec.opcode - 0x52) % 7 {
                                 0 => matches!(first, Some(73 | 70)),
                                 1 => matches!(first, Some(74 | 68)),
@@ -139,7 +135,7 @@ impl<'a> ProgramIndex<'a> {
                             }
                         }
                         if matches!(spec.opcode, 0x52..=0x6d)
-                            && let Some(flags) = self.local_field_flags(id, budget)?
+                            && let Some(flags) = self.local_field_flags(id)?
                             && (flags & 8 != 0) != matches!(spec.opcode, 0x60..=0x6d)
                         {
                             return Err(MethodError::Malformed {
@@ -156,9 +152,9 @@ impl<'a> ProgramIndex<'a> {
                         }
                     }
                     OperandReference::Method(id) => {
-                        let method = self.method_reference(id, budget)?;
+                        let method = self.method_reference(id)?;
                         if matches!(spec.opcode, 0x6e..=0x72 | 0x74..=0x78)
-                            && let Some(target) = self.local_method(id, budget)?
+                            && let Some(target) = self.local_method(id)?
                             && (target.access_flags & crate::substrate::flags::STATIC != 0)
                                 != matches!(spec.opcode, 0x71 | 0x77)
                         {
@@ -167,10 +163,8 @@ impl<'a> ProgramIndex<'a> {
                                 problem: MethodProblem::InvalidInvokeKind,
                             });
                         }
-                        let prototype = CheckedPrototype::from_prototype(
-                            &method.declaration.prototype,
-                            budget,
-                        )?;
+                        let prototype =
+                            CheckedPrototype::from_prototype(&method.declaration.prototype)?;
                         CheckedReferenceFact::Method {
                             owner: method.owner,
                             owner_type: method.owner_type,
@@ -179,27 +173,24 @@ impl<'a> ProgramIndex<'a> {
                         }
                     }
                     OperandReference::Proto(id) => {
-                        let proto = self.prototype(id, budget)?;
+                        let proto = self.prototype(id)?;
                         CheckedReferenceFact::Proto {
-                            prototype: CheckedPrototype::from_prototype(&proto, budget)?,
+                            prototype: CheckedPrototype::from_prototype(&proto)?,
                         }
                     }
                     OperandReference::CallSite(id) => {
-                        let callsite = self.call_site(id, budget)?;
+                        let callsite = self.call_site(id)?;
                         CheckedReferenceFact::CallSite {
                             name: callsite.name,
                             handle: CheckedMethodHandleFact::new(
                                 callsite.handle.kind,
                                 callsite.handle.member,
                             ),
-                            prototype: CheckedPrototype::from_prototype(
-                                &callsite.prototype,
-                                budget,
-                            )?,
+                            prototype: CheckedPrototype::from_prototype(&callsite.prototype)?,
                         }
                     }
                     OperandReference::MethodHandle(id) => {
-                        let handle = self.method_handle(id, budget)?;
+                        let handle = self.method_handle(id)?;
                         CheckedReferenceFact::MethodHandle {
                             handle: CheckedMethodHandleFact::new(handle.kind, handle.member),
                         }
@@ -212,7 +203,6 @@ impl<'a> ProgramIndex<'a> {
                         slot: reference.slot,
                         fact,
                     },
-                    budget,
                 )
                 .map_err(method_error)?;
             }
@@ -269,7 +259,6 @@ fn check_reference_coverage(
 fn build_entry_layout(
     source: &MethodSource<'_, '_>,
     code: &crate::input::RawMethodView<'_>,
-    budget: &mut RunContext<'_>,
 ) -> Result<EntryLayout, MethodError> {
     let declaration = source.declaration();
     if declaration.parameter_types.len() != declaration.parameter_type_ids.len() {
@@ -292,7 +281,6 @@ fn build_entry_layout(
     };
     let mut parameters = Vec::new();
     for (index, type_id) in declaration.parameter_type_ids.iter().enumerate() {
-        budget.checkpoint()?;
         let descriptor =
             declaration
                 .parameter_types
@@ -310,12 +298,7 @@ fn build_entry_layout(
         cursor = cursor
             .checked_add(width.words())
             .ok_or(MethodError::PlatformCapacity)?;
-        push(
-            &mut parameters,
-            EntryParameter::new(TypeId(*type_id), slot),
-            budget,
-        )
-        .map_err(method_error)?;
+        push(&mut parameters, EntryParameter::new(TypeId(*type_id), slot)).map_err(method_error)?;
     }
     if cursor != u32::from(code.registers_size()) {
         return Err(MethodError::InternalInvariant(
@@ -343,7 +326,7 @@ fn method_error(error: RequestError) -> MethodError {
     match error {
         RequestError::Input(error) => MethodError::Input(error),
         RequestError::Method(error) => error,
-        RequestError::Control(error) => MethodError::Control(error),
+
         RequestError::Allocation(error) => MethodError::Allocation(error),
         RequestError::PlatformCapacity => MethodError::PlatformCapacity,
         RequestError::InternalInvariant(message) => MethodError::InternalInvariant(message),
@@ -357,9 +340,7 @@ fn outcome<'a>(
 ) -> Result<DecodedOutcome<'a>, MethodError> {
     if matches!(
         error.kind(),
-        crate::FailureKind::Cancelled
-            | crate::FailureKind::ResourceExhausted
-            | crate::FailureKind::InternalInvariant
+        crate::FailureKind::ResourceExhausted | crate::FailureKind::InternalInvariant
     ) {
         return Err(error);
     }

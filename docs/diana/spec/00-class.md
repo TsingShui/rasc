@@ -5,8 +5,7 @@ the engine development shell `crates/diana-decomp/examples/dbg_shell.rs`.
 
 ## Input and ownership
 
-`p0::collect` consumes a selected `ProgramIndex`, its original `ClassKey` and the
-caller's `RunContext`. P0 reuses the shared checked declaration and metadata
+`p0::collect` consumes a selected `ProgramIndex` and its original `ClassKey`. P0 reuses the shared checked declaration and metadata
 readers; those readers own range checks, class-data delta decoding, declaration
 checks and encoded-value grammar. The input snapshot and APK selection remain
 application-owned. P0 performs one class-data traversal for both the field and
@@ -45,7 +44,7 @@ A fact uses `present`, `absent`, `not_read` or `unavailable`. A failed local rea
 MUST NOT become an absent fact. Declaration failures and annotation prefixes retain
 the independently available members and metadata. Section diagnostics explain
 incomplete traversal; a delivered prefix MUST NOT claim complete coverage.
-Cancellation, allocation failures and internal invariants stop collection or rendering.
+Allocation failures and internal invariants stop collection or rendering.
 One member's declaration or preparation failure does not discard independently
 readable siblings. Each direct interface keeps its own fact state, so an
 unreadable interface does not discard the other original references.

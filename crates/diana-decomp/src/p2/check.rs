@@ -1,27 +1,26 @@
 //! Translation validation over immutable P1/P2 products. Coverage is a bijection
 //! and transfers are matched by source site and role, not by aggregate counts.
 
-use super::scratch::{filled, push, sort_by_key};
+use super::scratch::{filled, push};
 use super::{
     BlockId, Coverage, EdgeRole, EdgeTarget, ExitId, ExitKind, FlowError, FlowMethod, NormalEdge,
     OpId,
 };
 use crate::p1::{DecodedInstruction, DecodedItem};
-use crate::{CodeUnitOffset, RunContext, TypeId};
+use crate::{CodeUnitOffset, TypeId};
 
 fn bug(message: &'static str) -> FlowError {
     FlowError::InternalInvariant(message)
 }
 
-pub(crate) fn verify(flow: &FlowMethod<'_>, control: &mut RunContext<'_>) -> Result<(), FlowError> {
-    check_coverage_and_order(flow, control)?;
-    let mut transfers = Transfers::new(flow, control)?;
+pub(crate) fn verify(flow: &FlowMethod<'_>) -> Result<(), FlowError> {
+    check_coverage_and_order(flow)?;
+    let mut transfers = Transfers::new(flow)?;
     for block in flow.blocks() {
-        control.checkpoint()?;
         for index in block.operations.clone() {
             let operation = &flow.operations()[index as usize];
             let instruction = instruction(flow, operation.pc)?;
-            super::oracle::verify_operation(flow, instruction, operation, control)?;
+            super::oracle::verify_operation(flow, instruction, operation)?;
             // The selection comes from the original instruction, never the P2 enum.
             let advanced = instruction.opcode() == 0x1e;
             let selection = if advanced {
@@ -47,18 +46,12 @@ pub(crate) fn verify(flow: &FlowMethod<'_>, control: &mut RunContext<'_>) -> Res
                         super::LockTransfer::Preserve
                     },
                 )?;
-                transfers.exceptions(
-                    block.id,
-                    Some(operation.id),
-                    operation.pc,
-                    selection,
-                    control,
-                )?;
+                transfers.exceptions(block.id, Some(operation.id), operation.pc, selection)?;
             }
         }
         if let Some(pc) = block.terminal_pc {
             let original = instruction(flow, pc)?;
-            super::oracle::verify_terminal(flow, block, original, control)?;
+            super::oracle::verify_terminal(flow, block, original)?;
             if original.opcode() == 0x27 {
                 check_exception_completion(
                     block.exceptional.ok_or(bug("throw lacks completion"))?,
@@ -72,7 +65,7 @@ pub(crate) fn verify(flow: &FlowMethod<'_>, control: &mut RunContext<'_>) -> Res
             }
             match original.opcode() {
                 0x0e..=0x11 => transfers.exit(block.id, pc, ExitKind::Return)?,
-                0x27 => transfers.exceptions(block.id, None, pc, pc, control)?,
+                0x27 => transfers.exceptions(block.id, None, pc, pc)?,
                 0x28..=0x2a => transfers.normal(
                     block.id,
                     pc,
@@ -111,7 +104,6 @@ pub(crate) fn verify(flow: &FlowMethod<'_>, control: &mut RunContext<'_>) -> Res
                         .map_err(super::build::request_error)?
                         .ok_or(bug("switch payload has no cases"))?;
                     for (index, case) in cases.enumerate() {
-                        control.checkpoint()?;
                         let target = relative(pc, case.offset.0)?;
                         transfers.normal(
                             block.id,
@@ -141,7 +133,7 @@ pub(crate) fn verify(flow: &FlowMethod<'_>, control: &mut RunContext<'_>) -> Res
             transfers.normal(block.id, operation.pc, NormalEdge::Fallthrough, next(last)?)?;
         }
     }
-    transfers.finish(control)
+    transfers.finish()
 }
 
 pub(super) fn instruction<'f, 'a>(
@@ -196,10 +188,7 @@ fn check_span(flow: &FlowMethod<'_>, span: super::SlotSpan) -> Result<(), FlowEr
     Ok(())
 }
 
-fn check_coverage_and_order(
-    flow: &FlowMethod<'_>,
-    control: &mut RunContext<'_>,
-) -> Result<(), FlowError> {
+fn check_coverage_and_order(flow: &FlowMethod<'_>) -> Result<(), FlowError> {
     if flow
         .blocks()
         .first()
@@ -210,11 +199,10 @@ fn check_coverage_and_order(
     if flow.coverage().len() != flow.decoded().items().len() {
         return Err(bug("coverage does not align with P1 items"));
     }
-    let mut claims = filled(flow.coverage().len(), None, control)?;
+    let mut claims = filled(flow.coverage().len(), None)?;
     let mut operation_cursor = 0usize;
     let mut previous_start = None;
     for (index, block) in flow.blocks().iter().enumerate() {
-        control.checkpoint()?;
         if block.id.0 as usize != index || previous_start.is_some_and(|pc| pc >= block.start_pc) {
             return Err(bug("block identities or PC order disagree"));
         }
@@ -227,7 +215,6 @@ fn check_coverage_and_order(
         }
         let mut pc = block.start_pc;
         for index in block.operations.clone() {
-            control.checkpoint()?;
             let operation = &flow.operations()[index as usize];
             if operation.normal.reads != super::ReadOrder::CaptureAllBeforeCommit {
                 return Err(bug("operation does not capture inputs before committing"));
@@ -285,7 +272,6 @@ fn check_coverage_and_order(
         return Err(bug("operation arena contains unowned operations"));
     }
     for (index, item) in flow.decoded().items().iter().enumerate() {
-        control.checkpoint()?;
         let expected = match item {
             DecodedItem::Payload(_) => {
                 if claims[index].is_some() {
@@ -308,7 +294,6 @@ fn check_coverage_and_order(
         }
     }
     for slot in flow.slots() {
-        control.checkpoint()?;
         if slot
             .end()
             .is_none_or(|end| u64::from(end.0) > flow.decoded().registers_size().0)
@@ -355,10 +340,9 @@ struct Transfers<'f, 'a> {
 }
 
 impl<'f, 'a> Transfers<'f, 'a> {
-    fn new(flow: &'f FlowMethod<'a>, control: &mut RunContext<'_>) -> Result<Self, FlowError> {
+    fn new(flow: &'f FlowMethod<'a>) -> Result<Self, FlowError> {
         let mut keys = Vec::new();
         for (index, edge) in flow.edges().iter().enumerate() {
-            control.checkpoint()?;
             if edge.id.0 as usize != index {
                 return Err(bug("edge identity is not its arena index"));
             }
@@ -388,33 +372,26 @@ impl<'f, 'a> Transfers<'f, 'a> {
                     ordinal: order,
                 },
             };
-            push(&mut keys, (key, index), control)?;
+            push(&mut keys, (key, index))?;
         }
-        sort_by_key(&mut keys, |(key, _)| *key, control)?;
-        control.checkpoint()?;
+        keys.sort_unstable_by_key(|(key, _)| *key);
+
         for pair in keys.windows(2) {
-            control.checkpoint()?;
             if pair[0].0 == pair[1].0 {
                 return Err(bug("duplicate semantic edge replaces an original transfer"));
             }
         }
         let mut exit_keys = Vec::new();
         for (index, exit) in flow.exits().iter().enumerate() {
-            control.checkpoint()?;
             if exit.id.0 as usize != index || flow.block(exit.block).is_none() {
                 return Err(bug("exit identity or owner is foreign"));
             }
             let kind = if exit.kind == ExitKind::Return { 0 } else { 1 };
-            push(
-                &mut exit_keys,
-                ((exit.block, exit.pc, kind), exit.id),
-                control,
-            )?;
+            push(&mut exit_keys, ((exit.block, exit.pc, kind), exit.id))?;
         }
-        sort_by_key(&mut exit_keys, |(key, _)| *key, control)?;
-        control.checkpoint()?;
+        exit_keys.sort_unstable_by_key(|(key, _)| *key);
+
         for pair in exit_keys.windows(2) {
-            control.checkpoint()?;
             if pair[0].0 == pair[1].0 {
                 return Err(bug("duplicate exit for the same original site"));
             }
@@ -423,8 +400,8 @@ impl<'f, 'a> Transfers<'f, 'a> {
             flow,
             keys,
             exit_keys,
-            seen: filled(flow.edges().len(), false, control)?,
-            exits_seen: filled(flow.exits().len(), false, control)?,
+            seen: filled(flow.edges().len(), false)?,
+            exits_seen: filled(flow.exits().len(), false)?,
         })
     }
 
@@ -512,16 +489,14 @@ impl<'f, 'a> Transfers<'f, 'a> {
         source: Option<OpId>,
         throw_pc: CodeUnitOffset,
         selection_pc: CodeUnitOffset,
-        control: &mut RunContext<'_>,
     ) -> Result<(), FlowError> {
         let clauses = self
             .flow
             .decoded()
-            .catch_clauses_at(selection_pc, control)
+            .catch_clauses_at(selection_pc)
             .map_err(super::build::request_error)?;
         let mut catch_all = false;
         for (ordinal, (catch, target)) in clauses.iter().enumerate() {
-            control.checkpoint()?;
             let order = u32::try_from(ordinal).map_err(|_| FlowError::PlatformCapacity)?;
             catch_all |= catch.is_none();
             let key = Key {
@@ -565,9 +540,8 @@ impl<'f, 'a> Transfers<'f, 'a> {
         Ok(())
     }
 
-    fn finish(self, control: &mut RunContext<'_>) -> Result<(), FlowError> {
+    fn finish(self) -> Result<(), FlowError> {
         for seen in self.seen.iter().chain(self.exits_seen.iter()) {
-            control.checkpoint()?;
             if !seen {
                 return Err(bug("P2 edge/exit has no original transfer owner"));
             }
@@ -580,36 +554,31 @@ impl<'f, 'a> Transfers<'f, 'a> {
             .len()
             .checked_add(1)
             .ok_or(FlowError::PlatformCapacity)?;
-        let mut offsets = filled(count, 0usize, control)?;
+        let mut offsets = filled(count, 0usize)?;
         for (key, _) in &self.keys {
-            control.checkpoint()?;
             let offset = &mut offsets[key.block.0 as usize + 1];
             *offset = offset.checked_add(1).ok_or(FlowError::PlatformCapacity)?;
         }
         for index in 1..offsets.len() {
-            control.checkpoint()?;
             offsets[index] = offsets[index]
                 .checked_add(offsets[index - 1])
                 .ok_or(FlowError::PlatformCapacity)?;
         }
-        let mut visited = filled(self.flow.blocks().len(), false, control)?;
+        let mut visited = filled(self.flow.blocks().len(), false)?;
         let mut pending = Vec::new();
         visited[0] = true;
-        push(&mut pending, BlockId(0), control)?;
+        push(&mut pending, BlockId(0))?;
         while let Some(block) = pending.pop() {
-            control.checkpoint()?;
             let range = offsets[block.0 as usize]..offsets[block.0 as usize + 1];
             for (_, index) in &self.keys[range] {
-                control.checkpoint()?;
                 if let EdgeTarget::Block(target) = self.flow.edges()[*index].target
                     && !std::mem::replace(&mut visited[target.0 as usize], true)
                 {
-                    push(&mut pending, target, control)?;
+                    push(&mut pending, target)?;
                 }
             }
         }
         for seen in visited {
-            control.checkpoint()?;
             if !seen {
                 return Err(bug("flow has an unreachable block"));
             }

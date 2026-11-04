@@ -2,7 +2,7 @@
 
 use diana_decomp::{
     ClassKey, DexImage, Engine, ImageOrigin, InputId, MethodSelector, Options, RenderedReport,
-    Report, Request, RequestError, RunContext,
+    Report, Request, RequestError,
 };
 
 use super::images::{ImageError, ImageSet, Selection, resolve_class, resolve_method};
@@ -60,12 +60,8 @@ impl std::fmt::Debug for Decompiled {
 }
 
 /// Runs the shared engine chain for one locator.
-pub fn run(
-    scope: &RequestScope,
-    selector: &Selector,
-    control: &mut RunContext<'_>,
-) -> Result<Decompiled, DecompileError> {
-    run_with_catalog(scope, selector, control)
+pub fn run(scope: &RequestScope, selector: &Selector) -> Result<Decompiled, DecompileError> {
+    run_with_catalog(scope, selector)
 }
 
 /// Runs the engine with an explicit declaration catalog. The CLI passes the
@@ -73,21 +69,19 @@ pub fn run(
 pub fn run_with_catalog(
     scope: &RequestScope,
     selector: &Selector,
-    control: &mut RunContext<'_>,
 ) -> Result<Decompiled, DecompileError> {
-    run_with_jobs(scope, selector, control, 1)
+    run_with_jobs(scope, selector, 1)
 }
 
 /// Runs class member analysis with the selected Rayon worker count. A parallel
-/// RunContext shares cumulative limits and cancellation between methods.
+/// Analysis uses the borrowed input selected for this request.
 pub fn run_with_jobs(
     scope: &RequestScope,
     selector: &Selector,
-    control: &mut RunContext<'_>,
     jobs: usize,
 ) -> Result<Decompiled, DecompileError> {
     let images = ImageSet::open(scope)?;
-    let selection = resolve(scope, &images, selector, control)?;
+    let selection = resolve(scope, &images, selector)?;
     let mut dex_images = Vec::new();
     for image in images.images() {
         dex_images
@@ -101,7 +95,7 @@ pub fn run_with_jobs(
             },
         });
     }
-    let engine = Engine::open(dex_images, Options::default(), control)
+    let engine = Engine::open(dex_images, Options::default())
         .map_err(DecompileError::Engine)?
         .with_method_jobs(jobs);
     let class = ClassKey {
@@ -115,8 +109,8 @@ pub fn run_with_jobs(
             prototype: selection.member_type.clone(),
         }),
     };
-    let report = engine.decompile(request, control)?;
-    let rendered = diana_decomp::render(&report, control)?;
+    let report = engine.decompile(request)?;
+    let rendered = diana_decomp::render(&report)?;
     let entry = selection.image.entry.map(|entry| entry.0);
     let logical = selection.image.logical;
     let class_at = super::at::class(entry, logical, selection.class_def.0, &selection.descriptor);
@@ -153,11 +147,10 @@ fn resolve<'a>(
     scope: &RequestScope,
     images: &'a ImageSet<'a>,
     selector: &Selector,
-    control: &mut RunContext<'_>,
 ) -> Result<Selection<'a>, DecompileError> {
     match selector {
-        Selector::Class(class) => Ok(resolve_class(images, class, control)?),
-        Selector::Method(method) => Ok(resolve_method(images, method, control)?),
+        Selector::Class(class) => Ok(resolve_class(images, class)?),
+        Selector::Method(method) => Ok(resolve_method(images, method)?),
         Selector::Field(_) | Selector::String(_) => {
             let _ = scope;
             Err(SelectorError::Syntax("this command selects a class or a method").into())

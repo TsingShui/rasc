@@ -8,7 +8,6 @@ use diana::analysis::input::InputOptions;
 use diana::analysis::query::{Query, QueryKind, QueryPlan};
 use diana::analysis::request::RequestScope;
 use diana::analysis::selector::{ClassSelector, Selector};
-use diana_decomp::RunContext;
 
 fn main() {
     fastrace::set_reporter(
@@ -23,7 +22,7 @@ fn main() {
     let images = diana::analysis::images::ImageSet::open(&scope).expect("images");
     let root = fastrace::Span::root("profile", fastrace::collector::SpanContext::random());
     let _guard = root.set_local_parent();
-    let mut controls = RunContext::new(&|| false);
+
     let query = Query::new(
         &scope,
         QueryPlan {
@@ -36,10 +35,10 @@ fn main() {
         },
     )
     .expect("query");
-    let cancel = std::sync::atomic::AtomicBool::new(false);
+
     let mut all = Vec::new();
     query
-        .run(&cancel, &mut |row| {
+        .run(&mut |row| {
             if let diana::analysis::query::Row::Class(class) = row {
                 all.push((class.image.0, class.class_def.0, class.descriptor));
             }
@@ -60,7 +59,7 @@ fn main() {
             descriptor: descriptor.clone(),
         });
         let started = Instant::now();
-        let result = decompile::run(&scope, &selector, &mut controls).expect("decompile");
+        let result = decompile::run(&scope, &selector).expect("decompile");
         eprintln!(
             "class {class_def} {} {:.3}s",
             result.status,

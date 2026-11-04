@@ -38,17 +38,15 @@ pub fn run(
         })?),
     };
     let scope = RequestScope::open(input, &super::options()).map_err(Failure::input)?;
-    let mut control = diana_decomp::RunContext::new_parallel(&|| false);
+
     let jobs = match kind {
         Kind::Class { jobs } => jobs,
         Kind::Method => 1,
     };
     let decompiled =
-        decompile::run_with_jobs(&scope, &selector, &mut control, jobs).map_err(|error| {
-            Failure {
-                code: error.code(),
-                message: error.to_string(),
-            }
+        decompile::run_with_jobs(&scope, &selector, jobs).map_err(|error| Failure {
+            code: error.code(),
+            message: error.to_string(),
         })?;
     let payload = match format {
         Format::Text => text_payload(&decompiled, verbose),
@@ -171,7 +169,7 @@ fn severity(kind: FailureKind) -> &'static str {
         FailureKind::Malformed
         | FailureKind::InternalInvariant
         | FailureKind::ResourceExhausted => "error",
-        FailureKind::Unsupported | FailureKind::Cancelled => "warning",
+        FailureKind::Unsupported => "warning",
     }
 }
 

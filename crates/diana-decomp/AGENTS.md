@@ -11,7 +11,7 @@ changing an engine capability.
   raw identities, classified failures, available members and effect order.
 - Use `thiserror` major version 2 for typed errors and `rayon` major version 1
   for parallel compute scheduling. Obtain operator approval before introducing
-  alternatives. Preserve concrete public errors, cancellation and allocation
+  alternatives. Preserve concrete public errors and allocation
   failure handling.
 - Remain independent of rasc, dexdec, rusty-dex, Kuna and radguard code. Consult
   `docs/diana/SOURCE_MAP.md` before reviewing or reusing reference material.

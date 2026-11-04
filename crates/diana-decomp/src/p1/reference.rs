@@ -4,7 +4,7 @@ use crate::input::strings::{DexString, TypeShape};
 use crate::raw::OperandReference;
 use crate::raw::ReferenceSlot;
 use crate::substrate::owned::push;
-use crate::{CodeUnitOffset, RunContext, TypeId};
+use crate::{CodeUnitOffset, TypeId};
 
 /// The resolved form of one original type descriptor.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -42,19 +42,15 @@ impl<'a> CheckedParameter<'a> {
 }
 
 impl<'a> CheckedPrototype<'a> {
-    pub(crate) fn from_prototype(
-        prototype: &Prototype<'_, 'a>,
-        budget: &mut RunContext<'_>,
-    ) -> Result<Self, MethodError> {
+    pub(crate) fn from_prototype(prototype: &Prototype<'_, 'a>) -> Result<Self, MethodError> {
         let mut parameters = Vec::new();
-        prototype.visit_parameter_type_ids(budget, |type_id, descriptor, budget| {
+        prototype.visit_parameter_type_ids(|type_id, descriptor| {
             push(
                 &mut parameters,
                 CheckedParameter {
                     type_id,
                     descriptor,
                 },
-                budget,
             )
             .map_err(super::disassembly::scratch)
         })?;

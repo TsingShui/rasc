@@ -1,6 +1,6 @@
 use crate::input::{DexContainer, InputError, InputProblem, ProgramIndex};
 use crate::substrate::report::*;
-use crate::{ByteOffset, ClassKey, FailureKind, MethodId, MethodKey, RequestError, RunContext};
+use crate::{ByteOffset, ClassKey, FailureKind, MethodId, MethodKey, RequestError};
 
 /// Original caller-owned bytes and one logical header selection. The caller
 /// retains the physical owner until this engine is dropped.
@@ -45,8 +45,7 @@ struct IndexedImage<'a> {
     index: ProgramIndex<'a>,
 }
 
-/// Immutable original indexes. Control and cancellation belong to each request,
-/// not to the engine; owned reports remain usable after this engine is dropped.
+/// Immutable original indexes borrowing caller-owned bytes.
 pub struct Engine<'a> {
     images: Vec<IndexedImage<'a>>,
     method_jobs: usize,
@@ -55,8 +54,7 @@ pub struct Engine<'a> {
 
 impl<'a> Engine<'a> {
     /// Sets the number of Rayon workers for class member analysis. A value of
-    /// one runs sequentially; zero is treated as one. Parallel execution requires
-    /// a RunContext created with `new_parallel`.
+    /// one runs sequentially; zero is treated as one.
     pub fn with_method_jobs(mut self, jobs: usize) -> Self {
         self.method_jobs = jobs.max(1);
         self.method_pool = std::sync::OnceLock::new();
@@ -67,11 +65,7 @@ impl<'a> Engine<'a> {
     /// slice's header chain is checked once. Conflicting origins, duplicate
     /// logical identities, malformed input and allocation/control failures are
     /// classified errors. No input copies, file access or global state occur.
-    pub fn open(
-        images: Vec<DexImage<'a>>,
-        control: &mut RunContext<'_>,
-    ) -> Result<Self, InputError> {
-        control.checkpoint()?;
+    pub fn open(images: Vec<DexImage<'a>>) -> Result<Self, InputError> {
         if images.is_empty() {
             return Err(InputError::Malformed {
                 code: InputProblem::InvalidReference,
@@ -85,7 +79,7 @@ impl<'a> Engine<'a> {
             .ok_or(InputError::PlatformCapacity {
                 offset_byte: ByteOffset(0),
             })?;
-        control.checkpoint()?;
+
         let mut indexed: Vec<IndexedImage<'a>> = Vec::new();
         indexed
             .try_reserve_exact(images.len())
@@ -100,9 +94,8 @@ impl<'a> Engine<'a> {
         for image in images {
             let mut shared = None;
             for previous in &indexed {
-                control.checkpoint()?;
                 if previous.image.origin == image.origin {
-                    if !same_bytes(previous.image.bytes, image.bytes, control)? {
+                    if !same_bytes(previous.image.bytes, image.bytes) {
                         return Err(InputError::Malformed {
                             code: InputProblem::ConflictingOrigin,
                             offset_byte: image.header_offset,
@@ -124,10 +117,10 @@ impl<'a> Engine<'a> {
             })?;
             let container = match shared {
                 Some(container) => container,
-                None => DexContainer::open(image.bytes, control)?,
+                None => DexContainer::open(image.bytes)?,
             };
             let index = container
-                .program(image.header_offset, control)?
+                .program(image.header_offset)?
                 .with_dex(crate::DexId(u32::try_from(indexed.len()).map_err(
                     |_| InputError::PlatformCapacity {
                         offset_byte: image.header_offset,
@@ -190,18 +183,17 @@ impl MethodTask {
         index: &ProgramIndex<'a>,
         facts: &crate::p0::ClassFacts,
         method: MethodId,
-        control: &mut RunContext<'_>,
     ) -> Result<MethodOutcome<'a>, RequestError> {
         let task = Self { _sealed: () };
-        let source = index.method_source(facts, method, control)?;
+        let source = index.method_source(facts, method)?;
         if matches!(source.raw(), crate::input::RawPrintable::Declaration) {
             return Ok(MethodOutcome::DeclarationOnly);
         }
-        let mut outcome = index.decode_method_source(&source, control)?;
+        let mut outcome = index.decode_method_source(&source)?;
         let Some(decoded) = outcome.decoded.take() else {
             return Ok(MethodOutcome::DisassemblyStopped(outcome));
         };
-        match crate::p2::build_flow(&task, decoded, control) {
+        match crate::p2::build_flow(&task, decoded) {
             crate::p2::FlowBuild::Ready(flow) => Ok(MethodOutcome::Flowed(flow)),
             crate::p2::FlowBuild::Stopped(stop) => Ok(MethodOutcome::FlowStopped(stop)),
         }
@@ -213,12 +205,10 @@ impl<'a> Engine<'a> {
     pub fn class_facts(
         &self,
         class: ClassKey,
-        control: &mut RunContext<'_>,
     ) -> Result<std::sync::Arc<crate::p0::ClassFacts>, RequestError> {
-        control.checkpoint()?;
         let position = usize::try_from(class.dex.0).map_err(|_| RequestError::UnknownDex)?;
         let image = self.images.get(position).ok_or(RequestError::UnknownDex)?;
-        image.index.class_facts_cached(class.class_def, control)
+        image.index.class_facts_cached(class.class_def)
     }
 
     /// Runs P0, the method reader, P1 and P2 for one method entry only.
@@ -226,12 +216,11 @@ impl<'a> Engine<'a> {
         &self,
         class: ClassKey,
         method: MethodId,
-        control: &mut RunContext<'_>,
     ) -> Result<MethodAnalysis<'a>, RequestError> {
-        let facts = self.class_facts(class, control)?;
+        let facts = self.class_facts(class)?;
         let position = usize::try_from(class.dex.0).map_err(|_| RequestError::UnknownDex)?;
         let image = self.images.get(position).ok_or(RequestError::UnknownDex)?;
-        let result = MethodTask::run(&image.index, &facts, method, control);
+        let result = MethodTask::run(&image.index, &facts, method);
         Ok(MethodAnalysis {
             key: MethodKey { class, method },
             result,
@@ -240,50 +229,38 @@ impl<'a> Engine<'a> {
 
     /// Runs P0, the method reader, P1 and P2 for one class request. Class assembly
     /// and rendering belong to P8/P9 and are not part of this boundary.
-    pub fn analyze(
-        &self,
-        request: Request,
-        control: &mut RunContext<'_>,
-    ) -> Result<ClassAnalysis<'a>, RequestError> {
-        control.checkpoint()?;
+    pub fn analyze(&self, request: Request) -> Result<ClassAnalysis<'a>, RequestError> {
         let position =
             usize::try_from(request.class.dex.0).map_err(|_| RequestError::UnknownDex)?;
         let image = self.images.get(position).ok_or(RequestError::UnknownDex)?;
-        let facts = image
-            .index
-            .class_facts_cached(request.class.class_def, control)?;
+        let facts = image.index.class_facts_cached(request.class.class_def)?;
         let mut entries = Vec::new();
         match &request.method {
             Some(selector) => crate::substrate::owned::push(
                 &mut entries,
                 facts.resolve_method(&selector.name, &selector.prototype)?,
-                control,
             )?,
             None => {
                 for entry in facts.methods() {
-                    control.checkpoint()?;
-                    crate::substrate::owned::push(&mut entries, entry.method(), control)?;
+                    crate::substrate::owned::push(&mut entries, entry.method())?;
                 }
             }
         }
         let mut methods = Vec::new();
-        crate::substrate::owned::reserve(&mut methods, entries.len(), control)?;
+        crate::substrate::owned::reserve(&mut methods, entries.len())?;
         let mut terminated = None;
         for method in entries {
-            // The method reader observes cancellation and returns the classified
-            // error. Keep that stop alongside already delivered siblings.
+            // Keep a classified stop alongside already delivered siblings.
             let key = MethodKey {
                 class: request.class,
                 method,
             };
-            let result = MethodTask::run(&image.index, &facts, method, control);
+            let result = MethodTask::run(&image.index, &facts, method);
             let terminal = match &result {
                 Err(error)
                     if matches!(
                         error.kind(),
-                        FailureKind::Cancelled
-                            | FailureKind::ResourceExhausted
-                            | FailureKind::InternalInvariant
+                        FailureKind::ResourceExhausted | FailureKind::InternalInvariant
                     ) =>
                 {
                     Some(error.kind())
@@ -291,9 +268,7 @@ impl<'a> Engine<'a> {
                 Ok(MethodOutcome::FlowStopped(stop))
                     if matches!(
                         stop.error().kind(),
-                        FailureKind::Cancelled
-                            | FailureKind::ResourceExhausted
-                            | FailureKind::InternalInvariant
+                        FailureKind::ResourceExhausted | FailureKind::InternalInvariant
                     ) =>
                 {
                     Some(stop.error().kind())
@@ -301,10 +276,9 @@ impl<'a> Engine<'a> {
                 _ => None,
             };
             // Capacity was reserved for all selected entries before starting work.
-            // Preserve a cancelled method's input without rechecking cancellation.
             methods.push(MethodAnalysis { key, result });
             // Return the retained prefix and stop; never silently skip subsequent
-            // siblings after request-level cancellation/resource/invariant failure.
+            // siblings after request-level resource/invariant failure.
             if let Some(kind) = terminal {
                 terminated = Some(kind);
                 break;
@@ -324,18 +298,6 @@ impl<'a> Engine<'a> {
     }
 }
 
-fn same_bytes(left: &[u8], right: &[u8], control: &mut RunContext<'_>) -> Result<bool, InputError> {
-    if std::ptr::eq(left, right) {
-        return Ok(true);
-    }
-    if left.len() != right.len() {
-        return Ok(false);
-    }
-    for (a, b) in left.chunks(65536).zip(right.chunks(65536)) {
-        control.checkpoint()?;
-        if a != b {
-            return Ok(false);
-        }
-    }
-    Ok(true)
+fn same_bytes(left: &[u8], right: &[u8]) -> bool {
+    std::ptr::eq(left, right) || left == right
 }

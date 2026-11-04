@@ -103,7 +103,7 @@ after it is published.
 | Code | Meaning |
 |---|---|
 | 0 | A result was delivered, including a partial document |
-| 1 | Input, decode, cancellation, allocation, internal or I/O failure |
+| 1 | Input, decode, allocation, internal or I/O failure |
 | 2 | Unknown command/flag or an invalid selector |
 | 3 | The requested single object or entry does not exist |
 | 4 | The selector matches several objects |
@@ -118,13 +118,14 @@ atomic from a private temporary file in the target directory, an existing file n
 `--force`, and a directory, a symbolic link, the input itself or a hardlink alias are
 refused. Nothing is printed to stdout.
 
-## Cancellation and allocation failure
+## Allocation failure and process termination
 
 Diana exposes no numeric work, allocation or output quotas. Every read is range-,
 count- and arithmetic-checked, container growth uses `try_reserve`, and an actual
 allocation failure is reported as a classified error instead of a truncated result.
-Cancellation is cooperative between analysis stages; a process killed by a signal
-is not a catchable cancellation guarantee.
+The CLI/host owns process termination, including signals. There is no cooperative
+request cancellation API or engine callback. Process termination is not a promise
+to deliver an in-progress result or clean up every interrupted write.
 
 ## Internal P0/P1/P2 inspection
 

@@ -3,31 +3,27 @@
 
 use super::{BranchOp, Effects, FlowError, FlowMethod, SwitchKind, Terminal};
 use crate::p1::{DecodedInstruction, DecodedMethod};
-use crate::{CodeUnitOffset, RegisterId, RegisterSlot, RunContext, SlotWidth};
+use crate::{CodeUnitOffset, RegisterId, RegisterSlot, SlotWidth};
 
 pub(super) fn verify_operation(
     flow: &FlowMethod<'_>,
     instruction: &DecodedInstruction,
     operation: &super::Operation,
-    control: &mut RunContext<'_>,
 ) -> Result<(), FlowError> {
-    control.checkpoint()?;
     if operation.effects != expected_effects(instruction.opcode()) {
         return Err(FlowError::Correspondence {
             pc: instruction.pc(),
             obligation: "complete DEX effect obligations",
         });
     }
-    super::replay::verify(flow, instruction, operation, control)
+    super::replay::verify(flow, instruction, operation)
 }
 
 pub(super) fn verify_terminal(
     flow: &FlowMethod<'_>,
     block: &super::Block,
     original: &DecodedInstruction,
-    control: &mut RunContext<'_>,
 ) -> Result<(), FlowError> {
-    control.checkpoint()?;
     let valid = matches!(
         (&block.terminal, original.opcode()),
         (Some(Terminal::Goto { .. }), 0x28..=0x2a)
@@ -87,7 +83,7 @@ pub(super) fn verify_terminal(
                     "P2 switch terminal disagrees with P1",
                 ));
             }
-            verify_switch_cases(flow.decoded(), instruction, cases, control)?;
+            verify_switch_cases(flow.decoded(), instruction, cases)?;
         }
         Some(Terminal::Return { width, pc: site }) => {
             if *site != instruction.pc()
@@ -161,7 +157,6 @@ fn verify_switch_cases(
     decoded: &DecodedMethod<'_>,
     instruction: &DecodedInstruction,
     actual: &[(i64, CodeUnitOffset)],
-    control: &mut RunContext<'_>,
 ) -> Result<(), FlowError> {
     let pc = instruction
         .payload_target()
@@ -186,7 +181,6 @@ fn verify_switch_cases(
         });
     }
     for (case, (key, target)) in original.zip(actual) {
-        control.checkpoint()?;
         if case.key != *key || super::check::relative(instruction.pc(), case.offset.0)? != *target {
             return Err(FlowError::Correspondence {
                 pc: instruction.pc(),

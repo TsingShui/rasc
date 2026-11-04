@@ -1,18 +1,10 @@
-use std::sync::atomic::{AtomicBool, Ordering};
-
-use diana_decomp::{ControlError, FailureKind, RequestError, RunContext};
+use diana_decomp::{FailureKind, RequestError};
 
 use super::apk::DexRoot;
 use super::archive::EntryRecord;
 use super::dex::{self, ClassRow, FieldRow, ImageIndex, MethodRow, StringRow, contains};
 use super::input::{EntryIndex, InputError};
 use super::request::RequestScope;
-
-impl From<ControlError> for QueryError {
-    fn from(error: ControlError) -> Self {
-        Self::Request(RequestError::Control(error))
-    }
-}
 
 /// One physical ZIP record, listed in directory order.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -63,8 +55,6 @@ pub enum QueryError {
     NotArchive,
     #[error("the job count must be positive")]
     InvalidJobs,
-    #[error("query work was cancelled")]
-    Cancelled,
 }
 
 impl QueryError {
@@ -74,7 +64,6 @@ impl QueryError {
             Self::Engine(error) => error.kind(),
             Self::Method(error) => error.kind(),
             Self::Request(error) => error.kind(),
-            Self::Cancelled => FailureKind::Cancelled,
             Self::WorkerLost => FailureKind::InternalInvariant,
             Self::NotArchive | Self::InvalidJobs => FailureKind::Unsupported,
         }
@@ -153,17 +142,12 @@ impl<'a> Query<'a> {
     }
 
     /// Streams every matching row. Rows arrive in worker completion order; the
-    /// caller must not rely on a sequence. Exceeding a configured bound or a
-    /// cancellation stops the request with an error, and the delivered prefix is
-    /// not a complete result.
+    /// caller must not rely on a sequence. Producer/sink failures return an error;
+    /// a delivered prefix is not a complete result.
     pub fn run(
         &self,
-        cancel: &AtomicBool,
         sink: &mut impl FnMut(Row) -> Result<(), QueryError>,
     ) -> Result<(), QueryError> {
-        if cancel.load(Ordering::Relaxed) {
-            return Err(QueryError::Cancelled);
-        }
         if self.kind == QueryKind::Entries {
             if self.images.is_empty() {
                 return Ok(());
@@ -172,7 +156,6 @@ impl<'a> Query<'a> {
                 return Err(QueryError::NotArchive);
             }
             for entry in &self.entries {
-                cancel_check(cancel)?;
                 let row = EntryRow {
                     image: ImageIndex(0),
                     entry: entry.index(),
@@ -195,50 +178,33 @@ impl<'a> Query<'a> {
         super::runner::run(
             self.roots.len(),
             self.jobs,
-            cancel,
-            |ordinal, cancel, emit| {
+            |ordinal, emit| {
                 let root = &self.roots[ordinal];
-                let cancelled = || cancel.load(Ordering::Relaxed);
-                let mut control = RunContext::new(&cancelled);
+
                 let image = ImageIndex(ordinal);
                 let filter = self.filter.as_deref();
                 let class = self.class.as_deref();
                 match kind {
                     QueryKind::Entries => Ok(()),
-                    QueryKind::Classes => match dex::open(root.bytes(), &mut control) {
-                        Ok(index) => dex::classes(
-                            &index,
-                            image,
-                            filter,
-                            &self.class_filter,
-                            &mut control,
-                            emit,
-                        ),
+                    QueryKind::Classes => match dex::open(root.bytes()) {
+                        Ok(index) => dex::classes(&index, image, filter, &self.class_filter, emit),
                         Err(error) => Err(error),
                     },
-                    QueryKind::Methods => match dex::open(root.bytes(), &mut control) {
-                        Ok(index) => dex::methods(&index, image, class, filter, &mut control, emit),
+                    QueryKind::Methods => match dex::open(root.bytes()) {
+                        Ok(index) => dex::methods(&index, image, class, filter, emit),
                         Err(error) => Err(error),
                     },
-                    QueryKind::Fields => match dex::open(root.bytes(), &mut control) {
-                        Ok(index) => dex::fields(&index, image, class, filter, &mut control, emit),
+                    QueryKind::Fields => match dex::open(root.bytes()) {
+                        Ok(index) => dex::fields(&index, image, class, filter, emit),
                         Err(error) => Err(error),
                     },
-                    QueryKind::Strings => match dex::open(root.bytes(), &mut control) {
-                        Ok(index) => dex::strings(&index, image, filter, &mut control, emit),
+                    QueryKind::Strings => match dex::open(root.bytes()) {
+                        Ok(index) => dex::strings(&index, image, filter, emit),
                         Err(error) => Err(error),
                     },
                 }
             },
             sink,
         )
-    }
-}
-
-fn cancel_check(cancel: &AtomicBool) -> Result<(), QueryError> {
-    if cancel.load(Ordering::Relaxed) {
-        Err(QueryError::Cancelled)
-    } else {
-        Ok(())
     }
 }
