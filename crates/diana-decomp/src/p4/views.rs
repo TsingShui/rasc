@@ -2,6 +2,125 @@ use super::build::*;
 use super::*;
 use crate::p3::{SsaFacts, StateId};
 
+fn machine_read<'f>(
+    s: &SsaFacts,
+    f: &'f TypeFacts,
+    state: StateId,
+    required: Families,
+    missing: Option<MissingFact>,
+    meaning: ReadMeaning,
+) -> Result<(Interpretation, &'f ValueFacts), Problem> {
+    if !s
+        .state(state)
+        .is_some_and(|s| s.availability().is_available())
+    {
+        return Err(Problem::SourceUnavailable(state));
+    }
+    let value = state_value(s, state)
+        .and_then(|v| f.value(v))
+        .ok_or(Problem::SourceUnavailable(state))?;
+    if let Some(missing) = missing {
+        return Err(Problem::Missing(missing));
+    }
+    if let Some(bits) = value.literal() {
+        let families = required.intersect(literal_families(bits));
+        if families.is_conflict() {
+            return Err(if required == mask(Family::Reference) {
+                Problem::NonzeroReferenceLiteral
+            } else {
+                Problem::FamilyConflict
+            });
+        }
+        let family = match families.selected() {
+            Some(family) => family,
+            None if meaning == ReadMeaning::CopyBits => {
+                return Ok((Interpretation::LiteralBits(bits), value));
+            }
+            None if meaning == ReadMeaning::Equality && families.contains(Family::Integral) => {
+                Family::Integral
+            }
+            None => return Err(Problem::AmbiguousRepresentation(families)),
+        };
+        let read = if family == Family::Reference {
+            Interpretation::Null
+        } else {
+            Interpretation::Literal { bits, family }
+        };
+        return Ok((read, value));
+    }
+    let families = value.families.intersect(required);
+    if families.is_conflict() {
+        return Err(Problem::FamilyConflict);
+    }
+    let Some(family) = families.selected() else {
+        if meaning == ReadMeaning::CopyBits {
+            let width = s
+                .width(value.value())
+                .ok_or(Problem::SourceUnavailable(state))?;
+            return Ok((Interpretation::CopyBits(width), value));
+        }
+        return Err(Problem::AmbiguousRepresentation(families));
+    };
+    Ok((Interpretation::Direct(family), value))
+}
+
+fn proven_integral_view(
+    f: &TypeFacts,
+    value: &ValueFacts,
+    read: Interpretation,
+    types: &[TypeNameId],
+) -> Option<Interpretation> {
+    let &declared = types.first()?;
+    let bounds = f
+        .name(declared)?
+        .units
+        .first()
+        .copied()
+        .and_then(tag_range)?;
+    let (family, range) = match read {
+        Interpretation::Direct(family @ (Family::Integral | Family::Long)) => {
+            (family, value.integral_range()?)
+        }
+        Interpretation::Literal {
+            bits,
+            family: family @ (Family::Integral | Family::Long),
+        } => {
+            // An exact literal already supplies its machine-domain view. Select
+            // a declared view only when it adds a narrower, value-preserving form.
+            let domain = tag_range(match family {
+                Family::Integral => u16::from(b'I'),
+                _ => u16::from(b'J'),
+            })?;
+            if bounds == domain {
+                return None;
+            }
+            let actual = if bits.width == crate::SlotWidth::One {
+                i64::from(bits.value as u32 as i32)
+            } else {
+                bits.value as i64
+            };
+            (
+                family,
+                IntegralRange {
+                    min: actual,
+                    max: actual,
+                },
+            )
+        }
+        _ => return None,
+    };
+    for &wanted in types {
+        if name_family(f, wanted) != Some(family) {
+            return None;
+        }
+        let bounds = f.name(wanted)?.units.first().copied().and_then(tag_range)?;
+        if range.min < bounds.min || range.max > bounds.max {
+            return None;
+        }
+    }
+    Some(Interpretation::IntegralView { declared })
+}
+
 fn interpretation(
     s: &SsaFacts,
     f: &TypeFacts,
@@ -11,95 +130,11 @@ fn interpretation(
     missing: Option<MissingFact>,
     meaning: ReadMeaning,
 ) -> Interpretation {
-    if !s
-        .state(state)
-        .is_some_and(|s| s.availability().is_available())
-    {
-        return Interpretation::Unknown(Problem::SourceUnavailable(state));
-    }
-    let Some(value) = state_value(s, state).and_then(|v| f.value(v)) else {
-        return Interpretation::Unknown(Problem::SourceUnavailable(state));
+    let (read, value) = match machine_read(s, f, state, required, missing, meaning) {
+        Ok(established) => established,
+        Err(problem) => return Interpretation::Unknown(problem),
     };
-    if let Some(missing) = missing {
-        return Interpretation::Unknown(Problem::Missing(missing));
-    }
-    if let Some(bits) = value.literal() {
-        let families = required.intersect(literal_families(bits));
-        if families.is_conflict() {
-            return Interpretation::Unknown(if required == mask(Family::Reference) {
-                Problem::NonzeroReferenceLiteral
-            } else {
-                Problem::FamilyConflict
-            });
-        }
-        let family = match families.selected() {
-            Some(family) => family,
-            None if meaning == ReadMeaning::CopyBits => return Interpretation::LiteralBits(bits),
-            None if meaning == ReadMeaning::Equality && families.contains(Family::Integral) => {
-                Family::Integral
-            }
-            None => return Interpretation::Unknown(Problem::AmbiguousRepresentation(families)),
-        };
-        if family == Family::Reference {
-            return Interpretation::Null;
-        }
-        if matches!(family, Family::Integral | Family::Long) {
-            let actual = if bits.width == crate::SlotWidth::One {
-                i64::from(bits.value as u32 as i32)
-            } else {
-                bits.value as i64
-            };
-            for &name in types {
-                if let Some(range) = f.names[name.0 as usize]
-                    .units
-                    .first()
-                    .copied()
-                    .and_then(tag_range)
-                    && (actual < range.min || actual > range.max)
-                {
-                    return Interpretation::Unknown(Problem::LiteralOutOfRange);
-                }
-            }
-        }
-        return Interpretation::Literal { bits, family };
-    }
-    let family = value.families.intersect(required);
-    if family.is_conflict() {
-        return Interpretation::Unknown(Problem::FamilyConflict);
-    }
-    let Some(family) = family.selected() else {
-        if meaning == ReadMeaning::CopyBits {
-            return match s.width(value.value()) {
-                Some(width) => Interpretation::CopyBits(width),
-                None => Interpretation::Unknown(Problem::SourceUnavailable(state)),
-            };
-        }
-        return Interpretation::Unknown(Problem::AmbiguousRepresentation(family));
-    };
-    if family == Family::Reference {
-        return Interpretation::Direct(Family::Reference);
-    }
-    if let Some(&declared) = types.first() {
-        for &wanted in types {
-            if let Some(bounds) = f.names[wanted.0 as usize]
-                .units
-                .first()
-                .copied()
-                .and_then(tag_range)
-            {
-                let Some(range) = value.integral_range() else {
-                    return Interpretation::Unknown(Problem::NarrowingRange);
-                };
-                if range.min < bounds.min || range.max > bounds.max {
-                    return Interpretation::Unknown(Problem::NarrowingRange);
-                }
-            }
-        }
-        if matches!(family, Family::Integral | Family::Long) {
-            return Interpretation::IntegralView { declared };
-        }
-    }
-    Interpretation::Direct(family)
+    proven_integral_view(f, value, read, types).unwrap_or(read)
 }
 fn record(f: &mut TypeFacts, site: IssueSite, view: Interpretation) -> Result<(), TypeError> {
     match view {

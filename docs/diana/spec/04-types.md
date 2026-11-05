@@ -115,14 +115,29 @@ group and erasing independently established producer facts. Ambiguous producers
 with contradictory requirements retain the conflict instead of choosing by visit
 order. Pure literals have separate use-site views.
 
-`views.rs` establishes direct reads, literal bit interpretations, null views and
-range-supported integral views. An available reference-family source is read as
-`Direct(Reference)` once its required reading facts are established. This means
-passing the existing reference unchanged, not proven subtyping, Java source
-binding or initialized-object state. Source declarations stay in `ValueFacts`;
-original use-site declarations stay in `Requirement::types`. They are not rewritten
-to match one another. Unknown hierarchy alone is not a missing read interpretation
-and does not produce a recovery issue.
+`views.rs` first establishes the machine read from source availability, width,
+required representation and genuinely required missing facts. Direct reads preserve
+the existing value; literal reads preserve the original bits in the selected family.
+An available reference-family source uses `Direct(Reference)` without proving
+subtyping, Java source binding or initialized-object state. Integral/long reads do
+not require a use-site declaration's numeric range. Source declarations stay in
+`ValueFacts`; original use declarations stay in `Requirement::types`. Neither is
+rewritten to match the other.
+
+An optional declared integral view is selected only after the read is established.
+Its range proof comes from the source's existing facts or exact literal bits, never
+from the consumer's desired type. Missing or insufficient range evidence leaves
+the established direct/literal read intact; it is not a read-recovery problem.
+Exact literals keep their literal view when the declaration adds no narrower
+value-preserving form. A selected IntegralView may also refer to a literal whose
+bits remain in ValueFacts. Literals and runtime values follow the same separation.
+
+A declaration such as Z does not by itself prove canonical boolean values or
+request an implicit conversion. Downstream expression building MUST distinguish
+an ordinary integral read from a range-proved declared view; it MUST NOT infer
+boolean naturalization from the declaration alone. Keeping the original word
+expression and original binding does not require such naturalization. P4 does not
+add bitwise range rules or manufacture [0,1] bounds to make a read available.
 
 Unavailable SSA sources, unresolved argument grouping, representation conflicts
 and required missing facts retain their existing local outcomes. Literal null still
@@ -130,6 +145,10 @@ requires established one-word zero provenance; an arbitrary runtime int does not
 become a reference. Initialization and array-component interpretation remain
 separate consumers with their own actual fact dependencies. Original casts,
 including their resolution/check/exception behavior, remain execution operations.
+Original integer conversions and storage truncations likewise remain at their
+original operations; their input reads do not require a prior losslessness proof.
+Actual representation conflicts and original classified use issues remain distinct
+from inability to select an optional value-preserving view.
 
 Bit-preserving move operands retain a copy/bits view when no numeric interpretation
 is required; literal equality predicates can use the integral bit interpretation.

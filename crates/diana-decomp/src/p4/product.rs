@@ -204,12 +204,17 @@ pub enum Problem {
 }
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Interpretation {
-    /// A VM-level read. Reference does not assert subtype compatibility, Java
-    /// source binding or initialized-object state and introduces no conversion.
+    /// A VM-level read preserving the existing value. Use-site declarations do
+    /// not certify a narrow range or authorize a conversion. Reference also does
+    /// not assert subtyping, Java source binding or initialized-object state.
     Direct(Family),
+    /// A range-proved, value-preserving declared view, not a runtime conversion.
+    /// A literal's original bits remain in its ValueFacts.
     IntegralView {
         declared: TypeNameId,
     },
+    /// Exact bits interpreted as the selected family. This does not certify
+    /// membership in a use-site declaration's narrower value domain.
     Literal {
         bits: Bits,
         family: Family,
@@ -238,7 +243,8 @@ impl Requirement {
         self.families
     }
     /// Original use-site declarations, retained independently of the reading
-    /// interpretation. Reference declarations do not establish subtyping.
+    /// interpretation. They establish neither subtyping nor a numeric narrowing
+    /// request; a value-preserving declared view requires its own evidence.
     pub fn types(&self) -> &[TypeNameId] {
         &self.types
     }

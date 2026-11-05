@@ -57,7 +57,10 @@ read/use issues. Array fills consume checked payload width/count/bits and select
 an element interpretation from existing SSA array sources. Ordinary reference
 inputs now use `Direct(Reference)` without proving a class hierarchy. Original
 source/use declarations and invocation prototypes stay separate; invocation
-identity is not selected from argument types. Runtime Phi representation now
+identity is not selected from argument types. Machine reads are established before
+optional value-preserving declared views. Insufficient range evidence retains the
+original read rather than making it unavailable; use declarations do not add
+conversions or establish boolean naturalization. Runtime Phi representation now
 consumes available literal-input constraints before joining nonliteral groups;
 source literals keep their independent views. Initialization follows original SSA
 reference bindings and execution positions, including edge-correlated paired
@@ -116,31 +119,35 @@ facts and array-fill interpretations with original payload bits. These are diagn
 counts, not semantic verification badges. The timed Engine traversal now includes P4.
 
 Engine format/check/Clippy and release builds pass; no tests were added, modified
-or run for the position-related initialization change. Two authorized real-input
+or run for the machine-read/optional-view separation. Two authorized real-input
 runs delivered 115,760 TypedMethod products without construction/upstream/class
-stops. Methods retaining local type issues fell from 7,498 to 488. The inputs'
-27,880 identity-ambiguity issues disappeared; other issue categories and the 724
-undetermined ordinary use views remained unchanged. These counts do not imply
-complete recovery or prove all object relationships.
+stops. Methods retaining local type issues fell from 488 to 36, ordinary unknown
+use views from 724 to 10, and issue occurrences from 816 to 102. Remaining issues
+are 92 missing ArrayComponent facts, 9 NonArrayDescriptor occurrences and 1
+ConstructorOwnerMismatch. Those facts and diagnostics were not removed.
 
-Fourteen focused method observations retained identical type sources, values,
-ordinary views, Phi representations, constructor summaries, catch facts and array
-fills. Their 42 retained P1/P2/P3 products also matched before/after. Observed
-reference uses include parameter/return merges and two independently allocated,
-normally constructed objects merging to Initialized while identity remains Multiple.
-Pending constructor receivers still report BeforeConstructor; numeric-only reads
-no longer acquire initialization records from a reference candidate. All 279 fills
-retained their interpretations: 1 Boolean, 64 Byte, 3 Char, 49 Float, 158 Int and
-4 Long. Byte roundtrip checked 1,444,571 items without mismatches or skipped items.
+All 714 former NarrowingRange use views in 457 methods now preserve their original
+reads: 626 Direct(Integral) and 88 Direct(Long). Source ranges remain unchanged,
+including absent int/long ranges and full-int ranges at boolean-declared uses;
+this is not new range inference. Seven associated unknown component sources remain
+unknown. In 458 focused method observations, source facts, original use declarations
+and bindings, Phi views, constructors, initialization, catch facts and array fills
+matched before/after. Their 914 retained P2/P3 products also matched. Exact literals
+in narrower proved domains select explicit IntegralView forms; their original bits
+remain in ValueFacts. No runtime conversion or new arithmetic rule was added.
 
-These finite observations are not correctness rates or ART admission evidence.
-The runs did not establish execution coverage of post-Phi construction with a
-multi-origin receiver, opposite selections of the same allocation sources,
-constructor-failure/repeated-construction uses, retained older loop allocation
-instances, unavailable initialization sources or unreadable-direct-call events.
-Those paths have static review, not new execution evidence. Short/Double payloads,
-malformed catch declarations and conflicting/width-mismatched fills also remain
-without execution evidence from these inputs.
+All 279 fills retained their interpretations: 1 Boolean, 64 Byte, 3 Char, 49 Float,
+158 Int and 4 Long. Byte roundtrip checked 1,444,571 items without mismatches or
+skipped items. These finite observations are not correctness rates or ART admission
+evidence. Source-unavailable, representation-conflict, nonzero-reference-literal
+and out-of-domain literal-view rejection branches retain static review rather
+than new execution evidence from these inputs.
+
+Post-Phi construction with multi-origin receivers, opposite allocation selections,
+constructor failure/repetition uses, retained older loop allocation instances and
+unreadable-direct-call events also lack execution evidence from these runs.
+Short/Double payloads, malformed catch declarations and conflicting/width-mismatched
+fills retain the same evidence limitation.
 
 Signature-qualified Java-like calls (`Api.register<Listener>(h)`, with a complete
 original descriptor when needed) are specified under
