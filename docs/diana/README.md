@@ -7,7 +7,7 @@ gates.
 
 [PIPELINE_DESIGN](PIPELINE_DESIGN.md) is the approved, locked architecture for the
 complete P0–P9 product chain. Current Engine requests implement P0 → method reader
-→ P1 → P2 → P3 → P4 → P5 storage and transfer planning. Current scheduling,
+→ P1 → P2 → P3 → P4 → P5 → P6 region, protection and monitor planning. Current scheduling,
 construction boundaries and later-stage responsibilities are in [phases](phases.md).
 
 | Document | Responsibility |
@@ -21,13 +21,14 @@ construction boundaries and later-stage responsibilities are in [phases](phases.
 | [spec/03-ssa.md](spec/03-ssa.md) | P3 exact-slot states, pruned SSA, original position mapping and correspondence checks. |
 | [spec/04-types.md](spec/04-types.md) | P4 value/type sources, per-use views, Phi adaptations and position-related initialization. |
 | [spec/05-variables.md](spec/05-variables.md) | P5 storage bindings, original transfer copies, exception snapshots and local gaps. |
+| [spec/06-regions.md](spec/06-regions.md) | P6 regions, concrete transfers, protection ownership and monitor scope plans. |
 | [Engine README](../../crates/diana-decomp/README.md) | Implemented engine capabilities and inspection commands. |
 | [CLI README](../../apps/diana/README.md) | Application commands, selectors and publication behavior. |
 | [SOURCE_MAP.md](SOURCE_MAP.md) | Source attribution, reproducibility and evidence boundaries. |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Contribution, Rust and acceptance rules. |
 | [WRITING.md](WRITING.md) | Documentation conventions. |
 
-P6–P9 contracts remain in PIPELINE_DESIGN; archived implementations are not
+P7–P9 contracts remain in PIPELINE_DESIGN; archived implementations are not
 active stages or alternate recovery paths. Removed specifications and historical
 execution records remain available in git history. The archived implementation
 in `ref-old-impl/` supplies semantic/check reference material, not another build

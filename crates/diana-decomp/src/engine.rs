@@ -181,11 +181,12 @@ pub struct MethodAnalysis<'a> {
     pub result: Result<MethodOutcome<'a>, RequestError>,
 }
 
-/// The sole executable method path advances P1 -> P2 -> P3 -> P4 -> P5 or retains a classified stop.
+/// The sole executable method path advances P1 -> P2 -> P3 -> P4 -> P5 -> P6 or retains a classified stop.
 pub enum MethodOutcome<'a> {
     DeclarationOnly,
     DisassemblyStopped(crate::p1::DecodedOutcome<'a>),
-    Stored(crate::p5::StorageMethod<'a>),
+    Planned(crate::p6::PlannedMethod<'a>),
+    RegionStopped(crate::p6::RegionStop<'a>),
     StorageStopped(crate::p5::StorageStop<'a>),
     TypeStopped(crate::p4::TypeStop<'a>),
     FlowStopped(crate::p2::FlowStop<'a>),
@@ -196,7 +197,8 @@ impl MethodOutcome<'_> {
     /// Borrowed execution facts without extracting the predecessor product.
     pub fn execution(&self) -> Option<crate::p2::ExecutionFacts<'_, '_>> {
         match self {
-            Self::Stored(stored) => Some(stored.execution()),
+            Self::Planned(planned) => Some(planned.execution()),
+            Self::RegionStopped(stop) => Some(stop.execution()),
             Self::StorageStopped(stop) => Some(stop.execution()),
             Self::TypeStopped(stop) => Some(stop.execution()),
             Self::SsaStopped(stop) => Some(stop.execution()),
@@ -207,7 +209,8 @@ impl MethodOutcome<'_> {
     /// Original read-only evidence for debugging; no stage constructor is exposed.
     pub fn evidence(&self) -> Option<crate::p2::MethodEvidence<'_, '_>> {
         match self {
-            Self::Stored(stored) => Some(stored.evidence()),
+            Self::Planned(planned) => Some(planned.evidence()),
+            Self::RegionStopped(stop) => Some(stop.evidence()),
             Self::StorageStopped(stop) => Some(stop.evidence()),
             Self::TypeStopped(stop) => Some(stop.evidence()),
             Self::SsaStopped(stop) => Some(stop.evidence()),
@@ -244,7 +247,14 @@ impl MethodTask {
                     crate::p4::TypeBuild::Ready(typed) => {
                         match crate::p5::build_storage(&task, typed) {
                             crate::p5::StorageBuild::Ready(stored) => {
-                                Ok(MethodOutcome::Stored(stored))
+                                match crate::p6::build_regions(&task, stored) {
+                                    crate::p6::RegionBuild::Ready(planned) => {
+                                        Ok(MethodOutcome::Planned(planned))
+                                    }
+                                    crate::p6::RegionBuild::Stopped(stop) => {
+                                        Ok(MethodOutcome::RegionStopped(stop))
+                                    }
+                                }
                             }
                             crate::p5::StorageBuild::Stopped(stop) => {
                                 Ok(MethodOutcome::StorageStopped(stop))
@@ -271,7 +281,7 @@ impl<'a> Engine<'a> {
         image.index.class_facts_cached(class.class_def)
     }
 
-    /// Runs P0, the method reader and P1–P5 for one method entry only.
+    /// Runs P0, the method reader and P1–P6 for one method entry only.
     pub fn analyze_method(
         &self,
         class: ClassKey,
@@ -287,7 +297,7 @@ impl<'a> Engine<'a> {
         })
     }
 
-    /// Runs P0, the method reader and P1–P5 for one class request. Class assembly
+    /// Runs P0, the method reader and P1–P6 for one class request. Class assembly
     /// and rendering belong to P8/P9 and are not part of this boundary.
     pub fn analyze(&self, request: Request) -> Result<ClassAnalysis<'a>, RequestError> {
         let position =

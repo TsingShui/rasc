@@ -1,0 +1,204 @@
+# P6 control, protection and monitor plans
+
+[PIPELINE_DESIGN §5.6](../PIPELINE_DESIGN.md#56-p6自然区域优先保留显式转移的-java-like-控制计划)
+defines the product obligations. This chapter describes their implementation in
+`crates/diana-decomp/src/p6/`. Capability observations belong in the
+[engine README](../../../crates/diana-decomp/README.md).
+
+## Boundary and failure behavior
+
+Engine's method task calls `build_regions(task, storage)` once. P6 consumes a
+mature `StorageMethod`, privately retains it, and publishes `PlannedMethod` or
+`RegionStop`. Only the owning constructor has publication authority.
+
+`PlannedMethod::facts()` supplies `RegionFacts`. `storage_facts()`, `type_facts()`
+and `execution()` provide the established facts needed by P7. Borrowed
+`storage_evidence()` and `analysis_evidence()` support inspection without extracting
+an owned predecessor or exposing another analysis entry. P6 MUST NOT use the
+retained SSA inspection view to reconstruct missing storage facts.
+
+The P5 execution graph has known operation boundaries, terminals and targets.
+Local storage gaps do not invalidate that graph. P6 records affected accesses and
+continues planning independent regions. A `Graph` region denotes known explicit
+control, not an invented target for unknown control. P6 MUST NOT replace an
+unavailable operand with a default, omit an effect, or re-run an earlier solver.
+
+A region mismatch rejects that composition, not the method. Resource failures and
+necessary construction-invariant failures produce a classified `RegionStop` with
+the complete P5 product and a separate, unpublished `RegionPartial`. The partial
+arena is not `RegionFacts`. A method-private stop does not cancel sibling tasks.
+
+## Original blocks and normal structure
+
+Each original P2 block has one `BlockPlan`. Its ordered `Node` portions partition
+the original operations and terminal without duplication. Portions isolate monitor
+operations, terminal evaluation and changes of exception protection. A
+`WithinBlock` link is a sequencing relation between those portions; it is not a
+new DEX edge, effect, instruction or SSA definition. Original normal edges retain
+their `EdgeId` and connect the original block's final portion to the target's
+first portion. Reachability includes the original exceptional transfers.
+
+P6 builds private normal incoming/outgoing indexes. Iterative Lengauer–Tarjan
+computes normal dominators, with analysis-only roots for the method entry,
+handlers and otherwise disconnected components. Reverse LT supplies finite-exit
+postdominator candidates. A position with no path to an exit has no such candidate.
+P6 MUST retain every original divergent path when checking a candidate; virtual
+analysis roots do not become runtime transfers. Iterative SCC walks and
+header-dominated backedges establish natural loops. An SCC alone does not
+establish a natural loop.
+
+The region arena contains `Block`, `Sequence`, `If`, `Loop`, original `Switch`,
+`LabelledBlock`, `Try`, `Synchronized` and explicit `Graph` nodes. Containment-sized
+candidates combine previously owned content. External entrances, disjoint child
+ownership, protection boundaries and P5 construction-group membership constrain
+composition. Crossing candidates remain explicit rather than duplicating their
+shared content. Empty branch arms contain no fabricated instruction.
+
+Private parts carry entry, continuation and membership constraints. Parent paths
+supply nested loop and scope context when P6 chooses transfers. All graph walks,
+ownership composition and context walks use explicit stacks or finite queues.
+Candidate frontiers are derived from the input; a mismatch does not restart method
+analysis or launch an unbounded template search. Scratch and result allocation are
+fallible and checked, without a configured numeric quota.
+
+## Loops, switches and continuations
+
+`LoopForm` is `While(LoopCondition)`, `DoWhile(LoopCondition)` or `Infinite`.
+`LoopCondition` identifies the original predicate node, repeating link and exiting
+link. Its polarity is preserved by those original edge roles. The body and the
+syntax-owned predicate have separate execution ownership.
+
+A header predicate becomes `while` only when its original evaluation position can
+be retained. Preceding producer operations remain in the loop body of
+`while(true)` when lifting them would move or repeat execution. A tail predicate
+remains at the tail. `continue` in a do-while targets that predicate, not the next
+body execution. Traditional for, enhanced for and for-each are not region forms.
+
+A conditional loop's normal continuation is the actual destination of its exiting
+predicate link. It is not a common postdominator beyond exit-side work. Other loop
+exits retain their own targets. A non-terminating region does not acquire a
+synthetic exit to make postdomination convenient.
+
+Original switch case keys, default, roles and duplicate-target edges remain distinct.
+A switch body can contain a local graph with multiple case entrances and
+fallthrough. The selector has one execution owner; recovery does not introduce a
+state variable, generated dispatcher or repeated selector evaluation.
+
+`Continuation` records whether a completed region finishes its parent, reaches a
+confirmed next position, or needs an explicit label transfer. P7 MUST consume this
+choice rather than infer fallthrough from source layout. Public follow content has
+one owner, not a separate copy in each arm.
+
+## Transfers, labels and P5 obligations
+
+Every original edge has an `EdgePlan`. Each normal `LinkPlan` chooses a concrete
+`Goto`, `Next`, arm, loop predicate, `Break`, `Continue` or synchronized-boundary
+action. Return and throw retain their original terminal identity; P6 does not
+invent normal edges for them.
+
+`LabelId` binds a node entrance, original `BlockId`, entry kind and leaf ownership.
+Original block entries, handler entries and within-block continuation labels remain
+distinct. An original jump still targets the original block entrance. Continuation
+labels only describe the planned sequencing of portions of that same block.
+A handler label does not turn an exception arrival into a normal goto.
+
+P6 MUST select the original branch before executing that edge's P5 copies. Normal
+link copies refer to the original `NormalEdge` site. `CopyPlacement` retains every
+other P5 location, including initial entry, normal commit, before-operation,
+before-terminal, before-throw and handler-only receiving positions. Assignment gaps
+and unavailable copy components remain P5 facts; a plan ID is not evidence that
+all of its assignments are available.
+
+`OperationOwner` and `TerminalOwner` define one emission partition. A natural
+predicate, catch capture, synchronized operation or P5 construction member MUST
+NOT also execute through an ordinary block lowering. P6 retains all original
+facts even when natural syntax represents an event. Selected P5 construction
+groups stay atomic across implicit control/protection scopes. Their deferred
+publication, operation/copy emission and snapshot prelude remain P5 decisions.
+
+## Protection and catch ownership
+
+Every original throwing operation and throw terminal has a `ThrowSiteId`, its
+original completion, ordered handler chain, original edges and before-throw snapshot
+references. Throw and selection PCs remain the P2 facts. Handler entries retain the
+original exception capture and P5 receives after that capture. Missing catch type
+content is not a reason to remove its original identity or priority.
+
+A natural `TryPlan` records a clause range in an original chain and disjoint body
+and handler content. Catch ownership follows the ordered clause range, not target
+address equality. A shared target does not merge different catch roles. Normal or
+sibling-catch entrances into a natural catch body reject that wrapping. Shared
+handler tails require a common continuation or explicit representation.
+
+Proved enclosing synchronization supplies a bounded protection context: its
+implicit cleanup can be projected out while planning catches inside the body.
+The original chains remain unchanged. Remaining prefix and suffix clauses still
+have their original order. Candidate composition prefers the full catch frontier
+when equal memberships would otherwise let a suffix obscure it.
+
+A site does not execute both an explicit and a natural capture plan. If selected
+candidates cannot account for its original handler choices in one model, P6 expands
+the affected natural protection nodes into explicit graphs before publication.
+This changes plans, not original execution facts, and preserves independent regions.
+P7 receives either natural ownership or the complete site-specific chain; it does
+not infer a handler relation from printing position. Catch-all is not automatically
+finally.
+
+## Monitor capture and scope proof
+
+Lock analysis describes method-local acquisition obligations under P2's completion
+contract, not a claim about all locks held by the calling thread. An untracked
+acquire or an uncertain join remains a concrete `LockGap`, not proof of malformed
+monitor use. Normal acquisition, normal release and exceptional release outcomes
+remain distinct.
+
+A persistent, method-private stack and work queue propagate those obligations.
+Repeating one acquisition site before its release becomes uncertainty rather than
+an unbounded stack. Captured-reference stability consumes P4 identities and P5
+storage reads/writes. Before/after positions distinguish a change before the exit
+operand read from one after release. A shared static root or an allocation-source
+set alone does not establish the same dynamic object: relevant writes or repeated
+births in the capture window defeat that proof. This is not another register or
+alias environment.
+
+Under the P2 lock-completion model, a successful acquire supplies a non-null,
+current-thread-owned capture. A matching stable release with established ownership
+has a local `ImpossibleRelease` exception disposition. P6 retains its raw P2
+completion and all original exception edges; the disposition is not a general
+callee-behavior or VM-admission proof. An unresolved lock relationship retains
+explicit monitor operations and the original exceptional outcome.
+
+`MonitorPlan` records `Natural(SyncId)` or `Explicit(LockSeparation)` for each
+acquisition. The natural scope requires closed entrances, a matching normal
+release/continuation and faithful escaping-exception cleanup. The implemented
+normal-release rule has one release site and one continuation. Multiple release
+sites or incompatible continuations retain explicit plans with that reason.
+
+Cleanup preserves the original exception capture, stable lock operand, release and
+rethrow of that same exception. Extra cleanup effects, handler-only receives or
+before-rethrow saves that cannot execute in an implicit cleanup keep that scope
+explicit. A cleanup reached from a failing acquire cannot become a successful
+synchronized scope. Independent proven nested regions remain available.
+
+The synchronized entry and release links retain their exact P5 copies. Acquisition
+failure does not execute body or cleanup. Successful body completion executes the
+original release obligations before its continuation. Synchronized syntax and
+ordinary monitor emission do not both own the same event. An explicit goto does
+not add release, finally, heap rollback or initialization.
+
+## Test obligations
+
+The existing core test obtains `PlannedMethod` only through the formal Engine
+chain. Independent checks compare original block/operation/terminal ownership,
+normal edge targets and P5 copies, source-site completions, handler priority,
+snapshots and selected emission ownership. Target interpretation consumes region
+roles and labels, not a production region-builder helper.
+
+Finite symbolic traces compare original P2 control with P6 target interpretation,
+including branch roles, looping definitions, tail conditions, exit-side work,
+selector evaluation, selected copies, capture timing and monitor identity/order.
+Control choices name original PCs and roles. Divergent prefixes are bounded test
+observations, not truncated production results. These checks do not implement a
+full VM, reconstruct SSA or prove external calls or ART behavior. Targeted
+mutations must compile and fail the corresponding core obligation before they
+count as rejected. All independent verification remains test-only.

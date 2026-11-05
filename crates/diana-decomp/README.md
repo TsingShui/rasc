@@ -7,7 +7,7 @@ only from the analyzed input.
 
 The active method chain is P0 class facts → method reader → P1 disassembly → P2
 execution model → P3 SSA → P4 value/use interpretation → P5 storage/transfer
-plans. `Engine::analyze_method` and class requests use one method task. The
+plans → P6 control/protection/monitor plans. `Engine::analyze_method` and class requests use one method task. The
 application decompilation interface is being rebuilt.
 The approved architecture is [PIPELINE_DESIGN](../../docs/diana/PIPELINE_DESIGN.md).
 
@@ -16,7 +16,7 @@ and structural associations. P2 owns ordered operations, exact slots, explicit
 normal/exception frame/heap/lock completion rules, transfers, exits and coverage.
 It does not expose its complete P1 predecessor. Read-only `MethodEvidence` supports
 original inspection and checks without product extraction or construction access.
-P2–P5 constructors are internal and require Engine's method-task authority.
+P2–P6 constructors are internal and require Engine's method-task authority.
 P3 privately retains P2 and delivers exact-slot states, definitions, ordered use
 bindings, necessary Phis, per-transfer incoming states and original StatePoint
 mappings. Borrowed `ExecutionFacts` exposes normal execution queries, not a
@@ -28,7 +28,8 @@ A P2 stop retains the complete P1 input, classified error and available unvalida
 construction facts. A P3 stop retains complete P2 input and a partial SSA
 snapshot; neither stop can be promoted to a successful product. P4 construction
 stops likewise retain SSA and a distinct unpublished `TypePartial`. P5 stops retain
-P4 and an unpublished `StoragePartial`; neither snapshot is a mature successor.
+P4 and an unpublished `StoragePartial`. P6 stops retain P5 and an unpublished
+`RegionPartial`; these snapshots are not mature successors.
 Class requests
 reserve result storage before starting method work and retain all selected known
 member outcomes. A method-task resource/invariant error no longer stops siblings;
@@ -77,7 +78,8 @@ source-declaration rewrite. Actual object-relation uncertainty and unsupported
 interpretations remain separate from missing input facts.
 The [P4 chapter](../../docs/diana/spec/04-types.md) records its algorithm and guarantees.
 
-P5 privately retains P4 in `StorageMethod`, returned as `MethodOutcome::Stored`.
+P5 privately retains P4 in `StorageMethod`; P6 privately retains that product in
+`PlannedMethod`, returned as `MethodOutcome::Planned`.
 It maps each SSA value to a parameter, independent local, exact literal or explicit
 reference carrier, preserving P4 numeric bit storage without choosing a new family.
 Definitions keep their original normal commit/materialization sites. Every Phi
@@ -91,7 +93,13 @@ independent producers and plan components remain available. The
 Construction plans now select natural groups for established allocation/constructor
 correspondence, including private alias publication and compatible snapshot
 preludes; other relationships retain explicit operations and concrete reasons.
-P6–P9 remain inactive.
+P6 delivers Block/Sequence/If/Loop/original Switch/LabelledBlock/Try/Synchronized
+and explicit Graph regions through the same method chain. Normal LT dominators,
+finite-exit postdominator candidates and iterative SCC analysis drive composition.
+Labels and selected edge copies remain concrete. Ordered throw-site chains,
+original captures, P5 construction ownership and explicit monitor separation reasons
+survive failed natural composition. The [P6 chapter](../../docs/diana/spec/06-regions.md)
+defines the boundary and scope rules. P7–P9 remain inactive.
 
 Independent translation checking compiles only under `cfg(test)`; ordinary
 Engine requests do not run symbolic replay, output audits or duplicate dominator
@@ -134,7 +142,7 @@ and per-method construction failures. Optional `class` selects one original clas
 through `Engine::analyze`; `analysis_ns` measures that analysis, excluding index
 opening, JSON formatting and inactive rendering. `partial_methods`, `local_issues`
 and unresolved input counts distinguish ready products from fully established
-facts; batch `complete` describes traversal, not semantic verification. P3–P5 are not
+facts; batch `complete` describes traversal, not semantic verification. P3–P6 are not
 formally verified. `p4` (`details:true`) exposes type origins, bits, requirements,
 views and initialization paths. `p4-all` adds typed/partial counts, interpretation
 problems, array-fill interpretation counts and missing-fact occurrences to the
@@ -144,15 +152,18 @@ gaps, catch facts and array-fill interpretations with original payload bits. The
 counts, not semantic verification badges. `p5` (`details:true`) exposes bindings,
 original reads/definitions, copy assignments/steps, snapshot routes, constructor
 receiver accesses and local gaps. `p5-all` aggregates the same facts, including
-unavailable plan components. The timed Engine traversal now includes P5, even
-when a command inspects a retained earlier product. Each shell command creates a
+unavailable plan components. `p6` (`details:true`) exposes the region arena,
+continuations, labels, original links and copy delivery, handler/site ownership,
+lock events and selected emission roles. `p6-all` aggregates those plans and
+construction stops. The timed Engine traversal includes P6, even when a command
+inspects a retained earlier product. Each shell command creates a
 fresh Engine. `Engine::with_method_jobs(n)` enables a bounded Rayon pool for
 multi-member class requests when `n > 1`; the default is one. Single-method calls
 keep the same sequential chain. The shell exposes this setting as
 `--method-jobs <workers>`. Separate DEX-process concurrency and method-worker
 concurrency need joint configuration rather than multiplying both blindly.
 `p5-all` with `details:true` also exposes each class member's retained P3/P4/P5
-products from that one class request.
+products and the P6 plan from that one class request.
 
 Earlier engine format/check/Clippy and release builds passed for unified component
 projection, scoped check bounds and same-DEX ancestor relationships; those changes
@@ -303,6 +314,32 @@ stops or storage gaps. It selected 720,360 natural groups and retained 459,253
 explicit allocation carriers. Uncertainty in the original initialization-owner
 relation stayed unchanged. These observations are not whole-method equivalence or
 ART admission evidence.
+
+### Region planning observations
+
+The same core test checks original operation/terminal ownership, selected
+control targets and edge copies, before-throw saves, catch order and exactly-once
+natural emission. Finite original-graph versus planned-target traces cover
+branches, nested regions, while/do-while conditions, repeated producers, exit-side
+work, nested loops, a divergent prefix, original switch fallthrough/shared targets,
+natural and explicit protection, and successful/failing lock paths. Debug and
+release execution of the sole core test passed. The model consumes supplied
+branch roles and P5 storage; it is not a full VM or a P7/P9 execution test.
+
+Ten temporary P6 mutations compiled and failed the targeted core obligations:
+missing edge copies, reversed arm role, skipped tail condition, skipped exit-side
+work, reversed catch priority, lost snapshots, duplicate monitor emission, invented
+lock alias, duplicate construction emission and collapsed shared-entry catch roles.
+All mutations were removed. These finite checks do not prove every graph, caller,
+callee, monitor pattern or resource-failure path.
+
+A 55-DEX traversal delivered 2,644,578 PlannedMethod products without P6 stops or
+upstream/class stops. The pre-existing P4 issue remained and storage gaps stayed
+zero. Natural and explicit plans coexist; recovery diagnostics are not execution-fact
+failures or whole-method verification badges. All 4,448 retained P2/P3/P4/P5
+products for 1,112 focused methods matched. Serial/four-worker products including
+P6 matched for 19 classes and 4,585 members. Input/P1 were unchanged, so prior
+byte-roundtrip evidence was retained rather than rerun.
 
 ## Method scheduling observations
 

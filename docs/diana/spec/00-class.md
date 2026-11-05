@@ -82,7 +82,7 @@ cached as absent definitions.
 
 ## Development inspection
 
-The engine development shell is the single P0–P5 observation entry:
+The engine development shell is the single P0–P6 observation entry:
 
 ```sh
 cargo run -p diana-decomp --example dbg_shell --locked -- \

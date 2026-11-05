@@ -641,6 +641,9 @@ impl<'a> StorageMethod<'a> {
     pub fn analysis_evidence(&self) -> AnalysisEvidence<'_, 'a> {
         AnalysisEvidence { typed: &self.typed }
     }
+    pub fn storage_evidence(&self) -> StorageEvidence<'_, 'a> {
+        StorageEvidence { storage: self }
+    }
     pub fn method_id(&self) -> crate::MethodId {
         self.typed.method_id()
     }
@@ -648,6 +651,32 @@ impl<'a> StorageMethod<'a> {
         self.typed.class_id()
     }
 }
+/// Borrowed P5 inspection through later products; no predecessor extraction.
+#[derive(Clone, Copy)]
+pub struct StorageEvidence<'f, 'a> {
+    storage: &'f StorageMethod<'a>,
+}
+impl<'f, 'a> StorageEvidence<'f, 'a> {
+    pub fn facts(self) -> &'f StorageFacts {
+        self.storage.facts()
+    }
+    pub fn type_facts(self) -> &'f TypeFacts {
+        self.storage.type_facts()
+    }
+    pub fn execution(self) -> ExecutionFacts<'f, 'a> {
+        self.storage.execution()
+    }
+    pub fn class_id(self) -> crate::ClassDefId {
+        self.storage.class_id()
+    }
+    pub fn method_id(self) -> crate::MethodId {
+        self.storage.method_id()
+    }
+    pub fn analysis_evidence(self) -> AnalysisEvidence<'f, 'a> {
+        self.storage.analysis_evidence()
+    }
+}
+
 /// Read-only analysis inspection, not a predecessor extraction or build interface.
 #[derive(Clone, Copy)]
 pub struct AnalysisEvidence<'f, 'a> {

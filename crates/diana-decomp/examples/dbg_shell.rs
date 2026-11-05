@@ -536,6 +536,27 @@ impl Shell {
                     .map(|_| class_id(request))
                     .transpose()?,
             ),
+            "p6-all" => region_all(
+                &engine,
+                index.class_count(),
+                request
+                    .get("class")
+                    .map(|_| class_id(request))
+                    .transpose()?,
+                request.get("details").and_then(Value::as_bool) == Some(true),
+            ),
+            "p6" | "regions" => {
+                let analysis = engine
+                    .analyze_method(class_key(class_id(request)?), MethodId(method_id(request)?))?;
+                let outcome = analysis.result?;
+                let details = request.get("details").and_then(Value::as_bool) == Some(true);
+                match &outcome {
+                    MethodOutcome::Planned(planned) => Ok(region_json(planned, details)),
+                    MethodOutcome::RegionStopped(stop) => Ok(region_stop_json(stop)),
+                    _ => Ok(inspection_stop(&outcome)
+                        .unwrap_or(json!({"stage":"p6","upstream_stopped":true}))),
+                }
+            }
             "p5-all" => storage_all(
                 &engine,
                 index.class_count(),
@@ -554,7 +575,12 @@ impl Shell {
                     .and_then(Value::as_bool)
                     .unwrap_or(false);
                 match &outcome {
-                    MethodOutcome::Stored(stored) => Ok(storage_json(stored, details)),
+                    MethodOutcome::Planned(stored) => {
+                        Ok(storage_json(stored.storage_evidence(), details))
+                    }
+                    MethodOutcome::RegionStopped(stop) => {
+                        Ok(storage_json(stop.storage_evidence(), details))
+                    }
                     MethodOutcome::StorageStopped(stop) => Ok(
                         json!({"stage":"p5","stopped":true,"kind":format!("{:?}",stop.error().kind()),"error":format!("{}",stop.error()),
                         "partial":{"bindings":stop.partial().bindings().len(),"locals":stop.partial().locals().len(),"issues":stop.partial().issues().len()}}),
@@ -572,8 +598,11 @@ impl Shell {
                     .and_then(Value::as_bool)
                     .unwrap_or(false);
                 match &outcome {
-                    MethodOutcome::Stored(stored) => {
+                    MethodOutcome::Planned(stored) => {
                         Ok(type_json(stored.analysis_evidence(), details))
+                    }
+                    MethodOutcome::RegionStopped(stop) => {
+                        Ok(type_json(stop.analysis_evidence(), details))
                     }
                     MethodOutcome::StorageStopped(stop) => {
                         Ok(type_json(stop.analysis_evidence(), details))
@@ -593,13 +622,18 @@ impl Shell {
                     .analyze_method(class_key(class_id(request)?), MethodId(method_id(request)?))?;
                 let outcome = analysis.result?;
                 match &outcome {
-                    MethodOutcome::Stored(ssa) => Ok(ssa_json(
+                    MethodOutcome::Planned(ssa) => Ok(ssa_json(
                         ssa.analysis_evidence().ssa_facts(),
                         ssa.execution(),
                         request
                             .get("details")
                             .and_then(Value::as_bool)
                             .unwrap_or(false),
+                    )),
+                    MethodOutcome::RegionStopped(stop) => Ok(ssa_json(
+                        stop.analysis_evidence().ssa_facts(),
+                        stop.execution(),
+                        request.get("details").and_then(Value::as_bool) == Some(true),
                     )),
                     MethodOutcome::StorageStopped(stop) => Ok(ssa_json(
                         stop.analysis_evidence().ssa_facts(),
@@ -682,7 +716,8 @@ impl Shell {
                                 p1_errors += 1;
                                 continue;
                             }
-                            MethodOutcome::Stored(stored) => Ok(stored.execution()),
+                            MethodOutcome::Planned(stored) => Ok(stored.execution()),
+                            MethodOutcome::RegionStopped(stop) => Ok(stop.execution()),
                             MethodOutcome::StorageStopped(stop) => Ok(stop.execution()),
                             MethodOutcome::TypeStopped(stop) => Ok(stop.execution()),
                             MethodOutcome::SsaStopped(stop) => Ok(stop.execution()),
@@ -894,7 +929,8 @@ fn type_evidence<'f, 'a>(
     outcome: &'f MethodOutcome<'a>,
 ) -> Option<diana_decomp::p5::AnalysisEvidence<'f, 'a>> {
     match outcome {
-        MethodOutcome::Stored(stored) => Some(stored.analysis_evidence()),
+        MethodOutcome::Planned(stored) => Some(stored.analysis_evidence()),
+        MethodOutcome::RegionStopped(stop) => Some(stop.analysis_evidence()),
         MethodOutcome::StorageStopped(stop) => Some(stop.analysis_evidence()),
         _ => None,
     }
@@ -1119,7 +1155,8 @@ fn ssa_all(
             match &entry.result {
                 Ok(MethodOutcome::DeclarationOnly) => no_code += 1,
                 Ok(
-                    MethodOutcome::Stored(_)
+                    MethodOutcome::Planned(_)
+                    | MethodOutcome::RegionStopped(_)
                     | MethodOutcome::StorageStopped(_)
                     | MethodOutcome::TypeStopped(_),
                 ) => {
@@ -1358,7 +1395,7 @@ fn add_storage_counts(counts: &mut BTreeMap<String, u64>, f: &diana_decomp::p5::
     count!("issues", f.issues().len());
 }
 
-fn storage_json(stored: &diana_decomp::p5::StorageMethod<'_>, details: bool) -> Value {
+fn storage_json(stored: diana_decomp::p5::StorageEvidence<'_, '_>, details: bool) -> Value {
     let f = stored.facts();
     let mut counts = BTreeMap::new();
     add_storage_counts(&mut counts, f);
@@ -1426,10 +1463,17 @@ fn storage_all(
             methods += 1;
             if let Some(members) = &mut members {
                 let result = match &entry.result {
-                    Ok(MethodOutcome::Stored(stored)) => json!({
+                    Ok(MethodOutcome::Planned(stored)) => json!({
                         "p3":ssa_json(stored.analysis_evidence().ssa_facts(),stored.execution(),true),
                         "p4":type_json(stored.analysis_evidence(),true),
-                        "p5":storage_json(stored,true),
+                        "p5":storage_json(stored.storage_evidence(),true),
+                        "p6":region_json(stored,true),
+                    }),
+                    Ok(MethodOutcome::RegionStopped(stop)) => json!({
+                        "p3":ssa_json(stop.analysis_evidence().ssa_facts(),stop.execution(),true),
+                        "p4":type_json(stop.analysis_evidence(),true),
+                        "p5":storage_json(stop.storage_evidence(),true),
+                        "p6":region_stop_json(stop),
                     }),
                     Ok(MethodOutcome::StorageStopped(stop)) => {
                         json!({"stage":"p5","kind":format!("{:?}",stop.error().kind()),"error":format!("{}",stop.error())})
@@ -1450,10 +1494,20 @@ fn storage_all(
                 members.push(json!({"class":entry.key.class.class_def.0,"method":entry.key.method.0,"result":result}));
             }
             match &entry.result {
-                Ok(MethodOutcome::Stored(stored)) => {
+                Ok(MethodOutcome::Planned(stored)) => {
                     ready += 1;
                     type_issues += stored.type_facts().issues().len() as u64;
-                    let f = stored.facts();
+                    let f = stored.storage_facts();
+                    add_storage_counts(&mut counts, f);
+                    partial += u64::from(!f.issues().is_empty());
+                    for issue in f.issues() {
+                        *problems.entry(format!("{:?}", issue.gap())).or_default() += 1;
+                    }
+                }
+                Ok(MethodOutcome::RegionStopped(stop)) => {
+                    ready += 1;
+                    type_issues += stop.type_facts().issues().len() as u64;
+                    let f = stop.storage_facts();
                     add_storage_counts(&mut counts, f);
                     partial += u64::from(!f.issues().is_empty());
                     for issue in f.issues() {
@@ -1488,6 +1542,178 @@ fn storage_all(
     Ok(result)
 }
 
+fn add_region_counts(counts: &mut BTreeMap<String, u64>, f: &diana_decomp::p6::RegionFacts) {
+    use diana_decomp::p6::*;
+    for (name, count) in [
+        ("nodes", f.nodes().len()),
+        ("blocks", f.blocks().len()),
+        ("links", f.links().len()),
+        ("edges", f.edges().len()),
+        ("labels", f.labels().len()),
+        ("throws", f.throws().len()),
+        ("handler_chains", f.handler_chains().len()),
+        ("handler_entries", f.handler_entries().len()),
+        ("copy_placements", f.copy_placements().len()),
+        ("lock_events", f.locks().len()),
+        ("monitor_plans", f.monitor_plans().len()),
+        ("issues", f.issues().len()),
+    ] {
+        *counts.entry(name.into()).or_default() += count as u64;
+    }
+    for r in f.regions() {
+        let name = match r.kind() {
+            RegionKind::Block(_) => "block_regions",
+            RegionKind::Sequence => "sequences",
+            RegionKind::If { .. } => "ifs",
+            RegionKind::Loop(id) => match f.loops()[id.0 as usize].form() {
+                LoopForm::While(_) => "while",
+                LoopForm::DoWhile(_) => "do_while",
+                LoopForm::Infinite => "infinite_loops",
+            },
+            RegionKind::Switch { .. } => "switches",
+            RegionKind::LabelledBlock { .. } => "labelled_blocks",
+            RegionKind::Try(_) => "tries",
+            RegionKind::Synchronized(_) => "synchronized",
+            RegionKind::Graph { .. } => "graphs",
+        };
+        *counts.entry(name.into()).or_default() += 1;
+    }
+}
+fn region_json(method: &diana_decomp::p6::PlannedMethod<'_>, details: bool) -> Value {
+    let f = method.facts();
+    let mut counts = BTreeMap::new();
+    add_region_counts(&mut counts, f);
+    let mut result = json!({"stage":"p6","class":method.class_id().0,"method":method.method_id().0,"counts":counts,"upstream_storage_issues":method.storage_facts().issues().len(),"upstream_type_issues":method.type_facts().issues().len(),"root":f.root().map(|r|r.0),"issues":f.issues().iter().map(|i|format!("{i:?}")).collect::<Vec<_>>()});
+    if details {
+        result["nodes"]=json!(f.nodes().iter().map(|n|json!({"id":n.id().0,"block":n.block().0,"operations":[n.operations().start,n.operations().end],"terminal":n.has_terminal(),"reachable":n.reachable()})).collect::<Vec<_>>());
+        result["blocks"]=json!(f.blocks().iter().map(|b|json!({"id":b.block().0,"parts":b.parts().iter().map(|n|n.0).collect::<Vec<_>>()})).collect::<Vec<_>>());
+        result["regions"]=json!(f.regions().iter().map(|r|json!({"id":r.id().0,"kind":format!("{:?}",r.kind()),"entry":r.entry().map(|n|n.0),"follow":r.follow().map(|n|n.0),"continuation":format!("{:?}",r.continuation()),"parent":f.parent(r.id()).map(|r|r.0),"children":r.children().iter().map(|r|r.0).collect::<Vec<_>>(),"nodes":r.nodes().iter().map(|n|n.0).collect::<Vec<_>>()})).collect::<Vec<_>>());
+        result["links"]=json!(f.links().iter().zip(f.link_plans()).map(|(l,p)|json!({"id":l.id().0,"from":l.from().0,"to":l.to().0,"origin":format!("{:?}",l.origin()),"action":format!("{:?}",p.action()),"copies":p.copies().iter().map(|p|p.0).collect::<Vec<_>>()})).collect::<Vec<_>>());
+        result["edges"] = json!(
+            f.edges()
+                .iter()
+                .map(|e| json!({"id":e.edge().0,"route":format!("{:?}",e.route())}))
+                .collect::<Vec<_>>()
+        );
+        result["labels"]=json!(f.labels().iter().map(|l|json!({"id":l.id().0,"node":l.node().0,"block":l.block().0,"kind":format!("{:?}",l.kind()),"owner":l.owner().0})).collect::<Vec<_>>());
+        result["throws"]=json!(f.throws().iter().map(|t|json!({"id":t.id().0,"site":format!("{:?}",t.site()),"node":t.node().0,"completion":format!("{:?}",t.completion()),"chain":t.chain().0,"edges":t.edges().iter().map(|e|e.0).collect::<Vec<_>>(),"snapshots":t.snapshots().iter().map(|p|p.0).collect::<Vec<_>>(),"construction":t.construction().map(|g|g.0),"protection":format!("{:?}",t.protection())})).collect::<Vec<_>>());
+        result["handler_chains"]=json!(f.handler_chains().iter().map(|c|json!({"id":c.id().0,"clauses":c.clauses().iter().map(|c|json!({"order":c.order,"catch":c.catch.map(|t|t.0),"target":format!("{:?}",c.target)})).collect::<Vec<_>>()})).collect::<Vec<_>>());
+        result["handler_entries"]=json!(f.handler_entries().iter().map(|h|json!({"node":h.node().0,"capture":h.capture().map(|op|op.0),"receives":h.receives().iter().map(|p|p.0).collect::<Vec<_>>()})).collect::<Vec<_>>());
+        result["copies"]=json!(f.copy_placements().iter().map(|p|json!({"plan":p.plan.0,"location":format!("{:?}",p.location),"construction":p.construction.map(|g|g.0)})).collect::<Vec<_>>());
+        result["loops"]=json!(f.loops().iter().map(|l|json!({"id":l.id().0,"header":l.header().0,"condition":l.condition().map(|n|n.0),"continue":l.continue_target().0,"follow":l.follow().map(|n|n.0),"form":format!("{:?}",l.form()),"members":l.members().iter().map(|n|n.0).collect::<Vec<_>>(),"latches":l.latches().iter().map(|l|l.0).collect::<Vec<_>>(),"exits":l.exits().iter().map(|l|l.0).collect::<Vec<_>>()})).collect::<Vec<_>>());
+        result["locks"]=json!(f.locks().iter().map(|l|json!({"operation":l.operation().0,"receiver":format!("{:?}",l.receiver()),"before":format!("{:?}",l.before()),"normal":format!("{:?}",l.normal()),"exception":format!("{:?}",l.exception()),"matched":l.matched().map(|op|op.0),"release_cannot_throw":l.release_cannot_throw()})).collect::<Vec<_>>());
+        result["tries"]=json!(f.tries().iter().map(|p|json!({"id":p.id().0,"chain":p.chain().0,"clauses":[p.clauses().start,p.clauses().end],"outer_sync":p.outer_sync().map(|id|id.0),"entry":p.entry().0,"follow":p.follow().map(|n|n.0),"body":p.body().iter().map(|n|n.0).collect::<Vec<_>>(),"handlers":p.handlers().iter().map(|n|n.0).collect::<Vec<_>>(),"members":p.members().iter().map(|n|n.0).collect::<Vec<_>>()})).collect::<Vec<_>>());
+        result["monitor_plans"] = json!(
+            f.monitor_plans()
+                .iter()
+                .map(|p| json!({"enter":p.enter().0,"mode":format!("{:?}",p.mode())}))
+                .collect::<Vec<_>>()
+        );
+        result["synchronized"]=json!(f.synchronized().iter().map(|s|json!({"id":s.id().0,"enter":s.enter().0,"enter_link":s.enter_link().0,"release_link":s.release_link().0,"lock":format!("{:?}",s.lock()),"body":s.body().iter().map(|n|n.0).collect::<Vec<_>>(),"releases":s.releases().iter().map(|op|op.0).collect::<Vec<_>>(),"cleanups":s.cleanups().iter().map(|c|json!({"capture":c.capture.0,"release":c.release.0,"rethrow":c.rethrow.0,"nodes":c.nodes.iter().map(|n|n.0).collect::<Vec<_>>()})).collect::<Vec<_>>(),"members":s.members().iter().map(|n|n.0).collect::<Vec<_>>(),"follow":s.follow().map(|n|n.0)})).collect::<Vec<_>>());
+        result["operation_owners"] = json!(
+            f.operation_owners()
+                .iter()
+                .map(|o| format!("{o:?}"))
+                .collect::<Vec<_>>()
+        );
+        result["terminal_owners"] = json!(
+            f.terminal_owners()
+                .iter()
+                .map(|o| format!("{o:?}"))
+                .collect::<Vec<_>>()
+        );
+    }
+    result
+}
+fn region_stop_json(stop: &diana_decomp::p6::RegionStop<'_>) -> Value {
+    json!({"stage":"p6","stopped":true,"kind":format!("{:?}",stop.error().kind()),"error":format!("{}",stop.error()),"partial":{"nodes":stop.partial().nodes().len(),"regions":stop.partial().regions().len(),"issues":stop.partial().issues().len()}})
+}
+fn region_all(
+    engine: &Engine<'_>,
+    classes: u32,
+    selected: Option<u32>,
+    details: bool,
+) -> Result<Value, RequestError> {
+    let started = std::time::Instant::now();
+    let mut analysis_time = std::time::Duration::ZERO;
+    let (mut methods, mut no_code, mut ready, mut failed, mut upstream, mut class_errors) =
+        (0u64, 0u64, 0u64, 0u64, 0u64, 0u64);
+    let mut counts = BTreeMap::new();
+    let mut first_failure = None;
+    let mut members = details.then(Vec::new);
+    let requested = selected.map_or(classes, |_| 1);
+    for ordinal in 0..requested {
+        let class = selected.unwrap_or(ordinal);
+        let began = std::time::Instant::now();
+        let analysis = engine.analyze(Request {
+            class: class_key(class),
+            method: None,
+        });
+        analysis_time += began.elapsed();
+        let analysis = match analysis {
+            Ok(a) => a,
+            Err(e) => {
+                class_errors += 1;
+                if first_failure.is_none() {
+                    first_failure = Some(json!({"class":class,"error":format!("{e}")}));
+                }
+                continue;
+            }
+        };
+        for entry in &analysis.methods {
+            methods += 1;
+            let result = match &entry.result {
+                Ok(MethodOutcome::Planned(p)) => {
+                    ready += 1;
+                    add_region_counts(&mut counts, p.facts());
+                    *counts.entry("upstream_storage_issues".into()).or_default() +=
+                        p.storage_facts().issues().len() as u64;
+                    *counts.entry("upstream_type_issues".into()).or_default() +=
+                        p.type_facts().issues().len() as u64;
+                    details.then(|| region_json(p, true))
+                }
+                Ok(MethodOutcome::RegionStopped(stop)) => {
+                    failed += 1;
+                    let v = region_stop_json(stop);
+                    if first_failure.is_none() {
+                        first_failure =
+                            Some(json!({"class":class,"method":entry.key.method.0,"result":v}));
+                    }
+                    Some(v)
+                }
+                Ok(MethodOutcome::DeclarationOnly) => {
+                    no_code += 1;
+                    None
+                }
+                other => {
+                    upstream += 1;
+                    let retained = match other {
+                        Err(error) => {
+                            json!({"kind":format!("{:?}",error.kind()),"error":format!("{error}")})
+                        }
+                        Ok(outcome) => inspection_stop(outcome)
+                            .unwrap_or(json!({"unavailable":"method facts not delivered"})),
+                    };
+                    if first_failure.is_none() {
+                        first_failure = Some(
+                            json!({"class":class,"method":entry.key.method.0,"result":retained}),
+                        );
+                    }
+                    Some(retained)
+                }
+            };
+            if let Some(members) = &mut members {
+                members.push(json!({"class":class,"method":entry.key.method.0,"result":result}));
+            }
+        }
+    }
+    let mut out = json!({"stage":"p6","classes":requested,"methods":methods,"no_code":no_code,"planned":ready,"failed":failed,"upstream":upstream,"class_errors":class_errors,"upstream_storage_issues":counts.get("upstream_storage_issues").copied().unwrap_or(0),"upstream_type_issues":counts.get("upstream_type_issues").copied().unwrap_or(0),"counts":counts,"first_failure":first_failure,"complete":true,"analysis_ns":analysis_time.as_nanos(),"elapsed_ms":started.elapsed().as_millis()});
+    if let Some(members) = members {
+        out["members"] = json!(members);
+    }
+    Ok(out)
+}
+
 fn inspection_stop(outcome: &MethodOutcome<'_>) -> Option<Value> {
     match outcome {
         MethodOutcome::DeclarationOnly => Some(json!({"declaration_only": true})),
@@ -1504,10 +1730,17 @@ fn inspection_stop(outcome: &MethodOutcome<'_>) -> Option<Value> {
                 "blocks": partial.blocks().len(), "edges": partial.edges().len(),
             })),
         })),
-        MethodOutcome::Stored(_)
-        | MethodOutcome::StorageStopped(_)
-        | MethodOutcome::TypeStopped(_)
-        | MethodOutcome::SsaStopped(_) => None,
+        MethodOutcome::RegionStopped(stop) => Some(region_stop_json(stop)),
+        MethodOutcome::StorageStopped(stop) => Some(
+            json!({"stage":"p5","stopped":true,"kind":format!("{:?}",stop.error().kind()),"error":format!("{}",stop.error())}),
+        ),
+        MethodOutcome::TypeStopped(stop) => Some(
+            json!({"stage":"p4","stopped":true,"kind":format!("{:?}",stop.error().kind()),"error":format!("{}",stop.error())}),
+        ),
+        MethodOutcome::SsaStopped(stop) => Some(
+            json!({"stage":"p3","stopped":true,"kind":format!("{:?}",stop.error().kind()),"error":format!("{}",stop.error())}),
+        ),
+        MethodOutcome::Planned(_) => None,
     }
 }
 

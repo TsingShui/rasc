@@ -18,7 +18,9 @@ or start another analysis chain.
 `AnalysisEvidence` is a separate borrowed inspection view. It supplies retained
 SSA/type facts to `dbg_shell` and existing core checks, without construction or
 mutation authority. P6/P7 consume storage accesses and plans, not this inspection
-view as a substitute for a missing P5 fact.
+view as a substitute for a missing P5 fact. `StorageEvidence` supplies borrowed
+P5 inspection through a later method product. It exposes the same immutable
+storage/type/execution facts, not an owned predecessor or constructor.
 
 ## Bindings, reads and materialization
 
