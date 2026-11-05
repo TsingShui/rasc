@@ -1,6 +1,7 @@
 use crate::input::{DexContainer, InputError, InputProblem, ProgramIndex};
 use crate::substrate::report::*;
 use crate::{ByteOffset, ClassKey, MethodId, MethodKey, RequestError};
+use rayon::prelude::*;
 
 /// Original caller-owned bytes and one logical header selection. The caller
 /// retains the physical owner until this engine is dropped.
@@ -49,16 +50,43 @@ struct IndexedImage<'a> {
 pub struct Engine<'a> {
     images: Vec<IndexedImage<'a>>,
     method_jobs: usize,
-    method_pool: std::sync::OnceLock<Result<rayon::ThreadPool, String>>,
+    method_pool: std::sync::OnceLock<rayon::ThreadPool>,
+    method_pool_build: std::sync::Mutex<()>,
 }
 
 impl<'a> Engine<'a> {
     /// Sets the number of Rayon workers for class member analysis. A value of
-    /// one runs sequentially; zero is treated as one.
+    /// one runs sequentially; zero is treated as one. The default is one.
+    /// The bounded pool is created lazily for a multi-member class request.
+    /// Pool startup failures are classified request errors, not cached absences.
     pub fn with_method_jobs(mut self, jobs: usize) -> Self {
         self.method_jobs = jobs.max(1);
         self.method_pool = std::sync::OnceLock::new();
+        self.method_pool_build = std::sync::Mutex::new(());
         self
+    }
+
+    fn method_pool(&self) -> Result<&rayon::ThreadPool, RequestError> {
+        if let Some(pool) = self.method_pool.get() {
+            return Ok(pool);
+        }
+        let _build = self.method_pool_build.lock().map_err(|_| {
+            RequestError::InternalInvariant("method worker pool construction poisoned")
+        })?;
+        if self.method_pool.get().is_none() {
+            let pool = rayon::ThreadPoolBuilder::new()
+                .num_threads(self.method_jobs)
+                .build()
+                .map_err(RequestError::MethodScheduling)?;
+            self.method_pool.set(pool).map_err(|_| {
+                RequestError::InternalInvariant("method worker pool initialized twice")
+            })?;
+        }
+        self.method_pool
+            .get()
+            .ok_or(RequestError::InternalInvariant(
+                "method worker pool was not initialized",
+            ))
     }
 
     /// Admits physical bytes and selected logical catalogs. The same physical
@@ -136,6 +164,7 @@ impl<'a> Engine<'a> {
             images: indexed,
             method_jobs: 1,
             method_pool: std::sync::OnceLock::new(),
+            method_pool_build: std::sync::Mutex::new(()),
         })
     }
 }
@@ -152,11 +181,12 @@ pub struct MethodAnalysis<'a> {
     pub result: Result<MethodOutcome<'a>, RequestError>,
 }
 
-/// The sole executable method path advances P1 -> P2 -> P3 -> P4 or retains a classified stop.
+/// The sole executable method path advances P1 -> P2 -> P3 -> P4 -> P5 or retains a classified stop.
 pub enum MethodOutcome<'a> {
     DeclarationOnly,
     DisassemblyStopped(crate::p1::DecodedOutcome<'a>),
-    Typed(crate::p4::TypedMethod<'a>),
+    Stored(crate::p5::StorageMethod<'a>),
+    StorageStopped(crate::p5::StorageStop<'a>),
     TypeStopped(crate::p4::TypeStop<'a>),
     FlowStopped(crate::p2::FlowStop<'a>),
     SsaStopped(crate::p3::SsaStop<'a>),
@@ -166,7 +196,8 @@ impl MethodOutcome<'_> {
     /// Borrowed execution facts without extracting the predecessor product.
     pub fn execution(&self) -> Option<crate::p2::ExecutionFacts<'_, '_>> {
         match self {
-            Self::Typed(typed) => Some(typed.execution()),
+            Self::Stored(stored) => Some(stored.execution()),
+            Self::StorageStopped(stop) => Some(stop.execution()),
             Self::TypeStopped(stop) => Some(stop.execution()),
             Self::SsaStopped(stop) => Some(stop.execution()),
             _ => None,
@@ -176,7 +207,8 @@ impl MethodOutcome<'_> {
     /// Original read-only evidence for debugging; no stage constructor is exposed.
     pub fn evidence(&self) -> Option<crate::p2::MethodEvidence<'_, '_>> {
         match self {
-            Self::Typed(typed) => Some(typed.evidence()),
+            Self::Stored(stored) => Some(stored.evidence()),
+            Self::StorageStopped(stop) => Some(stop.evidence()),
             Self::TypeStopped(stop) => Some(stop.evidence()),
             Self::SsaStopped(stop) => Some(stop.evidence()),
             Self::FlowStopped(stop) => Some(stop.evidence()),
@@ -209,7 +241,16 @@ impl MethodTask {
         match crate::p2::build_flow(&task, decoded) {
             crate::p2::FlowBuild::Ready(flow) => match crate::p3::build_ssa(&task, flow) {
                 crate::p3::SsaBuild::Ready(ssa) => match crate::p4::build_types(&task, ssa) {
-                    crate::p4::TypeBuild::Ready(typed) => Ok(MethodOutcome::Typed(typed)),
+                    crate::p4::TypeBuild::Ready(typed) => {
+                        match crate::p5::build_storage(&task, typed) {
+                            crate::p5::StorageBuild::Ready(stored) => {
+                                Ok(MethodOutcome::Stored(stored))
+                            }
+                            crate::p5::StorageBuild::Stopped(stop) => {
+                                Ok(MethodOutcome::StorageStopped(stop))
+                            }
+                        }
+                    }
                     crate::p4::TypeBuild::Stopped(stop) => Ok(MethodOutcome::TypeStopped(stop)),
                 },
                 crate::p3::SsaBuild::Stopped(stop) => Ok(MethodOutcome::SsaStopped(stop)),
@@ -230,7 +271,7 @@ impl<'a> Engine<'a> {
         image.index.class_facts_cached(class.class_def)
     }
 
-    /// Runs P0, the method reader and P1–P4 for one method entry only.
+    /// Runs P0, the method reader and P1–P5 for one method entry only.
     pub fn analyze_method(
         &self,
         class: ClassKey,
@@ -246,7 +287,7 @@ impl<'a> Engine<'a> {
         })
     }
 
-    /// Runs P0, the method reader and P1–P4 for one class request. Class assembly
+    /// Runs P0, the method reader and P1–P5 for one class request. Class assembly
     /// and rendering belong to P8/P9 and are not part of this boundary.
     pub fn analyze(&self, request: Request) -> Result<ClassAnalysis<'a>, RequestError> {
         let position =
@@ -267,17 +308,28 @@ impl<'a> Engine<'a> {
         }
         let mut methods = Vec::new();
         crate::substrate::owned::reserve(&mut methods, entries.len())?;
-        for method in entries {
-            // Keep a classified stop alongside already delivered siblings.
-            let key = MethodKey {
+        let analyze = |&method: &MethodId| MethodAnalysis {
+            key: MethodKey {
                 class: request.class,
                 method,
-            };
-            let result = MethodTask::run(&image.index, &facts, method);
-            // Result storage was reserved before starting any task. All method
-            // products and scratch are private, so a returned task failure does
-            // not invalidate sibling inputs or the result collector.
-            methods.push(MethodAnalysis { key, result });
+            },
+            // A method failure is a result, not a fail-fast iterator error.
+            result: MethodTask::run(&image.index, &facts, method),
+        };
+        if self.method_jobs > 1 && entries.len() > 1 {
+            // This indexed map emits exactly one result per selected entry.
+            // collect_into_vec reuses the fallibly reserved destination buffer;
+            // there is no sorting or separate completion-reordering buffer.
+            self.method_pool()?.install(|| {
+                entries
+                    .par_iter()
+                    .map(analyze)
+                    .collect_into_vec(&mut methods);
+            });
+        } else {
+            for method in &entries {
+                methods.push(analyze(method));
+            }
         }
         Ok(ClassAnalysis {
             image: ImageFact {

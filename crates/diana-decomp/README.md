@@ -6,8 +6,9 @@ forbids unsafe code and external runtime/process dependencies; declarations come
 only from the analyzed input.
 
 The active method chain is P0 class facts → method reader → P1 disassembly → P2
-execution model → P3 SSA → P4 value/use interpretation. `Engine::analyze_method`
-and class requests use one method task. P5–P9 are not yet active; the application decompilation interface is being rebuilt.
+execution model → P3 SSA → P4 value/use interpretation → P5 storage/transfer
+plans. `Engine::analyze_method` and class requests use one method task. The
+application decompilation interface is being rebuilt.
 The approved architecture is [PIPELINE_DESIGN](../../docs/diana/PIPELINE_DESIGN.md).
 
 P1 retains complete instruction/payload facts, original references, entry layout
@@ -15,7 +16,7 @@ and structural associations. P2 owns ordered operations, exact slots, explicit
 normal/exception frame/heap/lock completion rules, transfers, exits and coverage.
 It does not expose its complete P1 predecessor. Read-only `MethodEvidence` supports
 original inspection and checks without product extraction or construction access.
-P2/P3 constructors are internal and require Engine's method-task authority.
+P2–P5 constructors are internal and require Engine's method-task authority.
 P3 privately retains P2 and delivers exact-slot states, definitions, ordered use
 bindings, necessary Phis, per-transfer incoming states and original StatePoint
 mappings. Borrowed `ExecutionFacts` exposes normal execution queries, not a
@@ -26,7 +27,9 @@ Undefined/invalidated sources remain explicit availability facts, not default va
 A P2 stop retains the complete P1 input, classified error and available unvalidated
 construction facts. A P3 stop retains complete P2 input and a partial SSA
 snapshot; neither stop can be promoted to a successful product. P4 construction
-stops likewise retain SSA and a distinct unpublished `TypePartial`. Class requests
+stops likewise retain SSA and a distinct unpublished `TypePartial`. P5 stops retain
+P4 and an unpublished `StoragePartial`; neither snapshot is a mature successor.
+Class requests
 reserve result storage before starting method work and retain all selected known
 member outcomes. A method-task resource/invariant error no longer stops siblings;
 `ClassAnalysis.terminated` and its kind-based truncation path are removed.
@@ -71,8 +74,22 @@ query now follows original declaration facts without exposing an index or stage
 constructor to P4. Successful check-cast bounds now refine array
 component knowledge at original execution positions without an SSA write or global
 source-declaration rewrite. Actual object-relation uncertainty and unsupported
-interpretations remain separate from missing input facts. P5–P9 remain inactive, so partial Java-like text is not yet delivered.
+interpretations remain separate from missing input facts.
 The [P4 chapter](../../docs/diana/spec/04-types.md) records its algorithm and guarantees.
+
+P5 privately retains P4 in `StorageMethod`, returned as `MethodOutcome::Stored`.
+It maps each SSA value to a parameter, independent local, exact literal or explicit
+reference carrier, preserving P4 numeric bit storage without choosing a new family.
+Definitions keep their original normal commit/materialization sites. Every Phi
+incoming retains its original transfer and adaptation: normal copies execute only
+on the selected transfer; exceptional incoming uses before-throw saves and
+handler-only receives after the original exception capture. Dependency-indexed
+copy scheduling preserves simultaneous-copy requirements and uses matching
+temporaries to break cycles. Local gaps follow affected storage dependencies;
+independent producers and plan components remain available. The
+[P5 chapter](../../docs/diana/spec/05-variables.md) defines its active interface.
+Scope: construction plans use explicit reference carriers; natural-new merge
+selection and P6–P9 are not yet active.
 
 Independent translation checking compiles only under `cfg(test)`; ordinary
 Engine requests do not run symbolic replay, output audits or duplicate dominator
@@ -115,18 +132,29 @@ and per-method construction failures. Optional `class` selects one original clas
 through `Engine::analyze`; `analysis_ns` measures that analysis, excluding index
 opening, JSON formatting and inactive rendering. `partial_methods`, `local_issues`
 and unresolved input counts distinguish ready products from fully established
-facts; batch `complete` describes traversal, not semantic verification. P3/P4 are not
+facts; batch `complete` describes traversal, not semantic verification. P3–P5 are not
 formally verified. `p4` (`details:true`) exposes type origins, bits, requirements,
 views and initialization paths. `p4-all` adds typed/partial counts, interpretation
 problems, array-fill interpretation counts and missing-fact occurrences to the
 same traversal. Array-access counts and component gaps remain separate from
 unreadable use views. Detailed P4 output includes projected component sources and
 gaps, catch facts and array-fill interpretations with original payload bits. These are diagnostic
-counts, not semantic verification badges. The timed Engine traversal now includes P4.
+counts, not semantic verification badges. `p5` (`details:true`) exposes bindings,
+original reads/definitions, copy assignments/steps, snapshot routes, constructor
+receiver accesses and local gaps. `p5-all` aggregates the same facts, including
+unavailable plan components. The timed Engine traversal now includes P5, even
+when a command inspects a retained earlier product. Each shell command creates a
+fresh Engine. `Engine::with_method_jobs(n)` enables a bounded Rayon pool for
+multi-member class requests when `n > 1`; the default is one. Single-method calls
+keep the same sequential chain. The shell exposes this setting as
+`--method-jobs <workers>`. Separate DEX-process concurrency and method-worker
+concurrency need joint configuration rather than multiplying both blindly.
+`p5-all` with `details:true` also exposes each class member's retained P3/P4/P5
+products from that one class request.
 
-Engine format/check/Clippy and release builds pass; no tests were added, modified
-or run for unified component projection, scoped check bounds, same-DEX ancestor
-relationships or corpus traversal.
+Earlier engine format/check/Clippy and release builds passed for unified component
+projection, scoped check bounds and same-DEX ancestor relationships; those changes
+added, modified and ran no tests.
 The focused observation covered 1,112 methods associated with component gaps or
 constructor diagnostics. All 2,224 retained P2/P3 products matched. P4 value/use,
 Phi, type-name, array-access, fill and initialization-use products matched.
@@ -163,12 +191,13 @@ initialization evidence, not ART execution or admission evidence. The
 [pinned ART source](../../docs/diana/SOURCE_MAP.md#84-additional-mature-projects-pinned-commits-specific-symbols-and-what-not-to-borrow)
 records the runtime-source review's separate scope.
 
-Release timing compared this implementation with ae25282 through the same shell:
+Same-DEX ancestor-query timing compared with ae25282 through the same shell:
 three warmups and 12 alternating before/after processes for each of six selected
-classes. Each process issued 13 class requests with warmed input files; the first
-request had fresh Engine/declaration caches, and the last ten supplied the warm
-median. Fresh-request median ratios were 1.011–1.053, or approximately 0.5–10.1
-microseconds higher; warm median ratios were 0.904–1.072. These observations cover
+classes. Each process issued 13 class requests with warmed input files. The shell
+recreates Engine for every command, so every request had fresh Engine/declaration
+caches. First-command median ratios were 1.011–1.053, or approximately 0.5–10.1
+microseconds higher; last-ten-command median ratios were 0.904–1.072. Those later
+commands measure a warm process, not declaration-cache hits. These observations cover
 three ordinary classes, two local-ancestor classes and one missing-local-parent
 class. Median process peak RSS did not increase in these samples. They establish
 neither universal speed/memory bounds nor a general performance improvement.
@@ -203,6 +232,55 @@ active; the current engine delivers the facts needed for that contract.
 classified outcomes and encountered opcode variants. `roundtrip-all` checks independent byte re-encoding over retained
 P1 evidence. These inspection commands do not run the test-only P2/P3 verifiers.
 No phase-specific debug binary is required.
+
+## P5 observations
+
+The current authorized-input traversal covered 55 DEX files and delivered
+2,644,578 StorageMethod products. It retained 29,138,117 value bindings,
+44,074,425 use accesses, 3,085,278 Phi incoming records and 12,407 handler/Phi
+snapshot locals. Reported storage gaps, partial copy plans, stage stops and class
+errors were zero. The original single P4 initialization-owner uncertainty remained;
+it was not converted into a storage failure. The 1,112-method focused comparison
+retained identical P2, P3 and P4 products, for 3,336 matching observations.
+
+Copy-cycle saves were not encountered. Source-unavailable and representation-gap
+storage propagation also lacks execution evidence from this traversal. The
+installed scheduling/dependency algorithms and finite counters do not prove these
+branches or whole-method behavioral correspondence. Existing byte-roundtrip
+evidence was reused because input and P1 were unchanged; no second full chain was
+run merely to repeat that check. These are authorized private-input observations,
+not repository-reproducible fixtures or correctness rates.
+
+The existing core test was mechanically migrated to StorageMethod and the new
+outcome/access APIs. Its existing class-recovery case now requests four method
+workers. Inputs and expected assertion values were unchanged; no cases were added.
+Not run: Rust tests for the P5 and Rayon changes.
+
+## Method scheduling observations
+
+Rayon workers share immutable input/P0 facts and run the same MethodTask, with
+private phase products and scratch. The scheduler reserves selected-member result
+storage before dispatch, retains classified member failures and joins tasks before
+returning. Pool startup errors retain their typed source and are not cached as an
+absence. The [scheduling contract](../../docs/diana/phases.md#current-method-scheduling)
+defines startup and local-failure scopes.
+
+A serial/four-worker comparison covered 19 existing focused classes and 4,585
+members. Detailed retained P3/P4/P5 products matched. Full 55-DEX traversals under
+8-process/1-worker, 4-process/2-worker and 2-process/4-worker configurations retained
+identical P5 counters and 2,644,578 StorageMethod products, without storage gaps,
+stage stops or class errors. Existing P4 uncertainty remained unchanged.
+
+For six selected large classes, three warmup pairs preceded 12 alternating
+serial/four-worker pairs. Analysis-time median ratios were 0.341–0.939; process
+wall-time ratios were 0.372–0.940. Every command used a fresh Engine/pool and warm
+input files. These finite measurements are not universal speedup bounds.
+Whole-batch observed wall times were approximately 32.0, 41.2 and 71.0 seconds for
+the respective configurations above, without reused P5 results. Thus this batch
+retains the faster eight-process/single-method-worker configuration; internal
+method parallelism is available for class requests, not forced on every workload.
+These were individual batch observations, not a repeated throughput benchmark.
+Actual worker-startup failure and allocation-failure execution remain unobserved.
 
 Applicable engine gates:
 

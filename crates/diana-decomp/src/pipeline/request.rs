@@ -15,6 +15,8 @@ pub enum RequestError {
     Allocation(#[source] TryReserveError),
     #[error("request capacity is not representable on this platform")]
     PlatformCapacity,
+    #[error("method worker pool could not start: {0}")]
+    MethodScheduling(#[source] rayon::ThreadPoolBuildError),
     #[error("undefined register {register:?} at {pc:?}")]
     UndefinedRegister {
         register: crate::RegisterId,
@@ -63,7 +65,9 @@ impl RequestError {
             Self::Method(error) => error.kind(),
             Self::Flow(error) => error.kind(),
 
-            Self::Allocation(_) | Self::PlatformCapacity => FailureKind::ResourceExhausted,
+            Self::Allocation(_) | Self::PlatformCapacity | Self::MethodScheduling(_) => {
+                FailureKind::ResourceExhausted
+            }
             Self::UnknownDex | Self::UndefinedRegister { .. } | Self::InvalidWideRead { .. } => {
                 FailureKind::Malformed
             }

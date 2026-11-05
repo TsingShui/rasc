@@ -28,15 +28,20 @@ enum Format {
 struct Shell {
     dex: PathBuf,
     bytes: Vec<u8>,
+    method_jobs: usize,
 }
 
 impl Shell {
-    fn open(path: PathBuf) -> Result<Self, String> {
+    fn open(path: PathBuf, method_jobs: usize) -> Result<Self, String> {
         let bytes = std::fs::read(&path).map_err(|error| format!("cannot read input: {error}"))?;
         if !bytes.starts_with(b"dex\n") {
             return Err("dbg_shell accepts a bare DEX, not an APK or ZIP".into());
         }
-        Ok(Self { dex: path, bytes })
+        Ok(Self {
+            dex: path,
+            bytes,
+            method_jobs,
+        })
     }
 
     fn run(&mut self, request: &Value) -> Result<Value, RequestError> {
@@ -46,7 +51,8 @@ impl Shell {
             header_offset: ByteOffset(0),
             origin: ImageOrigin { input: InputId(0) },
         }])
-        .map_err(RequestError::Input)?;
+        .map_err(RequestError::Input)?
+        .with_method_jobs(self.method_jobs);
         let command = request
             .get("cmd")
             .and_then(Value::as_str)
@@ -530,6 +536,33 @@ impl Shell {
                     .map(|_| class_id(request))
                     .transpose()?,
             ),
+            "p5-all" => storage_all(
+                &engine,
+                index.class_count(),
+                request
+                    .get("class")
+                    .map(|_| class_id(request))
+                    .transpose()?,
+                request.get("details").and_then(Value::as_bool) == Some(true),
+            ),
+            "p5" | "storage" => {
+                let analysis = engine
+                    .analyze_method(class_key(class_id(request)?), MethodId(method_id(request)?))?;
+                let outcome = analysis.result?;
+                let details = request
+                    .get("details")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false);
+                match &outcome {
+                    MethodOutcome::Stored(stored) => Ok(storage_json(stored, details)),
+                    MethodOutcome::StorageStopped(stop) => Ok(
+                        json!({"stage":"p5","stopped":true,"kind":format!("{:?}",stop.error().kind()),"error":format!("{}",stop.error()),
+                        "partial":{"bindings":stop.partial().bindings().len(),"locals":stop.partial().locals().len(),"issues":stop.partial().issues().len()}}),
+                    ),
+                    _ => Ok(inspection_stop(&outcome)
+                        .unwrap_or(json!({"stage":"p5","upstream_stopped":true}))),
+                }
+            }
             "p4" | "types" => {
                 let analysis = engine
                     .analyze_method(class_key(class_id(request)?), MethodId(method_id(request)?))?;
@@ -539,7 +572,12 @@ impl Shell {
                     .and_then(Value::as_bool)
                     .unwrap_or(false);
                 match &outcome {
-                    MethodOutcome::Typed(typed) => Ok(type_json(typed, details)),
+                    MethodOutcome::Stored(stored) => {
+                        Ok(type_json(stored.analysis_evidence(), details))
+                    }
+                    MethodOutcome::StorageStopped(stop) => {
+                        Ok(type_json(stop.analysis_evidence(), details))
+                    }
                     MethodOutcome::SsaStopped(stop) => Ok(
                         json!({"stage":"p4","upstream_stage":"p3","kind":format!("{:?}",stop.error().kind()),"error":format!("{}",stop.error())}),
                     ),
@@ -555,9 +593,17 @@ impl Shell {
                     .analyze_method(class_key(class_id(request)?), MethodId(method_id(request)?))?;
                 let outcome = analysis.result?;
                 match &outcome {
-                    MethodOutcome::Typed(ssa) => Ok(ssa_json(
-                        ssa.ssa_facts(),
+                    MethodOutcome::Stored(ssa) => Ok(ssa_json(
+                        ssa.analysis_evidence().ssa_facts(),
                         ssa.execution(),
+                        request
+                            .get("details")
+                            .and_then(Value::as_bool)
+                            .unwrap_or(false),
+                    )),
+                    MethodOutcome::StorageStopped(stop) => Ok(ssa_json(
+                        stop.analysis_evidence().ssa_facts(),
+                        stop.execution(),
                         request
                             .get("details")
                             .and_then(Value::as_bool)
@@ -636,7 +682,8 @@ impl Shell {
                                 p1_errors += 1;
                                 continue;
                             }
-                            MethodOutcome::Typed(ssa) => Ok(ssa.execution()),
+                            MethodOutcome::Stored(stored) => Ok(stored.execution()),
+                            MethodOutcome::StorageStopped(stop) => Ok(stop.execution()),
                             MethodOutcome::TypeStopped(stop) => Ok(stop.execution()),
                             MethodOutcome::SsaStopped(stop) => Ok(stop.execution()),
                             MethodOutcome::FlowStopped(stop) => Err(stop.error()),
@@ -843,7 +890,17 @@ fn catch_types_json(facts: &[diana_decomp::input::CatchTypeFact<'_>]) -> Value {
     })).collect::<Vec<_>>())
 }
 
-fn type_json(typed: &diana_decomp::p4::TypedMethod<'_>, details: bool) -> Value {
+fn type_evidence<'f, 'a>(
+    outcome: &'f MethodOutcome<'a>,
+) -> Option<diana_decomp::p5::AnalysisEvidence<'f, 'a>> {
+    match outcome {
+        MethodOutcome::Stored(stored) => Some(stored.analysis_evidence()),
+        MethodOutcome::StorageStopped(stop) => Some(stop.analysis_evidence()),
+        _ => None,
+    }
+}
+
+fn type_json(typed: diana_decomp::p5::AnalysisEvidence<'_, '_>, details: bool) -> Value {
     let f = typed.facts();
     let flow = typed.execution();
     use diana_decomp::p4::{Interpretation, Problem};
@@ -956,7 +1013,10 @@ fn ssa_all(
         for entry in &analysis.methods {
             methods += 1;
             let available = match &entry.result {
-                Ok(MethodOutcome::Typed(typed)) => {
+                Ok(outcome) if type_evidence(outcome).is_some() => {
+                    let typed = type_evidence(outcome).ok_or(RequestError::InternalInvariant(
+                        "retained type view missing",
+                    ))?;
                     typed_ready += 1;
                     array_accesses += typed.facts().array_accesses().len() as u64;
                     for access in typed.facts().array_accesses() {
@@ -1058,7 +1118,11 @@ fn ssa_all(
             };
             match &entry.result {
                 Ok(MethodOutcome::DeclarationOnly) => no_code += 1,
-                Ok(MethodOutcome::Typed(_) | MethodOutcome::TypeStopped(_)) => {
+                Ok(
+                    MethodOutcome::Stored(_)
+                    | MethodOutcome::StorageStopped(_)
+                    | MethodOutcome::TypeStopped(_),
+                ) => {
                     ready += 1;
                     let (f, flow) = available
                         .ok_or(RequestError::InternalInvariant("retained SSA view missing"))?;
@@ -1124,6 +1188,296 @@ fn ssa_all(
     )
 }
 
+fn add_storage_counts(counts: &mut BTreeMap<String, u64>, f: &diana_decomp::p5::StorageFacts) {
+    use diana_decomp::p5::*;
+    macro_rules! count {
+        ($name:literal,$value:expr) => {
+            *counts.entry($name.into()).or_default() += $value as u64;
+        };
+    }
+    count!("bindings", f.bindings().len());
+    count!("locals", f.locals().len());
+    count!(
+        "parameters",
+        f.bindings()
+            .iter()
+            .filter(|b| matches!(b, StorageBinding::Parameter { .. }))
+            .count()
+    );
+    count!(
+        "literal_bindings",
+        f.bindings()
+            .iter()
+            .filter(|b| matches!(b, StorageBinding::Literal(_)))
+            .count()
+    );
+    count!(
+        "allocation_carriers",
+        f.bindings()
+            .iter()
+            .filter(|b| matches!(b, StorageBinding::Uninitialized { .. }))
+            .count()
+    );
+    count!(
+        "unavailable_bindings",
+        f.bindings()
+            .iter()
+            .filter(|b| matches!(b, StorageBinding::Unavailable(_)))
+            .count()
+    );
+    count!(
+        "numeric_bit_locals",
+        f.locals()
+            .iter()
+            .filter(|l| matches!(l.storage_type(), StorageType::NumericBits { .. }))
+            .count()
+    );
+    count!("uses", f.uses().len());
+    count!(
+        "unavailable_uses",
+        f.uses().iter().filter(|u| u.read().is_err()).count()
+    );
+    count!("definitions", f.definitions().len());
+    count!(
+        "unavailable_definitions",
+        f.definitions()
+            .iter()
+            .filter(|d| matches!(d.materialization(), Materialization::Unavailable(_)))
+            .count()
+    );
+    count!("copy_plans", f.copy_plans().len());
+    count!(
+        "partial_copy_plans",
+        f.copy_plans().iter().filter(|p| !p.is_complete()).count()
+    );
+    count!(
+        "copies",
+        f.copy_plans()
+            .iter()
+            .map(|p| p.assignments().len())
+            .sum::<usize>()
+    );
+    count!(
+        "unavailable_copies",
+        f.copy_plans()
+            .iter()
+            .flat_map(|p| p.assignments())
+            .filter(|a| a.issue().is_some())
+            .count()
+    );
+    count!(
+        "copy_steps",
+        f.copy_plans()
+            .iter()
+            .map(|p| p.steps().len())
+            .sum::<usize>()
+    );
+    count!(
+        "cycle_saves",
+        f.copy_plans()
+            .iter()
+            .flat_map(|p| p.steps())
+            .filter(|s| matches!(s, CopyStep::Save { .. }))
+            .count()
+    );
+    count!(
+        "snapshot_saves",
+        f.copy_plans()
+            .iter()
+            .filter(|p| matches!(p.location(), CopyLocation::BeforeThrow(_)))
+            .map(|p| p.assignments().len())
+            .sum::<usize>()
+    );
+    count!(
+        "handler_receives",
+        f.copy_plans()
+            .iter()
+            .filter(|p| matches!(p.location(), CopyLocation::HandlerEntry { .. }))
+            .map(|p| p.assignments().len())
+            .sum::<usize>()
+    );
+    count!("snapshots", f.snapshots().len());
+    count!("phi_transfers", f.transfers().len());
+    count!(
+        "literal_transfers",
+        f.transfers()
+            .iter()
+            .filter(|t| matches!(t.route(), TransferRoute::Literal))
+            .count()
+    );
+    count!(
+        "normal_phi_transfers",
+        f.transfers()
+            .iter()
+            .filter(|t| matches!(t.route(), TransferRoute::Normal { .. }))
+            .count()
+    );
+    count!(
+        "exception_phi_transfers",
+        f.transfers()
+            .iter()
+            .filter(|t| matches!(t.route(), TransferRoute::Exception { .. }))
+            .count()
+    );
+    count!(
+        "unavailable_phi_transfers",
+        f.transfers()
+            .iter()
+            .filter(|t| match t.route() {
+                TransferRoute::Literal => false,
+                TransferRoute::Unavailable(_) => true,
+                TransferRoute::Normal { plan, copy } => f.copy_plans()[plan.0 as usize]
+                    .assignments()[copy.0 as usize]
+                    .issue()
+                    .is_some(),
+                TransferRoute::Exception {
+                    save_plan,
+                    save,
+                    receive_plan,
+                    receive,
+                    ..
+                } =>
+                    f.copy_plans()[save_plan.0 as usize].assignments()[save.0 as usize]
+                        .issue()
+                        .is_some()
+                        || f.copy_plans()[receive_plan.0 as usize].assignments()[receive.0 as usize]
+                            .issue()
+                            .is_some(),
+            })
+            .count()
+    );
+    count!("constructions", f.constructions().len());
+    count!("issues", f.issues().len());
+}
+
+fn storage_json(stored: &diana_decomp::p5::StorageMethod<'_>, details: bool) -> Value {
+    let f = stored.facts();
+    let mut counts = BTreeMap::new();
+    add_storage_counts(&mut counts, f);
+    json!({"stage":"p5","class":stored.class_id().0,"method":stored.method_id().0,"counts":counts,"upstream_type_issues":stored.type_facts().issues().len(),
+        "details":details.then(||json!({
+            "bindings":f.bindings().iter().enumerate().map(|(i,b)|json!({"value":i,"binding":format!("{b:?}")})).collect::<Vec<_>>(),
+            "locals":f.locals().iter().map(|l|json!({"id":l.id().0,"type":format!("{:?}",l.storage_type()),"kind":format!("{:?}",l.kind()),"gap":f.local_gap(l.id()).map(|g|format!("{g:?}"))})).collect::<Vec<_>>(),
+            "uses":f.uses().iter().map(|u|json!({"site":format!("{:?}",u.site()),"point":u.point().0,"state":u.state().0,"read":format!("{:?}",u.read()),"original_source":format!("{:?}",u.original_source()),"initialization":u.initialization().map(|i|format!("{i:?}"))})).collect::<Vec<_>>(),
+            "definitions":f.definitions().iter().map(|d|json!({"operation":d.operation().0,"output":d.output(),"state":d.state().0,"point":d.point().0,"commit":format!("{:?}",d.commit()),"commit_pc":d.commit_pc().map(|pc|pc.0),"materialization":format!("{:?}",d.materialization())})).collect::<Vec<_>>(),
+            "copy_plans":f.copy_plans().iter().map(|p|json!({"id":p.id().0,"location":format!("{:?}",p.location()),"complete":p.is_complete(),
+                "assignments":p.assignments().iter().map(|a|json!({"id":a.id().0,"origin":format!("{:?}",a.origin()),"destination":format!("{:?}",a.destination()),"source":format!("{:?}",a.source()),"issue":a.issue().map(|g|format!("{g:?}"))})).collect::<Vec<_>>(),
+                "steps":p.steps().iter().map(|s|format!("{s:?}")).collect::<Vec<_>>()
+            })).collect::<Vec<_>>(),
+            "snapshots":f.snapshots().iter().map(|s|json!({"id":s.id().0,"phi":s.phi().0,"entry":s.entry().0,"local":s.local().0})).collect::<Vec<_>>(),
+            "transfers":f.transfers().iter().map(|t|json!({"phi":t.phi().0,"transfer":t.transfer().0,"state":t.source().0,"view":format!("{:?}",t.view()),"route":format!("{:?}",t.route())})).collect::<Vec<_>>(),
+            "constructions":f.constructions().iter().map(|c|json!({"operation":c.fact().operation.0,"relation":format!("{:?}",c.fact().relation),"receiver":c.receiver().map(|r|format!("{r:?}"))})).collect::<Vec<_>>(),
+            "issues":f.issues().iter().map(|i|json!({"site":format!("{:?}",i.site()),"gap":format!("{:?}",i.gap())})).collect::<Vec<_>>()
+        }))
+    })
+}
+fn storage_all(
+    engine: &Engine<'_>,
+    classes: u32,
+    selected: Option<u32>,
+    details: bool,
+) -> Result<Value, RequestError> {
+    let started = std::time::Instant::now();
+    let mut analysis_time = std::time::Duration::ZERO;
+    let mut counts = BTreeMap::new();
+    let mut problems = BTreeMap::<String, u64>::new();
+    let (
+        mut methods,
+        mut no_code,
+        mut ready,
+        mut failed,
+        mut upstream,
+        mut class_errors,
+        mut partial,
+        mut type_issues,
+    ) = (0u64, 0u64, 0u64, 0u64, 0u64, 0u64, 0u64, 0u64);
+    let requested = selected.map_or(classes, |_| 1);
+    let mut first_failure = None;
+    let mut members = details.then(Vec::new);
+    for ordinal in 0..requested {
+        let class = selected.unwrap_or(ordinal);
+        let began = std::time::Instant::now();
+        let result = engine.analyze(Request {
+            class: class_key(class),
+            method: None,
+        });
+        analysis_time += began.elapsed();
+        let analysis = match result {
+            Ok(a) => a,
+            Err(error) => {
+                class_errors += 1;
+                if first_failure.is_none() {
+                    first_failure = Some(json!({"class":class,"error":format!("{error}")}));
+                }
+                continue;
+            }
+        };
+        for entry in &analysis.methods {
+            methods += 1;
+            if let Some(members) = &mut members {
+                let result = match &entry.result {
+                    Ok(MethodOutcome::Stored(stored)) => json!({
+                        "p3":ssa_json(stored.analysis_evidence().ssa_facts(),stored.execution(),true),
+                        "p4":type_json(stored.analysis_evidence(),true),
+                        "p5":storage_json(stored,true),
+                    }),
+                    Ok(MethodOutcome::StorageStopped(stop)) => {
+                        json!({"stage":"p5","kind":format!("{:?}",stop.error().kind()),"error":format!("{}",stop.error())})
+                    }
+                    Ok(MethodOutcome::TypeStopped(stop)) => {
+                        json!({"stage":"p4","kind":format!("{:?}",stop.error().kind()),"error":format!("{}",stop.error())})
+                    }
+                    Ok(MethodOutcome::SsaStopped(stop)) => {
+                        json!({"stage":"p3","kind":format!("{:?}",stop.error().kind()),"error":format!("{}",stop.error())})
+                    }
+                    Ok(outcome) => {
+                        inspection_stop(outcome).unwrap_or(json!({"stage_stopped":true}))
+                    }
+                    Err(error) => {
+                        json!({"kind":format!("{:?}",error.kind()),"error":format!("{error}")})
+                    }
+                };
+                members.push(json!({"class":entry.key.class.class_def.0,"method":entry.key.method.0,"result":result}));
+            }
+            match &entry.result {
+                Ok(MethodOutcome::Stored(stored)) => {
+                    ready += 1;
+                    type_issues += stored.type_facts().issues().len() as u64;
+                    let f = stored.facts();
+                    add_storage_counts(&mut counts, f);
+                    partial += u64::from(!f.issues().is_empty());
+                    for issue in f.issues() {
+                        *problems.entry(format!("{:?}", issue.gap())).or_default() += 1;
+                    }
+                }
+                Ok(MethodOutcome::StorageStopped(stop)) => {
+                    failed += 1;
+                    if first_failure.is_none() {
+                        first_failure = Some(
+                            json!({"class":class,"method":entry.key.method.0,"kind":format!("{:?}",stop.error().kind()),"error":format!("{}",stop.error())}),
+                        );
+                    }
+                }
+                Ok(MethodOutcome::DeclarationOnly) => no_code += 1,
+                other => {
+                    upstream += 1;
+                    if first_failure.is_none() {
+                        first_failure = Some(
+                            json!({"class":class,"method":entry.key.method.0,"error":match other{Err(e)=>format!("{e}"),_=>"upstream stopped".into()}}),
+                        );
+                    }
+                }
+            }
+        }
+    }
+    let mut result = json!({"stage":"p5","classes":requested,"class":selected,"methods":methods,"no_code":no_code,"stored":ready,"failed":failed,"upstream":upstream,"class_errors":class_errors,
+        "partial_methods":partial,"counts":counts,"problems":problems,"upstream_type_issues":type_issues,"first_failure":first_failure,"complete":true,"analysis_ns":analysis_time.as_nanos(),"elapsed_ms":started.elapsed().as_millis()});
+    if let Some(members) = members {
+        result["members"] = json!(members);
+    }
+    Ok(result)
+}
+
 fn inspection_stop(outcome: &MethodOutcome<'_>) -> Option<Value> {
     match outcome {
         MethodOutcome::DeclarationOnly => Some(json!({"declaration_only": true})),
@@ -1140,9 +1494,10 @@ fn inspection_stop(outcome: &MethodOutcome<'_>) -> Option<Value> {
                 "blocks": partial.blocks().len(), "edges": partial.edges().len(),
             })),
         })),
-        MethodOutcome::Typed(_) | MethodOutcome::TypeStopped(_) | MethodOutcome::SsaStopped(_) => {
-            None
-        }
+        MethodOutcome::Stored(_)
+        | MethodOutcome::StorageStopped(_)
+        | MethodOutcome::TypeStopped(_)
+        | MethodOutcome::SsaStopped(_) => None,
     }
 }
 
@@ -1552,6 +1907,7 @@ fn main() -> std::process::ExitCode {
     let mut dex = None;
     let mut exec = Vec::new();
     let mut explicit_format = None;
+    let mut method_jobs = 1;
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--dex" | "-d" => {
@@ -1560,6 +1916,17 @@ fn main() -> std::process::ExitCode {
                     return std::process::ExitCode::from(2);
                 };
                 dex = Some(PathBuf::from(path));
+            }
+            "--method-jobs" => {
+                let Some(jobs) = args
+                    .next()
+                    .and_then(|value| value.parse::<usize>().ok())
+                    .filter(|&jobs| jobs > 0)
+                else {
+                    eprintln!("dbg_shell: --method-jobs needs a positive integer");
+                    return std::process::ExitCode::from(2);
+                };
+                method_jobs = jobs;
             }
             "--format" | "-f" => {
                 let Some(value) = args.next() else {
@@ -1584,7 +1951,7 @@ fn main() -> std::process::ExitCode {
             }
             "--help" | "-h" => {
                 eprintln!(
-                    "usage: dbg_shell --dex <classes.dex> [--exec <json>]...\n\
+                    "usage: dbg_shell --dex <classes.dex> [--method-jobs <workers>] [--exec <json>]...\n\
                      stdin: one command per line, JSON or `p1 <class> <method>`/`p2 <class> <method>`
                      default: text for stdin shell, json for --exec; --format overrides"
                 );
@@ -1606,7 +1973,7 @@ fn main() -> std::process::ExitCode {
         eprintln!("dbg_shell: --dex is required");
         return std::process::ExitCode::from(2);
     };
-    let mut shell = match Shell::open(path) {
+    let mut shell = match Shell::open(path, method_jobs) {
         Ok(shell) => shell,
         Err(error) => {
             eprintln!("dbg_shell: {error}");

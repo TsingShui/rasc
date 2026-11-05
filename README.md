@@ -1,7 +1,8 @@
 # Diana
 
 Native Rust APK/DEX decompiler, designed to replace rasc.
-The engine currently implements the P0 → method reader → P1 → P2 → P3 analysis chain.
+The engine currently implements P0 → method reader → P1 → P2 → P3 → P4 → P5
+storage and transfer planning.
 The CLI source remains in the workspace; decompilation/result integration is being
 rebuilt and the application package is not currently buildable. Readable output
 with original facts and uncertainty remains the goal, not Java compilability.

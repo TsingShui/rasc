@@ -12,7 +12,7 @@ use crate::p2::{
     LockTransfer, MoveKind, OpKind, ReadOrder,
 };
 use crate::p3::{StateKind, TransferOrigin, ValueOrigin};
-use crate::p4::TypedMethod;
+use crate::p5::StorageMethod;
 use crate::raw::{DexVersion, OperandReference, RawDecodeError, ReferenceSlot};
 use crate::{
     ByteOffset, CallSiteId, ClassDefId, ClassKey, CodeUnitOffset, DexId, DexImage, Engine,
@@ -179,10 +179,10 @@ fn dynamic_instructions_preserve_layout_references_and_completions() {
     }
 }
 
-fn type_use<'f>(typed: &'f TypedMethod<'_>, pc: u32, argument: usize) -> &'f crate::p4::UseView {
+fn type_use<'f>(typed: &'f StorageMethod<'_>, pc: u32, argument: usize) -> &'f crate::p4::UseView {
     let site = local_use(typed, pc, argument).site();
     typed
-        .facts()
+        .type_facts()
         .uses()
         .iter()
         .find(|u| u.site() == site)
@@ -215,7 +215,7 @@ fn check_types() {
         }
     ));
     let branch = typed
-        .facts()
+        .type_facts()
         .uses()
         .iter()
         .find(|u| {
@@ -266,10 +266,11 @@ fn check_types() {
         Interpretation::Direct(Family::Float)
     );
     let value = typed
+        .analysis_evidence()
         .ssa_facts()
         .readable_value(local_use(&typed, 3, 0))
         .unwrap();
-    assert_eq!(typed.facts().value(value).unwrap().literal(), None);
+    assert_eq!(typed.type_facts().value(value).unwrap().literal(), None);
 
     // The array descriptor is a fixed declaration seed, not a type inferred
     // backwards from neg-float. Keep the original type index 11.
@@ -278,16 +279,17 @@ fn check_types() {
         .copy_from_slice(&[2, b'[', b'F', 0]);
     let typed = flowed(&fixture.bytes);
     let value = typed
+        .analysis_evidence()
         .ssa_facts()
         .readable_value(local_use(&typed, 3, 0))
         .unwrap();
-    let facts = typed.facts().value(value).unwrap();
+    let facts = typed.type_facts().value(value).unwrap();
     assert_eq!(facts.families().selected(), Some(Family::Float));
     assert!(
         facts
             .types()
             .iter()
-            .any(|&n| typed.facts().name(n).unwrap().units() == [u16::from(b'F')])
+            .any(|&n| typed.type_facts().name(n).unwrap().units() == [u16::from(b'F')])
     );
     assert_eq!(
         type_use(&typed, 3, 0).interpretation(),
@@ -318,8 +320,8 @@ fn check_types() {
         0,
     );
     let typed = flowed(&fixture.bytes);
-    assert_eq!(typed.facts().phis().len(), 1);
-    let phi = &typed.facts().phis()[0];
+    assert_eq!(typed.type_facts().phis().len(), 1);
+    let phi = &typed.type_facts().phis()[0];
     assert_eq!(phi.families().selected(), Some(Family::Integral));
     let mut incoming = phi
         .incoming()
@@ -334,12 +336,12 @@ fn check_types() {
         .collect::<Vec<_>>();
     incoming.sort_unstable();
     assert_eq!(incoming, [1, 2]);
-    let value = typed.ssa_facts().phis()[0].value();
+    let value = typed.analysis_evidence().ssa_facts().phis()[0].value();
     assert_eq!(
-        typed.facts().value(value).unwrap().integral_range(),
+        typed.type_facts().value(value).unwrap().integral_range(),
         Some(crate::p4::IntegralRange { min: 1, max: 2 })
     );
-    assert_eq!(typed.facts().value(value).unwrap().literal(), None);
+    assert_eq!(typed.type_facts().value(value).unwrap().literal(), None);
 
     let fixture = dex(
         39,
@@ -356,7 +358,7 @@ fn check_types() {
         Interpretation::Null
     );
     assert!(matches!(
-        typed.facts().phis()[0].representation(),
+        typed.type_facts().phis()[0].representation(),
         crate::p4::PhiRepresentation::Literal(crate::p4::Bits { value: 0, .. })
     ));
     for (seed, expect_null) in [(0x0012, true), (0x1012, false)] {
@@ -402,7 +404,7 @@ fn check_types() {
     let typed = flowed(&fixture.bytes);
     assert!(
         typed
-            .facts()
+            .type_facts()
             .issues()
             .iter()
             .any(|i| i.problem == Problem::Missing(MissingFact::ArgumentLayout))
@@ -430,9 +432,9 @@ fn check_types() {
     put32(&mut fixture.bytes, fixture.tries, 3);
     put16(&mut fixture.bytes, fixture.tries + 4, 3);
     let typed = flowed(&fixture.bytes);
-    assert_eq!(typed.facts().constructors().len(), 1);
+    assert_eq!(typed.type_facts().constructors().len(), 1);
     assert_eq!(
-        typed.facts().constructors()[0].relation,
+        typed.type_facts().constructors()[0].relation,
         crate::p4::ConstructorRelation::Allocation
     );
     for (pc, expected) in [
@@ -443,7 +445,7 @@ fn check_types() {
         let site = local_use(&typed, pc, 0).site();
         assert_eq!(
             typed
-                .facts()
+                .type_facts()
                 .initialization()
                 .iter()
                 .find(|i| i.site == site)
@@ -476,7 +478,7 @@ fn check_types() {
     let site = local_use(&typed, 8, 0).site();
     assert_eq!(
         typed
-            .facts()
+            .type_facts()
             .initialization()
             .iter()
             .find(|i| i.site == site)
@@ -486,29 +488,38 @@ fn check_types() {
     );
     assert!(
         typed
-            .facts()
+            .type_facts()
             .issues()
             .iter()
             .any(|i| i.problem == Problem::InitializationStateConflict)
     );
 }
 
-fn local_use<'f>(ssa: &'f TypedMethod<'_>, pc: u32, argument: usize) -> &'f crate::p3::UseBinding {
+fn local_use<'f>(
+    ssa: &'f StorageMethod<'_>,
+    pc: u32,
+    argument: usize,
+) -> &'f crate::p3::UseBinding {
     let op = ssa
         .execution()
         .operations()
         .iter()
         .find(|o| o.pc() == CodeUnitOffset(pc))
         .unwrap();
-    &ssa.ssa_facts().operation_uses(op.id()).unwrap().unwrap()[argument]
+    &ssa.analysis_evidence()
+        .ssa_facts()
+        .operation_uses(op.id())
+        .unwrap()
+        .unwrap()[argument]
 }
-fn assert_local_source(ssa: &TypedMethod<'_>, at: u32, source: u32) {
+fn assert_local_source(ssa: &StorageMethod<'_>, at: u32, source: u32) {
     let value = ssa
+        .analysis_evidence()
         .ssa_facts()
         .readable_value(local_use(ssa, at, 0))
         .unwrap();
     let ValueOrigin::Operation { operation, .. } =
-        ssa.ssa_facts().values()[value.0 as usize].origin()
+        ssa.analysis_evidence().ssa_facts().values()[value.0 as usize].origin()
     else {
         panic!("use at {at} lost its original operation source");
     };
@@ -584,20 +595,45 @@ fn check_local_recovery() {
             .collect::<Vec<_>>(),
         [6, 7, 5]
     );
-    assert!(ssa.ssa_facts().operation_uses(call.id()).unwrap().is_err());
-    let output = ssa.ssa_facts().operation_outputs(call.id()).unwrap()[0];
-    assert!(ssa.ssa_facts().output_value(&output).is_none());
+    assert!(
+        ssa.analysis_evidence()
+            .ssa_facts()
+            .operation_uses(call.id())
+            .unwrap()
+            .is_err()
+    );
+    let output = ssa
+        .analysis_evidence()
+        .ssa_facts()
+        .operation_outputs(call.id())
+        .unwrap()[0];
+    assert!(
+        ssa.analysis_evidence()
+            .ssa_facts()
+            .output_value(&output)
+            .is_none()
+    );
     assert_eq!(
-        ssa.ssa_facts().state(output.state()).unwrap().kind(),
+        ssa.analysis_evidence()
+            .ssa_facts()
+            .state(output.state())
+            .unwrap()
+            .kind(),
         StateKind::Unavailable {
             operation: call.id()
         }
     );
     for pc in [6, 7] {
         let usage = local_use(&ssa, pc, 0);
-        assert!(ssa.ssa_facts().readable_value(usage).is_none());
         assert!(
-            ssa.ssa_facts()
+            ssa.analysis_evidence()
+                .ssa_facts()
+                .readable_value(usage)
+                .is_none()
+        );
+        assert!(
+            ssa.analysis_evidence()
+                .ssa_facts()
                 .state(usage.state())
                 .unwrap()
                 .availability()
@@ -605,19 +641,21 @@ fn check_local_recovery() {
         );
     }
     let parameter = ssa
+        .analysis_evidence()
         .ssa_facts()
         .readable_value(local_use(&ssa, 8, 0))
         .unwrap();
     assert_eq!(
-        ssa.ssa_facts().values()[parameter.0 as usize].origin(),
+        ssa.analysis_evidence().ssa_facts().values()[parameter.0 as usize].origin(),
         ValueOrigin::Entry(crate::p3::EntryRole::Parameter(0))
     );
     assert_local_source(&ssa, 10, 9);
     assert_local_source(&ssa, 13, 11);
     assert_local_source(&ssa, 16, 0);
     assert!(
-        !ssa.ssa_facts().dominates(
-            ssa.ssa_facts()
+        !ssa.analysis_evidence().ssa_facts().dominates(
+            ssa.analysis_evidence()
+                .ssa_facts()
                 .operation_site(call.id())
                 .unwrap()
                 .commit()
@@ -672,7 +710,8 @@ fn check_local_recovery() {
         OpKind::UnresolvedResult { .. }
     ));
     assert!(
-        ssa.ssa_facts()
+        ssa.analysis_evidence()
+            .ssa_facts()
             .readable_value(local_use(&ssa, 4, 0))
             .is_none()
     );
@@ -738,7 +777,8 @@ fn check_local_recovery() {
         header_offset: ByteOffset(0),
         origin: ImageOrigin { input: InputId(0) },
     }])
-    .unwrap();
+    .unwrap()
+    .with_method_jobs(4);
     let class = engine
         .analyze(crate::Request {
             class: CLASS,
@@ -753,10 +793,10 @@ fn check_local_recovery() {
             .collect::<Vec<_>>(),
         [1, 2]
     );
-    let Ok(MethodOutcome::Typed(first)) = &class.methods[0].result else {
+    let Ok(MethodOutcome::Stored(first)) = &class.methods[0].result else {
         panic!("partial method discarded");
     };
-    let Ok(MethodOutcome::Typed(second)) = &class.methods[1].result else {
+    let Ok(MethodOutcome::Stored(second)) = &class.methods[1].result else {
         panic!("sibling not analyzed");
     };
     assert!(first.execution().issues().next().is_some());
@@ -779,10 +819,19 @@ fn check_local_recovery() {
     );
     let ssa = flowed(&fixture.bytes);
     let usage = local_use(&ssa, 9, 0);
-    let state = ssa.ssa_facts().state(usage.state()).unwrap();
+    let state = ssa
+        .analysis_evidence()
+        .ssa_facts()
+        .state(usage.state())
+        .unwrap();
     assert!(matches!(state.kind(), StateKind::Phi(_)));
     assert!(state.availability().may_have_value() && state.availability().may_be_unavailable());
-    assert!(ssa.ssa_facts().readable_value(usage).is_none());
+    assert!(
+        ssa.analysis_evidence()
+            .ssa_facts()
+            .readable_value(usage)
+            .is_none()
+    );
 
     // Invalid register operands are facts with errors, not new valid variables.
     // A partial out-of-frame wide write also makes an overlapping valid word uncertain.
@@ -811,20 +860,35 @@ fn check_local_recovery() {
     );
     let bad_read = local_use(&ssa, 2, 0);
     assert_eq!(
-        ssa.ssa_facts().state(bad_read.state()).unwrap().kind(),
+        ssa.analysis_evidence()
+            .ssa_facts()
+            .state(bad_read.state())
+            .unwrap()
+            .kind(),
         StateKind::OutsideFrame
     );
-    assert!(ssa.ssa_facts().readable_value(bad_read).is_none());
+    assert!(
+        ssa.analysis_evidence()
+            .ssa_facts()
+            .readable_value(bad_read)
+            .is_none()
+    );
     assert_local_source(&ssa, 3, 0);
     let overlapped = local_use(&ssa, 6, 0);
     assert!(
-        ssa.ssa_facts()
+        ssa.analysis_evidence()
+            .ssa_facts()
             .state(overlapped.state())
             .unwrap()
             .availability()
             .may_be_unavailable()
     );
-    assert!(ssa.ssa_facts().readable_value(overlapped).is_none());
+    assert!(
+        ssa.analysis_evidence()
+            .ssa_facts()
+            .readable_value(overlapped)
+            .is_none()
+    );
     assert_local_source(&ssa, 8, 7);
 }
 
@@ -865,7 +929,7 @@ fn check_ssa_cases() {
     for (name, words, proto, phis, unavailable) in cases {
         let fixture = dex(39, words, None, proto, 8, 3, 0);
         let ssa = flowed(&fixture.bytes);
-        let f = ssa.ssa_facts();
+        let f = ssa.analysis_evidence().ssa_facts();
         assert_eq!(f.phis().len(), phis, "{name}");
         assert_eq!(
             f.uses()
@@ -932,7 +996,7 @@ fn check_ssa_cases() {
         None,
     );
     let ssa = flowed(&fixture.bytes);
-    let f = ssa.ssa_facts();
+    let f = ssa.analysis_evidence().ssa_facts();
     let handler_use = &f.operation_uses(crate::p2::OpId(2)).unwrap().unwrap()[0];
     let old = f.readable_value(handler_use).unwrap();
     assert_eq!(
@@ -1114,7 +1178,7 @@ fn check_metamorphic_relations() {
 }
 
 fn invoke_signature(
-    flow: &TypedMethod<'_>,
+    flow: &StorageMethod<'_>,
 ) -> (
     InvokeKind,
     OperandReference,
@@ -1150,11 +1214,12 @@ fn analyze(bytes: &[u8]) -> MethodOutcome<'_> {
     engine.analyze_method(CLASS, ENTRY).unwrap().result.unwrap()
 }
 
-fn flowed(bytes: &[u8]) -> TypedMethod<'_> {
+fn flowed(bytes: &[u8]) -> StorageMethod<'_> {
     match analyze(bytes) {
-        MethodOutcome::Typed(ssa) => ssa,
+        MethodOutcome::Stored(ssa) => ssa,
         MethodOutcome::SsaStopped(stop) => panic!("P3 stopped: {}", stop.error()),
         MethodOutcome::TypeStopped(stop) => panic!("P4 stopped: {}", stop.error()),
+        MethodOutcome::StorageStopped(stop) => panic!("P5 stopped: {}", stop.error()),
         MethodOutcome::DisassemblyStopped(stop) => panic!("P1 stopped: {:?}", stop.error),
         MethodOutcome::FlowStopped(stop) => panic!("P2 stopped: {}", stop.error()),
         MethodOutcome::DeclarationOnly => panic!("executable member became declaration-only"),
@@ -1164,9 +1229,10 @@ fn flowed(bytes: &[u8]) -> TypedMethod<'_> {
 fn has_issue(bytes: &[u8], expected: impl Fn(&MethodError) -> bool) -> bool {
     match analyze(bytes) {
         MethodOutcome::DisassemblyStopped(stop) => stop.error.as_ref().is_some_and(expected),
-        MethodOutcome::Typed(ssa) => ssa.execution().issues().any(|(_, issue)| expected(issue)),
+        MethodOutcome::Stored(ssa) => ssa.execution().issues().any(|(_, issue)| expected(issue)),
         MethodOutcome::SsaStopped(stop) => panic!("P3 lost local recovery: {}", stop.error()),
         MethodOutcome::TypeStopped(stop) => panic!("P4 lost local recovery: {}", stop.error()),
+        MethodOutcome::StorageStopped(stop) => panic!("P5 lost local recovery: {}", stop.error()),
         MethodOutcome::FlowStopped(stop) => panic!("P2 lost local recovery: {}", stop.error()),
         MethodOutcome::DeclarationOnly => panic!("code disappeared"),
     }
@@ -1406,7 +1472,7 @@ fn check_prototype(prototype: &CheckedPrototype<'_>, id: u16) {
     );
 }
 
-fn check_completion(flow: &TypedMethod<'_>, handler_pc: u32, heap: HeapTransfer) {
+fn check_completion(flow: &StorageMethod<'_>, handler_pc: u32, heap: HeapTransfer) {
     assert_eq!(flow.execution().operations().len(), 2);
     let operation = &flow.execution().operations()[0];
     assert_eq!(operation.pc(), CodeUnitOffset(0));
