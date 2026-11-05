@@ -145,12 +145,15 @@ MethodSource 保留：
 - 必要 owner 上下文及原始逻辑 DEX 关联；
 - 代码存在、确认无代码或读取失败的互斥状态；
 - 原始 registers/ins/outs 计数、指令 bytes 和已检查范围；
-- 原始 try/handler 记录、debug/注解位置及独立读取状态；
+- 原始 try/handler 记录、typed catch 的 TypeId/descriptor 读取结果及使用问题；
+- debug/注解位置及独立读取状态；
 - 可用原始区段、覆盖与具体局部问题。
 
 代码区段存在且范围可读，不表示指令已正确解码。寄存器原始计数被读出，
 不表示指令操作数和参数入口布局已检查；这些是 P1 的义务。
 原始 try/handler 的编码解析与其指令边界关联同样分属 reader 和 P1。
+reader 按原始类型身份保留 typed catch 的独立读取结果；descriptor 读取失败
+不抹去已确定的记录范围、目标和顺序，也不作为整个方法停止的默认理由。
 
 输入准备 MUST NOT 重建类成员目录或重解析 P0 已交付的方法声明。
 无法定位的区段不能作为已检查切片交付；独立可读区段、声明和元数据仍
@@ -761,6 +764,11 @@ Phi 只属于原始块头或每个 ValueId 的可用性仅由 PC 数值先后确
 
 P4 收集声明约束，求解值 family/type、Phi 合流、常量使用视图与每个使用点
 的转换，生产初始化、数组和调用相关证据。它不修改图或重新分配 ValueId。
+P2 的执行事实接口交付原 catch 类型读取结果和操作关联的数组 payload
+宽度、数量及借用 bits。P4 消费这些已建立事实，不从原始 code view 重解析。
+异常对象的 Throwable 共同上界与各 typed catch 来源分开；共享 handler 保留
+全部可能声明。数组 fill 的元素解释来自 SSA 数组组件，不能仅按 payload
+宽度选择 int/float，也不能将批量填充改成新的 stores 或改变异常位置。
 
 #### 5.4.1 直接消费原始引用签名
 

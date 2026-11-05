@@ -26,7 +26,7 @@ pub use catalog::{
     ClassHierarchy, ClassView, FieldDeclaration, FieldEntry, FieldStorage, MethodDeclaration,
     MethodEntry, ProgramIndex, Prototype, ReferenceFacts,
 };
-pub use code::{MethodBody, RawMethodView};
+pub use code::{CatchTypeFact, MethodBody, RawMethodView};
 pub use container::DexContainer;
 pub use cursor::{Cursor, checked_range};
 pub use error::{InputError, InputProblem, UnsupportedInput};

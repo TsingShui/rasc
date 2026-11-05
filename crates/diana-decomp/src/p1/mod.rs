@@ -7,7 +7,7 @@ mod reference;
 mod structure;
 
 pub use disassembly::{
-    DecodedInstruction, DecodedItem, DecodedMethod, DecodedOutcome, DecodedPayload,
+    ArrayPayload, DecodedInstruction, DecodedItem, DecodedMethod, DecodedOutcome, DecodedPayload,
     DecodedReference, EntryLayout, EntryParameter, InvokeLayout,
 };
 pub use reference::{

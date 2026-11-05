@@ -3,6 +3,14 @@ use super::constraints::{RuleKind, Work};
 use super::*;
 use crate::p3::{SsaFacts, ValueId};
 
+fn merge_exception(target: ExceptionSources, source: ExceptionSources) -> ExceptionSources {
+    match (target, source) {
+        (ExceptionSources::Pending, x) => x,
+        (x, ExceptionSources::Pending) => x,
+        (a, b) if a == b => a,
+        _ => ExceptionSources::Mixed,
+    }
+}
 fn merge_identity(target: Identity, source: Identity) -> Identity {
     match (target, source) {
         (Identity::Multiple, _) | (_, Identity::Multiple) => Identity::Multiple,
@@ -44,6 +52,14 @@ fn copy_source(
     }
     if kind == RuleKind::Component {
         return Ok(changed);
+    }
+    let exception = merge_exception(
+        f.values[target].exception_sources,
+        f.values[source].exception_sources,
+    );
+    if exception != f.values[target].exception_sources {
+        f.values[target].exception_sources = exception;
+        changed = true;
     }
     let source_bits = f.values[source].literal;
     if let Some(bits) = source_bits {
@@ -94,13 +110,16 @@ fn unavailable(f: &mut TypeFacts, to: ValueId, kind: RuleKind) -> bool {
         v.type_unknown = true;
         return changed;
     }
-    let changed = (kind != RuleKind::Cast && !v.type_unknown)
+    let exception = merge_exception(v.exception_sources, ExceptionSources::Unproven);
+    let changed = exception != v.exception_sources
+        || (kind != RuleKind::Cast && !v.type_unknown)
         || !v.mixed_literal
         || !v.range_unknown
         || v.identity != Identity::Multiple;
     if kind != RuleKind::Cast {
         v.type_unknown = true;
     }
+    v.exception_sources = exception;
     v.mixed_literal = true;
     v.range_unknown = true;
     v.identity = Identity::Multiple;
@@ -116,6 +135,9 @@ pub(super) fn sources(s: &SsaFacts, f: &mut TypeFacts, w: &Work) -> Result<(), T
     }
     // Unknown identity at a seed is not a promise that it aliases a later root.
     for (i, v) in f.values.iter_mut().enumerate() {
+        if pending[i] {
+            v.exception_sources = ExceptionSources::Pending;
+        }
         if !pending[i] && v.identity == Identity::Unknown {
             v.identity = Identity::Multiple;
         }
@@ -175,7 +197,12 @@ pub(super) fn sources(s: &SsaFacts, f: &mut TypeFacts, w: &Work) -> Result<(), T
             let missing = rule.kind == RuleKind::Component && v.types.is_empty();
             let ungrounded =
                 rule.kind != RuleKind::Component && v.literal.is_none() && !v.mixed_literal;
-            if (missing && !v.type_unknown) || ungrounded {
+            let exception_ungrounded = rule.kind != RuleKind::Component
+                && v.exception_sources == ExceptionSources::Pending;
+            if (missing && !v.type_unknown) || ungrounded || exception_ungrounded {
+                if exception_ungrounded {
+                    v.exception_sources = ExceptionSources::Unproven;
+                }
                 if missing {
                     v.type_unknown = true;
                 }

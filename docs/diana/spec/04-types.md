@@ -39,6 +39,7 @@ failures retain their classification, and method-task stops do not truncate sibl
 | `PhiView` | Original Phi identity, literal or runtime representation and an interpretation for every original incoming transfer. |
 | `ConstructorFact` | Original invocation, receiver state, identity provenance and established or unresolved construction relationship (`Allocation`, `This`, `Super`, `OtherOwner`, unknown). |
 | `InitializationUse` | Initialization states at the original use position, including failure, mixed paths and unknowns. |
+| `ArrayFillView` | Original fill operation and SSA array state, with a source-supported primitive element interpretation or local problem; width/count/bits remain in the execution payload fact. |
 
 `Owner` type origins retain the original class key and TypeId. The current-class
 type is therefore comparable by identity, and comparison with the declared direct
@@ -65,6 +66,23 @@ Producer facts and consumer requirements are different constraints. A known int
 producer does not become float because one use requests float. Equal width alone
 does not establish compatibility. Original conversion instructions remain at their
 original operation positions; a use view does not insert a replacement conversion.
+
+### Exception declaration bounds
+
+For each exception value, P4 uses the original incoming exception edges to collect
+all catch declarations that reach that handler. `Catch` origins retain TypeId and
+exact descriptor text. A shared handler keeps the alternatives rather than choosing
+its first typed catch. Catch-all supplies a Throwable bound. A failed declaration
+read keeps its original execution fact and a local missing-descriptor issue;
+a readable non-class catch retains its classified input-use issue and an
+`InvalidCatchType` problem. Neither becomes an inferred type from a consumer.
+
+Exception-object provenance supplies a separate guaranteed Throwable upper bound,
+not another possible type alongside a more specific typed catch. Copy, cast and
+Phi rules propagate grounded exception/unproven source categories in the same sparse
+worklist. Mixed or unavailable sources and unrooted cycles cannot establish this
+guarantee. Views can use `ExceptionUpperBound` without requiring the caught class
+definition or an external hierarchy. This does not claim an exact runtime class.
 
 ## Finite source propagation
 
@@ -115,6 +133,26 @@ Pure-literal Phis need no common runtime storage representation: every incoming
 retains its bit identity and each consumer has its own interpretation. Runtime
 Phis have a common representation and per-transfer incoming views. An unavailable
 incoming does not acquire the known sibling's value or adaptation.
+
+## Array payload interpretation
+
+P4 consumes the operation-bound `ExecutionFacts::array_payload` and the existing
+SSA array source. `ArrayFillView` selects Boolean, Byte, Char, Short, Int, Long,
+Float or Double only when every known array source supports the same component
+interpretation, no source is unavailable/unknown, and payload width agrees.
+Equal payload widths do not select a family: `[F` and `[I` keep distinct bit
+interpretations. Mixed component interpretations, non-primitive components,
+width mismatches and unavailable sources remain local problems with original data
+retained. A payload-view failure keeps its FailureKind in the local problem and
+its full error through the operation-bound execution query; it is not relabeled
+as an absent payload. An unestablished component never becomes an inferred int array.
+
+The view records the element interpretation rather than allocating one SSA value
+per payload element. Consumers pair it with the borrowed original bits; integer
+signedness, floating bit patterns and noncanonical values are not replaced by
+numeric conversions or normalized literals. P4 does not infer array length from
+payload count, pad/truncate data, introduce stores or merge the fill with allocation.
+Original effects and normal/exception completions stay at their original positions.
 
 ## Position-related initialization
 

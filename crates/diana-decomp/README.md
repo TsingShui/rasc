@@ -51,9 +51,11 @@ It delivers value families/type sources, per-use literal/reference/integral view
 Phi incoming adaptations and position-related constructor states. P0's class
 declaration now travels inside the method products as one shared immutable
 `OwnerFacts` handle, so `this` carries its declared owner type and constructor
-calls on `this` distinguish `This`, `Super` and `OtherOwner`. Remaining gaps are
-cross-class reference hierarchy, catch descriptors and array payload facts;
-no new input-context query is implemented. Ambiguous object
+calls on `this` distinguish `This`, `Super` and `OtherOwner`. Typed-catch descriptor
+results now travel from the method reader through execution facts, including local
+read/use issues. Array fills consume checked payload width/count/bits and select
+an element interpretation from existing SSA array sources. Cross-class reference
+hierarchy remains unavailable; no input-context query is implemented. Ambiguous object
 identity and unsupported interpretations are reported separately from missing
 input facts. P5–P9 remain inactive, so partial Java-like text is not yet delivered.
 The [P4 chapter](../../docs/diana/spec/04-types.md) records its algorithm and guarantees.
@@ -102,21 +104,23 @@ and unresolved input counts distinguish ready products from fully established
 facts; batch `complete` describes traversal, not semantic verification. P3/P4 are not
 formally verified. `p4` (`details:true`) exposes type origins, bits, requirements,
 views and initialization paths. `p4-all` adds typed/partial counts, interpretation
-problems and missing-fact occurrences to the same traversal. These are diagnostic
+problems, array-fill interpretation counts, exception-provenance guarantee counts and
+missing-fact occurrences to the same traversal. Detailed P4 output includes catch
+facts and array-fill interpretations with original payload bits. These are diagnostic
 counts, not semantic verification badges. The timed Engine traversal now includes P4.
 
-This correction was checked with engine format/check/Clippy and release builds;
-no tests were added, modified or run. Two authorized real-input runs delivered
-115,760 TypedMethod products without construction/upstream/class stops. Across
-both inputs, methods carrying partial type results numbered 105,732 before owner
-transmission, 44,291 after transmission alone and 32,552 after consuming the known
-superclass relation in use views. These are aggregate uncertainty counts, not
-recovery or correctness rates. 3,407 ordinary use views remain undetermined, with
-reference-relation and identity uncertainty recorded separately. Byte roundtrip
-checked 1,444,571 items without mismatches. The new unreadable-direct-call transfer
-was statically reviewed; these inputs had no upstream local issues and do not
-supply execution coverage of that path. The observations do not prove complete
-type recovery or ART admission.
+Engine format/check/Clippy and release builds pass; no tests were added, modified
+or run for the catch/payload change. Two authorized real-input runs delivered
+115,760 TypedMethod products without construction/upstream/class stops. 32,387
+methods retain partial type results, and 3,407 ordinary use views remain
+undetermined; reference-relation and identity uncertainty are recorded separately.
+All 279 array fills acquired an element interpretation: 1 Boolean, 64 Byte, 3 Char,
+49 Float, 158 Int and 4 Long. No missing catch-descriptor or array-payload issue
+remained in those inputs. Byte roundtrip checked 1,444,571 items without mismatches.
+These are finite observations, not correctness rates or ART admission evidence.
+The inputs did not exercise Short/Double payloads, malformed catch declarations,
+conflicting/width-mismatched fills or the unreadable-direct-call initialization
+path. Those branches have static review but no execution evidence from these runs.
 
 `p2-all` observes retained execution facts from the same Engine chain and reports
 classified outcomes and encountered opcode variants. `roundtrip-all` checks independent byte re-encoding over retained

@@ -41,7 +41,11 @@ safe code/header/instruction/try/handler ranges and original register counts.
 An omitted code offset and native/abstract flags are checked for consistency;
 no-code declarations MUST NOT create empty executable graphs. The reader checks
 incoming word totals against the declaration, try record ranges/order and handler
-encoding. It does not know instruction boundaries before P1.
+encoding. Typed-catch descriptor reads are retained once per original TypeId in
+immutable shared facts. A read failure or non-class catch descriptor keeps its
+classified issue without erasing safely bounded handler records. Unknown record
+extents, malformed encoding or unsafe targets still stop input preparation.
+The reader does not know instruction boundaries before P1.
 
 Method/parameter annotation reads are independent of code analysis. Original
 annotation facts and local failures also remain available through P0. The code
@@ -67,7 +71,7 @@ For established positions and facts, `DecodedMethod` retains:
 | References | Instruction reference slots associated with checked string/type/field/method/prototype/call-site/handle facts. |
 | Invoke layout | Receiver presence, ordered parameter widths and result category; wide argument words remain adjacent. |
 | Structural associations | Branch/switch targets, payload ownership, handler entries and producer/result adjacency. |
-| Protection | Original try boundaries and ordered catch clauses, with typed catches and catch-all distinguished. |
+| Protection | Original try boundaries and ordered catch clauses, with typed catches and catch-all distinguished; original typed-catch descriptor results and use issues are retained from the reader. |
 | Independent metadata state | Available method/parameter annotation ranges and recorded read issue. |
 
 P1 checks all decoded instruction register spans and explicit targets, including
@@ -75,6 +79,12 @@ unreachable instructions. Structural reachability checks reachable fallthrough;
 it does not prove conditional paths feasible. `move-result*` MUST follow its
 checked producer and MUST NOT be an explicit branch/handler entry. Handler and
 move-exception association are checked independently of normal branches.
+
+`catch_type` exposes the retained descriptor result for an original catch TypeId;
+it does not resolve that reference again. Catch ordering and targets remain in
+the original protection associations, independent of declaration availability.
+`array_payload_at` projects checked element width/count and borrowed bits from
+an existing decoded layout. Padding is excluded; no payload header is re-decoded.
 
 P1 checks opcode requirements against original reference facts. It MUST NOT use
 Java source legality, normal compiler templates, natural loops or complete external

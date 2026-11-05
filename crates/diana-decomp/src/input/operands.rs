@@ -247,6 +247,7 @@ pub struct RawArrayElement {
     pub bits: u64,
 }
 
+#[derive(Clone, Debug)]
 pub struct ArrayElements<'a> {
     width: ByteLength,
     chunks: std::slice::ChunksExact<'a, u8>,

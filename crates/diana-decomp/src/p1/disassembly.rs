@@ -131,6 +131,29 @@ impl<'a> DecodedPayload {
     }
 }
 
+/// Borrowed original array data with its checked layout. Padding is not an element.
+#[derive(Clone, Debug)]
+pub struct ArrayPayload<'a> {
+    pc: CodeUnitOffset,
+    element_width: crate::ByteLength,
+    element_count: u32,
+    elements: crate::input::operands::ArrayElements<'a>,
+}
+impl<'a> ArrayPayload<'a> {
+    pub fn pc(&self) -> CodeUnitOffset {
+        self.pc
+    }
+    pub fn element_width(&self) -> crate::ByteLength {
+        self.element_width
+    }
+    pub fn element_count(&self) -> u32 {
+        self.element_count
+    }
+    pub fn elements(&self) -> crate::input::operands::ArrayElements<'a> {
+        self.elements.clone()
+    }
+}
+
 /// P1 result with an explicit decoded product or a retained prefix.
 pub struct DecodedOutcome<'a> {
     pub decoded: Option<DecodedMethod<'a>>,
@@ -427,6 +450,16 @@ impl<'a> DecodedMethod<'a> {
     pub fn is_reachable(&self, pc: CodeUnitOffset) -> bool {
         self.layout.is_reachable(pc)
     }
+    /// The method reader's original typed-catch reads, shared without resolving again.
+    pub fn catch_types(&self) -> &[crate::input::CatchTypeFact<'a>] {
+        self.source.catch_types()
+    }
+    pub fn catch_type(&self, id: TypeId) -> Option<&crate::input::CatchTypeFact<'a>> {
+        self.catch_types()
+            .binary_search_by_key(&id, |fact| fact.type_id())
+            .ok()
+            .map(|i| &self.catch_types()[i])
+    }
     /// Checked original try boundaries in code units.
     pub fn try_boundaries(&self) -> impl Iterator<Item = u32> + '_ {
         self.protection.boundaries().map(|value| value.0)
@@ -521,6 +554,35 @@ impl<'a> DecodedMethod<'a> {
             Some(payload) => payload.array_elements(&self.source),
             None => Ok(None),
         }
+    }
+
+    /// Checked array metadata and borrowed original elements, without re-decoding headers.
+    pub fn array_payload_at(
+        &self,
+        pc: CodeUnitOffset,
+    ) -> Result<Option<ArrayPayload<'a>>, RequestError> {
+        let Some(payload) = self.payload_at(pc) else {
+            return Ok(None);
+        };
+        let LayoutKind::ArrayData {
+            element_width,
+            element_count,
+        } = payload.kind()
+        else {
+            return Ok(None);
+        };
+        let elements =
+            payload
+                .array_elements(&self.source)?
+                .ok_or(RequestError::InternalInvariant(
+                    "array payload lost its element view",
+                ))?;
+        Ok(Some(ArrayPayload {
+            pc,
+            element_width,
+            element_count,
+            elements,
+        }))
     }
 
     /// The decoded payload that starts at `pc`, if any.

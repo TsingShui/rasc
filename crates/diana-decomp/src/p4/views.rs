@@ -6,6 +6,7 @@ fn original_type(origin: TypeOrigin, owner: &crate::p0::OwnerFacts) -> Option<cr
     match origin {
         TypeOrigin::Owner { key, original } if key == owner.key() => Some(original),
         TypeOrigin::Parameter { original, .. }
+        | TypeOrigin::Catch { original }
         | TypeOrigin::Return { original }
         | TypeOrigin::Reference {
             original: Some(original),
@@ -112,6 +113,17 @@ fn interpretation(
                 if object {
                     if relation == Relation::Same {
                         relation = Relation::WidenToObject;
+                    }
+                    continue;
+                }
+                if value.guarantees_exception_object()
+                    && target
+                        .iter()
+                        .copied()
+                        .eq(b"Ljava/lang/Throwable;".iter().map(|&b| u16::from(b)))
+                {
+                    if relation != Relation::Unknown {
+                        relation = Relation::ExceptionUpperBound;
                     }
                     continue;
                 }

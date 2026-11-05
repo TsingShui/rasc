@@ -86,6 +86,9 @@ pub enum TypeOrigin {
         part: SignaturePart,
         original: Option<TypeId>,
     },
+    Catch {
+        original: TypeId,
+    },
     Intrinsic,
     Component {
         array: TypeNameId,
@@ -122,6 +125,15 @@ pub enum Identity {
     Multiple,
 }
 
+// Unproven includes unavailable sources; it does not prove a non-exception value.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum ExceptionSources {
+    Pending,
+    Exception,
+    Unproven,
+    Mixed,
+}
+
 #[derive(Debug)]
 pub struct ValueFacts {
     pub(super) value: ValueId,
@@ -133,6 +145,7 @@ pub struct ValueFacts {
     pub(super) range: Option<IntegralRange>,
     pub(super) range_unknown: bool,
     pub(super) identity: Identity,
+    pub(super) exception_sources: ExceptionSources,
 }
 impl ValueFacts {
     pub fn value(&self) -> ValueId {
@@ -161,6 +174,12 @@ impl ValueFacts {
     }
     pub fn identity(&self) -> Identity {
         self.identity
+    }
+    /// Every grounded source is an exception object. This is a common upper-bound
+    /// guarantee, not another alternative in the declared-type source list.
+    /// False means this provenance domain supplies no guarantee, not non-membership.
+    pub fn guarantees_exception_object(&self) -> bool {
+        self.exception_sources == ExceptionSources::Exception
     }
 }
 
@@ -191,12 +210,21 @@ pub enum Problem {
     LiteralOutOfRange,
     NarrowingRange,
     NonArrayDescriptor(TypeNameId),
+    InvalidCatchType(TypeId),
+    NonPrimitiveArrayComponent(TypeNameId),
+    ArrayComponentConflict,
+    ArrayPayloadUnavailable(crate::FailureKind),
+    ArrayPayloadWidth {
+        expected: crate::ByteLength,
+        actual: crate::ByteLength,
+    },
 }
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Relation {
     Same,
     WidenToObject,
     DirectSuperclass,
+    ExceptionUpperBound,
     Unknown,
 }
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -296,6 +324,37 @@ impl PhiView {
         &self.incoming
     }
 }
+/// Element interpretation selected from established array sources, never width alone.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ArrayElementType {
+    Boolean,
+    Byte,
+    Char,
+    Short,
+    Int,
+    Long,
+    Float,
+    Double,
+}
+impl ArrayElementType {
+    pub fn width(self) -> crate::ByteLength {
+        crate::ByteLength(match self {
+            Self::Boolean | Self::Byte => 1,
+            Self::Char | Self::Short => 2,
+            Self::Int | Self::Float => 4,
+            Self::Long | Self::Double => 8,
+        })
+    }
+}
+#[derive(Clone, Copy, Debug)]
+pub struct ArrayFillView {
+    pub operation: OpId,
+    pub array: StateId,
+    /// Pair with execution().array_payload(operation) for all original bits.
+    /// No per-element SSA values or replacement stores are introduced.
+    pub element: Result<ArrayElementType, Problem>,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ConstructorRelation {
     Allocation,
@@ -370,6 +429,7 @@ pub struct TypeFacts {
     pub(super) uses: Vec<UseView>,
     pub(super) phis: Vec<PhiView>,
     pub(super) constructors: Vec<ConstructorFact>,
+    pub(super) array_fills: Vec<ArrayFillView>,
     pub(super) initialization: Vec<InitializationUse>,
     pub(super) issues: Vec<TypeIssue>,
 }
@@ -381,6 +441,7 @@ impl TypeFacts {
             uses: Vec::new(),
             phis: Vec::new(),
             constructors: Vec::new(),
+            array_fills: Vec::new(),
             initialization: Vec::new(),
             issues: Vec::new(),
         }
@@ -402,6 +463,9 @@ impl TypeFacts {
     }
     pub fn phis(&self) -> &[PhiView] {
         &self.phis
+    }
+    pub fn array_fills(&self) -> &[ArrayFillView] {
+        &self.array_fills
     }
     pub fn constructors(&self) -> &[ConstructorFact] {
         &self.constructors

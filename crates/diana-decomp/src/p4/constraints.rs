@@ -187,6 +187,7 @@ pub(super) fn collect(ssa: &SsaMethod<'_>, f: &mut TypeFacts) -> Result<Work, Ty
                 range: None,
                 range_unknown: true,
                 identity: Identity::Unknown,
+                exception_sources: ExceptionSources::Unproven,
             },
         )?;
     }
@@ -240,6 +241,21 @@ pub(super) fn collect(ssa: &SsaMethod<'_>, f: &mut TypeFacts) -> Result<Work, Ty
         rules: Vec::new(),
         compatible: Vec::new(),
     };
+    let mut handler_types = if flow.catch_types().is_empty() {
+        Vec::new()
+    } else {
+        lists(flow.blocks().len())?
+    };
+    if !handler_types.is_empty() {
+        for edge in flow.exception_edges() {
+            if let EdgeTarget::Block(handler) = edge.target()
+                && let EdgeRole::Exception { catch, .. } = edge.role()
+                && !handler_types[handler.0 as usize].contains(&catch)
+            {
+                push(&mut handler_types[handler.0 as usize], catch)?;
+            }
+        }
+    }
     for v in s.values() {
         match v.origin() {
             ValueOrigin::Entry(EntryRole::Parameter(i)) => {
@@ -282,21 +298,65 @@ pub(super) fn collect(ssa: &SsaMethod<'_>, f: &mut TypeFacts) -> Result<Work, Ty
                 )?;
             }
             ValueOrigin::Exception(operation) => {
-                let throwable = intrinsic(f, b"Ljava/lang/Throwable;")?;
-                seed(f, v.id(), throwable)?;
                 f.values[v.id().0 as usize].identity = Identity::Root(v.id());
+                f.values[v.id().0 as usize].families = mask(Family::Reference);
+                f.values[v.id().0 as usize].exception_sources = ExceptionSources::Exception;
                 let handler = flow.operations()[operation.0 as usize].block();
-                let typed = flow.edges().iter().any(|e| {
-                    e.target() == EdgeTarget::Block(handler)
-                        && matches!(e.role(), EdgeRole::Exception { catch: Some(_), .. })
-                });
-                if typed {
-                    f.values[v.id().0 as usize].type_unknown = true;
-                    issue(
-                        f,
-                        IssueSite::Value(v.id()),
-                        Problem::Missing(MissingFact::CatchDescriptor),
-                    )?;
+                let catches = handler_types
+                    .get(handler.0 as usize)
+                    .map_or(&[][..], Vec::as_slice);
+                for &catch in catches {
+                    let name = if let Some(original) = catch {
+                        let fact =
+                            flow.catch_type(original)
+                                .ok_or(TypeError::InternalInvariant(
+                                    "exception edge has no original catch-type fact",
+                                ))?;
+                        if fact.use_issue().is_some() {
+                            f.values[v.id().0 as usize].type_unknown = true;
+                            issue(
+                                f,
+                                IssueSite::Value(v.id()),
+                                Problem::InvalidCatchType(original),
+                            )?;
+                            continue;
+                        }
+                        match fact.descriptor() {
+                            Ok(descriptor) => {
+                                if let Some(i) = f
+                                    .names
+                                    .iter()
+                                    .position(|n| n.origin == TypeOrigin::Catch { original })
+                                {
+                                    TypeNameId(id(i)?)
+                                } else {
+                                    add_name(
+                                        f,
+                                        owned::copy_units(descriptor)?,
+                                        TypeOrigin::Catch { original },
+                                    )?
+                                }
+                            }
+                            Err(_) => {
+                                f.values[v.id().0 as usize].type_unknown = true;
+                                issue(
+                                    f,
+                                    IssueSite::Value(v.id()),
+                                    Problem::Missing(MissingFact::CatchDescriptor),
+                                )?;
+                                continue;
+                            }
+                        }
+                    } else {
+                        intrinsic(f, b"Ljava/lang/Throwable;")?
+                    };
+                    if !f.values[v.id().0 as usize].types.contains(&name) {
+                        seed(f, v.id(), name)?;
+                    }
+                }
+                if f.values[v.id().0 as usize].types.is_empty() {
+                    let throwable = intrinsic(f, b"Ljava/lang/Throwable;")?;
+                    seed(f, v.id(), throwable)?;
                 }
             }
             ValueOrigin::Operation { .. } => {}
@@ -660,11 +720,6 @@ pub(super) fn collect(ssa: &SsaMethod<'_>, f: &mut TypeFacts) -> Result<Work, Ty
             }
             OpKind::FillArrayData { .. } => {
                 arg(f, s, op.id(), 0, mask(Family::Reference));
-                issue(
-                    f,
-                    IssueSite::Operation(op.id()),
-                    Problem::Missing(MissingFact::ArrayPayload),
-                )?;
             }
             OpKind::Monitor { .. } => arg(f, s, op.id(), 0, mask(Family::Reference)),
             OpKind::MoveException => {}

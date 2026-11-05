@@ -27,7 +27,7 @@ by an opaque call or class initialization is not rolled back.
 | Arithmetic and conversion | Retain numeric domain, operand order, wrapping integer behavior, masked shifts, conversion direction and floating comparison bias. Integer division/remainder can throw; floating division/remainder do not throw for division by zero. |
 | Field/array access | Retain object, index and value roles, access direction, element interpretation and resolution/throw obligations. `aput` begins at opcode `0x4b`, not `0x4c`. |
 | String/class/handle/type constants | Retain the original reference and resolution site. String resolution can initialize String; class-literal resolution does not imply initialization of the referenced class. |
-| Allocation, filled array and fill | Retain allocation or existing-array identity, input order and borrowed payload association. P2 MUST NOT expand bulk fill into stores. |
+| Allocation, filled array and fill | Retain allocation or existing-array identity, input order and borrowed payload association. `ExecutionFacts::array_payload` delivers the associated checked element width/count and original bits. P2 MUST NOT expand bulk fill into stores. |
 | Invoke | Consume P1's checked receiver/parameter layout; retain dispatch kind and polymorphic prototype. A used result commits at its original move-result site. A discarded result does not remove the call. |
 | Monitor | Retain the lock operand and enter/exit direction. Enter acquires on success; exit releases on success. An exceptional exit's lock outcome is not established by its advanced exception-selection PC. |
 | Terminal | Retain ordered condition/selector/return/throw reads and the original target/exit roles. |
@@ -164,6 +164,12 @@ The debug shell observes these outcomes and does not call a stage builder.
 and original declarations. `MethodEvidence` supplies restricted borrowed debug/check
 facts, with no product extraction, mutable access or construction entry.
 `ExecutionFacts` is a separate immutable view over complete P2 execution facts.
+Its `catch_type`/`catch_types` queries preserve the method reader's descriptor
+results and use issues, keyed by the original logical-DEX-local TypeId used on
+exception edges. These queries expose no index or declaration-resolution ability.
+Its operation-bound array-payload query borrows P1's checked data without supplying
+a raw code view to consumers. Non-fill operations have no array payload; a broken
+established association remains an explicit construction error.
 P3 privately retains FlowMethod and consumes this view; it cannot extract a
 predecessor product or obtain raw evidence through the ordinary execution view.
 

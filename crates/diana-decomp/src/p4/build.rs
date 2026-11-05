@@ -44,6 +44,7 @@ fn construct(ssa: &SsaMethod<'_>, f: &mut TypeFacts) -> Result<(), TypeError> {
     super::constraints::array_requirements(ssa, f)?;
     super::solve::families(ssa.facts(), f, &mut work)?;
     super::views::finish(ssa, f)?;
+    super::arrays::finish(ssa, f)?;
     super::initialization::construct(ssa, f)?;
     Ok(())
 }

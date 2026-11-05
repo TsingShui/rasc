@@ -93,6 +93,33 @@ impl<'f, 'a> ExecutionFacts<'f, 'a> {
     pub fn coverage_at(self, pc: crate::CodeUnitOffset) -> Option<Coverage> {
         self.flow.coverage_at(pc)
     }
+    /// Original typed-catch content and local use issues; no declaration re-read.
+    pub fn catch_types(self) -> &'f [crate::input::CatchTypeFact<'a>] {
+        self.flow.decoded.catch_types()
+    }
+    pub fn catch_type(self, id: crate::TypeId) -> Option<&'f crate::input::CatchTypeFact<'a>> {
+        self.flow.decoded.catch_type(id)
+    }
+    /// The checked data associated with this fill operation. None means it is not
+    /// a fill; an absent/mismatched P1 association remains a construction error.
+    pub fn array_payload(
+        self,
+        operation: OpId,
+    ) -> Result<Option<crate::p1::ArrayPayload<'a>>, crate::RequestError> {
+        let Some(op) = self.operation(operation) else {
+            return Ok(None);
+        };
+        let OpKind::FillArrayData { payload } = op.kind() else {
+            return Ok(None);
+        };
+        self.flow
+            .decoded
+            .array_payload_at(*payload)?
+            .map(Some)
+            .ok_or(crate::RequestError::InternalInvariant(
+                "fill operation lost its checked array payload",
+            ))
+    }
     pub fn reference_fact(
         self,
         pc: crate::CodeUnitOffset,

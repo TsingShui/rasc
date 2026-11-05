@@ -1,10 +1,30 @@
 use super::catalog::ProgramIndex;
 use super::strings::TypeShape;
-use super::{Cursor, InputError, InputProblem, file_offset, malformed};
+use super::{Cursor, DexString, InputError, InputProblem, file_offset, malformed};
 
 use crate::{
     ByteLength, ByteOffset, ByteRange, CodeUnitCount, CodeUnitOffset, RegisterWordCount, TypeId,
 };
+
+/// One original typed-catch reference. A readable descriptor and a valid catch
+/// use are independent; failed content reads do not erase handler boundaries.
+#[derive(Clone, Debug)]
+pub struct CatchTypeFact<'a> {
+    type_id: TypeId,
+    descriptor: Result<DexString<'a>, InputError>,
+    use_issue: Option<InputError>,
+}
+impl<'a> CatchTypeFact<'a> {
+    pub fn type_id(&self) -> TypeId {
+        self.type_id
+    }
+    pub fn descriptor(&self) -> Result<DexString<'a>, &InputError> {
+        self.descriptor.as_ref().copied()
+    }
+    pub fn use_issue(&self) -> Option<&InputError> {
+        self.use_issue.as_ref()
+    }
+}
 
 #[derive(Clone, Debug)]
 pub enum MethodBody<'a> {
@@ -29,6 +49,7 @@ pub struct RawMethodView<'a> {
     code_byte_range: ByteRange,
     try_byte_range: ByteRange,
     handler_byte_range: ByteRange,
+    catch_types: Option<std::sync::Arc<Vec<CatchTypeFact<'a>>>>,
     debug_info_offset_byte: Option<ByteOffset>,
 }
 
@@ -69,6 +90,9 @@ impl<'a> RawMethodView<'a> {
     }
     pub fn handler_byte_range(&self) -> ByteRange {
         self.handler_byte_range
+    }
+    pub fn catch_types(&self) -> &[CatchTypeFact<'a>] {
+        self.catch_types.as_deref().map_or(&[], Vec::as_slice)
     }
     pub fn debug_info_offset_byte(&self) -> Option<ByteOffset> {
         self.debug_info_offset_byte
@@ -121,9 +145,16 @@ pub(super) fn read_code<'a>(
     }
     let tries = cursor.skip(usize::from(tries_size), ByteLength(8))?;
     let handler_start = cursor.position_byte();
-    if tries_size != 0 {
-        check_handlers(index, &mut cursor, tries, code_units)?;
-    }
+    let catch_types = if tries_size != 0 {
+        let facts = check_handlers(index, &mut cursor, tries, code_units)?;
+        if facts.is_empty() {
+            None
+        } else {
+            Some(std::sync::Arc::new(facts))
+        }
+    } else {
+        None
+    };
     Ok(MethodBody::Code(RawMethodView {
         source_bytes: index.bytes,
         header_offset: index.header.header_offset,
@@ -147,16 +178,18 @@ pub(super) fn read_code<'a>(
             start: handler_start,
             end: cursor.position_byte(),
         },
+        catch_types,
         debug_info_offset_byte: (debug_offset != ByteOffset(0)).then_some(debug_offset),
     }))
 }
 
-fn check_handlers(
-    index: &ProgramIndex<'_>,
+fn check_handlers<'a>(
+    index: &ProgramIndex<'a>,
     cursor: &mut Cursor<'_>,
     tries: ByteRange,
     code_units: CodeUnitCount,
-) -> Result<(), InputError> {
+) -> Result<Vec<CatchTypeFact<'a>>, InputError> {
+    let mut types = Vec::new();
     let list_start = cursor.position_byte();
     let count = cursor.read_uleb32()?;
     if u64::from(count) > cursor.remaining_byte().0 as u64 {
@@ -181,14 +214,12 @@ fn check_handlers(
         }
 
         for _ in 0..typed {
+            let at = cursor.position_byte();
             let type_idx = TypeId(cursor.read_uleb32()?);
-            let (_, shape) = index.type_descriptor(type_idx)?;
-            if !matches!(shape, TypeShape::Class) {
-                return Err(malformed(
-                    InputProblem::InvalidHandler,
-                    cursor.position_byte(),
-                ));
-            }
+            types
+                .try_reserve(1)
+                .map_err(|_| InputError::Allocation { offset_byte: at })?;
+            types.push((type_idx, at));
             if CodeUnitOffset(cursor.read_uleb32()?).0 >= code_units.0 {
                 return Err(malformed(
                     InputProblem::InvalidHandler,
@@ -227,5 +258,29 @@ fn check_handlers(
         }
         previous_end = end;
     }
-    Ok(())
+    // Resolve each catch identity once, retaining its first original occurrence.
+    types.sort_unstable();
+    types.dedup_by_key(|(ty, _)| *ty);
+    let mut facts = Vec::new();
+    facts
+        .try_reserve(types.len())
+        .map_err(|_| InputError::Allocation {
+            offset_byte: list_start,
+        })?;
+    for (type_id, at) in types {
+        let (descriptor, use_issue) = match index.type_descriptor(type_id) {
+            Ok((descriptor, shape)) => (
+                Ok(descriptor),
+                (!matches!(shape, TypeShape::Class))
+                    .then(|| malformed(InputProblem::InvalidHandler, at)),
+            ),
+            Err(error) => (Err(error), None),
+        };
+        facts.push(CatchTypeFact {
+            type_id,
+            descriptor,
+            use_issue,
+        });
+    }
+    Ok(facts)
 }
