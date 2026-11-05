@@ -1,5 +1,5 @@
-use super::super::TypeError;
-use super::super::build::{filled, push};
+use super::TypeError;
+use super::build::{filled, push};
 use crate::RequestError;
 use std::collections::HashMap;
 use std::hash::Hash;

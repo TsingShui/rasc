@@ -12,38 +12,21 @@ fn merge_identity(target: Identity, source: Identity) -> Identity {
         _ => Identity::Multiple,
     }
 }
-fn copy_source(
-    f: &mut TypeFacts,
-    to: ValueId,
-    from: ValueId,
-    kind: RuleKind,
-) -> Result<bool, TypeError> {
+fn copy_source(f: &mut TypeFacts, to: ValueId, from: ValueId) -> Result<bool, TypeError> {
     let target = to.0 as usize;
     let source = from.0 as usize;
     let mut changed = false;
-    if matches!(kind, RuleKind::Copy | RuleKind::Phi | RuleKind::Component) {
-        let len = f.values[source].types.len();
-        for i in 0..len {
-            let original = f.values[source].types[i];
-            let name = if kind == RuleKind::Component {
-                component(f, original)?
-            } else {
-                Some(original)
-            };
-            if let Some(name) = name
-                && !f.values[target].types.contains(&name)
-            {
-                push(&mut f.values[target].types, name)?;
-                changed = true;
-            }
-        }
-        if f.values[source].type_unknown && !f.values[target].type_unknown {
-            f.values[target].type_unknown = true;
+    let len = f.values[source].types.len();
+    for i in 0..len {
+        let name = f.values[source].types[i];
+        if !f.values[target].types.contains(&name) {
+            push(&mut f.values[target].types, name)?;
             changed = true;
         }
     }
-    if kind == RuleKind::Component {
-        return Ok(changed);
+    if f.values[source].type_unknown && !f.values[target].type_unknown {
+        f.values[target].type_unknown = true;
+        changed = true;
     }
     let source_bits = f.values[source].literal;
     if let Some(bits) = source_bits {
@@ -87,20 +70,11 @@ fn copy_source(
     }
     Ok(changed)
 }
-fn unavailable(f: &mut TypeFacts, to: ValueId, kind: RuleKind) -> bool {
+fn unavailable(f: &mut TypeFacts, to: ValueId) -> bool {
     let v = &mut f.values[to.0 as usize];
-    if kind == RuleKind::Component {
-        let changed = !v.type_unknown;
-        v.type_unknown = true;
-        return changed;
-    }
-    let changed = (kind != RuleKind::Cast && !v.type_unknown)
-        || !v.mixed_literal
-        || !v.range_unknown
-        || v.identity != Identity::Multiple;
-    if kind != RuleKind::Cast {
-        v.type_unknown = true;
-    }
+    let changed =
+        !v.type_unknown || !v.mixed_literal || !v.range_unknown || v.identity != Identity::Multiple;
+    v.type_unknown = true;
     v.mixed_literal = true;
     v.range_unknown = true;
     v.identity = Identity::Multiple;
@@ -110,9 +84,7 @@ pub(super) fn sources(s: &SsaFacts, f: &mut TypeFacts, w: &Work) -> Result<(), T
     let mut users = lists(f.values.len())?;
     let mut pending = filled(f.values.len(), false)?;
     for rule in &w.rules {
-        if rule.kind != RuleKind::Component {
-            pending[rule.target.0 as usize] = true;
-        }
+        pending[rule.target.0 as usize] = true;
     }
     // Unknown identity at a seed is not a promise that it aliases a later root.
     for (i, v) in f.values.iter_mut().enumerate() {
@@ -121,8 +93,9 @@ pub(super) fn sources(s: &SsaFacts, f: &mut TypeFacts, w: &Work) -> Result<(), T
         }
     }
     let mut queue = Vec::new();
-    let mut queued = filled(w.rules.len(), true)?;
+    let mut queued = filled(w.rules.len(), false)?;
     for (i, rule) in w.rules.iter().enumerate() {
+        queued[i] = true;
         push(&mut queue, i)?;
         for &input in &rule.inputs {
             if let Some(v) = state_value(s, input) {
@@ -132,7 +105,7 @@ pub(super) fn sources(s: &SsaFacts, f: &mut TypeFacts, w: &Work) -> Result<(), T
                 .state(input)
                 .is_some_and(|s| s.availability().is_available())
             {
-                unavailable(f, rule.target, rule.kind);
+                unavailable(f, rule.target);
             }
         }
     }
@@ -143,9 +116,9 @@ pub(super) fn sources(s: &SsaFacts, f: &mut TypeFacts, w: &Work) -> Result<(), T
             let mut changed = false;
             for &input in &rule.inputs {
                 if let Some(v) = state_value(s, input) {
-                    changed |= copy_source(f, rule.target, v, rule.kind)?;
+                    changed |= copy_source(f, rule.target, v)?;
                 } else {
-                    changed |= unavailable(f, rule.target, rule.kind);
+                    changed |= unavailable(f, rule.target);
                 }
             }
             if rule.kind == RuleKind::Phi
@@ -172,18 +145,10 @@ pub(super) fn sources(s: &SsaFacts, f: &mut TypeFacts, w: &Work) -> Result<(), T
         let mut added = false;
         for rule in &w.rules {
             let v = &mut f.values[rule.target.0 as usize];
-            let missing = rule.kind == RuleKind::Component && v.types.is_empty();
-            let ungrounded =
-                rule.kind != RuleKind::Component && v.literal.is_none() && !v.mixed_literal;
-            if (missing && !v.type_unknown) || ungrounded {
-                if missing {
-                    v.type_unknown = true;
-                }
-                if ungrounded {
-                    v.mixed_literal = true;
-                    v.range_unknown = true;
-                    v.identity = Identity::Multiple;
-                }
+            if v.literal.is_none() && !v.mixed_literal {
+                v.mixed_literal = true;
+                v.range_unknown = true;
+                v.identity = Identity::Multiple;
                 for &user in &users[rule.target.0 as usize] {
                     if !queued[user] {
                         queued[user] = true;
@@ -195,15 +160,6 @@ pub(super) fn sources(s: &SsaFacts, f: &mut TypeFacts, w: &Work) -> Result<(), T
         }
         if !added {
             break;
-        }
-    }
-    for rule in &w.rules {
-        if rule.kind == RuleKind::Component && f.values[rule.target.0 as usize].type_unknown {
-            issue(
-                f,
-                IssueSite::Value(rule.target),
-                Problem::Missing(MissingFact::ArrayComponent),
-            )?;
         }
     }
     Ok(())
@@ -245,13 +201,10 @@ pub(super) fn families(s: &SsaFacts, f: &mut TypeFacts, w: &mut Work) -> Result<
     let mut allowed = Vec::new();
     for (i, value) in f.values.iter().enumerate() {
         push(&mut parent, i)?;
-        let mut source = value.families;
-        for &name in &value.types {
-            if let Some(family) = name_family(f, name) {
-                source = source.intersect(mask(family));
-            }
-        }
-        push(&mut allowed, source)?;
+        // Producer/opcode seeds and complete component projections establish
+        // bounds. Propagated declaration subsets do not cover unknown sources;
+        // Copy/Phi representation relations are joined below instead.
+        push(&mut allowed, value.families)?;
     }
     // Constrain runtime Phi destinations before union, not the independently
     // interpreted literals or fixed producers on other incoming paths.

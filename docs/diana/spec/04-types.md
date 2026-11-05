@@ -39,6 +39,7 @@ failures retain their classification, and method-task stops do not truncate sibl
 | `PhiView` | Original Phi identity, literal or runtime representation and an interpretation for every original incoming transfer. |
 | `ConstructorFact` | Original invocation, receiver state, identity provenance and established or unresolved construction relationship (`Allocation`, `This`, `Super`, `OtherOwner`, unknown). |
 | `InitializationUse` | Initialization states at the original use position, including failure, mixed paths and unknowns. |
+| `ArrayAccessView` | Original get/put/fill operation and SSA array state, with component bounds at that execution position and explicit coverage gaps. |
 | `ArrayFillView` | Original fill operation and SSA array state, with a source-supported primitive element interpretation or local problem; width/count/bits remain in the execution payload fact. |
 
 `Owner` type origins retain the original class key and TypeId. The current-class
@@ -57,8 +58,9 @@ is not an exact runtime-class or complete-hierarchy claim.
 ## Constraint construction
 
 `constraints.rs` consumes the existing operation enum and checked declarations.
-Method entry/return declarations, fields, call prototypes, allocation and cast
-references supply type seeds. Unary/binary/compare, array and terminal semantics
+Method entry/return declarations, fields, call prototypes and allocation
+references supply declaration constraints. Original casts supply position-related
+check events rather than value-definition seeds. Unary/binary/compare, array and terminal semantics
 supply their own representation requirements. Polymorphic calls use their supplied
 prototype independently of the separate target declaration.
 
@@ -66,6 +68,40 @@ Producer facts and consumer requirements are different constraints. A known int
 producer does not become float because one use requests float. Equal width alone
 does not establish compatibility. Original conversion instructions remain at their
 original operation positions; a use view does not insert a replacement conversion.
+
+### Position-related check bounds
+
+`refinements.rs` consumes the original cast target, SSA receiver binding and
+normal/exception transfers. A check-cast has no register write or SSA output.
+P4 MUST apply its checked bound only after normal completion and only to a
+reference established to be the checked reference. The input's original source
+declaration remains unchanged; a successful array check adds a position guarantee,
+not another alternative alongside an Object source declaration. The bound MUST NOT
+leak to a preceding position, exception path or unproved alias.
+
+Private queries identify a StateId, PointId and component-projection depth.
+Copy relations preserve the reference; a Phi rewrites the binding on each original
+incoming transfer before joining that path's knowledge. Both references in an alias
+query select the same transfer. A reference-valued array load projects its source
+at the original load execute point; this type dependency does not identify the
+loaded element with the array object. No register environment or second SSA chain
+is constructed. `references.rs` supplies the same immutable source/alias rules to
+this consumer and initialization.
+
+Alternative paths retain known bounds and independent gaps. A successful check
+can discharge declaration-projection gaps for its covered normal path, but cannot
+repair unavailable SSA input. Uncovered unknown siblings remain unknown. Null-only paths are
+grounded but supply no element type; a successful cast of null MUST NOT contribute
+a component type to a different non-null alternative. Neither null nor construction
+bottom establishes an array execution or non-nullness.
+
+The sparse worklist grows finite name/gap sets. Queries beyond every input
+descriptor's array rank share one no-nominal-evidence depth; this closes recursive
+component dependencies without a numeric quota. Queries retain descriptor-suffix
+references and materialize only components demanded by published access facts,
+rather than expanding every dimension of unrelated declarations. An ungrounded cycle acquires
+Unknown rather than vacuous completeness. Projection finishes before Copy/Phi
+source propagation and family selection; no consumer retries an earlier stage.
 
 ### Exception declaration bounds
 
@@ -85,10 +121,15 @@ specific typed catch. Reading a reference does not require resolving that hierar
 
 ## Finite source propagation
 
-`solve.rs` indexes dependent rules by source ValueId. Move, Phi, cast identity and
-array-component facts propagate only to affected rules. Known type sources grow;
+`solve.rs` indexes Move/Phi rules by source ValueId. Position-related component
+bounds are established first; moves and Phis propagate those producer facts and
+literal/range/identity evidence only to affected rules. A cast retains the same
+reference binding rather than introducing a value rule. Known type sources grow;
 component projection strictly removes array dimensions. Original names are not
-rewritten to a chosen common representation.
+rewritten to a chosen common representation. Opcode/prototype seeds establish
+producer family bounds; only complete component knowledge supplies additional
+producer bounds. Copy/Phi relations propagate representation constraints. The
+solver MUST NOT treat a propagated declaration subset as exhaustive source coverage.
 
 Literal evidence retains original bits separately from representation. A move or
 Phi can retain a literal only when all grounded sources agree on width and bits.
@@ -150,8 +191,11 @@ original operations; their input reads do not require a prior losslessness proof
 Actual representation conflicts and original classified use issues remain distinct
 from inability to select an optional value-preserving view.
 
-Bit-preserving move operands retain a copy/bits view when no numeric interpretation
-is required; literal equality predicates can use the integral bit interpretation.
+Bit-preserving move and word/wide storage operands retain a copy/bits view when no
+numeric interpretation is required. A complete, consistent declaration context can
+select a literal's integral/floating bit view after that read is established; it
+does not convert a runtime value. Literal equality predicates can use the integral
+bit interpretation.
 These choices do not select a global type for other uses of the same constant.
 Pure-literal Phis need no common runtime storage representation: every incoming
 retains its bit identity and each consumer has its own interpretation. Runtime
@@ -161,6 +205,14 @@ groups are joined. The shared literal rule admits reference interpretation only
 for one-word zero; nonzero words remain integral/float candidates and wide bits
 remain long/double candidates. It does not choose an interpretation for that literal
 at another use. Pure-literal Phis retain independent use views.
+
+Numeric Phi transfers copy their existing word/wide encoding rather than evaluate
+a numeric expression. A nonselected numeric Runtime family set denotes common
+bit storage; incoming views preserve CopyBits/LiteralBits and P5 consumes that
+storage without choosing int/float or long/double. Candidate sets that mix
+references and numeric data still require a compatible representation and retain
+unresolved incoming problems. Ordinary numeric reads keep their own interpretation
+requirements; a ready bit transfer does not certify such a read.
 
 A conflicting local Phi constraint does not rewrite an independent producer's
 established representation. Unavailable inputs supply no literal evidence, and an
@@ -181,10 +233,51 @@ compatibility or bypass an original runtime check. A source-expression consumer
 cannot repair unknown binding by adding casts, boxing, helpers or typed aliases
 merely to influence Java overload selection.
 
+## Array component knowledge
+
+`components.rs` is the sole declaration-projection producer. Allocation projection
+and the position-related solver use its results. `refinements.rs` supplies one
+component knowledge record for each original access; load-result sources, optional
+store context and payload interpretation consume that record. Projection uses
+already delivered descriptors and SSA availability, not consumer demands,
+method-name patterns or classpath facts.
+
+Knowledge consists of known component sources K and gaps U. Joining alternatives
+unions K and preserves every participating gap. A declared array removes one
+dimension with its original type origin retained. A non-array declaration bound
+supplies an UnprojectableDeclaration gap, not proof that the runtime object is
+non-array. Unknown/unavailable alternatives remain gaps beside known arrays.
+Empty knowledge is internal bottom until source closure; ungrounded components
+become unknown, never vacuously complete.
+
+`ArrayAccessView` covers each original get, put and payload fill. Its component
+knowledge remains available even when ordinary reads are established. Complete
+coverage means all participating non-null alternatives have projectable bounds at
+that position; it proves neither an exact runtime reference component class nor
+non-nullness. A covering successful check can supply a bound absent from the
+original declaration. P4 MUST NOT drop known sources or uncovered gaps merely to
+turn a mixed projection into a complete one. All-null knowledge remains distinct
+from an established element type.
+
+Opcode semantics establish the receiver/index/value read requirements and the
+normal load-result encoding. A missing component declaration MUST NOT independently
+block those reads. Word/wide stores preserve bits; reference stores read references
+or established null without proving assignment compatibility. Complete component
+declarations supply optional use context, not stronger storage-read requirements.
+Partial declaration context stays in ArrayAccessView rather than masquerading as
+a complete Requirement. Known source components do not override unknown branches.
+
+Original null, bounds, component and covariant-store checks, storage truncation
+and normal/exception effects remain in execution facts. Consumers MUST NOT add
+casts, conversions or helpers to compensate for an unknown component, or omit
+checks because declared projection coverage is complete.
+
 ## Array payload interpretation
 
 P4 consumes the operation-bound `ExecutionFacts::array_payload` and the existing
-SSA array source. `ArrayFillView` selects Boolean, Byte, Char, Short, Int, Long,
+SSA array source and its existing ArrayAccessView component knowledge; it does not
+project a second set of array declarations. `ArrayFillView` selects Boolean, Byte,
+Char, Short, Int, Long,
 Float or Double only when every known array source supports the same component
 interpretation, no source is unavailable/unknown, and payload width agrees.
 Equal payload widths do not select a family: `[F` and `[I` keep distinct bit
@@ -209,8 +302,9 @@ This does not decide whether P7 can merge the operations into natural `new` synt
 A constructor call whose receiver is `this` establishes `This` when its owner is
 the current class and `Super` when its owner is the declared direct superclass; a
 different readable owner keeps the original invocation and is reported as
-`OtherOwner`. Constructor relationships follow the existing Copy/Cast/Phi source
-rules rather than requiring one provenance root. Equal source relationships retain
+`OtherOwner`. Constructor relationships follow the existing Copy/Phi source
+rules rather than requiring one provenance root; check-cast retains the same
+reference binding. Equal source relationships retain
 that relationship even when identity is Multiple; different relationships retain
 the existing ambiguous summary. The same source-relation facts drive initialization.
 All possible pending sources must match `Allocation`, `This` or `Super` before
@@ -230,9 +324,9 @@ does not create an object-initialization issue.
 
 Sparse dependencies follow P3's transfers and the existing source rules. A Phi
 selects each source on its original incoming transfer, including that transfer's
-normal/exception initialization effect before joining. Copy/Cast captures a
-reference, not an initialization snapshot: later constructor events still affect
-proven aliases. Successful and exceptional completion remain distinct even for
+normal/exception initialization effect before joining. Copy captures a reference,
+not an initialization snapshot; check-cast introduces no replacement binding.
+Later constructor events still affect proven aliases. Successful and exceptional completion remain distinct even for
 void calls with no register-result commit. Failure preserves its state and already
 established effects; it is not heap rollback.
 
@@ -272,8 +366,9 @@ not a missing declaration. Constructor-owner gaps retain their own diagnostics.
 ## Inspection and evidence
 
 The existing `dbg_shell` supports `p4`/`types` and `p4-all`. Detailed views retain
-original sites, type origins, bits, Phi transfers, constructor relations and
-initialization states. Batch traversal completion is not a semantic correctness
+original sites, type origins, bits, Phi transfers, constructor relations,
+initialization states and component sources/gaps. Unknown component counts are
+separate from unreadable use views and typed recovery issues. Batch traversal completion is not a semantic correctness
 badge. P3 views still observe retained SSA through the same P4 method chain.
 
 The existing sole core test uses public Engine products with independently encoded

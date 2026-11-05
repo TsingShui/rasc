@@ -10,15 +10,25 @@ use crate::substrate::owned;
 pub(super) enum RuleKind {
     Copy,
     Phi,
-    Cast,
-    Component,
 }
 pub(super) struct Rule {
     pub target: ValueId,
     pub inputs: Vec<StateId>,
     pub kind: RuleKind,
 }
+pub(super) struct ArraySite {
+    pub operation: OpId,
+    pub array: StateId,
+    pub output: Option<ValueId>,
+}
+pub(super) struct CastBound {
+    pub operation: OpId,
+    pub receiver: StateId,
+    pub target: TypeNameId,
+}
 pub(super) struct Work {
+    pub arrays: Vec<ArraySite>,
+    pub casts: Vec<CastBound>,
     pub rules: Vec<Rule>,
     pub compatible: Vec<(usize, usize)>,
 }
@@ -237,6 +247,8 @@ pub(super) fn collect(ssa: &SsaMethod<'_>, f: &mut TypeFacts) -> Result<Work, Ty
         },
     )?;
     let mut work = Work {
+        arrays: Vec::new(),
+        casts: Vec::new(),
         rules: Vec::new(),
         compatible: Vec::new(),
     };
@@ -483,10 +495,26 @@ pub(super) fn collect(ssa: &SsaMethod<'_>, f: &mut TypeFacts) -> Result<Work, Ty
             OpKind::Array { access, kind } => {
                 let get = *access == ArrayAccess::Get;
                 let array = usize::from(!get);
+                let index = use_index(s, op.id(), array).ok_or(TypeError::InternalInvariant(
+                    "array operation lost its fixed SSA input layout",
+                ))?;
+                push(
+                    &mut work.arrays,
+                    ArraySite {
+                        operation: op.id(),
+                        array: s.uses()[index].state(),
+                        output: out,
+                    },
+                )?;
                 arg(f, s, op.id(), array, mask(Family::Reference));
                 arg(f, s, op.id(), array + 1, mask(Family::Integral));
                 if !get {
                     arg(f, s, op.id(), 0, value_kind(*kind));
+                    if matches!(kind, ValueKind::Word | ValueKind::Wide)
+                        && let Some(i) = use_index(s, op.id(), 0)
+                    {
+                        f.uses[i].requirement.meaning = ReadMeaning::CopyBits;
+                    }
                 }
                 if let Some(v) = out {
                     f.values[v.0 as usize].families =
@@ -497,7 +525,6 @@ pub(super) fn collect(ssa: &SsaMethod<'_>, f: &mut TypeFacts) -> Result<Work, Ty
                     if *kind == ValueKind::Object {
                         f.values[v.0 as usize].identity = Identity::Root(v);
                     }
-                    input_rule(s, &mut work, v, op.id(), array, RuleKind::Component)?;
                 }
             }
             OpKind::ArrayLength => {
@@ -543,7 +570,23 @@ pub(super) fn collect(ssa: &SsaMethod<'_>, f: &mut TypeFacts) -> Result<Work, Ty
                     )?),
                     _ => None,
                 };
-                if let Some(v) = out {
+                if matches!(op.kind(), OpKind::Cast { .. }) {
+                    if let Some(target) = name
+                        && flow
+                            .reference_use_issue(op.pc(), ReferenceSlot::First)
+                            .is_none()
+                        && let Some(input) = use_index(s, op.id(), 0)
+                    {
+                        push(
+                            &mut work.casts,
+                            CastBound {
+                                operation: op.id(),
+                                receiver: s.uses()[input].state(),
+                                target,
+                            },
+                        )?;
+                    }
+                } else if let Some(v) = out {
                     f.values[v.0 as usize].families = mask(Family::Reference);
                     if let Some(n) = name {
                         seed(f, v, n)?;
@@ -555,17 +598,11 @@ pub(super) fn collect(ssa: &SsaMethod<'_>, f: &mut TypeFacts) -> Result<Work, Ty
                             Problem::Missing(MissingFact::ReferenceDeclaration),
                         )?;
                     }
-                    if matches!(op.kind(), OpKind::Cast { .. }) {
-                        f.values[v.0 as usize].mixed_literal = false;
-                        f.values[v.0 as usize].range_unknown = false;
-                        input_rule(s, &mut work, v, op.id(), 0, RuleKind::Cast)?;
-                    } else {
-                        f.values[v.0 as usize].identity = Identity::Root(v);
-                    }
+                    f.values[v.0 as usize].identity = Identity::Root(v);
                 }
                 if matches!(op.kind(), OpKind::FilledNewArray { .. })
                     && let Some(array) = name
-                    && let Some(element) = component(f, array)?
+                    && let Some(element) = super::components::declaration(f, array)?
                 {
                     let count = s.operation_site(op.id()).map_or(0, |p| p.use_len());
                     for i in 0..count {
@@ -716,6 +753,17 @@ pub(super) fn collect(ssa: &SsaMethod<'_>, f: &mut TypeFacts) -> Result<Work, Ty
                 }
             }
             OpKind::FillArrayData { .. } => {
+                let index = use_index(s, op.id(), 0).ok_or(TypeError::InternalInvariant(
+                    "array fill lost its fixed SSA input layout",
+                ))?;
+                push(
+                    &mut work.arrays,
+                    ArraySite {
+                        operation: op.id(),
+                        array: s.uses()[index].state(),
+                        output: None,
+                    },
+                )?;
                 arg(f, s, op.id(), 0, mask(Family::Reference));
             }
             OpKind::Monitor { .. } => arg(f, s, op.id(), 0, mask(Family::Reference)),
@@ -779,50 +827,4 @@ pub(super) fn collect(ssa: &SsaMethod<'_>, f: &mut TypeFacts) -> Result<Work, Ty
         }
     }
     Ok(work)
-}
-
-pub(super) fn array_requirements(ssa: &SsaMethod<'_>, f: &mut TypeFacts) -> Result<(), TypeError> {
-    let s = ssa.facts();
-    for op in ssa.execution().operations() {
-        let OpKind::Array {
-            access: ArrayAccess::Put,
-            ..
-        } = op.kind()
-        else {
-            continue;
-        };
-        let mut found = false;
-        let mut unknown = false;
-        if let Some(i) = use_index(s, op.id(), 1)
-            && let Some(v) = state_value(s, s.uses()[i].state())
-        {
-            let len = f.values[v.0 as usize].types.len();
-            unknown = f.values[v.0 as usize].type_unknown;
-            for i in 0..len {
-                let array = f.values[v.0 as usize].types[i];
-                if let Some(element) = component(f, array)? {
-                    found = true;
-                    arg_type(f, s, op.id(), 0, element)?;
-                } else {
-                    issue(
-                        f,
-                        IssueSite::Operation(op.id()),
-                        Problem::NonArrayDescriptor(array),
-                    )?;
-                    unknown = true;
-                }
-            }
-        }
-        if !found || unknown {
-            if let Some(i) = use_index(s, op.id(), 0) {
-                f.uses[i].requirement.missing = Some(MissingFact::ArrayComponent);
-            }
-            issue(
-                f,
-                IssueSite::Operation(op.id()),
-                Problem::Missing(MissingFact::ArrayComponent),
-            )?;
-        }
-    }
-    Ok(())
 }

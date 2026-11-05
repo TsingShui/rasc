@@ -1,15 +1,15 @@
-mod dataflow;
 mod references;
 
 use super::build::*;
 use super::constraints::Work;
+use super::dataflow::Dataflow;
+use super::references::*;
 use super::*;
 use crate::RequestError;
 use crate::p1::CheckedReferenceFact;
 use crate::p2::{EdgeRole, InvokeKind, OpId, OpKind};
 use crate::p3::{PointId, SsaMethod, StateId, Target, TransferId, TransferOrigin};
 use crate::raw::ReferenceSlot;
-use dataflow::Dataflow;
 use references::*;
 
 const INIT_NAME: [u16; 6] = crate::substrate::owned::ascii_units(*b"<init>");

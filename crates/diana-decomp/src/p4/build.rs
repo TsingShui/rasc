@@ -40,8 +40,9 @@ pub(crate) fn build_types<'a>(
 }
 fn construct(ssa: &SsaMethod<'_>, f: &mut TypeFacts) -> Result<(), TypeError> {
     let mut work = super::constraints::collect(ssa, f)?;
+    super::refinements::construct(ssa, f, &work)?;
     super::solve::sources(ssa.facts(), f, &work)?;
-    super::constraints::array_requirements(ssa, f)?;
+    super::components::finish(ssa, f, &work)?;
     super::solve::families(ssa.facts(), f, &mut work)?;
     super::views::finish(ssa.facts(), f)?;
     super::arrays::finish(ssa, f)?;
@@ -135,24 +136,4 @@ pub(super) fn intrinsic(f: &mut TypeFacts, text: &[u8]) -> Result<TypeNameId, Ty
     owned::reserve(&mut units, text.len())?;
     units.extend(text.iter().map(|&b| u16::from(b)));
     add_name(f, units, TypeOrigin::Intrinsic)
-}
-pub(super) fn component(
-    f: &mut TypeFacts,
-    array: TypeNameId,
-) -> Result<Option<TypeNameId>, TypeError> {
-    if f.names[array.0 as usize].units.first() != Some(&u16::from(b'[')) {
-        return Ok(None);
-    }
-    if let Some(i) = f
-        .names
-        .iter()
-        .position(|n| n.origin == TypeOrigin::Component { array })
-    {
-        return Ok(Some(TypeNameId(id(i)?)));
-    }
-    let source = &f.names[array.0 as usize].units[1..];
-    let mut units = Vec::new();
-    owned::reserve(&mut units, source.len())?;
-    units.extend_from_slice(source);
-    add_name(f, units, TypeOrigin::Component { array }).map(Some)
 }

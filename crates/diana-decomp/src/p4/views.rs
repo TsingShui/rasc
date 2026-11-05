@@ -134,6 +134,27 @@ fn interpretation(
         Ok(established) => established,
         Err(problem) => return Interpretation::Unknown(problem),
     };
+    let read = if let Interpretation::LiteralBits(bits) = read {
+        let family = types.first().and_then(|&name| name_family(f, name));
+        match family {
+            Some(family)
+                if required.contains(family)
+                    && literal_families(bits).contains(family)
+                    && types
+                        .iter()
+                        .all(|&name| name_family(f, name) == Some(family)) =>
+            {
+                if family == Family::Reference {
+                    Interpretation::Null
+                } else {
+                    Interpretation::Literal { bits, family }
+                }
+            }
+            _ => read,
+        }
+    } else {
+        read
+    };
     proven_integral_view(f, value, read, types).unwrap_or(read)
 }
 fn record(f: &mut TypeFacts, site: IssueSite, view: Interpretation) -> Result<(), TypeError> {
@@ -163,7 +184,15 @@ pub(super) fn finish(s: &SsaFacts, f: &mut TypeFacts) -> Result<(), TypeError> {
                     Interpretation::Unknown(Problem::SourceUnavailable(input.state()))
                 }
             } else {
-                interpretation(s, f, input.state(), families, &[], None, ReadMeaning::Value)
+                // A numeric Phi transfer copies a common word/wide bit
+                // encoding; it does not evaluate an int/float interpretation.
+                // Mixed numeric/reference candidates still need a real choice.
+                let meaning = if families.contains(Family::Reference) {
+                    ReadMeaning::Value
+                } else {
+                    ReadMeaning::CopyBits
+                };
+                interpretation(s, f, input.state(), families, &[], None, meaning)
             };
             record(
                 f,

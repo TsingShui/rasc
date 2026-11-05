@@ -220,7 +220,8 @@ pub enum Interpretation {
         family: Family,
     },
     Null,
-    /// A bit-preserving copy or pure Phi does not choose a numeric interpretation.
+    /// Bit-preserving moves, storage inputs and numeric Phi transfers do not
+    /// require a numeric interpretation.
     LiteralBits(Bits),
     CopyBits(crate::SlotWidth),
     Unknown(Problem),
@@ -242,9 +243,10 @@ impl Requirement {
     pub fn families(&self) -> Families {
         self.families
     }
-    /// Original use-site declarations, retained independently of the reading
-    /// interpretation. They establish neither subtyping nor a numeric narrowing
-    /// request; a value-preserving declared view requires its own evidence.
+    /// Use-site declarations and complete array-component contexts, independent
+    /// of the reading interpretation. Partial component sources remain in
+    /// ArrayAccessView instead. This establishes neither subtyping nor a numeric
+    /// narrowing request; a value-preserving view requires its own evidence.
     pub fn types(&self) -> &[TypeNameId] {
         &self.types
     }
@@ -282,6 +284,10 @@ pub struct IncomingView {
 #[derive(Debug)]
 pub enum PhiRepresentation {
     Literal(Bits),
+    /// A selected family, or common numeric word/wide bit storage when no
+    /// numeric interpretation is selected. Incoming views carry that bit copy;
+    /// consumers do not choose a numeric family for it. Candidate sets mixing
+    /// references and numeric data retain their unresolved incoming problems.
     Runtime(Families),
 }
 #[derive(Debug)]
@@ -327,6 +333,55 @@ impl ArrayElementType {
         })
     }
 }
+/// A gap in projecting declarations, not proof that the runtime value is not an array.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ComponentGap {
+    SourceUnavailable(StateId),
+    UnknownSource,
+    NoDeclaration,
+    UnprojectableDeclaration(TypeNameId),
+}
+
+/// Component bounds at an access position and independently retained uncertainty.
+/// Complete coverage does not establish an exact runtime component class,
+/// non-nullness or permission to omit an original array-store check.
+#[derive(Debug)]
+pub struct ComponentKnowledge {
+    pub(super) types: Vec<TypeNameId>,
+    pub(super) gaps: Vec<ComponentGap>,
+}
+impl ComponentKnowledge {
+    pub fn types(&self) -> &[TypeNameId] {
+        &self.types
+    }
+    pub fn gaps(&self) -> &[ComponentGap] {
+        &self.gaps
+    }
+    pub fn is_complete(&self) -> bool {
+        !self.types.is_empty() && self.gaps.is_empty()
+    }
+}
+
+/// Component knowledge at an original get, put or payload fill position. Machine
+/// encoding, effects and normal/exception completions remain in execution facts.
+#[derive(Debug)]
+pub struct ArrayAccessView {
+    pub(super) operation: OpId,
+    pub(super) array: StateId,
+    pub(super) component: ComponentKnowledge,
+}
+impl ArrayAccessView {
+    pub fn operation(&self) -> OpId {
+        self.operation
+    }
+    pub fn array(&self) -> StateId {
+        self.array
+    }
+    pub fn component(&self) -> &ComponentKnowledge {
+        &self.component
+    }
+}
+
 #[derive(Clone, Copy, Debug)]
 pub struct ArrayFillView {
     pub operation: OpId,
@@ -410,6 +465,7 @@ pub struct TypeFacts {
     pub(super) uses: Vec<UseView>,
     pub(super) phis: Vec<PhiView>,
     pub(super) constructors: Vec<ConstructorFact>,
+    pub(super) array_accesses: Vec<ArrayAccessView>,
     pub(super) array_fills: Vec<ArrayFillView>,
     pub(super) initialization: Vec<InitializationUse>,
     pub(super) issues: Vec<TypeIssue>,
@@ -422,6 +478,7 @@ impl TypeFacts {
             uses: Vec::new(),
             phis: Vec::new(),
             constructors: Vec::new(),
+            array_accesses: Vec::new(),
             array_fills: Vec::new(),
             initialization: Vec::new(),
             issues: Vec::new(),
@@ -444,6 +501,10 @@ impl TypeFacts {
     }
     pub fn phis(&self) -> &[PhiView] {
         &self.phis
+    }
+    /// One entry per original get/put/payload fill, in operation order.
+    pub fn array_accesses(&self) -> &[ArrayAccessView] {
+        &self.array_accesses
     }
     pub fn array_fills(&self) -> &[ArrayFillView] {
         &self.array_fills

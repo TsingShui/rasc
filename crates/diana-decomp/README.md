@@ -65,8 +65,10 @@ consumes available literal-input constraints before joining nonliteral groups;
 source literals keep their independent views. Initialization follows original SSA
 reference bindings and execution positions, including edge-correlated paired
 observations; Multiple identity is not an initialization failure by itself. No
-input-context query is implemented. Actual object-relation uncertainty and
-unsupported interpretations remain separate from missing input facts. P5–P9 remain inactive, so partial Java-like text is not yet delivered.
+input-context query is implemented. Successful check-cast bounds now refine array
+component knowledge at original execution positions without an SSA write or global
+source-declaration rewrite. Actual object-relation uncertainty and unsupported
+interpretations remain separate from missing input facts. P5–P9 remain inactive, so partial Java-like text is not yet delivered.
 The [P4 chapter](../../docs/diana/spec/04-types.md) records its algorithm and guarantees.
 
 Independent translation checking compiles only under `cfg(test)`; ordinary
@@ -114,40 +116,64 @@ facts; batch `complete` describes traversal, not semantic verification. P3/P4 ar
 formally verified. `p4` (`details:true`) exposes type origins, bits, requirements,
 views and initialization paths. `p4-all` adds typed/partial counts, interpretation
 problems, array-fill interpretation counts and missing-fact occurrences to the
-same traversal. Detailed P4 output includes catch
-facts and array-fill interpretations with original payload bits. These are diagnostic
+same traversal. Array-access counts and component gaps remain separate from
+unreadable use views. Detailed P4 output includes projected component sources and
+gaps, catch facts and array-fill interpretations with original payload bits. These are diagnostic
 counts, not semantic verification badges. The timed Engine traversal now includes P4.
 
 Engine format/check/Clippy and release builds pass; no tests were added, modified
-or run for the machine-read/optional-view separation. Two authorized real-input
-runs delivered 115,760 TypedMethod products without construction/upstream/class
-stops. Methods retaining local type issues fell from 488 to 36, ordinary unknown
-use views from 724 to 10, and issue occurrences from 816 to 102. Remaining issues
-are 92 missing ArrayComponent facts, 9 NonArrayDescriptor occurrences and 1
-ConstructorOwnerMismatch. Those facts and diagnostics were not removed.
+or run for unified component projection, scoped check bounds or corpus traversal.
+The focused observation covered 1,112 methods associated with component gaps or
+constructor diagnostics. All 2,224 retained P2/P3 products matched. Original literal
+bits, integral ranges, identities, Phi views, constructors, initialization and fill
+views matched; no previously known type source was lost. Component precision now
+comes from original declarations and successful checks at the actual access point,
+not a fake cast output or consumer-desired type.
 
-All 714 former NarrowingRange use views in 457 methods now preserve their original
-reads: 626 Direct(Integral) and 88 Direct(Long). Source ranges remain unchanged,
-including absent int/long ranges and full-int ranges at boolean-declared uses;
-this is not new range inference. Seven associated unknown component sources remain
-unknown. In 458 focused method observations, source facts, original use declarations
-and bindings, Phi views, constructors, initialization, catch facts and array fills
-matched before/after. Their 914 retained P2/P3 products also matched. Exact literals
-in narrower proved domains select explicit IntegralView forms; their original bits
-remain in ValueFacts. No runtime conversion or new arithmetic rule was added.
+Machine reads remain independent of optional numeric views. Absent int/long ranges
+and full-int ranges at boolean-declared uses are not new range evidence; a Z
+declaration alone does not authorize boolean naturalization. Literal views retain
+their original bits. No runtime conversion or new arithmetic rule was added.
 
-All 279 fills retained their interpretations: 1 Boolean, 64 Byte, 3 Char, 49 Float,
-158 Int and 4 Long. Byte roundtrip checked 1,444,571 items without mismatches or
-skipped items. These finite observations are not correctness rates or ART admission
-evidence. Source-unavailable, representation-conflict, nonzero-reference-literal
-and out-of-domain literal-view rejection branches retain static review rather
-than new execution evidence from these inputs.
+Full traversal of the two APKs in the working directory covered all 55 DEX entries
+(41 and 14) and delivered 2,644,578 TypedMethod products. Construction/upstream/class
+stops, ordinary unknown reads and representation conflicts were zero. The 11
+recovery diagnostics in 11 method instances are all ConstructorOwnerMismatch;
+these are not 11 established distinct defects. The 3,142 formerly incomplete
+component positions now have established bounds; all 523,479 observed array
+accesses have complete component knowledge. This includes Copy/Phi and nested
+array dependencies, not just direct checked receivers. Null-only alternatives
+supply no element type and do not import a different checked array's component
+into a non-null path. Complete bounds do not prove non-nullness, an exact runtime
+component class or permission to remove the original checks.
+
+The constructor-owner classifier also accepts only the current/direct-parent
+identity. All 11 reported targets are on input-declared ancestor paths: 10 paths
+are inside one DEX and one crosses DEX entries of the same APK. The original calls
+target Object rather than an intermediate parent; replacing them with a direct
+parent call would change the binding. The
+[pinned ART source](../../docs/diana/SOURCE_MAP.md#84-additional-mature-projects-pinned-commits-specific-symbols-and-what-not-to-borrow)
+does not enforce that extra direct-parent restriction. Formal ancestor delivery
+and initialization classification remain unresolved in the current product;
+source review is not ART execution or admission evidence.
+
+The focused single-DEX runs retained all 279 fill interpretations and checked
+1,444,571 byte-roundtrip items. The full APK traversal produced 10,212 fill views
+without unknown element interpretations, including 28 Short and 1,334 Double
+views. Full byte roundtrip checked 48,102,163 items with zero mismatches, skipped
+items or method/class errors. These finite observations are not correctness rates
+or ART admission evidence. Aggregate counters do not establish branch-specific
+coverage of source-unavailable, representation-conflict, nonzero-reference-literal
+or out-of-domain literal-view rejection.
 
 Post-Phi construction with multi-origin receivers, opposite allocation selections,
 constructor failure/repetition uses, retained older loop allocation instances and
 unreadable-direct-call events also lack execution evidence from these runs.
-Short/Double payloads, malformed catch declarations and conflicting/width-mismatched
-fills retain the same evidence limitation.
+Malformed catch declarations and conflicting/width-mismatched fills retain the
+same evidence limitation. Unavailable array sources, ungrounded
+component cycles, numeric wide-bit Phi storage and mixed numeric/reference
+representation rejection also have static review rather than new execution
+evidence from these inputs.
 
 Signature-qualified Java-like calls (`Api.register<Listener>(h)`, with a complete
 original descriptor when needed) are specified under

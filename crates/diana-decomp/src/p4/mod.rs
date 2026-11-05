@@ -1,9 +1,13 @@
 //! P4 value facts, per-use interpretations and position-related initialization.
 mod arrays;
 mod build;
+mod components;
 mod constraints;
+mod dataflow;
 mod initialization;
 mod product;
+mod references;
+mod refinements;
 mod solve;
 mod views;
 

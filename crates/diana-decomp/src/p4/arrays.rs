@@ -1,14 +1,15 @@
 use super::build::*;
 use super::*;
-use crate::p2::{OpId, OpKind};
-use crate::p3::{SsaMethod, StateId};
+use crate::p2::OpKind;
+use crate::p3::SsaMethod;
 
 fn interpretation(
     ssa: &SsaMethod<'_>,
     f: &TypeFacts,
-    operation: OpId,
-    state: StateId,
+    access: &ArrayAccessView,
 ) -> Result<ArrayElementType, Problem> {
+    let operation = access.operation;
+    let state = access.array;
     let s = ssa.facts();
     if !s
         .state(state)
@@ -28,19 +29,18 @@ fn interpretation(
         .map_err(|error| Problem::ArrayPayloadUnavailable(error.kind()))?
         .ok_or(Problem::Missing(MissingFact::ArrayPayload))?;
     let mut selected = None;
-    for &name in value.types() {
+    for &name in access.component.types() {
         let units = &f.names[name.0 as usize].units;
         let element = match units.as_slice() {
-            [0x5b, 0x5a] => ArrayElementType::Boolean,
-            [0x5b, 0x42] => ArrayElementType::Byte,
-            [0x5b, 0x43] => ArrayElementType::Char,
-            [0x5b, 0x53] => ArrayElementType::Short,
-            [0x5b, 0x49] => ArrayElementType::Int,
-            [0x5b, 0x4a] => ArrayElementType::Long,
-            [0x5b, 0x46] => ArrayElementType::Float,
-            [0x5b, 0x44] => ArrayElementType::Double,
-            [0x5b, ..] => return Err(Problem::NonPrimitiveArrayComponent(name)),
-            _ => return Err(Problem::NonArrayDescriptor(name)),
+            [0x5a] => ArrayElementType::Boolean,
+            [0x42] => ArrayElementType::Byte,
+            [0x43] => ArrayElementType::Char,
+            [0x53] => ArrayElementType::Short,
+            [0x49] => ArrayElementType::Int,
+            [0x4a] => ArrayElementType::Long,
+            [0x46] => ArrayElementType::Float,
+            [0x44] => ArrayElementType::Double,
+            _ => return Err(Problem::NonPrimitiveArrayComponent(name)),
         };
         if element.width() != payload.element_width() {
             return Err(Problem::ArrayPayloadWidth {
@@ -53,34 +53,31 @@ fn interpretation(
         }
         selected = Some(element);
     }
-    if value.has_unknown_type_source() {
+    if !access.component.is_complete() {
         return Err(Problem::Missing(MissingFact::ArrayComponent));
     }
     selected.ok_or(Problem::Missing(MissingFact::ArrayComponent))
 }
 
 pub(super) fn finish(ssa: &SsaMethod<'_>, f: &mut TypeFacts) -> Result<(), TypeError> {
-    for operation in ssa.execution().operations() {
-        if !matches!(operation.kind(), OpKind::FillArrayData { .. }) {
+    for i in 0..f.array_accesses.len() {
+        let access = &f.array_accesses[i];
+        if !matches!(
+            ssa.execution().operations()[access.operation.0 as usize].kind(),
+            OpKind::FillArrayData { .. }
+        ) {
             continue;
         }
-        let array = ssa
-            .facts()
-            .operation_uses(operation.id())
-            .and_then(Result::ok)
-            .and_then(|u| u.first())
-            .ok_or(TypeError::InternalInvariant(
-                "array fill has no SSA input binding",
-            ))?
-            .state();
-        let element = interpretation(ssa, f, operation.id(), array);
+        let operation = access.operation;
+        let array = access.array;
+        let element = interpretation(ssa, f, access);
         if let Err(problem) = element {
-            issue(f, IssueSite::Operation(operation.id()), problem)?;
+            issue(f, IssueSite::Operation(operation), problem)?;
         }
         push(
             &mut f.array_fills,
             ArrayFillView {
-                operation: operation.id(),
+                operation,
                 array,
                 element,
             },

@@ -141,6 +141,13 @@ impl Shell {
                     "stage": "p0",
                     "class_def": class,
                     "descriptor": text(facts.descriptor()),
+                    "declaration": {
+                        "type_id": facts.type_index().0,
+                        "access_flags": facts.access_flags().raw(),
+                        "superclass_type_id": facts.owner_facts().superclass_type_id().map(|id| id.0),
+                        "superclass": facts.superclass(),
+                        "interfaces": facts.interfaces(),
+                    },
                     "class_data": {
                         "static_fields": declared.static_fields,
                         "instance_fields": declared.instance_fields,
@@ -446,6 +453,20 @@ impl Shell {
                             "pc": pc.0,
                             "slot": format!("{slot:?}"),
                             "fact": format!("{fact:?}"),
+                            "name": match fact {
+                                Ok(diana_decomp::p1::CheckedReferenceFact::Method { name, .. }
+                                    | diana_decomp::p1::CheckedReferenceFact::Field { name, .. }) => Some(dex_text(*name)),
+                                _ => None,
+                            },
+                            "owner": match fact {
+                                Ok(diana_decomp::p1::CheckedReferenceFact::Method { owner, .. }
+                                    | diana_decomp::p1::CheckedReferenceFact::Field { owner, .. }) => Some(dex_text(*owner)),
+                                _ => None,
+                            },
+                            "type_descriptor": match fact {
+                                Ok(diana_decomp::p1::CheckedReferenceFact::Type { descriptor, .. }) => Some(dex_text(*descriptor)),
+                                _ => None,
+                            },
                             "use_issue": decoded.reference_use_issue(pc, slot).map(|e|format!("{e}")),
                         })
                     })
@@ -728,6 +749,11 @@ impl Shell {
                     .ok_or(RequestError::InternalInvariant("method has no flow"))?;
                 let details = if request.get("details").and_then(Value::as_bool) == Some(true) {
                     Some(json!({
+                        "blocks": flow.blocks().iter().map(|block|json!({
+                            "id":block.id().0,"start_pc":block.start_pc().0,
+                            "terminal_pc":block.terminal_pc().map(|pc|pc.0),
+                            "terminal":block.terminal().map(|terminal|format!("{terminal:?}")),
+                        })).collect::<Vec<_>>(),
                         "operations": flow.operations().iter().map(|operation| json!({
                             "id": operation.id().0,
                             "pc": operation.pc().0,
@@ -831,6 +857,7 @@ fn type_json(typed: &diana_decomp::p4::TypedMethod<'_>, details: bool) -> Value 
         "input_issues":typed.execution().issues().map(|(pc,e)|json!({"pc":pc.0,"kind":format!("{:?}",e.kind()),"detail":format!("{e}")})).collect::<Vec<_>>(),
         "values":f.values().len(),"uses":f.uses().len(),"phis":f.phis().len(),
         "constructors":f.constructors().len(),"initialization_uses":f.initialization().len(),"array_fills":f.array_fills().len(),
+        "array_accesses":f.array_accesses().len(),"unknown_array_components":f.array_accesses().iter().filter(|a|!a.component().is_complete()).count(),
         "catch_types":catch_types_json(flow.catch_types()),
         "issues":f.issues().len(),"missing_facts":missing,
         "unknown_views":f.uses().iter().filter(|u|matches!(u.interpretation(),Interpretation::Unknown(_))).count(),
@@ -844,6 +871,9 @@ fn type_json(typed: &diana_decomp::p4::TypedMethod<'_>, details: bool) -> Value 
                 "types":u.requirement().types().iter().map(|n|n.0).collect::<Vec<_>>(),"view":format!("{:?}",u.interpretation())})).collect::<Vec<_>>(),
             "phis":f.phis().iter().map(|p|json!({"phi":p.phi().0,"representation":format!("{:?}",p.representation()),
                 "incoming":p.incoming().iter().map(|i|json!({"transfer":i.transfer.0,"state":i.state.0,"view":format!("{:?}",i.interpretation)})).collect::<Vec<_>>()})).collect::<Vec<_>>(),
+            "array_accesses":f.array_accesses().iter().map(|a|json!({"operation":a.operation().0,"array":a.array().0,
+                "component_types":a.component().types().iter().map(|n|n.0).collect::<Vec<_>>(),"component_complete":a.component().is_complete(),
+                "component_gaps":a.component().gaps().iter().map(|g|format!("{g:?}")).collect::<Vec<_>>()})).collect::<Vec<_>>(),
             "array_fills":f.array_fills().iter().map(|v|json!({"operation":v.operation.0,"array":v.array.0,"element":v.element.map(|e|format!("{e:?}")).ok(),"problem":v.element.err().map(|e|format!("{e:?}")),"payload":match flow.array_payload(v.operation) {
                 Ok(Some(p))=>json!({"pc":p.pc().0,"element_width":p.element_width().0,"element_count":p.element_count(),"bits":p.elements().map(|e|e.bits).collect::<Vec<_>>()}),
                 Ok(None)=>Value::Null,Err(e)=>json!({"kind":format!("{:?}",e.kind()),"detail":format!("{e}")}),
@@ -899,6 +929,8 @@ fn ssa_all(
     let (mut typed_partial, mut conflict_values) = (0u64, 0u64);
     let mut array_fill_types = std::collections::BTreeMap::<String, u64>::new();
     let mut array_fill_unknown = 0u64;
+    let (mut array_accesses, mut unknown_array_components) = (0u64, 0u64);
+    let mut component_gaps = std::collections::BTreeMap::<String, u64>::new();
     let mut first_failure = None;
     let mut analysis_time = std::time::Duration::ZERO;
     let (mut local_issues, mut partial_methods, mut unresolved_inputs) = (0u64, 0u64, 0u64);
@@ -926,6 +958,22 @@ fn ssa_all(
             let available = match &entry.result {
                 Ok(MethodOutcome::Typed(typed)) => {
                     typed_ready += 1;
+                    array_accesses += typed.facts().array_accesses().len() as u64;
+                    for access in typed.facts().array_accesses() {
+                        unknown_array_components += u64::from(!access.component().is_complete());
+                        for gap in access.component().gaps() {
+                            use diana_decomp::p4::ComponentGap;
+                            let kind = match gap {
+                                ComponentGap::SourceUnavailable(_) => "SourceUnavailable",
+                                ComponentGap::UnknownSource => "UnknownSource",
+                                ComponentGap::NoDeclaration => "NoDeclaration",
+                                ComponentGap::UnprojectableDeclaration(_) => {
+                                    "UnprojectableDeclaration"
+                                }
+                            };
+                            *component_gaps.entry(kind.into()).or_default() += 1;
+                        }
+                    }
                     for view in typed.facts().array_fills() {
                         match view.element {
                             Ok(element) => {
@@ -1069,6 +1117,7 @@ fn ssa_all(
         json!({"classes":requested,"class":selected,"methods":methods,"no_code":no_code,"ssa":ready,"failed":failed,"upstream":upstream,"class_errors":class_errors,
         "partial_methods":partial_methods,"local_issues":local_issues,"unresolved_input_sites":unresolved_inputs,"analysis_ns":analysis_time.as_nanos(),
         "array_fill_types":array_fill_types,"unknown_array_fills":array_fill_unknown,
+        "array_accesses":array_accesses,"unknown_array_components":unknown_array_components,"array_component_gaps":component_gaps,
         "typed":typed_ready,"typed_partial_methods":typed_partial,"conflict_values":conflict_values,"type_failed":type_failed,"type_issues":type_issues,"type_problems":problems,"unknown_type_views":unknown_views,"missing_facts":missing,
         "points":points,"states":states,"values":values,"uses":uses,"phis":phis,"unavailable_uses":unavailable,
         "complete":true,"first_failure":first_failure,"elapsed_ms":started.elapsed().as_millis()}),
@@ -1346,6 +1395,13 @@ fn class_key(class: u32) -> ClassKey {
 
 fn text(value: &diana_decomp::p0::OriginalText) -> String {
     String::from_utf16_lossy(value.units())
+}
+
+fn dex_text(value: diana_decomp::input::DexString<'_>) -> Value {
+    match value.units() {
+        Ok(units) => json!({"text":String::from_utf16_lossy(&units),"units":units}),
+        Err(e) => json!({"error":{"kind":format!("{:?}",e.kind()),"detail":format!("{e}")}}),
+    }
 }
 
 fn class_id(request: &Value) -> Result<u32, RequestError> {
