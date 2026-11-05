@@ -187,7 +187,6 @@ pub(super) fn collect(ssa: &SsaMethod<'_>, f: &mut TypeFacts) -> Result<Work, Ty
                 range: None,
                 range_unknown: true,
                 identity: Identity::Unknown,
-                exception_sources: ExceptionSources::Unproven,
             },
         )?;
     }
@@ -300,7 +299,6 @@ pub(super) fn collect(ssa: &SsaMethod<'_>, f: &mut TypeFacts) -> Result<Work, Ty
             ValueOrigin::Exception(operation) => {
                 f.values[v.id().0 as usize].identity = Identity::Root(v.id());
                 f.values[v.id().0 as usize].families = mask(Family::Reference);
-                f.values[v.id().0 as usize].exception_sources = ExceptionSources::Exception;
                 let handler = flow.operations()[operation.0 as usize].block();
                 let catches = handler_types
                     .get(handler.0 as usize)

@@ -838,7 +838,7 @@ fn type_json(typed: &diana_decomp::p4::TypedMethod<'_>, details: bool) -> Value 
         "details":details.then(||json!({
             "names":f.names().iter().enumerate().map(|(i,n)|json!({"id":i,"units":n.units(),"origin":format!("{:?}",n.origin())})).collect::<Vec<_>>(),
             "values":f.values().iter().map(|v|json!({"value":v.value().0,"families":format!("{:?}",v.families()),"types":v.types().iter().map(|n|n.0).collect::<Vec<_>>(),
-                "exception_object_guaranteed":v.guarantees_exception_object(),"unknown_type_source":v.has_unknown_type_source(),"literal":v.literal().map(|b|json!({"bits":b.value,"width":format!("{:?}",b.width)})),
+                "unknown_type_source":v.has_unknown_type_source(),"literal":v.literal().map(|b|json!({"bits":b.value,"width":format!("{:?}",b.width)})),
                 "range":v.integral_range().map(|r|json!([r.min,r.max])),"identity":format!("{:?}",v.identity())})).collect::<Vec<_>>(),
             "uses":f.uses().iter().map(|u|json!({"site":format!("{:?}",u.site()),"state":u.state().0,"required":format!("{:?}",u.requirement().families()),
                 "types":u.requirement().types().iter().map(|n|n.0).collect::<Vec<_>>(),"view":format!("{:?}",u.interpretation())})).collect::<Vec<_>>(),
@@ -898,7 +898,7 @@ fn ssa_all(
     let mut problems = std::collections::BTreeMap::<String, u64>::new();
     let (mut typed_partial, mut conflict_values) = (0u64, 0u64);
     let mut array_fill_types = std::collections::BTreeMap::<String, u64>::new();
-    let (mut array_fill_unknown, mut exception_values) = (0u64, 0u64);
+    let mut array_fill_unknown = 0u64;
     let mut first_failure = None;
     let mut analysis_time = std::time::Duration::ZERO;
     let (mut local_issues, mut partial_methods, mut unresolved_inputs) = (0u64, 0u64, 0u64);
@@ -926,12 +926,6 @@ fn ssa_all(
             let available = match &entry.result {
                 Ok(MethodOutcome::Typed(typed)) => {
                     typed_ready += 1;
-                    exception_values += typed
-                        .facts()
-                        .values()
-                        .iter()
-                        .filter(|v| v.guarantees_exception_object())
-                        .count() as u64;
                     for view in typed.facts().array_fills() {
                         match view.element {
                             Ok(element) => {
@@ -1074,7 +1068,7 @@ fn ssa_all(
     Ok(
         json!({"classes":requested,"class":selected,"methods":methods,"no_code":no_code,"ssa":ready,"failed":failed,"upstream":upstream,"class_errors":class_errors,
         "partial_methods":partial_methods,"local_issues":local_issues,"unresolved_input_sites":unresolved_inputs,"analysis_ns":analysis_time.as_nanos(),
-        "array_fill_types":array_fill_types,"unknown_array_fills":array_fill_unknown,"exception_object_values":exception_values,
+        "array_fill_types":array_fill_types,"unknown_array_fills":array_fill_unknown,
         "typed":typed_ready,"typed_partial_methods":typed_partial,"conflict_values":conflict_values,"type_failed":type_failed,"type_issues":type_issues,"type_problems":problems,"unknown_type_views":unknown_views,"missing_facts":missing,
         "points":points,"states":states,"values":values,"uses":uses,"phis":phis,"unavailable_uses":unavailable,
         "complete":true,"first_failure":first_failure,"elapsed_ms":started.elapsed().as_millis()}),

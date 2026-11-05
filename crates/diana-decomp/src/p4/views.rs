@@ -1,30 +1,9 @@
 use super::build::*;
 use super::*;
-use crate::p3::{SsaMethod, StateId};
-
-fn original_type(origin: TypeOrigin, owner: &crate::p0::OwnerFacts) -> Option<crate::TypeId> {
-    match origin {
-        TypeOrigin::Owner { key, original } if key == owner.key() => Some(original),
-        TypeOrigin::Parameter { original, .. }
-        | TypeOrigin::Catch { original }
-        | TypeOrigin::Return { original }
-        | TypeOrigin::Reference {
-            original: Some(original),
-            ..
-        } => Some(original),
-        _ => None,
-    }
-}
-
-fn direct_superclass(source: &TypeName, target: &TypeName, owner: &crate::p0::OwnerFacts) -> bool {
-    matches!(owner.superclass(), crate::p0::Fact::Present(_))
-        && original_type(source.origin, owner) == Some(owner.type_id())
-        && owner.superclass_type_id().is_some()
-        && original_type(target.origin, owner) == owner.superclass_type_id()
-}
+use crate::p3::{SsaFacts, StateId};
 
 fn interpretation(
-    ssa: &SsaMethod<'_>,
+    s: &SsaFacts,
     f: &TypeFacts,
     state: StateId,
     required: Families,
@@ -32,7 +11,6 @@ fn interpretation(
     missing: Option<MissingFact>,
     meaning: ReadMeaning,
 ) -> Interpretation {
-    let s = ssa.facts();
     if !s
         .state(state)
         .is_some_and(|s| s.availability().is_available())
@@ -101,53 +79,10 @@ fn interpretation(
         }
         return Interpretation::Unknown(Problem::AmbiguousRepresentation(family));
     };
+    if family == Family::Reference {
+        return Interpretation::Direct(Family::Reference);
+    }
     if let Some(&declared) = types.first() {
-        if family == Family::Reference {
-            let mut relation = Relation::Same;
-            for &wanted in types {
-                let target = &f.names[wanted.0 as usize].units;
-                let object = target
-                    .iter()
-                    .copied()
-                    .eq(b"Ljava/lang/Object;".iter().map(|&b| u16::from(b)));
-                if object {
-                    if relation == Relation::Same {
-                        relation = Relation::WidenToObject;
-                    }
-                    continue;
-                }
-                if value.guarantees_exception_object()
-                    && target
-                        .iter()
-                        .copied()
-                        .eq(b"Ljava/lang/Throwable;".iter().map(|&b| u16::from(b)))
-                {
-                    if relation != Relation::Unknown {
-                        relation = Relation::ExceptionUpperBound;
-                    }
-                    continue;
-                }
-                if value.type_unknown || value.types.is_empty() {
-                    relation = Relation::Unknown;
-                    continue;
-                }
-                let owner = ssa.execution().owner_facts();
-                for &source in &value.types {
-                    let source = &f.names[source.0 as usize];
-                    if source.units == *target {
-                        continue;
-                    }
-                    if direct_superclass(source, &f.names[wanted.0 as usize], owner) {
-                        if relation != Relation::Unknown {
-                            relation = Relation::DirectSuperclass;
-                        }
-                    } else {
-                        relation = Relation::Unknown;
-                    }
-                }
-            }
-            return Interpretation::Reference { declared, relation };
-        }
         for &wanted in types {
             if let Some(bounds) = f.names[wanted.0 as usize]
                 .units
@@ -172,19 +107,14 @@ fn interpretation(
 fn record(f: &mut TypeFacts, site: IssueSite, view: Interpretation) -> Result<(), TypeError> {
     match view {
         Interpretation::Unknown(problem) => issue(f, site, problem),
-        Interpretation::Reference {
-            relation: Relation::Unknown,
-            ..
-        } => issue(f, site, Problem::Missing(MissingFact::Hierarchy)),
         _ => Ok(()),
     }
 }
-pub(super) fn finish(ssa: &SsaMethod<'_>, f: &mut TypeFacts) -> Result<(), TypeError> {
-    let s = ssa.facts();
+pub(super) fn finish(s: &SsaFacts, f: &mut TypeFacts) -> Result<(), TypeError> {
     for i in 0..f.uses.len() {
         let u = &f.uses[i];
         let r = &u.requirement;
-        let view = interpretation(ssa, f, u.state, r.families, &r.types, r.missing, r.meaning);
+        let view = interpretation(s, f, u.state, r.families, &r.types, r.missing, r.meaning);
         f.uses[i].interpretation = view;
         record(f, IssueSite::Use(f.uses[i].site), view)?;
     }
@@ -201,15 +131,7 @@ pub(super) fn finish(ssa: &SsaMethod<'_>, f: &mut TypeFacts) -> Result<(), TypeE
                     Interpretation::Unknown(Problem::SourceUnavailable(input.state()))
                 }
             } else {
-                interpretation(
-                    ssa,
-                    f,
-                    input.state(),
-                    families,
-                    &[],
-                    None,
-                    ReadMeaning::Value,
-                )
+                interpretation(s, f, input.state(), families, &[], None, ReadMeaning::Value)
             };
             record(
                 f,

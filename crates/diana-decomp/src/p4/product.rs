@@ -125,15 +125,6 @@ pub enum Identity {
     Multiple,
 }
 
-// Unproven includes unavailable sources; it does not prove a non-exception value.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(super) enum ExceptionSources {
-    Pending,
-    Exception,
-    Unproven,
-    Mixed,
-}
-
 #[derive(Debug)]
 pub struct ValueFacts {
     pub(super) value: ValueId,
@@ -145,7 +136,6 @@ pub struct ValueFacts {
     pub(super) range: Option<IntegralRange>,
     pub(super) range_unknown: bool,
     pub(super) identity: Identity,
-    pub(super) exception_sources: ExceptionSources,
 }
 impl ValueFacts {
     pub fn value(&self) -> ValueId {
@@ -175,12 +165,6 @@ impl ValueFacts {
     pub fn identity(&self) -> Identity {
         self.identity
     }
-    /// Every grounded source is an exception object. This is a common upper-bound
-    /// guarantee, not another alternative in the declared-type source list.
-    /// False means this provenance domain supplies no guarantee, not non-membership.
-    pub fn guarantees_exception_object(&self) -> bool {
-        self.exception_sources == ExceptionSources::Exception
-    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -190,7 +174,6 @@ pub enum MissingFact {
     ArgumentLayout,
     ArrayComponent,
     ArrayPayload,
-    Hierarchy,
     InitializationReceiver,
     InitializationOwnerRelation,
 }
@@ -220,22 +203,12 @@ pub enum Problem {
     },
 }
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum Relation {
-    Same,
-    WidenToObject,
-    DirectSuperclass,
-    ExceptionUpperBound,
-    Unknown,
-}
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Interpretation {
+    /// A VM-level read. Reference does not assert subtype compatibility, Java
+    /// source binding or initialized-object state and introduces no conversion.
     Direct(Family),
     IntegralView {
         declared: TypeNameId,
-    },
-    Reference {
-        declared: TypeNameId,
-        relation: Relation,
     },
     Literal {
         bits: Bits,
@@ -264,6 +237,8 @@ impl Requirement {
     pub fn families(&self) -> Families {
         self.families
     }
+    /// Original use-site declarations, retained independently of the reading
+    /// interpretation. Reference declarations do not establish subtyping.
     pub fn types(&self) -> &[TypeNameId] {
         &self.types
     }

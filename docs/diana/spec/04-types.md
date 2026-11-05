@@ -77,12 +77,11 @@ read keeps its original execution fact and a local missing-descriptor issue;
 a readable non-class catch retains its classified input-use issue and an
 `InvalidCatchType` problem. Neither becomes an inferred type from a consumer.
 
-Exception-object provenance supplies a separate guaranteed Throwable upper bound,
-not another possible type alongside a more specific typed catch. Copy, cast and
-Phi rules propagate grounded exception/unproven source categories in the same sparse
-worklist. Mixed or unavailable sources and unrooted cycles cannot establish this
-guarantee. Views can use `ExceptionUpperBound` without requiring the caught class
-definition or an external hierarchy. This does not claim an exact runtime class.
+A caught object's original exception definition and its declaration alternatives
+remain available independently of ordinary reference reads. P4 does not propagate
+a separate exception-provenance domain merely to prove Java assignability.
+A Throwable bound is not an alternative runtime-class claim alongside a more
+specific typed catch. Reading a reference does not require resolving that hierarchy.
 
 ## Finite source propagation
 
@@ -116,15 +115,21 @@ group and erasing independently established producer facts. Ambiguous producers
 with contradictory requirements retain the conflict instead of choosing by visit
 order. Pure literals have separate use-site views.
 
-`views.rs` establishes direct reads, literal bit interpretations, null views,
-range-supported integral views and reference views. A reference view retains its
-original target and unresolved relationship; missing hierarchy facts do not cause
-an invented runtime cast. Identical descriptors, the VM's Object upper bound and
-the current class's delivered direct-superclass relation have explicit established
-relations. The superclass relation uses original method-local type identities and
-requires a Present parent declaration. Every possible source and required target
-must satisfy an established relation; an unavailable parent or unknown source does
-not become subtype evidence. Other relationships remain Unknown.
+`views.rs` establishes direct reads, literal bit interpretations, null views and
+range-supported integral views. An available reference-family source is read as
+`Direct(Reference)` once its required reading facts are established. This means
+passing the existing reference unchanged, not proven subtyping, Java source
+binding or initialized-object state. Source declarations stay in `ValueFacts`;
+original use-site declarations stay in `Requirement::types`. They are not rewritten
+to match one another. Unknown hierarchy alone is not a missing read interpretation
+and does not produce a recovery issue.
+
+Unavailable SSA sources, unresolved argument grouping, representation conflicts
+and required missing facts retain their existing local outcomes. Literal null still
+requires established one-word zero provenance; an arbitrary runtime int does not
+become a reference. Initialization and array-component interpretation remain
+separate consumers with their own actual fact dependencies. Original casts,
+including their resolution/check/exception behavior, remain execution operations.
 
 Bit-preserving move operands retain a copy/bits view when no numeric interpretation
 is required; literal equality predicates can use the integral bit interpretation.
@@ -133,6 +138,21 @@ Pure-literal Phis need no common runtime storage representation: every incoming
 retains its bit identity and each consumer has its own interpretation. Runtime
 Phis have a common representation and per-transfer incoming views. An unavailable
 incoming does not acquire the known sibling's value or adaptation.
+
+### Invocation identity and source expression
+
+P4 reads parameter/return declarations from the original invocation prototype;
+it does not choose an overload using argument types. The caller-visible return
+source comes from that prototype, not a source-language rebind or an expected
+result type. The original invocation kind, logical DEX reference identity,
+prototype, ordered bindings and completion rules remain in the retained execution
+product; P4 neither clones a second call directory nor changes those facts.
+
+[Signature-qualified calls](../PIPELINE_DESIGN.md#5731-原目标签名限定) express that
+existing binding without converting an operand. They do not prove assignment
+compatibility or bypass an original runtime check. A source-expression consumer
+cannot repair unknown binding by adding casts, boxing, helpers or typed aliases
+merely to influence Java overload selection.
 
 ## Array payload interpretation
 
