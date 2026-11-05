@@ -923,7 +923,7 @@ fn type_json(typed: diana_decomp::p5::AnalysisEvidence<'_, '_>, details: bool) -
             "names":f.names().iter().enumerate().map(|(i,n)|json!({"id":i,"units":n.units(),"origin":format!("{:?}",n.origin())})).collect::<Vec<_>>(),
             "values":f.values().iter().map(|v|json!({"value":v.value().0,"families":format!("{:?}",v.families()),"types":v.types().iter().map(|n|n.0).collect::<Vec<_>>(),
                 "unknown_type_source":v.has_unknown_type_source(),"literal":v.literal().map(|b|json!({"bits":b.value,"width":format!("{:?}",b.width)})),
-                "range":v.integral_range().map(|r|json!([r.min,r.max])),"identity":format!("{:?}",v.identity())})).collect::<Vec<_>>(),
+                "range":v.integral_range().map(|r|json!([r.min,r.max])),"identity":format!("{:?}",v.identity()),"allocations":v.allocations().iter().map(|o|o.0).collect::<Vec<_>>()})).collect::<Vec<_>>(),
             "uses":f.uses().iter().map(|u|json!({"site":format!("{:?}",u.site()),"state":u.state().0,"required":format!("{:?}",u.requirement().families()),
                 "types":u.requirement().types().iter().map(|n|n.0).collect::<Vec<_>>(),"view":format!("{:?}",u.interpretation())})).collect::<Vec<_>>(),
             "phis":f.phis().iter().map(|p|json!({"phi":p.phi().0,"representation":format!("{:?}",p.representation()),
@@ -935,8 +935,8 @@ fn type_json(typed: diana_decomp::p5::AnalysisEvidence<'_, '_>, details: bool) -
                 Ok(Some(p))=>json!({"pc":p.pc().0,"element_width":p.element_width().0,"element_count":p.element_count(),"bits":p.elements().map(|e|e.bits).collect::<Vec<_>>()}),
                 Ok(None)=>Value::Null,Err(e)=>json!({"kind":format!("{:?}",e.kind()),"detail":format!("{e}")}),
             }})).collect::<Vec<_>>(),
-            "constructors":f.constructors().iter().map(|c|json!({"operation":c.operation.0,"receiver":c.receiver.map(|s|s.0),"identity":format!("{:?}",c.identity),"relation":format!("{:?}",c.relation)})).collect::<Vec<_>>(),
-            "initialization":f.initialization().iter().map(|i|json!({"site":format!("{:?}",i.site),"point":i.point.0,"state":format!("{:?}",i.state)})).collect::<Vec<_>>(),
+            "constructors":f.constructors().iter().map(|c|json!({"operation":c.operation.0,"receiver":c.receiver.map(|s|s.0),"identity":format!("{:?}",c.identity),"relation":format!("{:?}",c.relation),"allocation":c.allocation.map(|a|format!("{a:?}"))})).collect::<Vec<_>>(),
+            "initialization":f.initialization().iter().map(|i|json!({"site":format!("{:?}",i.site),"point":i.point.0,"state":format!("{:?}",i.state),"allocation":i.allocation.map(|a|format!("{a:?}"))})).collect::<Vec<_>>(),
             "issues":f.issues().iter().map(|i|json!({"site":format!("{:?}",i.site),"problem":format!("{:?}",i.problem)})).collect::<Vec<_>>()
         }))
     })
@@ -1347,6 +1347,14 @@ fn add_storage_counts(counts: &mut BTreeMap<String, u64>, f: &diana_decomp::p5::
             .count()
     );
     count!("constructions", f.constructions().len());
+    count!("natural_constructions", f.construction_groups().len());
+    count!(
+        "deferred_bindings",
+        f.bindings()
+            .iter()
+            .filter(|b| matches!(b, StorageBinding::Deferred { .. }))
+            .count()
+    );
     count!("issues", f.issues().len());
 }
 
@@ -1366,7 +1374,9 @@ fn storage_json(stored: &diana_decomp::p5::StorageMethod<'_>, details: bool) -> 
             })).collect::<Vec<_>>(),
             "snapshots":f.snapshots().iter().map(|s|json!({"id":s.id().0,"phi":s.phi().0,"entry":s.entry().0,"local":s.local().0})).collect::<Vec<_>>(),
             "transfers":f.transfers().iter().map(|t|json!({"phi":t.phi().0,"transfer":t.transfer().0,"state":t.source().0,"view":format!("{:?}",t.view()),"route":format!("{:?}",t.route())})).collect::<Vec<_>>(),
-            "constructions":f.constructions().iter().map(|c|json!({"operation":c.fact().operation.0,"relation":format!("{:?}",c.fact().relation),"receiver":c.receiver().map(|r|format!("{r:?}"))})).collect::<Vec<_>>(),
+            "constructions":f.constructions().iter().map(|c|json!({"operation":c.fact().operation.0,"relation":format!("{:?}",c.fact().relation),"receiver":c.receiver().map(|r|format!("{r:?}")),"mode":format!("{:?}",c.mode())})).collect::<Vec<_>>(),
+            "groups":f.construction_groups().iter().map(|g|json!({"id":g.id().0,"allocation":g.allocation().0,"initialization":g.initialization().0,"normal":g.normal().0,"members":g.members().iter().map(|o|o.0).collect::<Vec<_>>(),"edges":g.interior_edges().iter().map(|e|e.0).collect::<Vec<_>>(),"arguments":g.arguments().iter().map(|a|format!("{a:?}")).collect::<Vec<_>>(),"publications":g.publications().iter().map(|p|json!({"value":p.value.0,"local":p.local.0})).collect::<Vec<_>>(),"prelude":g.prelude().map(|p|p.0),"snapshot_members":g.snapshot_members().iter().map(|p|p.0).collect::<Vec<_>>()})).collect::<Vec<_>>(),
+            "allocation_plans":f.allocation_plans().iter().map(|p|json!({"operation":p.operation().0,"mode":format!("{:?}",p.mode())})).collect::<Vec<_>>(),
             "issues":f.issues().iter().map(|i|json!({"site":format!("{:?}",i.site()),"gap":format!("{:?}",i.gap())})).collect::<Vec<_>>()
         }))
     })

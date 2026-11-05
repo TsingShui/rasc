@@ -24,7 +24,8 @@ view as a substitute for a missing P5 fact.
 
 `StorageFacts::bindings()` has one entry for each original SSA `ValueId`.
 A binding identifies an original parameter, independent local, reference carrier,
-allocation carrier, exact literal bits or a concrete storage gap. `ValueId` and
+allocation carrier, deferred construction publication, exact literal bits or a
+concrete storage gap. `ValueId` and
 `LocalId` have separate identities. P5 does not coalesce general values or build a
 second register environment.
 
@@ -52,6 +53,45 @@ receiver access. Allocation carriers become available at the allocation's normal
 commit, not at the constructor call. Reference carrier storage alone does not
 prove initialization. Per-use initialization remains the original P4 fact;
 absence of an initialization record does not mean initialized.
+
+## Construction groups
+
+`ConstructionMode` selects either a natural construction group or explicit
+operations with a concrete `Separation`. Every new-instance has an allocation
+plan, including unmatched or unresolved initialization. `ConstructionGroup`
+retains the original allocation, exact constructor, argument reads, original
+normal continuation, member operations, interior edges, normal publications and
+snapshot obligations. No new SSA value or alternate method chain is created.
+
+The planner consumes P4's position-related allocation binding and initialization.
+It requires a same-occurrence receiver before construction, an unshared linear
+normal corridor, and transparent object aliases/literal definitions inside that
+corridor. Branches, external entries, required intervening transfers, other
+operations and unavailable arguments retain explicit plans. Arguments use existing
+storage or P4-proven literal views; the planner does not inline arbitrary effectful
+computations or move allocation to the constructor site.
+
+A private carrier can be deferred only when original uses cannot observe it
+without the constructor's normal transfer. Relevant failure-path reads or uncertain
+instance relations prevent contraction. Original definition/commit points remain
+facts; `Deferred` marks the selected emission, not a rewritten DEX commit.
+Publication occurs on the constructor's original normal continuation. Allocation
+failure publishes nothing; constructor failure retains its effects without
+publishing a fictitious initialized object.
+
+Ordered handler chains must agree. That is not sufficient by itself: all
+before-throw snapshot requirements must be equivalent and their sources available
+at the allocation anchor. A common original copy plan becomes the group prelude;
+all original snapshot identities remain inspectable. Stage-specific or unavailable
+saves prevent contraction rather than being dropped or default-initialized.
+
+Consumers MUST inspect `operation_emission` and `copy_emission`. Construction
+members are lowered once through their group, not also emitted as ordinary
+operations. Reads of a deferred receiver/alias inside the group name private
+construction storage; they are not independently emitted local reads before
+publication. Original requirement records remain semantic evidence, not a second
+selected emission route. P6 preserves group membership and P7 follows the selected
+natural/explicit mode without re-identifying construction patterns.
 
 ## Transfer coverage and placement
 
@@ -121,6 +161,10 @@ has a fresh symbol, preventing one iteration from borrowing a previous iteration
 value. Snapshot and temporary storage starts undefined; tests do not seed defaults.
 Handler receives follow the original exception capture. Allocation failure produces
 no allocation result; constructor failure retains the previously committed carrier.
+For construction groups, the physical trace separates internal carrier storage
+from published locals. Group prelude saves execute once; successful initialization
+publishes each original alias, while both failure paths leave publications absent.
+Checks retain original events, reads, commits and once-only member ownership.
 These traces model storage correspondence, not concrete VM arithmetic, heap effects,
 external invocation behavior or ART admission.
 

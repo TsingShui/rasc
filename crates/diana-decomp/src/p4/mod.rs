@@ -1,4 +1,5 @@
 //! P4 value facts, per-use interpretations and position-related initialization.
+mod allocation;
 mod arrays;
 mod build;
 mod components;

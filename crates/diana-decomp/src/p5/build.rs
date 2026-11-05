@@ -42,7 +42,8 @@ pub(crate) fn build_storage<'a>(
 fn construct(typed: &TypedMethod<'_>, f: &mut StorageFacts) -> Result<(), StorageError> {
     super::bindings::construct(typed, f)?;
     super::transfers::construct(typed, f)?;
-    super::copies::construct(f)
+    super::copies::construct(f)?;
+    super::materialization::construct(typed, f)
 }
 pub(super) fn push<T>(v: &mut Vec<T>, item: T) -> Result<(), StorageError> {
     owned::push(v, item).map_err(Into::into)

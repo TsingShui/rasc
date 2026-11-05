@@ -40,9 +40,19 @@ failures retain their classification, and method-task stops do not truncate sibl
 | `UseView` | Existing UseSite/StateId, semantic or descriptor requirement and established interpretation or concrete problem. |
 | `PhiView` | Original Phi identity, literal or runtime representation and an interpretation for every original incoming transfer. |
 | `ConstructorFact` | Original invocation, receiver state, identity provenance and established or unresolved construction relationship (`Allocation`, `This`, `Super`, `Ancestor`, `OtherOwner`, unknown). |
-| `InitializationUse` | Initialization states at the original use position, including failure, mixed paths and unknowns. |
+| `InitializationUse` | Initialization states at the original use position, including failure, mixed paths and unknowns; a finite allocation comparison when a single original allocation is known. |
 | `ArrayAccessView` | Original get/put/fill operation and SSA array state, with component bounds at that execution position and explicit coverage gaps. |
 | `ArrayFillView` | Original fill operation and SSA array state, with a source-supported primitive element interpretation or local problem; width/count/bits remain in the execution payload fact. |
+
+`ValueFacts::allocations()` preserves known new-instance origins through the
+existing copy/Phi rules, including partial sources. This set is not a dynamic
+identity proof. `AllocationBinding` compares a captured reference with the
+allocation result at the original use position using P4's existing correlated
+reference solver. `Same` is published only for a dominating allocation definition
+and an exact same-reference result; `Different` and `Unknown` remain distinct.
+`ConstructorFact` carries the corresponding receiver binding. P5 consumes these
+finite facts without access to the private alias solver or another register
+source analysis.
 
 `Owner` type origins retain the original class key and TypeId. The current-class
 type is therefore comparable by identity, and comparison with the declared direct

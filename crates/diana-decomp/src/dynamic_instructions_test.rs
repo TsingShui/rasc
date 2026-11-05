@@ -34,6 +34,7 @@ const VOID: u16 = 8;
 fn dynamic_instructions_preserve_layout_references_and_completions() {
     check_metamorphic_relations();
     check_storage_cases();
+    check_natural_constructions();
     check_ssa_cases();
     check_local_recovery();
     check_types();
@@ -282,6 +283,151 @@ fn storage_normal_site(
     }
 }
 
+fn storage_construction_correspondence(method: &StorageMethod<'_>) {
+    use crate::p5::{ConstructionMode, ConstructionRole, OperationEmission, StorageBinding};
+    let f = method.facts();
+    let s = method.analysis_evidence().ssa_facts();
+    let mut owned = std::collections::HashSet::new();
+    for (i, group) in f.construction_groups().iter().enumerate() {
+        assert_eq!(group.id().0 as usize, i);
+        let ctor = method
+            .type_facts()
+            .constructors()
+            .iter()
+            .find(|c| c.operation == group.initialization())
+            .unwrap();
+        assert_eq!(
+            ctor.allocation,
+            Some(crate::p4::AllocationBinding {
+                operation: group.allocation(),
+                relation: crate::p4::AllocationRelation::Same
+            })
+        );
+        assert_eq!(ctor.relation, crate::p4::ConstructorRelation::Allocation);
+        assert_eq!(group.members().first(), Some(&group.allocation()));
+        assert_eq!(group.members().last(), Some(&group.initialization()));
+        for &op in group.members() {
+            assert!(
+                owned.insert(op),
+                "P5 original construction event emitted twice"
+            );
+            let role = match f.operation_emission(op).unwrap() {
+                OperationEmission::Construction { group: g, role } => {
+                    assert_eq!(g, group.id());
+                    role
+                }
+                _ => panic!("P5 group member left as ordinary emission"),
+            };
+            if op == group.allocation() {
+                assert_eq!(role, ConstructionRole::Allocation);
+            } else if op == group.initialization() {
+                assert_eq!(role, ConstructionRole::Initialization);
+            } else {
+                assert!(matches!(
+                    method.execution().operations()[op.0 as usize].kind(),
+                    OpKind::Move {
+                        kind: MoveKind::Object
+                    } | OpKind::Const { .. }
+                ));
+            }
+        }
+        assert_eq!(
+            f.constructions()
+                .iter()
+                .find(|c| c.fact().operation == group.initialization())
+                .unwrap()
+                .mode(),
+            ConstructionMode::Natural(group.id())
+        );
+        let args = f.operation_uses(group.initialization()).unwrap().unwrap();
+        assert_eq!(
+            args.iter()
+                .skip(1)
+                .map(|u| u.read().unwrap())
+                .collect::<Vec<_>>(),
+            group.arguments()
+        );
+        let expected = group
+            .members()
+            .iter()
+            .flat_map(|op| s.operation_outputs(*op).unwrap())
+            .filter_map(|o| s.output_value(o))
+            .filter(|v| method.type_facts().value(*v).unwrap().literal().is_none())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            group
+                .publications()
+                .iter()
+                .map(|p| p.value)
+                .collect::<Vec<_>>(),
+            expected,
+            "P5 group publication coverage"
+        );
+        let site = s.operation_site(group.initialization()).unwrap().execute();
+        assert!(s.transfers().iter().any(|t|t.from()==site&&t.target()==crate::p3::Target::Point(group.normal())&&!matches!(t.origin(),TransferOrigin::Edge(e)if matches!(method.execution().edges()[e.0 as usize].role(),EdgeRole::Exception{..}))),"P5 group publishes outside initializer normal continuation");
+        for p in group.publications() {
+            assert_eq!(
+                f.binding(p.value),
+                Some(StorageBinding::Deferred {
+                    local: p.local,
+                    group: group.id()
+                })
+            );
+            let ValueOrigin::Operation { operation, .. } = s.values()[p.value.0 as usize].origin()
+            else {
+                panic!("P5 publication invented a definition")
+            };
+            assert!(group.members().contains(&operation));
+        }
+    }
+    let allocations = method
+        .execution()
+        .operations()
+        .iter()
+        .filter(|o| matches!(o.kind(), OpKind::NewInstance { .. }))
+        .map(|o| o.id())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        f.allocation_plans()
+            .iter()
+            .map(|p| p.operation())
+            .collect::<Vec<_>>(),
+        allocations
+    );
+}
+
+fn storage_semantic_binding(
+    method: &StorageMethod<'_>,
+    value: crate::p3::ValueId,
+) -> crate::p5::StorageBinding {
+    use crate::p5::StorageBinding;
+    let binding = method.facts().binding(value).unwrap();
+    let StorageBinding::Deferred { local, group } = binding else {
+        return binding;
+    };
+    let plan = &method.facts().construction_groups()[group.0 as usize];
+    assert!(
+        plan.publications()
+            .iter()
+            .any(|p| p.value == value && p.local == local)
+    );
+    let origin = method.analysis_evidence().ssa_facts().values()[value.0 as usize].origin();
+    match origin {
+        ValueOrigin::Operation { operation, .. }
+            if matches!(
+                method.execution().operations()[operation.0 as usize].kind(),
+                OpKind::NewInstance { .. }
+            ) =>
+        {
+            StorageBinding::Uninitialized {
+                local,
+                allocation: operation,
+            }
+        }
+        _ => StorageBinding::ReferenceCarrier(local),
+    }
+}
+
 fn storage_correspondence(method: &StorageMethod<'_>) {
     use crate::p3::PointKind;
     use crate::p4::Family;
@@ -289,6 +435,7 @@ fn storage_correspondence(method: &StorageMethod<'_>) {
         CopyLocation, CopyOrigin, LocalKind, Materialization, StorageBinding, StorageGap,
         StorageRead, StorageType, ThrowSite, TransferRoute,
     };
+    storage_construction_correspondence(method);
     let f = method.facts();
     let s = method.analysis_evidence().ssa_facts();
     let t = method.type_facts();
@@ -297,7 +444,7 @@ fn storage_correspondence(method: &StorageMethod<'_>) {
     let mut value_locals = std::collections::HashSet::new();
     for v in s.values() {
         let fact = t.value(v.id()).unwrap();
-        let binding = f.binding(v.id()).unwrap();
+        let binding = storage_semantic_binding(method, v.id());
         if let Some(bits) = fact.literal() {
             assert_eq!(binding, StorageBinding::Literal(bits), "P5 exact literal");
             continue;
@@ -425,6 +572,19 @@ fn storage_correspondence(method: &StorageMethod<'_>) {
             assert_eq!(plan.point(), output.point(), "P5 materialization moved");
             assert_eq!(plan.commit(), site.commit_rule());
             assert_eq!(plan.commit_pc(), site.commit_pc());
+            if let Materialization::Deferred { group, local } = plan.materialization() {
+                let value = s.output_value(output).unwrap();
+                assert_eq!(
+                    f.binding(value),
+                    Some(StorageBinding::Deferred { local, group })
+                );
+                assert!(
+                    f.construction_groups()[group.0 as usize]
+                        .members()
+                        .contains(&output.operation())
+                );
+                continue;
+            }
             match s.output_value(output).map(|v| (v, f.binding(v).unwrap())) {
                 None => assert_eq!(
                     plan.materialization(),
@@ -1080,6 +1240,7 @@ fn storage_trace_ordered(
     let f = method.facts();
     let flow = method.execution();
     let mut cells = vec![None; f.locals().len()];
+    let mut internal = vec![None; f.locals().len()];
     let mut values = vec![None; s.values().len()];
     for v in s.values() {
         if let ValueOrigin::Entry(role) = v.origin() {
@@ -1144,11 +1305,29 @@ fn storage_trace_ordered(
                     .interpretation();
                 let expected =
                     storage_view(view, storage_trace_value(method, original.state(), &values));
+                let group = match kind {
+                    PointKind::Execute(op) => match f.operation_emission(op).unwrap() {
+                        crate::p5::OperationEmission::Construction { group, .. } => Some(group),
+                        _ => None,
+                    },
+                    _ => None,
+                };
+                let read = access
+                    .read()
+                    .expect("available trace use became unavailable");
+                let private = group.is_some_and(|g| {
+                    read.local().is_some_and(|l| {
+                        f.construction_groups()[g.0 as usize]
+                            .publications()
+                            .iter()
+                            .any(|p| p.local == l)
+                    })
+                });
                 let got = storage_symbol_read(
                     access
                         .read()
                         .expect("available trace use became unavailable"),
-                    &cells,
+                    if private { &internal } else { &cells },
                 );
                 assert_eq!(
                     got, expected,
@@ -1163,7 +1342,27 @@ fn storage_trace_ordered(
             PointKind::Terminal(block) => Some(ThrowSite::Terminal(block)),
             _ => None,
         };
+        if let PointKind::Execute(op) = kind
+            && let crate::p5::OperationEmission::Construction {
+                group,
+                role: crate::p5::ConstructionRole::Allocation,
+            } = f.operation_emission(op).unwrap()
+        {
+            let group = &f.construction_groups()[group.0 as usize];
+            for publication in group.publications() {
+                internal[publication.local.0 as usize] = None;
+            }
+            if let Some(plan) = group.prelude() {
+                storage_run_steps(method, &f.copy_plans()[plan.0 as usize], &mut cells);
+            }
+        }
         for plan in f.copy_plans() {
+            if matches!(
+                f.copy_emission(plan.id()),
+                Some(crate::p5::CopyEmission::Construction { .. })
+            ) {
+                continue;
+            }
             if let CopyLocation::BeforeThrow(site) = plan.location()
                 && Some(site) == throw_site
             {
@@ -1245,10 +1444,29 @@ fn storage_trace_ordered(
                     | Materialization::ExceptionCapture(local) => {
                         cells[local.0 as usize] = Some(token)
                     }
+                    Materialization::Deferred { local, .. } => {
+                        internal[local.0 as usize] = Some(token)
+                    }
                     Materialization::Literal(_) => {}
                     Materialization::Unavailable(_) => {
                         panic!("available trace output lost materialization")
                     }
+                }
+            }
+            if let PointKind::Execute(op) = kind
+                && let crate::p5::OperationEmission::Construction {
+                    group,
+                    role: crate::p5::ConstructionRole::Initialization,
+                } = f.operation_emission(op).unwrap()
+            {
+                let group = &f.construction_groups()[group.0 as usize];
+                assert_eq!(selected.target(), Target::Point(group.normal()));
+                for publication in group.publications() {
+                    cells[publication.local.0 as usize] = Some(
+                        internal[publication.local.0 as usize]
+                            .clone()
+                            .expect("P5 publication before internal allocation/alias"),
+                    );
                 }
             }
             let completed = match kind {
@@ -1662,6 +1880,174 @@ fn check_storage_cases() {
             .read()
             .is_ok()
     );
+}
+
+fn check_natural_constructions() {
+    use crate::p5::{ConstructionMode, Separation, StorageBinding};
+    let make = |words: &[u16],
+                handler: &[u16],
+                proto: u16,
+                registers: u16,
+                incoming: u16,
+                outgoing: u16,
+                ctor_proto: u16| {
+        let mut fixture = dex_with_handler(
+            39, words, None, proto, registers, incoming, outgoing, handler, None,
+        );
+        put16(&mut fixture.bytes, fixture.methods + 2, ctor_proto);
+        put32(&mut fixture.bytes, fixture.methods + 4, fixture.init_name);
+        fixture
+    };
+    for (words, init, post, members) in [
+        (&[0x0022, 2, 0x1070, 0, 0, 0x0107][..], 2, 5, 2),
+        (&[0x0022, 2, 0x0107, 0x1070, 0, 1, 0x0207][..], 3, 6, 3),
+        (&[0x0022, 2, 0x0128, 0x1070, 0, 0, 0x0107][..], 3, 6, 2),
+    ] {
+        let fixture = make(words, &[0x030d, 0x000e], 5, 4, 0, 1, 5);
+        let method = flowed(&fixture.bytes);
+        assert_eq!(method.facts().construction_groups().len(), 1);
+        let group = &method.facts().construction_groups()[0];
+        assert_eq!(group.members().len(), members);
+        let normal = storage_trace(&method, &[]);
+        assert_eq!(
+            storage_reads_at(&normal.0, post),
+            vec![vec![StorageSymbol::Definition(0, 1)]]
+        );
+        let handler = u32::try_from(words.len() + 1).unwrap();
+        for pc in [0, init] {
+            let failed = storage_trace(&method, &[(pc, Some(handler), true)]);
+            for publication in group.publications() {
+                assert_eq!(
+                    failed.1[publication.local.0 as usize], None,
+                    "P5 new publishes on failed allocation/constructor"
+                );
+            }
+        }
+        assert!(matches!(
+            method.facts().allocation_plans()[0].mode(),
+            ConstructionMode::Natural(_)
+        ));
+    }
+    for words in [
+        &[0x0022, 2, 0x4070, 0, 0x6570, 0x0107][..],
+        &[0x0022, 2, 0x3112, 0x4070, 0, 0x6510, 0x0207][..],
+    ] {
+        let fixture = make(words, &[0x030d, 0x000e], 8, 8, 3, 4, 6);
+        let method = flowed(&fixture.bytes);
+        assert_eq!(method.facts().construction_groups().len(), 1);
+        assert_eq!(method.facts().construction_groups()[0].arguments().len(), 2);
+        storage_trace(&method, &[]);
+    }
+    // A shared snapshot source can be saved once before the compound new;
+    // a later throw outside the group still saves its own updated source.
+    let fixture = make(
+        &[0x7101, 0x0022, 2, 0x1070, 0, 0, 0x01d8, 0x0101, 0x041a, 0],
+        &[0x020d, 0x137b, 0x000e],
+        8,
+        8,
+        3,
+        3,
+        5,
+    );
+    let method = flowed(&fixture.bytes);
+    assert_eq!(method.facts().construction_groups().len(), 1);
+    assert!(method.facts().construction_groups()[0].prelude().is_some());
+    for (pc, expected) in [
+        (1, StorageSymbol::Definition(0, 1)),
+        (3, StorageSymbol::Definition(0, 1)),
+        (8, StorageSymbol::Definition(6, 1)),
+    ] {
+        let trace = storage_trace(&method, &[(pc, Some(11), true)]).0;
+        assert_eq!(storage_reads_at(&trace, 12), vec![vec![expected]]);
+    }
+
+    // The same catch chain cannot hide a scalar whose old/new snapshots differ.
+    let fixture = make(
+        &[0x7101, 0x0022, 2, 0x2112, 0x1070, 0, 0],
+        &[0x020d, 0x137b, 0x000e],
+        8,
+        8,
+        3,
+        1,
+        5,
+    );
+    let method = flowed(&fixture.bytes);
+    assert!(method.facts().construction_groups().is_empty());
+    assert!(matches!(
+        method.facts().constructions()[0].mode(),
+        ConstructionMode::Explicit(Separation::SnapshotMismatch(_))
+    ));
+    let fixture = make(
+        &[0x0022, 2, 0x1070, 0, 0],
+        &[0x030d, 0x0107, 0x000e],
+        5,
+        4,
+        0,
+        1,
+        5,
+    );
+    let method = flowed(&fixture.bytes);
+    assert!(method.facts().construction_groups().is_empty());
+    assert!(
+        method
+            .facts()
+            .bindings()
+            .iter()
+            .any(|b| matches!(b, StorageBinding::Uninitialized { .. }))
+    );
+    let mut fixture = make(&[0x0022, 2, 0x1070, 0, 0], &[0x030d, 0x000e], 5, 4, 0, 1, 5);
+    put32(&mut fixture.bytes, fixture.tries, 2);
+    put16(&mut fixture.bytes, fixture.tries + 4, 3);
+    let method = flowed(&fixture.bytes);
+    assert!(
+        matches!(
+            method.facts().constructions()[0].mode(),
+            ConstructionMode::Explicit(Separation::DifferentProtection { .. })
+        ),
+        "P5 new changed the allocation protection"
+    );
+    let fixture = make(
+        &[0x0107, 0x0022, 2, 0x1070, 0, 1, 0x0739, 0xfffa],
+        &[0x030d, 0x000e],
+        8,
+        8,
+        3,
+        1,
+        5,
+    );
+    let method = flowed(&fixture.bytes);
+    assert!(method.facts().construction_groups().is_empty());
+    let use_site = local_use(&method, 0, 0).site();
+    let origin = method
+        .type_facts()
+        .initialization()
+        .iter()
+        .find(|u| u.site == use_site)
+        .unwrap()
+        .allocation
+        .unwrap();
+    assert_ne!(
+        origin.relation,
+        crate::p4::AllocationRelation::Same,
+        "P5 construction uses a stale allocation occurrence"
+    );
+
+    // A side effect between allocation and init is retained, not moved into new.
+    let fixture = make(
+        &[0x0022, 2, 0x001d, 0x1070, 0, 0],
+        &[0x030d, 0x000e],
+        5,
+        4,
+        0,
+        1,
+        5,
+    );
+    let method = flowed(&fixture.bytes);
+    assert!(method.facts().construction_groups().is_empty());
+    assert!(matches!(
+        method.facts().constructions()[0].mode(),
+        ConstructionMode::Explicit(Separation::InterveningOperation(_))
+    ));
 }
 
 fn type_use<'f>(typed: &'f StorageMethod<'_>, pc: u32, argument: usize) -> &'f crate::p4::UseView {

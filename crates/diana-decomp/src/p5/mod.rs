@@ -2,6 +2,7 @@
 mod bindings;
 mod build;
 mod copies;
+mod materialization;
 mod product;
 mod transfers;
 

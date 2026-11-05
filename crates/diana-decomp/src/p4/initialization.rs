@@ -461,6 +461,7 @@ pub(super) fn construct(
     f: &mut TypeFacts,
     work: &Work,
 ) -> Result<(), TypeError> {
+    super::allocation::sources(ssa, f, work)?;
     let refs = References::new(ssa, &f.values, &f.names, work)?;
     let mut calls = calls(ssa, f)?;
     owners(&refs, &mut calls)?;
@@ -475,6 +476,7 @@ pub(super) fn construct(
                     receiver: call.receiver,
                     identity: call.identity,
                     relation,
+                    allocation: None,
                 },
             )?;
             if relation == ConstructorRelation::AmbiguousIdentity && !eligible(call.owners) {
@@ -538,11 +540,41 @@ pub(super) fn construct(
     for (index, u) in ssa.facts().uses().iter().enumerate() {
         if reference_use(ssa, f, index) {
             let query = solver.query(u.state(), None, u.point())?;
-            push(&mut queries, (index, query))?;
+            let allocation = solver.refs.value(u.state()).and_then(|v| {
+                let [operation] = solver.refs.values[v.0 as usize].allocations.as_slice() else {
+                    return None;
+                };
+                Some(*operation)
+            });
+            let allocation = if let Some(operation) = allocation {
+                let output = ssa
+                    .facts()
+                    .operation_outputs(operation)
+                    .and_then(|o| o.first())
+                    .ok_or(TypeError::InternalInvariant(
+                        "allocation origin lost its output",
+                    ))?;
+                let alias = if ssa.facts().dominates(output.point(), u.point()) {
+                    Some(alias_query(
+                        &solver.refs,
+                        &solver.incoming,
+                        &mut solver.aliases,
+                        u.state(),
+                        output.state(),
+                        u.point(),
+                    )?)
+                } else {
+                    None
+                };
+                Some((operation, alias))
+            } else {
+                None
+            };
+            push(&mut queries, (index, query, allocation))?;
         }
     }
     solver.build()?;
-    for (index, query) in queries {
+    for (index, query, allocation) in queries {
         let u = &ssa.facts().uses()[index];
         let bits = solver.init.nodes[query].bits;
         push(
@@ -551,6 +583,14 @@ pub(super) fn construct(
                 site: u.site(),
                 point: u.point(),
                 state: classify(bits),
+                allocation: allocation.map(|(operation, alias)| AllocationBinding {
+                    operation,
+                    relation: match alias.map(|a| solver.aliases.nodes[a].bits) {
+                        Some(SAME) => AllocationRelation::Same,
+                        Some(DIFFERENT) => AllocationRelation::Different,
+                        _ => AllocationRelation::Unknown,
+                    },
+                }),
             },
         )?;
         if bits & ALIAS_GAP != 0 {
@@ -571,6 +611,9 @@ pub(super) fn construct(
                 },
             )?;
         }
+    }
+    for constructor in &mut f.constructors {
+        constructor.allocation = f.initialization.iter().find(|u| matches!(u.site, crate::p3::UseSite::Operation { operation, argument: 0 } if operation == constructor.operation)).and_then(|u| u.allocation);
     }
     Ok(())
 }

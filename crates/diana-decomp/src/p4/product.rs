@@ -136,6 +136,7 @@ pub struct ValueFacts {
     pub(super) range: Option<IntegralRange>,
     pub(super) range_unknown: bool,
     pub(super) identity: Identity,
+    pub(super) allocations: Vec<OpId>,
 }
 impl ValueFacts {
     pub fn value(&self) -> ValueId {
@@ -164,6 +165,11 @@ impl ValueFacts {
     }
     pub fn identity(&self) -> Identity {
         self.identity
+    }
+    /// Original new-instance origins carried through SSA copies/Phis. This set
+    /// does not prove that two positions refer to the same dynamic occurrence.
+    pub fn allocations(&self) -> &[OpId] {
+        &self.allocations
     }
 }
 
@@ -404,12 +410,24 @@ pub enum ConstructorRelation {
     UnknownOwner(crate::p0::SuperclassGap),
     NotAllocation,
 }
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum AllocationRelation {
+    Same,
+    Different,
+    Unknown,
+}
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct AllocationBinding {
+    pub operation: OpId,
+    pub relation: AllocationRelation,
+}
 #[derive(Clone, Copy, Debug)]
 pub struct ConstructorFact {
     pub operation: OpId,
     pub receiver: Option<StateId>,
     pub identity: Identity,
     pub relation: ConstructorRelation,
+    pub allocation: Option<AllocationBinding>,
 }
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Initialization {
@@ -445,6 +463,7 @@ pub struct InitializationUse {
     pub site: UseSite,
     pub point: PointId,
     pub state: Initialization,
+    pub allocation: Option<AllocationBinding>,
 }
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum IssueSite {

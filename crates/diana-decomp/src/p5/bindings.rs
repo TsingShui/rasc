@@ -258,6 +258,7 @@ pub(super) fn construct(typed: &TypedMethod<'_>, f: &mut StorageFacts) -> Result
             ConstructionPlan {
                 fact: *fact,
                 receiver,
+                mode: ConstructionMode::Explicit(Separation::NoAllocationBinding),
             },
         )?;
     }

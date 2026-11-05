@@ -88,8 +88,10 @@ copy scheduling preserves simultaneous-copy requirements and uses matching
 temporaries to break cycles. Local gaps follow affected storage dependencies;
 independent producers and plan components remain available. The
 [P5 chapter](../../docs/diana/spec/05-variables.md) defines its active interface.
-Scope: construction plans use explicit reference carriers; natural-new merge
-selection and P6–P9 are not yet active.
+Construction plans now select natural groups for established allocation/constructor
+correspondence, including private alias publication and compatible snapshot
+preludes; other relationships retain explicit operations and concrete reasons.
+P6–P9 remain inactive.
 
 Independent translation checking compiles only under `cfg(test)`; ordinary
 Engine requests do not run symbolic replay, output audits or duplicate dominator
@@ -282,6 +284,25 @@ an Engine-generated execution witness; no private product was fabricated to clai
 coverage. The [test contract](../../docs/diana/spec/05-variables.md#test-only-correspondence)
 states this boundary. Production input and P1 were unchanged, so prior corpus and
 byte-roundtrip observations were reused rather than rerun.
+
+### Natural construction observations
+
+P4 now publishes original allocation-source sets and position-related receiver
+comparisons. P5 consumes these facts to select construction groups without
+rebuilding reference provenance. Original sites and commits remain facts; selected
+deferred publications happen only after normal initialization. The core test
+covers direct and aliased creation, precomputed/literal arguments, straight-line
+cross-block corridors, both failure stages, compatible snapshot hoisting, differing
+snapshots/protection, visible failed carriers and stale allocation occurrences.
+Debug/release execution passed. Six targeted mutations of occurrence identity,
+publication point, protection, alias coverage, once-only emission and snapshot
+merging were rejected and removed.
+
+A 55-DEX P5 traversal delivered the same 2,644,578 code methods with no new stage
+stops or storage gaps. It selected 720,360 natural groups and retained 459,253
+explicit allocation carriers. Uncertainty in the original initialization-owner
+relation stayed unchanged. These observations are not whole-method equivalence or
+ART admission evidence.
 
 ## Method scheduling observations
 

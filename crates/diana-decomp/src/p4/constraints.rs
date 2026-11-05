@@ -197,6 +197,7 @@ pub(super) fn collect(ssa: &SsaMethod<'_>, f: &mut TypeFacts) -> Result<Work, Ty
                 range: None,
                 range_unknown: true,
                 identity: Identity::Unknown,
+                allocations: Vec::new(),
             },
         )?;
     }

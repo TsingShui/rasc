@@ -12,7 +12,7 @@ macro_rules! identity {
         pub struct $name(pub u32);
     )*};
 }
-identity!(LocalId, PlanId, CopyId, SnapshotId);
+identity!(LocalId, PlanId, CopyId, SnapshotId, GroupId);
 
 /// Existing P4 representation. Numeric bit storage does not choose int/float
 /// or long/double and never permits an arbitrary numeric/reference union.
@@ -68,12 +68,14 @@ pub enum StorageBinding {
     ReferenceCarrier(LocalId),
     Uninitialized { local: LocalId, allocation: OpId },
     Literal(Bits),
+    Deferred { local: LocalId, group: GroupId },
     Unavailable(StorageGap),
 }
 impl StorageBinding {
     pub fn local(self) -> Option<LocalId> {
         match self {
             Self::Parameter { local, .. }
+            | Self::Deferred { local, .. }
             | Self::Local(local)
             | Self::ReferenceCarrier(local)
             | Self::Uninitialized { local, .. } => Some(local),
@@ -151,6 +153,7 @@ pub enum Materialization {
     Store(LocalId),
     AllocationCarrier(LocalId),
     ExceptionCapture(LocalId),
+    Deferred { group: GroupId, local: LocalId },
     Literal(Bits),
     Unavailable(StorageGap),
 }
@@ -363,6 +366,7 @@ impl PhiTransfer {
 pub struct ConstructionPlan {
     pub(super) fact: ConstructorFact,
     pub(super) receiver: Option<Result<StorageRead, StorageGap>>,
+    pub(super) mode: ConstructionMode,
 }
 impl ConstructionPlan {
     pub fn fact(&self) -> ConstructorFact {
@@ -371,7 +375,121 @@ impl ConstructionPlan {
     pub fn receiver(&self) -> Option<Result<StorageRead, StorageGap>> {
         self.receiver
     }
+    pub fn mode(&self) -> ConstructionMode {
+        self.mode
+    }
 }
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Separation {
+    NoEstablishedConstructor,
+    NoAllocationBinding,
+    NonAllocationConstructor,
+    InstanceNotEstablished,
+    Initialization(Initialization),
+    SharedAllocation,
+    ControlBoundary(BlockId),
+    InterveningOperation(OpId),
+    ObservedBeforeSuccess(UseSite),
+    DifferentProtection {
+        allocation: OpId,
+        initialization: OpId,
+    },
+    SnapshotMismatch(PlanId),
+    MissingStorage(StorageGap),
+    ArgumentNotAvailable(UseSite),
+    TransferCopy(PlanId),
+}
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ConstructionMode {
+    Natural(GroupId),
+    Explicit(Separation),
+}
+#[derive(Clone, Copy, Debug)]
+pub struct AllocationPlan {
+    pub(super) operation: OpId,
+    pub(super) mode: ConstructionMode,
+}
+impl AllocationPlan {
+    pub fn operation(&self) -> OpId {
+        self.operation
+    }
+    pub fn mode(&self) -> ConstructionMode {
+        self.mode
+    }
+}
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ConstructionRole {
+    Allocation,
+    Alias,
+    Literal,
+    Initialization,
+}
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum OperationEmission {
+    Ordinary,
+    Construction {
+        group: GroupId,
+        role: ConstructionRole,
+    },
+}
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CopyEmission {
+    Original,
+    Construction { group: GroupId },
+}
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct Publication {
+    pub value: ValueId,
+    pub local: LocalId,
+}
+/// One selected compound materialization, not another execution graph. Original
+/// events/commits stay inspectable; members are emitted once through the group.
+#[derive(Debug)]
+pub struct ConstructionGroup {
+    pub(super) id: GroupId,
+    pub(super) allocation: OpId,
+    pub(super) initialization: OpId,
+    pub(super) normal: PointId,
+    pub(super) members: Vec<OpId>,
+    pub(super) interior_edges: Vec<crate::p2::EdgeId>,
+    pub(super) arguments: Vec<StorageRead>,
+    pub(super) publications: Vec<Publication>,
+    pub(super) prelude: Option<PlanId>,
+    pub(super) snapshot_members: Vec<PlanId>,
+}
+impl ConstructionGroup {
+    pub fn id(&self) -> GroupId {
+        self.id
+    }
+    pub fn allocation(&self) -> OpId {
+        self.allocation
+    }
+    pub fn initialization(&self) -> OpId {
+        self.initialization
+    }
+    pub fn normal(&self) -> PointId {
+        self.normal
+    }
+    pub fn members(&self) -> &[OpId] {
+        &self.members
+    }
+    pub fn interior_edges(&self) -> &[crate::p2::EdgeId] {
+        &self.interior_edges
+    }
+    pub fn arguments(&self) -> &[StorageRead] {
+        &self.arguments
+    }
+    pub fn publications(&self) -> &[Publication] {
+        &self.publications
+    }
+    pub fn prelude(&self) -> Option<PlanId> {
+        self.prelude
+    }
+    pub fn snapshot_members(&self) -> &[PlanId] {
+        &self.snapshot_members
+    }
+}
+
 #[derive(Clone, Copy, Debug)]
 pub enum StorageIssueSite {
     Value(ValueId),
@@ -409,6 +527,10 @@ pub struct StorageFacts {
     pub(super) snapshots: Vec<Snapshot>,
     pub(super) transfers: Vec<PhiTransfer>,
     pub(super) constructions: Vec<ConstructionPlan>,
+    pub(super) allocation_plans: Vec<AllocationPlan>,
+    pub(super) groups: Vec<ConstructionGroup>,
+    pub(super) operation_emission: Vec<OperationEmission>,
+    pub(super) copy_emission: Vec<CopyEmission>,
     pub(super) issues: Vec<StorageIssue>,
 }
 impl StorageFacts {
@@ -425,6 +547,10 @@ impl StorageFacts {
             snapshots: Vec::new(),
             transfers: Vec::new(),
             constructions: Vec::new(),
+            allocation_plans: Vec::new(),
+            groups: Vec::new(),
+            operation_emission: Vec::new(),
+            copy_emission: Vec::new(),
             issues: Vec::new(),
         }
     }
@@ -457,6 +583,18 @@ impl StorageFacts {
     }
     pub fn constructions(&self) -> &[ConstructionPlan] {
         &self.constructions
+    }
+    pub fn allocation_plans(&self) -> &[AllocationPlan] {
+        &self.allocation_plans
+    }
+    pub fn construction_groups(&self) -> &[ConstructionGroup] {
+        &self.groups
+    }
+    pub fn operation_emission(&self, operation: OpId) -> Option<OperationEmission> {
+        self.operation_emission.get(operation.0 as usize).copied()
+    }
+    pub fn copy_emission(&self, plan: PlanId) -> Option<CopyEmission> {
+        self.copy_emission.get(plan.0 as usize).copied()
     }
     pub fn issues(&self) -> &[StorageIssue] {
         &self.issues
