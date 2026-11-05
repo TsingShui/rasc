@@ -21,6 +21,12 @@ impl<'f, 'a> ExecutionFacts<'f, 'a> {
     pub fn owner_facts(self) -> &'f crate::p0::OwnerFacts {
         self.flow.owner_facts()
     }
+    pub(crate) fn owner_relation(
+        self,
+        target: crate::TypeId,
+    ) -> Result<crate::p0::SuperclassRelation, crate::RequestError> {
+        self.flow.decoded.owner_relation(target)
+    }
     pub fn declaration(self) -> &'f crate::p0::MethodDeclaration {
         self.flow.declaration()
     }

@@ -267,7 +267,7 @@ impl InvokeLayout {
 }
 
 pub(crate) struct DecodedFacts<'a> {
-    pub owner: crate::p0::OwnerFacts,
+    pub owner: crate::p0::OwnerContext<'a>,
     pub declaration: crate::p0::MethodDeclaration,
     pub access_flags: u32,
     pub entry: EntryLayout,
@@ -287,7 +287,7 @@ pub struct DecodedMethod<'a> {
     protection: CheckedProtection,
     /// One directory moved down the method chain; inspection borrows it.
     items: Vec<DecodedItem>,
-    owner: crate::p0::OwnerFacts,
+    owner: crate::p0::OwnerContext<'a>,
     declaration: crate::p0::MethodDeclaration,
     access_flags: u32,
     entry: EntryLayout,
@@ -317,11 +317,17 @@ impl<'a> DecodedMethod<'a> {
     }
     /// The original class definition this method belongs to.
     pub fn class_id(&self) -> crate::ClassDefId {
-        self.owner.key().class_def
+        self.owner.current().key().class_def
     }
     /// P0's immutable owner declaration retained in the same method product chain.
     pub fn owner_facts(&self) -> &crate::p0::OwnerFacts {
-        &self.owner
+        self.owner.current()
+    }
+    pub(crate) fn owner_relation(
+        &self,
+        target: TypeId,
+    ) -> Result<crate::p0::SuperclassRelation, RequestError> {
+        self.owner.relation(target)
     }
     /// The original P0 declaration retained for later declaration consumers.
     pub fn declaration(&self) -> &crate::p0::MethodDeclaration {

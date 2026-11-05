@@ -51,7 +51,8 @@ It delivers value families/type sources, per-use literal/reference/integral view
 Phi incoming adaptations and position-related constructor states. P0's class
 declaration now travels inside the method products as one shared immutable
 `OwnerFacts` handle, so `this` carries its declared owner type and constructor
-calls on `this` distinguish `This`, `Super` and `OtherOwner`. Typed-catch descriptor
+calls on `this` distinguish `This`, `Super`, proven same-DEX `Ancestor` and
+`OtherOwner`; unresolved owner relationships retain their concrete declaration gap. Typed-catch descriptor
 results now travel from the method reader through execution facts, including local
 read/use issues. Array fills consume checked payload width/count/bits and select
 an element interpretation from existing SSA array sources. Ordinary reference
@@ -65,7 +66,9 @@ consumes available literal-input constraints before joining nonliteral groups;
 source literals keep their independent views. Initialization follows original SSA
 reference bindings and execution positions, including edge-correlated paired
 observations; Multiple identity is not an initialization failure by itself. No
-input-context query is implemented. Successful check-cast bounds now refine array
+general input-context query is implemented. A restricted same-DEX superclass
+query now follows original declaration facts without exposing an index or stage
+constructor to P4. Successful check-cast bounds now refine array
 component knowledge at original execution positions without an SSA write or global
 source-declaration rewrite. Actual object-relation uncertainty and unsupported
 interpretations remain separate from missing input facts. P5–P9 remain inactive, so partial Java-like text is not yet delivered.
@@ -122,11 +125,13 @@ gaps, catch facts and array-fill interpretations with original payload bits. The
 counts, not semantic verification badges. The timed Engine traversal now includes P4.
 
 Engine format/check/Clippy and release builds pass; no tests were added, modified
-or run for unified component projection, scoped check bounds or corpus traversal.
+or run for unified component projection, scoped check bounds, same-DEX ancestor
+relationships or corpus traversal.
 The focused observation covered 1,112 methods associated with component gaps or
-constructor diagnostics. All 2,224 retained P2/P3 products matched. Original literal
-bits, integral ranges, identities, Phi views, constructors, initialization and fill
-views matched; no previously known type source was lost. Component precision now
+constructor diagnostics. All 2,224 retained P2/P3 products matched. P4 value/use,
+Phi, type-name, array-access, fill and initialization-use products matched.
+Constructor relationships and diagnostics changed in exactly the 11 affected
+methods; no other selected product changed. Component precision now
 comes from original declarations and successful checks at the actual access point,
 not a fake cast output or consumer-desired type.
 
@@ -137,9 +142,10 @@ their original bits. No runtime conversion or new arithmetic rule was added.
 
 Full traversal of the two APKs in the working directory covered all 55 DEX entries
 (41 and 14) and delivered 2,644,578 TypedMethod products. Construction/upstream/class
-stops, ordinary unknown reads and representation conflicts were zero. The 11
-recovery diagnostics in 11 method instances are all ConstructorOwnerMismatch;
-these are not 11 established distinct defects. The 3,142 formerly incomplete
+stops, ordinary unknown reads and representation conflicts were zero. Ten
+same-DEX constructor-owner relationships are now Ancestor. The one remaining
+recovery diagnostic is Missing(InitializationOwnerRelation), with a concrete
+UnknownOwner(MissingDefinition) constructor result. The 3,142 formerly incomplete
 component positions now have established bounds; all 523,479 observed array
 accesses have complete component knowledge. This includes Copy/Phi and nested
 array dependencies, not just direct checked receivers. Null-only alternatives
@@ -147,15 +153,25 @@ supply no element type and do not import a different checked array's component
 into a non-null path. Complete bounds do not prove non-nullness, an exact runtime
 component class or permission to remove the original checks.
 
-The constructor-owner classifier also accepts only the current/direct-parent
-identity. All 11 reported targets are on input-declared ancestor paths: 10 paths
-are inside one DEX and one crosses DEX entries of the same APK. The original calls
-target Object rather than an intermediate parent; replacing them with a direct
-parent call would change the binding. The
+The same-DEX constructor-owner query reuses the current declaration and follows
+only necessary local ancestor headers. It preserves the original calls to Object
+rather than replacing them with an intermediate parent's constructor. A target
+reference can establish ancestry without a target definition. The remaining case
+requires a parent definition from another DEX; local absence stays Unknown, not a
+mismatch, and the query does not search other images. This is declaration-based
+initialization evidence, not ART execution or admission evidence. The
 [pinned ART source](../../docs/diana/SOURCE_MAP.md#84-additional-mature-projects-pinned-commits-specific-symbols-and-what-not-to-borrow)
-does not enforce that extra direct-parent restriction. Formal ancestor delivery
-and initialization classification remain unresolved in the current product;
-source review is not ART execution or admission evidence.
+records the runtime-source review's separate scope.
+
+Release timing compared this implementation with ae25282 through the same shell:
+three warmups and 12 alternating before/after processes for each of six selected
+classes. Each process issued 13 class requests with warmed input files; the first
+request had fresh Engine/declaration caches, and the last ten supplied the warm
+median. Fresh-request median ratios were 1.011–1.053, or approximately 0.5–10.1
+microseconds higher; warm median ratios were 0.904–1.072. These observations cover
+three ordinary classes, two local-ancestor classes and one missing-local-parent
+class. Median process peak RSS did not increase in these samples. They establish
+neither universal speed/memory bounds nor a general performance improvement.
 
 The focused single-DEX runs retained all 279 fill interpretations and checked
 1,444,571 byte-roundtrip items. The full APK traversal produced 10,212 fill views
@@ -173,7 +189,9 @@ Malformed catch declarations and conflicting/width-mismatched fills retain the
 same evidence limitation. Unavailable array sources, ungrounded
 component cycles, numeric wide-bit Phi storage and mixed numeric/reference
 representation rejection also have static review rather than new execution
-evidence from these inputs.
+evidence from these inputs. The local missing-definition ancestor case was
+observed; malformed/ambiguous/cyclic local chains and declaration-lookup allocation
+failures were not exercised by this corpus.
 
 Signature-qualified Java-like calls (`Api.register<Listener>(h)`, with a complete
 original descriptor when needed) are specified under

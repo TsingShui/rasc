@@ -8,6 +8,7 @@ mod class_locations;
 mod code;
 mod container;
 mod cursor;
+mod declarations;
 mod dynamic;
 mod error;
 pub(crate) mod formats;
@@ -29,6 +30,7 @@ pub use catalog::{
 pub use code::{CatchTypeFact, MethodBody, RawMethodView};
 pub use container::DexContainer;
 pub use cursor::{Cursor, checked_range};
+pub(crate) use declarations::{LocalDeclarations, LocalParent};
 pub use error::{InputError, InputProblem, UnsupportedInput};
 use error::{count_usize, file_length, file_offset, malformed};
 pub use header::{DexHeader, TableSection, read_header};

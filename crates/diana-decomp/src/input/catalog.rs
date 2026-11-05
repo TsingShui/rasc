@@ -1,4 +1,5 @@
 use super::code::read_code;
+use super::declarations::{LocalDeclarations, Section, TableKey};
 use super::header::{SUPPORTED_MAP_KINDS, map_kind};
 use super::strings::{DexString, TypeShape};
 use super::{
@@ -10,14 +11,6 @@ use crate::{
     ByteLength, ByteOffset, ClassDefId, ClassKey, FailureKind, FieldId, MethodId, ProtoId,
     RegisterWordCount, StringId, TypeId, Utf16Offset,
 };
-
-#[derive(Clone, Copy)]
-struct Section {
-    kind: u16,
-    count: u32,
-    start_byte: ByteOffset,
-    end_byte: ByteOffset,
-}
 
 /// A single-image index borrowing original bytes. Variable metadata is resolved
 /// on demand; it owns neither a decoded string pool nor method result buffers.
@@ -31,11 +24,8 @@ pub struct ProgramIndex<'a> {
         >,
     >,
     facts_build: std::sync::Mutex<()>,
-    cache_build: std::sync::Mutex<()>,
-    class_locations: std::sync::OnceLock<super::class_locations::ClassLocations>,
+    pub(super) declarations: std::sync::Arc<LocalDeclarations<'a>>,
     pub(crate) header: DexHeader,
-    container: DexContainer<'a>,
-    sections: [Option<Section>; SUPPORTED_MAP_KINDS],
 }
 
 impl<'a> ProgramIndex<'a> {
@@ -115,28 +105,10 @@ impl<'a> ProgramIndex<'a> {
     }
 
     pub(super) fn class_type_id(&self, class: ClassDefId) -> Result<TypeId, InputError> {
-        let mut record = self.table(TableKey::Class(class))?;
-        Ok(TypeId(record.read_u32()?))
+        self.declarations.class_type_id(class)
     }
-
     fn class_location(&self, ty: TypeId) -> Result<Option<ClassDefId>, InputError> {
-        if self.class_locations.get().is_none() {
-            let _lock = self
-                .cache_build
-                .lock()
-                .map_err(|_| InputError::InternalInvariant("input cache construction poisoned"))?;
-            if let Some(locations) = self.class_locations.get() {
-                return locations.get(ty, self);
-            }
-            let locations = super::class_locations::ClassLocations::build(self)?;
-            let _ = self.class_locations.set(locations);
-        }
-        self.class_locations
-            .get()
-            .ok_or(InputError::InternalInvariant(
-                "class location cache was not initialized",
-            ))?
-            .get(ty, self)
+        self.declarations.class_location(ty)
     }
 
     pub fn open(bytes: &'a [u8]) -> Result<Self, InputError> {
@@ -195,40 +167,28 @@ impl<'a> ProgramIndex<'a> {
             dex: crate::DexId(0),
             class_facts: std::sync::Mutex::new(std::collections::HashMap::new()),
             facts_build: std::sync::Mutex::new(()),
-            cache_build: std::sync::Mutex::new(()),
-            class_locations: std::sync::OnceLock::new(),
+            declarations: std::sync::Arc::new(LocalDeclarations::new(
+                container,
+                header.clone(),
+                by_kind,
+            )),
             header,
-            container,
-            sections: by_kind,
         })
     }
 
     pub fn string(&self, string_idx: StringId) -> Result<DexString<'a>, InputError> {
-        let mut record = self.table(TableKey::String(string_idx))?;
-        let offset = file_offset(record.read_u32()?, ByteOffset(record.position_byte().0 - 4))?;
-        DexString::read(self.bytes, self.item(0x2002, offset)?)
+        self.declarations.string(string_idx)
     }
 
     pub fn class(&self, class_def_idx: ClassDefId) -> Result<ClassView<'_, 'a>, InputError> {
-        let mut record = self.table(TableKey::Class(class_def_idx))?;
-        let type_idx = TypeId(record.read_u32()?);
-        let access_flags = record.read_u32()?;
-        record.skip(4, ByteLength(4))?;
-        let class_data_offset =
-            file_offset(record.read_u32()?, ByteOffset(record.position_byte().0 - 4))?;
-        record.read_u32()?;
-        let (descriptor, shape) = self.type_descriptor(type_idx)?;
-        if !matches!(shape, TypeShape::Class) {
-            return Err(malformed(
-                InputProblem::InvalidDescriptor,
-                ByteOffset(record.position_byte().0 - 32),
-            ));
-        }
+        let (record, descriptor) = self.declarations.checked_class(class_def_idx)?;
+        let at = self.table(TableKey::Class(class_def_idx))?.position_byte();
+        let class_data_offset = file_offset(record.class_data, ByteOffset(at.0 + 24))?;
         Ok(ClassView {
             index: self,
             class_def_idx,
-            type_idx,
-            access_flags,
+            type_idx: record.type_id,
+            access_flags: record.access_flags,
             descriptor,
             class_data_offset: (class_data_offset != ByteOffset(0)).then_some(class_data_offset),
         })
@@ -261,30 +221,12 @@ impl<'a> ProgramIndex<'a> {
         kind: u16,
         offset_byte: ByteOffset,
     ) -> Result<Cursor<'a>, InputError> {
-        let (bit, alignment) =
-            map_kind(kind).ok_or_else(|| malformed(InputProblem::InvalidReference, offset_byte))?;
-        let section = self.sections[bit.trailing_zeros() as usize]
-            .ok_or_else(|| malformed(InputProblem::InvalidReference, offset_byte))?;
-        if offset_byte < section.start_byte || offset_byte >= section.end_byte {
-            return Err(malformed(InputProblem::InvalidReference, offset_byte));
-        }
-        if !offset_byte.0.is_multiple_of(alignment) {
-            return Err(malformed(InputProblem::InvalidAlignment, offset_byte));
-        }
-        let mut end = self.container.item_end(offset_byte)?.min(section.end_byte);
-        let link = self.header.link_byte_range;
-        if offset_byte >= link.start && offset_byte < link.end {
-            return Err(malformed(InputProblem::OverlappingSections, offset_byte));
-        }
-        if offset_byte < link.start {
-            end = end.min(link.start);
-        }
-        Cursor::bounded(self.bytes, offset_byte, end)
+        self.declarations.item(kind, offset_byte)
     }
 
     pub(crate) fn mapped_count(&self, kind: u16) -> u32 {
         map_kind(kind)
-            .and_then(|(bit, _)| self.sections[bit.trailing_zeros() as usize])
+            .and_then(|(bit, _)| self.declarations.sections[bit.trailing_zeros() as usize])
             .map_or(0, |section| section.count)
     }
     pub(super) fn mapped_entry(
@@ -295,7 +237,7 @@ impl<'a> ProgramIndex<'a> {
     ) -> Result<Cursor<'a>, InputError> {
         let (bit, _) = map_kind(kind)
             .ok_or_else(|| malformed(InputProblem::InvalidReference, self.header.header_offset))?;
-        let section = self.sections[bit.trailing_zeros() as usize]
+        let section = self.declarations.sections[bit.trailing_zeros() as usize]
             .ok_or_else(|| malformed(InputProblem::InvalidReference, self.header.header_offset))?;
         if id >= section.count {
             return Err(malformed(
@@ -319,41 +261,13 @@ impl<'a> ProgramIndex<'a> {
     }
 
     fn table(&self, key: TableKey) -> Result<Cursor<'a>, InputError> {
-        let (table, index, stride) = match key {
-            TableKey::String(id) => (self.header.string_ids, id.0, ByteLength(4)),
-            TableKey::Type(id) => (self.header.type_ids, id.0, ByteLength(4)),
-            TableKey::Proto(id) => (self.header.proto_ids, id.0, ByteLength(12)),
-            TableKey::Field(id) => (self.header.field_ids, id.0, ByteLength(8)),
-            TableKey::Method(id) => (self.header.method_ids, id.0, ByteLength(8)),
-            TableKey::Class(id) => (self.header.class_defs, id.0, ByteLength(32)),
-        };
-        if index >= table.count {
-            return Err(malformed(InputProblem::InvalidReference, table.offset_byte));
-        }
-        let table_end = table
-            .offset_byte
-            .checked_advance(table.size_byte)
-            .ok_or_else(|| malformed(InputProblem::RangeOverflow, table.offset_byte))?;
-        let prefix = checked_range(
-            ByteLength(table_end.0),
-            table.offset_byte,
-            count_usize(index, table.offset_byte)?,
-            stride,
-        )?;
-        let range = checked_range(ByteLength(table_end.0), prefix.end, 1, stride)?;
-
-        Cursor::bounded(self.bytes, range.start, range.end)
+        self.declarations.table(key)
     }
-
     pub(crate) fn type_descriptor(
         &self,
         type_idx: TypeId,
     ) -> Result<(DexString<'a>, TypeShape), InputError> {
-        let mut record = self.table(TableKey::Type(type_idx))?;
-        let string_idx = StringId(record.read_u32()?);
-        let descriptor = self.string(string_idx)?;
-        let shape = descriptor.shape()?;
-        Ok((descriptor, shape))
+        self.declarations.type_descriptor(type_idx)
     }
 
     pub(crate) fn prototype(&self, proto_idx: ProtoId) -> Result<Prototype<'_, 'a>, InputError> {
@@ -530,9 +444,7 @@ impl<'a> ProgramIndex<'a> {
     }
 
     pub(crate) fn source_file(&self, id: ClassDefId) -> Result<Option<DexString<'a>>, InputError> {
-        let mut record = self.table(TableKey::Class(id))?;
-        record.skip(4, ByteLength(4))?;
-        match record.read_u32()? {
+        match self.declarations.class_record(id)?.source_file {
             u32::MAX => Ok(None),
             id => self.string(StringId(id)).map(Some),
         }
@@ -542,21 +454,17 @@ impl<'a> ProgramIndex<'a> {
         &self,
         id: ClassDefId,
     ) -> Result<ByteOffset, InputError> {
-        let mut record = self.table(TableKey::Class(id))?;
-        record.skip(5, ByteLength(4))?;
-        let at = record.position_byte();
-        file_offset(record.read_u32()?, at)
+        let record = self.declarations.class_record(id)?;
+        let at = self.table(TableKey::Class(id))?.position_byte();
+        file_offset(record.annotations, ByteOffset(at.0 + 20))
     }
 
     pub(crate) fn class_context(&self, id: ClassDefId) -> Result<ClassContext<'a>, InputError> {
-        let mut record = self.table(TableKey::Class(id))?;
-        record.skip(2, ByteLength(4))?;
-        let super_idx = record.read_u32()?;
-        let interfaces_raw = record.read_u32()?;
-        record.read_u32()?;
-        let annotations_raw = record.read_u32()?;
-        record.read_u32()?;
-        let values_raw = record.read_u32()?;
+        let record = self.declarations.class_record(id)?;
+        let super_idx = record.superclass;
+        let interfaces_raw = record.interfaces;
+        let annotations_raw = record.annotations;
+        let values_raw = record.values;
         let superclass = local(self.superclass(super_idx))?;
         let interfaces = local(self.interfaces(interfaces_raw))?;
         let values_offset = local(self.values_offset(values_raw))?;
@@ -570,17 +478,7 @@ impl<'a> ProgramIndex<'a> {
     }
 
     fn superclass(&self, index: u32) -> Result<Option<DexString<'a>>, InputError> {
-        if index == u32::MAX {
-            return Ok(None);
-        }
-        let (name, shape) = self.type_descriptor(TypeId(index))?;
-        if !matches!(shape, TypeShape::Class) {
-            return Err(malformed(
-                InputProblem::InvalidDescriptor,
-                self.header.type_ids.offset_byte,
-            ));
-        }
-        Ok(Some(name))
+        self.declarations.superclass(index)
     }
 
     fn interfaces(&self, raw: u32) -> Result<&'a [u8], InputError> {
@@ -1161,15 +1059,6 @@ pub(crate) struct ClassDataWalk {
     /// First original class-data byte whose record could not be located.
     pub terminated_at: Option<ByteOffset>,
     pub issue: Option<InputError>,
-}
-
-enum TableKey {
-    String(StringId),
-    Type(TypeId),
-    Proto(ProtoId),
-    Field(FieldId),
-    Method(MethodId),
-    Class(ClassDefId),
 }
 
 #[derive(Clone, Copy)]

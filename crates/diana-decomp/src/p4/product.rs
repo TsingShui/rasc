@@ -396,9 +396,12 @@ pub enum ConstructorRelation {
     Allocation,
     This,
     Super,
+    /// A proven indirect superclass; the original invocation owner is retained.
+    Ancestor,
     OtherOwner,
     AmbiguousIdentity,
     Unknown(MissingFact),
+    UnknownOwner(crate::p0::SuperclassGap),
     NotAllocation,
 }
 #[derive(Clone, Copy, Debug)]

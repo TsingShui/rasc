@@ -30,12 +30,23 @@ class definitions do not erase a readable reference's owner/name/prototype.
 Class location and P0 caches remain local to the selected logical index;
 allocation failures MUST NOT be cached as member absence.
 
+`LocalDeclarations` owns the shared checked table, string/type and class-header
+reader while borrowing the original bytes. ProgramIndex and the restricted P0
+superclass view use that same implementation; no second descriptor or class-record
+parser is maintained. The view keeps only this logical header's namespace, and
+its local class-location index is initialized on demand. The declaration view
+has no method-analysis or stage-construction interface.
+
 ## Method source preparation
 
 `ProgramIndex::method_source` consumes a method entry from P0 `ClassFacts`.
 It uses the original code offset, delivered declaration and flags without walking
 class-data again or resolving the method declaration a second time. It establishes
 safe code/header/instruction/try/handler ranges and original register counts.
+The reader binds the existing OwnerFacts and the same-DEX declaration view into
+one private OwnerContext for downstream relation queries. ClassFacts itself
+remains an owned snapshot; method products retain the declaration view's input
+lifetime without borrowing the Engine or creating an index/cache ownership cycle.
 
 `MethodSource` separates a code-bearing member from a declaration-only member.
 An omitted code offset and native/abstract flags are checked for consistency;

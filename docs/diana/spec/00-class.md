@@ -54,6 +54,32 @@ Copies and JSON growth check capacity, then reserve fallibly. No numeric quota i
 introduced by P0. All offsets address the original physical DEX, including DEX 041
 shared data; the logical header offset remains part of identity.
 
+## Same-DEX superclass relationships
+
+The current declaration remains an owned `OwnerFacts` snapshot. Method preparation
+adds a private `OwnerContext` view that shares the selected logical DEX's restricted
+original declaration reader. This view travels with the current declaration through
+P1/P2/P3; it exposes no ProgramIndex, code reader or P0 construction entry to P4.
+The existing current-class declaration is reused rather than materialized again.
+
+`SuperclassRelation` distinguishes Same, Ancestor with depth, Unrelated and
+Unknown with a `SuperclassGap`. The query compares original TypeIds only inside
+this logical DEX. A matching superclass reference establishes the relationship
+without requiring that target's definition. Continuing beyond that reference
+requires an unambiguous local class definition. A missing definition, damaged
+record, duplicate-definition ambiguity or cycle does not prove Unrelated. Concrete
+input errors retain their classification in the gap; the current declaration's
+original failure remains in OwnerFacts.
+
+Current-class and direct-parent queries use the existing declaration without
+building a class-location index. A deeper query initializes the shared local
+class-location index on demand and reads only required ancestor headers through
+the same checked reader as ordinary P0 declarations. It does not enumerate members,
+open method bodies, build an all-ancestor closure or search another logical DEX.
+The actual local class-def count bounds traversal of a cyclic chain; this is not
+a numeric resource quota. Resource/invariant lookup failures are propagated, not
+cached as absent definitions.
+
 ## Development inspection
 
 The engine development shell is the single P0–P3 observation entry:

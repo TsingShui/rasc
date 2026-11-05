@@ -33,6 +33,7 @@ struct Call {
     identity: Identity,
     kind: CallKind,
     owners: u32,
+    owner_gap: Option<crate::p0::SuperclassGap>,
 }
 fn calls(ssa: &SsaMethod<'_>, f: &TypeFacts) -> Result<Vec<Call>, TypeError> {
     let flow = ssa.execution();
@@ -85,24 +86,27 @@ fn calls(ssa: &SsaMethod<'_>, f: &TypeFacts) -> Result<Vec<Call>, TypeError> {
                 identity,
                 kind,
                 owners: 0,
+                owner_gap: None,
             },
         )?;
     }
     Ok(calls)
 }
-fn relation(bits: u32) -> ConstructorRelation {
+fn relation(bits: u32, gap: Option<crate::p0::SuperclassGap>) -> ConstructorRelation {
     match bits {
         ALLOCATION => ConstructorRelation::Allocation,
         THIS => ConstructorRelation::This,
         SUPER => ConstructorRelation::Super,
+        ANCESTOR => ConstructorRelation::Ancestor,
         OTHER_OWNER => ConstructorRelation::OtherOwner,
         NOT_ALLOCATION => ConstructorRelation::NotAllocation,
         _ if bits & MISSING_REFERENCE != 0 => {
             ConstructorRelation::Unknown(MissingFact::ReferenceDeclaration)
         }
-        _ if bits & MISSING_OWNER != 0 => {
-            ConstructorRelation::Unknown(MissingFact::InitializationOwnerRelation)
-        }
+        _ if bits & MISSING_OWNER != 0 => gap.map_or(
+            ConstructorRelation::Unknown(MissingFact::InitializationOwnerRelation),
+            ConstructorRelation::UnknownOwner,
+        ),
         _ if bits & MISSING_RECEIVER != 0 => {
             ConstructorRelation::Unknown(MissingFact::InitializationReceiver)
         }
@@ -463,7 +467,7 @@ pub(super) fn construct(
     for call in &calls {
         let site = IssueSite::Operation(call.operation);
         if matches!(call.kind, CallKind::Constructor { .. }) {
-            let relation = relation(call.owners);
+            let relation = relation(call.owners, call.owner_gap);
             push(
                 &mut f.constructors,
                 ConstructorFact {

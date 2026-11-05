@@ -18,7 +18,8 @@ pub(super) const MISSING_REFERENCE: u32 = 32;
 pub(super) const MISSING_RECEIVER: u32 = 64;
 pub(super) const MISSING_OWNER: u32 = 128;
 pub(super) const OWNER_UNAVAILABLE: u32 = 256;
-pub(super) const ELIGIBLE: u32 = ALLOCATION | THIS | SUPER;
+pub(super) const ANCESTOR: u32 = 512;
+pub(super) const ELIGIBLE: u32 = ALLOCATION | THIS | SUPER | ANCESTOR;
 
 impl References<'_, '_> {
     fn has_reference_declaration(&self, value: ValueId) -> bool {
@@ -88,29 +89,40 @@ impl References<'_, '_> {
             ValueOrigin::Phi(_) => UNKNOWN,
         }
     }
-    fn owner_at_leaf(&self, state: StateId, owner: TypeId) -> u32 {
+    fn owner_at_leaf(
+        &self,
+        state: StateId,
+        owner: TypeId,
+    ) -> Result<(u32, Option<crate::p0::SuperclassGap>), TypeError> {
         if !self.available(state) {
-            return MISSING_RECEIVER;
+            return Ok((MISSING_RECEIVER, None));
         }
         let Some(value) = self.value(state) else {
-            return MISSING_RECEIVER;
+            return Ok((MISSING_RECEIVER, None));
         };
         let flow = self.ssa.execution();
-        match self.ssa.facts().values()[value.0 as usize].origin() {
+        let bits = match self.ssa.facts().values()[value.0 as usize].origin() {
             ValueOrigin::Entry(EntryRole::This)
                 if flow.declaration().name.units() == super::INIT_NAME =>
             {
-                let current = flow.owner_facts();
-                if owner == current.type_id() {
-                    return THIS;
-                }
-                match current.superclass() {
-                    crate::p0::Fact::Present(_) if Some(owner) == current.superclass_type_id() => {
-                        SUPER
+                use crate::p0::{SuperclassGap, SuperclassRelation};
+                match flow.owner_relation(owner)? {
+                    SuperclassRelation::Same => THIS,
+                    SuperclassRelation::Ancestor { depth: 1 } => SUPER,
+                    SuperclassRelation::Ancestor { .. } => ANCESTOR,
+                    SuperclassRelation::Unrelated => OTHER_OWNER,
+                    SuperclassRelation::Unknown(gap) => {
+                        let unavailable = matches!(
+                            gap,
+                            SuperclassGap::Declaration { .. }
+                                | SuperclassGap::CurrentDeclarationUnavailable
+                                | SuperclassGap::Cycle
+                        );
+                        return Ok((
+                            MISSING_OWNER | if unavailable { OWNER_UNAVAILABLE } else { 0 },
+                            Some(gap),
+                        ));
                     }
-                    crate::p0::Fact::Present(_) | crate::p0::Fact::Absent => OTHER_OWNER,
-                    crate::p0::Fact::Unavailable(_) => MISSING_OWNER | OWNER_UNAVAILABLE,
-                    crate::p0::Fact::NotRead => MISSING_OWNER,
                 }
             }
             ValueOrigin::Operation { operation, .. } => {
@@ -135,7 +147,8 @@ impl References<'_, '_> {
                 }
             }
             _ => NOT_ALLOCATION,
-        }
+        };
+        Ok((bits, None))
     }
 }
 
@@ -180,7 +193,13 @@ pub(super) fn owners(refs: &References<'_, '_>, calls: &mut [Call]) -> Result<()
                     graph.link(index, source, ())?;
                 }
             }
-            Source::Leaf => graph.nodes[index].seed = refs.owner_at_leaf(state, owner),
+            Source::Leaf => {
+                let (bits, gap) = refs.owner_at_leaf(state, owner)?;
+                graph.nodes[index].seed = bits;
+                if let Some(gap) = gap {
+                    calls[call].owner_gap = Some(gap);
+                }
+            }
         }
         index += 1;
     }

@@ -13,8 +13,10 @@ ordered uses, exact widths, Phi incoming/transfer identities, source availabilit
 operation kinds, original reference signatures and normal/exception completions.
 The current class's P0 declaration travels inside the same method product chain
 (`DecodedMethod` → `FlowMethod` → `SsaMethod`), so `this`, its method declaration and
-the class's direct superclass identity are consumed as delivered facts. P4 does not
-receive a separate context parameter and does not query the class index itself.
+the class's direct superclass identity are consumed as delivered facts. A restricted same-DEX superclass view travels with that declaration. P4 does not
+receive a separate context parameter or query ProgramIndex itself. It consumes the
+P0 relation result through the retained execution view; it cannot invoke a P0
+constructor, read method bodies or search another DEX.
 P4 MUST NOT decode code, reread reference records, reconstruct register sources or
 change SSA identities or control flow.
 
@@ -37,7 +39,7 @@ failures retain their classification, and method-task stops do not truncate sibl
 | `ValueFacts` | Existing ValueId, allowed representation families, original/derived type sources, literal provenance, integral range and reference identity provenance. |
 | `UseView` | Existing UseSite/StateId, semantic or descriptor requirement and established interpretation or concrete problem. |
 | `PhiView` | Original Phi identity, literal or runtime representation and an interpretation for every original incoming transfer. |
-| `ConstructorFact` | Original invocation, receiver state, identity provenance and established or unresolved construction relationship (`Allocation`, `This`, `Super`, `OtherOwner`, unknown). |
+| `ConstructorFact` | Original invocation, receiver state, identity provenance and established or unresolved construction relationship (`Allocation`, `This`, `Super`, `Ancestor`, `OtherOwner`, unknown). |
 | `InitializationUse` | Initialization states at the original use position, including failure, mixed paths and unknowns. |
 | `ArrayAccessView` | Original get/put/fill operation and SSA array state, with component bounds at that execution position and explicit coverage gaps. |
 | `ArrayFillView` | Original fill operation and SSA array state, with a source-supported primitive element interpretation or local problem; width/count/bits remain in the execution payload fact. |
@@ -300,14 +302,19 @@ Original effects and normal/exception completions stay at their original positio
 allocation/constructor signatures. Matching does not require a constructor body.
 This does not decide whether P7 can merge the operations into natural `new` syntax.
 A constructor call whose receiver is `this` establishes `This` when its owner is
-the current class and `Super` when its owner is the declared direct superclass; a
-different readable owner keeps the original invocation and is reported as
-`OtherOwner`. Constructor relationships follow the existing Copy/Phi source
+the current class, `Super` for the declared direct superclass and `Ancestor` for a
+proven indirect superclass. The last case retains the original invocation owner;
+it is not a Java `super()` expression. The same-DEX declaration query distinguishes
+a proven unrelated owner from an unresolved chain. `OtherOwner` requires the
+former; the latter keeps `UnknownOwner(SuperclassGap)` with the missing definition,
+original input error or other concrete reason. It is not owner-mismatch evidence.
+A new allocation still requires its exact allocation owner; ancestor acceptance
+applies only to constructor-this sources. Constructor relationships follow the existing Copy/Phi source
 rules rather than requiring one provenance root; check-cast retains the same
 reference binding. Equal source relationships retain
 that relationship even when identity is Multiple; different relationships retain
 the existing ambiguous summary. The same source-relation facts drive initialization.
-All possible pending sources must match `Allocation`, `This` or `Super` before
+All possible pending sources must match `Allocation`, `This`, `Super` or `Ancestor` before
 normal completion establishes their initialization. Sources whose producer
 semantics carry no pending obligation do not invalidate that proof. `OtherOwner` and unresolved pending sources
 are not successful-initialization evidence. Repeated construction retains its
@@ -361,7 +368,11 @@ separate fresh allocations have explicit disjointness. Reference provenance root
 from arbitrary calls/loads do not prove disjointness. Multiple identity alone does
 not create an initialization gap: all initialized incoming states join to
 Initialized. An actual unresolved object relationship remains analysis uncertainty,
-not a missing declaration. Constructor-owner gaps retain their own diagnostics.
+not a missing declaration. Constructor-owner gaps retain their own diagnostics. Missing definitions outside
+the current logical DEX remain unknown even when another supplied DEX contains
+a definition; this query does not perform cross-DEX resolution. Successful
+normal completion is still required to establish initialization. The ancestor
+relationship alone changes neither the original invocation nor exception behavior.
 
 ## Inspection and evidence
 

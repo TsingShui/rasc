@@ -1,4 +1,5 @@
-use super::{InputError, InputProblem, ProgramIndex, malformed};
+use super::declarations::LocalDeclarations;
+use super::{InputError, InputProblem, malformed};
 
 use crate::{ClassDefId, TypeId};
 
@@ -14,7 +15,7 @@ pub(super) struct ClassLocations {
     locations: Vec<Location>,
 }
 impl ClassLocations {
-    pub(super) fn build(index: &ProgramIndex<'_>) -> Result<Self, InputError> {
+    pub(super) fn build(index: &LocalDeclarations<'_>) -> Result<Self, InputError> {
         let offset_byte = index.header.class_defs.offset_byte;
         let length = usize::try_from(index.header.type_ids.count)
             .map_err(|_| InputError::PlatformCapacity { offset_byte })?;
@@ -51,7 +52,7 @@ impl ClassLocations {
     pub(super) fn get(
         &self,
         ty: TypeId,
-        index: &ProgramIndex<'_>,
+        index: &LocalDeclarations<'_>,
     ) -> Result<Option<ClassDefId>, InputError> {
         let at = usize::try_from(ty.0).map_err(|_| InputError::PlatformCapacity {
             offset_byte: index.header.class_defs.offset_byte,

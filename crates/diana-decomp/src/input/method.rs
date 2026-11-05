@@ -35,7 +35,7 @@ pub enum RawPrintable<'a> {
 pub struct MethodSource<'i, 'a> {
     index: &'i ProgramIndex<'a>,
     method_id: MethodId,
-    owner: crate::p0::OwnerFacts,
+    owner: crate::p0::OwnerContext<'a>,
     access_flags: u32,
     declaration: crate::p0::MethodDeclaration,
     raw: RawPrintable<'a>,
@@ -51,15 +51,18 @@ impl<'i, 'a> MethodSource<'i, 'a> {
     }
 
     pub fn class_id(&self) -> ClassDefId {
-        self.owner.key().class_def
+        self.owner.current().key().class_def
     }
     pub fn method_id(&self) -> MethodId {
         self.method_id
     }
     pub fn header_offset(&self) -> ByteOffset {
-        self.owner.header_offset()
+        self.owner.current().header_offset()
     }
     pub fn owner_facts(&self) -> &crate::p0::OwnerFacts {
+        self.owner.current()
+    }
+    pub(crate) fn owner_context(&self) -> &crate::p0::OwnerContext<'a> {
         &self.owner
     }
     pub fn access_flags(&self) -> u32 {
@@ -189,7 +192,7 @@ impl<'a> ProgramIndex<'a> {
         Ok(MethodSource {
             index: self,
             method_id,
-            owner: facts.owner_facts(),
+            owner: crate::p0::OwnerContext::new(facts.owner_facts(), self.declarations.clone()),
             access_flags,
             declaration,
             raw,
