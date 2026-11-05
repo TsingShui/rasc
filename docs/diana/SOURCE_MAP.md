@@ -4,13 +4,14 @@ Status: source-review notes for the design, not a cross-engine performance or co
 
 ## 1. Reference versions available to the team
 
-References are identified by **public repository URL, pinned commit, and repository-relative file/symbol**. They do not depend on the author's home directory, a deleted worktree, the parent repository's disk layout, or SSH access. Public availability check: the pinned versions of the three independent repositories can be accessed over HTTPS. This does not establish authorization for every fixture or the correctness of their algorithms.
+References are identified by **public repository URL, pinned commit, and repository-relative file/symbol**. They do not depend on the author's home directory, a deleted worktree, the parent repository's disk layout, or SSH access. Public availability check: the pinned versions of the independent decompiler repositories can be accessed over HTTPS. This does not establish authorization for every fixture or the correctness of their algorithms.
 
 | ID | Public source | Pinned commit | Relative root / review notes |
 |---|---|---|---|
 | DX | [TsingShui/rasc](https://github.com/TsingShui/rasc) | `ef8a4c92c6b89e8afed9ccbc1552feae67b6982d` | DX paths are relative to `crates/dexdec/`; root/rusty-dex paths are explicitly identified separately. [Pinned manifest](https://github.com/TsingShui/rasc/blob/ef8a4c92c6b89e8afed9ccbc1552feae67b6982d/crates/dexdec/Cargo.toml) |
 | KU | [Noelo-Lab/kuna](https://github.com/Noelo-Lab/kuna) | `29c44b57f8c1d9b35044aa4ee3f636c193288009` | Paths are relative to that repository's root. [Pinned phases document](https://github.com/Noelo-Lab/kuna/blob/29c44b57f8c1d9b35044aa4ee3f636c193288009/docs/phases.md) |
 | RG | [MG1937/radguard](https://github.com/MG1937/radguard), `0.1.3` | **`290de20c925c4a2c7642b1a63c9997185a06e130`** | Paths are relative to radguard's own repository root. [Pinned manifest](https://github.com/MG1937/radguard/blob/290de20c925c4a2c7642b1a63c9997185a06e130/Cargo.toml). An earlier version incorrectly identified the parent repository's commit as the radguard commit; the parent contains only a gitlink. This corrects that mistake. |
+| ZD | [zed-industries/zed](https://github.com/zed-industries/zed) | `654efae441bc8eb117d0042bb28cd7cf3570bdc9` | GUI design reference: `crates/ui/src/components/{list/list_item,tab}.rs`; MIT color data: `assets/themes/ayu/ayu.json`. See §6.2. |
 
 Explicitly obtain pinned references in the current checkout as described in [SOURCE_MAP.md](SOURCE_MAP.md#10-reproducible-inputs-and-tools). References are for review and implementation, not implicit dependencies of production or E2E test runs. Offline collaborators use source bundles verified at the same commits; do not automatically switch to main or the author's machine paths.
 
@@ -95,7 +96,8 @@ For each algorithm ported during implementation, add a record of source project/
 
 ### 6.1 Current reuse register
 
-Observed state: Diana production code contains no copied reference source. The
+Observed state: Diana engine and CLI implementation code contains no copied
+reference source. The GUI's adapted theme data is recorded in §6.2. The
 archived reference tree was removed from the working tree at commit 5cb156c and
 survives only in git history; it is not a workspace member. DX and rusty-dex license files are still present;
 RG remains unreviewable for copying, so it stays reading-only. No vendored
@@ -129,6 +131,26 @@ This register records the observed repository state for the accepted batches. It
 does not grant permission to copy from RG, and it does not certify any future
 focused extraction; such a change requires a new record with source, commit,
 license and adaptation differences.
+
+### 6.2 GUI design reference and theme data
+
+ZD at the commit in §1 supplies two distinct inputs:
+
+- `crates/ui/src/components/list/list_item.rs`, `crates/ui/src/components/tab.rs`
+  and `crates/project_panel/src/project_panel_settings.rs` were reviewed for
+  compact spacing, indentation and active/inactive hierarchy. These UI sources
+  carry GPL licenses. Diana does not copy or link their implementation; it uses
+  GPUI Kit's Tree, ListItem, TabBar, Editor, menu, dialog and sheet interfaces.
+- `assets/themes/ayu/ayu.json` supplies Ayu Dark color values, under
+  `assets/themes/ayu/LICENSE` (MIT; copyright 2016 Ike Ku). The GUI's
+  `appearance.rs` maps selected color roles and syntax colors into Kit's theme
+  rather than importing Zed's theme system. Its `THEME_NOTICE` retains the full
+  copyright and MIT notice, embedded in the executable and displayed through
+  the Theme Credits command. This data adaptation adds no dependency on Zed.
+
+The design reference does not establish pixel equivalence or interaction
+correctness. Current GUI capabilities and verification scope belong in its
+[README](../../apps/diana-gui/README.md).
 
 ## 7. Additional one-command references and reading targets
 

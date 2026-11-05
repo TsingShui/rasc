@@ -6,10 +6,11 @@ relevant work. Package-local instructions refine their respective scopes.
 ## Project layout and reference isolation
 
 - `apps/diana/`: CLI, input, snapshot, ZIP, query and output.
-- `apps/diana-gui/`, `apps/diana-web-ui/`: README-only future target placeholders.
-  No manifests, implementation, dependencies or CI; not workspace members. Do
-  not initialize/design their frameworks, browser UI or WASM bindings until
-  separately requested.
+- `apps/diana-gui/`: native GPUI Kit UI demo, selected with `-p diana-gui`.
+  Its authored content is not Engine output; input/analysis integration requires
+  a separate user request.
+- `apps/diana-web-ui/`: README-only future target placeholder, outside the workspace.
+  Do not initialize its framework, browser UI or WASM bindings until separately requested.
 - `crates/diana-decomp/`: independent native engine and public library.
 - `docs/diana/`: design, algorithms, sources and contribution rules.
 - `tools/audit/`: sensitive-input audit tooling.

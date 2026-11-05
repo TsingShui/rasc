@@ -1,0 +1,14 @@
+[package]
+name = "diana-gui"
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.93"
+description = "Diana native workspace UI demo"
+license = "Apache-2.0"
+publish = false
+
+[dependencies]
+gpui-kit = { version = "=0.9.0", features = ["syntect"] }
+
+[lints.rust]
+unsafe_code = "forbid"
