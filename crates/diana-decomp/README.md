@@ -230,7 +230,7 @@ active; the current engine delivers the facts needed for that contract.
 
 `p2-all` observes retained execution facts from the same Engine chain and reports
 classified outcomes and encountered opcode variants. `roundtrip-all` checks independent byte re-encoding over retained
-P1 evidence. These inspection commands do not run the test-only P2/P3 verifiers.
+P1 evidence. These inspection commands do not run the test-only correspondence checks.
 No phase-specific debug binary is required.
 
 ## P5 observations
@@ -251,10 +251,37 @@ evidence was reused because input and P1 were unchanged; no second full chain wa
 run merely to repeat that check. These are authorized private-input observations,
 not repository-reproducible fixtures or correctness rates.
 
-The existing core test was mechanically migrated to StorageMethod and the new
-outcome/access APIs. Its existing class-recovery case now requests four method
-workers. Inputs and expected assertion values were unchanged; no cases were added.
-Not run: Rust tests for the P5 and Rayon changes.
+### P5 correspondence tests
+
+The existing scoped core test now checks P5 through public Engine products.
+Its original cases retain their independently specified expectations, including
+the four-worker class-recovery case. P5 coverage checks also run on those retained
+products. The new input variants exhaust runtime/literal choices for two two-way
+join values and cover wide transfer, entry backedges, multiple throwing producers,
+throw terminals, shared/split handler entries, snapshot fan-out, unavailable
+incoming, conflicting views and unresolved wide representation. Finite traces use
+fresh definition-occurrence symbols and undefined synthetic storage, not a full
+DEX interpreter or P5 construction helpers.
+
+The checks distinguish upstream-to-plan correspondence from simultaneous-copy
+versus ordered-step equivalence. A separate slow fixed point checks gap locality
+and whether each reported cause can actually reach its consumer. Normal/exception
+traces preserve old values, original captures, normal commit, allocation failure
+and constructor failure. Both debug and release runs of the sole core test passed.
+
+Eight temporary production mutations were rejected by P5-specific obligations:
+wrong storage source, omitted copy steps, wrong transfer identity, snapshot moved
+after commit, unknown source replaced by zero, omitted dependent-use gap,
+allocation materialized before normal commit and one lost fan-out save. Each
+mutation compiled, failed the core test and was removed. This demonstrates
+sensitivity to those faults, not a proof of all implementations or paths.
+
+Cross-destination cycles are structurally excluded under the current independent
+binding and exact-slot guarantees. The generic cycle/temporary branch still lacks
+an Engine-generated execution witness; no private product was fabricated to claim
+coverage. The [test contract](../../docs/diana/spec/05-variables.md#test-only-correspondence)
+states this boundary. Production input and P1 were unchanged, so prior corpus and
+byte-roundtrip observations were reused rather than rerun.
 
 ## Method scheduling observations
 
@@ -289,6 +316,8 @@ cargo fmt --all -- --check
 cargo clippy -p diana-decomp --all-targets --all-features --locked -- -D warnings
 cargo build -p diana-decomp --release --locked
 cargo nextest run -p diana-decomp --all-features --locked \
+  -E 'test(dynamic_instructions_preserve_layout_references_and_completions)'
+cargo nextest run -p diana-decomp --release --all-features --locked \
   -E 'test(dynamic_instructions_preserve_layout_references_and_completions)'
 ```
 
