@@ -24,10 +24,7 @@ fn interpretation(
         return Interpretation::Unknown(Problem::Missing(missing));
     }
     if let Some(bits) = value.literal() {
-        let mut families = required.intersect(Families::width(bits.width));
-        if bits.value != 0 {
-            families = Families(families.0 & !mask(Family::Reference).0);
-        }
+        let families = required.intersect(literal_families(bits));
         if families.is_conflict() {
             return Interpretation::Unknown(if required == mask(Family::Reference) {
                 Problem::NonzeroReferenceLiteral

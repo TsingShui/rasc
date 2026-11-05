@@ -57,7 +57,9 @@ read/use issues. Array fills consume checked payload width/count/bits and select
 an element interpretation from existing SSA array sources. Ordinary reference
 inputs now use `Direct(Reference)` without proving a class hierarchy. Original
 source/use declarations and invocation prototypes stay separate; invocation
-identity is not selected from argument types. No input-context query is implemented.
+identity is not selected from argument types. Runtime Phi representation now
+consumes available literal-input constraints before joining nonliteral groups;
+source literals keep their independent views. No input-context query is implemented.
 Ambiguous object
 identity and unsupported interpretations are reported separately from missing
 input facts. P5–P9 remain inactive, so partial Java-like text is not yet delivered.
@@ -113,21 +115,24 @@ facts and array-fill interpretations with original payload bits. These are diagn
 counts, not semantic verification badges. The timed Engine traversal now includes P4.
 
 Engine format/check/Clippy and release builds pass; no tests were added, modified
-or run for the reference-read change. Two authorized real-input runs delivered
-115,760 TypedMethod products without construction/upstream/class stops. 8,392
-methods retain local type issues, and 3,407 ordinary use views remain undetermined.
-Removing the reference-compatibility requirement removed 61,277 hierarchy issues;
-this is a correction of diagnostic dependencies, not newly recovered hierarchy
-facts or code. Retained P1/P2/P3 products matched before/after in two focused
-method observations; source/use declarations, numeric/null views, constructor
-facts, initialization and array-fill interpretations matched apart from the
-intended reference-view change and removed assignability-only provenance fields.
+or run for the literal-Phi change. Two authorized real-input runs delivered
+115,760 TypedMethod products without construction/upstream/class stops. 7,498
+methods retain local type issues, and 724 ordinary use views remain undetermined,
+compared with 8,392 and 3,407 before the change. The inputs' 5,621 representation
+ambiguity issues disappeared without choosing a global interpretation for literals.
+A focused zero/one Phi now has an Integral runtime representation and integral
+incoming views; its literal producers retain their original bits and allowed
+families. A separate reference Phi in that method still has Multiple identity and
+unknown initialization. Initialization implementation was not changed; fewer
+numeric values being considered possible references also removes dependent noise.
+Retained P1/P2/P3 products matched before/after in that focused observation.
 All 279 fills retained their interpretations: 1 Boolean, 64 Byte, 3 Char, 49 Float,
 158 Int and 4 Long. Byte roundtrip checked 1,444,571 items without mismatches.
-These are finite observations, not correctness rates or ART admission evidence.
-The inputs did not exercise Short/Double payloads, malformed catch declarations,
-conflicting/width-mismatched fills or the unreadable-direct-call initialization
-path. Those branches have static review but no execution evidence from these runs.
+These finite observations are not correctness rates or ART admission evidence.
+Unavailable or contradictory literal incoming paths were not exercised in these
+runs. Short/Double payloads, malformed catch declarations, conflicting/width-
+mismatched fills and unreadable-direct-call initialization also retain only static
+review rather than execution evidence from these inputs.
 
 Signature-qualified Java-like calls (`Api.register<Listener>(h)`, with a complete
 original descriptor when needed) are specified under

@@ -136,8 +136,16 @@ is required; literal equality predicates can use the integral bit interpretation
 These choices do not select a global type for other uses of the same constant.
 Pure-literal Phis need no common runtime storage representation: every incoming
 retains its bit identity and each consumer has its own interpretation. Runtime
-Phis have a common representation and per-transfer incoming views. An unavailable
-incoming does not acquire the known sibling's value or adaptation.
+Phis have a common representation and per-transfer incoming views. Available
+literal inputs constrain a runtime Phi's local allowed families before nonliteral
+groups are joined. The shared literal rule admits reference interpretation only
+for one-word zero; nonzero words remain integral/float candidates and wide bits
+remain long/double candidates. It does not choose an interpretation for that literal
+at another use. Pure-literal Phis retain independent use views.
+
+A conflicting local Phi constraint does not rewrite an independent producer's
+established representation. Unavailable inputs supply no literal evidence, and an
+unavailable incoming does not acquire the known sibling's value or adaptation.
 
 ### Invocation identity and source expression
 

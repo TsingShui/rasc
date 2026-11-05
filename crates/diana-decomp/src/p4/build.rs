@@ -79,6 +79,14 @@ pub(super) fn issue(f: &mut TypeFacts, site: IssueSite, problem: Problem) -> Res
 pub(super) fn mask(family: Family) -> Families {
     Families::one(family)
 }
+pub(super) fn literal_families(bits: Bits) -> Families {
+    let allowed = Families::width(bits.width);
+    if bits.value == 0 {
+        allowed
+    } else {
+        Families(allowed.0 & !mask(Family::Reference).0)
+    }
+}
 pub(super) fn tag_family(tag: u16) -> Option<Family> {
     Some(match tag {
         0x5a | 0x42 | 0x53 | 0x43 | 0x49 => Family::Integral,

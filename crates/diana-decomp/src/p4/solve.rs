@@ -253,6 +253,26 @@ pub(super) fn families(s: &SsaFacts, f: &mut TypeFacts, w: &mut Work) -> Result<
         }
         push(&mut allowed, source)?;
     }
+    // Constrain runtime Phi destinations before union, not the independently
+    // interpreted literals or fixed producers on other incoming paths.
+    for rule in &w.rules {
+        if rule.kind != RuleKind::Phi || f.values[rule.target.0 as usize].literal().is_some() {
+            continue;
+        }
+        for &input in &rule.inputs {
+            if !s
+                .state(input)
+                .is_some_and(|state| state.availability().is_available())
+            {
+                continue;
+            }
+            if let Some(bits) = state_value(s, input).and_then(|v| f.values[v.0 as usize].literal())
+            {
+                let allowed = &mut allowed[rule.target.0 as usize];
+                *allowed = allowed.intersect(literal_families(bits));
+            }
+        }
+    }
     let mut size = filled(f.values.len(), 1usize)?;
     for rule in &w.rules {
         if !matches!(rule.kind, RuleKind::Copy | RuleKind::Phi)

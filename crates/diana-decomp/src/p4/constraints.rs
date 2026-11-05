@@ -367,10 +367,12 @@ pub(super) fn collect(ssa: &SsaMethod<'_>, f: &mut TypeFacts) -> Result<Work, Ty
             OpKind::Const { bits, width } => {
                 if let Some(v) = out {
                     let fact = &mut f.values[v.0 as usize];
-                    fact.literal = Some(Bits {
+                    let literal = Bits {
                         value: *bits,
                         width: *width,
-                    });
+                    };
+                    fact.literal = Some(literal);
+                    fact.families = fact.families.intersect(literal_families(literal));
                     fact.mixed_literal = false;
                     fact.range_unknown = false;
                     // Reinterpret the original two's-complement bits; this is not a numeric conversion.
@@ -383,9 +385,6 @@ pub(super) fn collect(ssa: &SsaMethod<'_>, f: &mut TypeFacts) -> Result<Work, Ty
                         min: value,
                         max: value,
                     });
-                    if *bits != 0 {
-                        fact.families = Families(fact.families.0 & !mask(Family::Reference).0);
-                    }
                 }
             }
             OpKind::Move { kind } => {
