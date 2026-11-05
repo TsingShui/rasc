@@ -45,7 +45,7 @@ fn construct(ssa: &SsaMethod<'_>, f: &mut TypeFacts) -> Result<(), TypeError> {
     super::solve::families(ssa.facts(), f, &mut work)?;
     super::views::finish(ssa.facts(), f)?;
     super::arrays::finish(ssa, f)?;
-    super::initialization::construct(ssa, f)?;
+    super::initialization::construct(ssa, f, &work)?;
     Ok(())
 }
 pub(super) fn push<T>(v: &mut Vec<T>, value: T) -> Result<(), TypeError> {

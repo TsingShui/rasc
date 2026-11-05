@@ -190,18 +190,47 @@ This does not decide whether P7 can merge the operations into natural `new` synt
 A constructor call whose receiver is `this` establishes `This` when its owner is
 the current class and `Super` when its owner is the declared direct superclass; a
 different readable owner keeps the original invocation and is reported as
-`OtherOwner`. For a before-constructor state, `Allocation`, `This` and `Super`
-establish initialization on normal completion. `OtherOwner` and unresolved owner
-relationships preserve the call but leave normal initialization uncertain; they
-are not successful-initialization evidence. Existing initialized/failed states
-retain the distinct repeated-constructor conflict rules.
+`OtherOwner`. Constructor relationships follow the existing Copy/Cast/Phi source
+rules rather than requiring one provenance root. Equal source relationships retain
+that relationship even when identity is Multiple; different relationships retain
+the existing ambiguous summary. The same source-relation facts drive initialization.
+All possible pending sources must match `Allocation`, `This` or `Super` before
+normal completion establishes their initialization. Sources whose producer
+semantics carry no pending obligation do not invalidate that proof. `OtherOwner` and unresolved pending sources
+are not successful-initialization evidence. Repeated construction retains its
+separate conflict rules.
 
-For used uninitialized allocations and constructor `this`, backward demand and a
-forward finite-state worklist operate on P3's original positions/transfers. Scratch
-is reused per root, not stored as a register-by-point matrix. Successful constructor
-completion and exceptional completion are distinct even for void calls with no
-register-result commit. Constructor failure preserves its failed state and already
-established execution effects; it is not heap rollback.
+The initialization solver asks for an original SSA reference binding at an original
+PointId. Entry/producer semantics supply initialized references, null or pending
+allocations/constructor `this`; an unclassified producer supplies Unknown, not an
+initialized default. Null is distinct internally from a constructed object. The
+published Initialized state means no pending construction obligation, not non-null.
+Only actual reference interpretations and independently required unavailable
+reference inputs create use demands; a numeric value's reference candidate alone
+does not create an object-initialization issue.
+
+Sparse dependencies follow P3's transfers and the existing source rules. A Phi
+selects each source on its original incoming transfer, including that transfer's
+normal/exception initialization effect before joining. Copy/Cast captures a
+reference, not an initialization snapshot: later constructor events still affect
+proven aliases. Successful and exceptional completion remain distinct even for
+void calls with no register-result commit. Failure preserves its state and already
+established effects; it is not heap rollback.
+
+Paired observations retain initialization states separately for equal, distinct and
+unproved reference relationships. Both bindings select the same incoming transfer;
+equal sets of possible roots do not prove aliasing. A new normal allocation is
+distinct from references already present at its execute point. A static allocation
+site does not identify one dynamic object across iterations. Insufficient relation
+facts retain uncertainty; no register environment or complete-method alias tracker
+is reconstructed. When an additional constructor receiver cannot be related to
+either observed binding, the solver conservatively preserves the affected gap.
+
+Finite bit-set worklists solve the demanded dependencies. Straight-line identity
+segments are collapsed without crossing observed definitions, joins or relevant
+events. Bottom means no evidence; an ungrounded cycle becomes Unknown, never a
+vacuously initialized result. Unavailable source alternatives remain unavailable
+rather than borrowing a known sibling's state.
 
 A direct call with an unreadable declaration can still be a constructor call.
 P4 records an uncertain initialization event without manufacturing a ConstructorFact.
@@ -216,8 +245,10 @@ Mixed paths retain the participating initialization states. Repeated initializat
 or reuse after failed construction does not reset to a known successful state.
 An unknown receiver is not presumed disjoint from a live uninitialized object;
 separate fresh allocations have explicit disjointness. Reference provenance roots
-from arbitrary calls/loads do not prove disjointness. Ambiguous identity is an
-analysis uncertainty, not falsely reported as a missing declaration.
+from arbitrary calls/loads do not prove disjointness. Multiple identity alone does
+not create an initialization gap: all initialized incoming states join to
+Initialized. An actual unresolved object relationship remains analysis uncertainty,
+not a missing declaration. Constructor-owner gaps retain their own diagnostics.
 
 ## Inspection and evidence
 
