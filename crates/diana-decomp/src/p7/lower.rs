@@ -266,6 +266,7 @@ fn semantic(
         }
         OpKind::Invoke { kind, .. } | OpKind::UnresolvedInvoke { kind, .. } => {
             let call = call(c, at, *kind, args)?;
+            let natural_binding = matches!(call.qualification, Qualification::Natural);
             let expression = c.expression(ExprKind::Call(call), None)?;
             if let Some(construction) = c
                 .planned
@@ -275,7 +276,16 @@ fn semantic(
                 .find(|p| p.fact().operation == at)
             {
                 let relation = construction.fact().relation;
-                let first = op.pc().0 == 0
+                // Natural delegation prints only as the first statement of the
+                // body. Earlier operations either print nothing (literal
+                // definitions, which become their uses' values) or the call is
+                // not the constructor's first action, so the explicit form keeps
+                // its position; the original code offset is not the test.
+                let first = c
+                    .code
+                    .operations
+                    .iter()
+                    .all(|operation| matches!(operation.emission, Emission::Literal))
                     && c.operations[at.0 as usize].before.is_empty()
                     && c.operations[at.0 as usize].snapshots.is_empty();
                 let pending = c
@@ -286,7 +296,13 @@ fn semantic(
                     .and_then(|u| u.first())
                     .and_then(|u| u.initialization())
                     == Some(Initialization::BeforeConstructor);
-                let syntax = if first && pending {
+                let syntax = if first
+                    && pending
+                    // A competing constructor overload would make `this(...)` /
+                    // `super(...)` name no target; the explicit form keeps the
+                    // original owner and prints the binding.
+                    && natural_binding
+                {
                     match relation {
                         ConstructorRelation::This => InitializationSyntax::This,
                         ConstructorRelation::Super => InitializationSyntax::Super,

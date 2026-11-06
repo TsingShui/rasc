@@ -86,11 +86,18 @@ fn class_result(out: &mut Buffer, class: &p8::ClassResult) -> Result<(), RenderE
         if let Ok(delivery) = &member.delivery
             && let Some(result) = delivery.result()
         {
-            owners.method(
-                member.id,
-                result.header().declaration.name_units(),
-                result.header().name_form,
-            )?;
+            let header = result.header();
+            // A constructor record names the type it constructs, just like its
+            // reference in a body: `<init>` is not an identifier.
+            if super::names::initializer(header.declaration.name_units()) {
+                owners.method(
+                    member.id,
+                    &class.header().name.units,
+                    class.header().name.form,
+                )?;
+            } else {
+                owners.method(member.id, header.declaration.name_units(), header.name_form)?;
+            }
         }
     }
     super::values::metadata(out, &lookup, class.values(), Some(&owners))?;
@@ -319,11 +326,13 @@ fn method(
         if let Ok(delivery) = &member.delivery
             && let Some(result) = delivery.result()
         {
-            owners.method(
-                member.id,
-                result.header().declaration.name_units(),
-                result.header().name_form,
-            )?;
+            let header = result.header();
+            match class_name {
+                Some(name) if super::names::initializer(header.declaration.name_units()) => {
+                    owners.method(member.id, &name.units, name.form)?;
+                }
+                _ => owners.method(member.id, header.declaration.name_units(), header.name_form)?,
+            }
         }
         super::values::metadata(out, lookup, values, Some(&owners))?;
     }
@@ -362,6 +371,7 @@ fn method(
                     names: &names,
                     lookup,
                     pending_controls: Some(&mut pending),
+                    statement: None,
                 };
                 context.body()?;
                 out.close()?;
@@ -411,6 +421,7 @@ fn method(
                     names: &names,
                     lookup,
                     pending_controls: None,
+                    statement: None,
                 };
                 for local in prefix.local_declarations() {
                     context.out.indent()?;

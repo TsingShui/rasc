@@ -205,6 +205,10 @@ const MAX_MARKERS: usize = 6;
 
 /// Prints the original flags without dumping a whole raw word. Undefined bits
 /// stay visible as their own residual mask.
+/// A method name that is the DEX constructor name, which is never an identifier.
+pub(super) fn initializer(units: &[u16]) -> bool {
+    units.iter().copied().eq("<init>".encode_utf16())
+}
 pub(super) fn flags(out: &mut Buffer, raw: u32, scope: FlagScope) -> Result<(), RenderError> {
     let common = [
         java(0x1, "public "),

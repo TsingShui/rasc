@@ -25,6 +25,12 @@ pub(super) trait ExpressionSource {
     fn field_qualification(&self, _reference: ReferenceId) -> bool {
         true
     }
+    fn inline_check(&self, _statement: StatementId, _value: StorageId) -> Option<InlineCheck> {
+        None
+    }
+    fn statement_sites(&self, _statement: StatementId) -> &[SiteId] {
+        &[]
+    }
     /// A partial product has no selected store form.
     fn natural_store(&self, _statement: StatementId) -> bool {
         false
@@ -57,6 +63,14 @@ impl ExpressionSource for MethodCode {
     }
     fn field_qualification(&self, reference: ReferenceId) -> bool {
         self.emission().field_qualification(reference)
+    }
+    fn inline_check(&self, statement: StatementId, value: StorageId) -> Option<InlineCheck> {
+        self.emission().inline_check(statement, value)
+    }
+    fn statement_sites(&self, statement: StatementId) -> &[SiteId] {
+        self.statements()
+            .get(statement.0 as usize)
+            .map_or(&[], |statement| statement.sites.as_slice())
     }
     fn natural_store(&self, statement: StatementId) -> bool {
         self.emission().natural_store(statement)
@@ -92,6 +106,9 @@ pub(super) struct Expressions<'a, 'b, S: ExpressionSource = MethodCode> {
     pub names: &'a MethodNames,
     pub lookup: &'a Lookup<'a>,
     pub pending_controls: Option<&'b mut [Option<super::TextOffset>]>,
+    /// The statement currently printing, so an inlined check-cast can wrap the
+    /// read that carries it.
+    pub statement: Option<StatementId>,
 }
 impl<S: ExpressionSource> Expressions<'_, '_, S> {
     /// A construction whose only publication is its own deferred carrier is an
@@ -197,7 +214,9 @@ impl<S: ExpressionSource> Expressions<'_, '_, S> {
                 }
             }
             StatementKind::CheckCast { value, reference } => {
-                self.out.put("check_cast ")?;
+                // A cast statement keeps the check at its original position and
+                // writes no register; the value keeps its own local.
+                self.out.put("cast ")?;
                 self.operand(*value)?;
                 self.out.put(" to ")?;
                 self.reference(*reference)?;
@@ -228,13 +247,15 @@ impl<S: ExpressionSource> Expressions<'_, '_, S> {
             }
             StatementKind::CaptureException => self.out.put("capture_exception")?,
             StatementKind::Initialize {
-                expression, syntax, ..
+                expression,
+                syntax,
+                relation,
             } => {
                 let ExprKind::Call(c) = &self.code.expressions()[expression.0 as usize].kind else {
                     return Err(RenderError::Invariant("initialization lost its invocation"));
                 };
                 let a = self.out.position();
-                self.call(c, Some(*syntax))?;
+                self.call(c, Some(*syntax), Some(*relation))?;
                 self.out.span(
                     a,
                     Origin::Expression {
@@ -321,7 +342,42 @@ impl<S: ExpressionSource> Expressions<'_, '_, S> {
         let start = self.out.position();
         match &e.kind {
             ExprKind::Read { storage, .. } => {
-                if let Some(composed) = self.code.composed_use(id) {
+                if let Some(check) = self
+                    .statement
+                    .and_then(|statement| self.code.inline_check(statement, *storage))
+                {
+                    // The check prints at its first use and keeps its own origin.
+                    self.out.put("((")?;
+                    self.reference(check.reference)?;
+                    self.out.put(") ")?;
+                    self.local(*storage)?;
+                    self.out.put(")")?;
+                    self.out.span(
+                        start,
+                        Origin::Statement {
+                            method: self.method,
+                            statement: check.check,
+                        },
+                    )?;
+                    self.out.span(
+                        start,
+                        Origin::Operation {
+                            method: self.method,
+                            operation: check.operation,
+                            pc: check.pc,
+                        },
+                    )?;
+                    // A hidden route still keeps an anchor at the check's text.
+                    for &site in self.code.statement_sites(check.check) {
+                        self.out.span(
+                            start,
+                            Origin::Site {
+                                method: self.method,
+                                site,
+                            },
+                        )?;
+                    }
+                } else if let Some(composed) = self.code.composed_use(id) {
                     self.expr(composed.expression)?;
                     self.out.span(
                         start,
@@ -476,7 +532,7 @@ impl<S: ExpressionSource> Expressions<'_, '_, S> {
                 self.args(elements)?;
                 self.out.put("}")?;
             }
-            ExprKind::Call(call) => self.call(call, None)?,
+            ExprKind::Call(call) => self.call(call, None, None)?,
             ExprKind::New {
                 reference,
                 constructor,
@@ -548,20 +604,32 @@ impl<S: ExpressionSource> Expressions<'_, '_, S> {
         }
         match &reference.declaration {
             Ok(ReferenceDeclaration::Member(m)) => {
-                let (owner, name) = match m {
-                    MemberDeclaration::Field { owner, name, .. }
-                    | MemberDeclaration::Method { owner, name, .. } => (*owner, name),
+                let (owner, name, initializer) = match m {
+                    MemberDeclaration::Field { owner, name, .. } => (*owner, name, false),
+                    MemberDeclaration::Method { owner, name, .. } => (
+                        *owner,
+                        name,
+                        name.units.iter().copied().eq("<init>".encode_utf16()),
+                    ),
                 };
-                if receiver.is_none() {
+                if initializer {
+                    // A constructor reference names the type it constructs.
+                    // `name<"<init>">` would hide the owner behind a name that
+                    // is not an identifier, and repeating the owner before it
+                    // would print the type twice.
                     self.ty(owner)?;
-                    self.out.put(".")?;
+                } else {
+                    if receiver.is_none() {
+                        self.ty(owner)?;
+                        self.out.put(".")?;
+                    }
+                    if signature && receiver.is_some() {
+                        self.out.put("binding<")?;
+                        self.ty(owner)?;
+                        self.out.put(">::")?;
+                    }
+                    self.out.name(&name.units, name.form)?;
                 }
-                if signature && receiver.is_some() {
-                    self.out.put("binding<")?;
-                    self.ty(owner)?;
-                    self.out.put(">::")?;
-                }
-                self.out.name(&name.units, name.form)?;
                 if signature {
                     match m {
                         MemberDeclaration::Field { field_type, .. } => {
@@ -599,6 +667,7 @@ impl<S: ExpressionSource> Expressions<'_, '_, S> {
         &mut self,
         c: &Call,
         initialization: Option<InitializationSyntax>,
+        relation: Option<crate::p4::ConstructorRelation>,
     ) -> Result<(), RenderError> {
         if let Some(InitializationSyntax::This | InitializationSyntax::Super) = initialization {
             let start = self.out.position();
@@ -627,7 +696,29 @@ impl<S: ExpressionSource> Expressions<'_, '_, S> {
             ) {
                 self.out.fmt(format_args!("invoke<{:?}> ", c.kind))?;
             }
-            self.member(c.target, c.receiver, false)?;
+            // A constructor delegation names the original constructor's owner,
+            // never the object under construction: `this`/`super` already say
+            // the receiver, so repeating it would claim a `this.<init>` target
+            // for a superclass call.
+            let receiver = match relation {
+                Some(
+                    crate::p4::ConstructorRelation::This | crate::p4::ConstructorRelation::Super,
+                ) => None,
+                _ => c.receiver,
+            };
+            self.member(c.target, receiver, false)?;
+            if receiver.is_none()
+                && let Some(receiver) = c.receiver
+            {
+                let start = self.out.position();
+                self.out.span(
+                    start,
+                    Origin::Expression {
+                        method: self.method,
+                        expression: receiver,
+                    },
+                )?;
+            }
         }
         if let Some(proto) = c.invocation_prototype {
             self.out.put(" [invocation prototype: ")?;
@@ -699,9 +790,13 @@ impl<S: ExpressionSource> Expressions<'_, '_, S> {
                         name,
                         prototype,
                     } => {
+                        // A constructor handle names the type it constructs,
+                        // the same way an ordinary constructor reference does.
                         self.ty(*owner)?;
-                        self.out.put(".")?;
-                        self.out.name(&name.units, name.form)?;
+                        if !name.units.iter().copied().eq("<init>".encode_utf16()) {
+                            self.out.put(".")?;
+                            self.out.name(&name.units, name.form)?;
+                        }
                         self.signature(prototype)?;
                     }
                 }

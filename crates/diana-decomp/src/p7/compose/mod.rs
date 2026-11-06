@@ -155,6 +155,7 @@ pub(super) fn construct(code: &mut MethodCode) -> Result<(), ExpressionError> {
     }
     expressions::construct(code)?;
     natural_stores(code)?;
+    inline_check_casts(code)?;
     Ok(())
 }
 
@@ -633,4 +634,169 @@ fn mark_terminal_targets(
         _ => {}
     }
     Ok(())
+}
+
+/// A `check-cast` whose value is read by the very next statement, at that
+/// statement's first evaluated leaf, prints inside that use. Nothing is
+/// reordered: the check still happens before every effect of that statement, and
+/// the checked local is not written.
+fn inline_check_casts(code: &mut MethodCode) -> Result<(), ExpressionError> {
+    let mut found: Vec<(StatementId, InlineCheck)> = Vec::new();
+    for node in 0..code.emission.blocks.len() {
+        let actions = &code.emission.blocks[node].actions;
+        for index in 0..actions.len().saturating_sub(1) {
+            let BodyAction::Statement {
+                operation,
+                statement,
+            } = actions[index]
+            else {
+                continue;
+            };
+            let StatementKind::CheckCast { value, reference } =
+                code.statements[statement.0 as usize].kind
+            else {
+                continue;
+            };
+            let ExprKind::Read { storage, .. } = code.expressions[value.0 as usize].kind else {
+                continue;
+            };
+            let phases = &code.emission.operations[operation.0 as usize];
+            if !phases.before.is_empty()
+                || !phases.snapshots.is_empty()
+                || !phases.after.is_empty()
+                || code.statements[statement.0 as usize]
+                    .sites
+                    .iter()
+                    .any(|&site| code.emission.site_annotation(site))
+            {
+                continue;
+            }
+            let BodyAction::Statement {
+                statement: next, ..
+            } = actions[index + 1]
+            else {
+                continue;
+            };
+            if code.statements[next.0 as usize]
+                .outputs
+                .iter()
+                .any(|output| {
+                    matches!(
+                        output.materialization(),
+                        crate::p5::Materialization::Store(local) if StorageId(local.0) == storage
+                    )
+                })
+            {
+                continue;
+            }
+            if first_leaf(code, next).is_none_or(|leaf| !reads(code, leaf, storage)) {
+                continue;
+            }
+            super::build::push(
+                &mut found,
+                (
+                    statement,
+                    InlineCheck {
+                        check: statement,
+                        operation,
+                        pc: code.operations[operation.0 as usize].pc,
+                        value: storage,
+                        reference,
+                        target: next,
+                    },
+                ),
+            )?;
+        }
+    }
+    if found.is_empty() {
+        return Ok(());
+    }
+    for (_, check) in &found {
+        let index = u32::try_from(code.emission.inline_checks.len())
+            .map_err(|_| crate::RequestError::PlatformCapacity)?;
+        super::build::push(&mut code.emission.inline_checks, *check)?;
+        super::build::push(
+            &mut code.emission.check_uses[check.target.0 as usize],
+            index,
+        )?;
+    }
+    // The check statement prints nothing of its own; its provenance moves to the
+    // use. Removing the collected statements keeps every other action in place.
+    for block in &mut code.emission.blocks {
+        block.actions.retain(|action| match action {
+            BodyAction::Statement { statement, .. } | BodyAction::Release { statement, .. } => {
+                !found.iter().any(|(check, _)| check == statement)
+            }
+            BodyAction::Receive { .. } => true,
+        });
+    }
+    Ok(())
+}
+
+/// The leftmost value this statement evaluates in its printed form.
+fn first_leaf(code: &MethodCode, statement: StatementId) -> Option<ExprId> {
+    let statement = code.statements.get(statement.0 as usize)?;
+    match &statement.kind {
+        StatementKind::Move { expression, .. } | StatementKind::Evaluate { expression } => {
+            leftmost(code, *expression)
+        }
+        // A natural store prints its receiver or array first; the explicit form
+        // prints the value first.
+        StatementKind::FieldStore {
+            receiver, value, ..
+        } => {
+            if code.emission.natural_store(statement.id) {
+                match receiver {
+                    Some(receiver) => leftmost(code, *receiver),
+                    None => None,
+                }
+            } else {
+                leftmost(code, *value)
+            }
+        }
+        StatementKind::ArrayStore { array, value, .. } => {
+            if code.emission.natural_store(statement.id) {
+                leftmost(code, *array)
+            } else {
+                leftmost(code, *value)
+            }
+        }
+        _ => None,
+    }
+}
+
+fn leftmost(code: &MethodCode, expression: ExprId) -> Option<ExprId> {
+    let expression = code.expressions.get(expression.0 as usize)?;
+    if let Some(composed) = code.emission.composed_use(expression.id) {
+        return leftmost(code, composed.expression);
+    }
+    match &expression.kind {
+        ExprKind::Read { .. }
+        | ExprKind::Snapshot { .. }
+        | ExprKind::Literal { .. }
+        | ExprKind::Unavailable { .. } => Some(expression.id),
+        ExprKind::Unary { value, .. } => leftmost(code, *value),
+        ExprKind::Binary { left, .. } | ExprKind::Compare { left, .. } => leftmost(code, *left),
+        ExprKind::Array { array, .. } => leftmost(code, *array),
+        ExprKind::Field { receiver, .. } => receiver.and_then(|r| leftmost(code, r)),
+        ExprKind::ArrayLength(a) => leftmost(code, *a),
+        ExprKind::InstanceOf { value, .. } => leftmost(code, *value),
+        ExprKind::NewArray { length, .. } => leftmost(code, *length),
+        ExprKind::Call(call) => match call.receiver {
+            Some(receiver) => leftmost(code, receiver),
+            None => match &call.arguments {
+                Arguments::Known(args) => args.first().and_then(|a| leftmost(code, *a)),
+                Arguments::Unavailable { .. } => None,
+            },
+        },
+        ExprKind::New { arguments, .. } => arguments.first().and_then(|a| leftmost(code, *a)),
+        _ => None,
+    }
+}
+
+fn reads(code: &MethodCode, expression: ExprId, storage: StorageId) -> bool {
+    matches!(
+        code.expressions.get(expression.0 as usize).map(|e| &e.kind),
+        Some(ExprKind::Read { storage: read, .. }) if *read == storage
+    )
 }

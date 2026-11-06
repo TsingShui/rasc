@@ -6,6 +6,37 @@ use crate::{
 };
 
 impl Expressions<'_, '_> {
+    /// A trailing note for a statement printed in Diana syntax rather than Java.
+    /// It names the original instruction and the one fact the form hides.
+    fn generated_note(&self, s: &Statement) -> Option<&'static str> {
+        match &s.kind {
+            StatementKind::CheckCast { .. } => Some(
+                "// Diana generated this from check-cast: a failed check throws \
+                 ClassCastException and the value is not reassigned",
+            ),
+            StatementKind::CaptureException => Some(
+                "// Diana generated this from move-exception: it holds the throwable \
+                 caught by this handler",
+            ),
+            StatementKind::Initialize {
+                syntax: InitializationSyntax::Explicit,
+                ..
+            } => Some(
+                "// Diana generated this from invoke-direct: the constructor runs at this \
+                 point",
+            ),
+            StatementKind::Move { expression, .. } | StatementKind::Evaluate { expression } => {
+                match &self.code.expressions().get(expression.0 as usize)?.kind {
+                    ExprKind::AllocateInstance { .. } => Some(
+                        "// Diana generated this from new-instance: the object exists before \
+                         its constructor runs",
+                    ),
+                    _ => None,
+                }
+            }
+            _ => None,
+        }
+    }
     pub fn statement(&mut self, op: OpId, release: Option<ControlId>) -> Result<(), RenderError> {
         if self.code.emission().composed_operation(op) {
             return Ok(());
@@ -33,14 +64,23 @@ impl Expressions<'_, '_> {
             self.operand(lock)?;
             self.out.put(")")?;
         } else {
+            // Only the statement's own operands may carry an inlined check: the
+            // copies printed before it and any snapshot value after it are not
+            // the check's first use.
+            self.statement = Some(id);
             self.assignment(s)?;
             self.semantic(s)?;
+            self.statement = None;
         }
         if !matches!(s.kind, StatementKind::Construction(_)) {
             self.phases(&phases.snapshots, "after_operands_before_effect")?;
         }
         self.sites(&s.sites, start)?;
         self.out.put(";")?;
+        if let Some(note) = self.generated_note(s) {
+            self.out.put(" ")?;
+            self.out.put(note)?;
+        }
         for definition in &s.outputs {
             if let Materialization::Unavailable(gap) = definition.materialization() {
                 self.out

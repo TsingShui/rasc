@@ -34,6 +34,17 @@ pub enum BlockEnd {
     Terminal(BlockId),
     Transfers(Vec<TransferId>),
 }
+/// A `check-cast` printed at the first use of its value instead of as its own
+/// statement. The check and its operation keep their provenance there.
+#[derive(Clone, Copy, Debug, Serialize)]
+pub struct InlineCheck {
+    pub check: StatementId,
+    pub operation: OpId,
+    pub pc: crate::CodeUnitOffset,
+    pub value: StorageId,
+    pub reference: ReferenceId,
+    pub target: StatementId,
+}
 /// One original definition evaluated at its unique, adjacent terminal use.
 #[derive(Clone, Copy, Debug, Serialize)]
 pub struct ComposedExpression {
@@ -156,6 +167,9 @@ pub struct EmissionPlan {
     /// A store prints as an ordinary assignment only when reordering its
     /// operands to Java's left-to-right order cannot be observed.
     pub(super) natural_stores: Vec<bool>,
+    pub(super) inline_checks: Vec<InlineCheck>,
+    /// Indices into `inline_checks`, by the statement that carries the check.
+    pub(super) check_uses: Vec<Vec<u32>>,
     pub(super) composed_uses: Vec<Option<ComposedExpression>>,
     pub(super) composed_operations: Vec<bool>,
     pub(super) hidden_locals: Vec<bool>,
@@ -176,6 +190,8 @@ impl EmissionPlan {
             site_annotations: Vec::new(),
             field_qualifications: Vec::new(),
             natural_stores: Vec::new(),
+            inline_checks: Vec::new(),
+            check_uses: Vec::new(),
             composed_uses: Vec::new(),
             composed_operations: Vec::new(),
             hidden_locals: Vec::new(),
@@ -198,6 +214,16 @@ impl EmissionPlan {
     }
     pub fn show_chains(&self) -> &[bool] {
         &self.show_chains
+    }
+    /// The check-cast carried by this statement for one read of `value`.
+    pub fn inline_check(&self, statement: StatementId, value: StorageId) -> Option<InlineCheck> {
+        for &index in self.check_uses.get(statement.0 as usize)? {
+            let check = self.inline_checks.get(index as usize)?;
+            if check.value == value {
+                return Some(*check);
+            }
+        }
+        None
     }
     pub fn natural_store(&self, id: StatementId) -> bool {
         self.natural_stores
@@ -309,6 +335,7 @@ pub(super) fn construct(code: &mut MethodCode) -> Result<(), ExpressionError> {
     plan.site_annotations = filled(code.sites.len(), true)?;
     plan.field_qualifications = filled(code.references.len(), true)?;
     plan.natural_stores = filled(code.statements.len(), false)?;
+    plan.check_uses = filled(code.statements.len(), Vec::new())?;
     plan.composed_uses = filled(code.expressions.len(), None)?;
     plan.composed_operations = filled(code.operations.len(), false)?;
     plan.hidden_locals = filled(code.locals.len(), false)?;

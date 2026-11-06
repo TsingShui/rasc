@@ -78,7 +78,21 @@ unchanged. An element that is itself a combined expression keeps the explicit
 form.
 
 Unary conversions correspond to original conversion operations. A check-cast
-remains a check with no invented register write. Array fill preserves its one
+remains a check with no invented register write. It prints as `cast v to T` at its
+original position, or as `((T) v)` inside the immediately following statement when
+that statement's first evaluated value is the checked local; the check then keeps
+its own statement and operation origins at the use. A check with a printed route,
+copy phase or later first operand stays a statement, and that statement carries one
+trailing comment naming the original `check-cast` and why the value is not
+reassigned.
+
+The same single trailing comment marks the other statements printed in Diana syntax
+rather than Java, naming the original instruction and the fact the form hides:
+`capture_exception` (`move-exception`, it holds the caught throwable),
+`allocate_uninitialized` (`new-instance`, the object exists before its constructor
+runs) and an explicit `initialize` (`invoke-direct`, the constructor runs at this
+point). Bracket annotations and block headers that are already visibly not Java keep
+no comment. Array fill preserves its one
 original operation, element width/count and bits. Explicit allocation and
 initialization stay separate when P5 did not select a compound construction.
 Unavailable reads and argument layouts print their supplied gaps and original
@@ -118,6 +132,22 @@ or local could qualify. A class initializer prints as `static { ... }`. An
 ordinary `new T(...)` omits the initializer suffix when the delivered constructor
 is that same type's `<init>`; a different delivered initializer keeps it. The
 original `<init>`/`<clinit>` identities remain in the owned method declaration.
+
+A constructor delegation whose receiver is still before its constructor prints as
+`this(...)` or `super(...)` exactly when it is the first statement the body prints,
+the target has no competing delivered overload and the earlier operations printed
+nothing (argument definitions that become their uses' values do not count). The
+original code offset is not the test. Otherwise the delegation keeps the explicit
+`initialize <Owner>(...)` form: a `this`/`super` receiver is not repeated as a
+qualifier, because that would name the object under construction instead of the
+original constructor's owner, and an ambiguous target still prints its
+`[binding ...]`.
+
+A constructor reference prints the type it constructs, never `name<"<init>">`:
+`initialize v5.ArrayList()` names the object and its constructor, and a `[binding
+...]` carries the same spelling with the original prototype. An annotation record
+for a constructor names that type too. The delivered `<init>` identity remains in
+the owned reference and declaration facts.
 
 A declared field type, method parameter and return type print their delivered
 generic arguments when the plan carries them, for example `Map<String, Face[]>`;
