@@ -834,7 +834,10 @@ impl Expressions<'_, '_> {
                     };
                     let clause = &self.code.chains()[chain.0 as usize].clauses
                         [clauses.start as usize + index];
-                    self.clause(clause)?;
+                    // The handler block follows immediately, so the clause
+                    // prints only the type it catches; the route target is the
+                    // enclosing catch itself and needs no second mention.
+                    self.clause_type(clause)?;
                     self.out.put(")")?;
                     self.out.open()?;
                 }
@@ -917,6 +920,28 @@ impl Expressions<'_, '_> {
         for issue in self.code.issues() {
             self.out.indent()?;
             self.out.fmt(format_args!("diagnostic {issue:?};\n"))?;
+        }
+        Ok(())
+    }
+    /// The caught type of one clause, without its route target.
+    fn clause_type(&mut self, c: &Clause) -> Result<(), RenderError> {
+        if let Some(catch) = &c.catch {
+            match &catch.descriptor {
+                Ok(t) => self.ty(*t)?,
+                Err(e) => {
+                    self.out
+                        .fmt(format_args!("unavailable_catch<{}; ", catch.original.0))?;
+                    self.out.quote(&e.detail)?;
+                    self.out.put(">")?;
+                }
+            }
+            if let Some(e) = &catch.use_issue {
+                self.out.put(" [")?;
+                self.out.quote(&e.detail)?;
+                self.out.put("]")?;
+            }
+        } else {
+            self.out.put("all")?;
         }
         Ok(())
     }

@@ -23,33 +23,26 @@ pub(super) fn construct(code: &mut MethodCode) -> Result<(), ExpressionError> {
     let mut labels = filled(code.labels.len(), false)?;
     let mut controls = filled(code.controls.len(), false)?;
     let mut chains = filled(code.chains.len(), false)?;
-    for chain in &code.chains {
-        if chain
-            .clauses
-            .iter()
-            .any(|clause| clause.catch.is_some() || clause.target.is_some())
-        {
-            *chains
-                .get_mut(chain.id.0 as usize)
-                .ok_or(bug("exception chain lost its identity"))? = true;
-        }
-    }
+    // A catch clause prints as its `try` clause, so a chain line is only needed
+    // when a printed site names it. A chain nothing points at would be a second,
+    // unreferenced statement of the same routes.
+    code.emission.site_annotations = site_annotations(code)?;
     for site in &code.sites {
-        if !matches!(site.syntax, ExceptionSyntax::Propagate) {
-            *chains
-                .get_mut(site.chain.0 as usize)
-                .ok_or(bug("site names an unknown exception chain"))? = true;
-            for route in &site.routes {
-                if let Delivery::Catch(control) = route.delivery {
-                    *controls
-                        .get_mut(control.0 as usize)
-                        .ok_or(bug("exception route names an unknown control"))? = true;
-                }
+        if !code.emission.site_annotations[site.id.0 as usize] {
+            continue;
+        }
+        *chains
+            .get_mut(site.chain.0 as usize)
+            .ok_or(bug("site names an unknown exception chain"))? = true;
+        for route in &site.routes {
+            if let Delivery::Catch(control) = route.delivery {
+                *controls
+                    .get_mut(control.0 as usize)
+                    .ok_or(bug("exception route names an unknown control"))? = true;
             }
         }
     }
     code.emission.show_chains = chains;
-    code.emission.site_annotations = site_annotations(code)?;
     code.emission.field_qualifications = field_qualifications(code)?;
     for transfer in &code.emission.transfers {
         match transfer.spelling {
@@ -79,6 +72,11 @@ pub(super) fn construct(code: &mut MethodCode) -> Result<(), ExpressionError> {
         }
     }
     for chain in &code.chains {
+        // Only a printed chain line names its handler targets; otherwise the
+        // catch clause that prints the route carries no label text.
+        if !code.emission.show_chains[chain.id.0 as usize] {
+            continue;
+        }
         for clause in &chain.clauses {
             if let Some(target) = clause.target {
                 mark_label(&mut labels, target)?;
