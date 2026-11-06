@@ -29,6 +29,18 @@ inspection share immutable owned P8 results, including assembly stops, rather th
 copying expression arenas. P9's renderer consumes the established products as
 described in [the rendering chapter](09-rendering.md).
 
+The class header states the printed form of the original header: kind, flags, name
+and the superclass clause. `SuperclassClause::Implicit` states that Java has no
+clause there, which covers an interface, annotation or enum, an absent original
+entry, and an ordinary class whose delivered superclass is exactly
+`java.lang.Object`. `SuperclassClause::Printed` keeps the delivered spelling,
+including a missing, unread or unavailable fact, so a gap stays visible. The
+original superclass type use and its planned import are unchanged either way.
+
+`ClassResult` also records the class initializers whose printed body states
+nothing, because such a block prints no text. The delivered member stays in the
+result; P9 omits only the `static { ... }` block of a recorded initializer.
+
 ## Directory and failure locality
 
 Assembly associates methods by original MethodId under the original ClassKey.

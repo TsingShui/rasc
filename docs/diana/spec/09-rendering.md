@@ -222,10 +222,22 @@ because of it. The original flag word still distinguishes VM locking from the
 declared modifier.
 
 An interface, annotation or enum prints no superclass clause: Java has none there
-and the delivered Object/Enum entry is implicit. A missing or unavailable
-superclass fact still prints, so the gap stays visible. A class initializer prints
-as `static { ... }` without access modifiers, because Java static initializers
-cannot carry them; those bits remain in the method's original flags.
+and the delivered Object/Enum entry is implicit. An ordinary class whose delivered
+superclass is exactly `java.lang.Object` prints no clause either, because Java
+source never states that relationship; the delivered type use and its planned
+import stay unchanged. A missing, unread or unavailable superclass fact still
+prints, so the gap stays visible, and every other superclass keeps its clause. P8
+selects that clause and P9 prints the selected form.
+
+A class initializer prints as `static { ... }` without access modifiers, because
+Java static initializers cannot carry them; those bits remain in the method's
+original flags. An initializer whose printed body states nothing prints no block
+at all. P8 omits the block when the initializer prints no local declaration, no
+chain clause, no call-site definition, no copy, no diagnostic, no action and no
+block end that still states text, and it keeps the block when a record of that
+member or that member's metadata gap would print at the same position. The
+member, its header, its original identities and its code remain in the class
+product and coverage; only its text is absent.
 
 P9 MUST preserve P8's base spelling and array rank. Original-name forms and raw
 descriptors remain explicit. Literal strings do not pass through name planning.

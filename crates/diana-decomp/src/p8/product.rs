@@ -211,13 +211,23 @@ pub enum InterfaceList {
     NotRead,
     Unavailable,
 }
+/// The class header's superclass clause. Java states none where the delivered
+/// entry is implicit there, and an original entry that is not stated is not a
+/// gap: only a missing or unread fact keeps its clause.
+#[derive(Serialize)]
+pub enum SuperclassClause {
+    /// No `extends` clause, because Java has none for this class.
+    Implicit,
+    /// `extends <type>`, including a delivered gap such as `type_not_read`.
+    Printed(TypeExpression),
+}
 #[derive(Serialize)]
 pub struct ClassHeader {
     pub name: super::values::ValueName,
     pub kind: ClassKind,
     pub flags: u32,
     pub owner: TypeUseId,
-    pub superclass: TypeExpression,
+    pub superclass: SuperclassClause,
     pub interfaces: InterfaceList,
 }
 /// Directory-driven, owned class display. Metadata and preparation values remain
@@ -236,6 +246,9 @@ pub struct ClassResult {
     /// Whether that order states any encoded value. A list of implicit defaults
     /// describes no value, because the class initializer assigns those fields.
     pub(super) preparation_has_values: bool,
+    /// Class initializers whose printed body states nothing. Each member keeps
+    /// its delivery, header and facts; only its `static { ... }` text is omitted.
+    pub(super) silent_initializers: Vec<MethodId>,
 }
 impl ClassResult {
     pub fn key(&self) -> ClassKey {
@@ -266,6 +279,11 @@ impl ClassResult {
     /// `Preparation` states remain available either way.
     pub fn preparation_has_values(&self) -> bool {
         self.preparation_has_values
+    }
+    /// Whether this class initializer prints no text, so its block is omitted.
+    /// The member, its facts and its parameter list remain in the product.
+    pub fn initializer_prints_nothing(&self, id: MethodId) -> bool {
+        self.silent_initializers.contains(&id)
     }
 }
 #[derive(Serialize)]

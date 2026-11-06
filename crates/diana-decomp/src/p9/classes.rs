@@ -20,6 +20,7 @@ pub(super) fn render(out: &mut Buffer, source: &SourceProduct) -> Result<(), Ren
                 Some(&attachments),
                 method.member(),
                 None,
+                false,
             )
         }
         SourceProduct::ClassStopped(stop) | SourceProduct::MethodStopped(stop) => {
@@ -52,7 +53,7 @@ pub(super) fn render(out: &mut Buffer, source: &SourceProduct) -> Result<(), Ren
             }
             super::raw::assembly(out, stop, matches!(source, SourceProduct::ClassStopped(_)))?;
             for m in stop.methods() {
-                member(out, &lookup, stop.facts(), None, m, None)?;
+                member(out, &lookup, stop.facts(), None, m, None, false)?;
             }
             if matches!(source, SourceProduct::ClassStopped(_)) {
                 out.close()?;
@@ -107,18 +108,13 @@ fn class_result(out: &mut Buffer, class: &p8::ClassResult) -> Result<(), RenderE
     if let Some(parameters) = lookup.class_parameters() {
         super::names::type_parameters(out, &lookup, parameters)?;
     }
-    // An interface, annotation or enum has no superclass clause in Java; the
-    // delivered Object/Enum entry is implicit there. A missing or unavailable
-    // superclass fact is still printed so the gap stays visible.
-    let implicit = matches!(
-        header.kind,
-        p8::ClassKind::Interface | p8::ClassKind::Annotation | p8::ClassKind::Enum
-    ) && matches!(header.superclass, p8::TypeExpression::Present(_));
-    if !implicit && !matches!(header.superclass, p8::TypeExpression::Absent) {
+    // P8 already decided whether the clause prints at all; a delivered generic
+    // superclass prints its interpreted arguments.
+    if let p8::SuperclassClause::Printed(superclass) = &header.superclass {
         out.put(" extends ")?;
         match lookup.signature(p8::SignatureOwner::Superclass) {
             Some(root) => super::names::signature(out, &lookup, root)?,
-            None => type_expression(out, &lookup, &header.superclass)?,
+            None => type_expression(out, &lookup, superclass)?,
         }
     }
     match &header.interfaces {
@@ -242,6 +238,7 @@ fn class_result(out: &mut Buffer, class: &p8::ClassResult) -> Result<(), RenderE
             Some(&attachments),
             m,
             Some(&class.header().name),
+            class.initializer_prints_nothing(m.id),
         )?;
     }
     for (kind, error) in [
@@ -282,10 +279,19 @@ fn member(
     attachments: Option<&Attachments<'_>>,
     member: &p8::MethodMember,
     class_name: Option<&p8::ValueName>,
+    prints_nothing: bool,
 ) -> Result<(), RenderError> {
     let initial_depth = out.depth;
     let start = out.position();
-    let result = method(out, lookup, facts, attachments, member, class_name);
+    let result = method(
+        out,
+        lookup,
+        facts,
+        attachments,
+        member,
+        class_name,
+        prints_nothing,
+    );
     match result {
         Ok(()) => {}
         Err(RenderError::Invariant(message)) => {
@@ -315,7 +321,14 @@ fn method(
     attachments: Option<&Attachments<'_>>,
     member: &p8::MethodMember,
     class_name: Option<&p8::ValueName>,
+    prints_nothing: bool,
 ) -> Result<(), RenderError> {
+    // P8 omits the `static { ... }` block of a class initializer whose printed
+    // body states nothing, because Java writes no empty initializer. The member
+    // stays in the product; its own span still anchors it here.
+    if prints_nothing {
+        return Ok(());
+    }
     // A record of this member prints above the header that names it; that header
     // is the declaration, so no owner prefix is printed with it. A standalone
     // publication has no class header to carry the residual block, which stays

@@ -1,5 +1,6 @@
 use super::*;
-use crate::p0::{ClassFacts, Fact, InitialValue};
+use crate::p0::{ClassFacts, Fact, InitialValue, OriginalText};
+use crate::p7::{BlockEnd, EmissionLayout, MethodCode, MethodKind, ReferenceDeclaration};
 use crate::substrate::owned::{push, reserve};
 use crate::{MethodId, RequestError};
 use std::sync::Arc;
@@ -18,6 +19,178 @@ fn type_expression<T>(
         Fact::Unavailable(_) => TypeExpression::Unavailable,
     })
 }
+/// The DEX descriptor of `java.lang.Object`, the superclass Java leaves implicit
+/// for an ordinary class.
+const OBJECT_DESCRIPTOR: &[u8] = b"Ljava/lang/Object;";
+
+/// The class header's superclass clause.
+///
+/// An interface, annotation or enum has no clause in Java, and neither has an
+/// ordinary class whose delivered superclass is exactly `java.lang.Object`: that
+/// entry is implicit, so printing it would state a relationship Java source does
+/// not write. An original entry that is absent is not stated either. A class
+/// whose superclass fact is missing, unread or unavailable keeps its clause so
+/// the gap stays visible, and every non-`Object` superclass keeps printing.
+fn superclass_clause(
+    kind: ClassKind,
+    fact: &Fact<OriginalText>,
+    plan: &TypeNamePlan,
+) -> Result<SuperclassClause, RequestError> {
+    Ok(match fact {
+        Fact::Present(delivered) => {
+            let implicit = !matches!(kind, ClassKind::Class)
+                || (delivered.units().len() == OBJECT_DESCRIPTOR.len()
+                    && delivered
+                        .units()
+                        .iter()
+                        .copied()
+                        .eq(OBJECT_DESCRIPTOR.iter().map(|&unit| u16::from(unit))));
+            if implicit {
+                SuperclassClause::Implicit
+            } else {
+                SuperclassClause::Printed(TypeExpression::Present(
+                    plan.find(TypeSource::Superclass)
+                        .ok_or(RequestError::InternalInvariant(
+                            "P8 superclass has no display use",
+                        ))?,
+                ))
+            }
+        }
+        Fact::Absent => SuperclassClause::Implicit,
+        Fact::NotRead => SuperclassClause::Printed(TypeExpression::NotRead),
+        Fact::Unavailable(_) => SuperclassClause::Printed(TypeExpression::Unavailable),
+    })
+}
+
+/// Whether a selected class initializer prints no text at all, which leaves the
+/// whole `static { ... }` block out of the class display.
+///
+/// The delivered member stays in the product: its delivery, header, original
+/// identities and code are unchanged; only its printed text disappears. Anything
+/// that would print at that position keeps the block as before, so a record of
+/// this member (which prints at its declaration), or its metadata gap, is not
+/// moved to the residual block.
+fn initializer_prints_nothing(
+    member: &MethodMember,
+    values: &ValuePlan,
+) -> Result<bool, RequestError> {
+    let Ok(MethodDelivery::Expressed(result) | MethodDelivery::Declared(result)) = &member.delivery
+    else {
+        return Ok(false);
+    };
+    let header = result.header();
+    if !matches!(header.kind, MethodKind::ClassInitializer)
+        || header.metadata_error.is_some()
+        || values
+            .annotations()
+            .iter()
+            .any(|record| match record.location {
+                crate::AnnotationLocation::Method(id) => id == member.id,
+                crate::AnnotationLocation::Parameter { method, .. } => method == member.id,
+                _ => false,
+            })
+    {
+        return Ok(false);
+    }
+    match result.code() {
+        None => Ok(true),
+        Some(code) => code_prints_nothing(code),
+    }
+}
+
+/// Whether a delivered statement schedule prints not one line.
+///
+/// A local declaration, a delivered issue, a printed chain clause, a call-site
+/// definition, an initial copy, a labelled or continuing control, a printed
+/// block label, any action and any end that still states text all print. An
+/// omitted control prints nothing, and an unlabelled sequence prints only its
+/// children, so the traversal follows those two forms and stops at every other.
+fn code_prints_nothing(code: &MethodCode) -> Result<bool, RequestError> {
+    let emission = code.emission();
+    let silent_locals = code.locals().iter().all(|local| {
+        emission.hidden_local(local.id)
+            || matches!(
+                local.original.kind(),
+                crate::p5::LocalKind::Parameter { .. }
+            )
+    });
+    let silent_chains = code.chains().iter().all(|chain| {
+        chain.clauses.is_empty()
+            || !emission
+                .show_chains()
+                .get(chain.id.0 as usize)
+                .copied()
+                .unwrap_or(true)
+    });
+    let silent_references = code.references().iter().all(|reference| {
+        !matches!(
+            &reference.declaration,
+            Ok(ReferenceDeclaration::CallSite { .. })
+        )
+    });
+    if !silent_locals
+        || !silent_chains
+        || !silent_references
+        || !code.issues().is_empty()
+        || !emission.initial().is_empty()
+    {
+        return Ok(false);
+    }
+    let Some(root) = code.root() else {
+        return Ok(true);
+    };
+    let mut work = Vec::new();
+    push(&mut work, root)?;
+    while let Some(id) = work.pop() {
+        let Some(control) = emission.controls().get(id.0 as usize) else {
+            return Ok(false);
+        };
+        if control.omitted {
+            continue;
+        }
+        if control.label_required || control.continuation.is_some() {
+            return Ok(false);
+        }
+        match &control.layout {
+            EmissionLayout::Block(node) => {
+                let Some(block) = emission.blocks().get(node.0 as usize) else {
+                    return Ok(false);
+                };
+                if block.show_label || !block.actions.is_empty() {
+                    return Ok(false);
+                }
+                match &block.end {
+                    BlockEnd::None => {}
+                    BlockEnd::Terminal(terminal) => {
+                        if !emission.omitted_return(*terminal) {
+                            return Ok(false);
+                        }
+                    }
+                    BlockEnd::Transfers(transfers) => {
+                        if !transfers.is_empty() {
+                            return Ok(false);
+                        }
+                    }
+                }
+            }
+            EmissionLayout::Sequence => {
+                let Some(children) = code
+                    .controls()
+                    .get(id.0 as usize)
+                    .map(|control| control.children.as_slice())
+                else {
+                    return Ok(false);
+                };
+                for &child in children {
+                    push(&mut work, child)?;
+                }
+            }
+            _ => return Ok(false),
+        }
+    }
+    Ok(true)
+}
+
 fn association(
     facts: &ClassFacts,
     methods: &[MethodMember],
@@ -140,7 +313,7 @@ pub(crate) fn assemble(
             kind,
             flags: flags.raw(),
             owner,
-            superclass: type_expression(facts.superclass(), &plan, TypeSource::Superclass)?,
+            superclass: superclass_clause(kind, facts.superclass(), &plan)?,
             interfaces,
         };
         let mut fields = Vec::new();
@@ -187,10 +360,17 @@ pub(crate) fn assemble(
             )?;
         }
         super::values::construct(&mut values, &facts, &plan, None)?;
-        Ok((header, fields, preparation_order))
+        let mut silent_initializers = Vec::new();
+        reserve(&mut silent_initializers, methods.len())?;
+        for member in &methods {
+            if initializer_prints_nothing(member, &values)? {
+                push(&mut silent_initializers, member.id)?;
+            }
+        }
+        Ok((header, fields, preparation_order, silent_initializers))
     })();
     match result {
-        Ok((header, fields, preparation_order)) => {
+        Ok((header, fields, preparation_order, silent_initializers)) => {
             let preparation_has_values = preparation_order
                 .iter()
                 .any(|&index| fields[index].preparation != Preparation::ImplicitDefault);
@@ -203,6 +383,7 @@ pub(crate) fn assemble(
                 names: plan,
                 preparation_order,
                 preparation_has_values,
+                silent_initializers,
             }))
         }
         Err(error) => ClassOutcome::Stopped(Arc::new(AssemblyStop {
