@@ -156,31 +156,48 @@ fn class_result(out: &mut Buffer, class: &p8::ClassResult) -> Result<(), RenderE
             let f = &class.fields()[field];
             out.indent()?;
             let a = out.position();
-            out.fmt(format_args!("field#{}: {:?}", f.id.0, f.preparation))?;
-            if let Some((_, range)) = class
-                .values()
-                .preparations()
-                .iter()
-                .find(|(id, _)| *id == f.id)
-            {
-                out.put(" [")?;
-                super::values::values(
-                    out,
-                    &lookup,
-                    &class.values().expressions()[range.start as usize..range.end as usize],
-                )?;
-                out.put("]")?;
+            // The declaration name identifies the field; an unavailable
+            // declaration keeps the original index instead of a guessed name.
+            match &f.expression {
+                p8::FieldExpression::Declared { name, form, .. } => out.name(name, *form)?,
+                _ => out.fmt(format_args!("field#{}", f.id.0))?,
             }
-            if let Some(original) = class.facts().field_entry(f.id) {
-                match original.initial_value() {
-                    Fact::Unavailable(error) => out.fmt(format_args!(" [unavailable: {error}]"))?,
-                    Fact::Present(crate::p0::InitialValue::Encoded { extent, .. })
-                        if matches!(f.preparation, p8::Preparation::EncodedPrefix) =>
-                    {
-                        out.fmt(format_args!(" [extent: {extent:?}]"))?
+            out.put(" = ")?;
+            match f.preparation {
+                p8::Preparation::ImplicitDefault => out.put("implicit_default")?,
+                p8::Preparation::Encoded | p8::Preparation::EncodedPrefix => {
+                    let range = class
+                        .values()
+                        .preparations()
+                        .iter()
+                        .find(|(id, _)| *id == f.id)
+                        .map(|(_, range)| range.clone());
+                    match range {
+                        Some(range) => super::values::values(
+                            out,
+                            &lookup,
+                            &class.values().expressions()[range.start as usize..range.end as usize],
+                        )?,
+                        None => out.put("encoded_value_unavailable")?,
                     }
-                    _ => {}
+                    if matches!(f.preparation, p8::Preparation::EncodedPrefix) {
+                        out.put(" /* encoded prefix */")?;
+                    }
                 }
+                p8::Preparation::Unavailable => {
+                    out.put("unavailable<")?;
+                    match class
+                        .facts()
+                        .field_entry(f.id)
+                        .map(|entry| entry.initial_value())
+                    {
+                        Some(Fact::Unavailable(error)) => out.fmt(format_args!("{error}"))?,
+                        _ => out.put("preparation state unknown")?,
+                    }
+                    out.put(">")?;
+                }
+                p8::Preparation::Absent => out.put("encoded_value_absent")?,
+                p8::Preparation::NotRead => out.put("preparation_not_read")?,
             }
             out.put(";\n")?;
             out.span(a, Origin::Preparation(f.id))?;

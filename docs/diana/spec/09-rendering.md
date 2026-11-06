@@ -82,6 +82,13 @@ words, not zero, null or an empty argument list.
 
 ## Declarations, metadata and literal identity
 
+Static preparation prints one `name = value` line per original static ordinal
+before the class initializer, using the field declaration name and the original
+index when that declaration is unavailable. An entry the encoded array does not
+cover prints `implicit_default`; a decoded entry prints its expression, with an
+explicit prefix marker when the traversal stopped early. These are encoded values,
+not executed assignments, so they are not folded into the field declaration.
+
 P9 prints the supplied member list, including no-code, synthetic/bridge and
 stopped members. It does not infer nesting from `$` or create declarations for an
 unlocated directory suffix. Static preparation follows P8's original ordinal
