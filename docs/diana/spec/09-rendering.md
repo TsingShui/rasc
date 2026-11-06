@@ -42,7 +42,8 @@ The following forms have fixed execution meanings:
 | `receiver.field = value` / `array[index] = value` | Ordinary assignment. It is used whenever the array, index or receiver slot is a plain local read or literal, because reading them before the value cannot be observed and the null/bounds check still follows the value. |
 | `store value -> receiver.field` or `store value -> array[index]` | Fallback when a non-value slot is an inlined expression or an unavailable operand, so Java's left-to-right order would not match the delivered store. |
 | `[after_operands_before_effect { copies }]` | Capture the operation's original operands, run its supplied snapshot steps, then execute the original effect. A result assignment commits only on normal completion. |
-| `new T(arguments) [on_success publish (locals)]` | Execute the selected P5 construction and publish its aliases only after successful initialization. Its common snapshot prelude precedes allocation. |
+| `new T(arguments)` / `target = new T(arguments)` | Execute the selected P5 construction. A single publication that is the construction's own deferred carrier prints as an ordinary assignment, because Java assigns only after `new` completes. |
+| `new T(arguments) [on_success publish (locals)]` | Fallback when more than one alias publishes, or the publication is not that carrier. Aliases become visible only after successful initialization. |
 | `resume construction g at label` | Continue the selected compound expression at the original initializer's node. Absorbed members are not executed again; PC order is not an implicit continuation. |
 | `test { ... yield condition [repeat {...}] [exit {...}]; }` | A loop condition whose predicate node also carries statements or phases keeps this block form. Copies belong to the original repeating or exiting edge; an empty edge prints no clause. Outer negation changes repetition polarity, not which original edge owns copies. |
 | `while (condition [repeat {...}])` | When the predicate node holds nothing but the condition, P7 selects this compact form and the copies stay attached to their own original edge. |
@@ -93,6 +94,13 @@ values use P8's flat events; call-site bootstrap values use P7's owned events an
 leaf declarations. Counts, reference identities and local gaps remain visible.
 Neither path parses encoded input again or interprets Signature as recovered
 generic syntax.
+
+A constructor prints as `OwnerName(parameters)` with no return type, using the
+class declaration's name rather than a reference spelling that an unrelated field
+or local could qualify. A class initializer prints as `static { ... }`. An
+ordinary `new T(...)` omits the initializer suffix when the delivered constructor
+is that same type's `<init>`; a different delivered initializer keeps it. The
+original `<init>`/`<clinit>` identities remain in the owned method declaration.
 
 A declared field type, method parameter and return type print their delivered
 generic arguments when the plan carries them, for example `Map<String, Face[]>`;

@@ -32,6 +32,13 @@ impl Buffer {
                 None => RenderError::OutputInvariant("formatting an existing display fact failed"),
             })
     }
+    /// Removes indentation-level spaces just written, before a caller appends a
+    /// brace. Only used where no span has been recorded at the trimmed position.
+    pub fn trim_trailing_spaces(&mut self) {
+        while self.text.ends_with(' ') {
+            self.text.pop();
+        }
+    }
     pub fn position(&self) -> TextOffset {
         TextOffset(self.text.len())
     }

@@ -395,14 +395,15 @@ pub(super) fn collect<'a>(
             class.incomplete = true;
         }
     }
+    // The owner name also names a constructor in a standalone method display.
+    add(
+        &mut uses,
+        facts.descriptor().units(),
+        Some(facts.type_index()),
+        TypeSource::Owner,
+        Scope::Class,
+    )?;
     if !standalone {
-        add(
-            &mut uses,
-            facts.descriptor().units(),
-            Some(facts.type_index()),
-            TypeSource::Owner,
-            Scope::Class,
-        )?;
         if let Fact::Present(t) = facts.superclass() {
             add(
                 &mut uses,

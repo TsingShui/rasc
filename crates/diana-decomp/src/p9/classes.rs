@@ -17,6 +17,7 @@ pub(super) fn render(out: &mut Buffer, source: &SourceProduct) -> Result<(), Ren
                 method.facts(),
                 Some(method.values()),
                 method.member(),
+                None,
             )
         }
         SourceProduct::ClassStopped(stop) | SourceProduct::MethodStopped(stop) => {
@@ -49,7 +50,7 @@ pub(super) fn render(out: &mut Buffer, source: &SourceProduct) -> Result<(), Ren
             }
             super::raw::assembly(out, stop, matches!(source, SourceProduct::ClassStopped(_)))?;
             for m in stop.methods() {
-                member(out, &lookup, stop.facts(), None, m)?;
+                member(out, &lookup, stop.facts(), None, m, None)?;
             }
             if matches!(source, SourceProduct::ClassStopped(_)) {
                 out.close()?;
@@ -187,7 +188,14 @@ fn class_result(out: &mut Buffer, class: &p8::ClassResult) -> Result<(), RenderE
         out.close()?;
     }
     for m in class.methods() {
-        member(out, &lookup, class.facts(), None, m)?;
+        member(
+            out,
+            &lookup,
+            class.facts(),
+            None,
+            m,
+            Some(&class.header().name),
+        )?;
     }
     for (kind, error) in [
         ("fields", class.facts().fields_issue()),
@@ -226,10 +234,11 @@ fn member(
     facts: &crate::p0::ClassFacts,
     values: Option<&p8::ValuePlan>,
     member: &p8::MethodMember,
+    class_name: Option<&p8::ValueName>,
 ) -> Result<(), RenderError> {
     let initial_depth = out.depth;
     let start = out.position();
-    let result = method(out, lookup, facts, values, member);
+    let result = method(out, lookup, facts, values, member, class_name);
     match result {
         Ok(()) => {}
         Err(RenderError::Invariant(message)) => {
@@ -258,6 +267,7 @@ fn method(
     facts: &crate::p0::ClassFacts,
     values: Option<&p8::ValuePlan>,
     member: &p8::MethodMember,
+    class_name: Option<&p8::ValueName>,
 ) -> Result<(), RenderError> {
     // MethodDisplay already carries only this member's metadata; class metadata
     // is printed once from its supplied record scopes before member declarations.
@@ -277,7 +287,14 @@ fn method(
                 header.declaration.parameter_count(),
                 lookup,
             )?;
-            header_line(out, lookup, &names, header)?;
+            header_line(
+                out,
+                lookup,
+                &names,
+                header,
+                class_name,
+                lookup.find_use(p8::TypeSource::Owner),
+            )?;
             if let Some(code) = result.code() {
                 out.open()?;
                 let mut pending = Vec::new();
@@ -295,6 +312,9 @@ fn method(
                 };
                 context.body()?;
                 out.close()?;
+            } else if matches!(header.kind, p7::MethodKind::ClassInitializer) {
+                out.open()?;
+                out.close()?;
             } else {
                 out.put("; // no code item\n")?;
             }
@@ -307,7 +327,7 @@ fn method(
                     header.declaration.parameter_count(),
                     lookup,
                 )?;
-                header_line(out, lookup, &names, header)?;
+                header_line(out, lookup, &names, header, None, None)?;
             } else {
                 original_header(out, facts, member.id)?;
             }
@@ -444,6 +464,8 @@ fn header_line(
     lookup: &Lookup<'_>,
     names: &MethodNames,
     h: &p7::MethodHeader,
+    class_name: Option<&p8::ValueName>,
+    owner: Option<p8::TypeUseId>,
 ) -> Result<(), RenderError> {
     out.indent()?;
     super::names::flags(
@@ -457,6 +479,33 @@ fn header_line(
         },
     )?;
     let method = h.key.method;
+    match h.kind {
+        // A class initializer is a static block, not a callable method.
+        p7::MethodKind::ClassInitializer => {
+            if h.access_flags & 0x8 == 0 {
+                out.put("static ")?;
+            }
+            // The caller opens the block, so the modifier line must not end in a
+            // space. No span covers the trimmed indentation.
+            out.trim_trailing_spaces();
+            return Ok(());
+        }
+        // A constructor carries the owner name and no return type.
+        p7::MethodKind::Constructor => {
+            // The class declaration name is the constructor name. A reference
+            // spelling can be qualified by an unrelated field or local shadow.
+            match (class_name, owner) {
+                (Some(name), _) => out.name(&name.units, name.form)?,
+                (None, Some(id)) => lookup.print(out, id)?,
+                (None, None) => out.name(h.declaration.name_units(), h.name_form)?,
+            }
+            out.put("(")?;
+            parameters(out, lookup, names, h)?;
+            out.put(")")?;
+            return Ok(());
+        }
+        p7::MethodKind::Ordinary => {}
+    }
     match lookup.signature(p8::SignatureOwner::Return(method)) {
         Some(root) => super::names::signature(out, lookup, root)?,
         None => match names.result {
@@ -471,6 +520,17 @@ fn header_line(
     out.put(" ")?;
     out.name(h.declaration.name_units(), h.name_form)?;
     out.put("(")?;
+    parameters(out, lookup, names, h)?;
+    out.put(")")
+}
+
+fn parameters(
+    out: &mut Buffer,
+    lookup: &Lookup<'_>,
+    names: &MethodNames,
+    h: &p7::MethodHeader,
+) -> Result<(), RenderError> {
+    let method = h.key.method;
     for (i, ty) in h.declaration.parameter_types.iter().enumerate() {
         if i > 0 {
             out.put(", ")?;
@@ -492,8 +552,9 @@ fn header_line(
         out.put(" ")?;
         out.put(&h.parameter_names[i])?;
     }
-    out.put(")")
+    Ok(())
 }
+
 fn original_header(
     out: &mut Buffer,
     facts: &crate::p0::ClassFacts,

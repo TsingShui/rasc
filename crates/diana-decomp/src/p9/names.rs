@@ -184,7 +184,7 @@ const fn conveyed(mask: u32) -> Bit {
     }
 }
 
-const MAX_MARKERS: usize = 4;
+const MAX_MARKERS: usize = 6;
 
 /// Prints the original flags without dumping a whole raw word. Undefined bits
 /// stay visible as their own residual mask.
@@ -194,7 +194,7 @@ pub(super) fn flags(out: &mut Buffer, raw: u32, scope: FlagScope) -> Result<(), 
         java(0x2, "private "),
         java(0x4, "protected "),
     ];
-    let specific: [Bit; 9] = match scope {
+    let specific: [Bit; 10] = match scope {
         FlagScope::Class { interface } => [
             java(0x8, "static "),
             java(0x10, "final "),
@@ -209,6 +209,7 @@ pub(super) fn flags(out: &mut Buffer, raw: u32, scope: FlagScope) -> Result<(), 
             conveyed(0x4000),
             NONE,
             NONE,
+            NONE,
         ],
         FlagScope::Field => [
             java(0x8, "static "),
@@ -217,6 +218,7 @@ pub(super) fn flags(out: &mut Buffer, raw: u32, scope: FlagScope) -> Result<(), 
             java(0x80, "transient "),
             dex(0x1000, "synthetic"),
             dex(0x4000, "enum"),
+            NONE,
             NONE,
             NONE,
             NONE,
@@ -230,6 +232,7 @@ pub(super) fn flags(out: &mut Buffer, raw: u32, scope: FlagScope) -> Result<(), 
             java(0x100, "native "),
             java(0x400, "abstract "),
             java(0x800, "strictfp "),
+            dex(0x1000, "synthetic"),
             if initializer {
                 conveyed(0x10000)
             } else {

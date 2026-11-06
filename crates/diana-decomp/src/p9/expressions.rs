@@ -94,13 +94,41 @@ pub(super) struct Expressions<'a, 'b, S: ExpressionSource = MethodCode> {
     pub pending_controls: Option<&'b mut [Option<super::TextOffset>]>,
 }
 impl<S: ExpressionSource> Expressions<'_, '_, S> {
+    /// A construction whose only publication is its own deferred carrier is an
+    /// ordinary assignment: Java assigns the local only after `new` completes, so
+    /// no separate success marker is needed.
+    fn deferred_publication(&self, s: &Statement) -> Option<StorageId> {
+        let StatementKind::Construction(group) = s.kind else {
+            return None;
+        };
+        let group = self.code.constructions().get(group.0 as usize)?;
+        let [publication] = group.publications.as_slice() else {
+            return None;
+        };
+        let mut carrier = None;
+        for definition in &s.outputs {
+            if let p5::Materialization::Deferred { local, .. } = definition.materialization() {
+                carrier = Some(StorageId(local.0));
+            }
+        }
+        (carrier == Some(publication.destination)).then_some(publication.destination)
+    }
     pub fn assignment(&mut self, s: &Statement) -> Result<(), RenderError> {
+        let deferred = self.deferred_publication(s);
         let mut first = true;
         for definition in &s.outputs {
-            if let p5::Materialization::Store(local)
-            | p5::Materialization::AllocationCarrier(local)
-            | p5::Materialization::ExceptionCapture(local) = definition.materialization()
-            {
+            let local = match definition.materialization() {
+                p5::Materialization::Store(local)
+                | p5::Materialization::AllocationCarrier(local)
+                | p5::Materialization::ExceptionCapture(local) => Some(local),
+                p5::Materialization::Deferred { local, .. }
+                    if deferred == Some(StorageId(local.0)) =>
+                {
+                    Some(local)
+                }
+                _ => None,
+            };
+            if let Some(local) = local {
                 if !first {
                     self.out.put(", ")?;
                 }
@@ -221,14 +249,16 @@ impl<S: ExpressionSource> Expressions<'_, '_, S> {
             StatementKind::Construction(group) => {
                 let g = &self.code.constructions()[group.0 as usize];
                 self.expr(g.expression)?;
-                self.out.put(" [on_success publish (")?;
-                for (i, p) in g.publications.iter().enumerate() {
-                    if i > 0 {
-                        self.out.put(", ")?;
+                if self.deferred_publication(s).is_none() {
+                    self.out.put(" [on_success publish (")?;
+                    for (i, p) in g.publications.iter().enumerate() {
+                        if i > 0 {
+                            self.out.put(", ")?;
+                        }
+                        self.local(p.destination)?;
                     }
-                    self.local(p.destination)?;
+                    self.out.put(")]")?;
                 }
-                self.out.put(")]")?;
             }
         }
         Ok(())
@@ -431,9 +461,14 @@ impl<S: ExpressionSource> Expressions<'_, '_, S> {
                 self.reference(*reference)?;
                 self.out.put("(")?;
                 self.args_known(arguments)?;
-                self.out.put(") [initializer: ")?;
-                self.member(*constructor, None, true)?;
-                self.out.put("]")?;
+                self.out.put(")")?;
+                // `new T(...)` already states T's constructor. The suffix stays
+                // when the delivered initializer is a different declaration.
+                if !self.redundant_initializer(*reference, *constructor) {
+                    self.out.put(" [initializer: ")?;
+                    self.member(*constructor, None, true)?;
+                    self.out.put("]")?;
+                }
             }
         }
         self.out.span(
@@ -443,6 +478,22 @@ impl<S: ExpressionSource> Expressions<'_, '_, S> {
                 expression: id,
             },
         )
+    }
+    fn redundant_initializer(&self, reference: ReferenceId, constructor: ReferenceId) -> bool {
+        let (
+            Ok(ReferenceDeclaration::Type { type_use }),
+            Ok(ReferenceDeclaration::Member(MemberDeclaration::Method { owner, name, .. })),
+        ) = (
+            &self.code.references()[reference.0 as usize].declaration,
+            &self.code.references()[constructor.0 as usize].declaration,
+        )
+        else {
+            return false;
+        };
+        let initializer = name.units.iter().copied().eq("<init>".encode_utf16());
+        initializer
+            && self.code.types()[owner.0 as usize].units
+                == self.code.types()[type_use.0 as usize].units
     }
     pub fn signature(&mut self, p: &Prototype) -> Result<(), RenderError> {
         self.out.put("<(")?;

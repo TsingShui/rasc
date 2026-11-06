@@ -30,7 +30,12 @@ fn qualification(
     let Arguments::Known(args) = args else {
         return Qualification::FullSignature;
     };
-    if name.form == NameForm::Original || args.len() != prototype.parameters.len() {
+    // A constructor name is never a Java identifier; its owner already names the
+    // created or delegated type, so only a competing delivered overload makes the
+    // target ambiguous.
+    let initializer = name.units.iter().copied().eq("<init>".encode_utf16());
+    if (name.form == NameForm::Original && !initializer) || args.len() != prototype.parameters.len()
+    {
         return Qualification::FullSignature;
     }
     let owner_units = &c.code.types[owner.0 as usize].units;

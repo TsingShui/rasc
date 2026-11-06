@@ -57,6 +57,10 @@ it is not an empty parameter list. An unavailable expression retains its concret
 gap and provenance. P7 MUST NOT substitute zero, null, NOP or a fabricated local.
 Reference-read errors and opcode-use errors remain distinct.
 
+A constructor or delegated `this`/`super` call also uses the natural surface: its
+name is never a Java identifier and the receiver or created type already names the
+target, so only a competing delivered overload qualifies it.
+
 Ordinary calls use a natural surface unless the delivered references leave the
 binding ambiguous: an original-name form, a missing signature or argument layout,
 dynamic invocation, or another delivered reference with the same owner, name and
