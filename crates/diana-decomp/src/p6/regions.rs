@@ -28,10 +28,21 @@ fn list(set: &[bool]) -> Result<Vec<NodeId>, RegionError> {
     }
     Ok(out)
 }
+#[derive(Clone, Copy)]
+enum PartCompletion {
+    Ordinary,
+    LoopBody(LoopId),
+}
 struct Part {
     nodes: Vec<NodeId>,
     entry: Option<NodeId>,
     follow: Option<NodeId>,
+    completion: PartCompletion,
+}
+#[derive(Clone, Copy)]
+enum SuccessorBoundary {
+    True(LinkId),
+    False(LinkId),
 }
 struct Candidate {
     kind: RegionKind,
@@ -39,6 +50,7 @@ struct Candidate {
     follow: Option<NodeId>,
     members: Vec<NodeId>,
     parts: Vec<Part>,
+    successor_boundary: Option<SuccessorBoundary>,
 }
 fn add(
     f: &mut RegionFacts,
@@ -135,6 +147,16 @@ fn compose(
     owners: &mut [RegionId],
     part: Part,
 ) -> Result<RegionId, RegionError> {
+    let loop_continue = match part.completion {
+        PartCompletion::Ordinary => None,
+        PartCompletion::LoopBody(id) => {
+            let target = f.loops[id.0 as usize].continue_target();
+            if part.follow != Some(target) {
+                return Err(bug("loop body lost its continue boundary"));
+            }
+            Some(target)
+        }
+    };
     let set = mask(f.nodes.len(), &part.nodes)?;
     let mut roots = Vec::new();
     for &p in &part.nodes {
@@ -160,6 +182,11 @@ fn compose(
         for &p in &f.regions[r.0 as usize].nodes {
             for &l in &g.outgoing[p.0 as usize] {
                 let q = f.links[l.0 as usize].to;
+                // The accepted loop owns this body-completion link, not a
+                // successor sibling. Its original transfer and copies survive.
+                if Some(q) == loop_continue {
+                    continue;
+                }
                 if set[q.0 as usize] && owners[q.0 as usize] != r {
                     let q = owners[q.0 as usize];
                     if next.is_some_and(|old| old != q) {
@@ -201,6 +228,65 @@ fn compose(
         owners[p.0 as usize] = region;
     }
     Ok(region)
+}
+fn branch_proposal(
+    storage: &StorageMethod<'_>,
+    f: &RegionFacts,
+    g: &Graph,
+    entry: NodeId,
+    true_link: LinkId,
+    false_link: LinkId,
+    follow: Option<NodeId>,
+) -> Result<Option<Candidate>, RegionError> {
+    let empty = filled(f.nodes.len(), false)?;
+    let t = f.links[true_link.0 as usize].to;
+    let e = f.links[false_link.0 as usize].to;
+    let a = protection::reachable(storage, f, g, &[t], follow, &empty, false)?;
+    let b = protection::reachable(storage, f, g, &[e], follow, &empty, false)?;
+    if a[entry.0 as usize] || b[entry.0 as usize] || a.iter().zip(&b).any(|(a, b)| *a && *b) {
+        return Ok(None);
+    }
+    let mut set = filled(f.nodes.len(), false)?;
+    set[entry.0 as usize] = true;
+    for i in 0..set.len() {
+        set[i] |= a[i] || b[i];
+    }
+    let mut parts = Vec::new();
+    push(
+        &mut parts,
+        Part {
+            completion: PartCompletion::Ordinary,
+            nodes: copy(&[entry])?,
+            entry: Some(entry),
+            follow: None,
+        },
+    )?;
+    for (target, arm) in [(t, &a), (e, &b)] {
+        push(
+            &mut parts,
+            Part {
+                completion: PartCompletion::Ordinary,
+                nodes: list(arm)?,
+                entry: if Some(target) == follow {
+                    None
+                } else {
+                    Some(target)
+                },
+                follow,
+            },
+        )?;
+    }
+    Ok(Some(Candidate {
+        kind: RegionKind::If {
+            true_link,
+            false_link,
+        },
+        entry,
+        follow,
+        members: list(&set)?,
+        parts,
+        successor_boundary: None,
+    }))
 }
 fn candidates(
     storage: &StorageMethod<'_>,
@@ -246,6 +332,7 @@ fn candidates(
         push(
             &mut parts,
             Part {
+                completion: PartCompletion::Ordinary,
                 nodes: body,
                 entry,
                 follow: Some(l.continue_target()),
@@ -255,6 +342,7 @@ fn candidates(
             push(
                 &mut parts,
                 Part {
+                    completion: PartCompletion::Ordinary,
                     nodes: copy(&[condition])?,
                     entry: Some(condition),
                     follow: None,
@@ -269,6 +357,7 @@ fn candidates(
                 follow: l.follow,
                 members,
                 parts,
+                successor_boundary: None,
             },
         )?;
     }
@@ -277,6 +366,7 @@ fn candidates(
         push(
             &mut parts,
             Part {
+                completion: PartCompletion::Ordinary,
                 nodes: copy(&p.body)?,
                 entry: Some(p.entry),
                 follow: p.follow,
@@ -286,6 +376,7 @@ fn candidates(
             push(
                 &mut parts,
                 Part {
+                    completion: PartCompletion::Ordinary,
                     nodes: copy(body)?,
                     entry: Some(entry),
                     follow: p.follow,
@@ -300,6 +391,7 @@ fn candidates(
                 follow: p.follow,
                 members: copy(&p.members)?,
                 parts,
+                successor_boundary: None,
             },
         )?;
     }
@@ -312,6 +404,7 @@ fn candidates(
         push(
             &mut parts,
             Part {
+                completion: PartCompletion::Ordinary,
                 nodes: copy(&[entry])?,
                 entry: Some(entry),
                 follow: None,
@@ -321,6 +414,7 @@ fn candidates(
         push(
             &mut parts,
             Part {
+                completion: PartCompletion::Ordinary,
                 nodes: copy(&p.body)?,
                 entry: Some(body_entry),
                 follow: p.follow,
@@ -334,6 +428,7 @@ fn candidates(
                 follow: p.follow,
                 members: copy(&p.members)?,
                 parts,
+                successor_boundary: None,
             },
         )?;
     }
@@ -359,18 +454,7 @@ fn candidates(
             continue;
         }
         let follow = s.follow(n.id);
-        let empty = filled(f.nodes.len(), false)?;
-        let mut parts = Vec::new();
-        push(
-            &mut parts,
-            Part {
-                nodes: copy(&[n.id])?,
-                entry: Some(n.id),
-                follow: None,
-            },
-        )?;
-        let members;
-        let kind = if matches!(terminal, Some(Terminal::Branch { .. })) {
+        if matches!(terminal, Some(Terminal::Branch { .. })) {
             let mut yes = None;
             let mut no = None;
             for &l in &g.outgoing[n.id.0 as usize] {
@@ -385,62 +469,64 @@ fn candidates(
             let (Some(yes), Some(no)) = (yes, no) else {
                 return Err(bug("conditional terminal lost its original arms"));
             };
+            if let Some(proposal) = branch_proposal(storage, f, g, n.id, yes, no, follow)? {
+                let set = mask(f.nodes.len(), &proposal.members)?;
+                if protection::closed_entry(storage, f, g, &set, n.id) {
+                    push(&mut out, proposal)?;
+                    continue;
+                }
+            }
             let t = f.links[yes.0 as usize].to;
             let e = f.links[no.0 as usize].to;
-            let a = protection::reachable(storage, f, g, &[t], follow, &empty, false)?;
-            let b = protection::reachable(storage, f, g, &[e], follow, &empty, false)?;
-            if a[n.id.0 as usize] || b[n.id.0 as usize] || a.iter().zip(&b).any(|(a, b)| *a && *b) {
-                continue;
+            if t != e {
+                for (boundary, link) in [
+                    (SuccessorBoundary::True(yes), yes),
+                    (SuccessorBoundary::False(no), no),
+                ] {
+                    let follow = Some(f.links[link.0 as usize].to);
+                    if let Some(mut proposal) =
+                        branch_proposal(storage, f, g, n.id, yes, no, follow)?
+                    {
+                        proposal.successor_boundary = Some(boundary);
+                        push(&mut out, proposal)?;
+                    }
+                }
             }
-            let mut set = filled(f.nodes.len(), false)?;
-            set[n.id.0 as usize] = true;
-            for i in 0..set.len() {
-                set[i] |= a[i] || b[i];
-            }
-            members = list(&set)?;
-            push(
-                &mut parts,
-                Part {
-                    nodes: list(&a)?,
-                    entry: if Some(t) == follow { None } else { Some(t) },
-                    follow,
-                },
-            )?;
-            push(
-                &mut parts,
-                Part {
-                    nodes: list(&b)?,
-                    entry: if Some(e) == follow { None } else { Some(e) },
-                    follow,
-                },
-            )?;
-            RegionKind::If {
-                true_link: yes,
-                false_link: no,
-            }
-        } else {
-            let arms = copy(&g.outgoing[n.id.0 as usize])?;
-            let mut starts = Vec::new();
-            for &l in &arms {
-                push(&mut starts, f.links[l.0 as usize].to)?;
-            }
-            let body = protection::reachable(storage, f, g, &starts, follow, &empty, false)?;
-            if body[n.id.0 as usize] {
-                continue;
-            }
-            let mut set = copy(&body)?;
-            set[n.id.0 as usize] = true;
-            members = list(&set)?;
-            push(
-                &mut parts,
-                Part {
-                    nodes: list(&body)?,
-                    entry: starts.iter().copied().find(|n| Some(*n) != follow),
-                    follow,
-                },
-            )?;
-            RegionKind::Switch { arms }
-        };
+            continue;
+        }
+        let empty = filled(f.nodes.len(), false)?;
+        let mut parts = Vec::new();
+        push(
+            &mut parts,
+            Part {
+                completion: PartCompletion::Ordinary,
+                nodes: copy(&[n.id])?,
+                entry: Some(n.id),
+                follow: None,
+            },
+        )?;
+        let arms = copy(&g.outgoing[n.id.0 as usize])?;
+        let mut starts = Vec::new();
+        for &l in &arms {
+            push(&mut starts, f.links[l.0 as usize].to)?;
+        }
+        let body = protection::reachable(storage, f, g, &starts, follow, &empty, false)?;
+        if body[n.id.0 as usize] {
+            continue;
+        }
+        let mut set = copy(&body)?;
+        set[n.id.0 as usize] = true;
+        let members = list(&set)?;
+        push(
+            &mut parts,
+            Part {
+                completion: PartCompletion::Ordinary,
+                nodes: list(&body)?,
+                entry: starts.iter().copied().find(|n| Some(*n) != follow),
+                follow,
+            },
+        )?;
+        let kind = RegionKind::Switch { arms };
         push(
             &mut out,
             Candidate {
@@ -449,6 +535,7 @@ fn candidates(
                 follow,
                 members,
                 parts,
+                successor_boundary: None,
             },
         )?;
     }
@@ -467,7 +554,25 @@ fn candidates(
                 _ => 0,
             },
             c.entry.0,
+            match c.successor_boundary {
+                None => (0, c.follow.map(|n| n.0), 0),
+                Some(SuccessorBoundary::True(link)) => (1, c.follow.map(|n| n.0), link.0),
+                Some(SuccessorBoundary::False(link)) => (2, c.follow.map(|n| n.0), link.0),
+            },
+            match c.kind {
+                RegionKind::Loop(id) => id.0,
+                RegionKind::Synchronized(id) => id.0,
+                RegionKind::Try(id) => id.0,
+                _ => 0,
+            },
         )
+    });
+    // One original predicate and boundary determine the same reach sets/parts.
+    out.dedup_by(|a, b| {
+        a.successor_boundary.is_some()
+            && b.successor_boundary.is_some()
+            && a.entry == b.entry
+            && a.follow == b.follow
     });
     Ok(out)
 }
@@ -521,6 +626,134 @@ fn accept(
         {
             return Ok(Err(RecoveryReason::Overlap));
         }
+    }
+    Ok(Ok(()))
+}
+fn match_branch_loops(
+    f: &RegionFacts,
+    c: &Candidate,
+) -> Result<Result<(), RecoveryReason>, RegionError> {
+    if !matches!(c.kind, RegionKind::If { .. }) {
+        return Ok(Ok(()));
+    }
+    let set = mask(f.nodes.len(), &c.members)?;
+    for plan in &f.loops {
+        let inside = plan.members.iter().filter(|n| set[n.0 as usize]).count();
+        let owns_loop = inside == plan.members.len();
+        // All established plans constrain branches, before any loop is selected.
+        if inside != 0 && !owns_loop && inside != c.members.len() {
+            return Ok(Err(RecoveryReason::Overlap));
+        }
+        if !owns_loop
+            && (set[plan.continue_target().0 as usize]
+                || plan
+                    .latches
+                    .iter()
+                    .any(|l| set[f.links[l.0 as usize].from.0 as usize]))
+        {
+            return Ok(Err(RecoveryReason::Overlap));
+        }
+    }
+    Ok(Ok(()))
+}
+fn successor_arm_acyclic(
+    f: &RegionFacts,
+    owners: &[RegionId],
+    arm: &[bool],
+) -> Result<bool, RegionError> {
+    let mut representative = Vec::new();
+    for n in 0..f.nodes.len() {
+        push(&mut representative, NodeId(id(n)?))?;
+    }
+    let mut contracted = filled(f.nodes.len(), false)?;
+    let mut seen = filled(f.regions.len(), false)?;
+    let mut stack = Vec::new();
+    for (n, &inside) in arm.iter().enumerate() {
+        if inside {
+            let owner = owners[n];
+            if !seen[owner.0 as usize] {
+                seen[owner.0 as usize] = true;
+                push(&mut stack, owner)?;
+            }
+        }
+    }
+    while let Some(id) = stack.pop() {
+        let region = &f.regions[id.0 as usize];
+        if matches!(region.kind, RegionKind::Loop(_))
+            && region.nodes.iter().all(|n| arm[n.0 as usize])
+        {
+            let entry = region.entry.ok_or(bug("selected loop has no entry"))?;
+            for &n in &region.nodes {
+                representative[n.0 as usize] = entry;
+                contracted[n.0 as usize] = true;
+            }
+        } else {
+            for &child in &region.children {
+                push(&mut stack, child)?;
+            }
+        }
+    }
+    let mut outgoing = lists(f.nodes.len())?;
+    let mut incoming = filled(f.nodes.len(), 0usize)?;
+    for link in &f.links {
+        if !arm[link.from.0 as usize] || !arm[link.to.0 as usize] {
+            continue;
+        }
+        let from = representative[link.from.0 as usize];
+        let to = representative[link.to.0 as usize];
+        if from == to && contracted[link.from.0 as usize] {
+            continue;
+        }
+        push(&mut outgoing[from.0 as usize], to)?;
+        incoming[to.0 as usize] = incoming[to.0 as usize]
+            .checked_add(1)
+            .ok_or(crate::RequestError::PlatformCapacity)?;
+    }
+    let mut queue = Vec::new();
+    let mut remaining = 0usize;
+    for (n, &inside) in arm.iter().enumerate() {
+        if inside && representative[n].0 as usize == n {
+            remaining += 1;
+            if incoming[n] == 0 {
+                push(&mut queue, NodeId(id(n)?))?;
+            }
+        }
+    }
+    while let Some(n) = queue.pop() {
+        remaining -= 1;
+        for &to in &outgoing[n.0 as usize] {
+            incoming[to.0 as usize] -= 1;
+            if incoming[to.0 as usize] == 0 {
+                push(&mut queue, to)?;
+            }
+        }
+    }
+    Ok(remaining == 0)
+}
+fn match_successor_boundary(
+    f: &RegionFacts,
+    owners: &[RegionId],
+    c: &Candidate,
+) -> Result<Result<(), RecoveryReason>, RegionError> {
+    if c.successor_boundary.is_none() {
+        return Ok(Ok(()));
+    }
+    let follow = c.follow.ok_or(bug("successor boundary has no follow"))?;
+    let mut arm = mask(f.nodes.len(), &c.members)?;
+    if arm[follow.0 as usize] || c.parts[1..].iter().any(|p| p.nodes.contains(&c.entry)) {
+        return Ok(Err(RecoveryReason::Unstructured));
+    }
+    if arm[0] && c.entry != NodeId(0) {
+        return Ok(Err(RecoveryReason::MultipleEntry));
+    }
+    for link in &f.links {
+        if arm[link.from.0 as usize] && !arm[link.to.0 as usize] && link.to != follow {
+            return Ok(Err(RecoveryReason::Unstructured));
+        }
+    }
+    arm[c.entry.0 as usize] = false;
+    if !successor_arm_acyclic(f, owners, &arm)? {
+        return Ok(Err(RecoveryReason::Unstructured));
     }
     Ok(Ok(()))
 }
@@ -972,7 +1205,14 @@ pub(super) fn construct(
         push(&mut owners, region)?;
     }
     for c in candidates(storage, f, g, s)? {
-        if let Err(reason) = accept(storage, f, g, &owners, &c)? {
+        let acceptance = match accept(storage, f, g, &owners, &c)? {
+            Ok(()) => match match_branch_loops(f, &c)? {
+                Ok(()) => match_successor_boundary(f, &owners, &c)?,
+                Err(reason) => Err(reason),
+            },
+            Err(reason) => Err(reason),
+        };
+        if let Err(reason) = acceptance {
             push(
                 &mut f.issues,
                 PlanningIssue::Graph {
@@ -983,7 +1223,12 @@ pub(super) fn construct(
             continue;
         }
         let mut children = Vec::new();
-        for p in c.parts {
+        for (i, mut p) in c.parts.into_iter().enumerate() {
+            if i == 0
+                && let RegionKind::Loop(id) = c.kind
+            {
+                p.completion = PartCompletion::LoopBody(id);
+            }
             push(&mut children, compose(storage, f, g, &mut owners, p)?)?;
         }
         let region = add(
@@ -1008,6 +1253,7 @@ pub(super) fn construct(
         g,
         &mut owners,
         Part {
+            completion: PartCompletion::Ordinary,
             nodes: all,
             entry: Some(NodeId(0)),
             follow: None,

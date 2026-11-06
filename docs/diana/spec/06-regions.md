@@ -85,6 +85,63 @@ Candidate frontiers are derived from the input; a mismatch does not restart meth
 analysis or launch an unbounded template search. Scratch and result allocation are
 fallible and checked, without a configured numeric quota.
 
+## Ordinary branch boundaries
+
+An ordinary branch first proposes its normal postdominator follow, with the
+original true/false links and their normal reach sets up to that follow. The
+primary boundary is admissible when neither arm reaches the predicate, the arms
+are disjoint, and their union with the predicate satisfies
+`protection::closed_entry`. P6 MUST enqueue only that primary proposal when it is
+boundary-admissible. A later owner/barrier rejection MUST NOT trigger another
+boundary search or reopen an accepted owner.
+
+Otherwise, distinct original successors supply the only alternative boundaries.
+For boundary F and other successor S, A is all normal content reachable from S
+without visiting F; the candidate owns only `{predicate} union A` and follows F.
+The arm targeting F is empty, with no entry and follow F. The other arm enters S
+and follows F. Header/true/false child positions and original link identities do
+not change. P6 MUST retain the selected edge's copies even for an empty arm.
+
+Before committing a successor-boundary candidate, P6 MUST establish:
+
+- The predicate is outside A and F is outside the candidate. After contracting
+  wholly contained, already-selected natural Loop regions, the remaining normal
+  arm graph is acyclic. Only Loop owners are contracted; their explicit
+  descendants remain in the product. An arbitrary Graph owner is not a cycle
+  abstraction.
+- The unchanged `closed_entry` predicate accepts all normal and executable
+  exceptional arrivals. If the candidate contains method entry node 0, its
+  predicate is node 0.
+- Every original normal link leaving the candidate targets F. Original
+  return/throw terminals and contained divergent loops retain their behavior;
+  exceptional outlets retain their site-specific facts. Reachability is not
+  clipped to a guessed enclosing scope or abrupt outlet.
+- Existing lock boundaries, P5 construction atomicity, exact/disjoint parts and
+  whole-current-owner containment all hold. A frontier cutting an owner rejects
+  only that composition; duplicate, foreign or missing content remains a
+  classified construction-invariant failure.
+
+Before committing either a primary or successor-boundary branch candidate U,
+P6 MUST require laminar membership with every LoopPlan L established by
+`loops::construct`: U is disjoint from `L.members()`, contained wholly in
+`L.members()`, or contains all of `L.members()`. P6 MUST reject a candidate that
+owns L's continue target or any latch source without owning all of `L.members()`.
+These constraints apply before Loop region selection; a partially contained loop
+cannot lose its core or completion boundary to an earlier branch candidate.
+Rejection retains explicit control without retrying the primary boundary.
+
+P6 MUST preserve predicate evaluation, original arm roles, effect order and all
+selected-edge copy, exception, lock and construction obligations. F has one outer
+owner, not an execution copy in either arm.
+
+The single commitment pass orders candidates by membership size, kind priority
+`Loop < Synchronized < Try < If < other`, full catch-frontier preference and entry.
+Its remaining key orders primary before true-successor before false-successor,
+then follow NodeId, boundary LinkId and owning plan identity. Identical successor
+proposals are deduplicated before commitment. Owner partitioning decides crossing
+candidates; P6 MUST NOT evaluate one predicate through two accepted If owners or
+retry alternatives after a late rejection.
+
 ## Loops, switches and continuations
 
 `LoopForm` is `While(LoopCondition)`, `DoWhile(LoopCondition)` or `Infinite`.
@@ -99,6 +156,22 @@ has not succeeded. Preceding producer operations remain in the loop body of
 `while(true)` when lifting them would move or repeat execution. A tail predicate
 remains at the tail. `continue` in a do-while targets that predicate, not the next
 body execution. Traditional for, enhanced for and for-each are not region forms.
+
+Private parts distinguish `Ordinary` completion from `LoopBody(LoopId)`.
+Only an accepted Loop candidate supplies `LoopBody` to its body part before
+composition; its predicate and all other parts remain Ordinary. P6 MUST keep the
+body follow equal to that LoopPlan's continue target. During body composition,
+original links to that target complete the lexical body execution and are omitted only
+from the private sibling-successor relation, even when the target is inside the
+body. Original links, edge/link plans and copies remain unchanged; subsequent
+transfer planning retains Continue/LoopCondition selection.
+
+P6 MUST NOT project another cycle-closing link, use an unselected loop as context,
+or infer loop completion from `follow == entry` in an Ordinary part. Exported
+entries, one successor per child, no repeated remaining child, complete root
+coverage, whole-owner membership and Graph selection retain their existing checks.
+A multi-exit loop child still contributes every exit to its parent's sibling
+relation.
 
 A conditional loop's normal continuation is the actual destination of its exiting
 predicate link. It is not a common postdominator beyond exit-side work. Other loop
