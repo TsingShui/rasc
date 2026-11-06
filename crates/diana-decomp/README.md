@@ -124,8 +124,10 @@ The same execution retains inspection while sharing immutable owned P7 results.
 Static preparation and annotation expressions preserve original event order and
 reference identities. Names handle imports, conflicting short names, lexical
 shadowing, array ranks and original `$` spelling; standalone methods remain fully
-qualified. Unknown package scope and uninterpreted signatures retain explicit
-naming reasons. See the [P8 chapter](../../docs/diana/spec/08-class.md).
+qualified. Erasure-matched signatures deliver class/method type parameters,
+single bounds, scoped variable uses and superclass/interface arguments. Unknown
+package scope and uninterpreted signatures retain explicit naming reasons.
+See the [P8 chapter](../../docs/diana/spec/08-class.md).
 P9 consumes that frozen display through Engine's private `RenderTask`, publishing
 owned `Rendered` text, UTF-8 spans, local diagnostics and the same source product.
 Text and JSON use that one publication. P7 fixes final child/phase placement,

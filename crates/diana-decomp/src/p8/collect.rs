@@ -1,5 +1,7 @@
 use super::names::{RawUse, Scope, ScopeFacts, ScopeName, SignatureOwner, TypeSource, id};
-use super::product::{MethodMember, SignatureArg, SignatureNode, SignaturePlan};
+use super::product::{
+    MethodMember, MethodTypeParameters, SignatureArg, SignatureNode, SignaturePlan, TypeParameter,
+};
 use super::signature;
 use crate::input::value_facts::{ValueDeclaration, ValueMember, ValuePrototype, ValueType};
 use crate::p0::{ClassFacts, Fact, InitialValue};
@@ -53,18 +55,21 @@ fn emit_signature<'a>(
     scope: Scope,
 ) -> Result<u32, RequestError> {
     let built = match node {
+        signature::Node::Variable { name, .. } => SignatureNode::Variable {
+            name: super::names::copy(name)?,
+        },
         signature::Node::Plain(descriptor) => {
             let source = signature_source(owner, part)?;
             add(
                 uses,
-                std::borrow::Cow::Owned(descriptor.clone()),
+                std::borrow::Cow::Owned(super::names::copy(descriptor)?),
                 None,
                 source,
                 scope,
             )?;
             SignatureNode::Leaf {
                 source,
-                descriptor: descriptor.clone(),
+                descriptor: super::names::copy(descriptor)?,
             }
         }
         signature::Node::Generic { base, args } => {
@@ -87,14 +92,14 @@ fn emit_signature<'a>(
             let source = signature_source(owner, part)?;
             add(
                 uses,
-                std::borrow::Cow::Owned(base.clone()),
+                std::borrow::Cow::Owned(super::names::copy(base)?),
                 None,
                 source,
                 scope,
             )?;
             SignatureNode::Generic {
                 base: source,
-                base_descriptor: base.clone(),
+                base_descriptor: super::names::copy(base)?,
                 args: built,
             }
         }
@@ -117,6 +122,7 @@ fn field_signature<'a>(
     facts: &'a ClassFacts,
     field: crate::FieldId,
     declaration: &crate::p0::FieldDeclaration,
+    class_parameters: &[signature::TypeParameter],
     uses: &mut Vec<RawUse<'a>>,
     plan: &mut SignaturePlan,
 ) -> Result<bool, RequestError> {
@@ -126,7 +132,7 @@ fn field_signature<'a>(
     ) else {
         return Ok(false);
     };
-    let Some(node) = signature::field(&text) else {
+    let Some(node) = signature::field(&text, class_parameters) else {
         return Ok(false);
     };
     if signature::erased(&node).as_deref() != Some(declaration.descriptor.units()) {
@@ -143,6 +149,7 @@ fn method_signature<'a>(
     facts: &'a ClassFacts,
     method: MethodId,
     declaration: &crate::p0::MethodDeclaration,
+    class_parameters: &[signature::TypeParameter],
     uses: &mut Vec<RawUse<'a>>,
     plan: &mut SignaturePlan,
 ) -> Result<bool, RequestError> {
@@ -152,10 +159,11 @@ fn method_signature<'a>(
     ) else {
         return Ok(false);
     };
-    let Some(signature::Declaration::Method {
+    let Some(signature::Method {
+        type_parameters,
         parameters,
         returns,
-    }) = signature::method(&text)
+    }) = signature::method(&text, class_parameters)
     else {
         return Ok(false);
     };
@@ -171,6 +179,14 @@ fn method_signature<'a>(
         return Ok(false);
     }
     let scope = Scope::Method(method);
+    let built_parameters = emit_parameters(&type_parameters, Some(method), uses, plan)?;
+    push(
+        &mut plan.method_parameters,
+        MethodTypeParameters {
+            method,
+            parameters: built_parameters,
+        },
+    )?;
     for (index, node) in parameters.iter().enumerate() {
         let owner = SignatureOwner::Parameter {
             method,
@@ -185,6 +201,88 @@ fn method_signature<'a>(
     let root = emit_signature(&returns, owner, &mut part, uses, plan, scope)?;
     push(&mut plan.roots, (owner, root))?;
     Ok(true)
+}
+
+fn emit_parameters<'a>(
+    parameters: &[signature::TypeParameter],
+    method: Option<MethodId>,
+    uses: &mut Vec<RawUse<'a>>,
+    plan: &mut SignaturePlan,
+) -> Result<Vec<TypeParameter>, RequestError> {
+    let mut built = Vec::new();
+    for (index, p) in parameters.iter().enumerate() {
+        let owner = match method {
+            Some(method) => SignatureOwner::MethodBound {
+                method,
+                index: id(index)?,
+            },
+            None => SignatureOwner::ClassBound(id(index)?),
+        };
+        let scope = method.map_or(Scope::Class, Scope::Method);
+        let bound = p
+            .bound
+            .as_ref()
+            .filter(|node| !signature::is_object(node))
+            .map(|node| emit_signature(node, owner, &mut 0, uses, plan, scope))
+            .transpose()?;
+        push(
+            &mut built,
+            TypeParameter {
+                name: super::names::copy(&p.name)?,
+                bound,
+            },
+        )?;
+    }
+    Ok(built)
+}
+
+/// The full class signature establishes a scope only when all original parent
+/// descriptors and their order agree. Missing parent facts do not imply Object.
+fn class_signature<'a>(
+    facts: &ClassFacts,
+    uses: &mut Vec<RawUse<'a>>,
+    plan: &mut SignaturePlan,
+) -> Result<Option<signature::Class>, RequestError> {
+    let Some(text) = signature_text(facts.annotations().records(), AnnotationLocation::Class)
+    else {
+        return Ok(None);
+    };
+    let Some(parsed) = signature::class(&text) else {
+        return Ok(None);
+    };
+    let Fact::Present(superclass) = facts.superclass() else {
+        return Ok(None);
+    };
+    if signature::erased(&parsed.superclass).as_deref() != Some(superclass.units()) {
+        return Ok(None);
+    }
+    match facts.interfaces() {
+        Fact::Present(items) => {
+            if items.len() != parsed.interfaces.len() {
+                return Ok(None);
+            }
+            for (item, node) in items.iter().zip(&parsed.interfaces) {
+                let Fact::Present(descriptor) = &item.descriptor else {
+                    return Ok(None);
+                };
+                if signature::erased(node).as_deref() != Some(descriptor.units()) {
+                    return Ok(None);
+                }
+            }
+        }
+        Fact::Absent if parsed.interfaces.is_empty() => {}
+        _ => return Ok(None),
+    }
+    plan.class_parameters = Some(emit_parameters(&parsed.type_parameters, None, uses, plan)?);
+    let owner = SignatureOwner::Superclass;
+    let root = emit_signature(&parsed.superclass, owner, &mut 0, uses, plan, Scope::Class)?;
+    push(&mut plan.roots, (owner, root))?;
+    for (index, node) in parsed.interfaces.iter().enumerate() {
+        let owner = SignatureOwner::Interface(id(index)?);
+        let root = emit_signature(node, owner, &mut 0, uses, plan, Scope::Class)?;
+        push(&mut plan.roots, (owner, root))?;
+    }
+    Ok(Some(parsed))
 }
 
 fn signature_source(owner: SignatureOwner, part: &mut u32) -> Result<TypeSource, RequestError> {
@@ -352,7 +450,15 @@ fn method_scope<'a>(
     member: &'a MethodMember,
     class: &ScopeFacts<'a>,
     signature_used: bool,
+    parameters: &[TypeParameter],
 ) -> Result<ScopeFacts<'a>, RequestError> {
+    let mut type_parameters = Vec::new();
+    for name in &class.type_parameters {
+        push(&mut type_parameters, super::names::copy(name)?)?;
+    }
+    for parameter in parameters {
+        push(&mut type_parameters, super::names::copy(&parameter.name)?)?;
+    }
     let mut names = super::names::copy(&class.names)?;
     if let Ok(delivery) = &member.delivery
         && let Some(code) = delivery.expressions()
@@ -382,6 +488,7 @@ fn method_scope<'a>(
     Ok(ScopeFacts {
         scope: Scope::Method(method),
         names,
+        type_parameters,
         incomplete: class.incomplete
             || member
                 .delivery
@@ -404,14 +511,20 @@ pub(super) fn collect<'a>(
     let mut uses = Vec::new();
     let mut scopes = Vec::new();
     let mut signatures = SignaturePlan::empty();
-    let metadata = facts
-        .annotations()
-        .records()
-        .iter()
-        .any(|a| a.location() == AnnotationLocation::Class && signature(a.descriptor()));
+    let class_signature = class_signature(facts, &mut uses, &mut signatures)?;
+    let class_parameters = class_signature
+        .as_ref()
+        .map_or(&[][..], |c| c.type_parameters.as_slice());
+    let metadata = class_signature.is_none()
+        && facts
+            .annotations()
+            .records()
+            .iter()
+            .any(|a| a.location() == AnnotationLocation::Class && signature(a.descriptor()));
     let mut class = ScopeFacts {
         scope: Scope::Class,
         names: Vec::new(),
+        type_parameters: Vec::new(),
         incomplete: !facts.field_traversal_complete()
             || !facts.method_traversal_complete()
             || facts.annotations().extent() != crate::AnnotationExtent::Complete,
@@ -423,6 +536,12 @@ pub(super) fn collect<'a>(
                 class_simple(facts.descriptor().units()),
             ),
     };
+    for parameter in class_parameters {
+        push(
+            &mut class.type_parameters,
+            super::names::copy(&parameter.name)?,
+        )?;
+    }
     for f in facts.fields() {
         if let Fact::Present(d) = f.declaration() {
             push(&mut class.names, ScopeName::Units(d.name.units()))?;
@@ -470,7 +589,14 @@ pub(super) fn collect<'a>(
                     TypeSource::Field(f.field()),
                     Scope::Class,
                 )?;
-                field_signature(facts, f.field(), d, &mut uses, &mut signatures)?;
+                field_signature(
+                    facts,
+                    f.field(),
+                    d,
+                    class_parameters,
+                    &mut uses,
+                    &mut signatures,
+                )?;
             }
             if let Fact::Present(InitialValue::Encoded {
                 tokens: t,
@@ -522,11 +648,19 @@ pub(super) fn collect<'a>(
                     scope,
                 )?;
             }
-            signature_used = method_signature(facts, m.id, d, &mut uses, &mut signatures)?;
+            signature_used =
+                method_signature(facts, m.id, d, class_parameters, &mut uses, &mut signatures)?;
         }
         push(
             &mut scopes,
-            method_scope(facts, m.id, m, &class, signature_used)?,
+            method_scope(
+                facts,
+                m.id,
+                m,
+                &class,
+                signature_used,
+                signatures.method_parameters(m.id).unwrap_or(&[]),
+            )?,
         )?;
         if let Ok(delivery) = &m.delivery
             && let Some(code) = delivery.expressions()

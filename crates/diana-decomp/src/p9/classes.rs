@@ -104,6 +104,9 @@ fn class_result(out: &mut Buffer, class: &p8::ClassResult) -> Result<(), RenderE
         p8::ClassKind::Enum => "enum ",
     })?;
     out.name(&header.name.units, header.name.form)?;
+    if let Some(parameters) = lookup.class_parameters() {
+        super::names::type_parameters(out, &lookup, parameters)?;
+    }
     // An interface, annotation or enum has no superclass clause in Java; the
     // delivered Object/Enum entry is implicit there. A missing or unavailable
     // superclass fact is still printed so the gap stays visible.
@@ -113,7 +116,10 @@ fn class_result(out: &mut Buffer, class: &p8::ClassResult) -> Result<(), RenderE
     ) && matches!(header.superclass, p8::TypeExpression::Present(_));
     if !implicit && !matches!(header.superclass, p8::TypeExpression::Absent) {
         out.put(" extends ")?;
-        type_expression(out, &lookup, &header.superclass)?;
+        match lookup.signature(p8::SignatureOwner::Superclass) {
+            Some(root) => super::names::signature(out, &lookup, root)?,
+            None => type_expression(out, &lookup, &header.superclass)?,
+        }
     }
     match &header.interfaces {
         p8::InterfaceList::Present(list) if !list.is_empty() => {
@@ -122,7 +128,13 @@ fn class_result(out: &mut Buffer, class: &p8::ClassResult) -> Result<(), RenderE
                 if i > 0 {
                     out.put(", ")?;
                 }
-                type_expression(out, &lookup, &interface.name)?;
+                let index = u32::try_from(i).map_err(|_| {
+                    RenderError::Invariant("interface index exceeds the delivered coordinate")
+                })?;
+                match lookup.signature(p8::SignatureOwner::Interface(index)) {
+                    Some(root) => super::names::signature(out, &lookup, root)?,
+                    None => type_expression(out, &lookup, &interface.name)?,
+                }
             }
         }
         p8::InterfaceList::NotRead => out.put(" interfaces_not_read")?,
@@ -526,6 +538,12 @@ fn header_line(
         },
     )?;
     let method = h.key.method;
+    if let Some(parameters) = lookup.method_parameters(method)
+        && !parameters.is_empty()
+    {
+        super::names::type_parameters(out, lookup, parameters)?;
+        out.put(" ")?;
+    }
     match h.kind {
         p7::MethodKind::ClassInitializer => unreachable!("handled above"),
         // A constructor carries the owner name and no return type.

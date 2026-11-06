@@ -19,6 +19,12 @@ impl<'a> Lookup<'a> {
     pub fn signature_node(&self, id: u32) -> Option<&p8::SignatureNode> {
         self.signatures?.node(id)
     }
+    pub fn class_parameters(&self) -> Option<&[p8::TypeParameter]> {
+        self.signatures?.class_parameters()
+    }
+    pub fn method_parameters(&self, method: crate::MethodId) -> Option<&[p8::TypeParameter]> {
+        self.signatures?.method_parameters(method)
+    }
     /// The delivered name of one type use, without array dimensions.
     pub fn target_name(&self, id: p8::TypeUseId) -> Option<&'a [u16]> {
         let use_ = self.uses.get(id.0 as usize)?;
@@ -332,6 +338,9 @@ pub(super) fn signature(
         "signature node is outside the delivered plan",
     ))?;
     match node {
+        p8::SignatureNode::Variable { name } => {
+            out.name(name, crate::substrate::names::name_form(name))?;
+        }
         p8::SignatureNode::Leaf { source, descriptor } => {
             print_source(out, lookup, *source, descriptor)?;
         }
@@ -372,6 +381,31 @@ pub(super) fn signature(
         }
     }
     Ok(())
+}
+
+pub(super) fn type_parameters(
+    out: &mut Buffer,
+    lookup: &Lookup<'_>,
+    parameters: &[p8::TypeParameter],
+) -> Result<(), RenderError> {
+    if parameters.is_empty() {
+        return Ok(());
+    }
+    out.put("<")?;
+    for (index, parameter) in parameters.iter().enumerate() {
+        if index > 0 {
+            out.put(", ")?;
+        }
+        out.name(
+            &parameter.name,
+            crate::substrate::names::name_form(&parameter.name),
+        )?;
+        if let Some(bound) = parameter.bound {
+            out.put(" extends ")?;
+            signature(out, lookup, bound)?;
+        }
+    }
+    out.put(">")
 }
 
 fn print_source(

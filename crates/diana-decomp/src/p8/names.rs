@@ -14,6 +14,10 @@ pub struct AnnotationId(pub u32);
 /// One original declaration whose `@Signature` can describe a generic type.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Serialize)]
 pub enum SignatureOwner {
+    Superclass,
+    Interface(u32),
+    ClassBound(u32),
+    MethodBound { method: MethodId, index: u32 },
     Field(FieldId),
     Parameter { method: MethodId, index: u32 },
     Return(MethodId),
@@ -176,6 +180,7 @@ impl ScopeName<'_> {
 pub(super) struct ScopeFacts<'a> {
     pub scope: Scope,
     pub names: Vec<ScopeName<'a>>,
+    pub type_parameters: Vec<Vec<u16>>,
     pub incomplete: bool,
     /// Uninterpreted signature data in this scope may declare a name that is
     /// unknown here, so no ordinary simple name can be proven unaffected.
@@ -344,7 +349,9 @@ pub(super) fn construct(
             Some(NameReason::IncompleteScope)
         } else if scope.metadata && (!owner_type || scope.metadata_names_owner) {
             Some(NameReason::UninterpretedMetadata)
-        } else if scope.names.iter().any(|n| n.matches(simple)) {
+        } else if scope.names.iter().any(|n| n.matches(simple))
+            || scope.type_parameters.iter().any(|name| name == simple)
+        {
             Some(NameReason::Shadowed)
         } else {
             None

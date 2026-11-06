@@ -80,12 +80,16 @@ pub struct MethodMember {
 pub struct SignaturePlan {
     pub(super) nodes: Vec<SignatureNode>,
     pub(super) roots: Vec<(SignatureOwner, u32)>,
+    pub(super) class_parameters: Option<Vec<TypeParameter>>,
+    pub(super) method_parameters: Vec<MethodTypeParameters>,
 }
 impl SignaturePlan {
     pub(super) fn empty() -> Self {
         Self {
             nodes: Vec::new(),
             roots: Vec::new(),
+            class_parameters: None,
+            method_parameters: Vec::new(),
         }
     }
     pub fn node(&self, id: u32) -> Option<&SignatureNode> {
@@ -100,9 +104,33 @@ impl SignaturePlan {
     pub fn nodes(&self) -> &[SignatureNode] {
         &self.nodes
     }
+    /// None means the class signature did not establish its parameter scope.
+    pub fn class_parameters(&self) -> Option<&[TypeParameter]> {
+        self.class_parameters.as_deref()
+    }
+    pub fn method_parameters(&self, method: MethodId) -> Option<&[TypeParameter]> {
+        self.method_parameters
+            .iter()
+            .find(|p| p.method == method)
+            .map(|p| p.parameters.as_slice())
+    }
+}
+#[derive(Serialize)]
+pub struct TypeParameter {
+    pub name: Vec<u16>,
+    pub bound: Option<u32>,
+}
+#[derive(Serialize)]
+pub(super) struct MethodTypeParameters {
+    #[serde(serialize_with = "debug")]
+    pub method: MethodId,
+    pub parameters: Vec<TypeParameter>,
 }
 #[derive(Serialize)]
 pub enum SignatureNode {
+    Variable {
+        name: Vec<u16>,
+    },
     Leaf {
         #[serde(serialize_with = "debug")]
         source: TypeSource,

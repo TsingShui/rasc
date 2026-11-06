@@ -148,12 +148,14 @@ preserves records whose member directory entry was not located, and no record is
 printed twice or dropped when it moves to its declaration. Array/annotation
 values use P8's flat events; call-site bootstrap values use P7's owned events and
 leaf declarations. Counts, reference identities and local gaps remain visible.
-Neither path parses encoded input again or interprets Signature as recovered
-generic syntax.
+Neither path parses encoded input again; generic display syntax comes only
+from P8's interpreted signature plan.
 
 A `@Signature` record whose declaration P8 already interpreted prints that
 interpreted signature instead of its raw descriptor fragments: one type for a
-field or parameter, and `(parameters) -> return` for a method. A record P8 did not
+field or parameter, optional type parameters followed by `(parameters) -> return`
+for a method, and optional type parameters followed by `extends`/`implements`
+clauses for a class. A record P8 did not
 interpret keeps its original value tokens, so an uninterpreted signature never
 silently changes shape. The delivered annotation text remains in the product.
 
@@ -188,10 +190,14 @@ backslashes are escaped, and controls, bidirectional controls and isolated
 surrogates keep `\uXXXX`. Nothing is renamed, no import is added because of the
 quoting, and the delivered units, descriptors and identities stay unchanged.
 
-A declared field type, method parameter and return type print their delivered
-generic arguments when the plan carries them, for example `Map<String, Face[]>`;
-otherwise the erased type prints. Each generic argument is an ordinary named type
-use, so imports and scope rules apply to it unchanged.
+A declared field type, method parameter, return type and superclass/interface
+print their delivered generic arguments when the plan carries them, for example
+`Map<String, Face[]>`; otherwise the erased type prints. Class and method headers
+print the delivered type parameters in declaration order. A single non-Object
+bound prints as `T extends Bound`; an unbounded or plain Object-bound parameter
+prints only its name. Variable uses print that declared name, including the same
+backtick segment notation for non-identifiers. Variables do not create imports;
+ordinary named types in arguments and bounds retain the existing naming rules.
 
 P9 prints the supplied class, field and method access flags as Java modifier
 words where the kind has one. A DEX-only bit that the declaration form does not

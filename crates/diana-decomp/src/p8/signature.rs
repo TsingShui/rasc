@@ -1,17 +1,14 @@
 //! JVM generic signature interpretation for original declarations.
 //!
-//! The input is the delivered `@Signature` annotation text of one declaration.
-//! This reader accepts only the subset that maps onto a declaration this product
-//! can print: primitives, classes, arrays, wildcards and nested type arguments of
-//! the same declaration. A type variable, an inner class with its own arguments,
-//! a malformed encoding or a mismatch with the erased descriptor keeps the
-//! declaration's erased type instead.
+//! Only established class and method parameters are in scope. Unsupported or
+//! malformed signatures keep the declaration's erased type instead.
 
 /// Nesting accepted before the text is treated as uninterpreted. A signature is
 /// printed for a human, not executed; deeper nesting keeps the erased type.
 const MAX_DEPTH: u32 = 64;
+const OBJECT: &[u8] = b"Ljava/lang/Object;";
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub(super) enum Node {
     /// A complete erased descriptor, including array dimensions.
     Plain(Vec<u16>),
@@ -19,15 +16,17 @@ pub(super) enum Node {
         base: Vec<u16>,
         args: Vec<Arg>,
     },
-    /// An array whose element carries arguments, so the dimensions print after
-    /// the element instead of inside its descriptor.
     Array {
         element: Box<Node>,
         dimensions: u32,
     },
+    Variable {
+        name: Vec<u16>,
+        erasure: Vec<u16>,
+    },
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub(super) enum Arg {
     Exact(Node),
     Any,
@@ -35,11 +34,39 @@ pub(super) enum Arg {
     Super(Node),
 }
 
-pub(super) enum Declaration {
-    Method {
-        parameters: Vec<Node>,
-        returns: Node,
-    },
+pub(super) struct TypeParameter {
+    pub name: Vec<u16>,
+    pub bound: Option<Node>,
+}
+
+pub(super) struct Method {
+    pub type_parameters: Vec<TypeParameter>,
+    pub parameters: Vec<Node>,
+    pub returns: Node,
+}
+
+pub(super) struct Class {
+    pub type_parameters: Vec<TypeParameter>,
+    pub superclass: Node,
+    pub interfaces: Vec<Node>,
+}
+
+#[derive(Clone, Copy)]
+struct Scope<'a> {
+    class: &'a [TypeParameter],
+    method: &'a [TypeParameter],
+    pending: Option<&'a [u16]>,
+}
+impl Scope<'_> {
+    fn parameter(&self, name: &[u16]) -> Option<&TypeParameter> {
+        if self.pending == Some(name) {
+            return None;
+        }
+        self.method
+            .iter()
+            .chain(self.class.iter())
+            .find(|p| p.name == name)
+    }
 }
 
 struct Cursor<'a> {
@@ -48,7 +75,14 @@ struct Cursor<'a> {
     depth: u32,
 }
 
-impl Cursor<'_> {
+impl<'a> Cursor<'a> {
+    fn new(units: &'a [u16]) -> Self {
+        Self {
+            units,
+            at: 0,
+            depth: 0,
+        }
+    }
     fn peek(&self) -> Option<u16> {
         self.units.get(self.at).copied()
     }
@@ -70,37 +104,73 @@ impl Cursor<'_> {
     fn at_end(&self) -> bool {
         self.at >= self.units.len()
     }
+    fn name(&mut self, terminator: u8) -> Option<Vec<u16>> {
+        let start = self.at;
+        while self.peek()? != u16::from(terminator) {
+            if matches!(self.peek()?, 46 | 59 | 91 | 47 | 60 | 62 | 58) {
+                return None;
+            }
+            self.at += 1;
+        }
+        if self.at == start {
+            return None;
+        }
+        copy(&self.units[start..self.at])
+    }
 }
 
-/// Parses a field signature: exactly one type and no remainder.
-pub(super) fn field(units: &[u16]) -> Option<Node> {
-    let mut cursor = Cursor {
-        units,
-        at: 0,
-        depth: 0,
-    };
-    let node = type_node(&mut cursor)?;
+fn copy(units: &[u16]) -> Option<Vec<u16>> {
+    let mut out = Vec::new();
+    out.try_reserve(units.len()).ok()?;
+    out.extend_from_slice(units);
+    Some(out)
+}
+fn append<T>(items: &mut Vec<T>, item: T) -> Option<()> {
+    items.try_reserve(1).ok()?;
+    items.push(item);
+    Some(())
+}
+
+/// Parses a field signature in the established class parameter scope.
+pub(super) fn field(units: &[u16], class: &[TypeParameter]) -> Option<Node> {
+    let mut cursor = Cursor::new(units);
+    let node = value_node(
+        &mut cursor,
+        Scope {
+            class,
+            method: &[],
+            pending: None,
+        },
+    )?;
     cursor.at_end().then_some(node)
 }
 
-/// Parses a method signature: parameters, return type and ignored throws.
-pub(super) fn method(units: &[u16]) -> Option<Declaration> {
-    let mut cursor = Cursor {
-        units,
-        at: 0,
-        depth: 0,
+/// Parses method parameters, return type and throws in explicit lexical scope.
+pub(super) fn method(units: &[u16], class: &[TypeParameter]) -> Option<Method> {
+    let mut cursor = Cursor::new(units);
+    let type_parameters = type_parameters(&mut cursor, class)?;
+    let scope = Scope {
+        class,
+        method: &type_parameters,
+        pending: None,
     };
     cursor.expect(b'(')?;
     let mut parameters = Vec::new();
     while cursor.peek()? != u16::from(b')') {
-        parameters.push(type_node(&mut cursor)?);
+        append(&mut parameters, value_node(&mut cursor, scope)?)?;
     }
     cursor.expect(b')')?;
-    let returns = type_node(&mut cursor)?;
+    let returns = type_node(&mut cursor, scope)?;
     while cursor.eat(b'^') {
-        type_node(&mut cursor)?;
+        match cursor.peek()? {
+            76 | 84 => {
+                type_node(&mut cursor, scope)?;
+            }
+            _ => return None,
+        }
     }
-    cursor.at_end().then_some(Declaration::Method {
+    cursor.at_end().then_some(Method {
+        type_parameters,
         parameters,
         returns,
     })
@@ -144,31 +214,136 @@ pub(super) fn declares_parameter(units: &[u16], name: &[u16]) -> Option<bool> {
     None
 }
 
-fn type_node(cursor: &mut Cursor<'_>) -> Option<Node> {
+/// Parses all class parameters and superclass/interface types in input order.
+pub(super) fn class(units: &[u16]) -> Option<Class> {
+    let mut cursor = Cursor::new(units);
+    let type_parameters = type_parameters(&mut cursor, &[])?;
+    let scope = Scope {
+        class: &type_parameters,
+        method: &[],
+        pending: None,
+    };
+    let superclass = class_type(&mut cursor, scope)?;
+    let mut interfaces = Vec::new();
+    while !cursor.at_end() {
+        append(&mut interfaces, class_type(&mut cursor, scope)?)?;
+    }
+    Some(Class {
+        type_parameters,
+        superclass,
+        interfaces,
+    })
+}
+
+fn type_parameters(cursor: &mut Cursor<'_>, class: &[TypeParameter]) -> Option<Vec<TypeParameter>> {
+    let mut parameters: Vec<TypeParameter> = Vec::new();
+    if !cursor.eat(b'<') {
+        return Some(parameters);
+    }
+    loop {
+        let name = cursor.name(b':')?;
+        if parameters
+            .iter()
+            .any(|p| p.name == name || p.bound.as_ref().is_some_and(|b| mentions(b, &name)))
+        {
+            return None;
+        }
+        cursor.expect(b':')?;
+        let scope = Scope {
+            class,
+            method: &parameters,
+            pending: Some(&name),
+        };
+        let bound = if matches!(cursor.peek(), Some(76 | 84 | 91)) {
+            Some(type_node(cursor, scope)?)
+        } else {
+            None
+        };
+        let bound = if cursor.eat(b':') {
+            if bound.is_some() || !matches!(cursor.peek(), Some(76 | 84 | 91)) {
+                return None;
+            }
+            Some(type_node(cursor, scope)?)
+        } else {
+            bound
+        };
+        // Publishing only after the bound is complete rejects self references;
+        // later names also cannot capture an outer parameter used by this bound.
+        append(&mut parameters, TypeParameter { name, bound })?;
+        if cursor.eat(b'>') {
+            return Some(parameters);
+        }
+    }
+}
+
+fn mentions(node: &Node, name: &[u16]) -> bool {
+    match node {
+        Node::Variable { name: used, .. } => used == name,
+        Node::Array { element, .. } => mentions(element, name),
+        Node::Generic { args, .. } => args.iter().any(|a| match a {
+            Arg::Exact(n) | Arg::Extends(n) | Arg::Super(n) => mentions(n, name),
+            Arg::Any => false,
+        }),
+        Node::Plain(_) => false,
+    }
+}
+
+fn class_type(cursor: &mut Cursor<'_>, scope: Scope<'_>) -> Option<Node> {
+    (cursor.peek()? == u16::from(b'L')).then_some(())?;
+    type_node(cursor, scope)
+}
+
+fn value_node(cursor: &mut Cursor<'_>, scope: Scope<'_>) -> Option<Node> {
+    if cursor.peek()? == u16::from(b'V') {
+        return None;
+    }
+    type_node(cursor, scope)
+}
+
+fn reference_node(cursor: &mut Cursor<'_>, scope: Scope<'_>) -> Option<Node> {
+    match cursor.peek()? {
+        76 | 84 | 91 => type_node(cursor, scope),
+        _ => None,
+    }
+}
+
+fn type_node(cursor: &mut Cursor<'_>, scope: Scope<'_>) -> Option<Node> {
     cursor.depth = cursor.depth.checked_add(1)?;
     if cursor.depth > MAX_DEPTH {
         return None;
     }
-    let node = type_node_inner(cursor);
+    let node = type_node_inner(cursor, scope);
     cursor.depth -= 1;
     node
 }
 
-fn type_node_inner(cursor: &mut Cursor<'_>) -> Option<Node> {
+fn type_node_inner(cursor: &mut Cursor<'_>, scope: Scope<'_>) -> Option<Node> {
     match cursor.bump()? {
         unit if is_primitive(unit) => Some(Node::Plain(vec![unit])),
+        unit if unit == u16::from(b'T') => {
+            let name = cursor.name(b';')?;
+            cursor.expect(b';')?;
+            let parameter = scope.parameter(&name)?;
+            let erasure = match &parameter.bound {
+                Some(bound) => erased(bound)?,
+                None => OBJECT.iter().copied().map(u16::from).collect(),
+            };
+            Some(Node::Variable { name, erasure })
+        }
         unit if unit == u16::from(b'[') => {
             let mut dimensions = 1u32;
             while cursor.eat(b'[') {
                 dimensions = dimensions.checked_add(1)?;
             }
-            let element = type_node(cursor)?;
+            let saved_depth = cursor.depth;
+            cursor.depth = cursor.depth.checked_add(dimensions.checked_sub(1)?)?;
+            let element = value_node(cursor, scope)?;
+            cursor.depth = saved_depth;
             match element {
-                Node::Generic { .. } => Some(Node::Array {
+                Node::Generic { .. } | Node::Variable { .. } => Some(Node::Array {
                     element: Box::new(element),
                     dimensions,
                 }),
-                // A plain element already carries its own complete descriptor.
                 plain => {
                     let count = usize::try_from(dimensions).ok()?;
                     let element = erased(&plain)?;
@@ -183,44 +358,39 @@ fn type_node_inner(cursor: &mut Cursor<'_>) -> Option<Node> {
             }
         }
         unit if unit == u16::from(b'L') => {
-            let mut name = Vec::new();
-            name.push(u16::from(b'L'));
+            let start = cursor.at - 1;
             loop {
                 match cursor.peek()? {
                     unit if unit == u16::from(b'<') || unit == u16::from(b';') => break,
-                    // `Louter<T;>.Inner;` is an inner class with outer arguments.
-                    unit if unit == u16::from(b'.') => return None,
-                    unit => {
-                        name.push(unit);
-                        cursor.at += 1;
-                    }
+                    46 | 91 | 62 | 58 => return None,
+                    _ => cursor.at += 1,
                 }
             }
-            if name.len() < 2 {
+            let name = &cursor.units[start + 1..cursor.at];
+            if name.split(|&u| u == 47).any(|segment| segment.is_empty()) {
                 return None;
             }
-            let base = {
-                let mut base = name;
-                base.push(u16::from(b';'));
-                base
-            };
+            let mut base = copy(&cursor.units[start..cursor.at])?;
+            append(&mut base, u16::from(b';'))?;
             if !cursor.eat(b'<') {
                 cursor.expect(b';')?;
                 return Some(Node::Plain(base));
             }
             let mut args = Vec::new();
-            while !cursor.eat(b'>') {
-                args.push(argument(cursor)?);
+            loop {
+                append(&mut args, argument(cursor, scope)?)?;
+                if cursor.eat(b'>') {
+                    break;
+                }
             }
             cursor.expect(b';')?;
             Some(Node::Generic { base, args })
         }
-        // A type variable needs the class-level parameter list to print its name.
         _ => None,
     }
 }
 
-fn argument(cursor: &mut Cursor<'_>) -> Option<Arg> {
+fn argument(cursor: &mut Cursor<'_>, scope: Scope<'_>) -> Option<Arg> {
     match cursor.peek()? {
         unit if unit == u16::from(b'*') => {
             cursor.at += 1;
@@ -228,13 +398,13 @@ fn argument(cursor: &mut Cursor<'_>) -> Option<Arg> {
         }
         unit if unit == u16::from(b'+') => {
             cursor.at += 1;
-            Some(Arg::Extends(type_node(cursor)?))
+            Some(Arg::Extends(reference_node(cursor, scope)?))
         }
         unit if unit == u16::from(b'-') => {
             cursor.at += 1;
-            Some(Arg::Super(type_node(cursor)?))
+            Some(Arg::Super(reference_node(cursor, scope)?))
         }
-        _ => Some(Arg::Exact(type_node(cursor)?)),
+        _ => Some(Arg::Exact(reference_node(cursor, scope)?)),
     }
 }
 
@@ -245,22 +415,29 @@ fn is_primitive(unit: u16) -> bool {
     )
 }
 
-/// The erased descriptor of one parsed node, used to check that the signature
-/// describes the same declaration the input actually carries.
+pub(super) fn is_object(node: &Node) -> bool {
+    matches!(node, Node::Plain(descriptor) if descriptor.iter().copied().eq(OBJECT.iter().copied().map(u16::from)))
+}
+
+/// Erases variables through their established single bound, preserving the
+/// descriptor equality check against the original declaration.
 pub(super) fn erased(node: &Node) -> Option<Vec<u16>> {
     match node {
-        Node::Plain(descriptor) => Some(descriptor.clone()),
-        Node::Generic { base, .. } => Some(base.clone()),
+        Node::Plain(descriptor) => copy(descriptor),
+        Node::Generic { base, .. } => copy(base),
+        Node::Variable { erasure, .. } => copy(erasure),
         Node::Array {
             element,
             dimensions,
         } => {
+            let element = erased(element)?;
+            let count = usize::try_from(*dimensions).ok()?;
             let mut descriptor = Vec::new();
             descriptor
-                .try_reserve(usize::try_from(*dimensions).ok()?)
+                .try_reserve(count.checked_add(element.len())?)
                 .ok()?;
-            descriptor.resize(usize::try_from(*dimensions).ok()?, u16::from(b'['));
-            descriptor.extend(erased(element)?);
+            descriptor.resize(count, u16::from(b'['));
+            descriptor.extend(element);
             Some(descriptor)
         }
     }

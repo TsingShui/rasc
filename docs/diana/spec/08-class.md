@@ -119,12 +119,26 @@ class-field names, method-local names and delivered field-reference names for
 shadowing. The same target can be simple in one method and qualified in another.
 A field, method parameter list and return type use the declaration's own
 `@Signature` when that text parses and its erased form equals the delivered
-descriptor. The reader accepts primitives, classes, arrays, wildcards and nested
-arguments; a type variable, an inner class with outer arguments, a malformed
-encoding, an unsupported nesting depth or a descriptor mismatch keeps the erased
-type. A signature that produced a display type no longer blocks shortening; one
-that did not still does. Class-level type parameters and superclass/interface
-arguments are not interpreted yet.
+descriptor. A class signature establishes its parameter scope only when its
+superclass and every interface erase to the delivered descriptors in original
+order. P8 delivers parameter names, optional bound roots and superclass/interface
+roots in the signature plan. An omitted or plain Object bound has no display root;
+the original annotation retains that distinction.
+
+The reader accepts primitives, classes, arrays, wildcards, nested arguments and
+variables declared in the explicit class/method scope. A variable erases to its
+single established bound, or Object when unbounded. Method parameters shadow
+class parameters; a bound sees only earlier parameters and cannot refer to itself
+or a later parameter. Unknown variables, recursive or forward bounds, multiple
+intersection bounds, inner classes with outer arguments, malformed encodings,
+nesting beyond the reader's `MAX_DEPTH` or descriptor mismatches keep the erased
+declaration. A rejected class signature leaves class parameters unknown without
+blocking independently interpretable member signatures.
+
+A signature that produced a display type no longer blocks shortening; one that
+did not still does. Variable nodes print their declared names without becoming
+import candidates. Parameter names also participate in lexical shadowing for
+ordinary type uses.
 
 Incomplete lexical evidence or uninterpreted signature scope keeps qualified
 spelling. A reference into `java.lang` is not assumed to be unaffected by an

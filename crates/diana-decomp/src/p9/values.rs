@@ -527,6 +527,12 @@ fn interpreted_signature(
             let Some(returns) = lookup.signature(SignatureOwner::Return(method)) else {
                 return Ok(false);
             };
+            if let Some(parameters) = lookup.method_parameters(method)
+                && !parameters.is_empty()
+            {
+                super::names::type_parameters(out, lookup, parameters)?;
+                out.put(" ")?;
+            }
             out.put("(")?;
             for index in 0..MAX_SIGNATURE_PARAMETERS {
                 let owner = SignatureOwner::Parameter { method, index };
@@ -542,7 +548,32 @@ fn interpreted_signature(
             super::names::signature(out, lookup, returns)?;
             Ok(true)
         }
-        crate::AnnotationLocation::Class => Ok(false),
+        crate::AnnotationLocation::Class => {
+            let Some(parameters) = lookup.class_parameters() else {
+                return Ok(false);
+            };
+            super::names::type_parameters(out, lookup, parameters)?;
+            if !parameters.is_empty() {
+                out.put(" ")?;
+            }
+            let superclass =
+                lookup
+                    .signature(SignatureOwner::Superclass)
+                    .ok_or(RenderError::Invariant(
+                        "interpreted class signature has no superclass",
+                    ))?;
+            out.put("extends ")?;
+            super::names::signature(out, lookup, superclass)?;
+            let mut index = 0;
+            while let Some(root) = lookup.signature(SignatureOwner::Interface(index)) {
+                out.put(if index == 0 { " implements " } else { ", " })?;
+                super::names::signature(out, lookup, root)?;
+                index = index.checked_add(1).ok_or(RenderError::Invariant(
+                    "interface index exceeds the delivered coordinate",
+                ))?;
+            }
+            Ok(true)
+        }
     }
 }
 /// The declaration's own arity bounds the parameter walk; a delivered signature
