@@ -72,27 +72,28 @@ impl Buffer {
     /// Exact UTF-16 identity is retained through escaping; comments and names
     /// cannot inject new source structure. Only valid scalars are encoded as UTF-8.
     pub fn quote(&mut self, s: &str) -> Result<(), RenderError> {
-        self.encode(s.encode_utf16(), true)
+        self.encode(s.encode_utf16(), Some("\""))
     }
     pub fn units(&mut self, units: &[u16], quoted: bool) -> Result<(), RenderError> {
-        self.encode(units.iter().copied(), quoted)
+        self.encode(units.iter().copied(), quoted.then_some("\""))
     }
     fn encode(
         &mut self,
         units: impl IntoIterator<Item = u16>,
-        quoted: bool,
+        delimiter: Option<&str>,
     ) -> Result<(), RenderError> {
-        if quoted {
-            self.put("\"")?;
+        if let Some(delimiter) = delimiter {
+            self.put(delimiter)?;
         }
         for c in char::decode_utf16(units) {
             match c {
                 Err(e) => self.fmt(format_args!("\\u{:04x}", e.unpaired_surrogate()))?,
-                Ok('"') if quoted => self.put("\\\"")?,
+                Ok('"') if delimiter == Some("\"") => self.put("\\\"")?,
+                Ok('`') if delimiter == Some("`") => self.put("\\`")?,
                 Ok('\\') => self.put("\\\\")?,
-                Ok('\n') => self.put("\\n")?,
-                Ok('\r') => self.put("\\r")?,
-                Ok('\t') => self.put("\\t")?,
+                Ok('\n') if delimiter != Some("`") => self.put("\\n")?,
+                Ok('\r') if delimiter != Some("`") => self.put("\\r")?,
+                Ok('\t') if delimiter != Some("`") => self.put("\\t")?,
                 Ok(c)
                     if c.is_control()
                         || matches!(c, '\u{2028}' | '\u{2029}'|'\u{061c}'|'\u{200e}'..='\u{200f}'|'\u{202a}'..='\u{202e}'|'\u{2066}'..='\u{2069}') =>
@@ -105,18 +106,24 @@ impl Buffer {
                 }
             }
         }
-        if quoted {
-            self.put("\"")?;
+        if let Some(delimiter) = delimiter {
+            self.put(delimiter)?;
         }
         Ok(())
     }
     pub fn name(&mut self, units: &[u16], form: crate::p7::NameForm) -> Result<(), RenderError> {
         if form == crate::p7::NameForm::Original {
-            self.put("name<")?;
-            self.units(units, true)?;
-            self.put(">")?;
+            self.encode(units.iter().copied(), Some("`"))
         } else {
-            self.units(units, false)?;
+            self.units(units, false)
+        }
+    }
+    pub fn path(&mut self, units: &[u16], separator: u16) -> Result<(), RenderError> {
+        for (index, segment) in units.split(|&unit| unit == separator).enumerate() {
+            if index > 0 {
+                self.put(".")?;
+            }
+            self.name(segment, crate::substrate::names::name_form(segment))?;
         }
         Ok(())
     }

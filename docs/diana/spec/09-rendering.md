@@ -152,11 +152,19 @@ qualifier, because that would name the object under construction instead of the
 original constructor's owner, and an ambiguous target still prints its
 `[binding ...]`.
 
-A constructor reference prints the type it constructs, never `name<"<init>">`:
-`initialize v5.ArrayList()` names the object and its constructor, and a `[binding
-...]` carries the same spelling with the original prototype. An annotation record
-for a constructor names that type too. The delivered `<init>` identity remains in
-the owned reference and declaration facts.
+A constructor reference prints the type it constructs, never a wrapper around the
+`<init>` name: `initialize v5.ArrayList()` names the object and its constructor,
+and a `[binding ...]` carries the same spelling with the original prototype. An
+annotation record for a constructor names that type too. The delivered `<init>`
+identity remains in the owned reference and declaration facts.
+
+An original name segment that is not a Java identifier prints inside backticks,
+exactly as delivered: `` class `0000` ``, `X.`00BN``, `Result.`constructor-impl``.
+Only that segment is quoted; valid package and name segments keep their normal
+spelling, and `$` stays inside its own simple-name segment. Backticks and
+backslashes are escaped, and controls, bidirectional controls and isolated
+surrogates keep `\uXXXX`. Nothing is renamed, no import is added because of the
+quoting, and the delivered units, descriptors and identities stay unchanged.
 
 A declared field type, method parameter and return type print their delivered
 generic arguments when the plan carries them, for example `Map<String, Face[]>`;

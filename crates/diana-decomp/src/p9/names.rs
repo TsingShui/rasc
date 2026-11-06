@@ -81,13 +81,19 @@ impl<'a> Lookup<'a> {
             p8::Spelling::Primitive => out.units(&t.full, false)?,
             p8::Spelling::Simple => out.units(&t.full[t.simple_start..], false)?,
             p8::Spelling::Qualified => out.units(&t.full, false)?,
+            p8::Spelling::Original if !t.full.is_empty() => {
+                // The descriptor retains segment boundaries even when an original
+                // segment contains a dot; '$' never introduces a boundary.
+                let start = t.descriptor.len() - t.full.len() - 1;
+                out.path(&t.descriptor[start..t.descriptor.len() - 1], 47)?;
+            }
             p8::Spelling::Original => {
                 out.put("type<")?;
                 out.units(&t.descriptor, true)?;
-                out.put(">")?;
+                out.put("; display unavailable>")?;
             }
         }
-        if dimensions && u.spelling != p8::Spelling::Original {
+        if dimensions && !t.full.is_empty() {
             for _ in 0..t.dimensions {
                 out.put("[]")?;
             }
@@ -379,7 +385,7 @@ fn print_source(
         None => {
             out.put("type<")?;
             out.units(descriptor, true)?;
-            out.put(">")
+            out.put("; display unavailable>")
         }
     }
 }

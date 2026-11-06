@@ -138,8 +138,12 @@ uses receive explicit single-type imports. Imports are deduplicated by full bina
 spelling, not by original reference identity. Conflicting short names retain
 qualified spelling. No wildcard/static import, member renaming, cast or typed alias
 is introduced. Primitive spelling and array rank are presentation facts, not new
-value interpretation. Invalid ordinary identifier spelling retains original-name
-notation and original UTF-16 units.
+value interpretation. A segment whose original text is not a Java identifier prints
+backtick-quoted in place, per path segment (`X.`00BN``, `Result.`constructor-impl``,
+```0000``), keeping original UTF-16 units, `$` and literal dots inside their own
+segment. A type with no delivered display name keeps
+`type<"..."; display unavailable>`. P9 escapes backticks, backslashes and controls
+inside the quoted segment; it does not choose a different name.
 
 P8 MUST NOT rewrite an already rendered string. Literal strings, raw descriptors,
 member names, call signatures and P7 execution products remain unchanged. The

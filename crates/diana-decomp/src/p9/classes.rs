@@ -65,7 +65,10 @@ fn class_result(out: &mut Buffer, class: &p8::ClassResult) -> Result<(), RenderE
         && !package.units.is_empty()
     {
         out.put("package ")?;
-        out.name(&package.units, package.form)?;
+        let owner = &lookup.uses[class.header().owner.0 as usize];
+        let target = &lookup.targets[owner.target.0 as usize];
+        let start = target.descriptor.len() - target.full.len() - 1;
+        out.path(&target.descriptor[start..start + target.package_end], 47)?;
         out.put(";\n\n")?;
     }
     for import in class.names().imports() {
@@ -571,7 +574,7 @@ fn header_line(
             None => {
                 out.put("type<")?;
                 out.units(h.declaration.return_type.units(), true)?;
-                out.put(">")?;
+                out.put("; display unavailable>")?;
             }
         },
     }
@@ -605,7 +608,7 @@ fn parameters(
         } else {
             out.put("type<")?;
             out.units(ty.units(), true)?;
-            out.put(">")?;
+            out.put("; display unavailable>")?;
         }
         out.put(" ")?;
         out.put(&h.parameter_names[i])?;
