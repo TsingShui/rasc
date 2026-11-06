@@ -440,7 +440,7 @@ pub fn collect(index: &ProgramIndex<'_>, owner: ClassKey) -> Result<ClassFacts, 
         methods,
         fields_issue,
         methods_issue,
-        annotations: annotations.facts,
-        annotations_issue: annotations.issue,
+        annotations: std::sync::Arc::new(annotations.facts),
+        annotations_issue: annotations.issue.map(std::sync::Arc::new),
     })
 }

@@ -1,7 +1,7 @@
 use crate::p2::{BlockId, EdgeId, ExceptionCompletion, ExitId, OpId};
 use crate::p5::{CopyLocation, GroupId, PlanId, StorageGap, StorageRead, ThrowSite};
 
-macro_rules! ids { ($($n:ident),*) => {$(#[derive(Clone,Copy,Debug,Eq,Hash,Ord,PartialEq,PartialOrd)] pub struct $n(pub u32);)*}; }
+macro_rules! ids { ($($n:ident),*) => {$(#[derive(Clone,Copy,Debug,Eq,Hash,Ord,PartialEq,PartialOrd,serde::Serialize)] #[serde(transparent)] pub struct $n(pub u32);)*}; }
 ids!(
     NodeId,
     LinkId,

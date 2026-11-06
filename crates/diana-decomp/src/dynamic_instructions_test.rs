@@ -5,7 +5,8 @@
 //! The synthetic envelope omits integrity digests, which Engine does not verify.
 //! P5 correspondence trusts published P3/P4 inputs and separately checks physical
 //! storage traces and simultaneous-copy semantics; it does not reconstruct SSA.
-//! This checks static products, not ART admission or execution of a bootstrap.
+//! Finite opaque-operation traces compare P2/P5, P6 and owned P7 scheduling,
+//! copied values and locks. They are not a VM, ART admission or bootstrap execution.
 
 use crate::input::{InputError, InputProblem};
 use crate::p1::{CheckedPrototype, CheckedReferenceFact, MethodError, MethodProblem};
@@ -14,7 +15,7 @@ use crate::p2::{
     LockTransfer, MoveKind, OpKind, ReadOrder,
 };
 use crate::p3::{StateKind, TransferOrigin, ValueOrigin};
-use crate::p6::PlannedMethod;
+use crate::p7::ExpressedMethod;
 use crate::raw::{DexVersion, OperandReference, RawDecodeError, ReferenceSlot};
 use crate::{
     ByteOffset, CallSiteId, ClassDefId, ClassKey, CodeUnitOffset, DexId, DexImage, Engine,
@@ -32,6 +33,8 @@ const VOID: u16 = 8;
 
 #[test]
 fn dynamic_instructions_preserve_layout_references_and_completions() {
+    check_expression_owned_facts();
+    check_expression_call_surface();
     check_metamorphic_relations();
     check_storage_cases();
     check_natural_constructions();
@@ -113,10 +116,10 @@ fn dynamic_instructions_preserve_layout_references_and_completions() {
         let words = [0xff00 | u16::from(opcode), 1];
         let fixture = dex(39, &words, None, 5, 300, 0, 0);
         let flow = flowed(&fixture.bytes);
-        let operation = &flow.execution().operations()[0];
-        assert_eq!(flow.execution().reads(operation).unwrap(), &[]);
+        let operation = &flow.inspection().execution().operations()[0];
+        assert_eq!(flow.inspection().execution().reads(operation).unwrap(), &[]);
         assert_eq!(
-            flow.execution().writes(operation),
+            flow.inspection().execution().writes(operation),
             &[slot(255, SlotWidth::One)]
         );
         assert_eq!(operation.result_pc(), None);
@@ -125,7 +128,8 @@ fn dynamic_instructions_preserve_layout_references_and_completions() {
         match (
             opcode,
             operation.kind(),
-            flow.execution()
+            flow.inspection()
+                .execution()
                 .reference_fact(CodeUnitOffset(0), ReferenceSlot::First)
                 .map(Result::unwrap),
         ) {
@@ -134,7 +138,7 @@ fn dynamic_instructions_preserve_layout_references_and_completions() {
                 OpKind::ConstMethodHandle {
                     handle: MethodHandleId(1),
                 },
-                Some(CheckedReferenceFact::MethodHandle { handle }),
+                Some(CheckedReferenceFact::MethodHandle { handle, .. }),
             ) => {
                 assert_eq!(handle.kind(), 4);
                 assert_eq!(handle.member(), OperandReference::Method(MethodId(2)));
@@ -184,6 +188,203 @@ fn dynamic_instructions_preserve_layout_references_and_completions() {
     }
 }
 
+fn check_expression_call_surface() {
+    use crate::p7::{ExprKind, Qualification};
+    let fixture = dex(39, &[0x3071, 2, 0x0021], None, 6, 3, 3, 3);
+    let method = flowed(&fixture.bytes);
+    assert!(method.result().code().unwrap().expressions().iter().any(|e|matches!(&e.kind,ExprKind::Call(c)if matches!(c.qualification,Qualification::Natural))),"ordinary original call lost its natural surface");
+    let mut fixture = dex(39, &[0x1071, 2, 0], None, 9, 4, 4, 1);
+    put16(&mut fixture.bytes, fixture.methods + 18, 3);
+    let method = flowed(&fixture.bytes);
+    assert!(method.result().code().unwrap().expressions().iter().any(|e|matches!(&e.kind,ExprKind::Call(c)if matches!(c.qualification,Qualification::FullSignature))),"original array parameter target was hidden behind a different source declaration");
+    let mut fixture = dex(
+        39,
+        &[0x3071, 2, 0x0021, 0x3071, 0, 0x0021],
+        None,
+        6,
+        3,
+        3,
+        3,
+    );
+    put16(&mut fixture.bytes, fixture.methods, 3);
+    put16(&mut fixture.bytes, fixture.methods + 2, 0);
+    let name = u32::from_le_bytes(
+        fixture.bytes[fixture.methods + 20..fixture.methods + 24]
+            .try_into()
+            .unwrap(),
+    );
+    put32(&mut fixture.bytes, fixture.methods + 4, name);
+    let method = flowed(&fixture.bytes);
+    let calls = method
+        .result()
+        .code()
+        .unwrap()
+        .expressions()
+        .iter()
+        .filter_map(|e| {
+            if let ExprKind::Call(c) = &e.kind {
+                Some(c)
+            } else {
+                None
+            }
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(calls.len(), 2);
+    assert!(
+        calls
+            .iter()
+            .all(|c| matches!(c.qualification, Qualification::FullSignature)),
+        "return-only original target difference was hidden"
+    );
+}
+fn check_expression_owned_facts() {
+    use crate::p1::{BootstrapToken as T, BootstrapValue as V, CheckedBootstrapFact as D};
+    let (words, entry, registers, incoming) = invoke_words(0xfc, WIDE);
+    let (owned, declared) = {
+        let fixture = dex_with_facts(
+            39,
+            &words,
+            None,
+            entry,
+            registers,
+            incoming,
+            4,
+            &[0x000d, 0x000e],
+            None,
+            StorageCatchLayout::CatchAll,
+            true,
+        );
+        let method = flowed(&fixture.bytes);
+        let call = method
+            .inspection()
+            .execution()
+            .reference_fact(CodeUnitOffset(0), ReferenceSlot::First)
+            .unwrap()
+            .unwrap();
+        let CheckedReferenceFact::CallSite {
+            bootstrap,
+            argument_count,
+            declarations,
+            ..
+        } = call
+        else {
+            panic!()
+        };
+        assert_eq!(*argument_count, 18);
+        let values = bootstrap
+            .iter()
+            .filter_map(|t| {
+                if let T::Value { value, .. } = t {
+                    Some(value)
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>();
+        assert!(matches!(values[0], V::Signed(-3)));
+        assert!(matches!(values[1], V::Signed(-1234)));
+        assert!(matches!(values[2], V::Unsigned(65)));
+        assert!(matches!(values[3], V::Signed(-7)));
+        assert!(matches!(values[4], V::Signed(0x123456789abcdef)));
+        assert!(matches!(
+            values[5],
+            V::Bits {
+                bits: 0x7fc01234,
+                ..
+            }
+        ));
+        assert!(matches!(
+            values[6],
+            V::Bits {
+                bits: 0x8000000000000000,
+                ..
+            }
+        ));
+        assert_eq!(
+            bootstrap
+                .iter()
+                .filter(|t| matches!(t, T::EndContainer))
+                .count(),
+            2
+        );
+        assert!(declarations.iter().any(|d|matches!(d.fact,D::MethodHandle{ref member,..}if matches!(member,crate::p1::CheckedMemberFact::Field{..}))));
+        let a = method
+            .result()
+            .header()
+            .metadata
+            .records()
+            .collect::<Vec<_>>();
+        assert_eq!(
+            a.len(),
+            2,
+            "P7 method metadata lost complete scoped records"
+        );
+        assert!(
+            a.iter()
+                .any(|r| matches!(r.location(),crate::AnnotationLocation::Method(m)if m==ENTRY))
+        );
+        assert!(a.iter().any(|r|matches!(r.location(),crate::AnnotationLocation::Parameter{method,parameter:crate::AnnotationParameterIndex(0)}if method==ENTRY)));
+        assert!(
+            a.iter()
+                .all(|r| matches!(r.extent(), crate::AnnotationExtent::Complete))
+        );
+        assert_eq!(a[0].visibility(), 1);
+        assert!(a[0].tokens().iter().any(|t|matches!(t,crate::AnnotationToken::Value(v)if matches!(v.kind(),crate::AnnotationValueKind::Signed(42)))));
+        let engine = Engine::open(vec![DexImage {
+            bytes: &fixture.bytes,
+            header_offset: ByteOffset(0),
+            origin: ImageOrigin { input: InputId(0) },
+        }])
+        .unwrap();
+        let declared = engine
+            .analyze_method(CLASS, MethodId(2))
+            .unwrap()
+            .result
+            .unwrap();
+        let MethodOutcome::Declared(declared) = declared else {
+            panic!("native declaration did not reach owned P7 result")
+        };
+        (method.into_result(), declared)
+    };
+    assert_eq!(
+        owned.header().declaration.name_units(),
+        b"exercise"
+            .iter()
+            .map(|b| u16::from(*b))
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(owned.header().metadata.records().count(), 2);
+    assert!(owned.code().unwrap().references().iter().any(|r| matches!(
+        r.declaration,
+        Ok(crate::p7::ReferenceDeclaration::CallSite {
+            argument_count: 18,
+            ..
+        })
+    )));
+    assert!(declared.code().is_none());
+    assert_eq!(declared.key().method, MethodId(2));
+    assert_eq!(declared.header().metadata.records().count(), 1);
+    assert!(serde_json::to_vec(&owned).unwrap().len() > 100);
+    let mut fixture = dex_with_facts(
+        39,
+        &words,
+        None,
+        entry,
+        registers,
+        incoming,
+        4,
+        &[0x000d, 0x000e],
+        None,
+        StorageCatchLayout::CatchAll,
+        true,
+    );
+    fixture.bytes[fixture.parameter_annotation.unwrap() + 4] = 0x7f;
+    let method = flowed(&fixture.bytes);
+    assert!(method.result().header().metadata.issue().is_some());
+    assert!(method.result().header().metadata_error.is_some());
+    assert!(method.result().code().is_some());
+}
+
 // P5's oracle consumes published P3/P4 facts, never P5 construction helpers.
 // Slow fixed points and symbolic stores deliberately differ from the producer.
 fn storage_value(s: &crate::p3::SsaFacts, state: crate::p3::StateId) -> Option<crate::p3::ValueId> {
@@ -195,13 +396,13 @@ fn storage_value(s: &crate::p3::SsaFacts, state: crate::p3::StateId) -> Option<c
 }
 
 fn storage_expected_read(
-    method: &PlannedMethod<'_>,
+    method: &ExpressedMethod<'_>,
     state: crate::p3::StateId,
     view: crate::p4::Interpretation,
 ) -> Result<crate::p5::StorageRead, crate::p5::StorageGap> {
     use crate::p4::Interpretation;
     use crate::p5::{StorageBinding, StorageGap, StorageRead};
-    let s = method.analysis_evidence().ssa_facts();
+    let s = method.inspection().analysis_evidence().ssa_facts();
     if let Interpretation::Unknown(problem) = view {
         return Err(StorageGap::Upstream(problem));
     }
@@ -209,7 +410,7 @@ fn storage_expected_read(
         return Err(StorageGap::SourceUnavailable(state));
     }
     let value = storage_value(s, state).expect("available input has no value");
-    match method.storage_facts().binding(value).unwrap() {
+    match method.inspection().storage_facts().binding(value).unwrap() {
         StorageBinding::Literal(bits) => Ok(StorageRead::Literal {
             value,
             state,
@@ -259,12 +460,12 @@ fn storage_read_equivalent(
 }
 
 fn storage_normal_site(
-    method: &PlannedMethod<'_>,
+    method: &ExpressedMethod<'_>,
     transfer: crate::p3::TransferId,
 ) -> crate::p5::TransferSite {
     use crate::p3::{PointKind, Target};
     use crate::p5::TransferSite;
-    let s = method.analysis_evidence().ssa_facts();
+    let s = method.inspection().analysis_evidence().ssa_facts();
     let t = &s.transfers()[transfer.0 as usize];
     match t.origin() {
         TransferOrigin::Entry => TransferSite::InitialEntry,
@@ -284,14 +485,15 @@ fn storage_normal_site(
     }
 }
 
-fn storage_construction_correspondence(method: &PlannedMethod<'_>) {
+fn storage_construction_correspondence(method: &ExpressedMethod<'_>) {
     use crate::p5::{ConstructionMode, ConstructionRole, OperationEmission, StorageBinding};
-    let f = method.storage_facts();
-    let s = method.analysis_evidence().ssa_facts();
+    let f = method.inspection().storage_facts();
+    let s = method.inspection().analysis_evidence().ssa_facts();
     let mut owned = std::collections::HashSet::new();
     for (i, group) in f.construction_groups().iter().enumerate() {
         assert_eq!(group.id().0 as usize, i);
         let ctor = method
+            .inspection()
             .type_facts()
             .constructors()
             .iter()
@@ -325,7 +527,7 @@ fn storage_construction_correspondence(method: &PlannedMethod<'_>) {
                 assert_eq!(role, ConstructionRole::Initialization);
             } else {
                 assert!(matches!(
-                    method.execution().operations()[op.0 as usize].kind(),
+                    method.inspection().execution().operations()[op.0 as usize].kind(),
                     OpKind::Move {
                         kind: MoveKind::Object
                     } | OpKind::Const { .. }
@@ -353,7 +555,15 @@ fn storage_construction_correspondence(method: &PlannedMethod<'_>) {
             .iter()
             .flat_map(|op| s.operation_outputs(*op).unwrap())
             .filter_map(|o| s.output_value(o))
-            .filter(|v| method.type_facts().value(*v).unwrap().literal().is_none())
+            .filter(|v| {
+                method
+                    .inspection()
+                    .type_facts()
+                    .value(*v)
+                    .unwrap()
+                    .literal()
+                    .is_none()
+            })
             .collect::<Vec<_>>();
         assert_eq!(
             group
@@ -365,7 +575,7 @@ fn storage_construction_correspondence(method: &PlannedMethod<'_>) {
             "P5 group publication coverage"
         );
         let site = s.operation_site(group.initialization()).unwrap().execute();
-        assert!(s.transfers().iter().any(|t|t.from()==site&&t.target()==crate::p3::Target::Point(group.normal())&&!matches!(t.origin(),TransferOrigin::Edge(e)if matches!(method.execution().edges()[e.0 as usize].role(),EdgeRole::Exception{..}))),"P5 group publishes outside initializer normal continuation");
+        assert!(s.transfers().iter().any(|t|t.from()==site&&t.target()==crate::p3::Target::Point(group.normal())&&!matches!(t.origin(),TransferOrigin::Edge(e)if matches!(method.inspection().execution().edges()[e.0 as usize].role(),EdgeRole::Exception{..}))),"P5 group publishes outside initializer normal continuation");
         for p in group.publications() {
             assert_eq!(
                 f.binding(p.value),
@@ -382,6 +592,7 @@ fn storage_construction_correspondence(method: &PlannedMethod<'_>) {
         }
     }
     let allocations = method
+        .inspection()
         .execution()
         .operations()
         .iter()
@@ -398,25 +609,26 @@ fn storage_construction_correspondence(method: &PlannedMethod<'_>) {
 }
 
 fn storage_semantic_binding(
-    method: &PlannedMethod<'_>,
+    method: &ExpressedMethod<'_>,
     value: crate::p3::ValueId,
 ) -> crate::p5::StorageBinding {
     use crate::p5::StorageBinding;
-    let binding = method.storage_facts().binding(value).unwrap();
+    let binding = method.inspection().storage_facts().binding(value).unwrap();
     let StorageBinding::Deferred { local, group } = binding else {
         return binding;
     };
-    let plan = &method.storage_facts().construction_groups()[group.0 as usize];
+    let plan = &method.inspection().storage_facts().construction_groups()[group.0 as usize];
     assert!(
         plan.publications()
             .iter()
             .any(|p| p.value == value && p.local == local)
     );
-    let origin = method.analysis_evidence().ssa_facts().values()[value.0 as usize].origin();
+    let origin =
+        method.inspection().analysis_evidence().ssa_facts().values()[value.0 as usize].origin();
     match origin {
         ValueOrigin::Operation { operation, .. }
             if matches!(
-                method.execution().operations()[operation.0 as usize].kind(),
+                method.inspection().execution().operations()[operation.0 as usize].kind(),
                 OpKind::NewInstance { .. }
             ) =>
         {
@@ -429,7 +641,7 @@ fn storage_semantic_binding(
     }
 }
 
-fn storage_correspondence(method: &PlannedMethod<'_>) {
+fn storage_correspondence(method: &ExpressedMethod<'_>) {
     use crate::p3::PointKind;
     use crate::p4::Family;
     use crate::p5::{
@@ -437,10 +649,10 @@ fn storage_correspondence(method: &PlannedMethod<'_>) {
         StorageRead, StorageType, ThrowSite, TransferRoute,
     };
     storage_construction_correspondence(method);
-    let f = method.storage_facts();
-    let s = method.analysis_evidence().ssa_facts();
-    let t = method.type_facts();
-    let flow = method.execution();
+    let f = method.inspection().storage_facts();
+    let s = method.inspection().analysis_evidence().ssa_facts();
+    let t = method.inspection().type_facts();
+    let flow = method.inspection().execution();
     assert_eq!(f.bindings().len(), s.values().len(), "P5 value coverage");
     let mut value_locals = std::collections::HashSet::new();
     for v in s.values() {
@@ -978,11 +1190,11 @@ struct StorageMissing {
 // Slow least fixed point over explicit interference, unlike production's
 // union/find and worklist. Sources are not poisoned backwards by a bad copy.
 fn storage_missing_closure(
-    method: &PlannedMethod<'_>,
+    method: &ExpressedMethod<'_>,
     dependencies: &[Vec<Option<crate::p5::LocalId>>],
     mut bad: Vec<Vec<bool>>,
 ) -> StorageMissing {
-    let f = method.storage_facts();
+    let f = method.inspection().storage_facts();
     let mut locals = vec![false; f.locals().len()];
     loop {
         let old = (bad.clone(), locals.clone());
@@ -1019,14 +1231,14 @@ fn storage_missing_closure(
     }
 }
 fn storage_dependency_cause(
-    method: &PlannedMethod<'_>,
+    method: &ExpressedMethod<'_>,
     dependencies: &[Vec<Option<crate::p5::LocalId>>],
     gap: crate::p5::StorageGap,
 ) -> StorageMissing {
     let crate::p5::StorageGap::Dependency { plan, copy } = gap else {
         panic!("P5 local gap has no original missing-copy cause")
     };
-    let f = method.storage_facts();
+    let f = method.inspection().storage_facts();
     let root = &f.copy_plans()[plan.0 as usize].assignments()[copy.0 as usize];
     assert!(
         root.source().is_err() || root.destination().is_err(),
@@ -1076,7 +1288,7 @@ fn storage_symbol_read(
     }
 }
 fn storage_run_steps(
-    method: &PlannedMethod<'_>,
+    method: &ExpressedMethod<'_>,
     plan: &crate::p5::CopyPlan,
     cells: &mut [Option<StorageSymbol>],
 ) {
@@ -1091,15 +1303,16 @@ fn storage_run_steps(
             } => {
                 assert!(saved.insert(destination), "P5 temporary written twice");
                 assert_eq!(
-                    method.storage_facts().locals()[destination.0 as usize].kind(),
+                    method.inspection().storage_facts().locals()[destination.0 as usize].kind(),
                     LocalKind::ParallelTemporary {
                         plan: plan.id(),
                         saved: source
                     }
                 );
                 assert_eq!(
-                    method.storage_facts().locals()[destination.0 as usize].storage_type(),
-                    method.storage_facts().locals()[source.0 as usize].storage_type()
+                    method.inspection().storage_facts().locals()[destination.0 as usize]
+                        .storage_type(),
+                    method.inspection().storage_facts().locals()[source.0 as usize].storage_type()
                 );
                 cells[destination.0 as usize] = Some(
                     cells[source.0 as usize]
@@ -1158,10 +1371,11 @@ fn storage_run_steps(
         }
     }
 }
-fn storage_parallel_equivalence(method: &PlannedMethod<'_>, plan: &crate::p5::CopyPlan) {
+fn storage_parallel_equivalence(method: &ExpressedMethod<'_>, plan: &crate::p5::CopyPlan) {
     use crate::p5::LocalKind;
     for epoch in 0..2 {
         let initial = method
+            .inspection()
             .storage_facts()
             .locals()
             .iter()
@@ -1182,6 +1396,7 @@ fn storage_parallel_equivalence(method: &PlannedMethod<'_>, plan: &crate::p5::Co
         let mut sequential = initial;
         storage_run_steps(method, plan, &mut sequential);
         for local in method
+            .inspection()
             .storage_facts()
             .locals()
             .iter()
@@ -1198,14 +1413,15 @@ fn storage_parallel_equivalence(method: &PlannedMethod<'_>, plan: &crate::p5::Co
 }
 
 fn storage_trace_value(
-    method: &PlannedMethod<'_>,
+    method: &ExpressedMethod<'_>,
     state: crate::p3::StateId,
     values: &[Option<StorageSymbol>],
 ) -> StorageSymbol {
-    let s = method.analysis_evidence().ssa_facts();
+    let s = method.inspection().analysis_evidence().ssa_facts();
     assert!(s.state(state).unwrap().availability().is_available());
     let value = storage_value(s, state).unwrap();
     method
+        .inspection()
         .type_facts()
         .value(value)
         .unwrap()
@@ -1221,7 +1437,7 @@ type StorageTraceCells = Vec<Option<StorageSymbol>>;
 // Choices name original branch/throw PCs and targets, never P5 plan IDs. The
 // reference side follows supplied SSA incoming facts, not a register replay.
 fn storage_trace(
-    method: &PlannedMethod<'_>,
+    method: &ExpressedMethod<'_>,
     choices: &[(u32, Option<u32>, bool)],
 ) -> (StorageTraceReads, StorageTraceCells) {
     let choices = choices
@@ -1232,14 +1448,14 @@ fn storage_trace(
 }
 
 fn storage_trace_ordered(
-    method: &PlannedMethod<'_>,
+    method: &ExpressedMethod<'_>,
     choices: &[(u32, Option<u32>, bool, Option<u32>)],
 ) -> (StorageTraceReads, StorageTraceCells) {
     use crate::p3::{PointKind, Target};
     use crate::p5::{CopyLocation, Materialization, ThrowSite};
-    let s = method.analysis_evidence().ssa_facts();
-    let f = method.storage_facts();
-    let flow = method.execution();
+    let s = method.inspection().analysis_evidence().ssa_facts();
+    let f = method.inspection().storage_facts();
+    let flow = method.inspection().execution();
     let mut cells = vec![None; f.locals().len()];
     let mut internal = vec![None; f.locals().len()];
     let mut values = vec![None; s.values().len()];
@@ -1298,6 +1514,7 @@ fn storage_trace_ordered(
             let mut actual = Vec::new();
             for (original, access) in uses.iter().zip(accesses) {
                 let view = method
+                    .inspection()
                     .type_facts()
                     .uses()
                     .iter()
@@ -1423,6 +1640,7 @@ fn storage_trace_ordered(
                 let value = s.output_value(output).unwrap();
                 let pc = flow.operations()[output.operation().0 as usize].pc().0;
                 let token = method
+                    .inspection()
                     .type_facts()
                     .value(value)
                     .unwrap()
@@ -1487,6 +1705,7 @@ fn storage_trace_ordered(
         let mut phi_updates = Vec::new();
         if let Target::Point(point) = selected.target() {
             for view in method
+                .inspection()
                 .type_facts()
                 .phis()
                 .iter()
@@ -1499,6 +1718,7 @@ fn storage_trace_ordered(
                     .find(|i| i.transfer == selected.id())
                     .unwrap();
                 let token = method
+                    .inspection()
                     .type_facts()
                     .value(phi.value())
                     .unwrap()
@@ -1591,7 +1811,15 @@ fn check_storage_cases() {
             0,
         );
         let method = flowed(&fixture.bytes);
-        assert_eq!(method.analysis_evidence().ssa_facts().phis().len(), 2);
+        assert_eq!(
+            method
+                .inspection()
+                .analysis_evidence()
+                .ssa_facts()
+                .phis()
+                .len(),
+            2
+        );
         for side in 0..2 {
             let trace =
                 storage_trace(&method, &[(0, Some(if side == 0 { 2 } else { 5 }), false)]).0;
@@ -1670,7 +1898,7 @@ fn check_storage_cases() {
         None,
     );
     let method = flowed(&fixture.bytes);
-    assert_eq!(method.storage_facts().snapshots().len(), 1);
+    assert_eq!(method.inspection().storage_facts().snapshots().len(), 1);
     region_trace(&method, &[], None);
     for pc in [1, 5] {
         region_trace(&method, &[(pc, RegionChoice::Exception(0))], None);
@@ -1706,17 +1934,21 @@ fn check_storage_cases() {
         let method = flowed(&fixture.bytes);
         let split = matches!(layout, StorageCatchLayout::Split(_));
         assert_eq!(
-            method.storage_facts().snapshots().len(),
+            method.inspection().storage_facts().snapshots().len(),
             if split { 2 } else { 1 }
         );
         assert_eq!(
-            method.storage_facts().transfers().len(),
+            method.inspection().storage_facts().transfers().len(),
             4,
             "split={split}; original edges={:?}; SSA transfers={:?}",
-            method.execution().edges(),
-            method.analysis_evidence().ssa_facts().transfers()
+            method.inspection().execution().edges(),
+            method
+                .inspection()
+                .analysis_evidence()
+                .ssa_facts()
+                .transfers()
         );
-        let saves = method.storage_facts().copy_plans().iter().find(|p| matches!(p.location(), CopyLocation::BeforeThrow(ThrowSite::Operation(op)) if method.execution().operations()[op.0 as usize].pc() == CodeUnitOffset(1))).unwrap().assignments();
+        let saves = method.inspection().storage_facts().copy_plans().iter().find(|p| matches!(p.location(), CopyLocation::BeforeThrow(ThrowSite::Operation(op)) if method.inspection().execution().operations()[op.0 as usize].pc() == CodeUnitOffset(1))).unwrap().assignments();
         assert_eq!(saves.len(), if split { 2 } else { 1 });
         if split {
             assert_eq!(
@@ -1749,10 +1981,17 @@ fn check_storage_cases() {
         None,
     );
     let method = flowed(&fixture.bytes);
-    assert!(method.storage_facts().copy_plans().iter().any(|p| matches!(
-        p.location(),
-        CopyLocation::BeforeThrow(ThrowSite::Terminal(_))
-    )));
+    assert!(
+        method
+            .inspection()
+            .storage_facts()
+            .copy_plans()
+            .iter()
+            .any(|p| matches!(
+                p.location(),
+                CopyLocation::BeforeThrow(ThrowSite::Terminal(_))
+            ))
+    );
     for (throw_pc, expected) in [
         (1, StorageSymbol::Definition(0, 1)),
         (5, StorageSymbol::Definition(1, 1)),
@@ -1776,9 +2015,11 @@ fn check_storage_cases() {
     let method = flowed(&fixture.bytes);
     assert!(
         method
+            .inspection()
             .storage_facts()
             .operation_uses(
                 method
+                    .inspection()
                     .execution()
                     .operations()
                     .iter()
@@ -1793,6 +2034,7 @@ fn check_storage_cases() {
     );
     for pc in [8, 9] {
         let op = method
+            .inspection()
             .execution()
             .operations()
             .iter()
@@ -1800,6 +2042,7 @@ fn check_storage_cases() {
             .unwrap();
         assert!(
             method
+                .inspection()
                 .storage_facts()
                 .operation_uses(op.id())
                 .unwrap()
@@ -1809,12 +2052,14 @@ fn check_storage_cases() {
         );
     }
     let bad_phi = method
+        .inspection()
         .analysis_evidence()
         .ssa_facts()
         .phis()
         .iter()
         .find(|p| {
             method
+                .inspection()
                 .analysis_evidence()
                 .ssa_facts()
                 .slot(p.slot())
@@ -1825,9 +2070,11 @@ fn check_storage_cases() {
         .unwrap();
     assert!(
         method
+            .inspection()
             .storage_facts()
             .local_gap(
                 method
+                    .inspection()
                     .storage_facts()
                     .binding(bad_phi.value())
                     .unwrap()
@@ -1851,6 +2098,7 @@ fn check_storage_cases() {
     let method = flowed(&fixture.bytes);
     assert!(
         method
+            .inspection()
             .storage_facts()
             .copy_plans()
             .iter()
@@ -1858,12 +2106,14 @@ fn check_storage_cases() {
     );
     assert!(
         method
+            .inspection()
             .storage_facts()
             .uses()
             .iter()
             .any(|u| u.read().is_err())
     );
     let op = method
+        .inspection()
         .execution()
         .operations()
         .iter()
@@ -1871,6 +2121,7 @@ fn check_storage_cases() {
         .unwrap();
     assert!(
         method
+            .inspection()
             .storage_facts()
             .operation_uses(op.id())
             .unwrap()
@@ -1892,12 +2143,14 @@ fn check_storage_cases() {
     let method = flowed(&fixture.bytes);
     assert!(
         method
+            .inspection()
             .storage_facts()
             .bindings()
             .iter()
             .any(|b| matches!(b, StorageBinding::Unavailable(_)))
     );
     let op = method
+        .inspection()
         .execution()
         .operations()
         .iter()
@@ -1905,6 +2158,7 @@ fn check_storage_cases() {
         .unwrap();
     assert!(
         method
+            .inspection()
             .storage_facts()
             .operation_uses(op.id())
             .unwrap()
@@ -1937,8 +2191,15 @@ fn check_natural_constructions() {
     ] {
         let fixture = make(words, &[0x030d, 0x000e], 5, 4, 0, 1, 5);
         let method = flowed(&fixture.bytes);
-        assert_eq!(method.storage_facts().construction_groups().len(), 1);
-        let group = &method.storage_facts().construction_groups()[0];
+        assert_eq!(
+            method
+                .inspection()
+                .storage_facts()
+                .construction_groups()
+                .len(),
+            1
+        );
+        let group = &method.inspection().storage_facts().construction_groups()[0];
         assert_eq!(group.members().len(), members);
         let normal = storage_trace(&method, &[]);
         assert_eq!(
@@ -1956,7 +2217,7 @@ fn check_natural_constructions() {
             }
         }
         assert!(matches!(
-            method.storage_facts().allocation_plans()[0].mode(),
+            method.inspection().storage_facts().allocation_plans()[0].mode(),
             ConstructionMode::Natural(_)
         ));
     }
@@ -1966,9 +2227,16 @@ fn check_natural_constructions() {
     ] {
         let fixture = make(words, &[0x030d, 0x000e], 8, 8, 3, 4, 6);
         let method = flowed(&fixture.bytes);
-        assert_eq!(method.storage_facts().construction_groups().len(), 1);
         assert_eq!(
-            method.storage_facts().construction_groups()[0]
+            method
+                .inspection()
+                .storage_facts()
+                .construction_groups()
+                .len(),
+            1
+        );
+        assert_eq!(
+            method.inspection().storage_facts().construction_groups()[0]
                 .arguments()
                 .len(),
             2
@@ -1987,9 +2255,16 @@ fn check_natural_constructions() {
         5,
     );
     let method = flowed(&fixture.bytes);
-    assert_eq!(method.storage_facts().construction_groups().len(), 1);
+    assert_eq!(
+        method
+            .inspection()
+            .storage_facts()
+            .construction_groups()
+            .len(),
+        1
+    );
     assert!(
-        method.storage_facts().construction_groups()[0]
+        method.inspection().storage_facts().construction_groups()[0]
             .prelude()
             .is_some()
     );
@@ -2013,9 +2288,15 @@ fn check_natural_constructions() {
         5,
     );
     let method = flowed(&fixture.bytes);
-    assert!(method.storage_facts().construction_groups().is_empty());
+    assert!(
+        method
+            .inspection()
+            .storage_facts()
+            .construction_groups()
+            .is_empty()
+    );
     assert!(matches!(
-        method.storage_facts().constructions()[0].mode(),
+        method.inspection().storage_facts().constructions()[0].mode(),
         ConstructionMode::Explicit(Separation::SnapshotMismatch(_))
     ));
     let fixture = make(
@@ -2028,9 +2309,16 @@ fn check_natural_constructions() {
         5,
     );
     let method = flowed(&fixture.bytes);
-    assert!(method.storage_facts().construction_groups().is_empty());
     assert!(
         method
+            .inspection()
+            .storage_facts()
+            .construction_groups()
+            .is_empty()
+    );
+    assert!(
+        method
+            .inspection()
             .storage_facts()
             .bindings()
             .iter()
@@ -2042,7 +2330,7 @@ fn check_natural_constructions() {
     let method = flowed(&fixture.bytes);
     assert!(
         matches!(
-            method.storage_facts().constructions()[0].mode(),
+            method.inspection().storage_facts().constructions()[0].mode(),
             ConstructionMode::Explicit(Separation::DifferentProtection { .. })
         ),
         "P5 new changed the allocation protection"
@@ -2057,9 +2345,16 @@ fn check_natural_constructions() {
         5,
     );
     let method = flowed(&fixture.bytes);
-    assert!(method.storage_facts().construction_groups().is_empty());
+    assert!(
+        method
+            .inspection()
+            .storage_facts()
+            .construction_groups()
+            .is_empty()
+    );
     let use_site = local_use(&method, 0, 0).site();
     let origin = method
+        .inspection()
         .type_facts()
         .initialization()
         .iter()
@@ -2084,18 +2379,27 @@ fn check_natural_constructions() {
         5,
     );
     let method = flowed(&fixture.bytes);
-    assert!(method.storage_facts().construction_groups().is_empty());
+    assert!(
+        method
+            .inspection()
+            .storage_facts()
+            .construction_groups()
+            .is_empty()
+    );
     assert!(matches!(
-        method.storage_facts().constructions()[0].mode(),
+        method.inspection().storage_facts().constructions()[0].mode(),
         ConstructionMode::Explicit(Separation::InterveningOperation(_))
     ));
 }
 
 // P6 expectations consume only the original P2 graph and published P5 plans.
 // Neither ownership coverage nor target interpretation calls a P6 builder/helper.
-fn region_action_target(method: &PlannedMethod<'_>, link: crate::p6::LinkId) -> crate::p6::NodeId {
+fn region_action_target(
+    method: &ExpressedMethod<'_>,
+    link: crate::p6::LinkId,
+) -> crate::p6::NodeId {
     use crate::p6::*;
-    let f = method.facts();
+    let f = method.inspection().facts();
     let l = &f.links()[link.0 as usize];
     let ancestor = |region: RegionId| {
         let mut at = Some(f.labels()[l.from().0 as usize].owner());
@@ -2256,13 +2560,13 @@ fn region_action_target(method: &PlannedMethod<'_>, link: crate::p6::LinkId) -> 
         }
     }
 }
-fn region_sync_correspondence(method: &PlannedMethod<'_>) {
+fn region_sync_correspondence(method: &ExpressedMethod<'_>) {
     use crate::p5::{CopyEmission, CopyLocation, PlanId, ThrowSite, TransferSite};
     use crate::p6::*;
     use std::collections::HashSet;
-    let f = method.facts();
-    let flow = method.execution();
-    let storage = method.storage_facts();
+    let f = method.inspection().facts();
+    let flow = method.inspection().execution();
+    let storage = method.inspection().storage_facts();
     let node_of = |op: crate::p2::OpId| {
         f.nodes()
             .iter()
@@ -2522,8 +2826,8 @@ fn region_sync_correspondence(method: &PlannedMethod<'_>) {
                         panic!()
                     };
                     assert_eq!(
-                        method.type_facts().values()[value.0 as usize].identity(),
-                        method.type_facts().values()[captured.0 as usize].identity(),
+                        method.inspection().type_facts().values()[value.0 as usize].identity(),
+                        method.inspection().type_facts().values()[captured.0 as usize].identity(),
                         "P6 rethrow changed the captured exception"
                     );
                 }
@@ -2549,17 +2853,20 @@ fn region_sync_correspondence(method: &PlannedMethod<'_>) {
     }
 }
 
-fn region_copy_owner(method: &PlannedMethod<'_>, plan: crate::p5::PlanId) -> crate::p6::CopyOwner {
+fn region_copy_owner(
+    method: &ExpressedMethod<'_>,
+    plan: crate::p5::PlanId,
+) -> crate::p6::CopyOwner {
     use crate::p6::{CopyOwner, RegionKind};
     if let Some(crate::p5::CopyEmission::Construction { group }) =
-        method.storage_facts().copy_emission(plan)
+        method.inspection().storage_facts().copy_emission(plan)
     {
         return CopyOwner::Construction(group);
     }
     let mut owner = CopyOwner::Original;
-    for r in method.facts().regions() {
+    for r in method.inspection().facts().regions() {
         if let RegionKind::Synchronized(scope) = r.kind()
-            && method.facts().synchronized()[scope.0 as usize]
+            && method.inspection().facts().synchronized()[scope.0 as usize]
                 .exits()
                 .iter()
                 .any(|e| e.before_release().contains(&plan) || e.after_release().contains(&plan))
@@ -2570,14 +2877,14 @@ fn region_copy_owner(method: &PlannedMethod<'_>, plan: crate::p5::PlanId) -> cra
     }
     owner
 }
-fn region_correspondence(method: &PlannedMethod<'_>) {
+fn region_correspondence(method: &ExpressedMethod<'_>) {
     region_sync_correspondence(method);
     use crate::p5::{CopyLocation, OperationEmission, ThrowSite, TransferSite};
     use crate::p6::*;
     use std::collections::HashSet;
-    let f = method.facts();
-    let flow = method.execution();
-    let storage = method.storage_facts();
+    let f = method.inspection().facts();
+    let flow = method.inspection().execution();
+    let storage = method.inspection().storage_facts();
     assert_eq!(f.blocks().len(), flow.blocks().len());
     assert_eq!(f.labels().len(), f.nodes().len());
     assert_eq!(f.operation_owners().len(), flow.operations().len());
@@ -3106,7 +3413,7 @@ enum RegionChoice {
     Exception(u32),
 }
 struct RegionMachine<'f, 'a> {
-    method: &'f PlannedMethod<'a>,
+    method: &'f ExpressedMethod<'a>,
     planned: bool,
     events: Vec<String>,
     cells: Vec<Option<(u32, u32)>>,
@@ -3121,16 +3428,20 @@ struct RegionMachine<'f, 'a> {
 }
 impl<'f, 'a> RegionMachine<'f, 'a> {
     fn new(
-        method: &'f PlannedMethod<'a>,
+        method: &'f ExpressedMethod<'a>,
         choices: &'f [(u32, RegionChoice)],
         planned: bool,
     ) -> Self {
         assert!(
-            method.storage_facts().construction_groups().is_empty(),
+            method
+                .inspection()
+                .storage_facts()
+                .construction_groups()
+                .is_empty(),
             "P6 traces expand P5 storage, not compound construction semantics"
         );
-        let mut cells = vec![None; method.storage_facts().locals().len()];
-        for l in method.storage_facts().locals() {
+        let mut cells = vec![None; method.inspection().storage_facts().locals().len()];
+        for l in method.inspection().storage_facts().locals() {
             if let crate::p5::LocalKind::Parameter { value, .. } = l.kind() {
                 cells[l.id().0 as usize] = Some((value.0, 0));
             }
@@ -3140,7 +3451,7 @@ impl<'f, 'a> RegionMachine<'f, 'a> {
             planned,
             events: Vec::new(),
             cells,
-            occurrences: vec![0; method.execution().operations().len()],
+            occurrences: vec![0; method.inspection().execution().operations().len()],
             choices,
             choice: 0,
             pending: Vec::new(),
@@ -3153,6 +3464,7 @@ impl<'f, 'a> RegionMachine<'f, 'a> {
     fn copies(&self, at: crate::p5::CopyLocation) -> Vec<crate::p5::PlanId> {
         if self.planned {
             self.method
+                .inspection()
                 .facts()
                 .copy_placements()
                 .iter()
@@ -3163,12 +3475,17 @@ impl<'f, 'a> RegionMachine<'f, 'a> {
                 .collect()
         } else {
             self.method
+                .inspection()
                 .storage_facts()
                 .copy_plans()
                 .iter()
                 .filter(|p| {
                     p.location() == at
-                        && self.method.storage_facts().copy_emission(p.id())
+                        && self
+                            .method
+                            .inspection()
+                            .storage_facts()
+                            .copy_emission(p.id())
                             == Some(crate::p5::CopyEmission::Original)
                 })
                 .map(|p| p.id())
@@ -3176,30 +3493,32 @@ impl<'f, 'a> RegionMachine<'f, 'a> {
         }
     }
     fn at(&mut self, site: crate::p5::TransferSite) {
-        let plans = if self.planned {
-            self.method
-                .facts()
-                .copy_placements()
-                .iter()
-                .filter(|p| {
-                    matches!(p.location,crate::p5::CopyLocation::Transfer{site:s,..}if s==site)
-                        && !matches!(p.owner, crate::p6::CopyOwner::Construction(_))
-                })
-                .map(|p| p.plan)
-                .collect::<Vec<_>>()
-        } else {
-            self.method
-                .storage_facts()
+        let plans =
+            if self.planned {
+                self.method
+                    .inspection()
+                    .facts()
+                    .copy_placements()
+                    .iter()
+                    .filter(|p| {
+                        matches!(p.location,crate::p5::CopyLocation::Transfer{site:s,..}if s==site)
+                            && !matches!(p.owner, crate::p6::CopyOwner::Construction(_))
+                    })
+                    .map(|p| p.plan)
+                    .collect::<Vec<_>>()
+            } else {
+                self.method
+                .inspection().storage_facts()
                 .copy_plans()
                 .iter()
                 .filter(|p| {
                     matches!(p.location(),crate::p5::CopyLocation::Transfer{site:s,..}if s==site)
-                        && self.method.storage_facts().copy_emission(p.id())
+                        && self.method.inspection().storage_facts().copy_emission(p.id())
                             == Some(crate::p5::CopyEmission::Original)
                 })
                 .map(|p| p.id())
                 .collect::<Vec<_>>()
-        };
+            };
         for p in plans {
             self.copy(p);
         }
@@ -3214,7 +3533,7 @@ impl<'f, 'a> RegionMachine<'f, 'a> {
     fn copy(&mut self, id: crate::p5::PlanId) {
         use crate::p5::CopyStep;
         self.events.push(format!("copy:{}", id.0));
-        let p = &self.method.storage_facts().copy_plans()[id.0 as usize];
+        let p = &self.method.inspection().storage_facts().copy_plans()[id.0 as usize];
         for step in p.steps() {
             match *step {
                 CopyStep::Save {
@@ -3235,18 +3554,21 @@ impl<'f, 'a> RegionMachine<'f, 'a> {
         }
         let plans = if self.planned {
             self.method
+                .inspection()
                 .facts()
                 .handler_entries()
                 .iter()
-                .find(|h| self.method.facts().nodes()[h.node().0 as usize].block() == block)
+                .find(|h| {
+                    self.method.inspection().facts().nodes()[h.node().0 as usize].block() == block
+                })
                 .map(|h| h.receives().to_vec())
                 .unwrap_or_default()
         } else {
-            self.method.storage_facts().copy_plans().iter().filter(|p|matches!(p.location(),crate::p5::CopyLocation::HandlerEntry{block:b,..}if b==block)).map(|p|p.id()).collect()
+            self.method.inspection().storage_facts().copy_plans().iter().filter(|p|matches!(p.location(),crate::p5::CopyLocation::HandlerEntry{block:b,..}if b==block)).map(|p|p.id()).collect()
         };
         for id in plans {
             if let crate::p5::CopyLocation::HandlerEntry { capture, .. } =
-                self.method.storage_facts().copy_plans()[id.0 as usize].location()
+                self.method.inspection().storage_facts().copy_plans()[id.0 as usize].location()
             {
                 if let Some(op) = capture {
                     self.pending.push((op, id));
@@ -3266,10 +3588,10 @@ impl<'f, 'a> RegionMachine<'f, 'a> {
             .expect("independent branch choice missing");
         assert_eq!(Some(at), pc);
         self.choice += 1;
-        edges.iter().copied().find(|e|matches!((self.method.execution().edges()[e.0 as usize].role(),choice),
+        edges.iter().copied().find(|e|matches!((self.method.inspection().execution().edges()[e.0 as usize].role(),choice),
             (EdgeRole::Normal(crate::p2::NormalEdge::ConditionalTrue),RegionChoice::True)|
             (EdgeRole::Normal(crate::p2::NormalEdge::ConditionalFalse),RegionChoice::False)|
-            (EdgeRole::Normal(crate::p2::NormalEdge::SwitchDefault),RegionChoice::Default))||matches!((self.method.execution().edges()[e.0 as usize].role(),choice),(EdgeRole::Normal(crate::p2::NormalEdge::SwitchCase{key,..}),RegionChoice::Case(k))if key==k)).expect("independent role missing")
+            (EdgeRole::Normal(crate::p2::NormalEdge::SwitchDefault),RegionChoice::Default))||matches!((self.method.inspection().execution().edges()[e.0 as usize].role(),choice),(EdgeRole::Normal(crate::p2::NormalEdge::SwitchCase{key,..}),RegionChoice::Case(k))if key==k)).expect("independent role missing")
     }
     fn exception_edge(
         &mut self,
@@ -3287,6 +3609,7 @@ impl<'f, 'a> RegionMachine<'f, 'a> {
         }
         let edges = if self.planned {
             self.method
+                .inspection()
                 .facts()
                 .throws()
                 .iter()
@@ -3297,12 +3620,13 @@ impl<'f, 'a> RegionMachine<'f, 'a> {
         } else {
             let (b, op) = match site {
                 crate::p5::ThrowSite::Operation(op) => (
-                    self.method.execution().operations()[op.0 as usize].block(),
+                    self.method.inspection().execution().operations()[op.0 as usize].block(),
                     Some(op),
                 ),
                 crate::p5::ThrowSite::Terminal(b) => (b, None),
             };
             self.method
+                .inspection()
                 .execution()
                 .edges()
                 .iter()
@@ -3319,16 +3643,17 @@ impl<'f, 'a> RegionMachine<'f, 'a> {
             order
         } else {
             assert_eq!(edges.len(), 1);
-            match self.method.execution().edges()[edges[0].0 as usize].role() {
+            match self.method.inspection().execution().edges()[edges[0].0 as usize].role() {
                 EdgeRole::Exception { order, .. } => order,
                 _ => unreachable!(),
             }
         };
-        Some(edges.into_iter().find(|e|matches!(self.method.execution().edges()[e.0 as usize].role(),EdgeRole::Exception{order:o,..}if o==order)).unwrap())
+        Some(edges.into_iter().find(|e|matches!(self.method.inspection().execution().edges()[e.0 as usize].role(),EdgeRole::Exception{order:o,..}if o==order)).unwrap())
     }
     fn before_throw(&mut self, site: crate::p5::ThrowSite) {
         let plans = if self.planned {
             self.method
+                .inspection()
                 .facts()
                 .throws()
                 .iter()
@@ -3345,10 +3670,11 @@ impl<'f, 'a> RegionMachine<'f, 'a> {
     }
     fn operation(&mut self, op: crate::p2::OpId) -> Option<crate::p2::EdgeId> {
         use crate::p5::{Materialization, ThrowSite, TransferSite};
-        let operation = &self.method.execution().operations()[op.0 as usize];
+        let operation = &self.method.inspection().execution().operations()[op.0 as usize];
         self.at(TransferSite::BeforeOperation(op));
         let uses = self
             .method
+            .inspection()
             .storage_facts()
             .operation_uses(op)
             .unwrap()
@@ -3356,6 +3682,10 @@ impl<'f, 'a> RegionMachine<'f, 'a> {
         for u in uses {
             self.events
                 .push(format!("read:{:?}:{:?}", u.site(), u.read()));
+            self.events.push(format!(
+                "value:{:?}",
+                u.read().ok().and_then(|r| self.read(r))
+            ));
         }
         let input = uses
             .first()
@@ -3372,6 +3702,7 @@ impl<'f, 'a> RegionMachine<'f, 'a> {
                 assert!(
                     !self
                         .method
+                        .inspection()
                         .facts()
                         .locks()
                         .iter()
@@ -3414,6 +3745,7 @@ impl<'f, 'a> RegionMachine<'f, 'a> {
         };
         for d in self
             .method
+            .inspection()
             .storage_facts()
             .operation_definitions(op)
             .unwrap()
@@ -3445,15 +3777,20 @@ impl<'f, 'a> RegionMachine<'f, 'a> {
         self.at(TransferSite::BeforeTerminal(block));
         for u in self
             .method
+            .inspection()
             .storage_facts()
             .terminal_uses(block)
             .unwrap_or(&[])
         {
             self.events
                 .push(format!("read:{:?}:{:?}", u.site(), u.read()));
+            self.events.push(format!(
+                "value:{:?}",
+                u.read().ok().and_then(|r| self.read(r))
+            ));
         }
         self.events.push(format!("terminal:{}", block.0));
-        let b = &self.method.execution().blocks()[block.0 as usize];
+        let b = &self.method.inspection().execution().blocks()[block.0 as usize];
         if b.exceptional().is_some() {
             self.before_throw(ThrowSite::Terminal(block));
         }
@@ -3470,19 +3807,19 @@ impl<'f, 'a> RegionMachine<'f, 'a> {
     fn edge(&mut self, id: crate::p2::EdgeId) {
         self.events.push(format!("select:{}", id.0));
         if matches!(
-            self.method.execution().edges()[id.0 as usize].role(),
+            self.method.inspection().execution().edges()[id.0 as usize].role(),
             EdgeRole::Normal(_)
         ) {
             let plans = if self.planned {
                 let crate::p6::EdgeRoute::Normal(link) =
-                    self.method.facts().edges()[id.0 as usize].route()
+                    self.method.inspection().facts().edges()[id.0 as usize].route()
                 else {
                     panic!()
                 };
-                let mut plans = self.method.facts().link_plans()[link.0 as usize]
+                let mut plans = self.method.inspection().facts().link_plans()[link.0 as usize]
                     .copies()
                     .to_vec();
-                for p in self.method.facts().copy_placements() {
+                for p in self.method.inspection().facts().copy_placements() {
                     if matches!(p.owner, crate::p6::CopyOwner::SynchronizedExit(_))
                         && matches!(p.location,crate::p5::CopyLocation::Transfer{site:crate::p5::TransferSite::NormalEdge(edge),..}if edge==id)
                     {
@@ -3491,7 +3828,7 @@ impl<'f, 'a> RegionMachine<'f, 'a> {
                 }
                 plans
             } else {
-                self.method.storage_facts().copy_plans().iter().filter(|p|matches!(p.location(),crate::p5::CopyLocation::Transfer{site:crate::p5::TransferSite::NormalEdge(e),..}if e==id)).map(|p|p.id()).collect()
+                self.method.inspection().storage_facts().copy_plans().iter().filter(|p|matches!(p.location(),crate::p5::CopyLocation::Transfer{site:crate::p5::TransferSite::NormalEdge(e),..}if e==id)).map(|p|p.id()).collect()
             };
             for p in plans {
                 self.copy(p);
@@ -3501,14 +3838,451 @@ impl<'f, 'a> RegionMachine<'f, 'a> {
         self.edges += 1;
     }
 }
+#[derive(Clone, Default)]
+struct ExpressionTracePhases {
+    before: Vec<crate::p7::CopyPlanId>,
+    snapshots: Vec<crate::p7::CopyPlanId>,
+    after: Vec<crate::p7::CopyPlanId>,
+}
+struct ExpressionTracePlan {
+    operations: Vec<ExpressionTracePhases>,
+    terminals: Vec<ExpressionTracePhases>,
+    transfers: Vec<Vec<crate::p7::CopyPlanId>>,
+}
+impl ExpressionTracePlan {
+    fn new(code: &crate::p7::MethodCode) -> Self {
+        use crate::p7::*;
+        let mut operations = vec![ExpressionTracePhases::default(); code.operations().len()];
+        let mut terminals = vec![ExpressionTracePhases::default(); code.terminals().len()];
+        let mut transfers = code
+            .transfers()
+            .iter()
+            .map(|t| t.copies.clone())
+            .collect::<Vec<_>>();
+        for op in code.operations() {
+            let s = &code.statements()[op.statement.unwrap().0 as usize];
+            operations[op.source.0 as usize] = ExpressionTracePhases {
+                before: s.before.clone(),
+                snapshots: s.snapshots.clone(),
+                after: s.after.clone(),
+            };
+        }
+        for t in code.terminals() {
+            terminals[t.block.0 as usize] = ExpressionTracePhases {
+                before: t.before.clone(),
+                snapshots: t.snapshots.clone(),
+                after: vec![],
+            };
+        }
+        for control in code.controls() {
+            if let ControlKind::Synchronized { outlets, .. } = &control.kind {
+                for outlet in outlets {
+                    let op = code
+                        .operations()
+                        .iter()
+                        .find(|o| o.statement == Some(outlet.release))
+                        .unwrap()
+                        .source
+                        .0 as usize;
+                    operations[op].before = outlet.before_operand.clone();
+                    operations[op].snapshots = outlet.snapshots.clone();
+                    for step in &outlet.completion {
+                        match step {
+                            OutletStep::Copies(plans) => operations[op].after.extend(plans),
+                            OutletStep::Transfer { transfer, copies } => {
+                                for &p in copies {
+                                    if !transfers[transfer.0 as usize].contains(&p) {
+                                        transfers[transfer.0 as usize].push(p);
+                                    }
+                                }
+                            }
+                            OutletStep::Terminal {
+                                terminal,
+                                before_operand,
+                                snapshots,
+                            } => {
+                                terminals[terminal.0 as usize].before = before_operand.clone();
+                                terminals[terminal.0 as usize].snapshots = snapshots.clone();
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        Self {
+            operations,
+            terminals,
+            transfers,
+        }
+    }
+}
+impl RegionMachine<'_, '_> {
+    fn expression_value(
+        &self,
+        id: crate::p7::ExprId,
+        literal: Option<crate::p3::ValueId>,
+    ) -> Option<(u32, u32)> {
+        use crate::p7::ExprKind as E;
+        let expr = &self.method.result().code().unwrap().expressions()[id.0 as usize];
+        match expr.kind {
+            E::Read { storage, .. } | E::Snapshot { storage } => self.cells[storage.0 as usize],
+            E::Literal { .. } => {
+                let value = expr
+                    .origin
+                    .as_ref()
+                    .and_then(|o| {
+                        if let Ok(crate::p5::StorageRead::Literal { value, .. }) = o.read {
+                            Some(value)
+                        } else {
+                            None
+                        }
+                    })
+                    .or(literal)
+                    .unwrap();
+                Some((value.0, 0))
+            }
+            E::Unavailable { .. } => None,
+            _ => panic!("P7 trace found an effect nested inside an operand read"),
+        }
+    }
+    fn expression_copy(&mut self, id: crate::p7::CopyPlanId) {
+        use crate::p7::CopyStatement;
+        self.events.push(format!("copy:{}", id.0));
+        let method = self.method;
+        let p = &method.result().code().unwrap().copies()[id.0 as usize];
+        for step in &p.steps {
+            match *step {
+                CopyStatement::Save {
+                    destination,
+                    source,
+                } => self.cells[destination.0 as usize] = self.cells[source.0 as usize],
+                CopyStatement::Assign {
+                    destination,
+                    expression,
+                    original,
+                    ..
+                } => {
+                    let literal = if let crate::p5::StorageRead::Literal { value, .. } = original {
+                        Some(value)
+                    } else {
+                        None
+                    };
+                    self.cells[destination.0 as usize] = self.expression_value(expression, literal);
+                }
+            }
+        }
+    }
+    fn expression_copies(&mut self, ids: &[crate::p7::CopyPlanId]) {
+        for &id in ids {
+            self.expression_copy(id);
+        }
+    }
+    fn expression_entry(&mut self, node: crate::p6::NodeId, exceptional: bool) {
+        use crate::p7::HandlerCapture;
+        if !exceptional {
+            return;
+        }
+        let method = self.method;
+        let code = method.result().code().unwrap();
+        let h = code.handlers().iter().find(|h| h.node == node).unwrap();
+        let capture = match h.capture {
+            HandlerCapture::None => None,
+            HandlerCapture::Body(s) | HandlerCapture::Catch { statement: s, .. } => Some(
+                code.operations()
+                    .iter()
+                    .find(|o| o.statement == Some(s))
+                    .unwrap()
+                    .source,
+            ),
+        };
+        for &plan in &h.receives {
+            if let Some(op) = capture {
+                self.pending.push((op, crate::p5::PlanId(plan.0)));
+            } else {
+                self.expression_copy(plan);
+            }
+        }
+    }
+    fn expression_exception(
+        &mut self,
+        site: crate::p5::ThrowSite,
+        pc: u32,
+        must_throw: bool,
+    ) -> Option<crate::p2::EdgeId> {
+        let requested = self
+            .choices
+            .get(self.choice)
+            .copied()
+            .filter(|(at, c)| *at == pc && matches!(c, RegionChoice::Exception(_)));
+        if requested.is_none() && !must_throw {
+            return None;
+        }
+        let method = self.method;
+        let site = method
+            .result()
+            .code()
+            .unwrap()
+            .sites()
+            .iter()
+            .find(|s| s.original == site)
+            .unwrap();
+        assert!(
+            !matches!(site.syntax, crate::p7::ExceptionSyntax::ImpossibleRelease),
+            "P7 invented an impossible exception"
+        );
+        let order = if let Some((_, RegionChoice::Exception(order))) = requested {
+            self.choice += 1;
+            order
+        } else {
+            assert_eq!(site.routes.len(), 1);
+            site.routes[0].order
+        };
+        Some(site.routes.iter().find(|r| r.order == order).unwrap().edge)
+    }
+    fn expression_reads(&mut self, ids: &[crate::p7::ExprId]) {
+        let method = self.method;
+        let code = method.result().code().unwrap();
+        for &id in ids {
+            let origin = code.expressions()[id.0 as usize].origin.as_ref().unwrap();
+            self.events
+                .push(format!("read:{:?}:{:?}", origin.site, origin.read));
+            self.events
+                .push(format!("value:{:?}", self.expression_value(id, None)));
+        }
+    }
+    fn expression_operation(
+        &mut self,
+        op: crate::p2::OpId,
+        plan: &ExpressionTracePlan,
+    ) -> Option<crate::p2::EdgeId> {
+        use crate::p5::{Materialization, ThrowSite};
+        use crate::p7::*;
+        let method = self.method;
+        let code = method.result().code().unwrap();
+        let o = &code.operations()[op.0 as usize];
+        let s = &code.statements()[o.statement.unwrap().0 as usize];
+        let phase = &plan.operations[op.0 as usize];
+        self.expression_copies(&phase.before);
+        let Arguments::Known(inputs) = &s.inputs else {
+            panic!("trace requires available argument layout")
+        };
+        self.expression_reads(inputs);
+        self.expression_copies(&phase.snapshots);
+        self.occurrences[op.0 as usize] += 1;
+        self.events
+            .push(format!("op:{}:{}", op.0, self.occurrences[op.0 as usize]));
+        if let Some(edge) = self.expression_exception(ThrowSite::Operation(op), o.pc.0, false) {
+            if matches!(s.kind, StatementKind::Monitor { enter: false, .. }) {
+                self.unknown_lock = true;
+            }
+            self.exception = Some((op.0, self.occurrences[op.0 as usize]));
+            return Some(edge);
+        }
+        if let StatementKind::Monitor { enter, lock } = s.kind {
+            let input = self.expression_value(lock, None);
+            if enter {
+                self.locks.push((op, input.unwrap()));
+                self.events.push(format!("acquire:{input:?}"));
+            } else {
+                if !self.unknown_lock {
+                    let at = self
+                        .locks
+                        .iter()
+                        .rposition(|(_, held)| Some(*held) == input)
+                        .unwrap();
+                    self.locks.remove(at);
+                }
+                self.events.push(format!("release:{input:?}"));
+            }
+        }
+        let token = match s.kind {
+            StatementKind::Move {
+                kind: MoveKind::Object,
+                expression,
+            } => self.expression_value(expression, None),
+            StatementKind::CaptureException => self.exception,
+            _ => Some((op.0, self.occurrences[op.0 as usize])),
+        };
+        for d in &s.outputs {
+            self.events
+                .push(format!("commit:{}:{}:{:?}", op.0, d.output(), d.commit()));
+            match d.materialization() {
+                Materialization::Store(l)
+                | Materialization::AllocationCarrier(l)
+                | Materialization::ExceptionCapture(l) => self.cells[l.0 as usize] = token,
+                Materialization::Literal(_) => {}
+                _ => panic!("trace requires available non-deferred publication"),
+            }
+        }
+        let mut i = 0;
+        while i < self.pending.len() {
+            if self.pending[i].0 == op {
+                let (_, p) = self.pending.remove(i);
+                self.expression_copy(CopyPlanId(p.0));
+            } else {
+                i += 1;
+            }
+        }
+        self.expression_copies(&phase.after);
+        None
+    }
+    fn expression_terminal(
+        &mut self,
+        block: u32,
+        plan: &ExpressionTracePlan,
+    ) -> Option<crate::p2::EdgeId> {
+        let method = self.method;
+        let t = &method.result().code().unwrap().terminals()[block as usize];
+        let phase = &plan.terminals[block as usize];
+        self.expression_copies(&phase.before);
+        self.expression_reads(&t.inputs);
+        self.events.push(format!("terminal:{block}"));
+        self.expression_copies(&phase.snapshots);
+        let edge = self.expression_exception(
+            crate::p5::ThrowSite::Terminal(crate::p2::BlockId(block)),
+            t.pc.unwrap().0,
+            matches!(t.kind, crate::p7::TerminalKind::Throw(_)),
+        );
+        if edge.is_some() {
+            self.exception = Some((self.occurrences.len() as u32 + block, 1));
+        }
+        edge
+    }
+    fn expression_choose(
+        &mut self,
+        pc: Option<u32>,
+        transfers: &[crate::p7::TransferId],
+    ) -> crate::p7::TransferId {
+        if transfers.len() == 1 {
+            return transfers[0];
+        }
+        let &(at, choice) = self.choices.get(self.choice).unwrap();
+        assert_eq!(Some(at), pc);
+        self.choice += 1;
+        let code = self.method.result().code().unwrap();
+        transfers.iter().copied().find(|t|matches!((code.transfers()[t.0 as usize].role,choice),(Some(crate::p2::NormalEdge::ConditionalTrue),RegionChoice::True)|(Some(crate::p2::NormalEdge::ConditionalFalse),RegionChoice::False)|(Some(crate::p2::NormalEdge::SwitchDefault),RegionChoice::Default))||matches!((code.transfers()[t.0 as usize].role,choice),(Some(crate::p2::NormalEdge::SwitchCase{key,..}),RegionChoice::Case(k))if key==k)).unwrap()
+    }
+    fn expression_edge(&mut self, id: crate::p7::TransferId, plan: &ExpressionTracePlan) {
+        let edge = self.method.result().code().unwrap().transfers()[id.0 as usize].edge;
+        if let Some(e) = edge {
+            self.events.push(format!("select:{}", e.0));
+        }
+        self.expression_copies(&plan.transfers[id.0 as usize]);
+        if let Some(e) = edge {
+            self.events.push(format!("edge:{}", e.0));
+            self.edges += 1;
+        }
+    }
+}
+fn expression_trace<'f, 'a>(
+    method: &'f ExpressedMethod<'a>,
+    choices: &'f [(u32, RegionChoice)],
+    budget: Option<usize>,
+) -> (RegionMachine<'f, 'a>, bool) {
+    use crate::p7::*;
+    let code = method.result().code().unwrap();
+    let phases = ExpressionTracePlan::new(code);
+    let mut m = RegionMachine::new(method, choices, true);
+    m.cells = vec![None; code.locals().len()];
+    for local in code.locals() {
+        if let crate::p5::LocalKind::Parameter { value, .. } = local.original.kind() {
+            m.cells[local.id.0 as usize] = Some((value.0, 0));
+        }
+    }
+    m.expression_copies(code.initial_copies());
+    let mut node = code.labels()[code.controls()[code.root().unwrap().0 as usize]
+        .entry
+        .unwrap()
+        .0 as usize]
+        .node;
+    let mut exceptional = false;
+    let mut exited = false;
+    for _ in 0..code.blocks().len() * (choices.len() + budget.unwrap_or(1) + 3) {
+        let block = &code.blocks()[node.0 as usize];
+        if exceptional {
+            m.expression_entry(node, true);
+            exceptional = false;
+        }
+        let mut thrown = None;
+        for op in code.operations().iter().filter(|o| o.node == node) {
+            if let Some(e) = m.expression_operation(op.source, &phases) {
+                thrown = Some(e);
+                break;
+            }
+        }
+        if thrown.is_none() {
+            let terminal = match block.completion {
+                BlockCompletion::None => None,
+                BlockCompletion::Ordinary(t) | BlockCompletion::Syntax { terminal: t, .. } => {
+                    Some(t)
+                }
+            };
+            if let Some(t) = terminal {
+                thrown = m.expression_terminal(t.0, &phases);
+            }
+        }
+        if let Some(edge) = thrown {
+            m.events.push(format!("select:{}", edge.0));
+            m.events.push(format!("edge:{}", edge.0));
+            m.edges += 1;
+            if budget == Some(m.edges) {
+                break;
+            }
+            let site = code
+                .sites()
+                .iter()
+                .find(|s| s.routes.iter().any(|r| r.edge == edge))
+                .unwrap();
+            let route = site.routes.iter().find(|r| r.edge == edge).unwrap();
+            let clause = code.chains()[site.chain.0 as usize]
+                .clauses
+                .iter()
+                .find(|c| c.order == route.order)
+                .unwrap();
+            if let Some(label) = clause.target {
+                node = code.labels()[label.0 as usize].node;
+                exceptional = true;
+                continue;
+            } else {
+                m.events.push("uncaught".into());
+                exited = true;
+                break;
+            }
+        }
+        if block.transfers.is_empty() {
+            m.events.push("return".into());
+            exited = true;
+            break;
+        }
+        let pc = match block.completion {
+            BlockCompletion::None => None,
+            BlockCompletion::Ordinary(t) | BlockCompletion::Syntax { terminal: t, .. } => {
+                code.terminals()[t.0 as usize].pc
+            }
+        };
+        let next = m.expression_choose(pc.map(|p| p.0), &block.transfers);
+        m.expression_edge(next, &phases);
+        if budget == Some(m.edges) {
+            break;
+        }
+        node = expression_target(code, next);
+    }
+    assert!(
+        exited || budget == Some(m.edges),
+        "P7 trace did not finish the requested path"
+    );
+    assert_eq!(m.choice, choices.len());
+    (m, exited)
+}
+
 fn region_trace(
-    method: &PlannedMethod<'_>,
+    method: &ExpressedMethod<'_>,
     choices: &[(u32, RegionChoice)],
     edge_budget: Option<usize>,
 ) -> Vec<String> {
     use crate::p6::*;
-    let flow = method.execution();
-    let f = method.facts();
+    let flow = method.inspection().execution();
+    let f = method.inspection().facts();
     let mut reference = RegionMachine::new(method, choices, false);
     reference.at(crate::p5::TransferSite::InitialEntry);
     let mut block = crate::p2::BlockId(0);
@@ -3663,13 +4437,31 @@ fn region_trace(
         planned.locks, reference.locks,
         "P6 lock identity/order differs"
     );
+    let (expressed, expression_exited) = expression_trace(method, choices, edge_budget);
+    assert_eq!(expression_exited, exited);
+    assert_eq!(
+        expressed.events, reference.events,
+        "P7 event/value/edge-copy trace differs"
+    );
+    assert_eq!(
+        expressed.locks, reference.locks,
+        "P7 lock identity/order differs"
+    );
+    assert_eq!(
+        expressed.cells, reference.cells,
+        "P7 published storage differs"
+    );
     reference.events
 }
 fn check_region_cases() {
     check_region_outlets();
     use crate::p6::*;
-    let has = |m: &PlannedMethod<'_>, predicate: fn(&RegionKind) -> bool| {
-        m.facts().regions().iter().any(|r| predicate(r.kind()))
+    let has = |m: &ExpressedMethod<'_>, predicate: fn(&RegionKind) -> bool| {
+        m.inspection()
+            .facts()
+            .regions()
+            .iter()
+            .any(|r| predicate(r.kind()))
     };
     let fixture = dex(
         39,
@@ -3687,7 +4479,7 @@ fn check_region_cases() {
     }
     let fixture = dex(39, &[0x0538, 5, 0x05d8, 0x0105, 0xfc28], None, 6, 8, 3, 0);
     let method = flowed(&fixture.bytes);
-    assert!(method.facts().regions().iter().any(|r|matches!(r.kind(),RegionKind::Loop(id)if matches!(method.facts().loops()[id.0 as usize].form(),LoopForm::While(_)))));
+    assert!(method.inspection().facts().regions().iter().any(|r|matches!(r.kind(),RegionKind::Loop(id)if matches!(method.inspection().facts().loops()[id.0 as usize].form(),LoopForm::While(_)))));
     region_trace(
         &method,
         &[
@@ -3711,6 +4503,7 @@ fn check_region_cases() {
     let loops_method = flowed(&nested_loops.bytes);
     assert_eq!(
         loops_method
+            .inspection()
             .facts()
             .regions()
             .iter()
@@ -3757,7 +4550,7 @@ fn check_region_cases() {
     );
     let fixture = dex(39, &[0x05d8, 0x0105, 0x053c, 0xfffe], None, 6, 8, 3, 0);
     let method = flowed(&fixture.bytes);
-    assert!(method.facts().regions().iter().any(|r|matches!(r.kind(),RegionKind::Loop(id)if matches!(method.facts().loops()[id.0 as usize].form(),LoopForm::DoWhile(_)))));
+    assert!(method.inspection().facts().regions().iter().any(|r|matches!(r.kind(),RegionKind::Loop(id)if matches!(method.inspection().facts().loops()[id.0 as usize].form(),LoopForm::DoWhile(_)))));
     region_trace(
         &method,
         &[
@@ -3777,7 +4570,7 @@ fn check_region_cases() {
         3,
     );
     let method = flowed(&fixture.bytes);
-    assert!(method.facts().regions().iter().any(|r|matches!(r.kind(),RegionKind::Loop(id)if matches!(method.facts().loops()[id.0 as usize].form(),LoopForm::Infinite))));
+    assert!(method.inspection().facts().regions().iter().any(|r|matches!(r.kind(),RegionKind::Loop(id)if matches!(method.inspection().facts().loops()[id.0 as usize].form(),LoopForm::Infinite))));
     let events = region_trace(
         &method,
         &[
@@ -3911,10 +4704,10 @@ fn check_region_cases() {
     assert!(
         has(&nested_method, |k| matches!(k, RegionKind::Try(_))),
         "P6 lost the typed catch inside a lock scope: issues={:?}, scopes={:?}, tries={:?}, regions={:?}",
-        nested_method.facts().issues(),
-        nested_method.facts().synchronized(),
-        nested_method.facts().tries(),
-        nested_method.facts().regions()
+        nested_method.inspection().facts().issues(),
+        nested_method.inspection().facts().synchronized(),
+        nested_method.inspection().facts().tries(),
+        nested_method.inspection().facts().regions()
     );
     assert!(
         has(&nested_method, |k| matches!(k, RegionKind::Synchronized(_))),
@@ -3941,6 +4734,7 @@ fn check_region_cases() {
     assert!(!has(&method, |k| matches!(k, RegionKind::Synchronized(_))));
     assert!(
         method
+            .inspection()
             .facts()
             .locks()
             .iter()
@@ -3951,8 +4745,9 @@ fn check_region_cases() {
 
 fn check_region_outlets() {
     use crate::p6::*;
-    let natural = |m: &PlannedMethod<'_>| {
-        m.facts()
+    let natural = |m: &ExpressedMethod<'_>| {
+        m.inspection()
+            .facts()
             .regions()
             .iter()
             .any(|r| matches!(r.kind(), RegionKind::Synchronized(_)))
@@ -3968,7 +4763,7 @@ fn check_region_outlets() {
         0,
     );
     let m = flowed(&f.bytes);
-    assert!(m.facts().regions().iter().any(|r|matches!(r.kind(),RegionKind::Loop(id)if matches!(m.facts().loops()[id.0 as usize].form(),LoopForm::DoWhile(_)))),"P6 head branch blocked a valid tail predicate");
+    assert!(m.inspection().facts().regions().iter().any(|r|matches!(r.kind(),RegionKind::Loop(id)if matches!(m.inspection().facts().loops()[id.0 as usize].form(),LoopForm::DoWhile(_)))),"P6 head branch blocked a valid tail predicate");
     for choices in [
         &[(0, RegionChoice::True), (6, RegionChoice::False)][..],
         &[
@@ -4000,7 +4795,7 @@ fn check_region_outlets() {
     );
     let m = flowed(&f.bytes);
     assert!(natural(&m), "P6 rejected multiple matching releases");
-    assert_eq!(m.facts().synchronized()[0].exits().len(), 2);
+    assert_eq!(m.inspection().facts().synchronized()[0].exits().len(), 2);
     for side in [RegionChoice::True, RegionChoice::False] {
         region_trace(&m, &[(1, side)], None);
     }
@@ -4020,9 +4815,9 @@ fn check_region_outlets() {
         natural(&m),
         "P6 imposed a common continuation on abrupt outlets"
     );
-    assert!(m.facts().synchronized()[0].follow().is_none());
+    assert!(m.inspection().facts().synchronized()[0].follow().is_none());
     assert!(
-        m.facts().synchronized()[0]
+        m.inspection().facts().synchronized()[0]
             .exits()
             .iter()
             .all(|e| matches!(e.kind(), SyncExitKind::ReturnVoid { .. }))
@@ -4034,7 +4829,7 @@ fn check_region_outlets() {
     let f = dex(39, &[0x041d, 0x0000, 0xff28], None, 9, 8, 4, 0);
     let m = flowed(&f.bytes);
     assert!(natural(&m));
-    assert!(m.facts().synchronized()[0].exits().is_empty());
+    assert!(m.inspection().facts().synchronized()[0].exits().is_empty());
     region_trace(&m, &[], Some(5));
     // A release/break corridor lies outside the original backedge core.
     let f = dex(
@@ -4051,7 +4846,7 @@ fn check_region_outlets() {
         natural(&m),
         "P6 split a closed scope at the natural-loop core"
     );
-    let scope = &m.facts().synchronized()[0];
+    let scope = &m.inspection().facts().synchronized()[0];
     assert!(scope.exits().iter().any(|e| matches!(
         e.kind(),
         SyncExitKind::Loop {
@@ -4107,23 +4902,24 @@ fn check_region_outlets() {
     assert!(
         natural(&m),
         "P6 rejected exception-closed cleanup control: {:?}",
-        m.facts().monitor_plans()
+        m.inspection().facts().monitor_plans()
     );
     assert!(
-        m.facts()
+        m.inspection()
+            .facts()
             .regions()
             .iter()
             .filter(|r| matches!(r.kind(), RegionKind::Try(_)))
             .count()
             >= 2,
         "P6 lost nested cleanup protection: tries={:?}; regions={:?}; issues={:?}; chains={:?}; throws={:?}; scopes={:?}; nodes={:?}",
-        m.facts().tries(),
-        m.facts().regions(),
-        m.facts().issues(),
-        m.facts().handler_chains(),
-        m.facts().throws(),
-        m.facts().synchronized(),
-        m.facts().nodes()
+        m.inspection().facts().tries(),
+        m.inspection().facts().regions(),
+        m.inspection().facts().issues(),
+        m.inspection().facts().handler_chains(),
+        m.inspection().facts().throws(),
+        m.inspection().facts().synchronized(),
+        m.inspection().facts().nodes()
     );
     region_trace(&m, &[], None);
     for side in [RegionChoice::True, RegionChoice::False] {
@@ -4155,10 +4951,14 @@ fn check_region_outlets() {
     put16(&mut f.bytes, f.tries + 4, 10);
     let m = flowed(&f.bytes);
     assert!(
-        m.storage_facts().copy_plans().iter().any(|p| matches!(
-            p.location(),
-            crate::p5::CopyLocation::HandlerEntry { .. }
-        ) && !p.steps().is_empty()),
+        m.inspection()
+            .storage_facts()
+            .copy_plans()
+            .iter()
+            .any(
+                |p| matches!(p.location(), crate::p5::CopyLocation::HandlerEntry { .. })
+                    && !p.steps().is_empty()
+            ),
         "cleanup receive fixture did not establish a receive"
     );
     assert!(
@@ -4166,13 +4966,15 @@ fn check_region_outlets() {
         "P6 treated handler receives as implicit cleanup"
     );
     assert!(
-        m.facts().synchronized()[0]
+        m.inspection().facts().synchronized()[0]
             .exits()
             .iter()
             .flat_map(|e| e.before_release())
-            .any(|p| !m.storage_facts().copy_plans()[p.0 as usize]
-                .steps()
-                .is_empty()),
+            .any(
+                |p| !m.inspection().storage_facts().copy_plans()[p.0 as usize]
+                    .steps()
+                    .is_empty()
+            ),
         "release snapshot fixture has no pre-release save"
     );
     region_trace(&m, &[], None);
@@ -4194,13 +4996,15 @@ fn check_region_outlets() {
     let m = flowed(&f.bytes);
     assert!(natural(&m));
     assert!(
-        m.facts().synchronized()[0]
+        m.inspection().facts().synchronized()[0]
             .exits()
             .iter()
             .flat_map(|e| e.after_release())
-            .any(|p| !m.storage_facts().copy_plans()[p.0 as usize]
-                .steps()
-                .is_empty()),
+            .any(
+                |p| !m.inspection().storage_facts().copy_plans()[p.0 as usize]
+                    .steps()
+                    .is_empty()
+            ),
         "single outlet fixture has no post-release copy"
     );
     for side in [RegionChoice::True, RegionChoice::False] {
@@ -4223,7 +5027,8 @@ fn check_region_outlets() {
     put16(&mut f.bytes, f.tries + 4, 2);
     let m = flowed(&f.bytes);
     assert_eq!(
-        m.facts()
+        m.inspection()
+            .facts()
             .regions()
             .iter()
             .filter(|r| matches!(r.kind(), RegionKind::Synchronized(_)))
@@ -4250,7 +5055,7 @@ fn check_region_outlets() {
     let m = flowed(&f.bytes);
     assert!(!natural(&m));
     assert!(matches!(
-        m.facts().monitor_plans()[0].mode(),
+        m.inspection().facts().monitor_plans()[0].mode(),
         MonitorMode::Explicit(LockSeparation::EscapingException(_))
     ));
     region_trace(
@@ -4276,7 +5081,7 @@ fn check_region_outlets() {
     let m = flowed(&f.bytes);
     assert!(!natural(&m));
     assert!(matches!(
-        m.facts().monitor_plans()[0].mode(),
+        m.inspection().facts().monitor_plans()[0].mode(),
         MonitorMode::Explicit(LockSeparation::IncompatibleContinuation { .. })
     ));
     for side in [RegionChoice::True, RegionChoice::False] {
@@ -4298,20 +5103,25 @@ fn check_region_outlets() {
     assert!(!natural(&m));
     assert!(
         matches!(
-            m.facts().monitor_plans()[0].mode(),
+            m.inspection().facts().monitor_plans()[0].mode(),
             MonitorMode::Explicit(LockSeparation::PostReleaseCopy(_))
         ),
         "post-release copy fixture did not exercise the copy boundary: {:?}",
-        m.facts().monitor_plans()
+        m.inspection().facts().monitor_plans()
     );
     for side in [RegionChoice::True, RegionChoice::False] {
         region_trace(&m, &[(1, side)], None);
     }
 }
 
-fn type_use<'f>(typed: &'f PlannedMethod<'_>, pc: u32, argument: usize) -> &'f crate::p4::UseView {
+fn type_use<'f>(
+    typed: &'f ExpressedMethod<'_>,
+    pc: u32,
+    argument: usize,
+) -> &'f crate::p4::UseView {
     let site = local_use(typed, pc, argument).site();
     typed
+        .inspection()
         .type_facts()
         .uses()
         .iter()
@@ -4345,6 +5155,7 @@ fn check_types() {
         }
     ));
     let branch = typed
+        .inspection()
         .type_facts()
         .uses()
         .iter()
@@ -4396,11 +5207,20 @@ fn check_types() {
         Interpretation::Direct(Family::Float)
     );
     let value = typed
+        .inspection()
         .analysis_evidence()
         .ssa_facts()
         .readable_value(local_use(&typed, 3, 0))
         .unwrap();
-    assert_eq!(typed.type_facts().value(value).unwrap().literal(), None);
+    assert_eq!(
+        typed
+            .inspection()
+            .type_facts()
+            .value(value)
+            .unwrap()
+            .literal(),
+        None
+    );
 
     // The array descriptor is a fixed declaration seed, not a type inferred
     // backwards from neg-float. Keep the original type index 11.
@@ -4409,17 +5229,17 @@ fn check_types() {
         .copy_from_slice(&[2, b'[', b'F', 0]);
     let typed = flowed(&fixture.bytes);
     let value = typed
+        .inspection()
         .analysis_evidence()
         .ssa_facts()
         .readable_value(local_use(&typed, 3, 0))
         .unwrap();
-    let facts = typed.type_facts().value(value).unwrap();
+    let facts = typed.inspection().type_facts().value(value).unwrap();
     assert_eq!(facts.families().selected(), Some(Family::Float));
     assert!(
-        facts
-            .types()
-            .iter()
-            .any(|&n| typed.type_facts().name(n).unwrap().units() == [u16::from(b'F')])
+        facts.types().iter().any(
+            |&n| typed.inspection().type_facts().name(n).unwrap().units() == [u16::from(b'F')]
+        )
     );
     assert_eq!(
         type_use(&typed, 3, 0).interpretation(),
@@ -4450,8 +5270,8 @@ fn check_types() {
         0,
     );
     let typed = flowed(&fixture.bytes);
-    assert_eq!(typed.type_facts().phis().len(), 1);
-    let phi = &typed.type_facts().phis()[0];
+    assert_eq!(typed.inspection().type_facts().phis().len(), 1);
+    let phi = &typed.inspection().type_facts().phis()[0];
     assert_eq!(phi.families().selected(), Some(Family::Integral));
     let mut incoming = phi
         .incoming()
@@ -4466,12 +5286,25 @@ fn check_types() {
         .collect::<Vec<_>>();
     incoming.sort_unstable();
     assert_eq!(incoming, [1, 2]);
-    let value = typed.analysis_evidence().ssa_facts().phis()[0].value();
+    let value = typed.inspection().analysis_evidence().ssa_facts().phis()[0].value();
     assert_eq!(
-        typed.type_facts().value(value).unwrap().integral_range(),
+        typed
+            .inspection()
+            .type_facts()
+            .value(value)
+            .unwrap()
+            .integral_range(),
         Some(crate::p4::IntegralRange { min: 1, max: 2 })
     );
-    assert_eq!(typed.type_facts().value(value).unwrap().literal(), None);
+    assert_eq!(
+        typed
+            .inspection()
+            .type_facts()
+            .value(value)
+            .unwrap()
+            .literal(),
+        None
+    );
 
     let fixture = dex(
         39,
@@ -4488,7 +5321,7 @@ fn check_types() {
         Interpretation::Null
     );
     assert!(matches!(
-        typed.type_facts().phis()[0].representation(),
+        typed.inspection().type_facts().phis()[0].representation(),
         crate::p4::PhiRepresentation::Literal(crate::p4::Bits { value: 0, .. })
     ));
     for (seed, expect_null) in [(0x0012, true), (0x1012, false)] {
@@ -4534,6 +5367,7 @@ fn check_types() {
     let typed = flowed(&fixture.bytes);
     assert!(
         typed
+            .inspection()
             .type_facts()
             .issues()
             .iter()
@@ -4562,9 +5396,9 @@ fn check_types() {
     put32(&mut fixture.bytes, fixture.tries, 3);
     put16(&mut fixture.bytes, fixture.tries + 4, 3);
     let typed = flowed(&fixture.bytes);
-    assert_eq!(typed.type_facts().constructors().len(), 1);
+    assert_eq!(typed.inspection().type_facts().constructors().len(), 1);
     assert_eq!(
-        typed.type_facts().constructors()[0].relation,
+        typed.inspection().type_facts().constructors()[0].relation,
         crate::p4::ConstructorRelation::Allocation
     );
     for (pc, expected) in [
@@ -4575,6 +5409,7 @@ fn check_types() {
         let site = local_use(&typed, pc, 0).site();
         assert_eq!(
             typed
+                .inspection()
                 .type_facts()
                 .initialization()
                 .iter()
@@ -4586,6 +5421,7 @@ fn check_types() {
     }
     assert_eq!(
         typed
+            .inspection()
             .execution()
             .operations()
             .iter()
@@ -4604,6 +5440,7 @@ fn check_types() {
         vec![vec![StorageSymbol::Definition(0, 1)]]
     );
     let allocation = typed
+        .inspection()
         .storage_facts()
         .bindings()
         .iter()
@@ -4636,6 +5473,7 @@ fn check_types() {
     let site = local_use(&typed, 8, 0).site();
     assert_eq!(
         typed
+            .inspection()
             .type_facts()
             .initialization()
             .iter()
@@ -4646,6 +5484,7 @@ fn check_types() {
     );
     assert!(
         typed
+            .inspection()
             .type_facts()
             .issues()
             .iter()
@@ -4654,35 +5493,42 @@ fn check_types() {
 }
 
 fn local_use<'f>(
-    ssa: &'f PlannedMethod<'_>,
+    ssa: &'f ExpressedMethod<'_>,
     pc: u32,
     argument: usize,
 ) -> &'f crate::p3::UseBinding {
     let op = ssa
+        .inspection()
         .execution()
         .operations()
         .iter()
         .find(|o| o.pc() == CodeUnitOffset(pc))
         .unwrap();
-    &ssa.analysis_evidence()
+    &ssa.inspection()
+        .analysis_evidence()
         .ssa_facts()
         .operation_uses(op.id())
         .unwrap()
         .unwrap()[argument]
 }
-fn assert_local_source(ssa: &PlannedMethod<'_>, at: u32, source: u32) {
+fn assert_local_source(ssa: &ExpressedMethod<'_>, at: u32, source: u32) {
     let value = ssa
+        .inspection()
         .analysis_evidence()
         .ssa_facts()
         .readable_value(local_use(ssa, at, 0))
         .unwrap();
     let ValueOrigin::Operation { operation, .. } =
-        ssa.analysis_evidence().ssa_facts().values()[value.0 as usize].origin()
+        ssa.inspection().analysis_evidence().ssa_facts().values()[value.0 as usize].origin()
     else {
         panic!("use at {at} lost its original operation source");
     };
     assert_eq!(
-        ssa.execution().operation(operation).unwrap().pc(),
+        ssa.inspection()
+            .execution()
+            .operation(operation)
+            .unwrap()
+            .pc(),
         CodeUnitOffset(source)
     );
 }
@@ -4700,12 +5546,14 @@ fn check_local_recovery() {
     );
     let ssa = flowed(&fixture.bytes);
     assert!(matches!(
-        ssa.execution()
+        ssa.inspection()
+            .execution()
             .reference_fact(CodeUnitOffset(1), ReferenceSlot::First),
         Some(Err(_))
     ));
     assert!(
-        ssa.execution()
+        ssa.inspection()
+            .execution()
             .issues()
             .any(|(pc, _)| pc == CodeUnitOffset(1))
     );
@@ -4713,10 +5561,14 @@ fn check_local_recovery() {
     assert_local_source(&ssa, 4, 1);
     assert_local_source(&ssa, 6, 5);
     assert!(
-        matches!(ssa.execution().operations()[1].kind(), OpKind::ConstString { value }
+        matches!(ssa.inspection().execution().operations()[1].kind(), OpKind::ConstString { value }
         if value.0 == 65535)
     );
-    assert!(ssa.execution().operations()[1].effects().may_throw());
+    assert!(
+        ssa.inspection().execution().operations()[1]
+            .effects()
+            .may_throw()
+    );
 
     // An unknown call layout is not a zero-argument call. Its possible result
     // affects only the encoded destination and overlaps, on normal completion.
@@ -4736,7 +5588,7 @@ fn check_local_recovery() {
         None,
     );
     let ssa = flowed(&fixture.bytes);
-    let call = &ssa.execution().operations()[1];
+    let call = &ssa.inspection().execution().operations()[1];
     assert!(matches!(
         call.kind(),
         OpKind::UnresolvedInvoke {
@@ -4744,9 +5596,10 @@ fn check_local_recovery() {
             ..
         }
     ));
-    assert!(ssa.execution().reads(call).is_err());
+    assert!(ssa.inspection().execution().reads(call).is_err());
     assert_eq!(
-        ssa.execution()
+        ssa.inspection()
+            .execution()
             .input_words(call)
             .unwrap()
             .map(|r| r.0)
@@ -4754,25 +5607,29 @@ fn check_local_recovery() {
         [6, 7, 5]
     );
     assert!(
-        ssa.analysis_evidence()
+        ssa.inspection()
+            .analysis_evidence()
             .ssa_facts()
             .operation_uses(call.id())
             .unwrap()
             .is_err()
     );
     let output = ssa
+        .inspection()
         .analysis_evidence()
         .ssa_facts()
         .operation_outputs(call.id())
         .unwrap()[0];
     assert!(
-        ssa.analysis_evidence()
+        ssa.inspection()
+            .analysis_evidence()
             .ssa_facts()
             .output_value(&output)
             .is_none()
     );
     assert_eq!(
-        ssa.analysis_evidence()
+        ssa.inspection()
+            .analysis_evidence()
             .ssa_facts()
             .state(output.state())
             .unwrap()
@@ -4784,13 +5641,15 @@ fn check_local_recovery() {
     for pc in [6, 7] {
         let usage = local_use(&ssa, pc, 0);
         assert!(
-            ssa.analysis_evidence()
+            ssa.inspection()
+                .analysis_evidence()
                 .ssa_facts()
                 .readable_value(usage)
                 .is_none()
         );
         assert!(
-            ssa.analysis_evidence()
+            ssa.inspection()
+                .analysis_evidence()
                 .ssa_facts()
                 .state(usage.state())
                 .unwrap()
@@ -4799,20 +5658,22 @@ fn check_local_recovery() {
         );
     }
     let parameter = ssa
+        .inspection()
         .analysis_evidence()
         .ssa_facts()
         .readable_value(local_use(&ssa, 8, 0))
         .unwrap();
     assert_eq!(
-        ssa.analysis_evidence().ssa_facts().values()[parameter.0 as usize].origin(),
+        ssa.inspection().analysis_evidence().ssa_facts().values()[parameter.0 as usize].origin(),
         ValueOrigin::Entry(crate::p3::EntryRole::Parameter(0))
     );
     assert_local_source(&ssa, 10, 9);
     assert_local_source(&ssa, 13, 11);
     assert_local_source(&ssa, 16, 0);
     assert!(
-        !ssa.analysis_evidence().ssa_facts().dominates(
-            ssa.analysis_evidence()
+        !ssa.inspection().analysis_evidence().ssa_facts().dominates(
+            ssa.inspection()
+                .analysis_evidence()
                 .ssa_facts()
                 .operation_site(call.id())
                 .unwrap()
@@ -4831,19 +5692,20 @@ fn check_local_recovery() {
     let fixture = dex(39, &[0x20fc, 0, 0x0576, 0x000b, 0x0204], None, 8, 8, 3, 3);
     let ssa = flowed(&fixture.bytes);
     assert!(
-        ssa.execution()
-            .reads(&ssa.execution().operations()[0])
+        ssa.inspection()
+            .execution()
+            .reads(&ssa.inspection().execution().operations()[0])
             .is_err()
     );
     assert!(matches!(
-        ssa.execution().operations()[0].kind(),
+        ssa.inspection().execution().operations()[0].kind(),
         OpKind::UnresolvedInvoke {
             result: crate::p2::InvokeResult::Value(SlotWidth::Two),
             ..
         }
     ));
     assert_local_source(&ssa, 4, 0);
-    assert!(ssa.execution().issues().any(|(_, e)| matches!(
+    assert!(ssa.inspection().execution().issues().any(|(_, e)| matches!(
         e,
         MethodError::Malformed {
             problem: MethodProblem::InvalidInvokeWordCount,
@@ -4864,18 +5726,20 @@ fn check_local_recovery() {
     );
     let ssa = flowed(&fixture.bytes);
     assert!(matches!(
-        ssa.execution().operations()[1].kind(),
+        ssa.inspection().execution().operations()[1].kind(),
         OpKind::UnresolvedResult { .. }
     ));
     assert!(
-        ssa.analysis_evidence()
+        ssa.inspection()
+            .analysis_evidence()
             .ssa_facts()
             .readable_value(local_use(&ssa, 4, 0))
             .is_none()
     );
     assert_local_source(&ssa, 6, 5);
     assert!(
-        ssa.execution()
+        ssa.inspection()
+            .execution()
             .issues()
             .any(|(pc, e)| pc == CodeUnitOffset(3)
                 && matches!(
@@ -4891,7 +5755,8 @@ fn check_local_recovery() {
     let fixture = dex(39, &[0x0022, 0, 0x5112, 0x127b], None, 8, 8, 3, 0);
     let ssa = flowed(&fixture.bytes);
     assert!(matches!(
-        ssa.execution()
+        ssa.inspection()
+            .execution()
             .reference_fact(CodeUnitOffset(0), ReferenceSlot::First),
         Some(Ok(CheckedReferenceFact::Type {
             form: crate::p1::TypeForm::Primitive,
@@ -4899,7 +5764,8 @@ fn check_local_recovery() {
         }))
     ));
     assert!(
-        ssa.execution()
+        ssa.inspection()
+            .execution()
             .reference_use_issue(CodeUnitOffset(0), ReferenceSlot::First)
             .is_some()
     );
@@ -4951,21 +5817,24 @@ fn check_local_recovery() {
             .collect::<Vec<_>>(),
         [1, 2]
     );
-    let Ok(MethodOutcome::Planned(first)) = &class.methods[0].result else {
+    let Ok(MethodOutcome::Expressed(first)) = &class.methods[0].result else {
         panic!("partial method discarded");
     };
-    let Ok(MethodOutcome::Planned(second)) = &class.methods[1].result else {
+    let Ok(MethodOutcome::Expressed(second)) = &class.methods[1].result else {
         panic!("sibling not analyzed");
     };
     storage_correspondence(first);
     storage_correspondence(second);
     region_correspondence(first);
     region_correspondence(second);
-    assert!(first.execution().issues().next().is_some());
+    assert!(first.inspection().execution().issues().next().is_some());
     assert_local_source(first, 3, 0);
-    assert!(second.execution().issues().next().is_none());
-    assert_eq!(second.execution().operations().len(), 1);
-    assert_eq!(second.execution().operations()[0].pc(), CodeUnitOffset(0));
+    assert!(second.inspection().execution().issues().next().is_none());
+    assert_eq!(second.inspection().execution().operations().len(), 1);
+    assert_eq!(
+        second.inspection().execution().operations()[0].pc(),
+        CodeUnitOffset(0)
+    );
 
     // Unknown and established sources must both survive a join.
     let fixture = dex(
@@ -4982,6 +5851,7 @@ fn check_local_recovery() {
     let ssa = flowed(&fixture.bytes);
     let usage = local_use(&ssa, 9, 0);
     let state = ssa
+        .inspection()
         .analysis_evidence()
         .ssa_facts()
         .state(usage.state())
@@ -4989,7 +5859,8 @@ fn check_local_recovery() {
     assert!(matches!(state.kind(), StateKind::Phi(_)));
     assert!(state.availability().may_have_value() && state.availability().may_be_unavailable());
     assert!(
-        ssa.analysis_evidence()
+        ssa.inspection()
+            .analysis_evidence()
             .ssa_facts()
             .readable_value(usage)
             .is_none()
@@ -5008,7 +5879,8 @@ fn check_local_recovery() {
     );
     let ssa = flowed(&fixture.bytes);
     assert_eq!(
-        ssa.execution()
+        ssa.inspection()
+            .execution()
             .issues()
             .filter(|(_, e)| matches!(
                 e,
@@ -5022,7 +5894,8 @@ fn check_local_recovery() {
     );
     let bad_read = local_use(&ssa, 2, 0);
     assert_eq!(
-        ssa.analysis_evidence()
+        ssa.inspection()
+            .analysis_evidence()
             .ssa_facts()
             .state(bad_read.state())
             .unwrap()
@@ -5030,7 +5903,8 @@ fn check_local_recovery() {
         StateKind::OutsideFrame
     );
     assert!(
-        ssa.analysis_evidence()
+        ssa.inspection()
+            .analysis_evidence()
             .ssa_facts()
             .readable_value(bad_read)
             .is_none()
@@ -5038,7 +5912,8 @@ fn check_local_recovery() {
     assert_local_source(&ssa, 3, 0);
     let overlapped = local_use(&ssa, 6, 0);
     assert!(
-        ssa.analysis_evidence()
+        ssa.inspection()
+            .analysis_evidence()
             .ssa_facts()
             .state(overlapped.state())
             .unwrap()
@@ -5046,7 +5921,8 @@ fn check_local_recovery() {
             .may_be_unavailable()
     );
     assert!(
-        ssa.analysis_evidence()
+        ssa.inspection()
+            .analysis_evidence()
             .ssa_facts()
             .readable_value(overlapped)
             .is_none()
@@ -5091,7 +5967,7 @@ fn check_ssa_cases() {
     for (name, words, proto, phis, unavailable) in cases {
         let fixture = dex(39, words, None, proto, 8, 3, 0);
         let ssa = flowed(&fixture.bytes);
-        let f = ssa.analysis_evidence().ssa_facts();
+        let f = ssa.inspection().analysis_evidence().ssa_facts();
         assert_eq!(f.phis().len(), phis, "{name}");
         assert_eq!(
             f.uses()
@@ -5137,7 +6013,7 @@ fn check_ssa_cases() {
             )));
         }
         if name == "irreducible" {
-            assert!(ssa.facts().regions().iter().any(|r| matches!(
+            assert!(ssa.inspection().facts().regions().iter().any(|r| matches!(
                 r.kind(),
                 crate::p6::RegionKind::Graph {
                     reason: crate::p6::RecoveryReason::Irreducible,
@@ -5183,7 +6059,7 @@ fn check_ssa_cases() {
         None,
     );
     let ssa = flowed(&fixture.bytes);
-    let f = ssa.analysis_evidence().ssa_facts();
+    let f = ssa.inspection().analysis_evidence().ssa_facts();
     let handler_use = &f.operation_uses(crate::p2::OpId(2)).unwrap().unwrap()[0];
     let old = f.readable_value(handler_use).unwrap();
     assert_eq!(
@@ -5242,14 +6118,15 @@ fn check_metamorphic_relations() {
         let after = flowed(&shifted.bytes);
         assert_eq!(invoke_signature(&before), invoke_signature(&after));
         assert_eq!(
-            before.execution().operations().len(),
-            after.execution().operations().len()
+            before.inspection().execution().operations().len(),
+            after.inspection().execution().operations().len()
         );
         for (a, b) in before
+            .inspection()
             .execution()
             .operations()
             .iter()
-            .zip(after.execution().operations())
+            .zip(after.inspection().execution().operations())
         {
             let renamed = |slots: &[RegisterSlot]| {
                 slots
@@ -5261,43 +6138,54 @@ fn check_metamorphic_relations() {
                     .collect::<Vec<_>>()
             };
             assert_eq!(
-                after.execution().reads(b).unwrap(),
-                renamed(before.execution().reads(a).unwrap())
+                after.inspection().execution().reads(b).unwrap(),
+                renamed(before.inspection().execution().reads(a).unwrap())
             );
             assert_eq!(
-                after.execution().writes(b),
-                renamed(before.execution().writes(a))
+                after.inspection().execution().writes(b),
+                renamed(before.inspection().execution().writes(a))
             );
             assert_eq!(a.effects(), b.effects());
             assert_eq!(a.normal(), b.normal());
             assert_eq!(a.exceptional(), b.exceptional());
         }
-        assert_eq!(before.execution().edges(), after.execution().edges());
-        assert_eq!(before.execution().exits(), after.execution().exits());
-        assert_eq!(before.execution().coverage(), after.execution().coverage());
+        assert_eq!(
+            before.inspection().execution().edges(),
+            after.inspection().execution().edges()
+        );
+        assert_eq!(
+            before.inspection().execution().exits(),
+            after.inspection().execution().exits()
+        );
+        assert_eq!(
+            before.inspection().execution().coverage(),
+            after.inspection().execution().coverage()
+        );
 
         let discarded = dex(39, &words, None, entry, registers, incoming, 4);
         let discarded = flowed(&discarded.bytes);
-        let used = &before.execution().operations()[0];
-        let unused = &discarded.execution().operations()[0];
+        let used = &before.inspection().execution().operations()[0];
+        let unused = &discarded.inspection().execution().operations()[0];
         assert_eq!(invoke_signature(&before), invoke_signature(&discarded));
         assert_eq!(
-            before.execution().reads(used).unwrap(),
-            discarded.execution().reads(unused).unwrap()
+            before.inspection().execution().reads(used).unwrap(),
+            discarded.inspection().execution().reads(unused).unwrap()
         );
         assert_eq!(used.effects(), unused.effects());
         assert_eq!(used.exceptional(), unused.exceptional());
         assert_eq!(unused.normal().commit(), CommitRule::None);
         assert_eq!(unused.normal().heap(), used.normal().heap());
         assert_eq!(unused.normal().lock(), used.normal().lock());
-        assert!(discarded.execution().writes(unused).is_empty());
+        assert!(discarded.inspection().execution().writes(unused).is_empty());
         assert_eq!(
             before
+                .inspection()
                 .execution()
                 .exception_edges()
                 .map(|e| (e.source_op(), e.role()))
                 .collect::<Vec<_>>(),
             discarded
+                .inspection()
                 .execution()
                 .exception_edges()
                 .map(|e| (e.source_op(), e.role()))
@@ -5328,7 +6216,7 @@ fn check_metamorphic_relations() {
         for words in encodings {
             let fixture = dex(39, &words, None, 6, 8, 3, 0);
             let flow = flowed(&fixture.bytes);
-            let op = &flow.execution().operations()[0];
+            let op = &flow.inspection().execution().operations()[0];
             if wide {
                 assert!(matches!(
                     op.kind(),
@@ -5337,10 +6225,13 @@ fn check_metamorphic_relations() {
                     }
                 ));
                 assert_eq!(
-                    flow.execution().reads(op).unwrap(),
+                    flow.inspection().execution().reads(op).unwrap(),
                     &[slot(6, SlotWidth::Two)]
                 );
-                assert_eq!(flow.execution().writes(op), &[slot(5, SlotWidth::Two)]);
+                assert_eq!(
+                    flow.inspection().execution().writes(op),
+                    &[slot(5, SlotWidth::Two)]
+                );
             } else {
                 assert!(matches!(
                     op.kind(),
@@ -5349,8 +6240,11 @@ fn check_metamorphic_relations() {
                         width: SlotWidth::One
                     }
                 ));
-                assert!(flow.execution().reads(op).unwrap().is_empty());
-                assert_eq!(flow.execution().writes(op), &[slot(0, SlotWidth::One)]);
+                assert!(flow.inspection().execution().reads(op).unwrap().is_empty());
+                assert_eq!(
+                    flow.inspection().execution().writes(op),
+                    &[slot(0, SlotWidth::One)]
+                );
             }
             assert!(!op.effects().may_throw());
             assert_eq!(op.exceptional(), None);
@@ -5359,13 +6253,13 @@ fn check_metamorphic_relations() {
             assert_eq!(op.normal().commit_pc(), Some(CodeUnitOffset(0)));
             assert_eq!(op.normal().heap(), HeapTransfer::Preserve);
             assert_eq!(op.normal().lock(), LockTransfer::Preserve);
-            assert_eq!(flow.execution().exception_edges().count(), 0);
+            assert_eq!(flow.inspection().execution().exception_edges().count(), 0);
         }
     }
 }
 
 fn invoke_signature(
-    flow: &PlannedMethod<'_>,
+    flow: &ExpressedMethod<'_>,
 ) -> (
     InvokeKind,
     OperandReference,
@@ -5377,7 +6271,7 @@ fn invoke_signature(
         target,
         prototype,
         result,
-    } = flow.execution().operations()[0].kind()
+    } = flow.inspection().execution().operations()[0].kind()
     else {
         panic!("call disappeared after an input transformation");
     };
@@ -5391,6 +6285,1894 @@ fn slot(start: u16, width: SlotWidth) -> RegisterSlot {
     }
 }
 
+fn expression_read(
+    code: &crate::p7::MethodCode,
+    id: crate::p7::ExprId,
+    expected: Result<crate::p5::StorageRead, crate::p5::StorageGap>,
+) {
+    use crate::p5::StorageRead as R;
+    use crate::p7::ExprKind as E;
+    let kind = &code.expressions()[id.0 as usize].kind;
+    match (kind, expected) {
+        (
+            E::Read { storage, view },
+            Ok(R::Value {
+                local,
+                view: original,
+                ..
+            }),
+        ) => {
+            assert_eq!(storage.0, local.0, "P7 changed read storage");
+            assert_eq!(*view, original, "P7 changed read interpretation");
+        }
+        (
+            E::Literal { bits, view },
+            Ok(R::Literal {
+                bits: original,
+                view: v,
+                ..
+            }),
+        ) => {
+            assert_eq!(*bits, original, "P7 changed literal bits");
+            assert_eq!(*view, v);
+        }
+        (E::Snapshot { storage }, Ok(R::Snapshot { local, .. })) => {
+            assert_eq!(storage.0, local.0, "P7 adapted a snapshot twice")
+        }
+        (E::Unavailable { gap }, Err(original)) => {
+            assert_eq!(*gap, original, "P7 replaced an unavailable read")
+        }
+        _ => panic!("P7 operand differs from the original storage read: {kind:?} / {expected:?}"),
+    }
+}
+fn expression_proto(
+    code: &crate::p7::MethodCode,
+    p: &crate::p7::Prototype,
+    expected: &CheckedPrototype<'_>,
+) {
+    assert_eq!(p.shorty, expected.shorty().units().unwrap());
+    assert_eq!(
+        code.types()[p.returns.0 as usize].units,
+        expected.return_type().units().unwrap()
+    );
+    assert_eq!(p.parameters.len(), expected.parameters().len());
+    for (actual, expected) in p.parameters.iter().zip(expected.parameters()) {
+        assert_eq!(
+            code.types()[actual.0 as usize].units,
+            expected.descriptor().units().unwrap()
+        );
+    }
+}
+fn expression_member(
+    code: &crate::p7::MethodCode,
+    m: &crate::p7::MemberDeclaration,
+    expected: &crate::p1::CheckedMemberFact<'_>,
+) {
+    use crate::p1::CheckedMemberFact as F;
+    use crate::p7::MemberDeclaration as M;
+    match (m, expected) {
+        (
+            M::Field {
+                owner,
+                name,
+                field_type,
+            },
+            F::Field {
+                owner: o,
+                name: n,
+                field_type: t,
+                ..
+            },
+        ) => {
+            assert_eq!(code.types()[owner.0 as usize].units, o.units().unwrap());
+            assert_eq!(name.units, n.units().unwrap());
+            assert_eq!(
+                code.types()[field_type.0 as usize].units,
+                t.units().unwrap()
+            );
+        }
+        (
+            M::Method {
+                owner,
+                name,
+                prototype,
+            },
+            F::Method {
+                owner: o,
+                name: n,
+                prototype: p,
+                ..
+            },
+        ) => {
+            assert_eq!(code.types()[owner.0 as usize].units, o.units().unwrap());
+            assert_eq!(name.units, n.units().unwrap());
+            expression_proto(code, prototype, p);
+        }
+        _ => panic!("P7 changed a handle member declaration"),
+    }
+}
+fn expression_bootstrap(
+    code: &crate::p7::MethodCode,
+    d: &crate::p7::ReferenceDeclaration,
+    f: &crate::p1::CheckedBootstrapFact<'_>,
+) {
+    use crate::p1::CheckedBootstrapFact as F;
+    use crate::p7::ReferenceDeclaration as R;
+    match (d, f) {
+        (R::String { units }, F::String { value }) => assert_eq!(*units, value.units().unwrap()),
+        (R::Type { type_use }, F::Type { descriptor, .. }) => assert_eq!(
+            code.types()[type_use.0 as usize].units,
+            descriptor.units().unwrap()
+        ),
+        (R::Member(m), F::Member(original)) => expression_member(code, m, original),
+        (R::Prototype(p), F::Proto { prototype }) => expression_proto(code, p, prototype),
+        (
+            R::MethodHandle {
+                kind,
+                member,
+                declaration,
+            },
+            F::MethodHandle { handle, member: m },
+        ) => {
+            assert_eq!(*kind, handle.kind());
+            assert_eq!(*member, handle.member());
+            expression_member(code, declaration, m);
+        }
+        _ => panic!("P7 changed a bootstrap leaf declaration"),
+    }
+}
+fn expression_reference(
+    code: &crate::p7::MethodCode,
+    d: &crate::p7::ReferenceDeclaration,
+    f: &CheckedReferenceFact<'_>,
+) {
+    use crate::p1::{BootstrapToken as T, BootstrapValue as F};
+    use crate::p7::{
+        Bootstrap as B, BootstrapLiteral as V, MemberDeclaration as M, ReferenceDeclaration as R,
+    };
+    match (d, f) {
+        (R::String { units }, CheckedReferenceFact::String { value }) => {
+            assert_eq!(*units, value.units().unwrap())
+        }
+        (R::Type { type_use }, CheckedReferenceFact::Type { descriptor, .. }) => assert_eq!(
+            code.types()[type_use.0 as usize].units,
+            descriptor.units().unwrap()
+        ),
+        (
+            R::Member(M::Field {
+                owner,
+                name,
+                field_type,
+            }),
+            CheckedReferenceFact::Field {
+                owner: o,
+                name: n,
+                field_type: t,
+                ..
+            },
+        ) => {
+            assert_eq!(code.types()[owner.0 as usize].units, o.units().unwrap());
+            assert_eq!(name.units, n.units().unwrap());
+            assert_eq!(
+                code.types()[field_type.0 as usize].units,
+                t.units().unwrap()
+            );
+        }
+        (
+            R::Member(M::Method {
+                owner,
+                name,
+                prototype,
+            }),
+            CheckedReferenceFact::Method {
+                owner: o,
+                name: n,
+                prototype: p,
+                ..
+            },
+        ) => {
+            assert_eq!(code.types()[owner.0 as usize].units, o.units().unwrap());
+            assert_eq!(name.units, n.units().unwrap());
+            expression_proto(code, prototype, p);
+        }
+        (R::Prototype(p), CheckedReferenceFact::Proto { prototype }) => {
+            expression_proto(code, p, prototype)
+        }
+        (
+            R::MethodHandle {
+                kind,
+                member,
+                declaration,
+            },
+            CheckedReferenceFact::MethodHandle { handle, member: m },
+        ) => {
+            assert_eq!(*kind, handle.kind());
+            assert_eq!(*member, handle.member());
+            expression_member(code, declaration, m);
+        }
+        (
+            R::CallSite {
+                name,
+                name_id,
+                handle_id,
+                prototype_id,
+                handle_kind,
+                member,
+                bootstrap_member,
+                prototype,
+                argument_count,
+                arguments,
+                encoded,
+                range,
+            },
+            CheckedReferenceFact::CallSite {
+                name: n,
+                name_id: ni,
+                handle_id: hi,
+                prototype_id: pi,
+                handle,
+                member: m,
+                declarations,
+                prototype: p,
+                bootstrap,
+                argument_count: count,
+                encoded: bytes,
+                range: r,
+            },
+        ) => {
+            assert_eq!(name.units, n.units().unwrap());
+            assert_eq!(*name_id, *ni);
+            assert_eq!(*handle_id, *hi);
+            assert_eq!(*prototype_id, *pi);
+            assert_eq!(*handle_kind, handle.kind());
+            assert_eq!(*member, handle.member());
+            let mut leaves = std::collections::HashSet::new();
+            leaves.insert(*bootstrap_member);
+            let expected = &declarations[m.0 as usize];
+            let record = &code.references()[bootstrap_member.0 as usize];
+            assert_eq!(record.position.reference, expected.reference);
+            assert_eq!(record.position.bootstrap, Some(expected.range));
+            expression_bootstrap(code, record.declaration.as_ref().unwrap(), &expected.fact);
+            expression_proto(code, prototype, p);
+            assert_eq!(*argument_count, *count);
+            assert_eq!(encoded.as_slice(), *bytes, "P7 lost bootstrap encoding");
+            assert_eq!(*range, *r);
+            assert_eq!(
+                arguments.len(),
+                bootstrap.len(),
+                "P7 lost bootstrap arguments"
+            );
+            for (a, b) in arguments.iter().zip(bootstrap) {
+                match (a, b) {
+                    (B::EndContainer, T::EndContainer) => {}
+                    (
+                        B::Value {
+                            range,
+                            name_id,
+                            name,
+                            tag,
+                            value_arg,
+                            value,
+                        },
+                        T::Value {
+                            range: r,
+                            name_id: ni,
+                            name: n,
+                            tag: t,
+                            value_arg: arg,
+                            value: v,
+                        },
+                    ) => {
+                        assert_eq!(*range, *r);
+                        assert_eq!(*name_id, *ni);
+                        assert_eq!(*name, n.map(|n| n.units().unwrap()));
+                        assert_eq!(*tag, *t);
+                        assert_eq!(*value_arg, *arg);
+                        match (value, v) {
+                            (V::Signed(a), F::Signed(b)) => assert_eq!(a, b),
+                            (V::Unsigned(a), F::Unsigned(b)) => assert_eq!(a, b),
+                            (V::Bits { width, bits }, F::Bits { width: w, bits: b }) => {
+                                assert_eq!(*width, w.0);
+                                assert_eq!(bits, b);
+                            }
+                            (V::Null, F::Null) => {}
+                            (V::Boolean(a), F::Boolean(b)) => assert_eq!(a, b),
+                            (V::Array { count: a }, F::Array { count: b }) => assert_eq!(a, b),
+                            (
+                                V::Annotation { type_use, count },
+                                F::Annotation {
+                                    descriptor,
+                                    count: b,
+                                    ..
+                                },
+                            ) => {
+                                assert_eq!(*count, *b);
+                                assert_eq!(
+                                    code.types()[type_use.0 as usize].units,
+                                    descriptor.units().unwrap()
+                                );
+                            }
+                            (
+                                V::Reference {
+                                    original,
+                                    declaration,
+                                },
+                                F::Reference { reference, fact },
+                            ) => {
+                                assert_eq!(original, reference);
+                                leaves.insert(*declaration);
+                                let expected = &declarations[fact.0 as usize];
+                                let record = &code.references()[declaration.0 as usize];
+                                assert_eq!(record.position.reference, expected.reference);
+                                assert_eq!(record.position.bootstrap, Some(expected.range));
+                                expression_bootstrap(
+                                    code,
+                                    record.declaration.as_ref().unwrap(),
+                                    &expected.fact,
+                                );
+                            }
+                            _ => panic!("P7 changed bootstrap value semantics"),
+                        }
+                    }
+                    _ => panic!("P7 changed bootstrap container order"),
+                }
+            }
+            assert_eq!(
+                leaves.len(),
+                declarations.len(),
+                "P7 lost a bootstrap declaration occurrence"
+            );
+        }
+        _ => panic!("P7 lost a readable original reference"),
+    }
+}
+fn expression_correspondence(method: &ExpressedMethod<'_>) {
+    use crate::p5::{CopyLocation, Materialization, ThrowSite, TransferSite};
+    use crate::p7::*;
+    let source = method.inspection();
+    let flow = source.execution();
+    let storage = source.storage_facts();
+    let f = source.facts();
+    let result = method.result();
+    let code = result.code().unwrap();
+    assert_eq!(
+        code.coverage(),
+        flow.coverage(),
+        "P7 lost original coverage"
+    );
+    assert_eq!(result.key().class, flow.owner_facts().key());
+    assert_eq!(result.key().method, flow.method_id());
+    assert_eq!(
+        result.header().declaration.name_units(),
+        flow.declaration().name_units()
+    );
+    assert_eq!(
+        result.header().declaration.prototype_units(),
+        flow.declaration().prototype_units()
+    );
+    assert_eq!(result.header().access_flags, flow.access_flags());
+    assert_eq!(
+        result.header().owner_descriptor,
+        flow.owner_facts().descriptor().units()
+    );
+    assert_eq!(
+        result
+            .header()
+            .metadata
+            .records()
+            .map(|r| r.bytes())
+            .collect::<Vec<_>>(),
+        flow.metadata()
+            .records()
+            .map(|r| r.bytes())
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(
+        code.locals().len(),
+        storage.locals().len(),
+        "P7 invented storage"
+    );
+    for (i, name) in source.type_facts().names().iter().enumerate() {
+        assert_eq!(code.types()[i].id.0 as usize, i);
+        assert_eq!(code.types()[i].units, name.units());
+    }
+    for (i, local) in storage.locals().iter().enumerate() {
+        let d = &code.locals()[i];
+        assert_eq!(d.id.0, local.id().0);
+        assert_eq!(d.original.kind(), local.kind());
+        assert_eq!(d.original.storage_type(), local.storage_type());
+        assert_eq!(d.gap, storage.local_gap(local.id()));
+        assert!(!d.name.is_empty());
+    }
+    let mut seen_refs = std::collections::HashSet::new();
+    for reference in code
+        .references()
+        .iter()
+        .filter(|r| r.position.bootstrap.is_none())
+    {
+        assert!(
+            seen_refs.insert((
+                reference.position.pc,
+                match reference.position.slot {
+                    ReferenceSlot::First => 0u8,
+                    ReferenceSlot::Second => 1u8,
+                }
+            )),
+            "P7 duplicated reference binding"
+        );
+        let pc = reference.position.pc;
+        match (
+            &reference.declaration,
+            flow.reference_fact(pc, reference.position.slot).unwrap(),
+        ) {
+            (Ok(decl), Ok(fact)) => expression_reference(code, decl, fact),
+            (Err(error), Err(original)) => {
+                assert_eq!(error.kind, original.kind());
+                assert_eq!(error.detail, original.to_string());
+            }
+            _ => panic!("P7 changed reference availability"),
+        };
+        assert_eq!(
+            reference.use_issue.as_ref().map(|e| e.kind),
+            flow.reference_use_issue(pc, reference.position.slot)
+                .map(|e| e.kind())
+        );
+    }
+    assert_eq!(seen_refs.len(), source.evidence().reference_facts().count());
+    let leaf_count = source
+        .evidence()
+        .reference_facts()
+        .map(|(_, _, f)| match f {
+            Ok(CheckedReferenceFact::CallSite { declarations, .. }) => declarations.len(),
+            _ => 0,
+        })
+        .sum::<usize>();
+    assert_eq!(code.references().len(), seen_refs.len() + leaf_count);
+    let bound = |id: ReferenceId,
+                 op: &crate::p2::Operation,
+                 slot: ReferenceSlot,
+                 target: OperandReference| {
+        let r = &code.references()[id.0 as usize];
+        assert_eq!(r.position.pc, op.pc());
+        assert_eq!(r.position.slot, slot);
+        assert_eq!(
+            r.position.reference, target,
+            "P7 rebound an original target"
+        );
+    };
+    assert_eq!(code.operations().len(), flow.operations().len());
+    assert_eq!(code.terminals().len(), flow.blocks().len());
+    for (m, op) in code.operations().iter().zip(flow.operations()) {
+        assert_eq!(m.source, op.id());
+        assert_eq!(m.original, *op.kind());
+        assert_eq!(m.pc, op.pc());
+        assert_eq!(m.result_pc, op.result_pc());
+        assert_eq!(m.original_block, op.block());
+        assert!(
+            f.nodes()[m.node.0 as usize]
+                .operations()
+                .contains(&op.id().0)
+        );
+        assert_eq!(m.effects, op.effects());
+        assert_eq!(m.normal, op.normal());
+        assert_eq!(m.exceptional, op.exceptional());
+        assert_eq!(m.writes, flow.writes(op));
+        match (&m.reads, flow.reads(op)) {
+            (Ok(a), Ok(b)) => assert_eq!(a.as_slice(), b),
+            (Err(a), Err(b)) => assert_eq!(a.kind, b.kind()),
+            _ => panic!("P7 changed original input availability"),
+        }
+        if let crate::p6::OperationOwner::Construction(g) = f.operation_owners()[op.id().0 as usize]
+        {
+            assert_eq!(m.emission, Emission::Construction(ConstructionId(g.0)));
+            let group = &code.constructions()[g.0 as usize];
+            assert_eq!(
+                m.statement,
+                if group.allocation == op.id() {
+                    Some(group.statement)
+                } else {
+                    None
+                },
+                "P7 emitted a compound member twice"
+            );
+            continue;
+        }
+        let stmt = &code.statements()[m.statement.unwrap().0 as usize];
+        let ids = match (&stmt.inputs, storage.operation_uses(op.id()).unwrap()) {
+            (Arguments::Known(a), Ok(uses)) => {
+                assert_eq!(a.len(), uses.len(), "P7 changed argument count");
+                for (&e, u) in a.iter().zip(uses) {
+                    expression_read(code, e, u.read());
+                    let origin = code.expressions()[e.0 as usize].origin.as_ref().unwrap();
+                    assert_eq!(origin.site, u.site(), "P7 changed argument order");
+                    assert_eq!(origin.state, u.state());
+                    assert_eq!(origin.point, u.point());
+                    assert_eq!(origin.read, u.read());
+                    assert_eq!(origin.initialization, u.initialization());
+                }
+                Some(a.as_slice())
+            }
+            (Arguments::Unavailable { gap, words }, Err(original)) => {
+                assert_eq!(*gap, original);
+                assert_eq!(*words, flow.input_words(op).unwrap().collect::<Vec<_>>());
+                None
+            }
+            _ => panic!("P7 fabricated an argument layout"),
+        };
+        let argument = |id: ExprId, index: usize| {
+            if let Some(ids) = ids {
+                assert_eq!(id, ids[index], "P7 changed operand identity/order");
+            } else {
+                assert!(matches!(
+                    code.expressions()[id.0 as usize].kind,
+                    ExprKind::Unavailable { .. }
+                ));
+            }
+        };
+        let expr = match stmt.kind {
+            StatementKind::Evaluate { expression }
+            | StatementKind::Initialize { expression, .. } => {
+                Some(&code.expressions()[expression.0 as usize].kind)
+            }
+            _ => None,
+        };
+        let reference = |r: ReferenceId, target| bound(r, op, ReferenceSlot::First, target);
+        match (op.kind(), &stmt.kind, expr) {
+            (OpKind::Nop, StatementKind::Nop, _) => {}
+            (
+                OpKind::Move { kind },
+                StatementKind::Move {
+                    kind: actual,
+                    expression,
+                },
+                _,
+            ) => {
+                assert_eq!(kind, actual);
+                argument(*expression, 0);
+            }
+            (
+                OpKind::Const { bits, width },
+                StatementKind::Evaluate { .. },
+                Some(ExprKind::Literal { bits: b, .. }),
+            ) => {
+                assert_eq!(b.value, *bits);
+                assert_eq!(b.width, *width);
+            }
+            (OpKind::ConstString { value }, _, Some(ExprKind::String(r))) => {
+                reference(*r, OperandReference::String(*value))
+            }
+            (OpKind::ConstClass { type_id }, _, Some(ExprKind::Class(r))) => {
+                reference(*r, OperandReference::Type(*type_id))
+            }
+            (OpKind::ConstMethodHandle { handle }, _, Some(ExprKind::MethodHandle(r))) => {
+                reference(*r, OperandReference::MethodHandle(*handle))
+            }
+            (OpKind::ConstMethodType { proto }, _, Some(ExprKind::MethodType(r))) => {
+                reference(*r, OperandReference::Proto(*proto))
+            }
+            (OpKind::Unary { op }, _, Some(ExprKind::Unary { op: a, value })) => {
+                assert_eq!(a, op, "P7 changed unary/conversion semantics");
+                argument(*value, 0);
+            }
+            (
+                OpKind::Binary { op, literal, .. },
+                _,
+                Some(ExprKind::Binary { op: a, left, right }),
+            ) => {
+                assert_eq!(a, op, "P7 changed binary semantics");
+                let (input, other) = if *op == crate::p2::BinaryOp::RsubInt {
+                    (right, left)
+                } else {
+                    (left, right)
+                };
+                argument(*input, 0);
+                if let Some(v) = literal {
+                    let ExprKind::Literal { bits, .. } = code.expressions()[other.0 as usize].kind
+                    else {
+                        panic!("P7 lost original arithmetic literal")
+                    };
+                    assert_eq!(bits.width, SlotWidth::One);
+                    assert_eq!(bits.value, (*v as u64) & 0xffff_ffff);
+                } else {
+                    argument(*other, 1);
+                }
+            }
+            (OpKind::Compare { op }, _, Some(ExprKind::Compare { op: a, left, right })) => {
+                assert_eq!(a, op);
+                argument(*left, 0);
+                argument(*right, 1);
+            }
+            (
+                OpKind::Field {
+                    access: crate::p2::FieldAccess::Get,
+                    static_field,
+                    field,
+                    ..
+                },
+                _,
+                Some(ExprKind::Field {
+                    reference: r,
+                    receiver,
+                }),
+            ) => {
+                reference(*r, OperandReference::Field(*field));
+                assert_eq!(receiver.is_none(), *static_field);
+                if let Some(r) = receiver {
+                    argument(*r, 0);
+                }
+            }
+            (
+                OpKind::Field {
+                    access: crate::p2::FieldAccess::Put,
+                    static_field,
+                    field,
+                    ..
+                },
+                StatementKind::FieldStore {
+                    reference: r,
+                    receiver,
+                    value,
+                },
+                _,
+            ) => {
+                reference(*r, OperandReference::Field(*field));
+                assert_eq!(receiver.is_none(), *static_field);
+                if let Some(r) = receiver {
+                    argument(*r, 1);
+                }
+                argument(*value, 0);
+            }
+            (
+                OpKind::Array {
+                    access: crate::p2::ArrayAccess::Get,
+                    kind,
+                },
+                _,
+                Some(ExprKind::Array {
+                    array,
+                    index,
+                    kind: k,
+                }),
+            ) => {
+                assert_eq!(k, kind);
+                argument(*array, 0);
+                argument(*index, 1);
+            }
+            (
+                OpKind::Array {
+                    access: crate::p2::ArrayAccess::Put,
+                    kind,
+                },
+                StatementKind::ArrayStore {
+                    array,
+                    index,
+                    value,
+                    kind: k,
+                },
+                _,
+            ) => {
+                assert_eq!(k, kind);
+                argument(*value, 0);
+                argument(*array, 1);
+                argument(*index, 2);
+            }
+            (OpKind::ArrayLength, _, Some(ExprKind::ArrayLength(array))) => argument(*array, 0),
+            (
+                OpKind::Cast { type_id },
+                StatementKind::CheckCast {
+                    value,
+                    reference: r,
+                },
+                _,
+            ) => {
+                reference(*r, OperandReference::Type(*type_id));
+                argument(*value, 0);
+                assert!(
+                    stmt.outputs.is_empty(),
+                    "P7 manufactured a check-cast write"
+                );
+            }
+            (
+                OpKind::InstanceOf { type_id },
+                _,
+                Some(ExprKind::InstanceOf {
+                    value,
+                    reference: r,
+                }),
+            ) => {
+                reference(*r, OperandReference::Type(*type_id));
+                argument(*value, 0);
+            }
+            (
+                OpKind::NewInstance { type_id },
+                _,
+                Some(ExprKind::AllocateInstance { reference: r }),
+            ) => reference(*r, OperandReference::Type(*type_id)),
+            (
+                OpKind::NewArray { type_id },
+                _,
+                Some(ExprKind::NewArray {
+                    reference: r,
+                    length,
+                }),
+            ) => {
+                reference(*r, OperandReference::Type(*type_id));
+                argument(*length, 0);
+            }
+            (
+                OpKind::FilledNewArray { type_id },
+                _,
+                Some(ExprKind::FilledArray {
+                    reference: r,
+                    elements,
+                }),
+            ) => {
+                reference(*r, OperandReference::Type(*type_id));
+                match (elements, ids) {
+                    (Arguments::Known(a), Some(b)) => assert_eq!(a.as_slice(), b),
+                    (Arguments::Unavailable { .. }, None) => {}
+                    _ => panic!("P7 changed filled-array layout"),
+                }
+            }
+            (OpKind::FillArrayData { .. }, StatementKind::FillArray { array, payload }, _) => {
+                argument(*array, 0);
+                let p = &code.payloads()[payload.0 as usize];
+                let original = flow.array_payload(op.id()).unwrap().unwrap();
+                assert_eq!(p.operation, op.id());
+                assert_eq!(p.width, original.element_width().0);
+                assert_eq!(p.count, original.element_count());
+                assert_eq!(
+                    p.bits,
+                    original.elements().map(|e| e.bits).collect::<Vec<_>>(),
+                    "P7 truncated or padded fill data"
+                );
+                assert_eq!(
+                    p.element,
+                    source
+                        .type_facts()
+                        .array_fills()
+                        .iter()
+                        .find(|p| p.operation == op.id())
+                        .unwrap()
+                        .element
+                );
+            }
+            (
+                OpKind::Invoke {
+                    kind,
+                    target,
+                    prototype,
+                    ..
+                }
+                | OpKind::UnresolvedInvoke {
+                    kind,
+                    target,
+                    prototype,
+                    ..
+                },
+                _,
+                Some(ExprKind::Call(call)),
+            ) => {
+                assert_eq!(call.kind, *kind);
+                reference(call.target, *target);
+                assert_eq!(call.invocation_prototype.is_some(), prototype.is_some());
+                if let (Some(id), Some(p)) = (call.invocation_prototype, prototype) {
+                    bound(id, op, ReferenceSlot::Second, OperandReference::Proto(*p));
+                }
+                if matches!(kind, InvokeKind::Custom | InvokeKind::Polymorphic) {
+                    assert!(
+                        matches!(call.qualification, Qualification::FullSignature),
+                        "P7 dynamic invocation lost explicit signature"
+                    );
+                }
+                let has_receiver = !matches!(kind, InvokeKind::Static | InvokeKind::Custom);
+                assert_eq!(call.receiver.is_some(), has_receiver);
+                if let Some(r) = call.receiver {
+                    argument(r, 0);
+                }
+                match (&call.arguments, ids) {
+                    (Arguments::Known(a), Some(b)) => {
+                        assert_eq!(
+                            a.as_slice(),
+                            &b[usize::from(has_receiver)..],
+                            "P7 changed invocation argument order"
+                        )
+                    }
+                    (Arguments::Unavailable { gap, words }, None) => {
+                        let Arguments::Unavailable {
+                            gap: original,
+                            words: w,
+                        } = &stmt.inputs
+                        else {
+                            panic!()
+                        };
+                        assert_eq!(gap, original);
+                        assert_eq!(words, w);
+                    }
+                    _ => panic!("P7 changed invocation argument order"),
+                }
+                if let Some(fact) = storage
+                    .constructions()
+                    .iter()
+                    .find(|p| p.fact().operation == op.id())
+                {
+                    let StatementKind::Initialize {
+                        relation, syntax, ..
+                    } = stmt.kind
+                    else {
+                        panic!("P7 lost explicit initialization")
+                    };
+                    assert_eq!(relation, fact.fact().relation);
+                    if syntax != InitializationSyntax::Explicit {
+                        assert_eq!(op.pc().0, 0, "P7 moved constructor initialization");
+                        assert!(stmt.before.is_empty() && stmt.snapshots.is_empty());
+                        assert!(matches!(
+                            (syntax, relation),
+                            (
+                                InitializationSyntax::This,
+                                crate::p4::ConstructorRelation::This
+                            ) | (
+                                InitializationSyntax::Super,
+                                crate::p4::ConstructorRelation::Super
+                            )
+                        ));
+                    }
+                }
+            }
+            (OpKind::Monitor { enter }, StatementKind::Monitor { enter: e, lock }, _) => {
+                assert_eq!(e, enter);
+                argument(*lock, 0);
+            }
+            (OpKind::MoveException, StatementKind::CaptureException, _) => {}
+            (
+                OpKind::UnresolvedResult { width },
+                StatementKind::UnresolvedResult { width: w },
+                _,
+            ) => assert_eq!(w, width),
+            _ => panic!(
+                "P7 operation semantics differ: {:?} / {:?} / {expr:?}",
+                op.kind(),
+                stmt.kind
+            ),
+        }
+        let outputs = storage.operation_definitions(op.id()).unwrap();
+        assert_eq!(stmt.outputs.len(), outputs.len());
+        for (a, b) in stmt.outputs.iter().zip(outputs) {
+            assert_eq!(a.operation(), b.operation());
+            assert_eq!(a.output(), b.output());
+            assert_eq!(a.point(), b.point());
+            assert_eq!(a.state(), b.state());
+            assert_eq!(a.commit(), b.commit());
+            assert_eq!(a.commit_pc(), b.commit_pc());
+            assert_eq!(
+                a.materialization(),
+                b.materialization(),
+                "P7 changed normal publication"
+            );
+        }
+        match (m.emission, f.operation_owners()[op.id().0 as usize]) {
+            (Emission::Literal, crate::p6::OperationOwner::Ordinary { .. }) => {
+                assert!(matches!(op.kind(), OpKind::Const { .. }));
+                assert!(
+                    stmt.before.is_empty() && stmt.snapshots.is_empty() && stmt.after.is_empty(),
+                    "P7 elided literal-side copies"
+                );
+                assert!(
+                    stmt.outputs
+                        .iter()
+                        .all(|d| matches!(d.materialization(), Materialization::Literal(_)))
+                );
+            }
+            (Emission::Block { node }, crate::p6::OperationOwner::Ordinary { node: n, .. }) => {
+                assert_eq!(node, n)
+            }
+            (Emission::Catch(c), crate::p6::OperationOwner::CatchCapture(t)) => assert!(
+                matches!(f.regions()[c.0 as usize].kind(),crate::p6::RegionKind::Try(id)if *id==t)
+            ),
+            (
+                Emission::Acquire(c) | Emission::Release(c),
+                crate::p6::OperationOwner::Synchronized { scope, .. },
+            ) => assert!(
+                matches!(f.regions()[c.0 as usize].kind(),crate::p6::RegionKind::Synchronized(id)if *id==scope)
+            ),
+            _ => panic!("P7 duplicated an operation owner"),
+        }
+    }
+    assert_eq!(code.copies().len(), storage.copy_plans().len());
+    for (a, b) in code.copies().iter().zip(storage.copy_plans()) {
+        assert_eq!(a.id.0, b.id().0);
+        assert_eq!(a.location, b.location());
+        assert_eq!(a.assignments.len(), b.assignments().len());
+        for (x, y) in a.assignments.iter().zip(b.assignments()) {
+            assert_eq!(x.id(), y.id());
+            assert_eq!(x.origin(), y.origin());
+            assert_eq!(x.source(), y.source());
+            assert_eq!(x.destination(), y.destination());
+            assert_eq!(x.issue(), y.issue());
+        }
+        assert_eq!(a.steps.len(), b.steps().len(), "P7 lost copy steps");
+        for (x, y) in a.steps.iter().zip(b.steps()) {
+            match (x, *y) {
+                (
+                    CopyStatement::Save {
+                        destination,
+                        source,
+                    },
+                    crate::p5::CopyStep::Save {
+                        destination: d,
+                        source: s,
+                    },
+                ) => {
+                    assert_eq!(destination.0, d.0);
+                    assert_eq!(source.0, s.0);
+                }
+                (
+                    CopyStatement::Assign {
+                        copy,
+                        destination,
+                        expression,
+                        original,
+                    },
+                    crate::p5::CopyStep::Assign {
+                        copy: o,
+                        destination: d,
+                        source,
+                    },
+                ) => {
+                    assert_eq!(*copy, o.0);
+                    assert_eq!(destination.0, d.0);
+                    assert_eq!(*original, source);
+                    expression_read(code, *expression, Ok(source));
+                }
+                _ => panic!("P7 changed sequential-copy order"),
+            }
+        }
+    }
+    assert_eq!(
+        code.constructions().len(),
+        storage.construction_groups().len()
+    );
+    for (g, original) in code
+        .constructions()
+        .iter()
+        .zip(storage.construction_groups())
+    {
+        assert_eq!(g.id.0, original.id().0);
+        assert_eq!(g.allocation, original.allocation());
+        assert_eq!(g.initialization, original.initialization());
+        assert_eq!(g.normal, original.normal());
+        assert_eq!(g.members, original.members());
+        assert_eq!(g.interior_edges, original.interior_edges());
+        assert_eq!(g.arguments, original.arguments());
+        assert_eq!(g.prelude.map(|p| p.0), original.prelude().map(|p| p.0));
+        assert_eq!(
+            g.snapshot_members.iter().map(|p| p.0).collect::<Vec<_>>(),
+            original
+                .snapshot_members()
+                .iter()
+                .map(|p| p.0)
+                .collect::<Vec<_>>()
+        );
+        let ExprKind::New {
+            reference,
+            constructor,
+            arguments,
+        } = &code.expressions()[g.expression.0 as usize].kind
+        else {
+            panic!("P7 failed to express selected natural construction")
+        };
+        let alloc = &flow.operations()[g.allocation.0 as usize];
+        let OpKind::NewInstance { type_id } = alloc.kind() else {
+            panic!()
+        };
+        bound(
+            *reference,
+            alloc,
+            ReferenceSlot::First,
+            OperandReference::Type(*type_id),
+        );
+        let init = &flow.operations()[g.initialization.0 as usize];
+        let OpKind::Invoke { target, .. } = init.kind() else {
+            panic!()
+        };
+        bound(*constructor, init, ReferenceSlot::First, *target);
+        assert_eq!(arguments.len(), original.arguments().len());
+        for (&a, &b) in arguments.iter().zip(original.arguments()) {
+            expression_read(code, a, Ok(b));
+        }
+        assert_eq!(
+            g.publications.len(),
+            original.publications().len(),
+            "P7 lost construction publication"
+        );
+        for (a, b) in g.publications.iter().zip(original.publications()) {
+            assert_eq!(a.original, *b);
+            assert_eq!(a.destination.0, b.local.0);
+        }
+        let s = &code.statements()[g.statement.0 as usize];
+        assert!(matches!(s.kind,StatementKind::Construction(id)if id==g.id));
+        assert_eq!(
+            s.snapshots.iter().map(|p| p.0).collect::<Vec<_>>(),
+            original.prelude().map(|p| vec![p.0]).unwrap_or_default(),
+            "P7 lost selected construction prelude"
+        );
+        assert_eq!(
+            s.sites.iter().map(|s| s.0).collect::<Vec<_>>(),
+            f.throws()
+                .iter()
+                .filter(|s| s.construction() == Some(original.id()))
+                .map(|s| s.id().0)
+                .collect::<Vec<_>>(),
+            "P7 lost compound exception sites"
+        );
+    }
+    // Interpret placement independently from the retained CopyBundle location.
+    let original_plans = |location: CopyLocation| {
+        storage
+            .copy_plans()
+            .iter()
+            .filter(|p| {
+                p.location() == location
+                    && storage.copy_emission(p.id()) == Some(crate::p5::CopyEmission::Original)
+            })
+            .map(|p| p.id().0)
+            .collect::<Vec<_>>()
+    };
+    let transfer_plans = |site: TransferSite| {
+        storage
+            .copy_plans()
+            .iter()
+            .filter(|p| {
+                matches!(p.location(),CopyLocation::Transfer{site:s,..}if s==site)
+                    && storage.copy_emission(p.id()) == Some(crate::p5::CopyEmission::Original)
+            })
+            .map(|p| p.id().0)
+            .collect::<Vec<_>>()
+    };
+    let plan_ids = |ids: &[CopyPlanId]| ids.iter().map(|p| p.0).collect::<Vec<_>>();
+    assert_eq!(
+        plan_ids(code.initial_copies()),
+        transfer_plans(TransferSite::InitialEntry)
+    );
+    for op in code.operations() {
+        let Some(statement) = op.statement else {
+            continue;
+        };
+        if matches!(
+            op.emission,
+            Emission::Construction(_) | Emission::Release(_)
+        ) {
+            continue;
+        }
+        let s = &code.statements()[statement.0 as usize];
+        assert_eq!(
+            plan_ids(&s.before),
+            transfer_plans(TransferSite::BeforeOperation(op.source)),
+            "P7 moved before-operation copies"
+        );
+        assert_eq!(
+            plan_ids(&s.snapshots),
+            original_plans(CopyLocation::BeforeThrow(ThrowSite::Operation(op.source))),
+            "P7 lost before-throw saves"
+        );
+        assert_eq!(
+            plan_ids(&s.after),
+            transfer_plans(TransferSite::AfterCommit(op.source)),
+            "P7 moved normal-commit copies"
+        );
+    }
+    for t in code.terminals() {
+        if matches!(t.emission, TerminalEmission::SyncExit(_)) {
+            continue;
+        }
+        let b = t.block;
+        assert_eq!(
+            plan_ids(&t.before),
+            transfer_plans(TransferSite::BeforeTerminal(b))
+        );
+        assert_eq!(
+            plan_ids(&t.snapshots),
+            original_plans(CopyLocation::BeforeThrow(ThrowSite::Terminal(b)))
+        );
+    }
+    assert_eq!(code.labels().len(), f.labels().len());
+    for (a, b) in code.labels().iter().zip(f.labels()) {
+        assert_eq!(a.id.0, b.id().0);
+        assert_eq!(a.node, b.node());
+        assert_eq!(a.block, b.block());
+        assert_eq!(a.owner.0, b.owner().0);
+        assert_eq!(a.kind, b.kind());
+    }
+    assert_eq!(code.transfers().len(), f.links().len());
+    for (t, (l, p)) in code
+        .transfers()
+        .iter()
+        .zip(f.links().iter().zip(f.link_plans()))
+    {
+        assert_eq!(t.id.0, l.id().0);
+        assert_eq!(t.from, l.from());
+        assert_eq!(
+            code.labels()[t.destination.0 as usize].node,
+            l.to(),
+            "P7 changed selected transfer target"
+        );
+        assert_eq!(
+            plan_ids(&t.copies),
+            p.copies().iter().map(|p| p.0).collect::<Vec<_>>(),
+            "P7 lost selected-edge copies"
+        );
+        if let crate::p6::LinkOrigin::Edge(id) = l.origin() {
+            assert_eq!(t.edge, Some(id));
+            let EdgeRole::Normal(role) = flow.edges()[id.0 as usize].role() else {
+                panic!()
+            };
+            assert_eq!(t.role, Some(role));
+        }
+    }
+    assert_eq!(code.controls().len(), f.regions().len());
+    assert_eq!(code.root().map(|r| r.0), f.root().map(|r| r.0));
+    for (c, r) in code.controls().iter().zip(f.regions()) {
+        assert_eq!(c.id.0, r.id().0);
+        assert_eq!(
+            c.children.iter().map(|c| c.0).collect::<Vec<_>>(),
+            r.children().iter().map(|r| r.0).collect::<Vec<_>>()
+        );
+        assert_eq!(c.entry.map(|l| code.labels()[l.0 as usize].node), r.entry());
+        assert_eq!(
+            c.follow.map(|l| code.labels()[l.0 as usize].node),
+            r.follow()
+        );
+        if let (
+            ControlKind::Synchronized {
+                acquire,
+                lock,
+                outlets,
+                ..
+            },
+            crate::p6::RegionKind::Synchronized(id),
+        ) = (&c.kind, r.kind())
+        {
+            let p = &f.synchronized()[id.0 as usize];
+            let a = &code.operations()[p.enter().0 as usize];
+            assert_eq!(Some(*acquire), a.statement);
+            let StatementKind::Monitor {
+                enter: true,
+                lock: l,
+            } = code.statements()[acquire.0 as usize].kind
+            else {
+                panic!()
+            };
+            assert_eq!(*lock, l);
+            assert_eq!(outlets.len(), p.exits().len());
+            for (o, e) in outlets.iter().zip(p.exits()) {
+                assert_eq!(
+                    o.release,
+                    code.operations()[e.release().0 as usize].statement.unwrap()
+                );
+                assert_eq!(o.transfer.0, e.release_link().0);
+                assert_eq!(code.labels()[o.destination.0 as usize].node, e.target());
+                assert_eq!(
+                    code.labels()[o.entry.0 as usize].node,
+                    code.operations()[e.release().0 as usize].node
+                );
+                assert_eq!(o.routing, e.routing());
+                assert_eq!(
+                    plan_ids(&o.before_operand),
+                    transfer_plans(TransferSite::BeforeOperation(e.release()))
+                );
+                assert_eq!(
+                    plan_ids(&o.snapshots),
+                    original_plans(CopyLocation::BeforeThrow(ThrowSite::Operation(e.release())))
+                );
+                assert_eq!(
+                    plan_ids(&o.after_release),
+                    e.after_release().iter().map(|p| p.0).collect::<Vec<_>>(),
+                    "P7 moved post-release copies"
+                );
+                let s = &code.statements()[o.release.0 as usize];
+                assert!(
+                    s.before.is_empty() && s.snapshots.is_empty() && s.after.is_empty(),
+                    "P7 duplicated release phases"
+                );
+                if let Resume::Rethrow {
+                    terminal,
+                    exception,
+                    capture,
+                } = o.resume
+                {
+                    let crate::p6::SyncExitKind::Rethrow {
+                        terminal: n,
+                        capture: original,
+                        exception: read,
+                    } = e.kind()
+                    else {
+                        panic!()
+                    };
+                    assert_eq!(terminal, f.nodes()[n.0 as usize].block());
+                    assert_eq!(capture, original);
+                    expression_read(code, exception, Ok(read));
+                }
+            }
+        }
+    }
+    assert_eq!(code.sites().len(), f.throws().len());
+    let mut emitted_copies = std::collections::HashSet::new();
+    emitted_copies.extend(code.initial_copies().iter().map(|p| p.0));
+    for s in code.statements() {
+        emitted_copies.extend(
+            s.before
+                .iter()
+                .chain(&s.snapshots)
+                .chain(&s.after)
+                .map(|p| p.0),
+        );
+    }
+    for t in code.terminals() {
+        emitted_copies.extend(t.before.iter().chain(&t.snapshots).map(|p| p.0));
+    }
+    for t in code.transfers() {
+        emitted_copies.extend(t.copies.iter().map(|p| p.0));
+    }
+    for h in code.handlers() {
+        emitted_copies.extend(h.receives.iter().map(|p| p.0));
+    }
+    for c in code.controls() {
+        if let ControlKind::Synchronized { outlets, .. } = &c.kind {
+            for o in outlets {
+                emitted_copies.extend(o.before_operand.iter().chain(&o.snapshots).map(|p| p.0));
+                for step in &o.completion {
+                    match step {
+                        OutletStep::Copies(p) | OutletStep::Transfer { copies: p, .. } => {
+                            emitted_copies.extend(p.iter().map(|p| p.0))
+                        }
+                        OutletStep::Terminal {
+                            before_operand,
+                            snapshots,
+                            ..
+                        } => emitted_copies
+                            .extend(before_operand.iter().chain(snapshots).map(|p| p.0)),
+                    }
+                }
+            }
+        }
+    }
+    for p in f.copy_placements() {
+        if !matches!(p.owner, crate::p6::CopyOwner::Construction(_)) {
+            assert!(
+                emitted_copies.contains(&p.plan.0),
+                "P7 lost an executable copy plan"
+            );
+        }
+    }
+    for (a, b) in code.sites().iter().zip(f.throws()) {
+        assert_eq!(a.id.0, b.id().0);
+        assert_eq!(a.original, b.site());
+        assert_eq!(a.completion, b.completion());
+        assert_eq!(a.chain, b.chain());
+        assert_eq!(
+            a.source_snapshots.iter().map(|p| p.0).collect::<Vec<_>>(),
+            b.snapshots().iter().map(|p| p.0).collect::<Vec<_>>()
+        );
+        assert_eq!(a.routes.len(), b.edges().len());
+        for (r, e) in a.routes.iter().zip(b.edges()) {
+            assert_eq!(r.edge, *e);
+            let crate::p6::EdgeRoute::Exception {
+                order, delivery, ..
+            } = f.edges()[e.0 as usize].route()
+            else {
+                panic!()
+            };
+            assert_eq!(r.order, order);
+            match (&r.delivery, delivery) {
+                (Delivery::Explicit, crate::p6::ExceptionDelivery::Explicit) => {}
+                (Delivery::Catch(c), crate::p6::ExceptionDelivery::Catch(id)) => assert!(
+                    matches!(f.regions()[c.0 as usize].kind(),crate::p6::RegionKind::Try(t)if *t==id)
+                ),
+                (
+                    Delivery::ImpossibleRelease(s),
+                    crate::p6::ExceptionDelivery::ImpossibleRelease(op),
+                ) => assert_eq!(Some(*s), code.operations()[op.0 as usize].statement),
+                _ => panic!("P7 changed exception delivery"),
+            }
+        }
+    }
+    assert_eq!(code.chains().len(), f.handler_chains().len());
+    for (a, b) in code.chains().iter().zip(f.handler_chains()) {
+        assert_eq!(a.clauses.len(), b.clauses().len());
+        for (x, y) in a.clauses.iter().zip(b.clauses()) {
+            assert_eq!(x.order, y.order, "P7 changed original handler priority");
+            assert_eq!(x.catch.as_ref().map(|t| t.original), y.catch);
+            assert_eq!(
+                x.target.map(|l| code.labels()[l.0 as usize].node),
+                if let crate::p6::CatchTarget::Handler(n) = y.target {
+                    Some(n)
+                } else {
+                    None
+                }
+            );
+        }
+    }
+    for (a, b) in code.handlers().iter().zip(f.handler_entries()) {
+        assert_eq!(a.node, b.node());
+        match (&a.capture, b.capture()) {
+            (HandlerCapture::None, None) => {}
+            (HandlerCapture::Body(s), Some(op)) => {
+                assert_eq!(Some(*s), code.operations()[op.0 as usize].statement);
+                assert!(matches!(
+                    code.operations()[op.0 as usize].emission,
+                    Emission::Block { .. }
+                ));
+            }
+            (HandlerCapture::Catch { statement, control }, Some(op)) => {
+                assert_eq!(Some(*statement), code.operations()[op.0 as usize].statement);
+                assert_eq!(
+                    code.operations()[op.0 as usize].emission,
+                    Emission::Catch(*control)
+                );
+            }
+            _ => panic!("P7 changed handler capture ownership"),
+        }
+        assert_eq!(
+            plan_ids(&a.receives),
+            b.receives().iter().map(|p| p.0).collect::<Vec<_>>(),
+            "P7 lost handler receives"
+        );
+    }
+}
+
+fn expression_target(code: &crate::p7::MethodCode, id: crate::p7::TransferId) -> crate::p6::NodeId {
+    use crate::p7::*;
+    let transfer = &code.transfers()[id.0 as usize];
+    let target = match transfer.kind {
+        TransferKind::Goto(label) | TransferKind::Next(label) => label,
+        TransferKind::Break(control) => code.controls()[control.0 as usize].follow.unwrap(),
+        TransferKind::Continue(control) => {
+            let ControlKind::Loop {
+                continue_target, ..
+            } = code.controls()[control.0 as usize].kind
+            else {
+                panic!()
+            };
+            continue_target
+        }
+        TransferKind::IfArm { control, taken } => {
+            let ControlKind::If {
+                when_true,
+                when_false,
+                ..
+            } = code.controls()[control.0 as usize].kind
+            else {
+                panic!()
+            };
+            let actual = if taken { when_true } else { when_false };
+            assert_eq!(id, actual, "P7 reversed a selected arm");
+            code.transfers()[actual.0 as usize].destination
+        }
+        TransferKind::SwitchArm(control) => {
+            let ControlKind::Switch { arms, .. } = &code.controls()[control.0 as usize].kind else {
+                panic!()
+            };
+            assert!(arms.contains(&id));
+            transfer.destination
+        }
+        TransferKind::LoopCondition { control, repeat } => {
+            let ControlKind::Loop { syntax, .. } = &code.controls()[control.0 as usize].kind else {
+                panic!()
+            };
+            let (on_repeat, exit) = match syntax {
+                LoopSyntax::While { repeat, exit, .. }
+                | LoopSyntax::DoWhile { repeat, exit, .. } => (*repeat, *exit),
+                _ => panic!(),
+            };
+            let actual = if repeat { on_repeat } else { exit };
+            assert_eq!(id, actual);
+            code.transfers()[actual.0 as usize].destination
+        }
+        TransferKind::EnterSync(control) => {
+            let c = &code.controls()[control.0 as usize];
+            assert!(matches!(c.kind, ControlKind::Synchronized { .. }));
+            code.controls()[c.children[1].0 as usize].entry.unwrap()
+        }
+        TransferKind::LeaveSync { control, release } => {
+            let ControlKind::Synchronized { outlets, .. } =
+                &code.controls()[control.0 as usize].kind
+            else {
+                panic!()
+            };
+            outlets.iter().find(|p| p.release == release).unwrap().entry
+        }
+        TransferKind::ReleasedSync { control, release } => {
+            let ControlKind::Synchronized { outlets, .. } =
+                &code.controls()[control.0 as usize].kind
+            else {
+                panic!()
+            };
+            outlets
+                .iter()
+                .find(|p| p.release == release)
+                .unwrap()
+                .destination
+        }
+    };
+    code.labels()[target.0 as usize].node
+}
+fn expression_outlet_correspondence(
+    method: &ExpressedMethod<'_>,
+    outlet: &crate::p7::SyncOutlet,
+    exit: &crate::p6::SyncExit,
+) {
+    use crate::p5::{CopyLocation, ThrowSite, TransferSite};
+    use crate::p7::OutletStep;
+    let source = method.inspection();
+    let f = source.facts();
+    let storage = source.storage_facts();
+    let at = |pred: &dyn Fn(CopyLocation) -> bool| {
+        exit.after_release()
+            .iter()
+            .filter(|id| pred(storage.copy_plans()[id.0 as usize].location()))
+            .map(|id| id.0)
+            .collect::<Vec<_>>()
+    };
+    let mut required = Vec::new();
+    let commits = at(
+        &|l| matches!(l,CopyLocation::Transfer{site:TransferSite::AfterCommit(op),..}if op==exit.release()),
+    );
+    if !commits.is_empty() {
+        required.push((0, exit.release().0));
+    }
+    required.push((1, exit.release_link().0));
+    for n in exit.routing() {
+        let node = &f.nodes()[n.0 as usize];
+        if node.has_terminal() {
+            required.push((2, node.block().0));
+        }
+        for link in f.links().iter().filter(|l| l.from() == *n) {
+            required.push((1, link.id().0));
+        }
+    }
+    let mut actual = Vec::new();
+    let mut copies = Vec::new();
+    for step in &outlet.completion {
+        match step {
+            OutletStep::Copies(p) => {
+                actual.push((0, exit.release().0));
+                let ids = p.iter().map(|p| p.0).collect::<Vec<_>>();
+                assert_eq!(ids, commits, "P7 moved post-commit outlet copies");
+                copies.extend(ids);
+            }
+            OutletStep::Transfer {
+                transfer,
+                copies: p,
+            } => {
+                actual.push((1, transfer.0));
+                let expected = match f.links()[transfer.0 as usize].origin() {
+                    crate::p6::LinkOrigin::WithinBlock(_) => vec![],
+                    crate::p6::LinkOrigin::Edge(edge) => at(
+                        &|l| matches!(l,CopyLocation::Transfer{site:TransferSite::NormalEdge(e),..}if e==edge),
+                    ),
+                };
+                let ids = p.iter().map(|p| p.0).collect::<Vec<_>>();
+                assert_eq!(ids, expected, "P7 changed selected-edge outlet copies");
+                copies.extend(ids);
+            }
+            OutletStep::Terminal {
+                terminal,
+                before_operand,
+                snapshots,
+            } => {
+                actual.push((2, terminal.0));
+                let before = before_operand.iter().map(|p| p.0).collect::<Vec<_>>();
+                let save = snapshots.iter().map(|p| p.0).collect::<Vec<_>>();
+                assert_eq!(
+                    before,
+                    at(
+                        &|l| matches!(l,CopyLocation::Transfer{site:TransferSite::BeforeTerminal(b),..}if b==*terminal)
+                    ),
+                    "P7 moved terminal outlet copies"
+                );
+                assert_eq!(
+                    save,
+                    at(&|l| l == CopyLocation::BeforeThrow(ThrowSite::Terminal(*terminal))),
+                    "P7 moved terminal outlet snapshots"
+                );
+                copies.extend(before);
+                copies.extend(save);
+            }
+        }
+    }
+    assert_eq!(actual, required, "P7 reordered unlocked continuation steps");
+    assert_eq!(
+        copies,
+        exit.after_release().iter().map(|p| p.0).collect::<Vec<_>>(),
+        "P7 lost unlocked continuation copies"
+    );
+}
+
+fn expression_controls(method: &ExpressedMethod<'_>) {
+    use crate::p7::*;
+    let inspection = method.inspection();
+    let f = inspection.facts();
+    let flow = inspection.execution();
+    let storage = inspection.storage_facts();
+    let code = method.result().code().unwrap();
+    for link in f.links() {
+        assert_eq!(
+            expression_target(code, TransferId(link.id().0)),
+            link.to(),
+            "P7 structured target differs from original link"
+        );
+    }
+    for (t, b) in code.terminals().iter().zip(flow.blocks()) {
+        assert_eq!(t.block, b.id());
+        assert_eq!(t.pc, b.terminal_pc());
+        let uses = if b.terminal().is_some() {
+            storage.terminal_uses(b.id()).unwrap()
+        } else {
+            &[]
+        };
+        assert_eq!(t.inputs.len(), uses.len());
+        for (&e, u) in t.inputs.iter().zip(uses) {
+            expression_read(code, e, u.read());
+            let origin = code.expressions()[e.0 as usize].origin.as_ref().unwrap();
+            assert_eq!(origin.site, u.site());
+            assert_eq!(origin.state, u.state());
+            assert_eq!(origin.point, u.point());
+        }
+        let arg = |n: usize| t.inputs[n];
+        match (&t.kind, b.terminal()) {
+            (TerminalKind::None, None) => {}
+            (TerminalKind::Goto(id), Some(crate::p2::Terminal::Goto { .. })) => assert_eq!(
+                code.transfers()[id.0 as usize].role,
+                Some(crate::p2::NormalEdge::Goto)
+            ),
+            (
+                TerminalKind::If {
+                    condition,
+                    when_true,
+                    when_false,
+                },
+                Some(crate::p2::Terminal::Branch { op, .. }),
+            ) => {
+                assert_eq!(
+                    code.transfers()[when_true.0 as usize].role,
+                    Some(crate::p2::NormalEdge::ConditionalTrue)
+                );
+                assert_eq!(
+                    code.transfers()[when_false.0 as usize].role,
+                    Some(crate::p2::NormalEdge::ConditionalFalse)
+                );
+                match condition {
+                    Condition::Pair {
+                        op: actual,
+                        left,
+                        right,
+                    } => {
+                        assert_eq!(actual, op);
+                        assert_eq!(*left, arg(0));
+                        assert_eq!(*right, arg(1));
+                    }
+                    Condition::Zero {
+                        op: actual,
+                        value,
+                        meaning,
+                    } => {
+                        assert_eq!(actual, op);
+                        assert_eq!(*value, arg(0));
+                        let view = uses[0].read().map(|r| match r {
+                            crate::p5::StorageRead::Value { view, .. }
+                            | crate::p5::StorageRead::Literal { view, .. } => view,
+                            _ => panic!(),
+                        });
+                        match view {
+                            Err(_) => assert!(matches!(meaning, ZeroMeaning::Unavailable)),
+                            Ok(
+                                crate::p4::Interpretation::Null
+                                | crate::p4::Interpretation::Direct(crate::p4::Family::Reference),
+                            ) => assert!(matches!(meaning, ZeroMeaning::Null)),
+                            _ => {}
+                        }
+                    }
+                }
+            }
+            (
+                TerminalKind::Switch { selector, arms },
+                Some(crate::p2::Terminal::Switch { cases, .. }),
+            ) => {
+                assert_eq!(*selector, arg(0));
+                assert_eq!(arms.len(), cases.len() + 1);
+                for id in arms {
+                    assert!(matches!(
+                        code.transfers()[id.0 as usize].role,
+                        Some(
+                            crate::p2::NormalEdge::SwitchCase { .. }
+                                | crate::p2::NormalEdge::SwitchDefault
+                        )
+                    ));
+                }
+            }
+            (TerminalKind::Return(value), Some(crate::p2::Terminal::Return { width, .. })) => {
+                assert_eq!(value.is_some(), width.is_some());
+                if let Some(value) = value {
+                    assert_eq!(*value, arg(0));
+                }
+            }
+            (TerminalKind::Throw(value), Some(crate::p2::Terminal::Throw { .. })) => {
+                assert_eq!(*value, arg(0))
+            }
+            _ => panic!("P7 changed terminal semantics"),
+        }
+        let selected = f.terminal_owners()[b.id().0 as usize];
+        match (t.emission, selected) {
+            (TerminalEmission::Construction(group), crate::p6::TerminalOwner::Ordinary(_)) => {
+                let TerminalKind::Goto(id) = t.kind else {
+                    panic!()
+                };
+                assert_eq!(code.transfers()[id.0 as usize].construction, Some(group));
+            }
+            (TerminalEmission::Block, crate::p6::TerminalOwner::Ordinary(_)) => {}
+            (TerminalEmission::If(c), crate::p6::TerminalOwner::IfCondition(r))
+            | (TerminalEmission::Switch(c), crate::p6::TerminalOwner::SwitchSelector(r)) => {
+                assert_eq!(c.0, r.0)
+            }
+            (TerminalEmission::Loop(c), crate::p6::TerminalOwner::LoopCondition(id)) => assert!(
+                matches!(f.regions()[c.0 as usize].kind(),crate::p6::RegionKind::Loop(l)if *l==id)
+            ),
+            (TerminalEmission::SyncExit(c), crate::p6::TerminalOwner::SynchronizedExit(id)) => {
+                assert!(
+                    matches!(f.regions()[c.0 as usize].kind(),crate::p6::RegionKind::Synchronized(s)if *s==id)
+                )
+            }
+            _ => panic!("P7 duplicated predicate/exit ownership"),
+        }
+    }
+    for (c, r) in code.controls().iter().zip(f.regions()) {
+        use crate::p6::RegionKind as R;
+        match (&c.kind, r.kind()) {
+            (ControlKind::Block { node }, R::Block(n)) => assert_eq!(*node, *n),
+            (ControlKind::Sequence, R::Sequence) => {}
+            (
+                ControlKind::If {
+                    terminal,
+                    when_true,
+                    when_false,
+                },
+                R::If {
+                    true_link,
+                    false_link,
+                },
+            ) => {
+                assert_eq!(*terminal, f.nodes()[r.entry().unwrap().0 as usize].block());
+                assert_eq!(when_true.0, true_link.0);
+                assert_eq!(when_false.0, false_link.0);
+            }
+            (
+                ControlKind::Loop {
+                    syntax,
+                    continue_target,
+                },
+                R::Loop(id),
+            ) => {
+                let p = &f.loops()[id.0 as usize];
+                assert_eq!(
+                    code.labels()[continue_target.0 as usize].node,
+                    p.continue_target()
+                );
+                match (syntax, p.form()) {
+                    (LoopSyntax::Infinite, crate::p6::LoopForm::Infinite) => {}
+                    (
+                        LoopSyntax::While {
+                            terminal,
+                            repeat,
+                            exit,
+                        },
+                        crate::p6::LoopForm::While(test),
+                    )
+                    | (
+                        LoopSyntax::DoWhile {
+                            terminal,
+                            repeat,
+                            exit,
+                        },
+                        crate::p6::LoopForm::DoWhile(test),
+                    ) => {
+                        assert_eq!(*terminal, f.nodes()[test.node().0 as usize].block());
+                        assert_eq!(repeat.0, test.repeat().0);
+                        assert_eq!(exit.0, test.exit().0);
+                    }
+                    _ => panic!("P7 changed loop form or condition placement"),
+                }
+            }
+            (ControlKind::Switch { arms, .. }, R::Switch { arms: original }) => assert_eq!(
+                arms.iter().map(|l| l.0).collect::<Vec<_>>(),
+                original.iter().map(|l| l.0).collect::<Vec<_>>()
+            ),
+            (ControlKind::LabelledBlock { target }, R::LabelledBlock { target: n }) => {
+                assert_eq!(code.labels()[target.0 as usize].node, *n)
+            }
+            (
+                ControlKind::Try {
+                    chain,
+                    clauses,
+                    handlers,
+                    planning_scope,
+                },
+                R::Try(id),
+            ) => {
+                let p = &f.tries()[id.0 as usize];
+                assert_eq!(*chain, p.chain());
+                assert_eq!(*clauses, p.clauses());
+                assert_eq!(*handlers, p.handlers());
+                assert_eq!(*planning_scope, p.outer_sync());
+            }
+            (ControlKind::Synchronized { enter, outlets, .. }, R::Synchronized(id)) => {
+                let p = &f.synchronized()[id.0 as usize];
+                assert_eq!(enter.0, p.enter_link().0);
+                assert_eq!(outlets.len(), p.exits().len());
+                for (o, e) in outlets.iter().zip(p.exits()) {
+                    expression_outlet_correspondence(method, o, e);
+                    match (&o.resume, e.kind()) {
+                        (Resume::Follow(l), crate::p6::SyncExitKind::Follow(n)) => {
+                            assert_eq!(code.labels()[l.0 as usize].node, n)
+                        }
+                        (
+                            Resume::Break { control, target },
+                            crate::p6::SyncExitKind::Loop {
+                                loop_id,
+                                kind: crate::p6::SyncLoopTransfer::Break,
+                                target: n,
+                            },
+                        )
+                        | (
+                            Resume::Continue { control, target },
+                            crate::p6::SyncExitKind::Loop {
+                                loop_id,
+                                kind: crate::p6::SyncLoopTransfer::Continue,
+                                target: n,
+                            },
+                        ) => {
+                            assert_eq!(code.labels()[target.0 as usize].node, n);
+                            assert!(
+                                matches!(f.regions()[control.0 as usize].kind(),R::Loop(id)if *id==loop_id)
+                            );
+                        }
+                        (
+                            Resume::ReturnVoid { terminal },
+                            crate::p6::SyncExitKind::ReturnVoid { terminal: n },
+                        )
+                        | (
+                            Resume::Rethrow { terminal, .. },
+                            crate::p6::SyncExitKind::Rethrow { terminal: n, .. },
+                        ) => assert_eq!(*terminal, f.nodes()[n.0 as usize].block()),
+                        _ => panic!("P7 changed released continuation"),
+                    }
+                }
+            }
+            (
+                ControlKind::Graph {
+                    reason,
+                    entries,
+                    exits,
+                },
+                R::Graph {
+                    reason: why,
+                    entries: ent,
+                    exits: out,
+                },
+            ) => {
+                assert_eq!(reason, why);
+                assert_eq!(
+                    entries
+                        .iter()
+                        .map(|l| code.labels()[l.0 as usize].node)
+                        .collect::<Vec<_>>(),
+                    *ent
+                );
+                assert_eq!(
+                    exits.iter().map(|l| l.0).collect::<Vec<_>>(),
+                    out.iter().map(|l| l.0).collect::<Vec<_>>()
+                );
+            }
+            _ => panic!("P7 changed selected region kind"),
+        }
+        match (&c.continuation, r.continuation()) {
+            (Continuation::None, crate::p6::Continuation::None)
+            | (Continuation::Parent, crate::p6::Continuation::Parent) => {}
+            (Continuation::Goto(a), crate::p6::Continuation::Goto(b)) => assert_eq!(a.0, b.0),
+            (Continuation::Next(a), crate::p6::Continuation::Next(b)) => {
+                assert_eq!(code.labels()[a.0 as usize].node, b)
+            }
+            _ => panic!("P7 changed region completion"),
+        }
+    }
+    let mut ownership = vec![0; code.statements().len()];
+    assert_eq!(code.blocks().len(), f.nodes().len());
+    for block in code.blocks() {
+        let original = &f.nodes()[block.node.0 as usize];
+        assert_eq!(block.original_block, original.block());
+        assert_eq!(block.reachable, original.reachable());
+        match block.completion {
+            BlockCompletion::None => assert!(!original.has_terminal()),
+            BlockCompletion::Ordinary(id) => {
+                assert!(original.has_terminal());
+                assert_eq!(id, original.block());
+                assert_eq!(
+                    code.terminals()[id.0 as usize].emission,
+                    TerminalEmission::Block
+                );
+            }
+            BlockCompletion::Syntax { terminal, owner } => {
+                assert!(original.has_terminal());
+                assert_eq!(terminal, original.block());
+                assert_eq!(owner, code.terminals()[terminal.0 as usize].emission);
+                assert_ne!(owner, TerminalEmission::Block);
+            }
+        }
+        assert_eq!(
+            block.transfers.iter().map(|t| t.0).collect::<Vec<_>>(),
+            f.links()
+                .iter()
+                .filter(|l| l.from() == block.node)
+                .map(|l| l.id().0)
+                .collect::<Vec<_>>()
+        );
+        let expected = code
+            .operations()
+            .iter()
+            .filter_map(|o| match o.emission {
+                Emission::Block { node } if node == block.node => o.statement,
+                Emission::Construction(g)
+                    if o.node == block.node
+                        && code.constructions()[g.0 as usize].allocation == o.source =>
+                {
+                    Some(code.constructions()[g.0 as usize].statement)
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            block.statements, expected,
+            "P7 changed block operation order"
+        );
+        for s in &block.statements {
+            ownership[s.0 as usize] += 1;
+        }
+    }
+    for c in code.controls() {
+        match &c.kind {
+            ControlKind::Try { handlers, .. } => {
+                for h in code
+                    .handlers()
+                    .iter()
+                    .filter(|h| handlers.contains(&h.node))
+                {
+                    if let HandlerCapture::Catch { statement, control } = h.capture {
+                        assert_eq!(control, c.id);
+                        ownership[statement.0 as usize] += 1;
+                    }
+                }
+            }
+            ControlKind::Synchronized {
+                acquire, outlets, ..
+            } => {
+                ownership[acquire.0 as usize] += 1;
+                for port in outlets {
+                    ownership[port.release.0 as usize] += 1;
+                }
+            }
+            _ => {}
+        }
+    }
+    for o in code.operations() {
+        if o.emission == Emission::Literal {
+            ownership[o.statement.unwrap().0 as usize] += 1;
+        }
+    }
+    assert!(
+        ownership.iter().all(|&n| n == 1),
+        "P7 statement has missing or duplicate execution ownership: {ownership:?}"
+    );
+}
+
 fn analyze(bytes: &[u8]) -> MethodOutcome<'_> {
     let engine = Engine::open(vec![DexImage {
         bytes,
@@ -5399,36 +8181,44 @@ fn analyze(bytes: &[u8]) -> MethodOutcome<'_> {
     }])
     .unwrap();
     let outcome = engine.analyze_method(CLASS, ENTRY).unwrap().result.unwrap();
-    if let MethodOutcome::Planned(method) = &outcome {
+    if let MethodOutcome::Expressed(method) = &outcome {
         storage_correspondence(method);
         region_correspondence(method);
+        expression_correspondence(method);
+        expression_controls(method);
     }
     outcome
 }
 
-fn flowed(bytes: &[u8]) -> PlannedMethod<'_> {
+fn flowed(bytes: &[u8]) -> ExpressedMethod<'_> {
     match analyze(bytes) {
-        MethodOutcome::Planned(ssa) => ssa,
+        MethodOutcome::Expressed(ssa) => ssa,
         MethodOutcome::SsaStopped(stop) => panic!("P3 stopped: {}", stop.error()),
         MethodOutcome::TypeStopped(stop) => panic!("P4 stopped: {}", stop.error()),
         MethodOutcome::StorageStopped(stop) => panic!("P5 stopped: {}", stop.error()),
         MethodOutcome::RegionStopped(stop) => panic!("P6 stopped: {}", stop.error()),
+        MethodOutcome::ExpressionStopped(stop) => panic!("P7 stopped: {}", stop.error()),
         MethodOutcome::DisassemblyStopped(stop) => panic!("P1 stopped: {:?}", stop.error),
         MethodOutcome::FlowStopped(stop) => panic!("P2 stopped: {}", stop.error()),
-        MethodOutcome::DeclarationOnly => panic!("executable member became declaration-only"),
+        MethodOutcome::Declared(_) => panic!("executable member became declaration-only"),
     }
 }
 
 fn has_issue(bytes: &[u8], expected: impl Fn(&MethodError) -> bool) -> bool {
     match analyze(bytes) {
         MethodOutcome::DisassemblyStopped(stop) => stop.error.as_ref().is_some_and(expected),
-        MethodOutcome::Planned(ssa) => ssa.execution().issues().any(|(_, issue)| expected(issue)),
+        MethodOutcome::Expressed(ssa) => ssa
+            .inspection()
+            .execution()
+            .issues()
+            .any(|(_, issue)| expected(issue)),
         MethodOutcome::SsaStopped(stop) => panic!("P3 lost local recovery: {}", stop.error()),
         MethodOutcome::TypeStopped(stop) => panic!("P4 lost local recovery: {}", stop.error()),
         MethodOutcome::StorageStopped(stop) => panic!("P5 lost local recovery: {}", stop.error()),
         MethodOutcome::RegionStopped(stop) => panic!("P6 lost local recovery: {}", stop.error()),
+        MethodOutcome::ExpressionStopped(stop) => panic!("P7 stopped: {}", stop.error()),
         MethodOutcome::FlowStopped(stop) => panic!("P2 lost local recovery: {}", stop.error()),
-        MethodOutcome::DeclarationOnly => panic!("code disappeared"),
+        MethodOutcome::Declared(_) => panic!("code disappeared"),
     }
 }
 
@@ -5485,9 +8275,13 @@ fn check_invoke(version: u8, opcode: u8, prototype: u16, capture: bool) {
     let result = capture.then_some((dest << 8) | result_opcode);
     let fixture = dex(version, &words, result, entry, registers, incoming, 4);
     let flow = flowed(&fixture.bytes);
-    let operation = &flow.execution().operations()[0];
+    let operation = &flow.inspection().execution().operations()[0];
     let polymorphic = opcode <= 0xfb;
-    let source = flow.evidence().instruction_at(CodeUnitOffset(0)).unwrap();
+    let source = flow
+        .inspection()
+        .evidence()
+        .instruction_at(CodeUnitOffset(0))
+        .unwrap();
     let (raw_words, reads) = match opcode {
         0xfa => (
             vec![7, 5, 6, 4],
@@ -5520,8 +8314,15 @@ fn check_invoke(version: u8, opcode: u8, prototype: u16, capture: bool) {
         source.registers().map(|r| r.0).collect::<Vec<_>>(),
         raw_words
     );
-    assert_eq!(flow.execution().reads(operation).unwrap(), reads);
-    let layouts = flow.evidence().invoke_layouts().collect::<Vec<_>>();
+    assert_eq!(
+        flow.inspection().execution().reads(operation).unwrap(),
+        reads
+    );
+    let layouts = flow
+        .inspection()
+        .evidence()
+        .invoke_layouts()
+        .collect::<Vec<_>>();
     assert_eq!(layouts.len(), 1);
     assert_eq!(layouts[0].0, CodeUnitOffset(0));
     assert_eq!(layouts[0].1.as_ref().unwrap().has_receiver(), polymorphic);
@@ -5560,6 +8361,7 @@ fn check_invoke(version: u8, opcode: u8, prototype: u16, capture: bool) {
             prototype: declaration,
             ..
         }) = flow
+            .inspection()
             .execution()
             .reference_fact(CodeUnitOffset(0), ReferenceSlot::First)
             .map(Result::unwrap)
@@ -5582,6 +8384,7 @@ fn check_invoke(version: u8, opcode: u8, prototype: u16, capture: bool) {
             "[Ljava/lang/Object;".encode_utf16().collect::<Vec<_>>()
         );
         let Some(CheckedReferenceFact::Proto { prototype: actual }) = flow
+            .inspection()
             .execution()
             .reference_fact(CodeUnitOffset(0), ReferenceSlot::Second)
             .map(Result::unwrap)
@@ -5602,7 +8405,9 @@ fn check_invoke(version: u8, opcode: u8, prototype: u16, capture: bool) {
             name,
             handle,
             prototype: actual,
+            ..
         }) = flow
+            .inspection()
             .execution()
             .reference_fact(CodeUnitOffset(0), ReferenceSlot::First)
             .map(Result::unwrap)
@@ -5620,18 +8425,20 @@ fn check_invoke(version: u8, opcode: u8, prototype: u16, capture: bool) {
     let width = u32::try_from(words.len()).unwrap();
     if capture {
         assert_eq!(
-            flow.execution().writes(operation),
+            flow.inspection().execution().writes(operation),
             &[slot(dest, result_width.unwrap())]
         );
         assert_eq!(operation.result_pc(), Some(CodeUnitOffset(width)));
         assert_eq!(operation.normal().commit(), CommitRule::AfterResult);
         assert_eq!(operation.normal().commit_pc(), Some(CodeUnitOffset(width)));
         assert_eq!(
-            flow.execution().coverage_at(CodeUnitOffset(width)),
+            flow.inspection()
+                .execution()
+                .coverage_at(CodeUnitOffset(width)),
             Some(Coverage::MergedResult(operation.id()))
         );
     } else {
-        assert_eq!(flow.execution().writes(operation), &[]);
+        assert_eq!(flow.inspection().execution().writes(operation), &[]);
         assert_eq!(operation.result_pc(), None);
         assert_eq!(operation.normal().commit(), CommitRule::None);
         assert_eq!(operation.normal().commit_pc(), None);
@@ -5666,12 +8473,12 @@ fn check_prototype(prototype: &CheckedPrototype<'_>, id: u16) {
     );
 }
 
-fn check_completion(flow: &PlannedMethod<'_>, handler_pc: u32, heap: HeapTransfer) {
-    assert_eq!(flow.execution().operations().len(), 2);
-    let operation = &flow.execution().operations()[0];
+fn check_completion(flow: &ExpressedMethod<'_>, handler_pc: u32, heap: HeapTransfer) {
+    assert_eq!(flow.inspection().execution().operations().len(), 2);
+    let operation = &flow.inspection().execution().operations()[0];
     assert_eq!(operation.pc(), CodeUnitOffset(0));
     assert_eq!(
-        flow.execution().coverage_at(CodeUnitOffset(0)),
+        flow.inspection().execution().coverage_at(CodeUnitOffset(0)),
         Some(Coverage::Operation(operation.id()))
     );
     assert!(operation.effects().may_throw());
@@ -5687,7 +8494,11 @@ fn check_completion(flow: &PlannedMethod<'_>, handler_pc: u32, heap: HeapTransfe
     assert_eq!(exceptional.frame(), ExceptionFrame::PreserveBeforeOperation);
     assert_eq!(exceptional.heap(), heap);
     assert_eq!(exceptional.lock(), LockTransfer::Preserve);
-    let edges = flow.execution().exception_edges().collect::<Vec<_>>();
+    let edges = flow
+        .inspection()
+        .execution()
+        .exception_edges()
+        .collect::<Vec<_>>();
     assert_eq!(edges.len(), 1);
     assert_eq!(edges[0].source_op(), Some(operation.id()));
     assert_eq!(
@@ -5703,15 +8514,19 @@ fn check_completion(flow: &PlannedMethod<'_>, handler_pc: u32, heap: HeapTransfe
         panic!("catch-all became an uncaught exit")
     };
     assert_eq!(
-        flow.execution().block(handler).unwrap().start_pc(),
+        flow.inspection()
+            .execution()
+            .block(handler)
+            .unwrap()
+            .start_pc(),
         CodeUnitOffset(handler_pc)
     );
     assert!(matches!(
-        flow.execution().operations()[1].kind(),
+        flow.inspection().execution().operations()[1].kind(),
         OpKind::MoveException
     ));
     assert_eq!(
-        flow.execution().operations()[1].pc(),
+        flow.inspection().execution().operations()[1].pc(),
         CodeUnitOffset(handler_pc)
     );
 }
@@ -5724,6 +8539,7 @@ struct Fixture {
     methods: usize,
     init_name: u32,
     array_descriptor: usize,
+    parameter_annotation: Option<usize>,
     tries: usize,
 }
 
@@ -5802,6 +8618,34 @@ fn dex_with_catches(
     target_words: Option<&[u16]>,
     catches: StorageCatchLayout<'_>,
 ) -> Fixture {
+    dex_with_facts(
+        version,
+        instruction,
+        result,
+        entry_proto,
+        registers,
+        incoming,
+        outgoing,
+        handler_words,
+        target_words,
+        catches,
+        false,
+    )
+}
+#[allow(clippy::too_many_arguments)]
+fn dex_with_facts(
+    version: u8,
+    instruction: &[u16],
+    result: Option<u16>,
+    entry_proto: u16,
+    registers: u16,
+    incoming: u16,
+    outgoing: u16,
+    handler_words: &[u16],
+    target_words: Option<&[u16]>,
+    catches: StorageCatchLayout<'_>,
+    rich: bool,
+) -> Fixture {
     let types = [
         "I",
         "J",
@@ -5860,10 +8704,15 @@ fn dex_with_catches(
     let string_ids = table(1, strings.len(), 4);
     let type_ids = table(2, types.len(), 4);
     let proto_ids = table(3, protos.len(), 12);
+    let field_ids = if rich { table(4, 1, 8) } else { 0 };
     let method_ids = table(5, 4, 8);
     let class_defs = table(6, 1, 32);
     let sites = if version >= 38 { table(7, 4, 4) } else { 0 };
-    let handles = if version >= 38 { table(8, 2, 8) } else { 0 };
+    let handles = if version >= 38 {
+        table(8, if rich { 3 } else { 2 }, 8)
+    } else {
+        0
+    };
     let data = bytes.len();
     map.push((0x1001, 9, data));
     for (index, (shorty, ret, args)) in protos.iter().enumerate() {
@@ -5913,6 +8762,11 @@ fn dex_with_catches(
         put16(&mut bytes, record + 2, *proto);
         put32(&mut bytes, record + 4, string_id(name));
     }
+    if rich {
+        put16(&mut bytes, field_ids, 3);
+        put16(&mut bytes, field_ids + 2, 0);
+        put32(&mut bytes, field_ids + 4, string_id("target"));
+    }
     let call_site_data = bytes.len();
     if version >= 38 {
         map.push((0x2005, 4, call_site_data));
@@ -5923,8 +8777,39 @@ fn dex_with_catches(
                 sites + index * 4,
                 u32::try_from(offset).unwrap(),
             );
+            let extras = if rich && index == 0 {
+                vec![
+                    vec![0, 0xfd],
+                    vec![0x22, 0x2e, 0xfb],
+                    vec![3, 65],
+                    vec![4, 0xf9],
+                    vec![0xe6, 0xef, 0xcd, 0xab, 0x89, 0x67, 0x45, 0x23, 1],
+                    vec![0x70, 0x34, 0x12, 0xc0, 0x7f],
+                    vec![0xf1, 0, 0, 0, 0, 0, 0, 0, 0x80],
+                    vec![0x17, u8::try_from(string_id("dynamic")).unwrap()],
+                    vec![0x18, 5],
+                    vec![0x19, 0],
+                    vec![0x1a, 2],
+                    vec![0x1b, 0],
+                    vec![0x15, 1],
+                    vec![0x16, 2],
+                    vec![0x1e],
+                    vec![0x3f],
+                    vec![0x1c, 3, 4, 1, 0x1f, 0x1e],
+                    vec![
+                        0x1d,
+                        3,
+                        1,
+                        u8::try_from(string_id("exercise")).unwrap(),
+                        0x17,
+                        u8::try_from(string_id("target")).unwrap(),
+                    ],
+                ]
+            } else {
+                vec![]
+            };
             bytes.extend([
-                3,
+                u8::try_from(3 + extras.len()).unwrap(),
                 0x16,
                 0,
                 0x17,
@@ -5932,6 +8817,13 @@ fn dex_with_catches(
                 0x15,
                 *proto,
             ]);
+            for v in extras {
+                bytes.extend(v);
+            }
+        }
+        if rich {
+            put16(&mut bytes, handles + 16, 0);
+            put16(&mut bytes, handles + 20, 0);
         }
         for (index, member) in [0, 2].iter().enumerate() {
             put16(&mut bytes, handles + index * 8, 4);
@@ -6035,6 +8927,67 @@ fn dex_with_catches(
         class_defs + 24,
         u32::try_from(class_data).unwrap(),
     );
+    let parameter_annotation = if rich {
+        let first = bytes.len();
+        map.push((0x2004, 3, first));
+        bytes.extend([1, 3, 1, u8::try_from(string_id("exercise")).unwrap(), 4, 42]);
+        let param = bytes.len();
+        bytes.extend([
+            0,
+            3,
+            1,
+            u8::try_from(string_id("exercise")).unwrap(),
+            0x17,
+            u8::try_from(string_id("target")).unwrap(),
+        ]);
+        let sibling = bytes.len();
+        bytes.extend([1, 3, 1, u8::try_from(string_id("exercise")).unwrap(), 4, 7]);
+        align(&mut bytes);
+        let sets = bytes.len();
+        map.push((0x1003, 3, sets));
+        for a in [first, param, sibling] {
+            bytes.extend(1u32.to_le_bytes());
+            bytes.extend(u32::try_from(a).unwrap().to_le_bytes());
+        }
+        let parameters = bytes.len();
+        map.push((0x1002, 1, parameters));
+        let n = protos[entry_proto as usize].2.len();
+        bytes.extend(u32::try_from(n).unwrap().to_le_bytes());
+        for i in 0..n {
+            bytes.extend(
+                if i == 0 {
+                    u32::try_from(sets + 8).unwrap()
+                } else {
+                    0
+                }
+                .to_le_bytes(),
+            );
+        }
+        let directory = bytes.len();
+        map.push((0x2006, 1, directory));
+        for v in [
+            0u32,
+            0,
+            2,
+            1,
+            1,
+            u32::try_from(sets).unwrap(),
+            2,
+            u32::try_from(sets + 16).unwrap(),
+            1,
+            u32::try_from(parameters).unwrap(),
+        ] {
+            bytes.extend(v.to_le_bytes());
+        }
+        put32(
+            &mut bytes,
+            class_defs + 20,
+            u32::try_from(directory).unwrap(),
+        );
+        Some(param)
+    } else {
+        None
+    };
     align(&mut bytes);
     let map_offset = bytes.len();
     map.push((0x1000, 1, map_offset));
@@ -6062,7 +9015,7 @@ fn dex_with_catches(
         (strings.len(), string_ids),
         (types.len(), type_ids),
         (protos.len(), proto_ids),
-        (0, 0),
+        (usize::from(rich), field_ids),
         (4, method_ids),
         (1, class_defs),
     ]
@@ -6082,6 +9035,7 @@ fn dex_with_catches(
         methods: method_ids,
         init_name: string_id("<init>"),
         array_descriptor,
+        parameter_annotation,
         tries,
     }
 }

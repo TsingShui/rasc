@@ -181,11 +181,12 @@ pub struct MethodAnalysis<'a> {
     pub result: Result<MethodOutcome<'a>, RequestError>,
 }
 
-/// The sole executable method path advances P1 -> P2 -> P3 -> P4 -> P5 -> P6 or retains a classified stop.
+/// The sole executable method path advances P1 -> P2 -> P3 -> P4 -> P5 -> P6 -> P7 or retains a classified stop.
 pub enum MethodOutcome<'a> {
-    DeclarationOnly,
+    Declared(crate::p7::MethodResult),
     DisassemblyStopped(crate::p1::DecodedOutcome<'a>),
-    Planned(crate::p6::PlannedMethod<'a>),
+    Expressed(crate::p7::ExpressedMethod<'a>),
+    ExpressionStopped(crate::p7::ExpressionStop<'a>),
     RegionStopped(crate::p6::RegionStop<'a>),
     StorageStopped(crate::p5::StorageStop<'a>),
     TypeStopped(crate::p4::TypeStop<'a>),
@@ -197,7 +198,8 @@ impl MethodOutcome<'_> {
     /// Borrowed execution facts without extracting the predecessor product.
     pub fn execution(&self) -> Option<crate::p2::ExecutionFacts<'_, '_>> {
         match self {
-            Self::Planned(planned) => Some(planned.execution()),
+            Self::Expressed(method) => Some(method.inspection().execution()),
+            Self::ExpressionStopped(stop) => Some(stop.inspection().execution()),
             Self::RegionStopped(stop) => Some(stop.execution()),
             Self::StorageStopped(stop) => Some(stop.execution()),
             Self::TypeStopped(stop) => Some(stop.execution()),
@@ -209,7 +211,8 @@ impl MethodOutcome<'_> {
     /// Original read-only evidence for debugging; no stage constructor is exposed.
     pub fn evidence(&self) -> Option<crate::p2::MethodEvidence<'_, '_>> {
         match self {
-            Self::Planned(planned) => Some(planned.evidence()),
+            Self::Expressed(method) => Some(method.inspection().evidence()),
+            Self::ExpressionStopped(stop) => Some(stop.inspection().evidence()),
             Self::RegionStopped(stop) => Some(stop.evidence()),
             Self::StorageStopped(stop) => Some(stop.evidence()),
             Self::TypeStopped(stop) => Some(stop.evidence()),
@@ -234,7 +237,14 @@ impl MethodTask {
         let task = Self { _sealed: () };
         let source = index.method_source(facts, method)?;
         if matches!(source.raw(), crate::input::RawPrintable::Declaration) {
-            return Ok(MethodOutcome::DeclarationOnly);
+            return crate::p7::build_declaration(&task, &source)
+                .map(MethodOutcome::Declared)
+                .map_err(|error| match error {
+                    crate::p7::ExpressionError::Request(error) => error,
+                    crate::p7::ExpressionError::InternalInvariant(message) => {
+                        RequestError::InternalInvariant(message)
+                    }
+                });
         }
         let mut outcome = index.decode_method_source(&source)?;
         drop(source);
@@ -249,7 +259,14 @@ impl MethodTask {
                             crate::p5::StorageBuild::Ready(stored) => {
                                 match crate::p6::build_regions(&task, stored) {
                                     crate::p6::RegionBuild::Ready(planned) => {
-                                        Ok(MethodOutcome::Planned(planned))
+                                        Ok(match crate::p7::build_method(&task, planned) {
+                                            crate::p7::MethodBuild::Ready(method) => {
+                                                MethodOutcome::Expressed(method)
+                                            }
+                                            crate::p7::MethodBuild::Stopped(stop) => {
+                                                MethodOutcome::ExpressionStopped(stop)
+                                            }
+                                        })
                                     }
                                     crate::p6::RegionBuild::Stopped(stop) => {
                                         Ok(MethodOutcome::RegionStopped(stop))
@@ -281,7 +298,7 @@ impl<'a> Engine<'a> {
         image.index.class_facts_cached(class.class_def)
     }
 
-    /// Runs P0, the method reader and P1–P6 for one method entry only.
+    /// Runs P0, the method reader and P1–P7 for one method entry only.
     pub fn analyze_method(
         &self,
         class: ClassKey,
@@ -297,7 +314,7 @@ impl<'a> Engine<'a> {
         })
     }
 
-    /// Runs P0, the method reader and P1–P6 for one class request. Class assembly
+    /// Runs P0, the method reader and P1–P7 for one class request. Class assembly
     /// and rendering belong to P8/P9 and are not part of this boundary.
     pub fn analyze(&self, request: Request) -> Result<ClassAnalysis<'a>, RequestError> {
         let position =

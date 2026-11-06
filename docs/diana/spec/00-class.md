@@ -31,6 +31,10 @@ The collector retains class, field, method and parameter annotations with their
 original associations, visibility, descriptor, physical ranges and value events.
 Nested metadata uses the shared reader's flat container-event representation. System annotations
 retain raw facts; P0 does not infer nested ownership or generic source declarations.
+MethodMetadata shares these owned immutable records with the method chain. Its
+read-only iterator exposes only the selected method and parameter records. Class
+traversal extent/issue remains explicit: an incomplete traversal does not establish
+absence of later method annotations.
 
 ## Snapshot and failure behavior
 
@@ -82,7 +86,7 @@ cached as absent definitions.
 
 ## Development inspection
 
-The engine development shell is the single P0–P6 observation entry:
+The engine development shell is the single P0–P7 observation entry:
 
 ```sh
 cargo run -p diana-decomp --example dbg_shell --locked -- \

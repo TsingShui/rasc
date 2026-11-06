@@ -29,13 +29,16 @@ impl From<Option<SlotWidth>> for InvokeResult {
 }
 
 /// Identity of one operation in this method product.
-#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, serde::Serialize)]
+#[serde(transparent)]
 pub struct OpId(pub u32);
 /// Identity of one basic block in this method product.
-#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, serde::Serialize)]
+#[serde(transparent)]
 pub struct BlockId(pub u32);
 /// Identity of one CFG edge. Equal source/target pairs never share an ID.
-#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, serde::Serialize)]
+#[serde(transparent)]
 pub struct EdgeId(pub u32);
 /// Identity of one abrupt method exit.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -338,7 +341,7 @@ pub enum InvokeKind {
     Custom,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum OpKind {
     Nop,
     Move {

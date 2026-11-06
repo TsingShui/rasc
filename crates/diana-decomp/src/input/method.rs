@@ -41,7 +41,8 @@ pub struct MethodSource<'i, 'a> {
     raw: RawPrintable<'a>,
     /// The independent method/parameter annotation read for this member. A
     /// damaged set retains its own classified error and does not remove code.
-    metadata: Result<CheckedAnnotations, RequestError>,
+    metadata: Result<CheckedAnnotations, std::sync::Arc<RequestError>>,
+    original_metadata: crate::p0::MethodMetadata,
 }
 
 impl<'i, 'a> MethodSource<'i, 'a> {
@@ -85,7 +86,13 @@ impl<'i, 'a> MethodSource<'i, 'a> {
     /// The independent annotation read. `Err` reports a damaged annotation set;
     /// the code and declaration facts of this source stay valid.
     pub fn metadata(&self) -> Result<&CheckedAnnotations, &RequestError> {
-        self.metadata.as_ref()
+        self.metadata.as_ref().map_err(AsRef::as_ref)
+    }
+    pub fn original_metadata(&self) -> &crate::p0::MethodMetadata {
+        &self.original_metadata
+    }
+    pub(crate) fn metadata_error(&self) -> Option<std::sync::Arc<RequestError>> {
+        self.metadata.as_ref().err().cloned()
     }
     pub fn into_raw(self) -> RawPrintable<'a> {
         self.raw
@@ -180,7 +187,7 @@ impl<'a> ProgramIndex<'a> {
         // annotation set keeps its own state and never removes intact code.
         let metadata = self
             .check_method_metadata(class_id, method_id, declaration.parameter_count())
-            .map_err(RequestError::from);
+            .map_err(|e| std::sync::Arc::new(RequestError::from(e)));
         // The reader establishes only safe original ranges and independent
         // metadata. P1 owns instruction decoding, structural checks and
         // reference-content association.
@@ -197,6 +204,7 @@ impl<'a> ProgramIndex<'a> {
             declaration,
             raw,
             metadata,
+            original_metadata: facts.method_metadata(method_id),
         })
     }
 

@@ -11,6 +11,8 @@ pub use disassembly::{
     DecodedReference, EntryLayout, EntryParameter, InvokeLayout,
 };
 pub use reference::{
-    CheckedMethodHandleFact, CheckedParameter, CheckedPrototype, CheckedReferenceFact, TypeForm,
+    BootstrapDeclaration, BootstrapReferenceId, BootstrapToken, BootstrapValue,
+    CheckedBootstrapFact, CheckedMemberFact, CheckedMethodHandleFact, CheckedParameter,
+    CheckedPrototype, CheckedReferenceFact, TypeForm,
 };
 pub use structure::{CheckedMethodLayout, MethodError, MethodProblem};

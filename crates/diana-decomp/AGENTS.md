@@ -21,6 +21,6 @@ changing an engine capability.
   only under `cfg(test)` and MUST NOT run on ordinary Engine requests.
 - Engine development verification uses the `dbg_shell` example:
   `cargo run -p diana-decomp --example dbg_shell --locked -- --dex <classes.dex> --exec '<json>'`.
-  It is the single P0–P6 inspection entry and accepts a bare DEX. Do not add
+  It is the single P0–P7 inspection entry and accepts a bare DEX. Do not add
   phase-specific debug renderers, binaries or examples.
 - Build from the repository root with `cargo build --locked -p diana-decomp`.

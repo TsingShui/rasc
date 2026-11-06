@@ -15,9 +15,10 @@ their owning modules.
 | P4 | `crates/diana-decomp/src/p4/` | `TypedMethod`: value facts, per-use interpretations, Phi incoming adaptations and position-related initialization. |
 | P5 | `crates/diana-decomp/src/p5/` | `StorageMethod`: value bindings, original-position materialization, per-transfer copies, exception snapshots and local storage gaps. |
 | P6 | `crates/diana-decomp/src/p6/` | `PlannedMethod`: natural/explicit regions, original edge and copy delivery, labels, ordered protection and monitor ownership. |
+| P7 | `crates/diana-decomp/src/p7/` | Owned `MethodResult`: unified operations, storage phases, selected control/protection expressions, declarations and local gaps. |
 
-P7–P9 retain their specified responsibilities in PIPELINE_DESIGN:
-method expression, class/name assembly and pure rendering.
+P8–P9 retain their specified responsibilities in PIPELINE_DESIGN:
+class/name assembly and pure rendering.
 Their archived implementations are not active stages or alternate recovery paths.
 The [P1–P9 local-result contract](PIPELINE_DESIGN.md#92-p1p9-统一消费局部结果) applies
 to every stage: mature products account for coverage, established facts and local
@@ -32,7 +33,7 @@ engine README.
 request entry `Engine::analyze`:
 
 ```text
-P0 ClassFacts → method reader → P1 DecodedMethod → P2 FlowMethod → P3 SsaMethod → P4 TypedMethod → P5 StorageMethod → P6 PlannedMethod
+P0 ClassFacts → method reader → P1 DecodedMethod → P2 FlowMethod → P3 SsaMethod → P4 TypedMethod → P5 StorageMethod → P6 PlannedMethod → P7 MethodResult
                    └─ declaration-only
                               └─ P1 stop with decoded prefix
                                                 └─ FlowStop with P1 input
@@ -41,12 +42,13 @@ P0 ClassFacts → method reader → P1 DecodedMethod → P2 FlowMethod → P3 Ss
 Stage stops retain their error and unpublished construction facts. P4 TypeStop
 retains SSA and TypePartial, not a relabeled TypedMethod. P5 StorageStop retains
 P4 and StoragePartial, not a relabeled StorageMethod. P6 RegionStop retains
-P5 and RegionPartial, not a relabeled PlannedMethod.
+P5 and RegionPartial, not a relabeled PlannedMethod. P7 ExpressionStop retains
+P6 and ExpressionPartial, not a relabeled MethodResult.
 ```
 
-P2–P6 construction requires a `MethodTask` credential issued only by Engine.
+P2–P7 construction requires a `MethodTask` credential issued only by Engine.
 Each stage owns construction; independent checks are test-only. Engine cannot assemble successful
-FlowMethod, SsaMethod, TypedMethod, StorageMethod or PlannedMethod products. Local reference, operand and binding issues can
+FlowMethod, SsaMethod, TypedMethod, StorageMethod, PlannedMethod or MethodResult products. Local reference, operand and binding issues can
 flow through to SSA with independent facts preserved. Class requests reserve result
 storage before tasks and retain every selected known member result, including
 method-task construction failures; error kind does not truncate siblings.
@@ -69,7 +71,7 @@ member task starts; P0 remains separately queryable. The error is not cached as 
 missing pool, so later requests can retry startup. A method-private error after
 startup remains that member's result, without cancelling siblings.
 
-`dbg_shell` is the sole engine inspection example. P1–P6 views and batch commands
+`dbg_shell` is the sole engine inspection example. P1–P7 views and batch commands
 observe the Engine products; they do not start a second stage chain. Byte
 roundtrip is an independent check over retained original evidence, not production
 DEX reconstruction.
@@ -103,6 +105,10 @@ DEX reconstruction.
   ownership. P7 consumes these plans without recovering control structure again.
   Borrowed StorageEvidence supports retained P5 inspection; it exposes no owned
   predecessor, private scratch or analysis entry.
+- `ExpressedMethod` owns MethodResult and privately retains P6 for same-execution
+  inspection. `MethodInspection` lends read-only facts without product extraction.
+  `into_result()` releases analysis; MethodResult owns its expressions and metadata
+  without a DEX or Engine lifetime. No-code members publish `Declared(MethodResult)`.
 - Only owning-stage constructors with scheduler-issued authority can publish
   mature products. Consumers MUST NOT promote partial snapshots or reuse stage
   construction to retry a stopped method.
@@ -115,6 +121,7 @@ DEX reconstruction.
 
 The stage chapters define [input](spec/01-input.md), [P0](spec/00-class.md) and
 [P2 execution/tests](spec/02-flow.md), [P3 SSA/tests](spec/03-ssa.md) and
-[P4 interpretations](spec/04-types.md) and [P5 storage](spec/05-variables.md) and [P6 regions](spec/06-regions.md).
+[P4 interpretations](spec/04-types.md), [P5 storage](spec/05-variables.md),
+[P6 regions](spec/06-regions.md) and [P7 expressions](spec/07-java.md).
 PIPELINE_DESIGN remains authoritative
 for ownership, consumers, failure preservation and the later product chain.

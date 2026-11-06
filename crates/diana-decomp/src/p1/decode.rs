@@ -7,7 +7,9 @@ use crate::{CodeUnitOffset, RegisterId, RequestError, TypeId};
 
 use super::disassembly::DecodedFacts;
 use super::reference::{
-    CheckedMethodHandleFact, CheckedPrototype, CheckedReferenceFact, ReferenceFactEntry, type_form,
+    BootstrapDeclaration, BootstrapReferenceId, BootstrapToken, BootstrapValue,
+    CheckedBootstrapFact, CheckedMemberFact, CheckedMethodHandleFact, CheckedPrototype,
+    CheckedReferenceFact, ReferenceFactEntry, type_form,
 };
 use super::{DecodedOutcome, EntryLayout, EntryParameter, MethodError, MethodProblem};
 
@@ -74,6 +76,8 @@ impl<'a> ProgramIndex<'a> {
                     entry,
                     annotations: source.annotations(),
                     metadata_issue: source.metadata().is_err(),
+                    original_metadata: source.original_metadata().clone(),
+                    metadata_error: source.metadata_error(),
                     reference_facts: references.facts,
                     issues: references.issues,
                 },
@@ -189,8 +193,37 @@ impl<'a> ProgramIndex<'a> {
             },
             OperandReference::CallSite(id) => {
                 let site = self.call_site(id)?;
+                let mut declarations = Vec::new();
+                push(
+                    &mut declarations,
+                    BootstrapDeclaration {
+                        reference: site.handle.member,
+                        range: site.range,
+                        fact: CheckedBootstrapFact::Member(
+                            self.checked_member(site.handle.member)?,
+                        ),
+                    },
+                )
+                .map_err(method_error)?;
+                let mut bootstrap = Vec::new();
+                for token in site.bootstrap {
+                    push(
+                        &mut bootstrap,
+                        self.bootstrap_token(token, &mut declarations)?,
+                    )
+                    .map_err(method_error)?;
+                }
                 CheckedReferenceFact::CallSite {
                     name: site.name,
+                    name_id: site.name_id,
+                    handle_id: site.handle_id,
+                    prototype_id: site.proto_id,
+                    member: BootstrapReferenceId(0),
+                    declarations,
+                    bootstrap,
+                    argument_count: site.count,
+                    encoded: site.encoded,
+                    range: site.range,
                     handle: CheckedMethodHandleFact::new(site.handle.kind, site.handle.member),
                     prototype: CheckedPrototype::from_prototype(&site.prototype)?,
                 }
@@ -199,8 +232,156 @@ impl<'a> ProgramIndex<'a> {
                 let handle = self.method_handle(id)?;
                 CheckedReferenceFact::MethodHandle {
                     handle: CheckedMethodHandleFact::new(handle.kind, handle.member),
+                    member: self.checked_member(handle.member)?,
                 }
             }
+        })
+    }
+
+    fn checked_member(
+        &self,
+        target: OperandReference,
+    ) -> Result<CheckedMemberFact<'a>, MethodError> {
+        if !matches!(
+            target,
+            OperandReference::Field(_) | OperandReference::Method(_)
+        ) {
+            return Err(MethodError::InternalInvariant(
+                "checked handle has no leaf member",
+            ));
+        }
+        match self.resolve_instruction_reference(target)? {
+            CheckedReferenceFact::Field {
+                owner,
+                owner_type,
+                name,
+                field_type,
+                field_type_id,
+            } => Ok(CheckedMemberFact::Field {
+                owner,
+                owner_type,
+                name,
+                field_type,
+                field_type_id,
+            }),
+            CheckedReferenceFact::Method {
+                owner,
+                owner_type,
+                name,
+                prototype,
+            } => Ok(CheckedMemberFact::Method {
+                owner,
+                owner_type,
+                name,
+                prototype,
+            }),
+            _ => Err(MethodError::InternalInvariant(
+                "handle declaration changed kind",
+            )),
+        }
+    }
+    fn bootstrap_declaration(
+        &self,
+        reference: OperandReference,
+    ) -> Result<CheckedBootstrapFact<'a>, MethodError> {
+        if matches!(reference, OperandReference::CallSite(_)) {
+            return Err(MethodError::InternalInvariant(
+                "encoded bootstrap value names a call site",
+            ));
+        }
+        Ok(match self.resolve_instruction_reference(reference)? {
+            CheckedReferenceFact::String { value } => CheckedBootstrapFact::String { value },
+            CheckedReferenceFact::Type {
+                descriptor,
+                form,
+                words,
+            } => CheckedBootstrapFact::Type {
+                descriptor,
+                form,
+                words,
+            },
+            CheckedReferenceFact::Field {
+                owner,
+                owner_type,
+                name,
+                field_type,
+                field_type_id,
+            } => CheckedBootstrapFact::Member(CheckedMemberFact::Field {
+                owner,
+                owner_type,
+                name,
+                field_type,
+                field_type_id,
+            }),
+            CheckedReferenceFact::Method {
+                owner,
+                owner_type,
+                name,
+                prototype,
+            } => CheckedBootstrapFact::Member(CheckedMemberFact::Method {
+                owner,
+                owner_type,
+                name,
+                prototype,
+            }),
+            CheckedReferenceFact::Proto { prototype } => CheckedBootstrapFact::Proto { prototype },
+            CheckedReferenceFact::MethodHandle { handle, member } => {
+                CheckedBootstrapFact::MethodHandle { handle, member }
+            }
+            CheckedReferenceFact::CallSite { .. } => {
+                return Err(MethodError::InternalInvariant(
+                    "bootstrap leaf declaration changed kind",
+                ));
+            }
+        })
+    }
+    fn bootstrap_token(
+        &self,
+        token: crate::input::values::ValueStep<'a>,
+        declarations: &mut Vec<BootstrapDeclaration<'a>>,
+    ) -> Result<BootstrapToken<'a>, MethodError> {
+        use crate::input::values::{EncodedKind, ValueStep};
+        let ValueStep::Value(item) = token else {
+            return Ok(BootstrapToken::EndContainer);
+        };
+        let value = match item.kind {
+            EncodedKind::Signed(v) => BootstrapValue::Signed(v),
+            EncodedKind::Unsigned(v) => BootstrapValue::Unsigned(v),
+            EncodedKind::Bits { width, bits } => BootstrapValue::Bits { width, bits },
+            EncodedKind::Null => BootstrapValue::Null,
+            EncodedKind::Boolean(v) => BootstrapValue::Boolean(v),
+            EncodedKind::Reference(reference) => {
+                let at = BootstrapReferenceId(
+                    u32::try_from(declarations.len()).map_err(|_| MethodError::PlatformCapacity)?,
+                );
+                push(
+                    declarations,
+                    BootstrapDeclaration {
+                        reference,
+                        range: item.range,
+                        fact: self.bootstrap_declaration(reference)?,
+                    },
+                )
+                .map_err(method_error)?;
+                BootstrapValue::Reference {
+                    reference,
+                    fact: at,
+                }
+            }
+            EncodedKind::Array { count } => BootstrapValue::Array { count },
+            EncodedKind::Annotation { type_id, count } => BootstrapValue::Annotation {
+                type_id,
+                descriptor: self.type_name(type_id)?,
+                count,
+            },
+        };
+        Ok(BootstrapToken::Value {
+            range: item.range,
+            name_id: item.name,
+            name: item.name.map(|id| self.string(id)).transpose()?,
+            tag: item.tag,
+            value_arg: item.arg,
+            value,
         })
     }
 

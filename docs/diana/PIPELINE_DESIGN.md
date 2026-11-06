@@ -1475,6 +1475,7 @@ Method not decompiled 异常桩，不自动略过复杂块或将其当成功空�
 输入：PlannedMethod，通过正式接口消费成熟的操作、绑定、类型、存储、
 区域与必要上下文。确认无代码的成员沿独立声明路径消费 P0 声明及方法
 reader 的无代码事实，不伪造 DecodedMethod，也不进入 P2–P6。
+封闭产品、执行阶段与局部失败的具体接口见 [P7 产品契约](spec/07-java.md)。
 
 #### 5.7.1 默认逐操作表达
 
@@ -1736,6 +1737,13 @@ MethodResult 拥有原始 MethodKey、声明和表达节点、类型引用、标
 表达、必要来源及具体不确定性；这些数据不借用 Engine、PlannedMethod 或
 DEX lease。类型使用保留原始引用身份、descriptor 和使用位置，不提前固化
 成可被字符串替换的最终类型拼写；P8 统一形成类范围的名称计划。
+
+P0 以只读 MethodMetadata 共享原方法/参数注解的拥有内容与覆盖/问题；
+方法 reader/P1 将它沿唯一链交付。动态引用 reader/P1 保留 call-site 的
+bootstrap 参数事件、原字节及叶声明池，P7 只复制既有事实，不重读输入。
+ExpressedMethod 私有保留本次 P6 产品供 MethodInspection 借用观察；
+into_result 释放保留分析，返回不带输入生命周期的 MethodResult。
+观察接口不交出 owned predecessor、不提供构造或求解入口。
 
 已建立的方法分析临时数据在不再被消费时释放。P9 使用既有表达和显式
 名称计划渲染，不在文本/JSON 之间改变表示模式、生成新跳转或重新读取

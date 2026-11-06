@@ -30,6 +30,12 @@ impl<'f, 'a> ExecutionFacts<'f, 'a> {
     pub fn declaration(self) -> &'f crate::p0::MethodDeclaration {
         self.flow.declaration()
     }
+    pub fn metadata(self) -> &'f crate::p0::MethodMetadata {
+        self.flow.decoded.original_metadata()
+    }
+    pub fn metadata_error(self) -> Option<&'f std::sync::Arc<crate::RequestError>> {
+        self.flow.decoded.metadata_error()
+    }
     pub fn access_flags(self) -> u32 {
         self.flow.access_flags()
     }

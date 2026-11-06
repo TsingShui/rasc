@@ -223,7 +223,7 @@ impl Shell {
                                 continue;
                             }
                         };
-                        if matches!(outcome, MethodOutcome::DeclarationOnly) {
+                        if matches!(outcome, MethodOutcome::Declared(_)) {
                             no_code += 1;
                             continue;
                         }
@@ -536,6 +536,29 @@ impl Shell {
                     .map(|_| class_id(request))
                     .transpose()?,
             ),
+            "p7-all" => expression_all(
+                &engine,
+                index.class_count(),
+                request
+                    .get("class")
+                    .map(|_| class_id(request))
+                    .transpose()?,
+                request.get("details").and_then(Value::as_bool) == Some(true),
+            ),
+            "p7" | "expressions" => {
+                let analysis = engine
+                    .analyze_method(class_key(class_id(request)?), MethodId(method_id(request)?))?;
+                let outcome = analysis.result?;
+                let details = request.get("details").and_then(Value::as_bool) == Some(true);
+                match &outcome {
+                    MethodOutcome::Expressed(method) => {
+                        Ok(expression_json(method.result(), details))
+                    }
+                    MethodOutcome::Declared(method) => Ok(expression_json(method, details)),
+                    _ => Ok(inspection_stop(&outcome)
+                        .unwrap_or(json!({"stage":"p7","upstream_stopped":true}))),
+                }
+            }
             "p6-all" => region_all(
                 &engine,
                 index.class_count(),
@@ -551,7 +574,14 @@ impl Shell {
                 let outcome = analysis.result?;
                 let details = request.get("details").and_then(Value::as_bool) == Some(true);
                 match &outcome {
-                    MethodOutcome::Planned(planned) => Ok(region_json(planned, details)),
+                    MethodOutcome::Expressed(planned) => {
+                        let planned = planned.inspection();
+                        Ok(region_json(planned, details))
+                    }
+                    MethodOutcome::ExpressionStopped(planned) => {
+                        let planned = planned.inspection();
+                        Ok(region_json(planned, details))
+                    }
                     MethodOutcome::RegionStopped(stop) => Ok(region_stop_json(stop)),
                     _ => Ok(inspection_stop(&outcome)
                         .unwrap_or(json!({"stage":"p6","upstream_stopped":true}))),
@@ -575,7 +605,12 @@ impl Shell {
                     .and_then(Value::as_bool)
                     .unwrap_or(false);
                 match &outcome {
-                    MethodOutcome::Planned(stored) => {
+                    MethodOutcome::Expressed(stored) => {
+                        let stored = stored.inspection();
+                        Ok(storage_json(stored.storage_evidence(), details))
+                    }
+                    MethodOutcome::ExpressionStopped(stored) => {
+                        let stored = stored.inspection();
                         Ok(storage_json(stored.storage_evidence(), details))
                     }
                     MethodOutcome::RegionStopped(stop) => {
@@ -598,7 +633,12 @@ impl Shell {
                     .and_then(Value::as_bool)
                     .unwrap_or(false);
                 match &outcome {
-                    MethodOutcome::Planned(stored) => {
+                    MethodOutcome::Expressed(stored) => {
+                        let stored = stored.inspection();
+                        Ok(type_json(stored.analysis_evidence(), details))
+                    }
+                    MethodOutcome::ExpressionStopped(stored) => {
+                        let stored = stored.inspection();
                         Ok(type_json(stored.analysis_evidence(), details))
                     }
                     MethodOutcome::RegionStopped(stop) => {
@@ -622,14 +662,28 @@ impl Shell {
                     .analyze_method(class_key(class_id(request)?), MethodId(method_id(request)?))?;
                 let outcome = analysis.result?;
                 match &outcome {
-                    MethodOutcome::Planned(ssa) => Ok(ssa_json(
-                        ssa.analysis_evidence().ssa_facts(),
-                        ssa.execution(),
-                        request
-                            .get("details")
-                            .and_then(Value::as_bool)
-                            .unwrap_or(false),
-                    )),
+                    MethodOutcome::Expressed(ssa) => {
+                        let ssa = ssa.inspection();
+                        Ok(ssa_json(
+                            ssa.analysis_evidence().ssa_facts(),
+                            ssa.execution(),
+                            request
+                                .get("details")
+                                .and_then(Value::as_bool)
+                                .unwrap_or(false),
+                        ))
+                    }
+                    MethodOutcome::ExpressionStopped(ssa) => {
+                        let ssa = ssa.inspection();
+                        Ok(ssa_json(
+                            ssa.analysis_evidence().ssa_facts(),
+                            ssa.execution(),
+                            request
+                                .get("details")
+                                .and_then(Value::as_bool)
+                                .unwrap_or(false),
+                        ))
+                    }
                     MethodOutcome::RegionStopped(stop) => Ok(ssa_json(
                         stop.analysis_evidence().ssa_facts(),
                         stop.execution(),
@@ -708,7 +762,7 @@ impl Shell {
                             }
                         };
                         let result = match outcome {
-                            MethodOutcome::DeclarationOnly => {
+                            MethodOutcome::Declared(_) => {
                                 no_code += 1;
                                 continue;
                             }
@@ -716,7 +770,14 @@ impl Shell {
                                 p1_errors += 1;
                                 continue;
                             }
-                            MethodOutcome::Planned(stored) => Ok(stored.execution()),
+                            MethodOutcome::Expressed(stored) => {
+                                let stored = stored.inspection();
+                                Ok(stored.execution())
+                            }
+                            MethodOutcome::ExpressionStopped(stored) => {
+                                let stored = stored.inspection();
+                                Ok(stored.execution())
+                            }
                             MethodOutcome::RegionStopped(stop) => Ok(stop.execution()),
                             MethodOutcome::StorageStopped(stop) => Ok(stop.execution()),
                             MethodOutcome::TypeStopped(stop) => Ok(stop.execution()),
@@ -929,7 +990,14 @@ fn type_evidence<'f, 'a>(
     outcome: &'f MethodOutcome<'a>,
 ) -> Option<diana_decomp::p5::AnalysisEvidence<'f, 'a>> {
     match outcome {
-        MethodOutcome::Planned(stored) => Some(stored.analysis_evidence()),
+        MethodOutcome::Expressed(stored) => {
+            let stored = stored.inspection();
+            Some(stored.analysis_evidence())
+        }
+        MethodOutcome::ExpressionStopped(stored) => {
+            let stored = stored.inspection();
+            Some(stored.analysis_evidence())
+        }
         MethodOutcome::RegionStopped(stop) => Some(stop.analysis_evidence()),
         MethodOutcome::StorageStopped(stop) => Some(stop.analysis_evidence()),
         _ => None,
@@ -1153,9 +1221,10 @@ fn ssa_all(
                 _ => None,
             };
             match &entry.result {
-                Ok(MethodOutcome::DeclarationOnly) => no_code += 1,
+                Ok(MethodOutcome::Declared(_)) => no_code += 1,
                 Ok(
-                    MethodOutcome::Planned(_)
+                    MethodOutcome::Expressed(_)
+                    | MethodOutcome::ExpressionStopped(_)
                     | MethodOutcome::RegionStopped(_)
                     | MethodOutcome::StorageStopped(_)
                     | MethodOutcome::TypeStopped(_),
@@ -1463,12 +1532,24 @@ fn storage_all(
             methods += 1;
             if let Some(members) = &mut members {
                 let result = match &entry.result {
-                    Ok(MethodOutcome::Planned(stored)) => json!({
-                        "p3":ssa_json(stored.analysis_evidence().ssa_facts(),stored.execution(),true),
-                        "p4":type_json(stored.analysis_evidence(),true),
-                        "p5":storage_json(stored.storage_evidence(),true),
-                        "p6":region_json(stored,true),
-                    }),
+                    Ok(MethodOutcome::Expressed(stored)) => {
+                        let stored = stored.inspection();
+                        json!({
+                            "p3":ssa_json(stored.analysis_evidence().ssa_facts(),stored.execution(),true),
+                            "p4":type_json(stored.analysis_evidence(),true),
+                            "p5":storage_json(stored.storage_evidence(),true),
+                            "p6":region_json(stored,true),
+                        })
+                    }
+                    Ok(MethodOutcome::ExpressionStopped(stored)) => {
+                        let stored = stored.inspection();
+                        json!({
+                            "p3":ssa_json(stored.analysis_evidence().ssa_facts(),stored.execution(),true),
+                            "p4":type_json(stored.analysis_evidence(),true),
+                            "p5":storage_json(stored.storage_evidence(),true),
+                            "p6":region_json(stored,true),
+                        })
+                    }
                     Ok(MethodOutcome::RegionStopped(stop)) => json!({
                         "p3":ssa_json(stop.analysis_evidence().ssa_facts(),stop.execution(),true),
                         "p4":type_json(stop.analysis_evidence(),true),
@@ -1494,7 +1575,19 @@ fn storage_all(
                 members.push(json!({"class":entry.key.class.class_def.0,"method":entry.key.method.0,"result":result}));
             }
             match &entry.result {
-                Ok(MethodOutcome::Planned(stored)) => {
+                Ok(MethodOutcome::Expressed(stored)) => {
+                    let stored = stored.inspection();
+                    ready += 1;
+                    type_issues += stored.type_facts().issues().len() as u64;
+                    let f = stored.storage_facts();
+                    add_storage_counts(&mut counts, f);
+                    partial += u64::from(!f.issues().is_empty());
+                    for issue in f.issues() {
+                        *problems.entry(format!("{:?}", issue.gap())).or_default() += 1;
+                    }
+                }
+                Ok(MethodOutcome::ExpressionStopped(stored)) => {
+                    let stored = stored.inspection();
                     ready += 1;
                     type_issues += stored.type_facts().issues().len() as u64;
                     let f = stored.storage_facts();
@@ -1522,7 +1615,7 @@ fn storage_all(
                         );
                     }
                 }
-                Ok(MethodOutcome::DeclarationOnly) => no_code += 1,
+                Ok(MethodOutcome::Declared(_)) => no_code += 1,
                 other => {
                     upstream += 1;
                     if first_failure.is_none() {
@@ -1588,7 +1681,7 @@ fn add_region_counts(counts: &mut BTreeMap<String, u64>, f: &diana_decomp::p6::R
         *counts.entry(name.into()).or_default() += 1;
     }
 }
-fn region_json(method: &diana_decomp::p6::PlannedMethod<'_>, details: bool) -> Value {
+fn region_json(method: diana_decomp::p7::MethodInspection<'_, '_>, details: bool) -> Value {
     let f = method.facts();
     let mut counts = BTreeMap::new();
     add_region_counts(&mut counts, f);
@@ -1672,7 +1765,18 @@ fn region_all(
         for entry in &analysis.methods {
             methods += 1;
             let result = match &entry.result {
-                Ok(MethodOutcome::Planned(p)) => {
+                Ok(MethodOutcome::Expressed(p)) => {
+                    let p = p.inspection();
+                    ready += 1;
+                    add_region_counts(&mut counts, p.facts());
+                    *counts.entry("upstream_storage_issues".into()).or_default() +=
+                        p.storage_facts().issues().len() as u64;
+                    *counts.entry("upstream_type_issues".into()).or_default() +=
+                        p.type_facts().issues().len() as u64;
+                    details.then(|| region_json(p, true))
+                }
+                Ok(MethodOutcome::ExpressionStopped(p)) => {
+                    let p = p.inspection();
                     ready += 1;
                     add_region_counts(&mut counts, p.facts());
                     *counts.entry("upstream_storage_issues".into()).or_default() +=
@@ -1690,7 +1794,7 @@ fn region_all(
                     }
                     Some(v)
                 }
-                Ok(MethodOutcome::DeclarationOnly) => {
+                Ok(MethodOutcome::Declared(_)) => {
                     no_code += 1;
                     None
                 }
@@ -1723,9 +1827,152 @@ fn region_all(
     Ok(out)
 }
 
+fn expression_counts(counts: &mut BTreeMap<String, u64>, result: &diana_decomp::p7::MethodResult) {
+    use diana_decomp::p7::*;
+    let Some(code) = result.code() else {
+        return;
+    };
+    for (name, n) in [
+        ("operations", code.operations().len()),
+        ("expressions", code.expressions().len()),
+        ("statements", code.statements().len()),
+        ("locals", code.locals().len()),
+        ("references", code.references().len()),
+        ("types", code.types().len()),
+        ("controls", code.controls().len()),
+        ("transfers", code.transfers().len()),
+        ("copies", code.copies().len()),
+        ("constructions", code.constructions().len()),
+        ("sites", code.sites().len()),
+        ("handlers", code.handlers().len()),
+        ("payloads", code.payloads().len()),
+        ("issues", code.issues().len()),
+    ] {
+        *counts.entry(name.into()).or_default() += n as u64;
+    }
+    for e in code.expressions() {
+        let key = match &e.kind {
+            ExprKind::Read { .. } | ExprKind::Snapshot { .. } => "reads",
+            ExprKind::Literal { .. } => "literals",
+            ExprKind::Unavailable { .. } => "unavailable_reads",
+            ExprKind::Unary { .. } => "unary",
+            ExprKind::Binary { .. } => "binary",
+            ExprKind::Compare { .. } => "compare",
+            ExprKind::String(_) => "strings",
+            ExprKind::Class(_) => "class_literals",
+            ExprKind::MethodHandle(_) => "method_handles",
+            ExprKind::MethodType(_) => "method_types",
+            ExprKind::Field { .. } => "field_gets",
+            ExprKind::Array { .. } => "array_gets",
+            ExprKind::ArrayLength(_) => "array_lengths",
+            ExprKind::InstanceOf { .. } => "instance_of",
+            ExprKind::AllocateInstance { .. } => "explicit_allocations",
+            ExprKind::NewArray { .. } => "new_arrays",
+            ExprKind::FilledArray { .. } => "filled_arrays",
+            ExprKind::Call(_) => "calls",
+            ExprKind::New { .. } => "natural_new",
+        };
+        *counts.entry(key.into()).or_default() += 1;
+    }
+}
+fn expression_json(result: &diana_decomp::p7::MethodResult, details: bool) -> Value {
+    let mut counts = BTreeMap::new();
+    expression_counts(&mut counts, result);
+    json!({"stage":"p7","class":result.key().class.class_def.0,"method":result.key().method.0,"declaration_only":result.code().is_none(),"counts":counts,"result":details.then(||json!(result))})
+}
+fn expression_all(
+    engine: &Engine<'_>,
+    classes: u32,
+    selected: Option<u32>,
+    details: bool,
+) -> Result<Value, RequestError> {
+    let start = std::time::Instant::now();
+    let mut time = std::time::Duration::ZERO;
+    let mut methods = 0u64;
+    let mut no_code = 0u64;
+    let mut expressed = 0u64;
+    let mut failed = 0u64;
+    let mut upstream = 0u64;
+    let mut class_errors = 0u64;
+    let mut type_issues = 0u64;
+    let mut storage_issues = 0u64;
+    let mut counts = BTreeMap::new();
+    let mut first_failure = None;
+    let mut members = details.then(Vec::new);
+    let requested = if selected.is_some() { 1 } else { classes };
+    for ordinal in 0..requested {
+        let class = selected.unwrap_or(ordinal);
+        let began = std::time::Instant::now();
+        let analysis = engine.analyze(Request {
+            class: class_key(class),
+            method: None,
+        });
+        time += began.elapsed();
+        let analysis = match analysis {
+            Ok(v) => v,
+            Err(e) => {
+                class_errors += 1;
+                if first_failure.is_none() {
+                    first_failure = Some(json!({"class":class,"error":format!("{e}")}));
+                }
+                continue;
+            }
+        };
+        for method in &analysis.methods {
+            methods += 1;
+            let result = match &method.result {
+                Ok(MethodOutcome::Expressed(m)) => {
+                    expressed += 1;
+                    expression_counts(&mut counts, m.result());
+                    type_issues += m.inspection().type_facts().issues().len() as u64;
+                    storage_issues += m.inspection().storage_facts().issues().len() as u64;
+                    details.then(|| expression_json(m.result(), true))
+                }
+                Ok(MethodOutcome::Declared(m)) => {
+                    no_code += 1;
+                    details.then(|| expression_json(m, true))
+                }
+                Ok(MethodOutcome::ExpressionStopped(stop)) => {
+                    failed += 1;
+                    let v = expression_stop_json(stop);
+                    if first_failure.is_none() {
+                        first_failure =
+                            Some(json!({"class":class,"method":method.key.method.0,"result":v}));
+                    }
+                    Some(v)
+                }
+                other => {
+                    upstream += 1;
+                    let value = match other {
+                        Ok(outcome) => inspection_stop(outcome)
+                            .unwrap_or(json!({"stage":"p7","upstream_stopped":true})),
+                        Err(e) => json!({"kind":format!("{:?}",e.kind()),"error":format!("{e}")}),
+                    };
+                    if first_failure.is_none() {
+                        first_failure = Some(
+                            json!({"class":class,"method":method.key.method.0,"result":value}),
+                        );
+                    }
+                    Some(value)
+                }
+            };
+            if let Some(members) = &mut members {
+                members.push(json!({"class":class,"method":method.key.method.0,"result":result}));
+            }
+        }
+    }
+    let mut out = json!({"stage":"p7","classes":selected.map_or(classes,|_|1),"methods":methods,"no_code":no_code,"expressed":expressed,"failed":failed,"upstream":upstream,"class_errors":class_errors,"upstream_type_issues":type_issues,"upstream_storage_issues":storage_issues,"counts":counts,"first_failure":first_failure,"complete":true,"analysis_ns":time.as_nanos(),"elapsed_ms":start.elapsed().as_millis()});
+    if let Some(members) = members {
+        out["members"] = json!(members);
+    }
+    Ok(out)
+}
+fn expression_stop_json(stop: &diana_decomp::p7::ExpressionStop<'_>) -> Value {
+    json!({"stage":"p7","stopped":true,"kind":format!("{:?}",stop.error().kind()),"error":format!("{}",stop.error()),"partial":{"expressions":stop.partial().expressions().len(),"statements":stop.partial().statements().len(),"operations":stop.partial().operations().len()}})
+}
 fn inspection_stop(outcome: &MethodOutcome<'_>) -> Option<Value> {
     match outcome {
-        MethodOutcome::DeclarationOnly => Some(json!({"declaration_only": true})),
+        MethodOutcome::Declared(_) => Some(json!({"declaration_only": true})),
         MethodOutcome::DisassemblyStopped(outcome) => Some(json!({
             "decoded": false, "prefix": outcome.prefix.len(),
             "error": outcome.error.as_ref().map(|error| format!("{error}")),
@@ -1749,7 +1996,10 @@ fn inspection_stop(outcome: &MethodOutcome<'_>) -> Option<Value> {
         MethodOutcome::SsaStopped(stop) => Some(
             json!({"stage":"p3","stopped":true,"kind":format!("{:?}",stop.error().kind()),"error":format!("{}",stop.error())}),
         ),
-        MethodOutcome::Planned(_) => None,
+        MethodOutcome::ExpressionStopped(stop) => Some(
+            json!({"stage":"p7","stopped":true,"kind":format!("{:?}",stop.error().kind()),"error":format!("{}",stop.error()),"partial":{"expressions":stop.partial().expressions().len(),"statements":stop.partial().statements().len(),"operations":stop.partial().operations().len()}}),
+        ),
+        MethodOutcome::Expressed(_) => None,
     }
 }
 

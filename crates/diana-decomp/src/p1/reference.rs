@@ -141,11 +141,106 @@ pub enum CheckedReferenceFact<'a> {
     },
     CallSite {
         name: DexString<'a>,
+        name_id: crate::StringId,
+        handle_id: crate::MethodHandleId,
+        prototype_id: crate::ProtoId,
         handle: CheckedMethodHandleFact,
+        member: BootstrapReferenceId,
+        declarations: Vec<BootstrapDeclaration<'a>>,
+        prototype: CheckedPrototype<'a>,
+        bootstrap: Vec<BootstrapToken<'a>>,
+        argument_count: u32,
+        encoded: &'a [u8],
+        range: crate::ByteRange,
+    },
+    MethodHandle {
+        handle: CheckedMethodHandleFact,
+        member: CheckedMemberFact<'a>,
+    },
+}
+
+/// Checked leaf declarations used by method-handle references. A handle cannot
+/// recursively name another handle or call site.
+#[derive(Clone, Debug)]
+pub enum CheckedMemberFact<'a> {
+    Field {
+        owner: DexString<'a>,
+        owner_type: TypeId,
+        name: DexString<'a>,
+        field_type: DexString<'a>,
+        field_type_id: TypeId,
+    },
+    Method {
+        owner: DexString<'a>,
+        owner_type: TypeId,
+        name: DexString<'a>,
+        prototype: CheckedPrototype<'a>,
+    },
+}
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct BootstrapReferenceId(pub u32);
+#[derive(Clone, Debug)]
+pub struct BootstrapDeclaration<'a> {
+    pub reference: OperandReference,
+    pub range: crate::ByteRange,
+    pub fact: CheckedBootstrapFact<'a>,
+}
+/// Bootstrap references are leaves: encoded values cannot name call-site arrays.
+/// Keeping a flat pool avoids recursive facts and per-value infallible boxes.
+#[derive(Clone, Debug)]
+pub enum CheckedBootstrapFact<'a> {
+    String {
+        value: DexString<'a>,
+    },
+    Type {
+        descriptor: DexString<'a>,
+        form: TypeForm,
+        words: u8,
+    },
+    Member(CheckedMemberFact<'a>),
+    Proto {
         prototype: CheckedPrototype<'a>,
     },
     MethodHandle {
         handle: CheckedMethodHandleFact,
+        member: CheckedMemberFact<'a>,
+    },
+}
+
+/// Flat checked encoded-value events; container depth remains input-derived.
+#[derive(Clone, Debug)]
+pub enum BootstrapToken<'a> {
+    Value {
+        range: crate::ByteRange,
+        name_id: Option<crate::StringId>,
+        name: Option<DexString<'a>>,
+        tag: u8,
+        value_arg: u8,
+        value: BootstrapValue<'a>,
+    },
+    EndContainer,
+}
+#[derive(Clone, Debug)]
+pub enum BootstrapValue<'a> {
+    Signed(i64),
+    Unsigned(u64),
+    Bits {
+        width: crate::ByteLength,
+        bits: u64,
+    },
+    Null,
+    Boolean(bool),
+    Reference {
+        reference: OperandReference,
+        fact: BootstrapReferenceId,
+    },
+    Array {
+        count: u32,
+    },
+    Annotation {
+        type_id: TypeId,
+        descriptor: DexString<'a>,
+        count: u32,
     },
 }
 

@@ -370,6 +370,35 @@ impl MethodDirectoryEntry {
     }
 }
 
+/// Owned immutable declaration metadata scoped to one original method. Sharing
+/// this value exposes neither the class directory nor other members' records.
+#[derive(Clone)]
+pub struct MethodMetadata {
+    method: MethodId,
+    annotations: std::sync::Arc<OriginalAnnotations>,
+    issue: Option<std::sync::Arc<RequestError>>,
+}
+impl MethodMetadata {
+    pub fn records(&self) -> impl Iterator<Item = &crate::AnnotationRecord> {
+        self.annotations
+            .records()
+            .iter()
+            .filter(|record| match record.location() {
+                crate::AnnotationLocation::Method(method)
+                | crate::AnnotationLocation::Parameter { method, .. } => method == self.method,
+                _ => false,
+            })
+    }
+    /// Class metadata traversal coverage; a prefix does not certify absence of
+    /// later method records. Independently available records remain readable.
+    pub fn extent(&self) -> crate::AnnotationExtent {
+        self.annotations.extent()
+    }
+    pub fn issue(&self) -> Option<&RequestError> {
+        self.issue.as_deref()
+    }
+}
+
 /// Owned read-only P0 facts: class identity, the original four-group member
 /// directory and independently available metadata. Local declaration/metadata
 /// damage stays in its own member entry. Method code is not opened.
@@ -382,8 +411,8 @@ pub struct ClassFacts {
     pub(super) methods: Vec<MethodDirectoryEntry>,
     pub(super) fields_issue: Option<RequestError>,
     pub(super) methods_issue: Option<RequestError>,
-    pub(super) annotations: OriginalAnnotations,
-    pub(super) annotations_issue: Option<RequestError>,
+    pub(super) annotations: std::sync::Arc<OriginalAnnotations>,
+    pub(super) annotations_issue: Option<std::sync::Arc<RequestError>>,
 }
 
 impl ClassFacts {
@@ -444,7 +473,14 @@ impl ClassFacts {
         &self.annotations
     }
     pub fn annotations_issue(&self) -> Option<&RequestError> {
-        self.annotations_issue.as_ref()
+        self.annotations_issue.as_deref()
+    }
+    pub(crate) fn method_metadata(&self, method: MethodId) -> MethodMetadata {
+        MethodMetadata {
+            method,
+            annotations: self.annotations.clone(),
+            issue: self.annotations_issue.clone(),
+        }
     }
     /// Resolve an exact original method selector over the delivered directory.
     /// A partial directory is not treated as proof that the member is absent.

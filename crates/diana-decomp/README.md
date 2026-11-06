@@ -7,7 +7,7 @@ only from the analyzed input.
 
 The active method chain is P0 class facts → method reader → P1 disassembly → P2
 execution model → P3 SSA → P4 value/use interpretation → P5 storage/transfer
-plans → P6 control/protection/monitor plans. `Engine::analyze_method` and class requests use one method task. The
+plans → P6 control/protection/monitor plans → P7 owned method expressions. `Engine::analyze_method` and class requests use one method task. The
 application decompilation interface is being rebuilt.
 The approved architecture is [PIPELINE_DESIGN](../../docs/diana/PIPELINE_DESIGN.md).
 
@@ -16,7 +16,7 @@ and structural associations. P2 owns ordered operations, exact slots, explicit
 normal/exception frame/heap/lock completion rules, transfers, exits and coverage.
 It does not expose its complete P1 predecessor. Read-only `MethodEvidence` supports
 original inspection and checks without product extraction or construction access.
-P2–P6 constructors are internal and require Engine's method-task authority.
+P2–P7 constructors are internal and require Engine's method-task authority.
 P3 privately retains P2 and delivers exact-slot states, definitions, ordered use
 bindings, necessary Phis, per-transfer incoming states and original StatePoint
 mappings. Borrowed `ExecutionFacts` exposes normal execution queries, not a
@@ -29,7 +29,8 @@ construction facts. A P3 stop retains complete P2 input and a partial SSA
 snapshot; neither stop can be promoted to a successful product. P4 construction
 stops likewise retain SSA and a distinct unpublished `TypePartial`. P5 stops retain
 P4 and an unpublished `StoragePartial`. P6 stops retain P5 and an unpublished
-`RegionPartial`; these snapshots are not mature successors.
+`RegionPartial`. P7 stops retain P6 and an unpublished `ExpressionPartial`;
+these snapshots are not mature successors.
 Class requests
 reserve result storage before starting method work and retain all selected known
 member outcomes. A method-task resource/invariant error no longer stops siblings;
@@ -79,7 +80,7 @@ interpretations remain separate from missing input facts.
 The [P4 chapter](../../docs/diana/spec/04-types.md) records its algorithm and guarantees.
 
 P5 privately retains P4 in `StorageMethod`; P6 privately retains that product in
-`PlannedMethod`, returned as `MethodOutcome::Planned`.
+`PlannedMethod`. P7 consumes this mature plan in the same method task.
 It maps each SSA value to a parameter, independent local, exact literal or explicit
 reference carrier, preserving P4 numeric bit storage without choosing a new family.
 Definitions keep their original normal commit/materialization sites. Every Phi
@@ -101,7 +102,18 @@ finite-exit postdominator candidates and iterative SCC analysis drive compositio
 Labels and selected edge copies remain concrete. Ordered throw-site chains,
 original captures, P5 construction ownership and explicit monitor separation reasons
 survive failed natural composition. The [P6 chapter](../../docs/diana/spec/06-regions.md)
-defines the boundary and scope rules. P7–P9 remain inactive.
+defines the boundary and scope rules.
+
+P7 produces an independently owned `MethodResult`, delivered by
+`MethodOutcome::Expressed(ExpressedMethod)`. `inspection()` borrows earlier facts
+from that same execution; `into_result()` releases retained analysis. No-code
+members use `Declared(MethodResult)`. Unified operation lowering retains original
+calls, conversions, checks, copies, exception sites and initialization positions.
+P5 natural constructions become `New` expressions, and P6 controls/outlets have
+explicit emission ownership. Metadata and bootstrap declaration facts now travel
+from their owning producers; P7 does not reopen input. See the
+[P7 chapter](../../docs/diana/spec/07-java.md). P8/P9 class assembly and source
+printing remain inactive.
 
 Independent translation checking compiles only under `cfg(test)`; ordinary
 Engine requests do not run symbolic replay, output audits or duplicate dominator
@@ -144,7 +156,7 @@ and per-method construction failures. Optional `class` selects one original clas
 through `Engine::analyze`; `analysis_ns` measures that analysis, excluding index
 opening, JSON formatting and inactive rendering. `partial_methods`, `local_issues`
 and unresolved input counts distinguish ready products from fully established
-facts; batch `complete` describes traversal, not semantic verification. P3–P6 are not
+facts; batch `complete` describes traversal, not semantic verification. P3–P7 are not
 formally verified. `p4` (`details:true`) exposes type origins, bits, requirements,
 views and initialization paths. `p4-all` adds typed/partial counts, interpretation
 problems, array-fill interpretation counts and missing-fact occurrences to the
@@ -158,7 +170,9 @@ unavailable plan components. `p6` (`details:true`) exposes the region arena,
 continuations, labels, original links and copy delivery, handler/site ownership,
 lock events, release outlets, copy emission ownership and selected operation roles.
 `p6-all` aggregates those plans and
-construction stops. The timed Engine traversal includes P6, even when a command
+construction stops. `p7` (alias `expressions`) and `p7-all` expose owned
+expression counts, detailed products and classified expression stops. The timed
+Engine traversal includes P7, even when a command
 inspects a retained earlier product. Each shell command creates a
 fresh Engine. `Engine::with_method_jobs(n)` enables a bounded Rayon pool for
 multi-member class requests when `n > 1`; the default is one. Single-method calls
@@ -166,7 +180,8 @@ keep the same sequential chain. The shell exposes this setting as
 `--method-jobs <workers>`. Separate DEX-process concurrency and method-worker
 concurrency need joint configuration rather than multiplying both blindly.
 `p5-all` with `details:true` also exposes each class member's retained P3/P4/P5
-products and the P6 plan from that one class request.
+products and the P6 plan from that one class request. `p7-all` with
+`details:true` exposes each member's owned method result.
 
 Earlier engine format/check/Clippy and release builds passed for unified component
 projection, scoped check bounds and same-DEX ancestor relationships; those changes
@@ -351,6 +366,34 @@ failures or whole-method verification badges. All 4,448 retained P2/P3/P4/P5
 products for 1,112 focused methods matched. Serial/four-worker products including
 P6 matched for 19 classes and 4,585 members. Input/P1 were unchanged, so prior
 byte-roundtrip evidence was retained rather than rerun.
+
+### Method expression observations
+
+The sole core test now checks P7 operation/operand semantics, references and
+bootstrap values, selected control targets, copies, publication, exception delivery
+and exactly-once ownership. Finite non-compound traces compare original/P5, P6 and
+owned P7 event order, read values, final storage and locks. Synthetic annotation
+and bootstrap inputs cover exact signed/floating bits, nested containers and
+leaf references; owned results remain readable after Engine/input release.
+Ordinary call and explicit-signature cases retain target identity without casts.
+Fourteen temporary mutations compiled and triggered their specific obligations:
+argument reversal, lost copy steps, invented zero, lost construction publication,
+lost compound sites/prelude, reversed handler/arm order, late snapshots, reordered
+unlocked completion, lost bootstrap values/parameter metadata, overqualified
+ordinary calls and hidden dynamic signatures. All were removed. These checks are not VM, bootstrap, heap/callee or P9 execution proofs.
+
+A fresh fixed-binary traversal of all 55 DEX entries delivered 2,644,578 expressed
+methods and 263,414 declaration-only results, with no P7, upstream or class stops.
+Storage issues stayed zero and the one existing type issue remained. The result
+contains 720,360 natural constructions and 459,253 explicit allocation operations.
+Retained P2–P6 products matched for 1,112 focused methods; serial/four-worker P7
+results matched for 19 classes and 4,585 members. These counts describe observed
+coverage, not universal semantic acceptance. All 48,102,163 instruction roundtrips
+were rerun across those 55 DEX entries with zero mismatch, skip or method/class
+error. The synthetic DEX 038/039 cases separately cover the changed dynamic facts;
+the real-input corpus does not supply those opcodes. Engine fmt/check/Clippy,
+release library/shell and debug/release core tests passed. Workspace build/Clippy
+remain blocked by CLI references to removed result APIs.
 
 ## Method scheduling observations
 

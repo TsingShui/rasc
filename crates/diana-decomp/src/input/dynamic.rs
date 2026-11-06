@@ -10,6 +10,13 @@ pub(crate) struct CheckedMethodHandle {
 }
 
 pub(crate) struct CheckedCallSite<'i, 'a> {
+    pub handle_id: MethodHandleId,
+    pub name_id: crate::StringId,
+    pub proto_id: ProtoId,
+    pub bootstrap: Vec<ValueStep<'a>>,
+    pub range: crate::ByteRange,
+    pub encoded: &'a [u8],
+    pub count: u32,
     pub name: super::DexString<'a>,
     pub handle: CheckedMethodHandle,
     pub prototype: Prototype<'i, 'a>,
@@ -93,8 +100,29 @@ impl<'a> ProgramIndex<'a> {
             return Err(invalid(proto.range.start).into());
         };
         let prototype = self.prototype(proto_id)?;
-        while values.next(self)?.is_some() {}
+        let mut bootstrap = Vec::new();
+        while let Some(value) = values.next(self)? {
+            bootstrap.try_reserve(1).map_err(MethodError::Allocation)?;
+            bootstrap.push(value);
+        }
+        let range = crate::ByteRange {
+            start: offset,
+            end: values.position(),
+        };
+        let encoded =
+            self.bytes
+                .get(range.start.0..range.end.0)
+                .ok_or(MethodError::InternalInvariant(
+                    "checked call site lost its encoded range",
+                ))?;
         Ok(CheckedCallSite {
+            handle_id,
+            name_id,
+            proto_id,
+            bootstrap,
+            range,
+            encoded,
+            count: values.count - 3,
             name,
             handle,
             prototype,

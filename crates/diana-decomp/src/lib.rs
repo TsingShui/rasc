@@ -12,6 +12,7 @@ pub mod p3;
 pub mod p4;
 pub mod p5;
 pub mod p6;
+pub mod p7;
 pub use engine::{
     DexImage, Engine, MethodOutcome, MethodSelector, Options, RecoveryPolicy, RepresentationPolicy,
     Request,

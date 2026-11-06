@@ -59,7 +59,10 @@ extents, malformed encoding or unsafe targets still stop input preparation.
 The reader does not know instruction boundaries before P1.
 
 Method/parameter annotation reads are independent of code analysis. Original
-annotation facts and local failures also remain available through P0. The code
+annotation facts and local failures also remain available through P0.
+P0's owned immutable MethodMetadata handle scopes records to this method and its
+parameters. MethodSource and P1 retain it alongside the independently checked
+metadata range/error; P7 receives complete available content without parsing again. The code
 view retains the original debug-info offset; the former debug-program interpreter
 is not an active engine module. P1 does not require source names, generic metadata,
 line numbers or debug local names to analyze code. Current range/metadata behavior
@@ -83,7 +86,7 @@ For established positions and facts, `DecodedMethod` retains:
 | Invoke layout | Receiver presence, ordered parameter widths and result category; wide argument words remain adjacent. |
 | Structural associations | Branch/switch targets, payload ownership, handler entries and producer/result adjacency. |
 | Protection | Original try boundaries and ordered catch clauses, with typed catches and catch-all distinguished; original typed-catch descriptor results and use issues are retained from the reader. |
-| Independent metadata state | Available method/parameter annotation ranges and recorded read issue. |
+| Independent metadata state | Owned method/parameter annotation content, coverage, original ranges and independent recorded read issues. |
 
 P1 checks all decoded instruction register spans and explicit targets, including
 unreachable instructions. Structural reachability checks reachable fallthrough;
@@ -96,6 +99,12 @@ it does not resolve that reference again. Catch ordering and targets remain in
 the original protection associations, independent of declaration availability.
 `array_payload_at` projects checked element width/count and borrowed bits from
 an existing decoded layout. Padding is excluded; no payload header is re-decoded.
+
+Call-site readers retain bootstrap argument events, original IDs, encoded range
+and bytes. P1 retains a flat leaf-declaration pool for bootstrap references and
+checked handle members; it does not discard trailing encoded values after
+validation. Container events preserve order and input-derived nesting without
+recursive boxes. Dynamic invocation prototypes remain independent of target names.
 
 P1 checks opcode requirements against original reference facts. It MUST NOT use
 Java source legality, normal compiler templates, natural loops or complete external

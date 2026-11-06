@@ -273,6 +273,8 @@ pub(crate) struct DecodedFacts<'a> {
     pub entry: EntryLayout,
     pub annotations: crate::input::CheckedAnnotations,
     pub metadata_issue: bool,
+    pub original_metadata: crate::p0::MethodMetadata,
+    pub metadata_error: Option<std::sync::Arc<RequestError>>,
     pub reference_facts: Vec<ReferenceFactEntry<'a>>,
     pub issues: Vec<(CodeUnitOffset, MethodError)>,
 }
@@ -293,6 +295,8 @@ pub struct DecodedMethod<'a> {
     entry: EntryLayout,
     annotations: crate::input::CheckedAnnotations,
     metadata_issue: bool,
+    original_metadata: crate::p0::MethodMetadata,
+    metadata_error: Option<std::sync::Arc<RequestError>>,
     /// Checked target declarations for every original operand reference.
     reference_facts: Vec<ReferenceFactEntry<'a>>,
     issues: Vec<(CodeUnitOffset, MethodError)>,
@@ -340,6 +344,12 @@ impl<'a> DecodedMethod<'a> {
     /// Whether the optional method/parameter annotation read was damaged.
     pub fn metadata_issue(&self) -> bool {
         self.metadata_issue
+    }
+    pub fn original_metadata(&self) -> &crate::p0::MethodMetadata {
+        &self.original_metadata
+    }
+    pub fn metadata_error(&self) -> Option<&std::sync::Arc<RequestError>> {
+        self.metadata_error.as_ref()
     }
     /// The original method access word.
     pub fn access_flags(&self) -> u32 {
@@ -733,6 +743,8 @@ impl<'a> ProgramIndex<'a> {
             entry: facts.entry,
             annotations: facts.annotations,
             metadata_issue: facts.metadata_issue,
+            original_metadata: facts.original_metadata,
+            metadata_error: facts.metadata_error,
             reference_facts: facts.reference_facts,
             issues: facts.issues,
             registers_size: source.registers_size(),
