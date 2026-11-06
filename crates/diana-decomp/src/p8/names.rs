@@ -177,7 +177,12 @@ pub(super) struct ScopeFacts<'a> {
     pub scope: Scope,
     pub names: Vec<ScopeName<'a>>,
     pub incomplete: bool,
+    /// Uninterpreted signature data in this scope may declare a name that is
+    /// unknown here, so no ordinary simple name can be proven unaffected.
     pub metadata: bool,
+    /// Whether that unknown data may declare the declaring class's own simple
+    /// name, which would shadow the class type inside its body.
+    pub metadata_names_owner: bool,
 }
 pub(super) fn copy<T: Copy>(data: &[T]) -> Result<Vec<T>, RequestError> {
     let mut out = Vec::new();
@@ -326,6 +331,7 @@ pub(super) fn construct(
                     "type use has no original naming scope",
                 ))?;
         let simple = &t.full[t.simple_start..];
+        let owner_type = t.full == owner.full;
         let reason = if t.primitive {
             None
         } else if t.original {
@@ -336,7 +342,7 @@ pub(super) fn construct(
             Some(NameReason::SameNameConflict)
         } else if scope.incomplete {
             Some(NameReason::IncompleteScope)
-        } else if scope.metadata {
+        } else if scope.metadata && (!owner_type || scope.metadata_names_owner) {
             Some(NameReason::UninterpretedMetadata)
         } else if scope.names.iter().any(|n| n.matches(simple)) {
             Some(NameReason::Shadowed)

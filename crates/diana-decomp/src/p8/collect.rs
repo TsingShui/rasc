@@ -322,6 +322,30 @@ fn signature(descriptor: &[u16]) -> bool {
             .copied()
             .map(u16::from))
 }
+
+/// The class's own simple name: the last `/` segment of its descriptor.
+fn class_simple(descriptor: &[u16]) -> &[u16] {
+    let name = descriptor
+        .strip_prefix(&[u16::from(b'L')])
+        .and_then(|rest| rest.strip_suffix(&[u16::from(b';')]))
+        .unwrap_or(descriptor);
+    let start = name
+        .iter()
+        .rposition(|&unit| unit == u16::from(b'/'))
+        .map_or(0, |at| at + 1);
+    &name[start..]
+}
+
+/// Whether an uninterpreted `@Signature` at `location` may declare a formal type
+/// parameter with `name`. Such a parameter shadows the declaring class inside its
+/// own body, so an established parameter list without that name keeps the owner
+/// nameable.
+fn signature_names(facts: &ClassFacts, location: AnnotationLocation, name: &[u16]) -> bool {
+    match signature_text(facts.annotations().records(), location) {
+        Some(text) => signature::declares_parameter(&text, name) != Some(false),
+        None => true,
+    }
+}
 fn method_scope<'a>(
     facts: &'a ClassFacts,
     method: MethodId,
@@ -346,14 +370,15 @@ fn method_scope<'a>(
         }
     }
     // A signature that produced a display type no longer blocks shortening; an
-    // uninterpreted one still does.
-    let metadata = class.metadata
-        || (!signature_used
-            && facts.annotations().records().iter().any(|a| {
-                matches!(a.location(), AnnotationLocation::Method(m)
+    // uninterpreted one still does, and its type parameters may carry the class's
+    // own name.
+    let method_metadata = !signature_used
+        && facts.annotations().records().iter().any(|a| {
+            matches!(a.location(), AnnotationLocation::Method(m)
                     | AnnotationLocation::Parameter { method: m, .. } if m == method)
-                    && signature(a.descriptor())
-            }));
+                && signature(a.descriptor())
+        });
+    let owner_simple = class_simple(facts.descriptor().units());
     Ok(ScopeFacts {
         scope: Scope::Method(method),
         names,
@@ -365,7 +390,10 @@ fn method_scope<'a>(
             || facts
                 .method_entry(method)
                 .is_none_or(|m| !m.declaration().is_present()),
-        metadata,
+        metadata: class.metadata || method_metadata,
+        metadata_names_owner: class.metadata_names_owner
+            || (method_metadata
+                && signature_names(facts, AnnotationLocation::Method(method), owner_simple)),
     })
 }
 pub(super) fn collect<'a>(
@@ -376,17 +404,24 @@ pub(super) fn collect<'a>(
     let mut uses = Vec::new();
     let mut scopes = Vec::new();
     let mut signatures = SignaturePlan::empty();
+    let metadata = facts
+        .annotations()
+        .records()
+        .iter()
+        .any(|a| a.location() == AnnotationLocation::Class && signature(a.descriptor()));
     let mut class = ScopeFacts {
         scope: Scope::Class,
         names: Vec::new(),
         incomplete: !facts.field_traversal_complete()
             || !facts.method_traversal_complete()
             || facts.annotations().extent() != crate::AnnotationExtent::Complete,
-        metadata: facts
-            .annotations()
-            .records()
-            .iter()
-            .any(|a| a.location() == AnnotationLocation::Class && signature(a.descriptor())),
+        metadata,
+        metadata_names_owner: metadata
+            && signature_names(
+                facts,
+                AnnotationLocation::Class,
+                class_simple(facts.descriptor().units()),
+            ),
     };
     for f in facts.fields() {
         if let Fact::Present(d) = f.declaration() {

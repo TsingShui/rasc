@@ -106,6 +106,44 @@ pub(super) fn method(units: &[u16]) -> Option<Declaration> {
     })
 }
 
+/// Whether a class or method signature declares a formal type parameter with
+/// `name`.
+///
+/// Such a signature starts with its `TypeParameters` section when it has one, and
+/// a `:` inside it only separates a type parameter from its bounds, so the
+/// parameter names are the identifier runs that end at one. `None` leaves the
+/// text uninterpreted.
+pub(super) fn declares_parameter(units: &[u16], name: &[u16]) -> Option<bool> {
+    if units.first() != Some(&u16::from(b'<')) {
+        return Some(false);
+    }
+    let mut start = 1;
+    let mut nested = 0u32;
+    for (at, unit) in units.iter().copied().enumerate().skip(1) {
+        match u8::try_from(unit).unwrap_or(0) {
+            b':' => {
+                if &units[start..at] == name {
+                    return Some(true);
+                }
+                start = at + 1;
+            }
+            b'<' => {
+                nested = nested.checked_add(1)?;
+                start = at + 1;
+            }
+            b'>' if nested == 0 => return Some(false),
+            b'>' => {
+                nested -= 1;
+                start = at + 1;
+            }
+            // These units belong to bounds, not to a parameter name.
+            b';' | b'/' | b'.' | b'[' | b']' | b'+' | b'-' | b'*' => start = at + 1,
+            _ => {}
+        }
+    }
+    None
+}
+
 fn type_node(cursor: &mut Cursor<'_>) -> Option<Node> {
     cursor.depth = cursor.depth.checked_add(1)?;
     if cursor.depth > MAX_DEPTH {
