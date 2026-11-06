@@ -117,13 +117,17 @@ unlocated directory suffix. Static preparation follows P8's original ordinal
 plan before the original class initializer. Implicit defaults are not encoded
 assignments or guessed zero values.
 
-Metadata records print once, prefixed by their original owner (`class`,
-`field <name>`, `method <name>`, `method <name> parameter <n>`), with the
-original index when that declaration is unavailable. The record's visibility
-prints as `build`, `runtime` or `system`, and a prefix traversal keeps an explicit
-marker. Flat array and nested-annotation events print as `{ ... }` and
+A metadata record prints at its own declaration, in delivered order and above the
+declaration it belongs to: a class record above the class header, a field record
+above that field, a method record above that method's header, and a parameter
+record inline before that parameter's type. A record whose owner declaration is
+not printed keeps the `metadata { ... }` block with its original owner prefix
+(`class`, `field <name>`, `method <name>`, `method <name> parameter <n>`) and the
+original index. The record's visibility prints as `build`, `runtime` or `system`,
+and a prefix traversal keeps an explicit marker. Flat array and nested-annotation events print as `{ ... }` and
 `@Type(...)` from their delivered child counts and closing events. This also
-preserves records whose member directory entry was not located. Array/annotation
+preserves records whose member directory entry was not located, and no record is
+printed twice or dropped when it moves to its declaration. Array/annotation
 values use P8's flat events; call-site bootstrap values use P7's owned events and
 leaf declarations. Counts, reference identities and local gaps remain visible.
 Neither path parses encoded input again or interprets Signature as recovered

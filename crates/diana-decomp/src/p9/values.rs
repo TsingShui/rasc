@@ -1,4 +1,5 @@
 use super::{Origin, RenderError, TextOffset, buffer::Buffer, names::Lookup};
+use crate::p8;
 use crate::p8::*;
 
 fn push<T>(values: &mut Vec<T>, value: T) -> Result<(), RenderError> {
@@ -27,7 +28,7 @@ pub(super) struct Owners<'a> {
 }
 
 impl<'a> Owners<'a> {
-    pub fn field(
+    fn field(
         &mut self,
         id: crate::FieldId,
         name: &'a [u16],
@@ -35,7 +36,7 @@ impl<'a> Owners<'a> {
     ) -> Result<(), RenderError> {
         push(&mut self.fields, (id, name, form))
     }
-    pub fn method(
+    fn method(
         &mut self,
         id: crate::MethodId,
         name: &'a [u16],
@@ -65,6 +66,248 @@ impl<'a> Owners<'a> {
                 .map(|(_, name, form)| (*name, *form)),
             crate::AnnotationLocation::Class => None,
         }
+    }
+}
+
+/// Where one delivered annotation record prints. A record whose owner is not a
+/// printed declaration keeps the residual block.
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum Slot {
+    /// Above the printed class header.
+    Class,
+    /// Above that field's declaration.
+    Field(crate::FieldId),
+    /// Above that member's header.
+    Method(crate::MethodId),
+    /// Inline before that parameter's type.
+    Parameter { method: crate::MethodId, index: u32 },
+    /// Owner declaration not printed: the residual block keeps the record.
+    Residual,
+}
+
+/// The declarations one P9 publication prints, which are the declarations a
+/// delivered record can attach to. Every other record keeps the residual block,
+/// so no record is dropped and none prints twice.
+pub(super) struct Attachments<'a> {
+    plan: &'a ValuePlan,
+    owners: Owners<'a>,
+    /// Ascending identities of the fields that print a declared member.
+    fields: Vec<crate::FieldId>,
+    /// Ascending identities of the printed members with the parameter list each
+    /// one prints.
+    methods: Vec<(crate::MethodId, u32)>,
+    /// Whether this publication prints a class header.
+    class_header: bool,
+}
+
+/// The header P9 prints for one member. A member whose delivery failed prints
+/// its original directory spelling instead, which carries no parameter list.
+fn printed_header(member: &p8::MethodMember) -> Option<&crate::p7::MethodHeader> {
+    match &member.delivery {
+        Ok(p8::MethodDelivery::Expressed(result) | p8::MethodDelivery::Declared(result)) => {
+            Some(result.header())
+        }
+        Ok(p8::MethodDelivery::Stopped(stop)) => {
+            stop.expression.as_ref().and_then(|prefix| prefix.header())
+        }
+        Err(_) => None,
+    }
+}
+
+impl<'a> Attachments<'a> {
+    /// Attachments of a complete class publication.
+    pub fn class(class: &'a p8::ClassResult) -> Result<Self, RenderError> {
+        let mut attachments = Self::new(class.values(), true);
+        for field in class.fields() {
+            if let p8::FieldExpression::Declared { name, form, .. } = &field.expression {
+                attachments.owners.field(field.id, name, *form)?;
+                push(&mut attachments.fields, field.id)?;
+            }
+        }
+        for member in class.methods() {
+            attachments.member(class.facts(), member, Some(&class.header().name))?;
+        }
+        attachments.finish()
+    }
+    /// Attachments of a standalone member publication.
+    pub fn standalone(display: &'a p8::MethodDisplay) -> Result<Self, RenderError> {
+        let mut attachments = Self::new(display.values(), false);
+        attachments.member(display.facts(), display.member(), None)?;
+        attachments.finish()
+    }
+    fn new(plan: &'a ValuePlan, class_header: bool) -> Self {
+        Self {
+            plan,
+            owners: Owners::default(),
+            fields: Vec::new(),
+            methods: Vec::new(),
+            class_header,
+        }
+    }
+    fn finish(mut self) -> Result<Self, RenderError> {
+        self.fields.sort_unstable();
+        self.methods.sort_unstable_by_key(|(id, _)| *id);
+        Ok(self)
+    }
+    fn member(
+        &mut self,
+        facts: &crate::p0::ClassFacts,
+        member: &'a p8::MethodMember,
+        class_name: Option<&'a p8::ValueName>,
+    ) -> Result<(), RenderError> {
+        let printed = printed_header(member);
+        // A residual prefix keeps today's owner spelling, which names only a
+        // member whose delivered result carries its declaration.
+        if let Ok(delivery) = &member.delivery
+            && let Some(result) = delivery.result()
+        {
+            let header = result.header();
+            // A constructor record names the type it constructs, just like its
+            // reference in a body: `<init>` is not an identifier.
+            match class_name {
+                Some(name) if super::names::initializer(header.declaration.name_units()) => {
+                    self.owners.method(member.id, &name.units, name.form)?;
+                }
+                _ => self.owners.method(
+                    member.id,
+                    header.declaration.name_units(),
+                    header.name_form,
+                )?,
+            }
+        }
+        // A record attaches to a member that prints a declaration spelling, from
+        // its header or from its original directory entry. A member that prints
+        // only an unavailable-declaration gap keeps its records in the residual
+        // block, and only a printed header has a parameter list to attach to.
+        let declared = printed.is_some()
+            || facts
+                .method_entry(member.id)
+                .is_some_and(|entry| entry.declaration().is_present());
+        if !declared {
+            return Ok(());
+        }
+        let parameters = printed.map_or(0, |header| header.declaration.parameter_count());
+        push(
+            &mut self.methods,
+            (
+                member.id,
+                u32::try_from(parameters).map_err(|_| RenderError::Capacity)?,
+            ),
+        )
+    }
+    fn slot(&self, location: crate::AnnotationLocation) -> Slot {
+        match location {
+            crate::AnnotationLocation::Class if self.class_header => Slot::Class,
+            crate::AnnotationLocation::Field(id) if self.fields.binary_search(&id).is_ok() => {
+                Slot::Field(id)
+            }
+            crate::AnnotationLocation::Method(id) if self.parameters(id).is_some() => {
+                Slot::Method(id)
+            }
+            crate::AnnotationLocation::Parameter { method, parameter }
+                if self
+                    .parameters(method)
+                    .is_some_and(|count| parameter.0 < count) =>
+            {
+                Slot::Parameter {
+                    method,
+                    index: parameter.0,
+                }
+            }
+            _ => Slot::Residual,
+        }
+    }
+    fn parameters(&self, method: crate::MethodId) -> Option<u32> {
+        self.methods
+            .binary_search_by_key(&method, |(id, _)| *id)
+            .ok()
+            .map(|index| self.methods[index].1)
+    }
+    fn declarations(
+        &self,
+        out: &mut Buffer,
+        lookup: &Lookup<'_>,
+        slot: Slot,
+    ) -> Result<(), RenderError> {
+        for a in self.plan.annotations() {
+            if self.slot(a.location) != slot {
+                continue;
+            }
+            out.indent()?;
+            record(out, lookup, self.plan, a)?;
+            out.put("\n")?;
+        }
+        Ok(())
+    }
+    /// Whether the residual block prints inside a member rendering. A standalone
+    /// publication has no class header, so the member owns that block's position.
+    pub fn prints_residual_here(&self) -> bool {
+        !self.class_header
+    }
+    /// Prints the records attaching above the class declaration.
+    pub fn print_class(&self, out: &mut Buffer, lookup: &Lookup<'_>) -> Result<(), RenderError> {
+        self.declarations(out, lookup, Slot::Class)
+    }
+    /// Prints the records attaching above one field declaration.
+    pub fn print_field(
+        &self,
+        out: &mut Buffer,
+        lookup: &Lookup<'_>,
+        field: crate::FieldId,
+    ) -> Result<(), RenderError> {
+        self.declarations(out, lookup, Slot::Field(field))
+    }
+    /// Prints the records attaching above one member's header.
+    pub fn print_method(
+        &self,
+        out: &mut Buffer,
+        lookup: &Lookup<'_>,
+        method: crate::MethodId,
+    ) -> Result<(), RenderError> {
+        self.declarations(out, lookup, Slot::Method(method))
+    }
+    /// Prints the records attaching inline before one parameter's type.
+    pub fn print_parameter(
+        &self,
+        out: &mut Buffer,
+        lookup: &Lookup<'_>,
+        method: crate::MethodId,
+        index: u32,
+    ) -> Result<(), RenderError> {
+        let slot = Slot::Parameter { method, index };
+        for a in self.plan.annotations() {
+            if self.slot(a.location) != slot {
+                continue;
+            }
+            record(out, lookup, self.plan, a)?;
+            out.put(" ")?;
+        }
+        Ok(())
+    }
+    /// Prints the records whose owner declaration is not printed, each still
+    /// prefixed by its original owner.
+    pub fn print_residual(&self, out: &mut Buffer, lookup: &Lookup<'_>) -> Result<(), RenderError> {
+        let mut residual = self
+            .plan
+            .annotations()
+            .iter()
+            .filter(|a| self.slot(a.location) == Slot::Residual)
+            .peekable();
+        if residual.peek().is_none() {
+            return Ok(());
+        }
+        out.indent()?;
+        out.put("metadata")?;
+        out.open()?;
+        for a in residual {
+            out.indent()?;
+            let start = out.position();
+            scope(out, a.location, Some(&self.owners))?;
+            record_text(out, lookup, self.plan, a)?;
+            out.put(";\n")?;
+            out.span(start, Origin::Annotation(a.id))?;
+        }
+        out.close()
     }
 }
 
@@ -205,16 +448,13 @@ fn reference_value(
     Ok(())
 }
 
-pub(super) fn annotation(
+/// One record's own delivered text: its type, arguments and visibility word.
+fn record_text(
     out: &mut Buffer,
     lookup: &Lookup<'_>,
     plan: &ValuePlan,
     a: &AnnotationExpression,
-    owners: Option<&Owners<'_>>,
 ) -> Result<(), RenderError> {
-    out.indent()?;
-    let start = out.position();
-    scope(out, a.location, owners)?;
     out.put("@")?;
     lookup.print(out, a.type_use)?;
     out.put("(")?;
@@ -234,9 +474,19 @@ pub(super) fn annotation(
     if a.extent != crate::AnnotationExtent::Complete {
         out.put(" /* prefix */")?;
     }
-    out.put(";\n")?;
-    out.span(start, Origin::Annotation(a.id))?;
     Ok(())
+}
+
+/// The same text as one attached record, with the record's own span.
+fn record(
+    out: &mut Buffer,
+    lookup: &Lookup<'_>,
+    plan: &ValuePlan,
+    a: &AnnotationExpression,
+) -> Result<(), RenderError> {
+    let start = out.position();
+    record_text(out, lookup, plan, a)?;
+    out.span(start, Origin::Annotation(a.id))
 }
 
 /// An interpreted `@Signature` record prints the declaration it describes
@@ -344,22 +594,4 @@ fn visibility(out: &mut Buffer, visibility: u8) -> Result<(), RenderError> {
         other => out.fmt(format_args!("visibility<0x{other:02x}>"))?,
     }
     Ok(())
-}
-
-pub(super) fn metadata(
-    out: &mut Buffer,
-    lookup: &Lookup<'_>,
-    plan: &ValuePlan,
-    owners: Option<&Owners<'_>>,
-) -> Result<(), RenderError> {
-    if plan.annotations().is_empty() {
-        return Ok(());
-    }
-    out.indent()?;
-    out.put("metadata")?;
-    out.open()?;
-    for a in plan.annotations() {
-        annotation(out, lookup, plan, a, owners)?;
-    }
-    out.close()
 }

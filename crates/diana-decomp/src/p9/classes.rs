@@ -3,6 +3,7 @@ use super::{
     buffer::Buffer,
     expressions::Expressions,
     names::{Lookup, MethodNames},
+    values::Attachments,
 };
 use crate::{MethodId, p0::Fact, p7, p8};
 
@@ -11,11 +12,12 @@ pub(super) fn render(out: &mut Buffer, source: &SourceProduct) -> Result<(), Ren
         SourceProduct::Class(class) => class_result(out, class),
         SourceProduct::Method(method) => {
             let lookup = Lookup::complete(method.names())?;
+            let attachments = Attachments::standalone(method)?;
             member(
                 out,
                 &lookup,
                 method.facts(),
-                Some(method.values()),
+                Some(&attachments),
                 method.member(),
                 None,
             )
@@ -77,33 +79,12 @@ fn class_result(out: &mut Buffer, class: &p8::ClassResult) -> Result<(), RenderE
         out.units(&target.full, false)?;
         out.put(";\n")?;
     }
-    // Annotation records name their owner from the delivered declarations, and
-    // keep the original index when that declaration is unavailable.
-    let mut owners = super::values::Owners::default();
-    for field in class.fields() {
-        if let p8::FieldExpression::Declared { name, form, .. } = &field.expression {
-            owners.field(field.id, name, *form)?;
-        }
-    }
-    for member in class.methods() {
-        if let Ok(delivery) = &member.delivery
-            && let Some(result) = delivery.result()
-        {
-            let header = result.header();
-            // A constructor record names the type it constructs, just like its
-            // reference in a body: `<init>` is not an identifier.
-            if super::names::initializer(header.declaration.name_units()) {
-                owners.method(
-                    member.id,
-                    &class.header().name.units,
-                    class.header().name.form,
-                )?;
-            } else {
-                owners.method(member.id, header.declaration.name_units(), header.name_form)?;
-            }
-        }
-    }
-    super::values::metadata(out, &lookup, class.values(), Some(&owners))?;
+    // Annotation records print at the declaration they describe. A record whose
+    // owner is not a printed declaration keeps the residual block in the
+    // metadata position, so no record is dropped or printed twice.
+    let attachments = Attachments::class(class)?;
+    attachments.print_residual(out, &lookup)?;
+    attachments.print_class(out, &lookup)?;
     let start = out.position();
     let header = class.header();
     super::names::flags(
@@ -150,6 +131,7 @@ fn class_result(out: &mut Buffer, class: &p8::ClassResult) -> Result<(), RenderE
     }
     out.open()?;
     for f in class.fields() {
+        attachments.print_field(out, &lookup, f.id)?;
         out.indent()?;
         let a = out.position();
         super::names::flags(out, f.flags, super::names::FlagScope::Field)?;
@@ -245,7 +227,7 @@ fn class_result(out: &mut Buffer, class: &p8::ClassResult) -> Result<(), RenderE
             out,
             &lookup,
             class.facts(),
-            None,
+            Some(&attachments),
             m,
             Some(&class.header().name),
         )?;
@@ -285,13 +267,13 @@ fn member(
     out: &mut Buffer,
     lookup: &Lookup<'_>,
     facts: &crate::p0::ClassFacts,
-    values: Option<&p8::ValuePlan>,
+    attachments: Option<&Attachments<'_>>,
     member: &p8::MethodMember,
     class_name: Option<&p8::ValueName>,
 ) -> Result<(), RenderError> {
     let initial_depth = out.depth;
     let start = out.position();
-    let result = method(out, lookup, facts, values, member, class_name);
+    let result = method(out, lookup, facts, attachments, member, class_name);
     match result {
         Ok(()) => {}
         Err(RenderError::Invariant(message)) => {
@@ -318,26 +300,19 @@ fn method(
     out: &mut Buffer,
     lookup: &Lookup<'_>,
     facts: &crate::p0::ClassFacts,
-    values: Option<&p8::ValuePlan>,
+    attachments: Option<&Attachments<'_>>,
     member: &p8::MethodMember,
     class_name: Option<&p8::ValueName>,
 ) -> Result<(), RenderError> {
-    // MethodDisplay already carries only this member's metadata; class metadata
-    // is printed once from its supplied record scopes before member declarations.
-    if let Some(values) = values {
-        let mut owners = super::values::Owners::default();
-        if let Ok(delivery) = &member.delivery
-            && let Some(result) = delivery.result()
-        {
-            let header = result.header();
-            match class_name {
-                Some(name) if super::names::initializer(header.declaration.name_units()) => {
-                    owners.method(member.id, &name.units, name.form)?;
-                }
-                _ => owners.method(member.id, header.declaration.name_units(), header.name_form)?,
-            }
+    // A record of this member prints above the header that names it; that header
+    // is the declaration, so no owner prefix is printed with it. A standalone
+    // publication has no class header to carry the residual block, which stays
+    // in this member's local error scope.
+    if let Some(attachments) = attachments {
+        if attachments.prints_residual_here() {
+            attachments.print_residual(out, lookup)?;
         }
-        super::values::metadata(out, lookup, values, Some(&owners))?;
+        attachments.print_method(out, lookup, member.id)?;
     }
     match &member.delivery {
         Ok(p8::MethodDelivery::Expressed(result) | p8::MethodDelivery::Declared(result)) => {
@@ -359,6 +334,7 @@ fn method(
                 header,
                 class_name,
                 lookup.find_use(p8::TypeSource::Owner),
+                attachments,
             )?;
             if let Some(code) = result.code() {
                 out.open()?;
@@ -393,7 +369,7 @@ fn method(
                     header.declaration.parameter_count(),
                     lookup,
                 )?;
-                header_line(out, lookup, &names, header, None, None)?;
+                header_line(out, lookup, &names, header, None, None, attachments)?;
             } else {
                 original_header(out, facts, member.id)?;
             }
@@ -533,6 +509,7 @@ fn header_line(
     h: &p7::MethodHeader,
     class_name: Option<&p8::ValueName>,
     owner: Option<p8::TypeUseId>,
+    attachments: Option<&Attachments<'_>>,
 ) -> Result<(), RenderError> {
     out.indent()?;
     // A class initializer is a static block. DEX may give it access bits that
@@ -561,7 +538,7 @@ fn header_line(
                 (None, None) => out.name(h.declaration.name_units(), h.name_form)?,
             }
             out.put("(")?;
-            parameters(out, lookup, names, h)?;
+            parameters(out, lookup, names, h, attachments)?;
             out.put(")")?;
             return Ok(());
         }
@@ -581,7 +558,7 @@ fn header_line(
     out.put(" ")?;
     out.name(h.declaration.name_units(), h.name_form)?;
     out.put("(")?;
-    parameters(out, lookup, names, h)?;
+    parameters(out, lookup, names, h, attachments)?;
     out.put(")")
 }
 
@@ -590,6 +567,7 @@ fn parameters(
     lookup: &Lookup<'_>,
     names: &MethodNames,
     h: &p7::MethodHeader,
+    attachments: Option<&Attachments<'_>>,
 ) -> Result<(), RenderError> {
     let method = h.key.method;
     for (i, ty) in h.declaration.parameter_types.iter().enumerate() {
@@ -597,6 +575,11 @@ fn parameters(
             out.put(", ")?;
         }
         let index = u32::try_from(i).map_err(|_| RenderError::Capacity)?;
+        // A parameter record prints inline before the type it describes, because
+        // this parameter list is that record's declaration.
+        if let Some(attachments) = attachments {
+            attachments.print_parameter(out, lookup, method, index)?;
+        }
         if let Some(root) = lookup.signature(p8::SignatureOwner::Parameter { method, index }) {
             super::names::signature(out, lookup, root)?;
             out.put(" ")?;
