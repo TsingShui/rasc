@@ -59,23 +59,37 @@ Reference-read errors and opcode-use errors remain distinct.
 
 A constructor or delegated `this`/`super` call also uses the natural surface: its
 name is never a Java identifier and the receiver or created type already names the
-target, so only a competing delivered overload qualifies it.
+target, so only an unresolved competing delivered overload qualifies it.
 
 Ordinary calls use a natural surface unless the delivered references leave the
 binding ambiguous: an original-name form, a missing signature or argument layout,
 dynamic invocation, or another delivered reference with the same owner, name and
 arity but a different parameter list or return type. An argument whose displayed
-type only widens into the formal parameter is not such an ambiguity, so the call
-keeps its natural surface; P7 inserts no conversion for it. This comparison is
-not overload resolution, subtype checking or a claim about declarations outside
-the input. Unknown external declarations do not block ordinary calls. Both forms
-retain the complete original
-reference, dispatch kind, receiver, argument order and invocation prototype.
-P7 MUST NOT insert casts, typed aliases, boxing or helpers to influence binding.
-`LocalSpelling` uses a nominal name only for complete, equal delivered reference
-type sources; other locals retain their machine storage representation. Calls
-using such reference carriers select an explicit signature rather than pretending
-that the display supplies a nominal argument type. Header parameter names are
+type only widens into the formal parameter is not by itself such an ambiguity;
+P7 inserts no conversion for it. Unknown external declarations do not block
+ordinary calls.
+
+For competing overloads only, P7 omits the binding disclosure when the recovered
+types of the printed arguments select exactly the original target by equal
+original type units.
+Every argument MUST be a leaf value or literal read with available original read
+provenance and exactly one recovered type whose units are known. Snapshot reads,
+missing or conflicting types and unavailable type spellings keep the disclosure.
+P7 compares only equal original type units at each parameter position among
+references with the same owner, name and arity, deduplicated by original reference
+identity. Exactly one distinct candidate MUST match, and it MUST be the original
+invocation target. A unique match to another target keeps the disclosure.
+Custom/polymorphic calls and original-name forms other than constructors retain
+their existing qualification rules. This comparison is not Java overload
+resolution, assignability, inheritance, widening or a claim about declarations
+outside the input.
+
+The binding suffix discloses the original target; it is not a Java-legality
+device. Both forms retain the complete original reference, dispatch kind,
+receiver, argument order and invocation prototype. P7 MUST NOT insert casts,
+typed aliases, boxing or helpers to influence binding. `LocalSpelling` uses a
+nominal name only for complete, equal delivered reference type sources; other
+locals retain their machine storage representation. Header parameter names are
 fixed by P7, including no-code declarations. P9 prints the selected suffix as
 `[binding ...]`; a natural call prints only the receiver, member and arguments.
 

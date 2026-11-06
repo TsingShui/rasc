@@ -139,7 +139,7 @@ original `<init>`/`<clinit>` identities remain in the owned method declaration.
 
 A constructor delegation whose receiver is still before its constructor prints as
 `this(...)` or `super(...)` exactly when it is the first statement the body prints,
-the target has no competing delivered overload and the earlier operations printed
+the target has P7's natural qualification and the earlier operations printed
 nothing (argument definitions that become their uses' values do not count). The
 original code offset is not the test. Otherwise the delegation keeps the explicit
 `initialize <Owner>(...)` form: a `this`/`super` receiver is not repeated as a

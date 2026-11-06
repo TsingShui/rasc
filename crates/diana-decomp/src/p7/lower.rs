@@ -3,13 +3,13 @@ use super::values::Context;
 use super::*;
 use crate::p2::{self, ArrayAccess, BranchOp, FieldAccess, InvokeKind, NormalEdge, OpId, OpKind};
 use crate::p4::{ConstructorRelation, Family, Initialization, Interpretation};
-use crate::p5::ThrowSite;
+use crate::p5::{StorageRead, ThrowSite};
 use crate::p6::{self, OperationOwner, TerminalOwner};
 
 /// A natural surface is used unless the delivered references leave the call
 /// ambiguous for a reader. Argument display types are not an ambiguity by
 /// themselves: widening a String argument into an Object parameter is not a
-/// different overload, and P7 does not invent casts or overload resolution.
+/// different overload, and P7 does not invent casts or Java overload resolution.
 fn qualification(
     c: &Context<'_, '_>,
     target: ReferenceId,
@@ -70,11 +70,87 @@ fn qualification(
             .all(|(a, b)| c.code.types[a.0 as usize].units == **b);
         let other_returns = &c.code.types[other_prototype.returns.0 as usize].units;
         if !same_parameters || other_returns != returns {
-            return Qualification::FullSignature;
+            return if arguments_select_target(c, target, args) {
+                Qualification::Natural
+            } else {
+                Qualification::FullSignature
+            };
         }
     }
     Qualification::Natural
 }
+
+/// Only the competing-overload verdict can be relaxed here; the caller has
+/// already checked invocation kind, declaration, name form and argument arity.
+/// Equal original type units must select one distinct delivered reference, and
+/// it must be the original target. This is disclosure selection, not Java
+/// assignability or permission to change the invocation's binding.
+fn arguments_select_target(c: &Context<'_, '_>, target: ReferenceId, args: &[ExprId]) -> bool {
+    let target = &c.code.references[target.0 as usize];
+    let Ok(ReferenceDeclaration::Member(MemberDeclaration::Method { owner, name, .. })) =
+        &target.declaration
+    else {
+        return false;
+    };
+    let argument_units = |arg: &ExprId| -> Option<&[u16]> {
+        let expression = c.code.expressions.get(arg.0 as usize)?;
+        if !matches!(
+            expression.kind,
+            ExprKind::Read { .. } | ExprKind::Literal { .. }
+        ) {
+            return None;
+        }
+        let (StorageRead::Value { value, .. } | StorageRead::Literal { value, .. }) =
+            expression.origin.as_ref()?.read.ok()?
+        else {
+            return None;
+        };
+        let facts = c.planned.type_facts();
+        let value = facts.value(value)?;
+        if value.has_unknown_type_source() || value.families().is_conflict() {
+            return None;
+        }
+        let [ty] = value.types() else {
+            return None;
+        };
+        let units = facts.name(*ty)?.units();
+        (!units.is_empty()).then_some(units)
+    };
+    let owner_units = &c.code.types[owner.0 as usize].units;
+    let mut selected = None;
+    for candidate in &c.code.references {
+        let Ok(ReferenceDeclaration::Member(MemberDeclaration::Method {
+            owner: candidate_owner,
+            name: candidate_name,
+            prototype,
+        })) = &candidate.declaration
+        else {
+            continue;
+        };
+        if candidate_name.units != name.units
+            || c.code.types[candidate_owner.0 as usize].units != *owner_units
+            || prototype.parameters.len() != args.len()
+        {
+            continue;
+        }
+        if !args
+            .iter()
+            .zip(&prototype.parameters)
+            .all(|(arg, parameter)| {
+                argument_units(arg) == Some(c.code.types[parameter.0 as usize].units.as_slice())
+            })
+        {
+            continue;
+        }
+        let reference = candidate.position.reference;
+        if selected.is_some_and(|previous| previous != reference) {
+            return false;
+        }
+        selected = Some(reference);
+    }
+    selected == Some(target.position.reference)
+}
+
 fn call(
     c: &mut Context<'_, '_>,
     op: OpId,
@@ -94,8 +170,6 @@ fn call(
         },
     };
     let target = c.first_reference(op)?;
-    // A delivered display-type difference requests an explicit target, not a
-    // subtype rejection or runtime conversion. Missing declarations are no gate.
     let qualification = qualification(c, target, kind, &arguments);
     Ok(Call {
         kind,
