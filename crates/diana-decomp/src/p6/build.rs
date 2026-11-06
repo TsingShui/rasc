@@ -27,7 +27,14 @@ pub(crate) fn build_regions<'a>(
 ) -> RegionBuild<'a> {
     let mut facts = RegionFacts::empty();
     match construct(&storage, &mut facts) {
-        Ok(()) => RegionBuild::Ready(PlannedMethod { storage, facts }),
+        Ok(()) => {
+            // After all planning reads, issues is the published reader-facing diagnostic set.
+            // Planning-only Graph records must not be published; regions retain selected reasons.
+            facts
+                .issues
+                .retain(|issue| !matches!(issue, PlanningIssue::Graph { .. }));
+            RegionBuild::Ready(PlannedMethod { storage, facts })
+        }
         Err(error) => RegionBuild::Stopped(RegionStop {
             storage,
             error,

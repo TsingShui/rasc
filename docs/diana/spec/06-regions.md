@@ -28,6 +28,30 @@ necessary construction-invariant failures produce a classified `RegionStop` with
 the complete P5 product and a separate, unpublished `RegionPartial`. The partial
 arena is not `RegionFacts`. A method-private stop does not cancel sibling tasks.
 
+## Planning state and published diagnostics
+
+During construction, P6's private issue accumulator includes `PlanningIssue::Graph`
+records for candidate rejection and graph selection. P6 consumes those records to
+select irreducible graph reasons and explicit lock-separation reasons. P6 MUST
+finish these computations before finalizing the published diagnostic set.
+
+Before publishing `PlannedMethod`, P6 MUST remove all `PlanningIssue::Graph`
+records from `RegionFacts::issues()`. Each surviving `RegionKind::Graph` retains
+its selected reason and entry; its printed `graph<reason>` header states that
+reason once. This includes `Unstructured`, `MultipleEntry`, `Irreducible` and
+`ProtectionBoundary` when selected, and any other selected `RecoveryReason`.
+Rejected-candidate reasons, including `MultipleEntry`, `Overlap` and `LockBoundary`
+at entries retained as non-graph regions, are planning state rather than
+reader-facing execution gaps. P6 MUST NOT publish them as diagnostics or header
+annotations. The finalization changes no region, node, label or selected reason.
+
+P6 MUST retain `Storage`, `Lock` and `Protection` diagnostics in their original
+order and with their original identities and content. A stopped construction keeps
+its unchanged unpublished `RegionPartial`, including its planning records; it is
+not subject to successful-product diagnostic finalization. P7 consumes the mature
+diagnostic set without reconstructing candidate history or matching issue entries
+to regions.
+
 ## Original blocks and normal structure
 
 Each original P2 block has one `BlockPlan`. Its ordered `Node` portions partition

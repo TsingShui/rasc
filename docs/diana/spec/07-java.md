@@ -186,6 +186,16 @@ syntax-owned predicates/exits; retained evidence is not a second emission.
 All original switch roles, duplicate-target links and selected-edge copies survive.
 Explicit graph transfers use the same statements and storage as natural regions.
 
+P7 MUST copy only P6's published reader-facing diagnostics into `Issue::Control`.
+Under the [P6 publication contract](06-regions.md#planning-state-and-published-diagnostics),
+these are `Storage`, `Lock` and `Protection` records, not `Graph` planning records.
+P7 retains the selected graph reason in its control expression; P9 prints it once
+in `graph<reason>`, not as a duplicate method-body `diagnostic` statement.
+Rejected-candidate reasons at non-graph entries are not method statements or graph
+annotations. P7/P9 MUST NOT re-derive or display P6's private candidate history.
+The retained non-graph diagnostics keep their existing `diagnostic` spelling,
+content, order and method-head placement; no other text states those issues.
+
 Exception sites retain original completion, ordered chain, edge delivery and
 snapshot provenance. Natural catch delivery, explicit protection, propagation and
 P6's method-local ImpossibleRelease finding stay distinct. P7 MUST NOT discard an
