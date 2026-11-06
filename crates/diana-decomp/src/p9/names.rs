@@ -167,7 +167,7 @@ pub(super) enum FlagScope {
     Method { initializer: bool },
 }
 
-/// One original `access_flags` bit with the meaning this declaration form shows.
+/// Original `access_flags` bits with the meaning this declaration form shows.
 #[derive(Clone, Copy)]
 struct Bit {
     mask: u32,
@@ -253,7 +253,9 @@ pub(super) fn flags(out: &mut Buffer, raw: u32, scope: FlagScope) -> Result<(), 
         FlagScope::Method { initializer } => [
             java(0x8, "static "),
             java(0x10, "final "),
-            java(0x20, "synchronized "),
+            // Both bits convey the modifier, but only 0x20 requests VM locking.
+            // The declaration word does not add a lock to the delivered body.
+            java(0x20 | 0x20000, "synchronized "),
             dex(0x40, "bridge"),
             dex(0x80, "varargs"),
             java(0x100, "native "),
@@ -292,18 +294,6 @@ pub(super) fn flags(out: &mut Buffer, raw: u32, scope: FlagScope) -> Result<(), 
             ));
         }
         markers[count] = Some(marker);
-        count += 1;
-    }
-    // The declared-synchronized bit has meaning only on a method. Elsewhere it
-    // remains an undefined bit of that kind and is not given a method name.
-    if matches!(scope, FlagScope::Method { .. }) && raw & 0x20000 != 0 {
-        known |= 0x20000;
-        if count == MAX_MARKERS {
-            return Err(RenderError::Invariant(
-                "access flag markers exceed the declared table",
-            ));
-        }
-        markers[count] = Some("declared_synchronized");
         count += 1;
     }
     if count > 0 {

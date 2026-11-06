@@ -71,7 +71,7 @@ Check payload and `bytes()` paths in `crates/rusty-dex/src/dex/instructions.rs` 
 | RG-06 | `src/dex/mod.rs:847–925`: `parse_code_item`, `parse_catch_handlers` | Has checked_mul/range checks, but typed_count can reach Vec::with_capacity before complete validation. | The reader validates the count against remaining input before allocation; small size is not evidence of safety. |
 | RG-07 | Same file, `read_mutf8:1059–1121` | Uses replacement characters for isolated surrogates when constructing a Rust String. | Diana preserves DEX strings as UTF-16 code units and does not accept semantic change; human diagnostics and literal representation are separate. |
 | RG-08 | `tests/quality_gate.py:420–456`: `decompile_dad_cached`; `normalize_dad_*` | Frozen DAD output with DEX-aware normalization; missing caches are not automatically generated. pickle is suitable only for trusted internal input. | Borrow the discipline of a fixed comparator and explicit baseline; do not copy fixtures, the pickle loader or permissive normalization. Differential results are clues only. |
-| RG-09 | `src/types.rs`, `src/decompiler.rs` `encoded_value` | Conversion from access flags/source literals to strings needs Java-legality checks. | synthetic/bridge/declared-synchronized cannot directly become Java keywords; retain original flags in metadata. |
+| RG-09 | `src/types.rs`, `src/decompiler.rs` `encoded_value` | Conversion from access flags/source literals to strings needs Java-legality checks. | synthetic/bridge have no Java modifier word; declared-synchronized conveys the declaration modifier, not implicit VM locking (see [P9](spec/09-rendering.md#declarations-metadata-and-literal-identity)); retain original flags in metadata. |
 
 ## 5. Algorithm applicability conditions
 

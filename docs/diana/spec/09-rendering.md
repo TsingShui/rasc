@@ -168,9 +168,21 @@ already show keeps an explicit `dex_flags<...>` marker; the class kind word and 
 `<init>`/`<clinit>` name already convey the interface/annotation/enum and
 constructor bits. Bits with no defined meaning for that kind remain visible as
 `unknown_flags<0x...>` and are never folded into the whole original word. The raw
-word itself remains in the source product. A `declared_synchronized` marker is a
-declaration fact: the VM does not lock such a method automatically, so P9 does not
-invent a lock and prints only the monitor operations delivered for its body.
+word itself remains in the source product. A field's `enum` marker identifies an
+enumerated value, not merely a field whose enclosing type is an enum; ordinary
+field syntax does not convey that fact. `synthetic`, `bridge` and `varargs` retain
+their marker spellings, not Java modifier words.
+
+For methods, either `ACC_SYNCHRONIZED` (0x20) or `ACC_DECLARED_SYNCHRONIZED`
+(0x20000) prints one `synchronized` declaration word, including when both are set.
+The [DEX access-flags table](https://source.android.com/docs/core/runtime/dex-format#access-flags)
+defines 0x20000 as declared `synchronized`, with no execution effect beyond
+reflection; 0x20 requests automatic locking and is valid only with `ACC_NATIVE`.
+The pinned ART [modifier definitions](https://android.googlesource.com/platform/art/+/bebbc3cc49f2d9d5420197df0a336fbc3fcbea40/libdexfile/dex/modifiers.h)
+keep these bits distinct. Here the word displays the declaration, not an extra
+implicit acquire/release: P9 MUST NOT add, remove or fold delivered body monitors
+because of it. The original flag word still distinguishes VM locking from the
+declared modifier.
 
 An interface, annotation or enum prints no superclass clause: Java has none there
 and the delivered Object/Enum entry is implicit. A missing or unavailable

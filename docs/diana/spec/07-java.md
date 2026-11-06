@@ -19,6 +19,16 @@ method-scoped annotation records. Metadata sharing retains owned immutable P0
 records, not a DEX lease. Names retain UTF-16 units and an identifier/original-name
 form; constructors and class initializers have distinct kinds.
 
+The original flags distinguish `ACC_SYNCHRONIZED` (0x20, VM locking on native
+methods) from `ACC_DECLARED_SYNCHRONIZED` (0x20000, the declared Java modifier,
+with no execution effect beyond reflection), as specified by the
+[DEX access-flags table](https://source.android.com/docs/core/runtime/dex-format#access-flags)
+and pinned ART [modifier definitions](https://android.googlesource.com/platform/art/+/bebbc3cc49f2d9d5420197df0a336fbc3fcbea40/libdexfile/dex/modifiers.h).
+P7 MUST NOT synthesize or suppress body monitor operations from the declared
+modifier. P9's [declaration spelling](09-rendering.md#declarations-metadata-and-literal-identity)
+uses `synchronized` for either bit without changing P7's execution plan or raw
+flags.
+
 `MethodCode` contains flat expression, statement, reference, type-use, local,
 block, transfer and control arenas. It also owns original coverage, operation
 provenance, copy schedules, construction publications, exception chains/sites,
