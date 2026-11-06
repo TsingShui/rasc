@@ -46,6 +46,17 @@ pub struct InlineCheck {
     pub target: StatementId,
 }
 /// One original definition evaluated at its unique, adjacent terminal use.
+/// A payload printed as the allocation's own array literal. The allocation, the
+/// fill statement and the payload keep their original facts; only the spelling
+/// and the omitted fill statement change.
+#[derive(Clone, Copy, Debug, Serialize)]
+pub struct ArrayLiteral {
+    pub payload: PayloadId,
+    /// The fill statement whose text the literal states; it prints nothing.
+    pub fill: StatementId,
+    pub operation: OpId,
+    pub pc: crate::CodeUnitOffset,
+}
 #[derive(Clone, Copy, Debug, Serialize)]
 pub struct ComposedExpression {
     pub expression: ExprId,
@@ -174,6 +185,8 @@ pub struct EmissionPlan {
     pub(super) check_uses: Vec<Vec<u32>>,
     pub(super) composed_uses: Vec<Option<ComposedExpression>>,
     pub(super) composed_operations: Vec<bool>,
+    /// By the statement whose allocation prints the payload.
+    pub(super) array_literals: Vec<Option<ArrayLiteral>>,
     pub(super) hidden_locals: Vec<bool>,
     pub(super) deferred_controls: Vec<bool>,
     pub(super) operations: Vec<EvaluationPhases>,
@@ -201,6 +214,7 @@ impl EmissionPlan {
             check_uses: Vec::new(),
             composed_uses: Vec::new(),
             composed_operations: Vec::new(),
+            array_literals: Vec::new(),
             hidden_locals: Vec::new(),
             deferred_controls: Vec::new(),
             operations: Vec::new(),
@@ -265,6 +279,9 @@ impl EmissionPlan {
             .get(id.0 as usize)
             .copied()
             .unwrap_or(false)
+    }
+    pub fn array_literal(&self, id: StatementId) -> Option<ArrayLiteral> {
+        self.array_literals.get(id.0 as usize).copied().flatten()
     }
     pub fn hidden_local(&self, id: StorageId) -> bool {
         self.hidden_locals
@@ -361,6 +378,7 @@ pub(super) fn construct(code: &mut MethodCode) -> Result<(), ExpressionError> {
     plan.check_uses = filled(code.statements.len(), Vec::new())?;
     plan.composed_uses = filled(code.expressions.len(), None)?;
     plan.composed_operations = filled(code.operations.len(), false)?;
+    plan.array_literals = filled(code.statements.len(), None)?;
     plan.hidden_locals = filled(code.locals.len(), false)?;
     plan.deferred_controls = filled(code.controls.len(), false)?;
     for l in &code.locals {

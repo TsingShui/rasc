@@ -35,6 +35,10 @@ pub(super) trait ExpressionSource {
     fn natural_store(&self, _statement: StatementId) -> bool {
         false
     }
+    /// A partial product has no selected allocation spelling.
+    fn array_literal(&self, _statement: StatementId) -> Option<ArrayLiteral> {
+        None
+    }
 }
 impl ExpressionSource for MethodCode {
     fn payloads(&self) -> &[ArrayPayload] {
@@ -74,6 +78,9 @@ impl ExpressionSource for MethodCode {
     }
     fn natural_store(&self, statement: StatementId) -> bool {
         self.emission().natural_store(statement)
+    }
+    fn array_literal(&self, statement: StatementId) -> Option<ArrayLiteral> {
+        self.emission().array_literal(statement)
     }
 }
 impl ExpressionSource for ExpressionPartial {
@@ -157,6 +164,28 @@ impl<S: ExpressionSource> Expressions<'_, '_, S> {
             self.out.put(" = ")?;
         }
         Ok(())
+    }
+    /// The payload the allocation prints, between its delivered array type and
+    /// the closing brace: every element in original order and exact bits.
+    fn array_literal(&mut self, literal: &ArrayLiteral) -> Result<(), RenderError> {
+        let payload = self
+            .code
+            .payloads()
+            .get(literal.payload.0 as usize)
+            .ok_or(RenderError::Invariant("array literal lost its payload"))?;
+        let Ok(element) = payload.element else {
+            return Err(RenderError::Invariant(
+                "array literal lost its element interpretation",
+            ));
+        };
+        self.out.put("{")?;
+        for (index, &bits) in payload.bits.iter().enumerate() {
+            if index > 0 {
+                self.out.put(", ")?;
+            }
+            element_literal(self.out, element, bits)?;
+        }
+        self.out.put("}")
     }
     pub fn semantic(&mut self, s: &Statement) -> Result<(), RenderError> {
         match &s.kind {
@@ -492,33 +521,70 @@ impl<S: ExpressionSource> Expressions<'_, '_, S> {
             }
             ExprKind::NewArray { reference, length } => {
                 self.out.put("new ")?;
-                // The delivered type is the array type; the instruction supplies
-                // the first length and every remaining dimension is empty.
-                let element = match &self.code.references()[reference.0 as usize].declaration {
-                    Ok(ReferenceDeclaration::Type { type_use }) => self
-                        .names
-                        .body
-                        .get(type_use.0 as usize)
-                        .copied()
-                        .flatten()
-                        .and_then(|id| self.lookup.dimensions(id).map(|d| (id, d))),
-                    _ => None,
-                };
-                match element {
-                    Some((type_use, dimensions)) if dimensions > 0 => {
-                        self.lookup.print_element(self.out, type_use)?;
-                        self.out.put("[")?;
-                        self.operand(*length)?;
-                        self.out.put("]")?;
-                        for _ in 1..dimensions {
-                            self.out.put("[]")?;
-                        }
+                let literal = self
+                    .statement
+                    .and_then(|statement| self.code.array_literal(statement));
+                if let Some(literal) = literal {
+                    // The delivered array type already carries its one dimension;
+                    // the payload states every element, in original order and bits.
+                    self.reference(*reference)?;
+                    self.array_literal(&literal)?;
+                    // The fill statement prints no text of its own, so its
+                    // statement, operation and hidden route origins stay at the
+                    // literal that states its effect.
+                    self.out.span(
+                        start,
+                        Origin::Statement {
+                            method: self.method,
+                            statement: literal.fill,
+                        },
+                    )?;
+                    self.out.span(
+                        start,
+                        Origin::Operation {
+                            method: self.method,
+                            operation: literal.operation,
+                            pc: literal.pc,
+                        },
+                    )?;
+                    for &site in self.code.statement_sites(literal.fill) {
+                        self.out.span(
+                            start,
+                            Origin::Site {
+                                method: self.method,
+                                site,
+                            },
+                        )?;
                     }
-                    _ => {
-                        self.reference(*reference)?;
-                        self.out.put("[")?;
-                        self.operand(*length)?;
-                        self.out.put("]")?;
+                } else {
+                    // The delivered type is the array type; the instruction supplies
+                    // the first length and every remaining dimension is empty.
+                    let element = match &self.code.references()[reference.0 as usize].declaration {
+                        Ok(ReferenceDeclaration::Type { type_use }) => self
+                            .names
+                            .body
+                            .get(type_use.0 as usize)
+                            .copied()
+                            .flatten()
+                            .and_then(|id| self.lookup.dimensions(id).map(|d| (id, d))),
+                        _ => None,
+                    };
+                    match element {
+                        Some((type_use, dimensions)) if dimensions > 0 => {
+                            self.lookup.print_element(self.out, type_use)?;
+                            self.out.put("[")?;
+                            self.operand(*length)?;
+                            self.out.put("]")?;
+                            for _ in 1..dimensions {
+                                self.out.put("[]")?;
+                            }
+                        }
+                        _ => {
+                            self.reference(*reference)?;
+                            self.out.put("[")?;
+                            self.operand(*length)?;
+                            self.out.put("]")?;
+                        }
                     }
                 }
             }
@@ -945,6 +1011,62 @@ pub(super) fn literal(
             bits.width, bits.value
         )),
     }
+}
+/// One payload element as its exact Java literal. The original bits are never
+/// changed: a bit pattern these forms cannot state keeps the payload statement,
+/// which P7 selects only for elements that print exactly.
+fn element_literal(
+    out: &mut Buffer,
+    element: crate::p4::ArrayElementType,
+    bits: u64,
+) -> Result<(), RenderError> {
+    use crate::p4::ArrayElementType::*;
+    match element {
+        Boolean => match bits {
+            0 => out.put("false")?,
+            1 => out.put("true")?,
+            _ => {
+                return Err(RenderError::Invariant("boolean element lost its 0/1 value"));
+            }
+        },
+        Byte => out.fmt(format_args!("{}", bits as u8 as i8))?,
+        Short => out.fmt(format_args!("{}", bits as u16 as i16))?,
+        Char => char_literal(out, bits as u16)?,
+        Int => out.fmt(format_args!("{}", bits as u32 as i32))?,
+        Long => out.fmt(format_args!("{}L", bits as i64))?,
+        Float => {
+            let value = f32::from_bits(bits as u32);
+            if !value.is_finite() {
+                return Err(RenderError::Invariant(
+                    "float element has no exact decimal spelling",
+                ));
+            }
+            // The shortest decimal for a finite float round-trips to these bits.
+            out.fmt(format_args!("{value:?}f"))?;
+        }
+        Double => {
+            let value = f64::from_bits(bits);
+            if !value.is_finite() {
+                return Err(RenderError::Invariant(
+                    "double element has no exact decimal spelling",
+                ));
+            }
+            out.fmt(format_args!("{value:?}d"))?;
+        }
+    }
+    Ok(())
+}
+
+/// One original `char` unit as a single-quoted literal with the project's
+/// existing escapes; an isolated surrogate or control unit keeps `\uXXXX`.
+fn char_literal(out: &mut Buffer, unit: u16) -> Result<(), RenderError> {
+    out.put("'")?;
+    if unit == u16::from(b'\'') {
+        out.put("\\'")?;
+    } else {
+        out.units(std::slice::from_ref(&unit), false)?;
+    }
+    out.put("'")
 }
 fn unary(op: crate::p2::UnaryOp) -> &'static str {
     use crate::p2::UnaryOp::*;

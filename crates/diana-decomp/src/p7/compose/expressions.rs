@@ -11,53 +11,9 @@ use crate::p4::{Family, Interpretation};
 use crate::p5::{LocalId, LocalKind, Materialization, StorageRead, StorageType};
 
 pub(super) fn construct(code: &mut MethodCode) -> Result<(), ExpressionError> {
-    let mut reads = filled(code.locals.len(), 0u8)?;
-    let mut protected = filled(code.locals.len(), false)?;
-    for expression in &code.expressions {
-        let storage = match expression.kind {
-            ExprKind::Read { storage, .. } | ExprKind::Snapshot { storage } => Some(storage),
-            _ => None,
-        };
-        if let Some(storage) = storage {
-            let count = reads
-                .get_mut(storage.0 as usize)
-                .ok_or(bug("expression names an unknown local"))?;
-            *count = count.saturating_add(1).min(2);
-        }
-    }
-    for copy in &code.copies {
-        for assignment in &copy.assignments {
-            // An unavailable dependency cannot establish which local it affects.
-            if assignment.issue().is_some() {
-                return Ok(());
-            }
-            if let Ok(destination) = assignment.destination() {
-                mark(&mut protected, StorageId(destination.0))?;
-            }
-            if let Ok(source) = assignment.source()
-                && let Some(source) = source.local()
-            {
-                mark(&mut protected, StorageId(source.0))?;
-            }
-        }
-        for step in &copy.steps {
-            match *step {
-                CopyStatement::Save {
-                    destination,
-                    source,
-                } => {
-                    mark(&mut protected, destination)?;
-                    mark(&mut protected, source)?;
-                }
-                CopyStatement::Assign { destination, .. } => mark(&mut protected, destination)?,
-            }
-        }
-    }
-    for group in &code.constructions {
-        for publication in &group.publications {
-            mark(&mut protected, publication.destination)?;
-        }
-    }
+    let Some((reads, protected)) = super::local_access(code)? else {
+        return Ok(());
+    };
 
     let mut last: Vec<Option<OpId>> = filled(code.terminals.len(), None)?;
     let mut next: Vec<Option<OpId>> = filled(code.operations.len(), None)?;
@@ -105,13 +61,6 @@ pub(super) fn construct(code: &mut MethodCode) -> Result<(), ExpressionError> {
             install(code, producer, use_id, Some(control))?;
         }
     }
-    Ok(())
-}
-
-fn mark(protected: &mut [bool], id: StorageId) -> Result<(), ExpressionError> {
-    *protected
-        .get_mut(id.0 as usize)
-        .ok_or(bug("copy names an unknown local"))? = true;
     Ok(())
 }
 
