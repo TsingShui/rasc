@@ -213,10 +213,16 @@ impl Expressions<'_, '_> {
     fn transfer(&mut self, id: TransferId) -> Result<(), RenderError> {
         self.transfer_with_indent(id, true)
     }
+    /// A fallthrough with no copies keeps its original route without printing
+    /// words, so its span stays zero-width where the route was taken.
+    fn transfer_prints_nothing(&self, id: TransferId) -> bool {
+        let p = &self.code.emission().transfers()[id.0 as usize];
+        matches!(p.spelling, TransferSpelling::Fallthrough) && p.copies.is_empty()
+    }
     fn transfer_with_indent(&mut self, id: TransferId, indent: bool) -> Result<(), RenderError> {
         let p = &self.code.emission().transfers()[id.0 as usize];
         let start = self.out.position();
-        if matches!(p.spelling, TransferSpelling::Fallthrough) && p.copies.is_empty() {
+        if self.transfer_prints_nothing(id) {
             return self.out.span(
                 start,
                 Origin::Transfer {
@@ -426,13 +432,22 @@ impl Expressions<'_, '_> {
             self.out.indent()?;
             match self.code.transfers()[arm.0 as usize].role {
                 Some(crate::p2::NormalEdge::SwitchCase { key, .. }) => {
-                    self.out.fmt(format_args!("case {key}: "))?
+                    self.out.fmt(format_args!("case {key}:"))?
                 }
-                Some(crate::p2::NormalEdge::SwitchDefault) => self.out.put("default: ")?,
+                Some(crate::p2::NormalEdge::SwitchDefault) => self.out.put("default:")?,
                 _ => return Err(RenderError::Invariant("switch arm lost its original role")),
             }
-            // The arm label already indented this line; only the transfer text follows.
+            let silent = self.transfer_prints_nothing(arm);
+            if !silent {
+                // The arm label already indented this line; only the transfer text follows.
+                self.out.put(" ")?;
+            }
             self.branch_transfer(arm, false)?;
+            if silent {
+                // A route that prints no words still ends its own line: the arm
+                // falls through to the next case instead of continuing this one.
+                self.out.put("\n")?;
+            }
         }
         Ok(())
     }
