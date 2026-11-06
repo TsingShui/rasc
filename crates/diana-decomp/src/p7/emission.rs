@@ -69,8 +69,6 @@ pub struct PredicateEmission {
     pub when_true: TransferId,
     pub when_false: TransferId,
     pub negate: bool,
-    /// Both selected edge schedules remain owned even when no steps print.
-    pub edge_copies: bool,
 }
 #[derive(Debug, Serialize)]
 pub enum LoopPlacement {
@@ -133,6 +131,9 @@ pub enum TransferSpelling {
     Fallthrough,
     Break(ControlId),
     Continue(ControlId),
+    /// The target is the innermost enclosing scope, so no label is named.
+    BreakHere(ControlId),
+    ContinueHere(ControlId),
     Selected,
 }
 #[derive(Debug, Serialize)]
@@ -156,6 +157,9 @@ pub struct EmissionPlan {
     /// Whether a route annotation still adds information beyond the printed
     /// chains and catch scopes.
     pub(super) site_annotations: Vec<bool>,
+    /// A field reference prints its declared type only when the delivered
+    /// references would otherwise be indistinguishable.
+    pub(super) field_qualifications: Vec<bool>,
     pub(super) composed_uses: Vec<Option<ComposedExpression>>,
     pub(super) composed_operations: Vec<bool>,
     pub(super) hidden_locals: Vec<bool>,
@@ -174,6 +178,7 @@ impl EmissionPlan {
             blocks: Vec::new(),
             show_chains: Vec::new(),
             site_annotations: Vec::new(),
+            field_qualifications: Vec::new(),
             composed_uses: Vec::new(),
             composed_operations: Vec::new(),
             hidden_locals: Vec::new(),
@@ -196,6 +201,12 @@ impl EmissionPlan {
     }
     pub fn show_chains(&self) -> &[bool] {
         &self.show_chains
+    }
+    pub fn field_qualification(&self, id: ReferenceId) -> bool {
+        self.field_qualifications
+            .get(id.0 as usize)
+            .copied()
+            .unwrap_or(true)
     }
     pub fn site_annotation(&self, id: SiteId) -> bool {
         self.site_annotations
@@ -270,7 +281,6 @@ fn predicate(
         when_true,
         when_false,
         negate: repeat == Some(when_false),
-        edge_copies: true,
     })
 }
 pub(super) fn local_spelling(types: &[TypeUse], l: &LocalDeclaration) -> LocalSpelling {
@@ -294,6 +304,7 @@ pub(super) fn construct(code: &mut MethodCode) -> Result<(), ExpressionError> {
     let mut plan = EmissionPlan::empty();
     plan.show_chains = filled(code.chains.len(), true)?;
     plan.site_annotations = filled(code.sites.len(), true)?;
+    plan.field_qualifications = filled(code.references.len(), true)?;
     plan.composed_uses = filled(code.expressions.len(), None)?;
     plan.composed_operations = filled(code.operations.len(), false)?;
     plan.hidden_locals = filled(code.locals.len(), false)?;

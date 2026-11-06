@@ -21,6 +21,10 @@ pub(super) trait ExpressionSource {
     fn composed_use(&self, _id: ExprId) -> Option<ComposedExpression> {
         None
     }
+    /// A partial product has no selected display plan, so it keeps the type.
+    fn field_qualification(&self, _reference: ReferenceId) -> bool {
+        true
+    }
 }
 impl ExpressionSource for MethodCode {
     fn payloads(&self) -> &[ArrayPayload] {
@@ -46,6 +50,9 @@ impl ExpressionSource for MethodCode {
     }
     fn composed_use(&self, id: ExprId) -> Option<ComposedExpression> {
         self.emission().composed_use(id)
+    }
+    fn field_qualification(&self, reference: ReferenceId) -> bool {
+        self.emission().field_qualification(reference)
     }
 }
 impl ExpressionSource for ExpressionPartial {
@@ -113,7 +120,8 @@ impl<S: ExpressionSource> Expressions<'_, '_, S> {
                 self.out.put("store ")?;
                 self.operand(*value)?;
                 self.out.put(" -> ")?;
-                self.member(*reference, *receiver, true)?;
+                let qualified = self.code.field_qualification(*reference);
+                self.member(*reference, *receiver, qualified)?;
             }
             StatementKind::ArrayStore {
                 array,
@@ -341,7 +349,10 @@ impl<S: ExpressionSource> Expressions<'_, '_, S> {
             ExprKind::Field {
                 reference,
                 receiver,
-            } => self.member(*reference, *receiver, true)?,
+            } => {
+                let qualified = self.code.field_qualification(*reference);
+                self.member(*reference, *receiver, qualified)?;
+            }
             ExprKind::Array { array, index, kind } => {
                 self.operand(*array)?;
                 self.out.put("[")?;
@@ -611,7 +622,10 @@ impl<S: ExpressionSource> Expressions<'_, '_, S> {
     pub fn copy(&mut self, id: CopyPlanId) -> Result<(), RenderError> {
         let bundle = &self.code.copies()[id.0 as usize];
         let start = self.out.position();
-        for step in &bundle.steps {
+        for (index, step) in bundle.steps.iter().enumerate() {
+            if index > 0 {
+                self.out.put(" ")?;
+            }
             match step {
                 CopyStatement::Assign {
                     destination,
@@ -631,11 +645,14 @@ impl<S: ExpressionSource> Expressions<'_, '_, S> {
                     self.local(*source)?;
                 }
             }
-            self.out.put("; ")?;
+            self.out.put(";")?;
         }
-        for req in &bundle.assignments {
+        for (index, req) in bundle.assignments.iter().enumerate() {
             if let Some(gap) = req.issue() {
-                self.out.fmt(format_args!("unavailable_copy<{gap:?}>; "))?;
+                if !bundle.steps.is_empty() || index > 0 {
+                    self.out.put(" ")?;
+                }
+                self.out.fmt(format_args!("unavailable_copy<{gap:?}>;"))?;
             }
         }
         self.out.span(

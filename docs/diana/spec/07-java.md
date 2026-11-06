@@ -96,6 +96,24 @@ schedule. Unavailable assignments remain gaps; a plan ID alone does not authoriz
 an assignment. Pure literal definitions can omit an emitted statement only when
 all publication plans are literal and no before/snapshot/after copy is attached.
 
+A break or continue whose target is the innermost enclosing scope needs no label,
+and a continue that ends the loop body is the same as reaching the body end, so the
+final plan prints neither. Its attached copies remain ordered statements.
+
+A tail-test repetition-edge copy set may move into the body end when the delivered
+facts prove both schedules equal: the predicate has one normal arrival from inside
+the body; the condition reads no destination the copies write; the exiting-edge
+copies neither read nor write those destinations; and no read outside the loop
+subtree, handler receive or construction observes them. Copies are plain
+assignments, so moving them introduces no effect or exception site. A head-test
+predicate is reached on entry with different state, so those copies stay on their
+edge.
+
+A loop predicate becomes an inline condition only when its block holds no label,
+statement, continuation or terminal phase. Edge copies may remain: they are printed
+inside the condition by their original repeating or exiting role, so a break still
+does not execute exiting-edge copies.
+
 A jump whose destination is the statement printed immediately after it is
 ordinary sequencing, so the final plan prints no `goto`. The search may pass
 upward only through containers that print their children in order and add nothing

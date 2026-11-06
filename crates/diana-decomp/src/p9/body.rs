@@ -155,8 +155,12 @@ impl Expressions<'_, '_> {
     }
     fn selected(&mut self, id: TransferId, jump: bool) -> Result<(), RenderError> {
         let start = self.out.position();
-        self.copies(&self.code.emission().transfers()[id.0 as usize].copies)?;
+        let copies = &self.code.emission().transfers()[id.0 as usize].copies;
+        self.copies(copies)?;
         if jump {
+            if !copies.is_empty() {
+                self.out.put(" ")?;
+            }
             self.out.put("goto ")?;
             self.label_name(self.code.transfers()[id.0 as usize].destination)?;
             self.out.put("; ")?;
@@ -188,6 +192,28 @@ impl Expressions<'_, '_> {
             self.out.indent()?;
         }
         self.copies(&p.copies)?;
+        if !p.copies.is_empty() && !matches!(p.spelling, TransferSpelling::Fallthrough) {
+            self.out.put(" ")?;
+        }
+        if matches!(
+            p.spelling,
+            TransferSpelling::BreakHere(_) | TransferSpelling::ContinueHere(_)
+        ) {
+            self.out
+                .put(if matches!(p.spelling, TransferSpelling::BreakHere(_)) {
+                    "break;"
+                } else {
+                    "continue;"
+                })?;
+            self.out.span(
+                start,
+                Origin::Transfer {
+                    method: self.method,
+                    transfer: id,
+                },
+            )?;
+            return self.out.put("\n");
+        }
         match p.spelling {
             TransferSpelling::Goto(label) => {
                 self.out.put("goto ")?;
@@ -205,6 +231,7 @@ impl Expressions<'_, '_> {
                     .put(&self.code.emission().controls()[c.0 as usize].label)?;
                 self.out.put(";")?;
             }
+            TransferSpelling::BreakHere(_) | TransferSpelling::ContinueHere(_) => {}
             TransferSpelling::Fallthrough => {}
             TransferSpelling::Selected => {
                 return Err(RenderError::Invariant(
@@ -244,6 +271,9 @@ impl Expressions<'_, '_> {
         let p = &self.code.emission().terminals()[id.0 as usize];
         self.out.indent()?;
         self.copies(&p.before)?;
+        if !p.before.is_empty() {
+            self.out.put(" ")?;
+        }
         let start = self.out.position();
         match &t.kind {
             TerminalKind::None => {}
@@ -354,15 +384,23 @@ impl Expressions<'_, '_> {
         }
         self.condition(condition)?;
         self.phases(&p.snapshots, "after_operands_before_effect")?;
-        if test.edge_copies {
-            self.out.put(" [on_original_true {")?;
-            self.selected(test.when_true, false)?;
-            self.out.put("} on_original_false {")?;
-            self.selected(test.when_false, false)?;
-            self.out.put("}]")?;
+        // Copies belong to one selected original edge. Naming the looping role
+        // is shorter than the truth value and keeps the same ownership.
+        let (repeat, exit) = if test.negate {
+            (test.when_false, test.when_true)
         } else {
-            self.selected(test.when_true, false)?;
-            self.selected(test.when_false, false)?;
+            (test.when_true, test.when_false)
+        };
+        for (role, edge) in [("repeat", repeat), ("exit", exit)] {
+            if self.code.emission().transfers()[edge.0 as usize]
+                .copies
+                .is_empty()
+            {
+                continue;
+            }
+            self.out.fmt(format_args!(" [{role}: "))?;
+            self.copies(&self.code.emission().transfers()[edge.0 as usize].copies)?;
+            self.out.put("]")?;
         }
         if test.negate {
             self.out.put(")")?;

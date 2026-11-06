@@ -43,12 +43,18 @@ The following forms have fixed execution meanings:
 | `[after_operands_before_effect { copies }]` | Capture the operation's original operands, run its supplied snapshot steps, then execute the original effect. A result assignment commits only on normal completion. |
 | `new T(arguments) [on_success publish (locals)]` | Execute the selected P5 construction and publish its aliases only after successful initialization. Its common snapshot prelude precedes allocation. |
 | `resume construction g at label` | Continue the selected compound expression at the original initializer's node. Absorbed members are not executed again; PC order is not an implicit continuation. |
-| `test { ... yield condition [on_original_true {...} on_original_false {...}]; }` | Evaluate the supplied predicate portion and execute copies only for the selected original edge. Outer negation changes repetition polarity, not which original edge owns copies. An empty edge schedule needs no printed clause. |
+| `test { ... yield condition [repeat {...}] [exit {...}]; }` | A loop condition whose predicate node also carries statements or phases keeps this block form. Copies belong to the original repeating or exiting edge; an empty edge prints no clause. Outer negation changes repetition polarity, not which original edge owns copies. |
+| `while (condition [repeat {...}])` | When the predicate node holds nothing but the condition, P7 selects this compact form and the copies stay attached to their own original edge. |
 | `synchronized R(lock) with_explicit_exits` | The header owns the original acquire. This lexical container does not implicitly release at its closing brace or on an abrupt exit. |
 | `release synchronized R(lock)` | Execute that outlet's original release read/effect at its original node. Only the named lock scope ends; enclosing try scopes remain unchanged. |
 | `on_exception_entry { copies }` | Receive saved values only on exceptional arrival, after the original capture when present. |
 | `exception_chain` and `[exn cN]` site markers | Preserve original selection priority, handler targets and delivered natural/explicit protection. A marker is printed only when the enclosing printed catch does not already express that route; it names the chain whose line carries the clauses. Method-local impossible-release findings do not delete original exception facts. |
 | `graph ... entry label` / `no_implicit_entry` | Preserve the supplied graph entry or its explicit absence. The first printed child is not an invented entry. |
+
+A `break` or `continue` whose target is the innermost enclosing scope prints
+without a label, and the label is then omitted. A `continue` that ends its loop
+body prints nothing, because reaching the body end already starts the predicate;
+its copies still print in order.
 
 A selected `FullSignature` call prints its original target as a trailing
 `[binding ...]` suffix; a natural call prints only the receiver, member and
