@@ -17,14 +17,14 @@ their owning modules.
 | P6 | `crates/diana-decomp/src/p6/` | `PlannedMethod`: natural/explicit regions, original edge and copy delivery, labels, ordered protection and monitor ownership. |
 | P7 | `crates/diana-decomp/src/p7/` | Owned `MethodResult`: unified operations, storage phases, selected control/protection expressions, declarations and local gaps. |
 | P8 | `crates/diana-decomp/src/p8/` | Owned `ClassResult`/`TypeNamePlan`: directory-driven member assembly, static/annotation expression and scope-aware naming. |
+| P9 | `crates/diana-decomp/src/p9/` | Owned `Rendered`: existing expressions/names to UTF-8 text, JSON, source spans and concrete output diagnostics. |
 
-P9 retains pure rendering responsibility in PIPELINE_DESIGN.
 Archived implementations are not active stages or alternate recovery paths.
 The [P1–P9 local-result contract](PIPELINE_DESIGN.md#92-p1p9-统一消费局部结果) applies
 to every stage: mature products account for coverage, established facts and local
 unavailability, and downstream processing preserves independent results. This
 contract is broader than the currently supported local data/binding continuation;
-control/protection publication limits and inactive stages remain recorded in the
+control/protection publication limits remain recorded in the
 engine README.
 
 ## Current method scheduling
@@ -34,7 +34,7 @@ request entry `Engine::analyze`:
 
 ```text
 P0 ClassFacts → method reader → P1 DecodedMethod → P2 FlowMethod → P3 SsaMethod → P4 TypedMethod → P5 StorageMethod → P6 PlannedMethod → P7 MethodResult
-                         all method tasks join → P8 ClassResult / standalone MethodDisplay
+                         all method tasks join → P8 ClassResult / standalone MethodDisplay → P9 Rendered
                    └─ declaration-only
                               └─ P1 stop with decoded prefix
                                                 └─ FlowStop with P1 input
@@ -52,7 +52,9 @@ P8 construction requires Engine's `ClassTask`. It consumes joined deliveries,
 never starts method analysis, and reports AssemblyStop with retained inputs on
 construction failure. Single-method requests use the same name planner without
 package/import output. Shared owned P7 results and partial expressions remain
-independent of the retained inspection products.
+independent of the retained inspection products. P9 construction requires Engine's
+`RenderTask`; it consumes immutable owned P8 products shared with inspection.
+`RenderStop` retains the same source and unfinished output without retrying stages.
 Each stage owns construction; independent checks are test-only. Engine cannot assemble successful
 FlowMethod, SsaMethod, TypedMethod, StorageMethod, PlannedMethod or MethodResult products. Local reference, operand and binding issues can
 flow through to SSA with independent facts preserved. Class requests reserve result
@@ -77,7 +79,7 @@ member task starts; P0 remains separately queryable. The error is not cached as 
 missing pool, so later requests can retry startup. A method-private error after
 startup remains that member's result, without cancelling siblings.
 
-`dbg_shell` is the sole engine inspection example. P1–P8 views and batch commands
+`dbg_shell` is the sole engine inspection example. P1–P9 views and batch commands
 observe the Engine products; they do not start a second stage chain. Byte
 roundtrip is an independent check over retained original evidence, not production
 DEX reconstruction.
@@ -118,6 +120,8 @@ DEX reconstruction.
 - `ClassResult` owns the P8 display and shares immutable owned declarations and
   P7 expressions. Stopped members retain separately classified raw/decoded copies
   and any existing P7 prefix. No owned class product borrows DEX or method analysis.
+- `Rendered` owns text, source spans and the immutable P8 source product; no DEX
+  or analysis lease is retained. Its text and JSON writers consume one publication.
 - Only owning-stage constructors with scheduler-issued authority can publish
   mature products. Consumers MUST NOT promote partial snapshots or reuse stage
   construction to retry a stopped method.
@@ -132,6 +136,6 @@ The stage chapters define [input](spec/01-input.md), [P0](spec/00-class.md) and
 [P2 execution/tests](spec/02-flow.md), [P3 SSA/tests](spec/03-ssa.md) and
 [P4 interpretations](spec/04-types.md), [P5 storage](spec/05-variables.md),
 [P6 regions](spec/06-regions.md), [P7 expressions](spec/07-java.md) and
-[P8 assembly/names](spec/08-class.md).
+[P8 assembly/names](spec/08-class.md) and [P9 rendering](spec/09-rendering.md).
 PIPELINE_DESIGN remains authoritative
 for ownership, consumers, failure preservation and the later product chain.

@@ -536,7 +536,7 @@ impl Shell {
                     .map(|_| class_id(request))
                     .transpose()?,
             ),
-            "p8-all" => assembly_all(
+            "p8-all" | "p9-all" => assembly_all(
                 &engine,
                 index.class_count(),
                 request
@@ -544,7 +544,22 @@ impl Shell {
                     .map(|_| class_id(request))
                     .transpose()?,
                 request.get("details").and_then(Value::as_bool) == Some(true),
+                command == "p9-all",
             ),
+            "p9" | "source" => {
+                let class = class_key(class_id(request)?);
+                let details = request.get("details").and_then(Value::as_bool) == Some(true);
+                if request.get("method").is_some() {
+                    let result = engine.analyze_method(class, MethodId(method_id(request)?))?;
+                    Ok(rendering_json(&result.rendered, details))
+                } else {
+                    let result = engine.analyze(Request {
+                        class,
+                        method: None,
+                    })?;
+                    Ok(rendering_json(&result.rendered, details))
+                }
+            }
             "p8" | "assembly" | "names" => {
                 let class = class_key(class_id(request)?);
                 let details = request.get("details").and_then(Value::as_bool) == Some(true);
@@ -552,7 +567,7 @@ impl Shell {
                     let method = engine.analyze_method(class, MethodId(method_id(request)?))?;
                     Ok(match &method.display {
                         diana_decomp::p8::MethodDisplayOutcome::Ready(r) => {
-                            json!({"stage":"p8","method":method.key.method.0,"standalone":true,"names":r.names(),"result":details.then(||json!(r))})
+                            json!({"stage":"p8","method":method.key.method.0,"standalone":true,"names":r.names(),"result":details.then(||json!(r.as_ref()))})
                         }
                         diana_decomp::p8::MethodDisplayOutcome::Stopped(s) => assembly_stop_json(s),
                     })
@@ -1908,6 +1923,16 @@ fn expression_counts(counts: &mut BTreeMap<String, u64>, result: &diana_decomp::
         *counts.entry(key.into()).or_default() += 1;
     }
 }
+fn rendering_json(result: &diana_decomp::p9::RenderOutcome, details: bool) -> Value {
+    match result {
+        diana_decomp::p9::RenderOutcome::Ready(r) => {
+            json!({"stage":"p9","class":r.source().class(),"text":r.text(),"spans":r.spans(),"issues":r.issues(),"result":details.then(||json!(r))})
+        }
+        diana_decomp::p9::RenderOutcome::Stopped(s) => {
+            json!({"stage":"p9","stopped":true,"class":s.source().class(),"error":s.error().to_string(),"kind":format!("{:?}",s.error().kind()),"text_prefix":s.text_prefix(),"spans":s.spans(),"source":details.then(||json!(s.source()))})
+        }
+    }
+}
 fn assembly_counts(counts: &mut BTreeMap<String, u64>, r: &diana_decomp::p8::ClassResult) {
     for (key, n) in [
         ("fields", r.fields().len()),
@@ -1938,7 +1963,7 @@ fn assembly_json(result: &diana_decomp::p8::ClassOutcome, details: bool) -> Valu
         diana_decomp::p8::ClassOutcome::Ready(r) => {
             let mut counts = BTreeMap::new();
             assembly_counts(&mut counts, r);
-            json!({"stage":"p8","class":r.key().class_def.0,"counts":counts,"result":details.then(||json!(r))})
+            json!({"stage":"p8","class":r.key().class_def.0,"counts":counts,"result":details.then(||json!(r.as_ref()))})
         }
         diana_decomp::p8::ClassOutcome::Stopped(s) => assembly_stop_json(s),
     }
@@ -1948,10 +1973,14 @@ fn assembly_all(
     classes: u32,
     selected: Option<u32>,
     details: bool,
+    rendering: bool,
 ) -> Result<Value, RequestError> {
     use diana_decomp::p8::{ClassOutcome, MethodDelivery};
     let start = std::time::Instant::now();
     let mut analysis_time = std::time::Duration::ZERO;
+    let mut rendered = 0u64;
+    let mut render_failed = 0u64;
+    let mut render_issues = 0u64;
     let mut ready = 0u64;
     let mut failed = 0u64;
     let mut class_errors = 0u64;
@@ -2018,11 +2047,38 @@ fn assembly_all(
                 }
             }
         }
+        if rendering {
+            match &analysis.rendered {
+                diana_decomp::p9::RenderOutcome::Ready(r) => {
+                    rendered += 1;
+                    render_issues += r.issues().len() as u64;
+                    *counts.entry("output_bytes".into()).or_default() += r.text().len() as u64;
+                    *counts.entry("source_spans".into()).or_default() += r.spans().len() as u64;
+                    if let Some(issue) = r.issues().first() {
+                        first_failure.get_or_insert(json!({"class":class,"render_issue":issue}));
+                    }
+                }
+                diana_decomp::p9::RenderOutcome::Stopped(s) => {
+                    render_failed += 1;
+                    first_failure
+                        .get_or_insert(json!({"class":class,"render_error":s.error().to_string()}));
+                }
+            }
+        }
         if let Some(products) = &mut products {
-            products.push(assembly_json(result, true));
+            products.push(if rendering {
+                rendering_json(&analysis.rendered, true)
+            } else {
+                assembly_json(result, true)
+            });
         }
     }
-    let mut result = json!({"stage":"p8","classes":selected.map_or(classes,|_|1),"ready":ready,"failed":failed,"class_errors":class_errors,"methods":methods,"no_code":no_code,"expressed":expressed,"stopped_members":stopped_members,"retention_errors":retention_errors,"upstream_type_issues":type_issues,"upstream_storage_issues":storage_issues,"counts":counts,"complete":true,"first_failure":first_failure,"analysis_ns":analysis_time.as_nanos(),"elapsed_ms":start.elapsed().as_millis()});
+    let mut result = json!({"stage":if rendering{"p9"}else{"p8"},"classes":selected.map_or(classes,|_|1),"ready":ready,"failed":failed,"class_errors":class_errors,"methods":methods,"no_code":no_code,"expressed":expressed,"stopped_members":stopped_members,"retention_errors":retention_errors,"upstream_type_issues":type_issues,"upstream_storage_issues":storage_issues,"counts":counts,"complete":true,"first_failure":first_failure,"analysis_ns":analysis_time.as_nanos(),"elapsed_ms":start.elapsed().as_millis()});
+    if rendering {
+        result["rendered"] = json!(rendered);
+        result["render_failed"] = json!(render_failed);
+        result["render_issues"] = json!(render_issues);
+    }
     if let Some(products) = products {
         result["products"] = json!(products);
     }
@@ -2536,6 +2592,11 @@ fn write_value(output: &mut impl Write, value: &Value, format: Format) -> std::i
     }
     if value.get("ok").and_then(Value::as_bool) == Some(true) {
         if let Some(result) = value.get("result") {
+            if result.get("stage").and_then(Value::as_str) == Some("p9")
+                && let Some(text) = result.get("text").and_then(Value::as_str)
+            {
+                return output.write_all(text.as_bytes());
+            }
             let mut text = String::new();
             render_text(result, 0, &mut text);
             if !text.is_empty() {

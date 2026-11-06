@@ -188,7 +188,7 @@ pub(crate) fn assemble(
         Ok((header, fields, preparation_order))
     })();
     match result {
-        Ok((header, fields, preparation_order)) => ClassOutcome::Ready(ClassResult {
+        Ok((header, fields, preparation_order)) => ClassOutcome::Ready(Arc::new(ClassResult {
             facts,
             header,
             values,
@@ -196,14 +196,14 @@ pub(crate) fn assemble(
             methods,
             names: plan,
             preparation_order,
-        }),
-        Err(error) => ClassOutcome::Stopped(AssemblyStop {
+        })),
+        Err(error) => ClassOutcome::Stopped(Arc::new(AssemblyStop {
             facts,
             methods,
             error,
             values,
             names: plan,
-        }),
+        })),
     }
 }
 pub(crate) fn method_display(
@@ -221,27 +221,27 @@ pub(crate) fn method_display(
         Ok(()) => {
             let mut methods = methods;
             let Some(member) = methods.pop() else {
-                return MethodDisplayOutcome::Stopped(AssemblyStop {
+                return MethodDisplayOutcome::Stopped(Arc::new(AssemblyStop {
                     facts,
                     methods,
                     error: RequestError::InternalInvariant("P8 selected member disappeared"),
                     values,
                     names: plan,
-                });
+                }));
             };
-            MethodDisplayOutcome::Ready(MethodDisplay {
+            MethodDisplayOutcome::Ready(Arc::new(MethodDisplay {
                 facts,
                 member,
                 values,
                 names: plan,
-            })
+            }))
         }
-        Err(error) => MethodDisplayOutcome::Stopped(AssemblyStop {
+        Err(error) => MethodDisplayOutcome::Stopped(Arc::new(AssemblyStop {
             facts,
             methods,
             error,
             values,
             names: plan,
-        }),
+        })),
     }
 }

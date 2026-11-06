@@ -1751,6 +1751,16 @@ ExpressionPartial 交付，不能改为成熟 MethodResult。
 名称计划渲染，不在文本/JSON 之间改变表示模式、生成新跳转或重新读取
 引用声明。package/import 整理不重跑 P7，也不修改操作、类型和调用身份。
 
+P7 的 EmissionPlan 固定最终发射位置；原 control/outlet 表继续保留来源事实，
+不是第二份可执行日程。循环条件的两条原边在 predicate 内选择并承接复制，
+独立 break 不经过条件退出边的复制。语法拥有的 header/predicate 不单独
+发射 continuation，避免跳过自身条件或 monitor acquire。自然构造跨节点时
+按已有初始化点恢复后续，不按 PC 排列假定顺序落下。
+
+已匹配的 synchronized release、释放后复制和 routing terminal 在原节点
+发射。with_explicit_exits 容器的结束不额外释放锁；release 只结束该锁范围，
+不撤掉外围 try/catch。P9 直接打印这些既定位置和显式语义，不补控制分析。
+
 方法整体使用 Java-like 记法，不增加“合法 Java/验证通过”的完整性徽章。
 出现 goto、exception_map 或显式 monitor 时，记法标识和执行关系正文默认
 可见；可隐藏的恢复诊断不能成为这些关系的唯一承载。标签/goto 不改变
@@ -1987,6 +1997,12 @@ P9 消费已有 MethodResult/ClassResult 及名称计划，输出文本/JSON并�
 P9 MUST 按节点状态打印已恢复表达、未恢复范围及具体原因，不能因某一
 片段不可用而拒绝整个正文，也不能为恢复显示重新解析类型或执行分析。
 基础输出资源或目标失效时返回具体交付错误；中途截断不是部分恢复成功。
+
+Engine 以 RenderTask 调用 P9。Rendered 拥有 UTF-8 文本、半开字节 spans、
+具体渲染问题及同一次不可变源产品；write_text/write_json 使用同一份文本。
+方法私有遍历/显示索引 scratch 失败局限于该成员；共享输出或类级显示上下文
+无法建立时交付 RenderStop，保留源产品和已完成前缀，不重标为成功结果。
+详细记法、生命周期和错误范围见 [P9 渲染](spec/09-rendering.md)。
 
 ### 8.3 类组装的成员契约
 

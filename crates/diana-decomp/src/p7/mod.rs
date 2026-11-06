@@ -3,6 +3,8 @@
 mod build;
 mod control;
 mod copies;
+mod emission;
+pub use emission::*;
 mod lower;
 mod product;
 mod references;

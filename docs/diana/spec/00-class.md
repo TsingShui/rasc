@@ -21,7 +21,9 @@ The collector MUST NOT open code items or invoke method analysis.
 
 Method declarations retain exact name/prototype text, shorty, parameter type
 identities and word layout, return type identity and parameter count, so the method
-reader does not resolve the declaration record again. Fields retain storage group,
+reader does not resolve the declaration record again. `OriginalText` JSON retains
+UTF-16 units beside display text, so isolated surrogates and literal escape
+sequences do not collapse to one serialized identity. Fields retain storage group,
 static ordinal, original declaration and encoded static preparation bytes. An omitted static entry is `implicit_default`, distinct
 from an explicitly encoded default. Instance fields have no encoded static initial
 value. Scalar strings and floating-point bits retain their original values. Other
@@ -94,7 +96,7 @@ cached as absent definitions.
 
 ## Development inspection
 
-The engine development shell is the single P0–P8 observation entry:
+The engine development shell is the single P0–P9 observation entry:
 
 ```sh
 cargo run -p diana-decomp --example dbg_shell --locked -- \

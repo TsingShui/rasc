@@ -380,6 +380,9 @@ pub(super) fn prepare(c: &mut Context<'_, '_>) -> Result<(), ExpressionError> {
                 name,
                 original: *local,
                 declared_types,
+                type_source_unknown: value
+                    .and_then(|v| c.planned.type_facts().value(v))
+                    .is_none_or(|v| v.has_unknown_type_source()),
                 gap: c.planned.storage_facts().local_gap(local.id()),
             },
         )?;

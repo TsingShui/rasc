@@ -19,6 +19,7 @@ pub struct MethodHeader {
     pub declaration: crate::p0::MethodDeclaration,
     pub name_form: NameForm,
     pub kind: MethodKind,
+    pub parameter_names: Vec<String>,
     #[serde(serialize_with = "super::metadata")]
     pub metadata: crate::p0::MethodMetadata,
     #[serde(serialize_with = "super::debug")]
@@ -31,6 +32,7 @@ pub struct LocalDeclaration {
     #[serde(serialize_with = "super::debug")]
     pub original: crate::p5::Local,
     pub declared_types: Vec<TypeUseId>,
+    pub type_source_unknown: bool,
     #[serde(serialize_with = "super::debug")]
     pub gap: Option<crate::p5::StorageGap>,
 }
@@ -88,6 +90,7 @@ pub enum Issue {
 /// associations, not authority to query an earlier stage or a live DEX image.
 #[derive(Debug, Serialize)]
 pub struct MethodCode {
+    pub(super) emission: EmissionPlan,
     #[serde(serialize_with = "super::debug")]
     pub(super) coverage: Vec<crate::p2::Coverage>,
     pub(super) types: Vec<TypeUse>,
@@ -115,6 +118,7 @@ pub struct MethodCode {
 impl MethodCode {
     pub(super) fn empty() -> Self {
         Self {
+            emission: EmissionPlan::empty(),
             coverage: Vec::new(),
             types: Vec::new(),
             references: Vec::new(),
@@ -138,6 +142,9 @@ impl MethodCode {
             components: Vec::new(),
             issues: Vec::new(),
         }
+    }
+    pub fn emission(&self) -> &EmissionPlan {
+        &self.emission
     }
     pub fn coverage(&self) -> &[crate::p2::Coverage] {
         &self.coverage
@@ -307,6 +314,24 @@ pub struct ExpressionPartial {
     pub(super) code: MethodCode,
 }
 impl ExpressionPartial {
+    /// Operation-associated fragments have closed statement dependencies. Other
+    /// arena entries are still construction evidence and can reference pending
+    /// records; they are not a second executable method or emission schedule.
+    pub fn fragments(&self) -> impl Iterator<Item = (&Operation, &Statement)> {
+        self.code.operations.iter().filter_map(|op| {
+            op.statement
+                .map(|id| (op, &self.code.statements[id.0 as usize]))
+        })
+    }
+    pub fn payloads(&self) -> &[ArrayPayload] {
+        &self.code.payloads
+    }
+    pub fn constructions(&self) -> &[Construction] {
+        &self.code.constructions
+    }
+    pub fn copies(&self) -> &[CopyBundle] {
+        &self.code.copies
+    }
     pub fn type_uses(&self) -> &[TypeUse] {
         &self.code.types
     }

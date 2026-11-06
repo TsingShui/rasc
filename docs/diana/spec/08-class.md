@@ -12,7 +12,7 @@ those tasks, it calls P8 with the original class directory and one delivery per
 selected method. P8 MUST NOT invoke a method-stage constructor, decode input,
 retry a failed method or derive missing execution facts.
 
-A complete class request produces `ClassOutcome::Ready(ClassResult)` or a
+A complete class request produces `ClassOutcome::Ready(Arc<ClassResult>)` or a
 classified `AssemblyStop`. A selected-method request uses the same collector and
 name planner with standalone scope, producing `MethodDisplayOutcome`. Standalone
 plans have no package or imports and keep qualified names. They do not analyze
@@ -24,7 +24,10 @@ methods, metadata expressions and `TypeNamePlan`. It shares immutable owned P0
 facts and P7 results through Arc; it does not borrow DEX bytes or an Engine.
 Sharing a result does not copy its expression arena or expose mutable analysis.
 P7's `into_result()` returns the owned shared result and releases retained
-analysis. A class result can outlive both the input bytes and Engine.
+analysis. A class result can outlive both the input bytes and Engine. P9 and same-execution
+inspection share immutable owned P8 results, including assembly stops, rather than
+copying expression arenas. P9's renderer consumes the established products as
+described in [the rendering chapter](09-rendering.md).
 
 ## Directory and failure locality
 

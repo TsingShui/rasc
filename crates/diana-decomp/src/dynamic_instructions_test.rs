@@ -33,6 +33,7 @@ const VOID: u16 = 8;
 
 #[test]
 fn dynamic_instructions_preserve_layout_references_and_completions() {
+    check_rendering_cases();
     check_assembly_cases();
     check_expression_owned_facts();
     check_expression_call_surface();
@@ -802,7 +803,7 @@ fn method_display_correspondence(result: &crate::p8::MethodDisplayOutcome) {
     }
 }
 
-fn assembled(bytes: &[u8]) -> crate::p8::ClassResult {
+fn assembled(bytes: &[u8]) -> std::sync::Arc<crate::p8::ClassResult> {
     let engine = Engine::open(vec![DexImage {
         bytes,
         header_offset: ByteOffset(0),
@@ -816,6 +817,7 @@ fn assembled(bytes: &[u8]) -> crate::p8::ClassResult {
             method: None,
         })
         .expect("P0/P8 discarded locatable original members");
+    rendering_correspondence(&response.rendered);
     let crate::Presentation::Class(crate::p8::ClassOutcome::Ready(r)) = response.presentation
     else {
         panic!("P8 did not publish a mixed original class")
@@ -1109,7 +1111,7 @@ fn check_assembly_cases() {
         assembled(&f.bytes)
     };
     assert_eq!(result.methods().len(), 4);
-    assert!(serde_json::to_vec(&result).unwrap().len() > 100);
+    assert!(serde_json::to_vec(result.as_ref()).unwrap().len() > 100);
 }
 
 fn check_expression_call_surface() {
@@ -4775,68 +4777,20 @@ struct ExpressionTracePlan {
 }
 impl ExpressionTracePlan {
     fn new(code: &crate::p7::MethodCode) -> Self {
-        use crate::p7::*;
-        let mut operations = vec![ExpressionTracePhases::default(); code.operations().len()];
-        let mut terminals = vec![ExpressionTracePhases::default(); code.terminals().len()];
-        let mut transfers = code
-            .transfers()
-            .iter()
-            .map(|t| t.copies.clone())
-            .collect::<Vec<_>>();
-        for op in code.operations() {
-            let s = &code.statements()[op.statement.unwrap().0 as usize];
-            operations[op.source.0 as usize] = ExpressionTracePhases {
-                before: s.before.clone(),
-                snapshots: s.snapshots.clone(),
-                after: s.after.clone(),
-            };
-        }
-        for t in code.terminals() {
-            terminals[t.block.0 as usize] = ExpressionTracePhases {
-                before: t.before.clone(),
-                snapshots: t.snapshots.clone(),
-                after: vec![],
-            };
-        }
-        for control in code.controls() {
-            if let ControlKind::Synchronized { outlets, .. } = &control.kind {
-                for outlet in outlets {
-                    let op = code
-                        .operations()
-                        .iter()
-                        .find(|o| o.statement == Some(outlet.release))
-                        .unwrap()
-                        .source
-                        .0 as usize;
-                    operations[op].before = outlet.before_operand.clone();
-                    operations[op].snapshots = outlet.snapshots.clone();
-                    for step in &outlet.completion {
-                        match step {
-                            OutletStep::Copies(plans) => operations[op].after.extend(plans),
-                            OutletStep::Transfer { transfer, copies } => {
-                                for &p in copies {
-                                    if !transfers[transfer.0 as usize].contains(&p) {
-                                        transfers[transfer.0 as usize].push(p);
-                                    }
-                                }
-                            }
-                            OutletStep::Terminal {
-                                terminal,
-                                before_operand,
-                                snapshots,
-                            } => {
-                                terminals[terminal.0 as usize].before = before_operand.clone();
-                                terminals[terminal.0 as usize].snapshots = snapshots.clone();
-                            }
-                        }
-                    }
-                }
-            }
-        }
+        let phases = |p: &crate::p7::EvaluationPhases| ExpressionTracePhases {
+            before: p.before.clone(),
+            snapshots: p.snapshots.clone(),
+            after: p.after.clone(),
+        };
         Self {
-            operations,
-            terminals,
-            transfers,
+            operations: code.emission().operations().iter().map(phases).collect(),
+            terminals: code.emission().terminals().iter().map(phases).collect(),
+            transfers: code
+                .emission()
+                .transfers()
+                .iter()
+                .map(|t| t.copies.clone())
+                .collect(),
         }
     }
 }
@@ -9102,6 +9056,914 @@ fn expression_controls(method: &ExpressedMethod<'_>) {
     );
 }
 
+const RENDER_LITERAL: &str = "雪😀\0\n\"\\uD800\u{202e}";
+fn rendered(bytes: &[u8]) -> crate::p9::RenderOutcome {
+    let engine = Engine::open(vec![DexImage {
+        bytes,
+        header_offset: ByteOffset(0),
+        origin: ImageOrigin { input: InputId(0) },
+    }])
+    .unwrap();
+    let result = engine.analyze_method(CLASS, ENTRY).unwrap();
+    rendering_correspondence(&result.rendered);
+    result.rendered
+}
+fn check_rendering_cases() {
+    use crate::{p7::*, p9::*};
+    let make = || {
+        let mut f = dex(39, &[0x001a, 0, 0x0011], None, 2, 4, 3, 0);
+        put16(&mut f.bytes, f.code + 18, f.literal_string as u16);
+        f
+    };
+    let ready = {
+        let f = make();
+        rendered(&f.bytes)
+    };
+    let RenderOutcome::Ready(r) = ready else {
+        panic!("P9 did not retain owned output")
+    };
+    let expected = r#""雪😀\u0000\n\"\\uD800\u202e""#;
+    assert!(
+        r.text().contains(expected),
+        "P9 changed UTF-16 literal escaping"
+    );
+    assert!(
+        !r.text().contains('\u{202e}'),
+        "P9 emitted a bidi control into readable source"
+    );
+    let span = r
+        .spans()
+        .iter()
+        .find(|s| {
+            matches!(s.origin, Origin::Expression { .. })
+                && &r.text()[s.start.0..s.end.0] == expected
+        })
+        .expect("P9 source span lost an escaped literal");
+    assert_eq!(
+        span.end.0 - span.start.0,
+        expected.len(),
+        "P9 counted characters instead of UTF-8 bytes"
+    );
+    assert!(expected.len() > expected.chars().count());
+    let mut f = make();
+    let at = u32::from_le_bytes(f.bytes[60..64].try_into().unwrap()) as usize
+        + f.literal_string as usize * 4;
+    let offset = u32::from_le_bytes(f.bytes[at..at + 4].try_into().unwrap()) as usize;
+    assert!(f.bytes[offset] < 128);
+    assert_eq!(&f.bytes[offset + 1..offset + 4], &[0xe9, 0x9b, 0xaa]);
+    f.bytes[offset + 1..offset + 4].copy_from_slice(&[0xed, 0xa0, 0x80]);
+    put32(&mut f.bytes, f.methods + 8 + 4, f.keyword_name);
+    let RenderOutcome::Ready(r) = rendered(&f.bytes) else {
+        panic!("P9 rejected an original UTF-16 identity")
+    };
+    assert!(
+        r.text().contains(r#""\ud800😀\u0000\n\"\\uD800\u202e""#),
+        "P9 replaced an isolated surrogate: {}",
+        r.text()
+    );
+    assert!(
+        r.text().contains("name<"),
+        "P9 hid an original non-identifier member name"
+    );
+    let SourceProduct::Method(m) = r.source() else {
+        panic!()
+    };
+    let original = m
+        .member()
+        .delivery
+        .as_ref()
+        .unwrap()
+        .result()
+        .unwrap()
+        .header();
+    let json = serde_json::to_value(original).unwrap();
+    assert_eq!(
+        json["declaration"]["name"]["units"],
+        serde_json::json!(original.declaration.name_units()),
+        "P9 JSON lost original UTF-16 member identity"
+    );
+    struct Broken(usize);
+    impl std::io::Write for Broken {
+        fn write(&mut self, b: &[u8]) -> std::io::Result<usize> {
+            if self.0 == 0 {
+                return Err(std::io::Error::from(std::io::ErrorKind::BrokenPipe));
+            }
+            let n = b.len().min(self.0).min(3);
+            self.0 -= n;
+            Ok(n)
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+    assert!(
+        matches!(r.write_text(&mut Broken(7)),Err(OutputError::Io(e)) if e.kind()==std::io::ErrorKind::BrokenPipe),
+        "P9 silently accepted truncated text output"
+    );
+    assert!(
+        matches!(r.write_json(&mut Broken(7)),Err(OutputError::Json(e)) if e.is_io()),
+        "P9 reclassified or ignored JSON sink failure"
+    );
+    // Both the header-selected exit and a break reach one live Phi, with distinct copies.
+    let f = dex(
+        39,
+        &[0x0012, 0x0438, 7, 0x00d8, 0x0100, 0x0039, 3, 0xfa28, 0x000f],
+        None,
+        0,
+        5,
+        3,
+        0,
+    );
+    let RenderOutcome::Ready(r) = rendered(&f.bytes) else {
+        panic!()
+    };
+    let SourceProduct::Method(m) = r.source() else {
+        panic!()
+    };
+    let code = m
+        .member()
+        .delivery
+        .as_ref()
+        .unwrap()
+        .result()
+        .unwrap()
+        .code()
+        .unwrap();
+    let c = code
+        .controls()
+        .iter()
+        .find(|c| {
+            matches!(
+                c.kind,
+                ControlKind::Loop {
+                    syntax: LoopSyntax::While { .. },
+                    ..
+                }
+            )
+        })
+        .expect("P9 loop-copy witness lost its natural loop");
+    let ControlKind::Loop {
+        syntax: LoopSyntax::While { exit, .. },
+        ..
+    } = c.kind
+    else {
+        panic!()
+    };
+    assert!(
+        !code.emission().transfers()[exit.0 as usize]
+            .copies
+            .is_empty(),
+        "P9 loop-copy witness has no condition-exit copy"
+    );
+    assert!(
+        code.transfers().iter().any(
+            |t| matches!(t.kind,TransferKind::Break(target) if target==c.id)
+                && !code.emission().transfers()[t.id.0 as usize]
+                    .copies
+                    .is_empty()
+        ),
+        "P9 loop-copy witness has no independent break copy"
+    );
+    // Straight allocation/initialization can be non-contiguous and backward in PC.
+    let mut f = dex_with_handler(
+        39,
+        &[0x0528, 0x1070, 0, 0, 0x000e, 0x0022, 2, 0xfa28],
+        None,
+        5,
+        2,
+        0,
+        1,
+        &[0x010d, 0x000e],
+        None,
+    );
+    put16(&mut f.bytes, f.methods + 2, 5);
+    put32(&mut f.bytes, f.methods + 4, f.init_name);
+    let RenderOutcome::Ready(r) = rendered(&f.bytes) else {
+        panic!()
+    };
+    let SourceProduct::Method(m) = r.source() else {
+        panic!()
+    };
+    let code = m
+        .member()
+        .delivery
+        .as_ref()
+        .unwrap()
+        .result()
+        .unwrap()
+        .code()
+        .unwrap();
+    assert_eq!(
+        code.constructions().len(),
+        1,
+        "P9 backward-channel witness was not naturally constructed"
+    );
+    let g = &code.constructions()[0];
+    let start = code.operations()[g.allocation.0 as usize].node;
+    let target = code.operations()[g.initialization.0 as usize].node;
+    assert!(
+        matches!(code.emission().blocks()[start.0 as usize].end,BlockEnd::ConstructionFollow{target:label,..} if label.0==target.0),
+        "P7 lost the compound normal continuation"
+    );
+    assert!(
+        r.text().contains("resume construction g0 at"),
+        "P9 let compound new fall through by PC order"
+    );
+}
+
+fn rendering_layout(r: &crate::p9::Rendered, method: MethodId, code: &crate::p7::MethodCode) {
+    use crate::{p7::*, p9::Origin};
+    let span = |origin| r.spans().iter().find(|s| s.origin == origin).unwrap();
+    let contains = |a: &crate::p9::SourceSpan, b: &crate::p9::SourceSpan| {
+        a.start.0 <= b.start.0 && b.end.0 <= a.end.0
+    };
+    for c in code.controls() {
+        let outer = span(Origin::Control {
+            method,
+            control: c.id,
+        });
+        match &c.kind {
+            ControlKind::Block { node } => {
+                for op in code.operations().iter().filter(|o| o.node == *node) {
+                    if matches!(
+                        op.emission,
+                        Emission::Block { .. } | Emission::Catch(_) | Emission::Release(_)
+                    ) {
+                        assert!(
+                            contains(
+                                outer,
+                                span(Origin::Operation {
+                                    method,
+                                    operation: op.source,
+                                    pc: op.pc
+                                })
+                            ),
+                            "P9 moved an operation out of its original node"
+                        );
+                    }
+                }
+                if let BlockCompletion::Ordinary(t)
+                | BlockCompletion::Syntax {
+                    terminal: t,
+                    owner: TerminalEmission::SyncExit(_),
+                } = code.blocks()[node.0 as usize].completion
+                {
+                    assert!(
+                        contains(outer, span(Origin::Terminal { method, block: t })),
+                        "P9 moved an unlocked terminal out of its original protected node"
+                    );
+                }
+            }
+            ControlKind::If {
+                terminal,
+                when_true,
+                when_false,
+            } => {
+                let EmissionLayout::If {
+                    header,
+                    yes,
+                    no,
+                    test,
+                } = &code.emission().controls()[c.id.0 as usize].layout
+                else {
+                    panic!("P7 changed selected if layout")
+                };
+                assert_eq!(
+                    (*header, *yes, *no),
+                    (c.children[0], c.children[1], c.children[2]),
+                    "P7 changed if child roles"
+                );
+                assert_eq!(
+                    (test.terminal, test.when_true, test.when_false),
+                    (*terminal, *when_true, *when_false)
+                );
+                assert!(
+                    code.emission().controls()[header.0 as usize]
+                        .continuation
+                        .is_none(),
+                    "P7 let a syntax header bypass its selected branch"
+                );
+                let a = span(Origin::Control {
+                    method,
+                    control: *yes,
+                });
+                let b = span(Origin::Control {
+                    method,
+                    control: *no,
+                });
+                assert!(a.end.0 <= b.start.0, "P9 reversed selected if arms");
+            }
+            ControlKind::Loop { syntax, .. } => {
+                if let LoopSyntax::While {
+                    terminal, repeat, ..
+                }
+                | LoopSyntax::DoWhile {
+                    terminal, repeat, ..
+                } = syntax
+                {
+                    let EmissionLayout::Loop { body, placement } =
+                        &code.emission().controls()[c.id.0 as usize].layout
+                    else {
+                        panic!("P7 lost selected loop predicate")
+                    };
+                    let (predicate, test, tail) = match placement {
+                        LoopPlacement::While { predicate, test } => (predicate, test, false),
+                        LoopPlacement::DoWhile { predicate, test } => (predicate, test, true),
+                        LoopPlacement::Infinite => panic!("P7 lost selected loop predicate"),
+                    };
+                    assert_eq!((*body, *predicate), (c.children[0], c.children[1]));
+                    assert!(
+                        code.emission().controls()[predicate.0 as usize]
+                            .continuation
+                            .is_none(),
+                        "P7 let a predicate jump before evaluation"
+                    );
+                    let TerminalKind::If {
+                        when_true,
+                        when_false,
+                        ..
+                    } = code.terminals()[terminal.0 as usize].kind
+                    else {
+                        panic!()
+                    };
+                    assert_eq!(
+                        (test.when_true, test.when_false),
+                        (when_true, when_false),
+                        "P7 reversed loop condition edge ownership"
+                    );
+                    assert_eq!(
+                        test.negate,
+                        *repeat == when_false,
+                        "P7 changed loop repetition polarity"
+                    );
+                    assert_eq!(tail, matches!(syntax, LoopSyntax::DoWhile { .. }));
+                    let test_span = span(Origin::Terminal {
+                        method,
+                        block: *terminal,
+                    });
+                    let text = &r.text()[test_span.start.0..test_span.end.0];
+                    assert_eq!(
+                        text.contains("!("),
+                        test.negate,
+                        "P9 changed loop repetition polarity"
+                    );
+                    let split = test_span.start.0 + text.find("on_original_false").unwrap();
+                    let body_span = span(Origin::Control {
+                        method,
+                        control: *body,
+                    });
+                    for (edge, truth) in [(when_true, true), (when_false, false)] {
+                        let edge_span = span(Origin::Transfer {
+                            method,
+                            transfer: edge,
+                        });
+                        assert!(
+                            contains(test_span, edge_span),
+                            "P9 hoisted loop exit copies into a shared continuation"
+                        );
+                        assert_eq!(
+                            edge_span.start.0 < split,
+                            truth,
+                            "P9 attached copies to the wrong loop condition edge"
+                        );
+                        for &copy in &code.emission().transfers()[edge.0 as usize].copies {
+                            let copied = span(Origin::Copy { method, copy });
+                            assert!(
+                                contains(edge_span, copied) && !contains(body_span, copied),
+                                "P9 lets a break execute condition-exit copies"
+                            );
+                        }
+                    }
+                }
+            }
+            ControlKind::Synchronized { acquire, .. } => {
+                let EmissionLayout::Synchronized { entry, .. } =
+                    code.emission().controls()[c.id.0 as usize].layout
+                else {
+                    panic!()
+                };
+                assert!(
+                    code.emission().controls()[entry.0 as usize]
+                        .continuation
+                        .is_none(),
+                    "P7 let an entry bypass monitor acquisition"
+                );
+                let at = span(Origin::Statement {
+                    method,
+                    statement: *acquire,
+                });
+                assert!(
+                    r.text()[at.start.0..at.end.0].contains("with_explicit_exits"),
+                    "P9 invented an implicit second monitor release"
+                );
+            }
+            _ => {}
+        }
+    }
+    for op in code.operations() {
+        if matches!(op.emission, Emission::Literal | Emission::Construction(_)) {
+            continue;
+        }
+        let operation = span(Origin::Operation {
+            method,
+            operation: op.source,
+            pc: op.pc,
+        });
+        let phases = &code.emission().operations()[op.source.0 as usize];
+        let statement = &code.statements()[op.statement.unwrap().0 as usize];
+        if let Arguments::Known(args) = &statement.inputs {
+            let mut last = operation.start.0;
+            for &arg in args {
+                let read = r
+                    .spans()
+                    .iter()
+                    .find(|s| {
+                        s.origin
+                            == Origin::Expression {
+                                method,
+                                expression: arg,
+                            }
+                            && contains(operation, s)
+                    })
+                    .expect("P9 lost an original operand read");
+                assert!(
+                    last <= read.start.0,
+                    "P9 reordered original operand captures"
+                );
+                last = read.end.0;
+            }
+        }
+        for &copy in &phases.before {
+            assert!(
+                span(Origin::Copy { method, copy }).end.0 <= operation.start.0,
+                "P9 reordered before-operand copies"
+            );
+        }
+        for &copy in &phases.snapshots {
+            assert!(
+                contains(operation, span(Origin::Copy { method, copy })),
+                "P9 moved a snapshot after commit"
+            );
+            assert!(
+                r.text()[operation.start.0..operation.end.0]
+                    .contains("after_operands_before_effect"),
+                "P9 changed snapshot phase semantics"
+            );
+        }
+        for &copy in &phases.after {
+            assert!(
+                operation.end.0 <= span(Origin::Copy { method, copy }).start.0,
+                "P9 moved normal copies before commit"
+            );
+        }
+        if let Some(pc) = op.result_pc {
+            assert!(
+                contains(
+                    operation,
+                    span(Origin::ResultCommit {
+                        method,
+                        operation: op.source,
+                        pc
+                    })
+                ),
+                "P9 lost result-capture provenance"
+            );
+        }
+    }
+    for handler in code.handlers() {
+        if let HandlerCapture::Body(statement) | HandlerCapture::Catch { statement, .. } =
+            handler.capture
+        {
+            let capture = span(Origin::Statement { method, statement });
+            for &copy in &handler.receives {
+                assert!(
+                    capture.end.0 <= span(Origin::Copy { method, copy }).start.0,
+                    "P9 received snapshots before the original exception capture"
+                );
+            }
+        }
+    }
+}
+
+// Independent lexical scope check over emitted bytes, not the printer's depth.
+fn output_braces(text: &str) -> Vec<(usize, usize)> {
+    let bytes = text.as_bytes();
+    let mut pairs = vec![];
+    let mut stack = vec![];
+    let mut i = 0;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'"' | b'\'' => {
+                let quote = bytes[i];
+                i += 1;
+                while i < bytes.len() {
+                    if bytes[i] == b'\\' {
+                        i += 2;
+                        continue;
+                    }
+                    if bytes[i] == quote {
+                        i += 1;
+                        break;
+                    }
+                    i += 1;
+                }
+            }
+            b'/' if bytes.get(i + 1) == Some(&b'/') => {
+                while i < bytes.len() && bytes[i] != b'\n' {
+                    i += 1;
+                }
+            }
+            b'/' if bytes.get(i + 1) == Some(&b'*') => {
+                i += 2;
+                while i + 1 < bytes.len() && !(bytes[i] == b'*' && bytes[i + 1] == b'/') {
+                    i += 1;
+                }
+                i += 2;
+            }
+            b'{' => {
+                stack.push(i);
+                i += 1;
+            }
+            b'}' => {
+                pairs.push((
+                    stack.pop().expect("P9 emitted an unmatched closing scope"),
+                    i,
+                ));
+                i += 1;
+            }
+            _ => i += 1,
+        }
+    }
+    assert!(stack.is_empty(), "P9 emitted an unclosed lexical scope");
+    pairs
+}
+fn rendering_protection(r: &crate::p9::Rendered, method: MethodId, code: &crate::p7::MethodCode) {
+    use crate::{p7::*, p9::Origin};
+    let pairs = output_braces(r.text());
+    let span = |id| {
+        r.spans()
+            .iter()
+            .find(|s| {
+                s.origin
+                    == Origin::Control {
+                        method,
+                        control: id,
+                    }
+            })
+            .unwrap()
+    };
+    let body_scope = |after: usize, body: &crate::p9::SourceSpan| {
+        let &(open, close) = pairs
+            .iter()
+            .filter(|(open, _)| *open >= after && *open <= body.start.0)
+            .min_by_key(|(open, _)| open)
+            .expect("P9 lost a selected lexical body");
+        assert!(
+            open < body.start.0 && body.end.0 <= close,
+            "P9 changed actual protection scope braces"
+        );
+        close
+    };
+    for c in code.controls() {
+        match &code.emission().controls()[c.id.0 as usize].layout {
+            EmissionLayout::Try { body, catches } => {
+                let original = span(c.id);
+                let text = &r.text()[original.start.0..original.end.0];
+                let start = original.start.0 + text.find(": try").unwrap();
+                let mut closed = body_scope(start, span(*body));
+                for &handler in catches {
+                    let header = &r.text()[closed + 1..span(handler).start.0];
+                    assert!(
+                        header.trim_start().starts_with("catch ("),
+                        "P9 detached an ordered handler from its try"
+                    );
+                    closed = body_scope(closed + 1, span(handler));
+                }
+            }
+            EmissionLayout::Synchronized { body, .. } => {
+                let ControlKind::Synchronized { acquire, .. } = c.kind else {
+                    panic!()
+                };
+                let acquire = r
+                    .spans()
+                    .iter()
+                    .find(|s| {
+                        s.origin
+                            == Origin::Statement {
+                                method,
+                                statement: acquire,
+                            }
+                    })
+                    .unwrap();
+                body_scope(acquire.end.0, span(*body));
+            }
+            _ => {}
+        }
+    }
+}
+
+fn rendering_names(r: &crate::p9::Rendered, names: &crate::p8::TypeNamePlan) {
+    for span in r.spans() {
+        if let crate::p9::Origin::Type(id) = span.origin {
+            let usage = &names.uses()[id.0 as usize];
+            if usage.spelling != crate::p8::Spelling::Original {
+                let target = &names.targets()[usage.target.0 as usize];
+                let mut expected = String::from_utf16(names.spelling(id).unwrap()).unwrap();
+                for _ in 0..target.dimensions {
+                    expected.push_str("[]");
+                }
+                assert_eq!(
+                    &r.text()[span.start.0..span.end.0],
+                    expected,
+                    "P9 changed a planned type spelling or array rank"
+                );
+            }
+        }
+    }
+}
+fn rendering_correspondence(outcome: &crate::p9::RenderOutcome) {
+    use crate::{p7::*, p8::*, p9::*};
+    let RenderOutcome::Ready(r) = outcome else {
+        let RenderOutcome::Stopped(s) = outcome else {
+            unreachable!()
+        };
+        panic!("P9 failed to render a retained product: {}", s.error());
+    };
+    assert!(
+        r.issues().is_empty(),
+        "P9 introduced a rendering gap: {:?}",
+        r.issues()
+    );
+    for span in r.spans() {
+        assert!(
+            span.start.0 <= span.end.0 && span.end.0 <= r.text().len(),
+            "P9 source span exceeds UTF-8 output"
+        );
+        assert!(
+            r.text().is_char_boundary(span.start.0) && r.text().is_char_boundary(span.end.0),
+            "P9 source span splits a UTF-8 scalar"
+        );
+    }
+    let check = |m: &MethodMember| {
+        let n = r
+            .spans()
+            .iter()
+            .filter(|s| s.origin == Origin::Method(m.id))
+            .count();
+        assert_eq!(n, 1, "P9 lost or duplicated an original member");
+        if let Ok(MethodDelivery::Stopped(stop)) = &m.delivery
+            && let Ok(Some(raw)) = &stop.raw
+        {
+            let expected = raw
+                .bytes
+                .iter()
+                .map(|b| format!("{b:02x} "))
+                .collect::<String>();
+            let at = r
+                .spans()
+                .iter()
+                .find(|s| {
+                    s.origin
+                        == Origin::Raw {
+                            method: m.id,
+                            pc: None,
+                        }
+                })
+                .expect("P9 lost retained raw-code output");
+            assert!(
+                r.text()[at.start.0..at.end.0].contains(&expected),
+                "P9 lost retained code bytes"
+            );
+        }
+        let Ok(MethodDelivery::Expressed(method)) = &m.delivery else {
+            return;
+        };
+        let code = method.code().unwrap();
+        for o in code.operations() {
+            let n=r.spans().iter().filter(|s|matches!(s.origin,Origin::Operation{method,operation,..} if method==m.id&&operation==o.source)).count();
+            assert_eq!(
+                n,
+                usize::from(o.emission != Emission::Literal),
+                "P9 lost or duplicated operation {:?} {:?}",
+                o.source,
+                o.emission
+            );
+        }
+        for t in code.terminals() {
+            if !matches!(t.kind, TerminalKind::None)
+                && !matches!(t.emission, TerminalEmission::Construction(_))
+            {
+                let n = r
+                    .spans()
+                    .iter()
+                    .filter(|s| {
+                        s.origin
+                            == Origin::Terminal {
+                                method: m.id,
+                                block: t.block,
+                            }
+                    })
+                    .count();
+                assert_eq!(n, 1, "P9 lost or duplicated terminal {:?}", t.block);
+            }
+        }
+        for p in code.copies() {
+            let expected = match p.emission {
+                CopyEmission::Original | CopyEmission::SyncExit(_) => 1,
+                CopyEmission::Construction(g) => {
+                    usize::from(code.constructions()[g.0 as usize].prelude == Some(p.id))
+                }
+            };
+            let n = r
+                .spans()
+                .iter()
+                .filter(|s| {
+                    s.origin
+                        == Origin::Copy {
+                            method: m.id,
+                            copy: p.id,
+                        }
+                })
+                .count();
+            assert_eq!(
+                n, expected,
+                "P9 lost or duplicated scheduled copy {:?} {:?}",
+                p.id, p.location
+            );
+        }
+        rendering_layout(r, m.id, code);
+        rendering_protection(r, m.id, code);
+        let mut parents = vec![None; code.controls().len()];
+        for c in code.controls() {
+            for child in &c.children {
+                parents[child.0 as usize] = Some(c.id);
+            }
+        }
+        for c in code.controls() {
+            if let ControlKind::Block { node } = c.kind {
+                let mut p = parents[c.id.0 as usize];
+                while let Some(parent) = p {
+                    if matches!(
+                        code.controls()[parent.0 as usize].kind,
+                        ControlKind::Try { .. }
+                    ) {
+                        let outer = r
+                            .spans()
+                            .iter()
+                            .find(|s| {
+                                s.origin
+                                    == Origin::Control {
+                                        method: m.id,
+                                        control: parent,
+                                    }
+                            })
+                            .unwrap();
+                        for span in r.spans() {
+                            let at_node = match span.origin {
+                                Origin::Operation {
+                                    method, operation, ..
+                                } if method == m.id => {
+                                    code.operations()[operation.0 as usize].node == node
+                                }
+                                Origin::Terminal { method, block } if method == m.id => {
+                                    code.blocks()[node.0 as usize].original_block == block
+                                        && matches!(
+                                            code.blocks()[node.0 as usize].completion,
+                                            BlockCompletion::Ordinary(_)
+                                                | BlockCompletion::Syntax { .. }
+                                        )
+                                }
+                                _ => false,
+                            };
+                            if at_node {
+                                assert!(
+                                    outer.start.0 <= span.start.0 && span.end.0 <= outer.end.0,
+                                    "P9 changed the original lexical protection owner"
+                                );
+                            }
+                        }
+                    }
+                    p = parents[parent.0 as usize];
+                }
+            }
+        }
+        for e in code.expressions() {
+            for emitted in r.spans().iter().filter(|s| {
+                s.origin
+                    == Origin::Expression {
+                        method: m.id,
+                        expression: e.id,
+                    }
+            }) {
+                let text = &r.text()[emitted.start.0..emitted.end.0];
+                if matches!(e.kind, ExprKind::Unavailable { .. }) {
+                    assert!(
+                        text.starts_with("unavailable<"),
+                        "P9 replaced an unavailable read with a value"
+                    );
+                }
+            }
+            if let ExprKind::Call(call) = &e.kind
+                && let Arguments::Known(args) = &call.arguments
+            {
+                let outer = r.spans().iter().find(|s| {
+                    s.origin
+                        == Origin::Expression {
+                            method: m.id,
+                            expression: e.id,
+                        }
+                });
+                if let Some(outer) = outer {
+                    let mut previous = outer.start.0;
+                    for &arg in args {
+                        let span = r
+                            .spans()
+                            .iter()
+                            .find(|s| {
+                                s.origin
+                                    == Origin::Expression {
+                                        method: m.id,
+                                        expression: arg,
+                                    }
+                                    && s.start.0 >= outer.start.0
+                                    && s.end.0 <= outer.end.0
+                            })
+                            .expect("P9 lost an original invocation argument");
+                        assert!(
+                            span.start.0 >= previous,
+                            "P9 reordered invocation argument reads"
+                        );
+                        previous = span.end.0;
+                    }
+                }
+            }
+        }
+    };
+    match r.source() {
+        SourceProduct::Class(c) => {
+            rendering_names(r, c.names());
+            for a in c.values().annotations() {
+                assert_eq!(
+                    r.spans()
+                        .iter()
+                        .filter(|s| s.origin == Origin::Annotation(a.id))
+                        .count(),
+                    1,
+                    "P9 lost or duplicated an original metadata scope"
+                );
+            }
+            let prep = r
+                .spans()
+                .iter()
+                .filter_map(|s| match s.origin {
+                    Origin::Preparation(f) => Some(f),
+                    _ => None,
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(
+                prep,
+                c.preparation_order()
+                    .iter()
+                    .map(|&i| c.fields()[i].id)
+                    .collect::<Vec<_>>(),
+                "P9 reordered static preparation"
+            );
+            for f in c.fields() {
+                assert_eq!(
+                    r.spans()
+                        .iter()
+                        .filter(|s| s.origin == Origin::Field(f.id))
+                        .count(),
+                    1,
+                    "P9 lost an original field"
+                );
+            }
+            for m in c.methods() {
+                check(m);
+            }
+        }
+        SourceProduct::Method(m) => {
+            rendering_names(r, m.names());
+            check(m.member());
+        }
+        SourceProduct::ClassStopped(s) | SourceProduct::MethodStopped(s) => {
+            for m in s.methods() {
+                check(m);
+            }
+        }
+    }
+    let mut text = Vec::new();
+    r.write_text(&mut text).unwrap();
+    let mut json = Vec::new();
+    r.write_json(&mut json).unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&json).unwrap();
+    assert_eq!(
+        json["text"].as_str().unwrap().as_bytes(),
+        text,
+        "P9 text and JSON changed recovery contents"
+    );
+}
+
 fn analyze(bytes: &[u8]) -> MethodOutcome<'_> {
     let engine = Engine::open(vec![DexImage {
         bytes,
@@ -9111,6 +9973,7 @@ fn analyze(bytes: &[u8]) -> MethodOutcome<'_> {
     .unwrap();
     let analysis = engine.analyze_method(CLASS, ENTRY).unwrap();
     method_display_correspondence(&analysis.display);
+    rendering_correspondence(&analysis.rendered);
     let outcome = analysis.result.unwrap();
     if let MethodOutcome::Expressed(method) = &outcome {
         storage_correspondence(method);
@@ -9463,6 +10326,8 @@ fn check_completion(flow: &ExpressedMethod<'_>, handler_pc: u32, heap: HeapTrans
 }
 
 struct Fixture {
+    literal_string: u32,
+    keyword_name: u32,
     bytes: Vec<u8>,
     code: usize,
     handles: usize,
@@ -9620,6 +10485,8 @@ fn dex_with_facts(
         "invokeExact",
         "link",
         "target",
+        RENDER_LITERAL,
+        "int",
     ]);
     strings.sort_unstable();
     strings.dedup();
@@ -9672,9 +10539,7 @@ fn dex_with_facts(
             string_ids + index * 4,
             u32::try_from(offset).unwrap(),
         );
-        uleb(&mut bytes, u32::try_from(text.len()).unwrap());
-        bytes.extend(text.as_bytes());
-        bytes.push(0);
+        mutf8(&mut bytes, &text.encode_utf16().collect::<Vec<_>>());
     }
     for (index, text) in types.iter().enumerate() {
         put32(&mut bytes, type_ids + index * 4, string_id(text));
@@ -9959,6 +10824,8 @@ fn dex_with_facts(
     put32(&mut bytes, 104, length - u32::try_from(data).unwrap());
     put32(&mut bytes, 108, u32::try_from(data).unwrap());
     Fixture {
+        literal_string: string_id(RENDER_LITERAL),
+        keyword_name: string_id("int"),
         bytes,
         code,
         handles,
@@ -9969,6 +10836,25 @@ fn dex_with_facts(
         parameter_annotation,
         tries,
     }
+}
+
+fn mutf8(bytes: &mut Vec<u8>, units: &[u16]) {
+    uleb(bytes, u32::try_from(units.len()).unwrap());
+    for &u in units {
+        match u {
+            1..=0x7f => bytes.push(u as u8),
+            0..=0x7ff => {
+                bytes.push(0xc0 | (u >> 6) as u8);
+                bytes.push(0x80 | (u & 63) as u8);
+            }
+            _ => {
+                bytes.push(0xe0 | (u >> 12) as u8);
+                bytes.push(0x80 | ((u >> 6) & 63) as u8);
+                bytes.push(0x80 | (u & 63) as u8);
+            }
+        }
+    }
+    bytes.push(0);
 }
 
 fn align(bytes: &mut Vec<u8>) {

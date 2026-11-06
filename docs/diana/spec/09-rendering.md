@@ -1,0 +1,138 @@
+# P9 rendering and source spans
+
+[PIPELINE_DESIGN §8.2](../PIPELINE_DESIGN.md#82-p7p8p9-的显示产品交付)
+defines the display boundary. Code lives in `crates/diana-decomp/src/p9/`;
+execution observations belong in the [engine README](../../../crates/diana-decomp/README.md).
+
+## Input, authority and lifetime
+
+Engine calls P9 with its private `RenderTask` after the same request's P8
+assembly. P9 consumes `ClassResult`, standalone `MethodDisplay`, or a classified
+`AssemblyStop`, together with their owned original facts and expression products.
+P8 shares these immutable results through Arc. Neither P9's input nor its output
+borrows DEX, Engine or method-analysis scratch.
+
+P9 MUST consume P7's final `EmissionPlan` and P8's chosen type spellings. It MUST
+NOT decode instructions, reconstruct a graph, choose a handler, solve types,
+resolve overloads, plan imports or retry an earlier stage. Indexing existing
+`TypeSource` mappings does not choose another spelling. Explicit graph syntax
+uses the same statements and copies as structured syntax.
+
+`Rendered` owns UTF-8 text, source spans, concrete rendering issues and the same
+immutable source product. `write_text` writes that text; `write_json` serializes
+that publication, including identical text and source facts. JSON does not run
+another renderer or select another recovery mode. The retained source section
+also contains inspection-formatted diagnostics; P9 does not parse Debug strings
+as an execution representation. The notation identifier is
+`diana-java-like-v1`, not a compilability or verification badge.
+
+## Expression and control notation
+
+The output is Java-like code with explicit forms for existing DEX operations and
+phase boundaries. These forms do not introduce runtime helpers or a dispatcher.
+Ordinary values use P7's locals, literal views and materializations. Calls retain
+original target IDs, dispatch and separate invocation prototypes; a signature
+qualifier is binding information, not a conversion or generic invocation.
+
+The following forms have fixed execution meanings:
+
+| Form | Meaning |
+|---|---|
+| `store value -> receiver.field` or `store value -> array[index]` | Capture the value before receiver/array/index, then perform the original store. This avoids silently adopting Java left-hand-side operand order. |
+| `[after_operands_before_effect { copies }]` | Capture the operation's original operands, run its supplied snapshot steps, then execute the original effect. A result assignment commits only on normal completion. |
+| `new T(arguments) [on_success publish (locals)]` | Execute the selected P5 construction and publish its aliases only after successful initialization. Its common snapshot prelude precedes allocation. |
+| `resume construction g at label` | Continue the selected compound expression at the original initializer's node. Absorbed members are not executed again; PC order is not an implicit continuation. |
+| `test { ... yield condition [on_original_true {...} on_original_false {...}]; }` | Evaluate the supplied predicate portion and execute copies only for the selected original edge. Outer negation changes repetition polarity, not which original edge owns copies. |
+| `synchronized R(lock) with_explicit_exits` | The header owns the original acquire. This lexical container does not implicitly release at its closing brace or on an abrupt exit. |
+| `release synchronized R(lock)` | Execute that outlet's original release read/effect at its original node. Only the named lock scope ends; enclosing try scopes remain unchanged. |
+| `on_exception_entry { copies }` | Receive saved values only on exceptional arrival, after the original capture when present. |
+| `exception_chain` and site route annotations | Preserve original selection priority, handler targets and delivered natural/explicit protection. Method-local impossible-release findings do not delete original exception facts. |
+| `graph ... entry label` / `no_implicit_entry` | Preserve the supplied graph entry or its explicit absence. The first printed child is not an invented entry. |
+
+P7 fixes condition/header ownership, loop repetition, child roles and necessary
+continuations. P9 prints those choices. In particular, predicate-exit copies do
+not appear in a loop's common continuation, where an independent break could
+execute them. Synchronized routing terminals and post-release copies remain at
+their original nodes rather than moving past surrounding catch scopes.
+
+Unary conversions correspond to original conversion operations. A check-cast
+remains a check with no invented register write. Array fill preserves its one
+original operation, element width/count and bits. Explicit allocation and
+initialization stay separate when P5 did not select a compound construction.
+Unavailable reads and argument layouts print their supplied gaps and original
+words, not zero, null or an empty argument list.
+
+## Declarations, metadata and literal identity
+
+P9 prints the supplied member list, including no-code, synthetic/bridge and
+stopped members. It does not infer nesting from `$` or create declarations for an
+unlocated directory suffix. Static preparation follows P8's original ordinal
+plan before the original class initializer. Implicit defaults are not encoded
+assignments or guessed zero values.
+
+Metadata records print once with their explicit original owner scopes. This also
+preserves records whose member directory entry was not located. Array/annotation
+values use P8's flat events; call-site bootstrap values use P7's owned events and
+leaf declarations. Counts, reference identities and local gaps remain visible.
+Neither path parses encoded input again or interprets Signature as recovered
+generic syntax.
+
+P9 MUST preserve P8's base spelling and array rank. Original-name forms and raw
+descriptors remain explicit. Literal strings do not pass through name planning.
+UTF-16 escaping preserves NUL, quotes, backslashes, controls and isolated
+surrogates; valid pairs become UTF-8 scalars. Bidi controls are escaped to avoid
+visual source injection. Floating-point non-finite values retain exact bit
+notation rather than losing a NaN payload.
+
+## Spans
+
+`TextOffset` is a byte coordinate in the final UTF-8 text. `SourceSpan` ranges are
+half-open and refer to original members or typed P7/P8 identities. Operations
+include original PCs; result capture, terminals, expressions, references,
+transfers, copies, labels, controls, metadata and preparation have distinct
+origins. A compound expression can map multiple original operations to one range.
+Nested spans overlap intentionally. Empty schedules and implicit fallthrough can
+have zero-length anchors; these are not invented executed instructions.
+
+Suppressed literal statements and contracted interior transfers remain in the
+owned source products and coverage. P9 does not manufacture textual operations
+merely to give every original instruction a nonempty range. Offsets are measured
+while writing; they are never reused from an earlier qualified-name rendering.
+
+## Failure locality and output errors
+
+Existing input, type, storage and control gaps remain content of the result, not
+reasons to reject independent members. Stopped members retain their classified
+cause, operation-associated closed P7 fragments, original decoded items and
+checked retained bytes when available. Other unpublished arena entries remain
+construction evidence. Storage/copy facts of a prefix are labeled as facts, not
+promoted to an executable method schedule. P9 MUST NOT recover missing control
+from those facts or reopen a DEX range.
+
+A method's display-reference invariant or private traversal/index scratch failure
+produces a method-local rendering issue; other members continue. Failure to retain
+that diagnostic preserves its cause in `DiagnosticRetention`. Shared output
+buffers, class-wide display context and output-layout failures stop that rendering
+publication with `RenderStop`, retaining its source product, completed text prefix,
+spans and existing issues. A prefix is not relabeled `Rendered`.
+
+The writer methods propagate concrete text/JSON sink errors. They MUST NOT report
+a truncated successful write, retry analysis or substitute an exception stub.
+The caller owns the sink and backpressure. Output growth and traversal work stacks
+use checked arithmetic and fallible reservations; region traversal is iterative.
+
+## Evidence boundary
+
+The existing single core test checks rendered member/operation/copy coverage,
+operand order, literal identity, selected type spelling, loop-edge copy placement,
+result-capture origins, snapshot phases and exception-entry ordering. An independent
+lexical scan checks actual try/catch and synchronized-container braces rather than
+trusting the printer's indentation or span claims. Text and JSON are compared from
+the same Engine publication, including after Engine/input release; sink failures
+are exercised separately from parser failures.
+
+These checks and P7's finite non-compound symbolic traces are test-only. They do
+not establish arbitrary VM, heap/callee, bootstrap or allocation-failure behavior.
+Mutation rejection requires successful compilation and a failure of the intended
+obligation. Corpus construction counts are observations, not per-instruction
+semantic proofs or Java-admission checks.

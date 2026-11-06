@@ -9,9 +9,9 @@ pub struct TypeUseId(pub u32);
 pub struct TargetId(pub u32);
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 pub struct ImportId(pub u32);
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Serialize)]
 pub struct AnnotationId(pub u32);
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub enum TypeSource {
     Owner,
     Superclass,

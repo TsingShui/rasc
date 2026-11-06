@@ -204,9 +204,12 @@ impl MethodDisplay {
 }
 /// Failed class construction retains every input member and the completed name
 /// prefix, without publishing a ClassResult or silently discarding a sibling.
+#[derive(Serialize)]
 pub struct AssemblyStop {
+    #[serde(serialize_with = "super::serialization::facts")]
     pub(super) facts: Arc<crate::p0::ClassFacts>,
     pub(super) methods: Vec<MethodMember>,
+    #[serde(serialize_with = "debug")]
     pub(super) error: RequestError,
     pub(super) values: super::values::ValuePlan,
     pub(super) names: TypeNamePlan,
@@ -232,10 +235,10 @@ impl AssemblyStop {
     }
 }
 pub enum ClassOutcome {
-    Ready(ClassResult),
-    Stopped(AssemblyStop),
+    Ready(Arc<ClassResult>),
+    Stopped(Arc<AssemblyStop>),
 }
 pub enum MethodDisplayOutcome {
-    Ready(MethodDisplay),
-    Stopped(AssemblyStop),
+    Ready(Arc<MethodDisplay>),
+    Stopped(Arc<AssemblyStop>),
 }

@@ -171,6 +171,9 @@ impl<'a> Engine<'a> {
 
 mod delivery;
 
+pub(crate) struct RenderTask {
+    _sealed: (),
+}
 pub(crate) struct ClassTask {
     _sealed: (),
 }
@@ -182,6 +185,7 @@ pub struct SingleMethodAnalysis<'a> {
     pub key: MethodKey,
     pub result: Result<MethodOutcome<'a>, RequestError>,
     pub display: crate::p8::MethodDisplayOutcome,
+    pub rendered: crate::p9::RenderOutcome,
 }
 pub struct ClassAnalysis<'a> {
     pub image: ImageFact,
@@ -189,6 +193,7 @@ pub struct ClassAnalysis<'a> {
     pub methods: Vec<MethodAnalysis<'a>>,
     pub diagnostics: Vec<Diagnostic>,
     pub presentation: Presentation,
+    pub rendered: crate::p9::RenderOutcome,
 }
 
 pub struct MethodAnalysis<'a> {
@@ -326,7 +331,10 @@ impl<'a> Engine<'a> {
         let mut members = Vec::new();
         crate::substrate::owned::push(&mut members, delivery::member(method, &result))?;
         let display = crate::p8::method_display(&ClassTask { _sealed: () }, facts, members, method);
+        let source = method_source(&display);
+        let rendered = crate::p9::render(&RenderTask { _sealed: () }, source);
         Ok(SingleMethodAnalysis {
+            rendered,
             key: MethodKey { class, method },
             result,
             display,
@@ -396,7 +404,18 @@ impl<'a> Engine<'a> {
         } else {
             Presentation::Class(crate::p8::assemble(&task, facts.clone(), members))
         };
+        let source = match &presentation {
+            Presentation::Class(crate::p8::ClassOutcome::Ready(c)) => {
+                crate::p9::SourceProduct::Class(c.clone())
+            }
+            Presentation::Class(crate::p8::ClassOutcome::Stopped(c)) => {
+                crate::p9::SourceProduct::ClassStopped(c.clone())
+            }
+            Presentation::Method(m) => method_source(m),
+        };
+        let rendered = crate::p9::render(&RenderTask { _sealed: () }, source);
         Ok(ClassAnalysis {
+            rendered,
             image: ImageFact {
                 dex: request.class.dex,
                 origin: image.image.origin,
@@ -407,6 +426,15 @@ impl<'a> Engine<'a> {
             diagnostics: Vec::new(),
             presentation,
         })
+    }
+}
+
+fn method_source(display: &crate::p8::MethodDisplayOutcome) -> crate::p9::SourceProduct {
+    match display {
+        crate::p8::MethodDisplayOutcome::Ready(m) => crate::p9::SourceProduct::Method(m.clone()),
+        crate::p8::MethodDisplayOutcome::Stopped(m) => {
+            crate::p9::SourceProduct::MethodStopped(m.clone())
+        }
     }
 }
 

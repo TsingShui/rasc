@@ -105,7 +105,7 @@ chapters describe the existing implementation until migrated to this target.
   as the single inspection entry:
   `cargo run -p diana-decomp --example dbg_shell --locked -- --dex <classes.dex> --exec '<json>'`.
   It accepts a bare DEX, emits one JSON response per command, and exposes the
-  delivered P0/P1/P2/P3/P4/P5/P6/P7/P8 products. Do not add phase-specific debug binaries, renderers or
+  delivered P0/P1/P2/P3/P4/P5/P6/P7/P8/P9 products. Do not add phase-specific debug binaries, renderers or
   debug examples.
 - Contributors MUST NOT develop, add or restore any unit tests, including inline
   `#[test]` functions, `#[cfg(test)]` modules and private-phase test harnesses.

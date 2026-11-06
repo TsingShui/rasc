@@ -8,7 +8,7 @@ only from the analyzed input.
 The active method chain is P0 class facts → method reader → P1 disassembly → P2
 execution model → P3 SSA → P4 value/use interpretation → P5 storage/transfer
 plans → P6 control/protection/monitor plans → P7 owned method expressions,
-followed by P8 class assembly and type-name planning. `Engine::analyze_method` and class requests use one method task. The
+followed by P8 class assembly/type-name planning and P9 text/JSON with UTF-8 source spans. `Engine::analyze_method` and class requests use one method task. The
 application decompilation interface is being rebuilt.
 The approved architecture is [PIPELINE_DESIGN](../../docs/diana/PIPELINE_DESIGN.md).
 
@@ -123,7 +123,12 @@ reference identities. Names handle imports, conflicting short names, lexical
 shadowing, array ranks and original `$` spelling; standalone methods remain fully
 qualified. Unknown package scope and uninterpreted signatures retain explicit
 naming reasons. See the [P8 chapter](../../docs/diana/spec/08-class.md).
-P9 source rendering remains inactive.
+P9 consumes that frozen display through Engine's private `RenderTask`, publishing
+owned `Rendered` text, UTF-8 spans, local diagnostics and the same source product.
+Text and JSON use that one publication. P7 fixes final child/phase placement,
+including loop-condition edge copies and original-node synchronized outlets;
+P9 does not reconstruct control. Explicit storage/check/lock notation preserves
+semantics without requiring legal Java. See the [P9 chapter](../../docs/diana/spec/09-rendering.md).
 
 Independent translation checking compiles only under `cfg(test)`; ordinary
 Engine requests do not run symbolic replay, output audits or duplicate dominator
@@ -182,7 +187,7 @@ lock events, release outlets, copy emission ownership and selected operation rol
 `p6-all` aggregates those plans and
 construction stops. `p7` (alias `expressions`) and `p7-all` expose owned
 expression counts, detailed products and classified expression stops. The timed
-Engine traversal includes P8, even when a command
+Engine traversal includes P9, even when a command
 inspects a retained earlier product. Each shell command creates a
 fresh Engine. `Engine::with_method_jobs(n)` enables a bounded Rayon pool for
 multi-member class requests when `n > 1`; the default is one. Single-method calls
@@ -193,7 +198,10 @@ concurrency need joint configuration rather than multiplying both blindly.
 products and the P6 plan from that one class request. `p7-all` with
 `details:true` exposes each member's owned method result. `p8` (aliases `assembly`
 and `names`) and `p8-all` expose class/member delivery, metadata expressions and
-name plans; adding `method` selects standalone naming.
+name plans; adding `method` selects standalone naming. `p9` (alias `source`) and
+`p9-all` expose final text, byte spans and rendering issues; `details:true` also
+includes the frozen source product. `--format text` prints the existing P9 text
+rather than a differently reconstructed body.
 
 Earlier engine format/check/Clippy and release builds passed for unified component
 projection, scoped check bounds and same-DEX ancestor relationships; those changes
@@ -268,8 +276,8 @@ failures were not exercised by this corpus.
 Signature-qualified Java-like calls (`Api.register<Listener>(h)`, with a complete
 original descriptor when needed) are specified under
 [the P7 contract](../../docs/diana/PIPELINE_DESIGN.md#5731-原目标签名限定).
-They introduce no operand conversion. P7/P9 source expression/rendering is not yet
-active; the current engine delivers the facts needed for that contract.
+They introduce no operand conversion. P7 now selects the display and P9 prints
+its complete raw-signature binding form when selected.
 
 `p2-all` observes retained execution facts from the same Engine chain and reports
 classified outcomes and encountered opcode variants. `roundtrip-all` checks independent byte re-encoding over retained
@@ -433,6 +441,42 @@ Serial/four-worker P8 products matched across 19 classes and 4,585 members.
 All 48,102,163 instruction roundtrips were rerun with zero mismatch, skip or
 method/class error. Actual allocator exhaustion and every stopped-stage prefix
 remain outside the exercised execution evidence.
+
+### Rendering observations
+
+The existing core test now checks P9 member/operation/copy preservation, operand
+capture order, selected names and array ranks, UTF-8 ranges, UTF-16 escaping,
+original metadata scopes, preparation order, raw stopped bytes and result lifetime.
+A head-tested loop has distinct condition-exit and break copies; a non-contiguous,
+backward-PC construction checks its original normal continuation. Original-node
+and independent lexical-brace checks cover released routing terminals, try/catch
+ownership and explicit synchronization exits. Text/JSON agree and failing output
+sinks retain their I/O classification.
+
+Seventeen mutations compiled and failed their intended obligations: omitted
+operations, members, metadata, copies, stopped bytes and unlocked terminals;
+reordered operands and preparation; invented zero reads; shortened names; wrong
+loop polarity/edge ownership; acquisition-bypassing headers; snapshot phase changes;
+character-count spans; surrogate replacement; and moving unlocked terminals across
+actual protection braces. All mutations were restored.
+
+A fixed release binary freshly processed all 55 DEX files without reused results:
+544,430 rendered classes, 1,472,798 fields and 2,907,992 methods, including 263,414
+no-code declarations. Rendering failures/issues, upstream stops, class errors and
+retention errors were zero; the existing one type issue remained. The traversal
+produced 7,488,484,265 UTF-8 bytes and 313,026,198 source spans. These counts are not
+per-instruction semantic proofs. The unchanged readers reuse the P8 evidence of
+48,102,163 instruction roundtrips with no mismatch, skip or method/class error.
+
+All 5,560 retained P2–P6 products for 1,112 focused methods matched. Existing P7
+facts also matched after accounting for the new emission, type-source,
+parameter-name and exact UTF-16 serialization fields; no call-qualification
+change occurred in that selection. Serial/four-worker P9 products matched for
+19 classes and 4,585 members. The single core test passes in debug and release;
+engine format/check/strict Clippy and release library/shell builds pass.
+Workspace gates remain blocked by the CLI's removed result APIs. Actual allocator
+exhaustion, all stopped-stage prefixes and arbitrary VM/heap/callee behavior remain
+outside this execution evidence.
 
 ## Method scheduling observations
 

@@ -64,6 +64,11 @@ This comparison is not overload resolution or subtype checking. Unknown external
 declarations do not block ordinary calls. Both forms retain the complete original
 reference, dispatch kind, receiver, argument order and invocation prototype.
 P7 MUST NOT insert casts, typed aliases, boxing or helpers to influence binding.
+`LocalSpelling` uses a nominal name only for complete, equal delivered reference
+type sources; other locals retain their machine storage representation. Calls
+using such reference carriers select an explicit signature rather than pretending
+that the display supplies a nominal argument type. Header parameter names are
+fixed by P7, including no-code declarations.
 
 P1 supplies checked call-site IDs, bytes/range, argument count and flat bootstrap
 events. A separate flat leaf-declaration pool retains referenced strings, types,
@@ -98,8 +103,8 @@ obligations; otherwise P7 retains explicit initialization at its original positi
 
 ## Control, protection and synchronized outlets
 
-P7 maps P6's selected Block/Sequence/If/Loop/Switch/LabelledBlock/Try/Synchronized/
-Graph kinds without changing child ownership or continuation. Labels have fixed
+P7 retains P6's selected Block/Sequence/If/Loop/Switch/LabelledBlock/Try/Synchronized/
+Graph kinds, child ownership and original continuation evidence. Labels have fixed
 method-local display names. Block completion distinguishes ordinary terminals from
 syntax-owned predicates/exits; retained evidence is not a second emission.
 All original switch roles, duplicate-target links and selected-edge copies survive.
@@ -118,13 +123,34 @@ The retained `after_release` list describes obligations, not a second schedule.
 `Resume` describes the established destination/abrupt intent, not a second terminal
 event. Rethrow retains its exact original expression; capture is provenance only.
 P7 MUST NOT move unlocked work into the held body or infer outlets from a common
-follow. Copy lists moved to outlet ownership are removed from ordinary emission.
+follow. These outlet records retain source ownership; they are not another
+execution route alongside the final emission plan.
+
+`EmissionPlan` is P9's sole execution layout. It binds the supplied P5 copy
+locations to operation, terminal and selected-edge phases without rescheduling
+steps. It fixes child roles, condition polarity, method-local control names and
+scope continuations. Syntax-owned header/predicate continuations are deferred to
+their owner, so a header cannot jump past its own test or monitor acquisition.
+Loop-condition edge copies stay inside that test's selected-edge clauses; they
+are not appended after a loop. `LoopPlacement` distinguishes infinite, head-test
+and tail-test forms without contradictory optional states.
+
+Matched releases print at their original nodes. Their after-release copies and
+routing terminals also stay at their original nodes and therefore keep original
+lexical try/catch ownership. The synchronized container has explicit planned
+exits, not another implicit release at its closing brace. A selected compound
+construction resumes at the original initializer node when it crosses nodes;
+absorbed statements remain suppressed even for backward-PC channels. These are
+placements of existing plans, not region identification or a new dispatcher.
 
 ## Failure and evidence
 
 `ExpressionError` preserves concrete request/resource errors and necessary
 construction invariants. `ExpressionStop` retains mature P6 facts and an
 unpublished `ExpressionPartial`; partial arenas are not a usable MethodResult.
+`fragments()` exposes operation-associated statements with closed dependencies.
+Unassociated arena entries remain construction evidence and can still reference
+pending records. Copy/storage prefixes do not promise a complete control layout.
 Local input/type/storage/control uncertainty remains in the owned mature result
 and affects only its actual consumers. No error kind automatically truncates
 siblings or promotes a construction prefix to success.
@@ -139,7 +165,7 @@ non-compound trace interpreter. Metadata/bootstrap fixtures supply independent
 encoded expectations and exercise result lifetime after input/Engine release.
 
 These checks compile only under `cfg(test)`. Ordinary Engine requests do not run
-independent replay, correspondence passes or a verification switch. JSON support
-serializes the inspection product; it is not P9 source rendering or a Java-legality
-gate. P8/P9 MUST consume the existing expression and naming products rather than
+independent replay, correspondence passes or a verification switch. P7 JSON support
+serializes the inspection product; final source and UTF-8 spans are owned by
+[P9](09-rendering.md), without a Java-legality gate. P8/P9 MUST consume the existing expression and naming products rather than
 repairing or re-analyzing execution.

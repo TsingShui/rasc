@@ -62,7 +62,15 @@ fn header(
     metadata: &crate::p0::MethodMetadata,
     metadata_error: Option<std::sync::Arc<RequestError>>,
 ) -> Result<MethodHeader, ExpressionError> {
+    let mut parameter_names = Vec::new();
+    for i in 0..declaration.parameter_count() {
+        push(
+            &mut parameter_names,
+            super::references::text(format_args!("p{i}"))?,
+        )?;
+    }
     Ok(MethodHeader {
+        parameter_names,
         key: crate::MethodKey {
             class: owner.key(),
             method,
@@ -127,7 +135,8 @@ fn construct(
     super::copies::construct(&mut c)?;
     super::lower::operations(&mut c)?;
     super::lower::terminals(&mut c)?;
-    super::control::construct(&mut c)
+    super::control::construct(&mut c)?;
+    super::emission::construct(c.code)
 }
 pub(super) fn push<T>(v: &mut Vec<T>, x: T) -> Result<(), ExpressionError> {
     crate::substrate::owned::push(v, x).map_err(Into::into)

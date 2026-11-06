@@ -61,6 +61,15 @@ fn qualification(
             c.code.expressions[arg.0 as usize].kind
         {
             let local = &c.code.locals[storage.0 as usize];
+            if matches!(
+                super::emission::local_spelling(&c.code.types, local),
+                LocalSpelling::Machine(crate::p5::StorageType::Family {
+                    family: Family::Reference,
+                    ..
+                })
+            ) {
+                return Qualification::FullSignature;
+            }
             if local
                 .declared_types
                 .iter()

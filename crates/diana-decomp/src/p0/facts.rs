@@ -102,8 +102,9 @@ impl fmt::Display for OriginalText {
 impl Serialize for OriginalText {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         use serde::ser::SerializeStruct;
-        let mut record = serializer.serialize_struct("OriginalText", 1)?;
+        let mut record = serializer.serialize_struct("OriginalText", 2)?;
         record.serialize_field("text", &DisplayValue(self))?;
+        record.serialize_field("units", &self.0)?;
         record.end()
     }
 }
