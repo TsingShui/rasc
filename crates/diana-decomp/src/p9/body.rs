@@ -354,11 +354,13 @@ impl Expressions<'_, '_> {
                 self.out.open()?;
                 self.branch_transfer(*when_true)?;
                 self.out.close()?;
-                self.out.indent()?;
-                self.out.put("else")?;
-                self.out.open()?;
-                self.branch_transfer(*when_false)?;
-                self.out.close()?;
+                if !self.code.emission().empty_else(id) {
+                    self.out.indent()?;
+                    self.out.put("else")?;
+                    self.out.open()?;
+                    self.branch_transfer(*when_false)?;
+                    self.out.close()?;
+                }
             }
             TerminalKind::Switch { selector, arms } => {
                 self.switch(*selector, arms, &p.snapshots)?
@@ -526,6 +528,9 @@ impl Expressions<'_, '_> {
         while let Some(event) = work.pop() {
             match event {
                 Event::Control(id) => {
+                    if self.code.emission().omitted(id) {
+                        continue;
+                    }
                     let c = &self.code.controls()[id.0 as usize];
                     let p = &self.code.emission().controls()[id.0 as usize];
                     let start = self.out.position();
@@ -590,8 +595,10 @@ impl Expressions<'_, '_> {
                                 push(&mut work, Event::Close)?;
                             }
                             push(&mut work, Event::Close)?;
-                            push(&mut work, Event::Control(*no))?;
-                            push(&mut work, Event::Else(test.when_false))?;
+                            if !self.code.emission().omitted(*no) {
+                                push(&mut work, Event::Control(*no))?;
+                                push(&mut work, Event::Else(test.when_false))?;
+                            }
                             push(&mut work, Event::Control(*yes))?;
                             push(&mut work, Event::If(*test))?;
                             push(&mut work, Event::Control(*header))?;

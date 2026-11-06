@@ -18,6 +18,7 @@ pub(super) fn construct(code: &mut MethodCode) -> Result<(), ExpressionError> {
     unlabel_inner_scopes(code)?;
     drop_trailing_continues(code)?;
     drop_duplicate_continuation(code)?;
+    collapse_planned_continuations(code)?;
     loops::construct(code)?;
     let mut labels = filled(code.labels.len(), false)?;
     let mut controls = filled(code.controls.len(), false)?;
@@ -156,6 +157,7 @@ pub(super) fn construct(code: &mut MethodCode) -> Result<(), ExpressionError> {
     expressions::construct(code)?;
     natural_stores(code)?;
     inline_check_casts(code)?;
+    omit_empty_branches(code)?;
     Ok(())
 }
 
@@ -197,7 +199,7 @@ fn natural_stores(code: &mut MethodCode) -> Result<(), ExpressionError> {
 /// may pass the search upward; a loop body does not fall through its own test.
 fn collapse_fallthrough_gotos(code: &mut MethodCode) -> Result<(), ExpressionError> {
     let mut parent: Vec<Option<ControlId>> = filled(code.controls.len(), None)?;
-    let mut sibling: Vec<Option<ControlId>> = filled(code.controls.len(), None)?;
+    let mut buffer = filled(code.controls.len().max(3), ControlId(0))?;
     for control in &code.controls {
         for &child in &control.children {
             let slot = parent
@@ -205,16 +207,6 @@ fn collapse_fallthrough_gotos(code: &mut MethodCode) -> Result<(), ExpressionErr
                 .ok_or(bug("control names an unknown child"))?;
             if slot.replace(control.id).is_some() {
                 return Err(bug("control has two containment owners"));
-            }
-        }
-        if matches!(control.kind, ControlKind::Sequence) {
-            for pair in control.children.windows(2) {
-                let slot = sibling
-                    .get_mut(pair[0].0 as usize)
-                    .ok_or(bug("sequence names an unknown child"))?;
-                if slot.replace(pair[1]).is_some() {
-                    return Err(bug("sequence child has two print successors"));
-                }
             }
         }
     }
@@ -226,7 +218,7 @@ fn collapse_fallthrough_gotos(code: &mut MethodCode) -> Result<(), ExpressionErr
         let Some(owner) = code.labels.get(from.0 as usize).map(|label| label.owner) else {
             continue;
         };
-        let Some(next) = printed_successor(code, &parent, &sibling, owner) else {
+        let Some(next) = printed_successor(code, &parent, owner, &mut buffer) else {
             continue;
         };
         if matches!(
@@ -429,38 +421,179 @@ fn drop_duplicate_continuation(code: &mut MethodCode) -> Result<(), ExpressionEr
     }
     Ok(())
 }
+fn collapse_planned_continuations(code: &mut MethodCode) -> Result<(), ExpressionError> {
+    let mut parent = filled(code.controls.len(), None)?;
+    let mut buffer = filled(code.controls.len().max(3), ControlId(0))?;
+    for control in &code.controls {
+        for &child in &control.children {
+            *parent
+                .get_mut(child.0 as usize)
+                .ok_or(bug("control names an unknown child"))? = Some(control.id);
+        }
+    }
+    for index in 0..code.emission.controls.len() {
+        let Some(label) = code.emission.controls[index].continuation else {
+            continue;
+        };
+        let control = ControlId(super::build::id(index)?);
+        let Some(next) = printed_successor(code, &parent, control, &mut buffer) else {
+            continue;
+        };
+        if matches!(
+            code.emission.controls[next.0 as usize].layout,
+            EmissionLayout::Block(node) if node.0 == label.0
+        ) {
+            code.emission.controls[index].continuation = None;
+        }
+    }
+    Ok(())
+}
+
+/// The caller reserves space for all controls (at least three slots). Layout
+/// roles, not containment order, determine which children P9 prints.
+fn printed_parts<'a>(
+    code: &'a MethodCode,
+    control: ControlId,
+    buffer: &'a mut [ControlId],
+) -> &'a [ControlId] {
+    let parts: &[ControlId] = match &code.emission.controls[control.0 as usize].layout {
+        EmissionLayout::Block(_) => return &[],
+        EmissionLayout::Sequence | EmissionLayout::Labelled | EmissionLayout::Graph => {
+            return &code.controls[control.0 as usize].children;
+        }
+        EmissionLayout::If {
+            header, yes, no, ..
+        } => {
+            buffer[..3].copy_from_slice(&[*header, *yes, *no]);
+            return &buffer[..if code.emission.omitted(*no) { 2 } else { 3 }];
+        }
+        EmissionLayout::Loop { body, .. } => std::slice::from_ref(body),
+        EmissionLayout::Switch { header, body, .. } => &[*header, *body],
+        EmissionLayout::Try { body, catches } => {
+            buffer[0] = *body;
+            buffer[1..=catches.len()].copy_from_slice(catches);
+            return &buffer[..=catches.len()];
+        }
+        EmissionLayout::Synchronized { entry, body, .. } => &[*entry, *body],
+    };
+    buffer[..parts.len()].copy_from_slice(parts);
+    &buffer[..parts.len()]
+}
+
 fn printed_successor(
     code: &MethodCode,
     parent: &[Option<ControlId>],
-    sibling: &[Option<ControlId>],
     start: ControlId,
+    buffer: &mut [ControlId],
 ) -> Option<ControlId> {
     let mut current = start;
     for _ in 0..=code.controls.len() {
-        if let Some(next) = sibling.get(current.0 as usize).copied().flatten() {
-            return Some(next);
-        }
-        let parent = parent.get(current.0 as usize).copied().flatten()?;
+        let up = parent.get(current.0 as usize).copied().flatten()?;
+        let layout = &code.emission.controls.get(up.0 as usize)?.layout;
         if !matches!(
-            code.controls.get(parent.0 as usize)?.kind,
-            ControlKind::Sequence
-                | ControlKind::LabelledBlock { .. }
-                | ControlKind::Graph { .. }
-                | ControlKind::Synchronized { .. }
+            layout,
+            EmissionLayout::Sequence
+                | EmissionLayout::Labelled
+                | EmissionLayout::Graph
+                | EmissionLayout::If { .. }
         ) {
             return None;
         }
-        // A container with its own continuation prints that jump before the
-        // enclosing successor, so control does not fall into it.
-        if code.emission.controls[parent.0 as usize]
-            .continuation
-            .is_some()
-        {
+        let parts = printed_parts(code, up, buffer);
+        let index = parts.iter().position(|&part| part == current)?;
+        if index + 1 < parts.len() {
+            // Branches are alternatives, not sequential successors. Only the
+            // last printed branch may fall through the enclosing If's end.
+            return if matches!(layout, EmissionLayout::If { .. }) {
+                None
+            } else {
+                Some(parts[index + 1])
+            };
+        }
+        if code.emission.controls[up.0 as usize].continuation.is_some() {
             return None;
         }
-        current = parent;
+        current = up;
     }
     None
+}
+
+fn omit_empty_branches(code: &mut MethodCode) -> Result<(), ExpressionError> {
+    let mut empty = filled(code.controls.len(), false)?;
+    let mut work = Vec::new();
+    if let Some(root) = code.root {
+        super::build::push(&mut work, (root, false))?;
+    }
+    while let Some((id, visited)) = work.pop() {
+        let control = &code.emission.controls[id.0 as usize];
+        if !visited {
+            super::build::push(&mut work, (id, true))?;
+            for &child in &code.controls[id.0 as usize].children {
+                super::build::push(&mut work, (child, false))?;
+            }
+            continue;
+        }
+        if control.label_required
+            || control.continuation.is_some()
+            || code.emission.deferred_control(id)
+        {
+            continue;
+        }
+        empty[id.0 as usize] = match &control.layout {
+            EmissionLayout::Block(node) => {
+                let block = &code.emission.blocks[node.0 as usize];
+                block.actions.is_empty() && !block.show_label && display_empty_end(code, &block.end)
+            }
+            EmissionLayout::Sequence => code.controls[id.0 as usize]
+                .children
+                .iter()
+                .all(|child| empty[child.0 as usize]),
+            _ => false,
+        };
+    }
+    for index in 0..code.emission.controls.len() {
+        if let EmissionLayout::If { no, test, .. } = code.emission.controls[index].layout
+            && empty[no.0 as usize]
+            && arm_prints_nothing(code, test.when_false, true)
+        {
+            code.emission.controls[no.0 as usize].omitted = true;
+        }
+    }
+    for index in 0..code.terminals.len() {
+        if let TerminalKind::If { when_false, .. } = code.terminals[index].kind {
+            let phases = &code.emission.terminals[index];
+            code.emission.empty_else[index] = phases.before.is_empty()
+                && phases.snapshots.is_empty()
+                && phases.after.is_empty()
+                && arm_prints_nothing(code, when_false, false);
+        }
+    }
+    Ok(())
+}
+
+/// A syntax-owned If arm prints only its copies; an ordinary terminal arm
+/// additionally prints its transfer spelling.
+fn arm_prints_nothing(code: &MethodCode, id: TransferId, syntax_owned: bool) -> bool {
+    let transfer = &code.emission.transfers[id.0 as usize];
+    transfer.copies.is_empty()
+        && (syntax_owned || matches!(transfer.spelling, TransferSpelling::Fallthrough))
+}
+
+fn display_empty_end(code: &MethodCode, end: &BlockEnd) -> bool {
+    match end {
+        BlockEnd::None => true,
+        BlockEnd::Transfers(transfers) => transfers
+            .iter()
+            .all(|&id| arm_prints_nothing(code, id, false)),
+        BlockEnd::Terminal(id) => {
+            let phases = &code.emission.terminals[id.0 as usize];
+            phases.before.is_empty()
+                && phases.snapshots.is_empty()
+                && phases.after.is_empty()
+                && matches!(code.terminals[id.0 as usize].kind,
+                    TerminalKind::Goto(transfer) if arm_prints_nothing(code, transfer, false))
+        }
+    }
 }
 /// A field reference is owner, name and type. The type is printed only when two
 /// delivered references share owner and name but not type, or when the original

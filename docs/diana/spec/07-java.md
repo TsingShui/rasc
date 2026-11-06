@@ -128,13 +128,28 @@ A control's planned continuation contributes no second jump when its last printe
 block already jumps to the same label; two adjacent jumps carry the same effect
 and only one is printed.
 
-A jump whose destination is the statement printed immediately after it is
-ordinary sequencing, so the final plan prints no `goto`. The search may pass
-upward only through containers that print their children in order and add nothing
-after them; a loop body never falls through its own test. Each exception site also
-records whether its route still needs an inline marker: a natural single route
-targeting an enclosing printed catch does not, because the chain line and the catch
-scope already state it. Other sites keep a compact chain reference.
+A jump, including a planned continuation, whose target prints next is ordinary
+sequencing, so P7 MUST omit its displayed `goto`. The search follows the final
+emission layout through Sequence, Labelled and Graph containers and the last
+printed If branch. It stops at a parent's continuation and at Loop, Try, Switch
+and Synchronized boundaries, whose trailing text or actions prevent fallthrough.
+
+P7 MUST omit an `else` emptied by this collapse only when its false-edge copies
+are empty and its control is an empty Block or a label-free Sequence of empty
+children. Each such control has no required label, continuation or deferred
+control; each block has no actions or displayed label. An empty block end is
+None, a list of copy-free Fallthrough transfers, or a Goto terminal with no
+terminal phases and a copy-free Fallthrough transfer. Other terminals retain the
+branch. For an explicit If terminal, P7 MUST omit the false arm only when its
+transfer is copy-free Fallthrough and all terminal phases are empty. P9 consumes
+this separate terminal display flag without recomputing emptiness. These display
+choices preserve the original blocks, controls, labels, transfers, sites, copies
+and exception routes.
+
+Each exception site also records whether its route still needs an inline marker:
+a natural single route targeting an enclosing printed catch does not, because the
+chain line and the catch scope already state it. Other sites keep a compact chain
+reference.
 
 P5-selected construction groups become `New` expressions placed at the original
 constructor call. Corridor operations that prepare arguments print as their own

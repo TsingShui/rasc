@@ -126,6 +126,8 @@ pub struct EmissionControl {
     pub label: String,
     /// Retain a labeled scope only when another emitted transfer names it.
     pub label_required: bool,
+    /// Display-only omission; the original control remains in the product.
+    pub omitted: bool,
     pub continuation: Option<LabelId>,
     pub layout: EmissionLayout,
 }
@@ -176,6 +178,8 @@ pub struct EmissionPlan {
     pub(super) deferred_controls: Vec<bool>,
     pub(super) operations: Vec<EvaluationPhases>,
     pub(super) terminals: Vec<EvaluationPhases>,
+    /// Display-only omission of a copy-free fallthrough false arm.
+    pub(super) empty_else: Vec<bool>,
     pub(super) transfers: Vec<EmissionTransfer>,
     pub(super) initial: Vec<CopyPlanId>,
     pub(super) statement_operations: Vec<Option<OpId>>,
@@ -198,6 +202,7 @@ impl EmissionPlan {
             deferred_controls: Vec::new(),
             operations: Vec::new(),
             terminals: Vec::new(),
+            empty_else: Vec::new(),
             transfers: Vec::new(),
             initial: Vec::new(),
             statement_operations: Vec::new(),
@@ -208,6 +213,11 @@ impl EmissionPlan {
     }
     pub fn controls(&self) -> &[EmissionControl] {
         &self.controls
+    }
+    pub fn omitted(&self, id: ControlId) -> bool {
+        self.controls
+            .get(id.0 as usize)
+            .is_some_and(|control| control.omitted)
     }
     pub fn blocks(&self) -> &[EmissionBlock] {
         &self.blocks
@@ -266,6 +276,9 @@ impl EmissionPlan {
     }
     pub fn operations(&self) -> &[EvaluationPhases] {
         &self.operations
+    }
+    pub fn empty_else(&self, id: BlockId) -> bool {
+        self.empty_else.get(id.0 as usize).copied().unwrap_or(false)
     }
     pub fn terminals(&self) -> &[EvaluationPhases] {
         &self.terminals
@@ -350,6 +363,7 @@ pub(super) fn construct(code: &mut MethodCode) -> Result<(), ExpressionError> {
     crate::substrate::owned::reserve(&mut plan.terminals, code.terminals.len())?;
     plan.terminals
         .resize_with(code.terminals.len(), EvaluationPhases::default);
+    plan.empty_else = filled(code.terminals.len(), false)?;
     plan.statement_operations = filled(code.statements.len(), None)?;
     let mut nodes = Vec::new();
     crate::substrate::owned::reserve(&mut nodes, code.blocks.len())?;
@@ -592,6 +606,7 @@ pub(super) fn construct(code: &mut MethodCode) -> Result<(), ExpressionError> {
             EmissionControl {
                 label: super::references::text(format_args!("R{}", c.id.0))?,
                 label_required: true,
+                omitted: false,
                 continuation: match c.continuation {
                     Continuation::Goto(label) => Some(label),
                     _ => None,

@@ -61,8 +61,12 @@ A selected `FullSignature` call prints its original target as a trailing
 `[binding ...]` suffix; a natural call prints only the receiver, member and
 arguments. The owned reference still carries the original target identity,
 dispatch kind and prototype, and the printed member keeps its source span. A jump
-to the statement printed immediately after it is sequencing, not an emitted
-`goto`.
+whose target prints next is sequencing, not an emitted `goto`, including planned
+continuations and the last printed If branch. P7 selects this omission and marks
+an emptied, label-free, copy-free `else` as omitted; P9 MUST print neither its
+`else` header nor its control. For an explicit If terminal, P9 consumes P7's
+separate empty-false-arm flag and omits that arm's text and span. P9 does not
+recompute adjacency or emptiness.
 
 P7 fixes condition/header ownership, loop repetition, child roles and necessary
 continuations. P9 prints those choices. In particular, predicate-exit copies do
