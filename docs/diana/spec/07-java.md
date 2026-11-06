@@ -288,6 +288,16 @@ exception propagates without a local handler or snapshot, and the same adjacency
 and storage requirements hold. Its check and possible exception still occur once
 before branch selection. No cast or new SSA definition is invented.
 
+A call can use the same adjacent boolean branch path only when its delivered
+storage family is integral and its complete, nonempty recovered type sources all
+name primitive boolean (`Z`). Its receiver and arguments remain leaf reads or
+literals, and its exception route propagates without snapshots. The call is the
+last original operation before the empty, single-entry branch header; no copies,
+phases or intervening evaluation move across it. Call results retain their
+`AfterResult` commit and move-result PC origin; other candidates still require
+`AtOperation`. Non-boolean calls, calls with other uses and calls with printed
+exception routes remain statements.
+
 The current expression pass does not nest already composed operands. This keeps
 expression rendering stack usage independent of input expression depth. Original
 operations, PCs, statements, transfer records and gaps remain owned; composed

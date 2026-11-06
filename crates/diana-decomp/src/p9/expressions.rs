@@ -407,7 +407,12 @@ impl<S: ExpressionSource> Expressions<'_, '_, S> {
                         )?;
                     }
                 } else if let Some(composed) = self.code.composed_use(id) {
-                    self.expr(composed.expression)?;
+                    // Inline checks belong to the producer statement even when
+                    // its expression prints at the adjacent consuming branch.
+                    let previous = self.statement.replace(composed.statement);
+                    let rendered = self.expr(composed.expression);
+                    self.statement = previous;
+                    rendered?;
                     self.out.span(
                         start,
                         Origin::Statement {

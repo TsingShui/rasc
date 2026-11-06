@@ -106,7 +106,15 @@ fn producer(
     let Materialization::Store(destination) = definition.materialization() else {
         return None;
     };
-    if definition.commit() != CommitRule::AtOperation {
+    let expr = code.expressions.get(expression.0 as usize)?;
+    // Calls commit at their delivered move-result; adjacency below keeps that
+    // commit before the branch, and install retains its result_pc origin.
+    let commit = if matches!(expr.kind, ExprKind::Call(_)) {
+        CommitRule::AfterResult
+    } else {
+        CommitRule::AtOperation
+    };
+    if definition.commit() != commit {
         return None;
     }
     let local = StorageId(destination.0);
@@ -123,7 +131,6 @@ fn producer(
     if matches!(family, Family::Reference) {
         return None;
     }
-    let expr = code.expressions.get(expression.0 as usize)?;
     let boolean = match &expr.kind {
         ExprKind::Unary { value, .. } if leaf(code, *value) => false,
         ExprKind::Binary { left, right, .. } if leaf(code, *left) && leaf(code, *right) => false,
@@ -136,13 +143,31 @@ fn producer(
             }
             true
         }
+        ExprKind::Call(call)
+            if call.receiver.is_none_or(|receiver| leaf(code, receiver))
+                && matches!(&call.arguments, Arguments::Known(args) if args.iter().all(|&arg| leaf(code, arg)))
+                && family == Family::Integral
+                && !declared.type_source_unknown
+                && !declared.declared_types.is_empty()
+                && declared.declared_types.iter().all(|id| {
+                    code.types
+                        .get(id.0 as usize)
+                        .is_some_and(|ty| ty.units == [u16::from(b'Z')])
+                }) =>
+        {
+            true
+        }
         _ => return None,
     };
     if boolean {
-        // The adjacent branch is the first consumer. The original type check
-        // can throw, so only an uncaught route without saved state is eligible.
-        if !matches!(source.original, crate::p2::OpKind::InstanceOf { .. })
-            || !source.effects.may_throw()
+        // The adjacent branch is the first consumer. The original check or
+        // call can throw, so only an uncaught route without saved state is eligible.
+        if !matches!(
+            source.original,
+            crate::p2::OpKind::InstanceOf { .. }
+                | crate::p2::OpKind::Invoke { .. }
+                | crate::p2::OpKind::UnresolvedInvoke { .. }
+        ) || !source.effects.may_throw()
             || source.exceptional.is_none()
             || statement_ref.sites.len() != 1
         {
@@ -347,6 +372,9 @@ fn terminal_use(
         };
         (terminal, use_id)
     } else {
+        // The producer is the last original operation; its sole fallthrough
+        // reaches this empty, single-entry header with no copies or phases.
+        // Thus even an effectful call stays at the same evaluation position.
         let EmissionLayout::If { header, test, .. } = following_control.layout else {
             return None;
         };
