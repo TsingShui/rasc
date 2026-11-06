@@ -25,6 +25,10 @@ pub(super) trait ExpressionSource {
     fn field_qualification(&self, _reference: ReferenceId) -> bool {
         true
     }
+    /// A partial product has no selected store form.
+    fn natural_store(&self, _statement: StatementId) -> bool {
+        false
+    }
 }
 impl ExpressionSource for MethodCode {
     fn payloads(&self) -> &[ArrayPayload] {
@@ -53,6 +57,9 @@ impl ExpressionSource for MethodCode {
     }
     fn field_qualification(&self, reference: ReferenceId) -> bool {
         self.emission().field_qualification(reference)
+    }
+    fn natural_store(&self, statement: StatementId) -> bool {
+        self.emission().natural_store(statement)
     }
 }
 impl ExpressionSource for ExpressionPartial {
@@ -117,11 +124,17 @@ impl<S: ExpressionSource> Expressions<'_, '_, S> {
                 receiver,
                 value,
             } => {
-                self.out.put("store ")?;
-                self.operand(*value)?;
-                self.out.put(" -> ")?;
                 let qualified = self.code.field_qualification(*reference);
-                self.member(*reference, *receiver, qualified)?;
+                if self.code.natural_store(s.id) {
+                    self.member(*reference, *receiver, qualified)?;
+                    self.out.put(" = ")?;
+                    self.operand(*value)?;
+                } else {
+                    self.out.put("store ")?;
+                    self.operand(*value)?;
+                    self.out.put(" -> ")?;
+                    self.member(*reference, *receiver, qualified)?;
+                }
             }
             StatementKind::ArrayStore {
                 array,
@@ -129,14 +142,31 @@ impl<S: ExpressionSource> Expressions<'_, '_, S> {
                 value,
                 kind,
             } => {
-                self.out.put("store ")?;
-                self.operand(*value)?;
-                self.out.put(" -> ")?;
-                self.operand(*array)?;
-                self.out.put("[")?;
-                self.operand(*index)?;
-                self.out.put("]")?;
-                self.out.fmt(format_args!(" /* {kind:?} store */"))?;
+                if self.code.natural_store(s.id) {
+                    self.operand(*array)?;
+                    self.out.put("[")?;
+                    self.operand(*index)?;
+                    self.out.put("] = ")?;
+                    self.operand(*value)?;
+                    // Only a narrowing store needs its original width kept.
+                    if matches!(
+                        kind,
+                        crate::p2::ValueKind::Byte
+                            | crate::p2::ValueKind::Char
+                            | crate::p2::ValueKind::Short
+                    ) {
+                        self.out.fmt(format_args!(" /* {kind:?} store */"))?;
+                    }
+                } else {
+                    self.out.put("store ")?;
+                    self.operand(*value)?;
+                    self.out.put(" -> ")?;
+                    self.operand(*array)?;
+                    self.out.put("[")?;
+                    self.operand(*index)?;
+                    self.out.put("]")?;
+                    self.out.fmt(format_args!(" /* {kind:?} store */"))?;
+                }
             }
             StatementKind::CheckCast { value, reference } => {
                 self.out.put("check_cast ")?;

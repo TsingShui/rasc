@@ -17,6 +17,7 @@ pub(super) fn construct(code: &mut MethodCode) -> Result<(), ExpressionError> {
     collapse_fallthrough_gotos(code)?;
     unlabel_inner_scopes(code)?;
     drop_trailing_continues(code)?;
+    drop_duplicate_continuation(code)?;
     loops::construct(code)?;
     let mut labels = filled(code.labels.len(), false)?;
     let mut controls = filled(code.controls.len(), false)?;
@@ -154,6 +155,40 @@ pub(super) fn construct(code: &mut MethodCode) -> Result<(), ExpressionError> {
         }
     }
     expressions::construct(code)?;
+    natural_stores(code)?;
+    Ok(())
+}
+
+/// Java evaluates the array reference, then its index, then the value. A DEX
+/// store only reads registers, so printing the value last states an order the
+/// original instruction did not. The array, index and receiver slots are never
+/// composed, so they stay plain local reads or literals; reading them before the
+/// value cannot be observed, and the store's null/bounds check still follows the
+/// value in both forms. Only a non-plain array, index or receiver — an inlined
+/// expression or an unavailable operand — keeps the explicit store form.
+fn natural_stores(code: &mut MethodCode) -> Result<(), ExpressionError> {
+    let mut natural = Vec::new();
+    crate::substrate::owned::reserve(&mut natural, code.statements.len())?;
+    natural.resize(code.statements.len(), false);
+    for statement in &code.statements {
+        let plain = |operand: ExprId| {
+            code.emission.composed_use(operand).is_none()
+                && matches!(
+                    code.expressions.get(operand.0 as usize).map(|e| &e.kind),
+                    Some(
+                        ExprKind::Read { .. }
+                            | ExprKind::Snapshot { .. }
+                            | ExprKind::Literal { .. }
+                    )
+                )
+        };
+        natural[statement.id.0 as usize] = match &statement.kind {
+            StatementKind::FieldStore { receiver, .. } => receiver.is_none_or(plain),
+            StatementKind::ArrayStore { array, index, .. } => plain(*array) && plain(*index),
+            _ => continue,
+        };
+    }
+    code.emission.natural_stores = natural;
     Ok(())
 }
 
@@ -315,6 +350,81 @@ fn drop_trailing_continues(code: &mut MethodCode) -> Result<(), ExpressionError>
         }
         if tail {
             code.emission.transfers[transfer].spelling = TransferSpelling::Fallthrough;
+        }
+    }
+    Ok(())
+}
+/// A control's planned continuation repeats the jump its last printed block
+/// already performs. Two adjacent jumps to one label are redundant, so the
+/// control stops emitting the second one.
+fn drop_duplicate_continuation(code: &mut MethodCode) -> Result<(), ExpressionError> {
+    let mut parent: Vec<Option<ControlId>> = filled(code.controls.len(), None)?;
+    for control in &code.controls {
+        for &child in &control.children {
+            *parent
+                .get_mut(child.0 as usize)
+                .ok_or(bug("control names an unknown child"))? = Some(control.id);
+        }
+    }
+    let mut owner: Vec<Option<ControlId>> = filled(code.labels.len(), None)?;
+    for label in &code.labels {
+        *owner
+            .get_mut(label.node.0 as usize)
+            .ok_or(bug("label names an unknown node"))? = Some(label.owner);
+    }
+    // Every block whose printed end is a jump to one label.
+    let mut jumps = filled(code.blocks.len(), None)?;
+    for (node, block) in code.emission.blocks.iter().enumerate() {
+        let transfer = match &block.end {
+            BlockEnd::Terminal(terminal) => match code.terminals[terminal.0 as usize].kind {
+                TerminalKind::Goto(transfer) => Some(transfer),
+                _ => None,
+            },
+            BlockEnd::Transfers(transfers) => transfers.last().copied(),
+            BlockEnd::None | BlockEnd::ConstructionFollow { .. } => None,
+        };
+        let Some(transfer) = transfer else {
+            continue;
+        };
+        if let TransferSpelling::Goto(label) = code.emission.transfers[transfer.0 as usize].spelling
+        {
+            jumps[node] = Some(label);
+        }
+    }
+    for control in 0..code.emission.controls.len() {
+        let Some(continuation) = code.emission.controls[control].continuation else {
+            continue;
+        };
+        for (node, jump) in jumps.iter().enumerate() {
+            if *jump != Some(continuation) {
+                continue;
+            }
+            let Some(mut current) = owner.get(node).copied().flatten() else {
+                continue;
+            };
+            let mut last = false;
+            for _ in 0..=code.controls.len() {
+                if current.0 as usize == control {
+                    last = true;
+                    break;
+                }
+                let Some(up) = parent.get(current.0 as usize).copied().flatten() else {
+                    break;
+                };
+                let Some(parent_control) = code.controls.get(up.0 as usize) else {
+                    break;
+                };
+                if !matches!(parent_control.kind, ControlKind::Sequence)
+                    || parent_control.children.last() != Some(&current)
+                {
+                    break;
+                }
+                current = up;
+            }
+            if last {
+                code.emission.controls[control].continuation = None;
+                break;
+            }
         }
     }
     Ok(())

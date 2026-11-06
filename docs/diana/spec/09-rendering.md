@@ -39,7 +39,8 @@ The following forms have fixed execution meanings:
 
 | Form | Meaning |
 |---|---|
-| `store value -> receiver.field` or `store value -> array[index]` | Capture the value before receiver/array/index, then perform the original store. This avoids silently adopting Java left-hand-side operand order. |
+| `receiver.field = value` / `array[index] = value` | Ordinary assignment. It is used whenever the array, index or receiver slot is a plain local read or literal, because reading them before the value cannot be observed and the null/bounds check still follows the value. |
+| `store value -> receiver.field` or `store value -> array[index]` | Fallback when a non-value slot is an inlined expression or an unavailable operand, so Java's left-to-right order would not match the delivered store. |
 | `[after_operands_before_effect { copies }]` | Capture the operation's original operands, run its supplied snapshot steps, then execute the original effect. A result assignment commits only on normal completion. |
 | `new T(arguments) [on_success publish (locals)]` | Execute the selected P5 construction and publish its aliases only after successful initialization. Its common snapshot prelude precedes allocation. |
 | `resume construction g at label` | Continue the selected compound expression at the original initializer's node. Absorbed members are not executed again; PC order is not an implicit continuation. |

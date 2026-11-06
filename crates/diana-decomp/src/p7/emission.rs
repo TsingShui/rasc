@@ -160,6 +160,9 @@ pub struct EmissionPlan {
     /// A field reference prints its declared type only when the delivered
     /// references would otherwise be indistinguishable.
     pub(super) field_qualifications: Vec<bool>,
+    /// A store prints as an ordinary assignment only when reordering its
+    /// operands to Java's left-to-right order cannot be observed.
+    pub(super) natural_stores: Vec<bool>,
     pub(super) composed_uses: Vec<Option<ComposedExpression>>,
     pub(super) composed_operations: Vec<bool>,
     pub(super) hidden_locals: Vec<bool>,
@@ -179,6 +182,7 @@ impl EmissionPlan {
             show_chains: Vec::new(),
             site_annotations: Vec::new(),
             field_qualifications: Vec::new(),
+            natural_stores: Vec::new(),
             composed_uses: Vec::new(),
             composed_operations: Vec::new(),
             hidden_locals: Vec::new(),
@@ -201,6 +205,12 @@ impl EmissionPlan {
     }
     pub fn show_chains(&self) -> &[bool] {
         &self.show_chains
+    }
+    pub fn natural_store(&self, id: StatementId) -> bool {
+        self.natural_stores
+            .get(id.0 as usize)
+            .copied()
+            .unwrap_or(false)
     }
     pub fn field_qualification(&self, id: ReferenceId) -> bool {
         self.field_qualifications
@@ -305,6 +315,7 @@ pub(super) fn construct(code: &mut MethodCode) -> Result<(), ExpressionError> {
     plan.show_chains = filled(code.chains.len(), true)?;
     plan.site_annotations = filled(code.sites.len(), true)?;
     plan.field_qualifications = filled(code.references.len(), true)?;
+    plan.natural_stores = filled(code.statements.len(), false)?;
     plan.composed_uses = filled(code.expressions.len(), None)?;
     plan.composed_operations = filled(code.operations.len(), false)?;
     plan.hidden_locals = filled(code.locals.len(), false)?;

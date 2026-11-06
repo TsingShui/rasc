@@ -96,6 +96,12 @@ schedule. Unavailable assignments remain gaps; a plan ID alone does not authoriz
 an assignment. Pure literal definitions can omit an emitted statement only when
 all publication plans are literal and no before/snapshot/after copy is attached.
 
+A store prints as an ordinary assignment unless its array, index or receiver slot
+is an inlined expression or an unavailable operand. Those slots are never
+composed, so reading them before the value cannot be observed and the store's
+null/bounds check still follows the value. A narrow element store keeps its
+original width marker.
+
 A break or continue whose target is the innermost enclosing scope needs no label,
 and a continue that ends the loop body is the same as reaching the body end, so the
 final plan prints neither. Its attached copies remain ordered statements.
@@ -113,6 +119,10 @@ A loop predicate becomes an inline condition only when its block holds no label,
 statement, continuation or terminal phase. Edge copies may remain: they are printed
 inside the condition by their original repeating or exiting role, so a break still
 does not execute exiting-edge copies.
+
+A control's planned continuation contributes no second jump when its last printed
+block already jumps to the same label; two adjacent jumps carry the same effect
+and only one is printed.
 
 A jump whose destination is the statement printed immediately after it is
 ordinary sequencing, so the final plan prints no `goto`. The search may pass
