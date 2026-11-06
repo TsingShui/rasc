@@ -74,7 +74,26 @@ fn class_result(out: &mut Buffer, class: &p8::ClassResult) -> Result<(), RenderE
         out.units(&target.full, false)?;
         out.put(";\n")?;
     }
-    super::values::metadata(out, &lookup, class.values())?;
+    // Annotation records name their owner from the delivered declarations, and
+    // keep the original index when that declaration is unavailable.
+    let mut owners = super::values::Owners::default();
+    for field in class.fields() {
+        if let p8::FieldExpression::Declared { name, form, .. } = &field.expression {
+            owners.field(field.id, name, *form)?;
+        }
+    }
+    for member in class.methods() {
+        if let Ok(delivery) = &member.delivery
+            && let Some(result) = delivery.result()
+        {
+            owners.method(
+                member.id,
+                result.header().declaration.name_units(),
+                result.header().name_form,
+            )?;
+        }
+    }
+    super::values::metadata(out, &lookup, class.values(), Some(&owners))?;
     let start = out.position();
     let header = class.header();
     super::names::flags(
@@ -296,7 +315,17 @@ fn method(
     // MethodDisplay already carries only this member's metadata; class metadata
     // is printed once from its supplied record scopes before member declarations.
     if let Some(values) = values {
-        super::values::metadata(out, lookup, values)?;
+        let mut owners = super::values::Owners::default();
+        if let Ok(delivery) = &member.delivery
+            && let Some(result) = delivery.result()
+        {
+            owners.method(
+                member.id,
+                result.header().declaration.name_units(),
+                result.header().name_form,
+            )?;
+        }
+        super::values::metadata(out, lookup, values, Some(&owners))?;
     }
     match &member.delivery {
         Ok(p8::MethodDelivery::Expressed(result) | p8::MethodDelivery::Declared(result)) => {
