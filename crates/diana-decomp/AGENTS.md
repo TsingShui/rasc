@@ -21,6 +21,8 @@ changing an engine capability.
   requests.
 - Engine development verification uses the `dbg_shell` example:
   `cargo run -p diana-decomp --example dbg_shell --locked -- --dex <classes.dex> --exec '<json>'`.
-  It is the single P0–P9 inspection entry and accepts a bare DEX. Do not add
-  phase-specific debug renderers, binaries or examples.
+  It is the single P0–P9 inspection entry and accepts a bare DEX. `class` is the
+  `class_def` index of that image; `method` is the engine-wide `MethodId`, not an
+  index inside the class. Do not add phase-specific debug renderers, binaries or
+  examples.
 - Build from the repository root with `cargo build --locked -p diana-decomp`.

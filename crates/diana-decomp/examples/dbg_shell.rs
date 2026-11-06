@@ -5,6 +5,12 @@
 //!   {"id":1,"cmd":"p0","class":0}
 //!   {"id":2,"cmd":"p1","class":0,"method":0}
 //! Output is one JSON object per line. `--exec` runs commands without a REPL.
+//!
+//! Coordinates: `class` is the `class_def` index of the single bare DEX image
+//! (`DexId(0)`). `method` is the engine-wide `MethodId`, not an index inside the
+//! class; a class product lists its own members as `MethodId(n)`. Passing a
+//! class-local ordinal selects another method and can surface a misleading
+//! malformed-DEX or foreign-method-identity error.
 
 use std::collections::BTreeMap;
 use std::io::{BufRead, Write};

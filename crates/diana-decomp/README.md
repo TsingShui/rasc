@@ -157,6 +157,11 @@ cargo run -p diana-decomp --release --example dbg_shell --locked -- \
   --dex <classes.dex> --exec '{"cmd":"p2","class":0,"method":0,"details":true}'
 ```
 
+`class` is the `class_def` index of that bare DEX image; `method` is the
+engine-wide `MethodId`, not an index local to the class. A class product lists its
+own members as `MethodId(n)`; a class-local ordinal selects a different method and
+can report a misleading malformed-DEX or foreign-method-identity error.
+
 `p3` (`details:true`) observes state positions, bindings, definitions and Phi
 incoming records. `p3-all` reports SSA counts, unavailable uses, upstream failures
 and per-method construction failures. Optional `class` selects one original class
