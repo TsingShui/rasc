@@ -72,6 +72,11 @@ ordinary loop-condition spelling selected by P7. Synchronized routing terminals
 and post-release copies remain at their original nodes rather than moving past
 surrounding catch scopes. Uncaught propagation is not an unavailable handler.
 
+Array allocation prints as `new Element[length]`, followed by one empty `[]`
+per remaining original dimension; the delivered element spelling and rank are
+unchanged. An element that is itself a combined expression keeps the explicit
+form.
+
 Unary conversions correspond to original conversion operations. A check-cast
 remains a check with no invented register write. Array fill preserves its one
 original operation, element width/count and bits. Explicit allocation and
@@ -123,6 +128,12 @@ constructor bits. Bits with no defined meaning for that kind remain visible as
 word itself remains in the source product. A `declared_synchronized` marker is a
 declaration fact: the VM does not lock such a method automatically, so P9 does not
 invent a lock and prints only the monitor operations delivered for its body.
+
+An interface, annotation or enum prints no superclass clause: Java has none there
+and the delivered Object/Enum entry is implicit. A missing or unavailable
+superclass fact still prints, so the gap stays visible. A class initializer prints
+as `static { ... }` without access modifiers, because Java static initializers
+cannot carry them; those bits remain in the method's original flags.
 
 P9 MUST preserve P8's base spelling and array rank. Original-name forms and raw
 descriptors remain explicit. Literal strings do not pass through name planning.

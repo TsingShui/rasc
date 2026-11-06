@@ -435,11 +435,36 @@ impl<S: ExpressionSource> Expressions<'_, '_, S> {
                 self.reference(*reference)?;
             }
             ExprKind::NewArray { reference, length } => {
-                self.out.put("new_array ")?;
-                self.reference(*reference)?;
-                self.out.put("[length: ")?;
-                self.operand(*length)?;
-                self.out.put("]")?;
+                self.out.put("new ")?;
+                // The delivered type is the array type; the instruction supplies
+                // the first length and every remaining dimension is empty.
+                let element = match &self.code.references()[reference.0 as usize].declaration {
+                    Ok(ReferenceDeclaration::Type { type_use }) => self
+                        .names
+                        .body
+                        .get(type_use.0 as usize)
+                        .copied()
+                        .flatten()
+                        .and_then(|id| self.lookup.dimensions(id).map(|d| (id, d))),
+                    _ => None,
+                };
+                match element {
+                    Some((type_use, dimensions)) if dimensions > 0 => {
+                        self.lookup.print_element(self.out, type_use)?;
+                        self.out.put("[")?;
+                        self.operand(*length)?;
+                        self.out.put("]")?;
+                        for _ in 1..dimensions {
+                            self.out.put("[]")?;
+                        }
+                    }
+                    _ => {
+                        self.reference(*reference)?;
+                        self.out.put("[")?;
+                        self.operand(*length)?;
+                        self.out.put("]")?;
+                    }
+                }
             }
             ExprKind::FilledArray {
                 reference,

@@ -502,7 +502,13 @@ impl Expressions<'_, '_> {
                         | EmissionLayout::Graph => {
                             self.out.indent()?;
                             self.out.put(&p.label)?;
-                            self.out.put(": ")?;
+                            // The graph header continues on this line; a plain
+                            // block opens immediately after the colon.
+                            self.out.put(if matches!(p.layout, EmissionLayout::Graph) {
+                                ": "
+                            } else {
+                                ":"
+                            })?;
                             if matches!(p.layout, EmissionLayout::Graph) {
                                 if let ControlKind::Graph {
                                     reason, entries, ..

@@ -43,7 +43,24 @@ impl<'a> Lookup<'a> {
     fn find(&self, source: p8::TypeSource) -> Option<p8::TypeUseId> {
         self.index.get(&source).copied()
     }
+    /// Array dimensions of one delivered type use.
+    pub fn dimensions(&self, id: p8::TypeUseId) -> Option<u32> {
+        let use_ = self.uses.get(id.0 as usize)?;
+        Some(self.targets.get(use_.target.0 as usize)?.dimensions)
+    }
     pub fn print(&self, out: &mut Buffer, id: p8::TypeUseId) -> Result<(), RenderError> {
+        self.print_parts(out, id, true)
+    }
+    /// Prints the base type without its trailing array dimensions.
+    pub fn print_element(&self, out: &mut Buffer, id: p8::TypeUseId) -> Result<(), RenderError> {
+        self.print_parts(out, id, false)
+    }
+    fn print_parts(
+        &self,
+        out: &mut Buffer,
+        id: p8::TypeUseId,
+        dimensions: bool,
+    ) -> Result<(), RenderError> {
         let start = out.position();
         let u = self.uses.get(id.0 as usize).ok_or(RenderError::Invariant(
             "named use is outside the delivered plan",
@@ -64,7 +81,7 @@ impl<'a> Lookup<'a> {
                 out.put(">")?;
             }
         }
-        if u.spelling != p8::Spelling::Original {
+        if dimensions && u.spelling != p8::Spelling::Original {
             for _ in 0..t.dimensions {
                 out.put("[]")?;
             }

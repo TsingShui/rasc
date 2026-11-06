@@ -94,7 +94,14 @@ fn class_result(out: &mut Buffer, class: &p8::ClassResult) -> Result<(), RenderE
         p8::ClassKind::Enum => "enum ",
     })?;
     out.name(&header.name.units, header.name.form)?;
-    if !matches!(header.superclass, p8::TypeExpression::Absent) {
+    // An interface, annotation or enum has no superclass clause in Java; the
+    // delivered Object/Enum entry is implicit there. A missing or unavailable
+    // superclass fact is still printed so the gap stays visible.
+    let implicit = matches!(
+        header.kind,
+        p8::ClassKind::Interface | p8::ClassKind::Annotation | p8::ClassKind::Enum
+    ) && matches!(header.superclass, p8::TypeExpression::Present(_));
+    if !implicit && !matches!(header.superclass, p8::TypeExpression::Absent) {
         out.put(" extends ")?;
         type_expression(out, &lookup, &header.superclass)?;
     }
@@ -485,28 +492,22 @@ fn header_line(
     owner: Option<p8::TypeUseId>,
 ) -> Result<(), RenderError> {
     out.indent()?;
+    // A class initializer is a static block. DEX may give it access bits that
+    // Java cannot express there; they stay in the original flags of the product.
+    if matches!(h.kind, p7::MethodKind::ClassInitializer) {
+        out.put("static")?;
+        return Ok(());
+    }
     super::names::flags(
         out,
         h.access_flags,
         super::names::FlagScope::Method {
-            initializer: matches!(
-                h.kind,
-                p7::MethodKind::Constructor | p7::MethodKind::ClassInitializer
-            ),
+            initializer: matches!(h.kind, p7::MethodKind::Constructor),
         },
     )?;
     let method = h.key.method;
     match h.kind {
-        // A class initializer is a static block, not a callable method.
-        p7::MethodKind::ClassInitializer => {
-            if h.access_flags & 0x8 == 0 {
-                out.put("static ")?;
-            }
-            // The caller opens the block, so the modifier line must not end in a
-            // space. No span covers the trimmed indentation.
-            out.trim_trailing_spaces();
-            return Ok(());
-        }
+        p7::MethodKind::ClassInitializer => unreachable!("handled above"),
         // A constructor carries the owner name and no return type.
         p7::MethodKind::Constructor => {
             // The class declaration name is the constructor name. A reference
