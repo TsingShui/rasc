@@ -218,15 +218,17 @@ pub(super) fn annotation(
     out.put("@")?;
     lookup.print(out, a.type_use)?;
     out.put("(")?;
-    values(
-        out,
-        lookup,
-        plan.expressions()
-            .get(a.values.start as usize..a.values.end as usize)
-            .ok_or(RenderError::Invariant(
-                "annotation expression range is unavailable",
-            ))?,
-    )?;
+    if !interpreted_signature(out, lookup, a)? {
+        values(
+            out,
+            lookup,
+            plan.expressions()
+                .get(a.values.start as usize..a.values.end as usize)
+                .ok_or(RenderError::Invariant(
+                    "annotation expression range is unavailable",
+                ))?,
+        )?;
+    }
     out.put(") ")?;
     visibility(out, a.visibility)?;
     if a.extent != crate::AnnotationExtent::Complete {
@@ -237,6 +239,65 @@ pub(super) fn annotation(
     Ok(())
 }
 
+/// An interpreted `@Signature` record prints the declaration it describes
+/// instead of its raw descriptor fragments. The delivered annotation keeps its
+/// original text in the product; this is the same interpretation the declaration
+/// already prints.
+fn interpreted_signature(
+    out: &mut Buffer,
+    lookup: &Lookup<'_>,
+    a: &AnnotationExpression,
+) -> Result<bool, RenderError> {
+    let Some(name) = lookup.target_name(a.type_use) else {
+        return Ok(false);
+    };
+    if name != b"dalvik.annotation.Signature".map(u16::from) {
+        return Ok(false);
+    }
+    match a.location {
+        crate::AnnotationLocation::Field(field) => {
+            let Some(root) = lookup.signature(SignatureOwner::Field(field)) else {
+                return Ok(false);
+            };
+            super::names::signature(out, lookup, root)?;
+            Ok(true)
+        }
+        crate::AnnotationLocation::Parameter { method, parameter } => {
+            let owner = SignatureOwner::Parameter {
+                method,
+                index: parameter.0,
+            };
+            let Some(root) = lookup.signature(owner) else {
+                return Ok(false);
+            };
+            super::names::signature(out, lookup, root)?;
+            Ok(true)
+        }
+        crate::AnnotationLocation::Method(method) => {
+            let Some(returns) = lookup.signature(SignatureOwner::Return(method)) else {
+                return Ok(false);
+            };
+            out.put("(")?;
+            for index in 0..MAX_SIGNATURE_PARAMETERS {
+                let owner = SignatureOwner::Parameter { method, index };
+                let Some(root) = lookup.signature(owner) else {
+                    break;
+                };
+                if index > 0 {
+                    out.put(", ")?;
+                }
+                super::names::signature(out, lookup, root)?;
+            }
+            out.put(") -> ")?;
+            super::names::signature(out, lookup, returns)?;
+            Ok(true)
+        }
+        crate::AnnotationLocation::Class => Ok(false),
+    }
+}
+/// The declaration's own arity bounds the parameter walk; a delivered signature
+/// never carries more parameters than the encoded method it describes.
+const MAX_SIGNATURE_PARAMETERS: u32 = 255;
 /// The record's original owner, named from the delivered declaration when the
 /// product carries one and by original index otherwise.
 fn scope(

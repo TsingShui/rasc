@@ -19,6 +19,12 @@ impl<'a> Lookup<'a> {
     pub fn signature_node(&self, id: u32) -> Option<&p8::SignatureNode> {
         self.signatures?.node(id)
     }
+    /// The delivered name of one type use, without array dimensions.
+    pub fn target_name(&self, id: p8::TypeUseId) -> Option<&'a [u16]> {
+        let use_ = self.uses.get(id.0 as usize)?;
+        let target = self.targets.get(use_.target.0 as usize)?;
+        Some(target.full.as_slice())
+    }
     pub fn find_use(&self, source: p8::TypeSource) -> Option<p8::TypeUseId> {
         self.find(source)
     }

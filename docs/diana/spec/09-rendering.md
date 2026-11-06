@@ -128,6 +128,12 @@ leaf declarations. Counts, reference identities and local gaps remain visible.
 Neither path parses encoded input again or interprets Signature as recovered
 generic syntax.
 
+A `@Signature` record whose declaration P8 already interpreted prints that
+interpreted signature instead of its raw descriptor fragments: one type for a
+field or parameter, and `(parameters) -> return` for a method. A record P8 did not
+interpret keeps its original value tokens, so an uninterpreted signature never
+silently changes shape. The delivered annotation text remains in the product.
+
 A constructor prints as `OwnerName(parameters)` with no return type, using the
 class declaration's name rather than a reference spelling that an unrelated field
 or local could qualify. A class initializer prints as `static { ... }`. An
