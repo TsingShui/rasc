@@ -271,11 +271,15 @@ through its composed use.
 The layout pass keeps labels referenced by explicit transfers, graph entries,
 exception handlers and construction continuations. Unreferenced labels retain
 zero-length source anchors. An unreferenced Sequence or If wrapper can be
-transparent; graph and labeled scopes remain explicit. A loop condition becomes
-ordinary `while`/`do-while` only when the predicate block, terminal phases and
-both edge copy schedules contain no work. Otherwise the existing explicit test
-retains its edge obligations. Pure propagation chains can be implicit only when
-no displayed site or handler requires the chain.
+transparent. A labeled or graph scope keeps its braces, graph header and
+children, but prints its control name only when a printed transfer names that
+control. A labeled scope that prints no name, has no continuation or deferred
+composition, and has one unnamed printed child prints that child without its own
+braces, unless a bare `break` or `continue` targets the scope. A loop condition
+becomes ordinary `while`/`do-while` only when the predicate block, terminal
+phases and both edge copy schedules contain no work. Otherwise the existing
+explicit test retains its edge obligations. Pure propagation chains can be
+implicit only when no displayed site or handler requires the chain.
 
 Integral literals encoded in integer arithmetic instructions retain their original
 bits and an integral view. Other bit-pattern literals keep their supplied views.

@@ -500,6 +500,34 @@ impl Expressions<'_, '_> {
             }
         }
     }
+    /// A `Labelled` scope whose own name no transfer uses, which has no planned
+    /// continuation or deferred composition and whose only child is another
+    /// unnamed printed control, contributes only braces. A bare break still names
+    /// the innermost printed scope, so one that targets this scope keeps them.
+    fn transparent_labelled(&self, id: ControlId, c: &Control, p: &EmissionControl) -> bool {
+        if p.label_required || p.continuation.is_some() || self.code.emission().deferred_control(id)
+        {
+            return false;
+        }
+        let [child] = c.children.as_slice() else {
+            return false;
+        };
+        let child_control = &self.code.emission().controls()[child.0 as usize];
+        if self.code.emission().omitted(*child) || child_control.label_required {
+            return false;
+        }
+        !self
+            .code
+            .emission()
+            .transfers()
+            .iter()
+            .any(|t| match t.spelling {
+                TransferSpelling::BreakHere(target) | TransferSpelling::ContinueHere(target) => {
+                    target == id
+                }
+                _ => false,
+            })
+    }
     /// An explicit work stack, bounded by the delivered tree, prevents hostile
     /// region depth from consuming the native call stack. It does not plan CFGs.
     pub fn body(&mut self) -> Result<(), RenderError> {
@@ -532,19 +560,25 @@ impl Expressions<'_, '_> {
                                 push(&mut work, Event::Control(child))?;
                             }
                         }
+                        EmissionLayout::Labelled if self.transparent_labelled(id, c, p) => {
+                            for &child in c.children.iter().rev() {
+                                push(&mut work, Event::Control(child))?;
+                            }
+                        }
                         EmissionLayout::Sequence
                         | EmissionLayout::Labelled
                         | EmissionLayout::Graph => {
+                            let graph = matches!(p.layout, EmissionLayout::Graph);
                             self.out.indent()?;
-                            self.out.put(&p.label)?;
-                            // The graph header continues on this line; a plain
-                            // block opens immediately after the colon.
-                            self.out.put(if matches!(p.layout, EmissionLayout::Graph) {
-                                ": "
-                            } else {
-                                ":"
-                            })?;
-                            if matches!(p.layout, EmissionLayout::Graph) {
+                            // A control name is printed only when a transfer still
+                            // names it; Sequence reaches here only when required.
+                            if p.label_required {
+                                self.out.put(&p.label)?;
+                                // The graph header continues on this line; a plain
+                                // block opens immediately after the colon.
+                                self.out.put(if graph { ": " } else { ":" })?;
+                            }
+                            if graph {
                                 if let ControlKind::Graph {
                                     reason, entries, ..
                                 } = &c.kind
@@ -565,7 +599,13 @@ impl Expressions<'_, '_> {
                                     self.out.put(" no_implicit_entry")?;
                                 }
                             }
-                            self.out.open()?;
+                            if graph || p.label_required {
+                                self.out.open()?;
+                            } else {
+                                // A bare break still names the innermost printed
+                                // scope, so only the unused name is omitted.
+                                self.out.open_plain()?;
+                            }
                             push(&mut work, Event::Close)?;
                             for &child in c.children.iter().rev() {
                                 push(&mut work, Event::Control(child))?;

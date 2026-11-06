@@ -58,7 +58,12 @@ impl Buffer {
         self.put("\n")
     }
     pub fn open(&mut self) -> Result<(), RenderError> {
-        self.put(" {\n")?;
+        self.put(" ")?;
+        self.open_plain()
+    }
+    /// A block without a header line of its own, indented at the block start.
+    pub fn open_plain(&mut self) -> Result<(), RenderError> {
+        self.put("{\n")?;
         self.depth = self.depth.checked_add(1).ok_or(RenderError::Capacity)?;
         Ok(())
     }
