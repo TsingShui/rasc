@@ -148,7 +148,15 @@ fn class_result(out: &mut Buffer, class: &p8::ClassResult) -> Result<(), RenderE
         out.put(";\n")?;
         out.span(a, Origin::Field(f.id))?;
     }
-    if !class.preparation_order().is_empty() {
+    // A list that is entirely implicit defaults states no value: those fields are
+    // initialized by the class initializer printed next. The original absence of
+    // encoded entries remains in the source product and the class meta count.
+    let preparation = !class.preparation_order().is_empty()
+        && !class
+            .preparation_order()
+            .iter()
+            .all(|&field| class.fields()[field].preparation == p8::Preparation::ImplicitDefault);
+    if preparation {
         out.indent()?;
         out.put("static_preparation_before_clinit")?;
         out.open()?;
