@@ -752,11 +752,26 @@ impl Expressions<'_, '_> {
                         }
                         EmissionLayout::Switch {
                             header,
-                            body,
+                            bodies,
+                            private_cases,
                             terminal,
                         } => {
                             push(&mut work, Event::Close)?;
-                            push(&mut work, Event::Control(*body))?;
+                            if *private_cases {
+                                let TerminalKind::Switch { arms, .. } =
+                                    &self.code.terminals()[terminal.0 as usize].kind
+                                else {
+                                    return Err(RenderError::Invariant("switch lost its arms"));
+                                };
+                                for (&body, &arm) in bodies.iter().zip(arms).rev() {
+                                    push(&mut work, Event::Control(body))?;
+                                    push(&mut work, Event::Case(arm))?;
+                                }
+                            } else {
+                                for &body in bodies.iter().rev() {
+                                    push(&mut work, Event::Control(body))?;
+                                }
+                            }
                             push(&mut work, Event::Switch(id, *terminal))?;
                             push(&mut work, Event::Control(*header))?;
                         }
@@ -948,7 +963,37 @@ impl Expressions<'_, '_> {
                         },
                     )?;
                     self.out.open()?;
-                    self.switch_arms(arms)?;
+                    if !matches!(
+                        self.code.emission().controls()[id.0 as usize].layout,
+                        EmissionLayout::Switch {
+                            private_cases: true,
+                            ..
+                        }
+                    ) {
+                        self.switch_arms(arms)?;
+                    }
+                }
+                Event::Case(arm) => {
+                    self.out.indent()?;
+                    match self.code.transfers()[arm.0 as usize].role {
+                        Some(crate::p2::NormalEdge::SwitchCase { key, .. }) => {
+                            self.out.fmt(format_args!("case {key}:"))?
+                        }
+                        Some(crate::p2::NormalEdge::SwitchDefault) => self.out.put("default:")?,
+                        _ => {
+                            return Err(RenderError::Invariant(
+                                "switch arm lost its original role",
+                            ));
+                        }
+                    }
+                    if !self.code.emission().transfers()[arm.0 as usize]
+                        .copies
+                        .is_empty()
+                    {
+                        self.out.put(" ")?;
+                    }
+                    self.selected(arm, false)?;
+                    self.out.put("\n")?;
                 }
                 Event::Catch(id, index) => {
                     self.out.close()?;
@@ -1218,6 +1263,7 @@ enum Event {
     LoopTailStart,
     LoopTailEnd(PredicateEmission),
     Switch(ControlId, BlockId),
+    Case(TransferId),
     Catch(ControlId, usize),
     Acquire(ControlId, OpId),
 }

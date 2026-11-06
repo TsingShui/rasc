@@ -210,6 +210,7 @@ pub enum ControlKind {
     Switch {
         terminal: crate::p2::BlockId,
         arms: Vec<TransferId>,
+        private_cases: bool,
     },
     LabelledBlock {
         target: LabelId,
@@ -594,7 +595,11 @@ pub(super) fn construct(c: &mut Context<'_, '_>) -> Result<(), ExpressionError> 
                     continue_target: label(c, p.continue_target())?,
                 }
             }
-            RegionKind::Switch { arms } => ControlKind::Switch {
+            RegionKind::Switch {
+                arms,
+                private_cases,
+            } => ControlKind::Switch {
+                private_cases: *private_cases,
                 terminal: terminal(c, r.entry().ok_or(bug("switch has no selector node"))?),
                 arms: ids(arms, |a| TransferId(a.0))?,
             },

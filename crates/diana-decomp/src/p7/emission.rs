@@ -126,7 +126,8 @@ pub enum EmissionLayout {
     },
     Switch {
         header: ControlId,
-        body: ControlId,
+        bodies: Vec<ControlId>,
+        private_cases: bool,
         terminal: BlockId,
     },
     Labelled,
@@ -631,11 +632,26 @@ pub(super) fn construct(code: &mut MethodCode) -> Result<(), ExpressionError> {
                     },
                 },
             },
-            ControlKind::Switch { terminal, .. } => EmissionLayout::Switch {
-                header: child(c, 0)?,
-                body: child(c, 1)?,
-                terminal: *terminal,
-            },
+            ControlKind::Switch {
+                terminal,
+                arms,
+                private_cases,
+            } => {
+                if *private_cases {
+                    if c.children.len() != arms.len() + 1 {
+                        return Err(bug("private switch lost its case children"));
+                    }
+                    for &arm in arms {
+                        plan.transfers[arm.0 as usize].spelling = TransferSpelling::Fallthrough;
+                    }
+                }
+                EmissionLayout::Switch {
+                    header: child(c, 0)?,
+                    bodies: copy(c.children.get(1..).ok_or(bug("switch lost its body"))?)?,
+                    private_cases: *private_cases,
+                    terminal: *terminal,
+                }
+            }
             ControlKind::LabelledBlock { .. } => EmissionLayout::Labelled,
             ControlKind::Try { .. } => EmissionLayout::Try {
                 body: child(c, 0)?,

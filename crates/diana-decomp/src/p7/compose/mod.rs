@@ -776,7 +776,11 @@ fn printed_parts<'a>(
             return &buffer[..if code.emission.omitted(*no) { 2 } else { 3 }];
         }
         EmissionLayout::Loop { body, .. } => std::slice::from_ref(body),
-        EmissionLayout::Switch { header, body, .. } => &[*header, *body],
+        EmissionLayout::Switch { header, bodies, .. } => {
+            buffer[0] = *header;
+            buffer[1..=bodies.len()].copy_from_slice(bodies);
+            return &buffer[..=bodies.len()];
+        }
         EmissionLayout::Try { body, catches } => {
             buffer[0] = *body;
             buffer[1..=catches.len()].copy_from_slice(catches);

@@ -182,9 +182,23 @@ and their release/break corridors outside that core. Candidate acceptance still
 checks the enlarged region's original entrances and unique content ownership.
 
 Original switch case keys, default, roles and duplicate-target edges remain distinct.
-A switch body can contain a local graph with multiple case entrances and
-fallthrough. The selector has one execution owner; recovery does not introduce a
-state variable, generated dispatcher or repeated selector evaluation.
+Before transfer planning, P6 can give a switch one private child per original arm
+instead of one multi-entry body. `private_cases` identifies this child layout:
+selector first, then bodies in original arm order. Admission requires distinct
+arm targets matching exactly the body's exported entries, disjoint normal reach
+sets up to the common follow, no other normal or executable exceptional arrivals,
+whole existing owners and P5 construction groups, and complete body coverage.
+Each arm must compose as a single chain of existing owners, have no normal cycle,
+and terminate by return/throw or links to the switch follow. Selected nested owners
+remain whole. No extra graph or labelled scope is created for a private arm.
+The shared follow stays outside the switch with one execution owner; case exits
+are planned against the switch or their unchanged nested scope, not a removed
+body wrapper. Original link destinations, copies and exception facts do not change.
+
+A rejected private-case composition retains the existing single body, including
+its local graph with multiple case entrances and fallthrough. Duplicate-target
+arms retain that layout. The selector has one execution owner; recovery does not
+introduce a state variable, generated dispatcher or repeated selector evaluation.
 
 `Continuation` records whether a completed region finishes its parent, reaches a
 confirmed next position, or needs an explicit label transfer. P7 MUST consume this

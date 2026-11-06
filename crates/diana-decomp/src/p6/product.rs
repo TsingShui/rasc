@@ -393,6 +393,7 @@ pub enum RegionKind {
     Loop(LoopId),
     Switch {
         arms: Vec<LinkId>,
+        private_cases: bool,
     },
     LabelledBlock {
         target: NodeId,

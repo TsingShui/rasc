@@ -220,6 +220,12 @@ Graph kinds, child ownership and original continuation evidence. Labels have fix
 method-local display names. Block completion distinguishes ordinary terminals from
 syntax-owned predicates/exits; retained evidence is not a second emission.
 All original switch roles, duplicate-target links and selected-edge copies survive.
+P7 consumes P6's `private_cases` child layout without finding regions again. Its
+switch emission lists the supplied bodies in arm order. Each original arm prints
+its case/default label and selected-edge copies before its unique body, without
+a dispatch goto. The selector terminal and arm transfer identities remain owned.
+Other switches retain the single-body dispatch layout. P9 follows these placements;
+it does not split graphs or infer private membership from printed text.
 Explicit graph transfers use the same statements and storage as natural regions.
 
 P7 MUST copy only P6's published reader-facing diagnostics into `Issue::Control`.
