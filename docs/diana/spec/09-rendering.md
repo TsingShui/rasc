@@ -77,8 +77,15 @@ whose target prints next is sequencing, not an emitted `goto`, including planned
 continuations and the last printed If branch. P7 selects this omission and marks
 an emptied, label-free, copy-free `else` as omitted; P9 MUST print neither its
 `else` header nor its control. For an explicit If terminal, P9 consumes P7's
-separate empty-false-arm flag and omits that arm's text and span. P9 does not
-recompute adjacency or emptiness.
+separate empty-false-arm flag and omits that arm's text and span. P7 also selects
+an exactly negated single-arm If when only the original false arm prints, an
+empty-If display when neither arm nor the predicate has work, and `else if` for a
+single nested printable If. P9 consumes those shapes without recomputing
+adjacency or emptiness. Inversion uses the same predicate-negation renderer as
+loops; the original false edge retains its copies at the displayed body's start.
+An empty If retains its header and original terminal facts, with a zero-length
+terminal anchor for a suppressed explicit test. A chained If owns its own braces
+and arm emission.
 
 P7 fixes condition/header ownership, loop repetition, child roles and necessary
 continuations. P9 prints those choices. In particular, predicate-exit copies do

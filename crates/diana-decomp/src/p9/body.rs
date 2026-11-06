@@ -309,6 +309,26 @@ impl Expressions<'_, '_> {
         if self.code.emission().omitted_return(id) {
             return Ok(());
         }
+        if self.code.emission().empty_if(id) {
+            let TerminalKind::If {
+                when_true,
+                when_false,
+                ..
+            } = self.code.terminals()[id.0 as usize].kind
+            else {
+                return Err(RenderError::Invariant("empty If lost its original edges"));
+            };
+            let start = self.out.position();
+            self.selected(when_true, false)?;
+            self.selected(when_false, false)?;
+            return self.out.span(
+                start,
+                Origin::Terminal {
+                    method: self.method,
+                    block: id,
+                },
+            );
+        }
         let t = &self.code.terminals()[id.0 as usize];
         let p = &self.code.emission().terminals()[id.0 as usize];
         self.out.indent()?;
@@ -416,7 +436,11 @@ impl Expressions<'_, '_> {
         }
         Ok(())
     }
-    fn predicate(&mut self, test: PredicateEmission) -> Result<(), RenderError> {
+    fn predicate_expression(
+        &mut self,
+        test: PredicateEmission,
+        loop_edges: bool,
+    ) -> Result<(), RenderError> {
         let t = &self.code.terminals()[test.terminal.0 as usize];
         let p = &self.code.emission().terminals()[test.terminal.0 as usize];
         let TerminalKind::If { condition, .. } = &t.kind else {
@@ -424,8 +448,6 @@ impl Expressions<'_, '_> {
                 "predicate lost its original condition",
             ));
         };
-        let start = self.out.position();
-        self.copies(&p.before)?;
         if test.negate {
             self.out.put("!(")?;
         }
@@ -438,20 +460,28 @@ impl Expressions<'_, '_> {
         } else {
             (test.when_true, test.when_false)
         };
-        for (role, edge) in [("repeat", repeat), ("exit", exit)] {
-            if self.code.emission().transfers()[edge.0 as usize]
-                .copies
-                .is_empty()
-            {
-                continue;
+        if loop_edges {
+            for (role, edge) in [("repeat", repeat), ("exit", exit)] {
+                if self.code.emission().transfers()[edge.0 as usize]
+                    .copies
+                    .is_empty()
+                {
+                    continue;
+                }
+                self.out.fmt(format_args!(" [{role}: "))?;
+                self.copies(&self.code.emission().transfers()[edge.0 as usize].copies)?;
+                self.out.put("]")?;
             }
-            self.out.fmt(format_args!(" [{role}: "))?;
-            self.copies(&self.code.emission().transfers()[edge.0 as usize].copies)?;
-            self.out.put("]")?;
         }
         if test.negate {
             self.out.put(")")?;
         }
+        Ok(())
+    }
+    fn predicate(&mut self, test: PredicateEmission) -> Result<(), RenderError> {
+        let start = self.out.position();
+        self.copies(&self.code.emission().terminals()[test.terminal.0 as usize].before)?;
+        self.predicate_expression(test, true)?;
         self.out.span(
             start,
             Origin::Terminal {
@@ -556,8 +586,9 @@ impl Expressions<'_, '_> {
             push(&mut work, Event::Control(root))?;
         }
         while let Some(event) = work.pop() {
+            let chained = matches!(event, Event::ChainedControl(_));
             match event {
-                Event::Control(id) => {
+                Event::Control(id) | Event::ChainedControl(id) => {
                     if self.code.emission().omitted(id) {
                         continue;
                     }
@@ -569,7 +600,14 @@ impl Expressions<'_, '_> {
                         EmissionLayout::Block(node) => self.block(*node)?,
                         EmissionLayout::Sequence if !p.label_required => {
                             for &child in c.children.iter().rev() {
-                                push(&mut work, Event::Control(child))?;
+                                push(
+                                    &mut work,
+                                    if chained {
+                                        Event::ChainedControl(child)
+                                    } else {
+                                        Event::Control(child)
+                                    },
+                                )?;
                             }
                         }
                         EmissionLayout::Labelled if self.transparent_labelled(id, c, p) => {
@@ -628,6 +666,7 @@ impl Expressions<'_, '_> {
                             yes,
                             no,
                             test,
+                            shape,
                         } => {
                             if p.label_required {
                                 self.out.indent()?;
@@ -636,13 +675,40 @@ impl Expressions<'_, '_> {
                                 self.out.open()?;
                                 push(&mut work, Event::Close)?;
                             }
-                            push(&mut work, Event::Close)?;
-                            if !self.code.emission().omitted(*no) {
-                                push(&mut work, Event::Control(*no))?;
-                                push(&mut work, Event::Else(test.when_false))?;
+                            match shape {
+                                IfShape::Empty => push(&mut work, Event::EmptyIf(*test))?,
+                                IfShape::Inverted => {
+                                    push(&mut work, Event::Close)?;
+                                    push(&mut work, Event::Control(*no))?;
+                                    push(
+                                        &mut work,
+                                        Event::If {
+                                            test: *test,
+                                            chained,
+                                        },
+                                    )?;
+                                }
+                                IfShape::IfElse | IfShape::ElseIf => {
+                                    if matches!(shape, IfShape::ElseIf) {
+                                        push(&mut work, Event::ChainedControl(*no))?;
+                                        push(&mut work, Event::ElseIf(test.when_false))?;
+                                    } else {
+                                        push(&mut work, Event::Close)?;
+                                        if !self.code.emission().omitted(*no) {
+                                            push(&mut work, Event::Control(*no))?;
+                                            push(&mut work, Event::Else(test.when_false))?;
+                                        }
+                                    }
+                                    push(&mut work, Event::Control(*yes))?;
+                                    push(
+                                        &mut work,
+                                        Event::If {
+                                            test: *test,
+                                            chained,
+                                        },
+                                    )?;
+                                }
                             }
-                            push(&mut work, Event::Control(*yes))?;
-                            push(&mut work, Event::If(*test))?;
                             push(&mut work, Event::Control(*header))?;
                         }
                         EmissionLayout::Loop { body, placement } => {
@@ -762,22 +828,28 @@ impl Expressions<'_, '_> {
                     }
                 }
                 Event::Close => self.out.close()?,
-                Event::If(test) => {
-                    let t = &self.code.terminals()[test.terminal.0 as usize];
-                    let TerminalKind::If { condition, .. } = &t.kind else {
-                        return Err(RenderError::Invariant("if header lost its predicate"));
-                    };
-                    self.out.indent()?;
+                Event::EmptyIf(test) => {
+                    let start = self.out.position();
+                    self.selected(test.when_true, false)?;
+                    self.selected(test.when_false, false)?;
+                    self.out.span(
+                        start,
+                        Origin::Terminal {
+                            method: self.method,
+                            block: test.terminal,
+                        },
+                    )?;
+                }
+                Event::If { test, chained } => {
+                    if !chained {
+                        self.out.indent()?;
+                    }
                     self.copies(
                         &self.code.emission().terminals()[test.terminal.0 as usize].before,
                     )?;
                     let a = self.out.position();
                     self.out.put("if (")?;
-                    self.condition(condition)?;
-                    self.phases(
-                        &self.code.emission().terminals()[test.terminal.0 as usize].snapshots,
-                        "after_operands_before_effect",
-                    )?;
+                    self.predicate_expression(test, false)?;
                     self.out.put(")")?;
                     self.out.span(
                         a,
@@ -786,17 +858,33 @@ impl Expressions<'_, '_> {
                             block: test.terminal,
                         },
                     )?;
+                    if test.negate {
+                        // P7 admits only nonprinting true-edge bundles here;
+                        // their plan IDs retain zero-length original origins.
+                        self.selected(test.when_true, false)?;
+                    }
                     self.out.open()?;
-                    if !self.code.emission().transfers()[test.when_true.0 as usize]
+                    let edge = if test.negate {
+                        test.when_false
+                    } else {
+                        test.when_true
+                    };
+                    if !self.code.emission().transfers()[edge.0 as usize]
                         .copies
                         .is_empty()
                     {
                         self.out.indent()?;
-                        self.selected(test.when_true, false)?;
+                        self.selected(edge, false)?;
                         self.out.put("\n")?;
                     } else {
-                        self.selected(test.when_true, false)?;
+                        self.selected(edge, false)?;
                     }
+                }
+                Event::ElseIf(edge) => {
+                    self.out.close()?;
+                    self.out.indent()?;
+                    self.out.put("else ")?;
+                    self.selected(edge, false)?;
                 }
                 Event::Else(edge) => {
                     self.out.close()?;
@@ -1128,10 +1216,16 @@ fn branch(op: BranchOp) -> &'static str {
 }
 enum Event {
     Control(ControlId),
+    ChainedControl(ControlId),
     End(ControlId, TextOffset),
     Close,
-    If(PredicateEmission),
+    If {
+        test: PredicateEmission,
+        chained: bool,
+    },
+    EmptyIf(PredicateEmission),
     Else(TransferId),
+    ElseIf(TransferId),
     LoopHead(PredicateEmission),
     CompactLoopTail(ControlId, PredicateEmission),
     LoopTailStart,

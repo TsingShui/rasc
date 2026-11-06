@@ -99,6 +99,16 @@ pub enum LoopPlacement {
         compact: bool,
     },
 }
+#[derive(Clone, Copy, Debug, Serialize)]
+pub enum IfShape {
+    IfElse,
+    ElseIf,
+    /// The false edge and its original body become the sole printed arm. Any
+    /// true-edge copy bundles have no steps or diagnostics, only source anchors.
+    Inverted,
+    /// Only the header remains; evaluating the predicate has no displayed work.
+    Empty,
+}
 #[derive(Debug, Serialize)]
 pub enum EmissionLayout {
     Block(crate::p6::NodeId),
@@ -108,6 +118,7 @@ pub enum EmissionLayout {
         yes: ControlId,
         no: ControlId,
         test: PredicateEmission,
+        shape: IfShape,
     },
     Loop {
         body: ControlId,
@@ -196,6 +207,9 @@ pub struct EmissionPlan {
     /// Display-only omission of a method body's closing void return, whose
     /// closing brace performs the same exit.
     pub(super) omitted_returns: Vec<bool>,
+    /// Both explicit If arms are fallthrough with only nonprinting copies;
+    /// the predicate has no evaluation or phase that needs to print.
+    pub(super) empty_if: Vec<bool>,
     pub(super) transfers: Vec<EmissionTransfer>,
     pub(super) initial: Vec<CopyPlanId>,
     pub(super) statement_operations: Vec<Option<OpId>>,
@@ -221,6 +235,7 @@ impl EmissionPlan {
             terminals: Vec::new(),
             empty_else: Vec::new(),
             omitted_returns: Vec::new(),
+            empty_if: Vec::new(),
             transfers: Vec::new(),
             initial: Vec::new(),
             statement_operations: Vec::new(),
@@ -306,6 +321,9 @@ impl EmissionPlan {
             .get(id.0 as usize)
             .copied()
             .unwrap_or(false)
+    }
+    pub fn empty_if(&self, id: BlockId) -> bool {
+        self.empty_if.get(id.0 as usize).copied().unwrap_or(false)
     }
     pub fn terminals(&self) -> &[EvaluationPhases] {
         &self.terminals
@@ -393,6 +411,7 @@ pub(super) fn construct(code: &mut MethodCode) -> Result<(), ExpressionError> {
         .resize_with(code.terminals.len(), EvaluationPhases::default);
     plan.empty_else = filled(code.terminals.len(), false)?;
     plan.omitted_returns = filled(code.terminals.len(), false)?;
+    plan.empty_if = filled(code.terminals.len(), false)?;
     plan.statement_operations = filled(code.statements.len(), None)?;
     let mut nodes = Vec::new();
     crate::substrate::owned::reserve(&mut nodes, code.blocks.len())?;
@@ -586,6 +605,7 @@ pub(super) fn construct(code: &mut MethodCode) -> Result<(), ExpressionError> {
                 yes: child(c, 1)?,
                 no: child(c, 2)?,
                 test: predicate(code, *terminal, None)?,
+                shape: IfShape::IfElse,
             },
             ControlKind::Loop { syntax, .. } => EmissionLayout::Loop {
                 body: child(c, 0)?,

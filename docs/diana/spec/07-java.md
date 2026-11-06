@@ -170,7 +170,29 @@ None, a list of copy-free Fallthrough transfers, or a Goto terminal with no
 terminal phases and a copy-free Fallthrough transfer. Other terminals retain the
 branch. For an explicit If terminal, P7 MUST omit the false arm only when its
 transfer is copy-free Fallthrough and all terminal phases are empty. P9 consumes
-this separate terminal display flag without recomputing emptiness. These display
+this separate terminal display flag without recomputing emptiness.
+
+When a syntax-owned If's true arm is empty under the same rules and its false
+arm prints, P7 selects an inverted single-arm display using `PredicateEmission`'s
+exact negation. Original true/false edge identities and child ownership stay
+unchanged; the false-edge copies begin the displayed body. A true-edge copy
+bundle with no executable steps or unavailable assignments is nonprinting; P9
+retains its zero-length copy and transfer origins without moving any step.
+A displayed predicate exception site prevents inversion. If both arms are empty,
+P7 suppresses the test only when it has no terminal phases, displayed site or
+composed operand evaluation, and its control has no continuation or deferred
+control; its header still prints at the original position. This omission requires
+both arms' copy bundles to have no executable steps or unavailable assignments.
+An explicit If terminal
+with two such Fallthrough arms uses a separate empty-If display flag under those
+same predicate and control restrictions. P9 retains both edges' zero-length copy
+and transfer origins.
+
+P7 selects `else if` only for a copy-free false edge whose body is one printable
+If, possibly inside label-free Sequences of otherwise empty children. Those
+containers and the inner If have no required label, continuation or deferred
+control; the inner header is empty and has no before-terminal copies. P9 prints
+the selected chain without another scope or duplicate child. These display
 choices preserve the original blocks, controls, labels, transfers, sites, copies
 and exception routes.
 

@@ -1,6 +1,7 @@
 //! Composes the established emission layout without reconstructing control flow.
 //! The input is the same method's closed P7 product; no predecessor is reopened.
 
+mod branches;
 mod expressions;
 mod loops;
 
@@ -155,7 +156,7 @@ pub(super) fn construct(code: &mut MethodCode) -> Result<(), ExpressionError> {
     expressions::construct(code)?;
     natural_stores(code)?;
     inline_check_casts(code)?;
-    omit_empty_branches(code)?;
+    branches::construct(code)?;
     omit_trailing_void_return(code)?;
     array_literals(code)?;
     Ok(())
@@ -786,84 +787,6 @@ fn printed_successor(
         current = up;
     }
     None
-}
-
-fn omit_empty_branches(code: &mut MethodCode) -> Result<(), ExpressionError> {
-    let mut empty = filled(code.controls.len(), false)?;
-    let mut work = Vec::new();
-    if let Some(root) = code.root {
-        super::build::push(&mut work, (root, false))?;
-    }
-    while let Some((id, visited)) = work.pop() {
-        let control = &code.emission.controls[id.0 as usize];
-        if !visited {
-            super::build::push(&mut work, (id, true))?;
-            for &child in &code.controls[id.0 as usize].children {
-                super::build::push(&mut work, (child, false))?;
-            }
-            continue;
-        }
-        if control.label_required
-            || control.continuation.is_some()
-            || code.emission.deferred_control(id)
-        {
-            continue;
-        }
-        empty[id.0 as usize] = match &control.layout {
-            EmissionLayout::Block(node) => {
-                let block = &code.emission.blocks[node.0 as usize];
-                block.actions.is_empty() && !block.show_label && display_empty_end(code, &block.end)
-            }
-            EmissionLayout::Sequence => code.controls[id.0 as usize]
-                .children
-                .iter()
-                .all(|child| empty[child.0 as usize]),
-            _ => false,
-        };
-    }
-    for index in 0..code.emission.controls.len() {
-        if let EmissionLayout::If { no, test, .. } = code.emission.controls[index].layout
-            && empty[no.0 as usize]
-            && arm_prints_nothing(code, test.when_false, true)
-        {
-            code.emission.controls[no.0 as usize].omitted = true;
-        }
-    }
-    for index in 0..code.terminals.len() {
-        if let TerminalKind::If { when_false, .. } = code.terminals[index].kind {
-            let phases = &code.emission.terminals[index];
-            code.emission.empty_else[index] = phases.before.is_empty()
-                && phases.snapshots.is_empty()
-                && phases.after.is_empty()
-                && arm_prints_nothing(code, when_false, false);
-        }
-    }
-    Ok(())
-}
-
-/// A syntax-owned If arm prints only its copies; an ordinary terminal arm
-/// additionally prints its transfer spelling.
-fn arm_prints_nothing(code: &MethodCode, id: TransferId, syntax_owned: bool) -> bool {
-    let transfer = &code.emission.transfers[id.0 as usize];
-    transfer.copies.is_empty()
-        && (syntax_owned || matches!(transfer.spelling, TransferSpelling::Fallthrough))
-}
-
-fn display_empty_end(code: &MethodCode, end: &BlockEnd) -> bool {
-    match end {
-        BlockEnd::None => true,
-        BlockEnd::Transfers(transfers) => transfers
-            .iter()
-            .all(|&id| arm_prints_nothing(code, id, false)),
-        BlockEnd::Terminal(id) => {
-            let phases = &code.emission.terminals[id.0 as usize];
-            phases.before.is_empty()
-                && phases.snapshots.is_empty()
-                && phases.after.is_empty()
-                && matches!(code.terminals[id.0 as usize].kind,
-                    TerminalKind::Goto(transfer) if arm_prints_nothing(code, transfer, false))
-        }
-    }
 }
 
 /// A void method's closing brace performs the return a bare `return;` states:
