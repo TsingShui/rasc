@@ -696,7 +696,9 @@ fn own(storage: &StorageMethod<'_>, f: &mut RegionFacts, g: &Graph) -> Result<()
                 node,
                 region: f.labels[node.0 as usize].owner,
             },
-            OperationEmission::Construction { group, .. } => OperationOwner::Construction(group),
+            OperationEmission::Construction { group, role } => {
+                OperationOwner::Construction { group, role }
+            }
         };
         push(&mut f.operation_owners, owner)?;
     }

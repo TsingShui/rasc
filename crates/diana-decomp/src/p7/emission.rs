@@ -33,13 +33,6 @@ pub enum BlockEnd {
     None,
     Terminal(BlockId),
     Transfers(Vec<TransferId>),
-    /// Continue at the original initializer's node after a selected compound
-    /// expression, including backward-PC channels. This is the P5 contraction,
-    /// not a newly analysed runtime edge or an inferred lexical fallthrough.
-    ConstructionFollow {
-        group: ConstructionId,
-        target: LabelId,
-    },
 }
 /// One original definition evaluated at its unique, adjacent terminal use.
 #[derive(Clone, Copy, Debug, Serialize)]
@@ -435,14 +428,6 @@ pub(super) fn construct(code: &mut MethodCode) -> Result<(), ExpressionError> {
     for (i, h) in code.handlers.iter().enumerate() {
         handlers[h.node.0 as usize] = Some(id(i)?);
     }
-    let mut compound_follows = filled(code.blocks.len(), None)?;
-    for g in &code.constructions {
-        let allocation = code.operations[g.allocation.0 as usize].node;
-        let initialization = code.operations[g.initialization.0 as usize].node;
-        if allocation != initialization {
-            compound_follows[allocation.0 as usize] = Some((g.id, LabelId(initialization.0)));
-        }
-    }
     for b in &code.blocks {
         let h = handlers[b.node.0 as usize];
         let mut actions = Vec::new();
@@ -463,7 +448,9 @@ pub(super) fn construct(code: &mut MethodCode) -> Result<(), ExpressionError> {
                         .statement
                         .ok_or(bug("emitted operation has no statement"))?,
                 }),
-                Emission::Construction(g) if code.constructions[g.0 as usize].allocation == op => {
+                Emission::Construction(g)
+                    if code.constructions[g.0 as usize].initialization == op =>
+                {
                     Some(BodyAction::Statement {
                         operation: op,
                         statement: code.constructions[g.0 as usize].statement,
@@ -489,30 +476,26 @@ pub(super) fn construct(code: &mut MethodCode) -> Result<(), ExpressionError> {
                 }
             }
         }
-        let end = if let Some((group, target)) = compound_follows[b.node.0 as usize] {
-            BlockEnd::ConstructionFollow { group, target }
-        } else {
-            match b.completion {
-                BlockCompletion::Ordinary(t)
-                | BlockCompletion::Syntax {
-                    terminal: t,
-                    owner: TerminalEmission::SyncExit(_),
-                } => BlockEnd::Terminal(t),
-                BlockCompletion::Syntax { .. } => BlockEnd::None,
-                BlockCompletion::None => {
-                    let mut links = Vec::new();
-                    for &t in &b.transfers {
-                        if code.transfers[t.0 as usize].construction.is_none()
-                            && !matches!(
-                                plan.transfers[t.0 as usize].spelling,
-                                TransferSpelling::Selected
-                            )
-                        {
-                            push(&mut links, t)?;
-                        }
+        let end = match b.completion {
+            BlockCompletion::Ordinary(t)
+            | BlockCompletion::Syntax {
+                terminal: t,
+                owner: TerminalEmission::SyncExit(_),
+            } => BlockEnd::Terminal(t),
+            BlockCompletion::Syntax { .. } => BlockEnd::None,
+            BlockCompletion::None => {
+                let mut links = Vec::new();
+                for &t in &b.transfers {
+                    if code.transfers[t.0 as usize].construction.is_none()
+                        && !matches!(
+                            plan.transfers[t.0 as usize].spelling,
+                            TransferSpelling::Selected
+                        )
+                    {
+                        push(&mut links, t)?;
                     }
-                    BlockEnd::Transfers(links)
                 }
+                BlockEnd::Transfers(links)
             }
         };
         push(
@@ -611,7 +594,7 @@ pub(super) fn construct(code: &mut MethodCode) -> Result<(), ExpressionError> {
     for (i, c) in plan.controls.iter_mut().enumerate() {
         let deferred = match c.layout {
             EmissionLayout::Block(n) => match &plan.blocks[n.0 as usize].end {
-                BlockEnd::None | BlockEnd::ConstructionFollow { .. } => true,
+                BlockEnd::None => true,
                 BlockEnd::Transfers(ts) => ts.is_empty(),
                 BlockEnd::Terminal(_) => false,
             },

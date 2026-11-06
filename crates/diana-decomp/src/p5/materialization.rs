@@ -195,6 +195,30 @@ fn without_success(
     }
     Ok(seen)
 }
+/// Whether this operation only copies the object allocated at `allocation`.
+fn aliases_allocation(
+    typed: &TypedMethod<'_>,
+    allocation: crate::p2::OpId,
+    operation: crate::p2::OpId,
+) -> bool {
+    let flow = typed.execution();
+    matches!(
+        flow.operations()[operation.0 as usize].kind(),
+        OpKind::Move {
+            kind: MoveKind::Object
+        }
+    ) && typed
+        .facts()
+        .initialization()
+        .iter()
+        .find(|u| matches!(u.site,UseSite::Operation{operation: o,argument:0}if o==operation))
+        .is_some_and(|u| {
+            u.allocation.is_some_and(|a| {
+                a.operation == allocation && a.relation == AllocationRelation::Same
+            }) && u.state == Initialization::BeforeConstructor
+        })
+}
+
 fn candidate(
     typed: &TypedMethod<'_>,
     f: &StorageFacts,
@@ -232,36 +256,46 @@ fn candidate(
         Ok(v) => v,
         Err(e) => return Ok(Err(e)),
     };
+    // Slots that carry the object under construction. A corridor operation may
+    // prepare constructor arguments as long as it never writes them.
+    let mut object_slots = Vec::new();
+    crate::substrate::owned::reserve(&mut object_slots, members.len().saturating_add(1))?;
+    for slot in flow.writes(&flow.operations()[allocation.0 as usize]) {
+        crate::substrate::owned::push(&mut object_slots, *slot)?;
+    }
+    let aliases_object =
+        |operation: crate::p2::OpId| aliases_allocation(typed, allocation, operation);
+    for &operation in &members {
+        if operation != allocation && operation != init && aliases_object(operation) {
+            for slot in flow.writes(&flow.operations()[operation.0 as usize]) {
+                crate::substrate::owned::push(&mut object_slots, *slot)?;
+            }
+        }
+    }
     for &operation in &members {
         if f.operation_emission[operation.0 as usize] != OperationEmission::Ordinary {
             return Ok(Err(Separation::SharedAllocation));
         }
-        if operation == allocation || operation == init {
+        if operation == allocation || operation == init || aliases_object(operation) {
             continue;
         }
         let op = &flow.operations()[operation.0 as usize];
-        let absorb = match op.kind() {
-            OpKind::Move {
-                kind: MoveKind::Object,
-            } => typed
-                .facts()
-                .initialization()
-                .iter()
-                .find(
-                    |u| matches!(u.site,UseSite::Operation{operation: o,argument:0}if o==operation),
-                )
-                .is_some_and(|u| {
-                    u.allocation.is_some_and(|a| {
-                        a.operation == allocation && a.relation == AllocationRelation::Same
-                    }) && u.state == Initialization::BeforeConstructor
-                }),
-            OpKind::Const { .. } => f.operation_definitions(operation).is_some_and(|defs| {
+        let literal = matches!(op.kind(), OpKind::Const { .. })
+            && f.operation_definitions(operation).is_some_and(|defs| {
                 defs.iter()
                     .all(|d| matches!(d.materialization(), Materialization::Literal(_)))
-            }),
-            _ => false,
-        };
-        if !absorb {
+            });
+        if literal {
+            continue;
+        }
+        // Any other operation may prepare an argument for the constructor. It
+        // keeps its own statement and position; only the allocation itself moves
+        // to the constructor call, so the object never escapes earlier.
+        if flow
+            .writes(op)
+            .iter()
+            .any(|slot| object_slots.contains(slot))
+        {
             return Ok(Err(Separation::InterveningOperation(operation)));
         }
     }
@@ -338,12 +372,21 @@ fn candidate(
             ));
         }
     };
+    // Arguments are read by the constructor call itself, so they must be ready
+    // at that instruction. An argument may be prepared by a corridor operation
+    // that runs after the allocation; it keeps its own statement and position.
+    let init_point = s
+        .operation_site(init)
+        .ok_or(StorageError::InternalInvariant(
+            "constructor lost its execute point",
+        ))?
+        .execute();
     for input in inputs.iter().skip(1) {
         let read = match input.read() {
             Ok(r) => r,
             Err(g) => return Ok(Err(Separation::MissingStorage(g))),
         };
-        if !source_ready(typed, read, at) {
+        if !source_ready(typed, read, init_point) {
             return Ok(Err(Separation::ArgumentNotAvailable(input.site())));
         }
         push(&mut arguments, read)?;
@@ -384,8 +427,14 @@ fn candidate(
             if !snapshots.iter().any(|p|matches!(f.copies[p.0 as usize].location,CopyLocation::BeforeThrow(ThrowSite::Operation(o))if o==op)){return Ok(Err(Separation::SnapshotMismatch(first)));}
         }
     }
+    // Only the allocated object and its transparent aliases become visible when
+    // the constructor succeeds. A corridor operation that prepares an argument
+    // keeps its own storage and is not published here.
     let mut publications = Vec::new();
     for &op in &members {
+        if op != allocation && !aliases_allocation(typed, allocation, op) {
+            continue;
+        }
         for output in s
             .operation_outputs(op)
             .ok_or(StorageError::InternalInvariant(
@@ -463,8 +512,10 @@ pub(super) fn construct(typed: &TypedMethod<'_>, f: &mut StorageFacts) -> Result
                         OpKind::Const { .. }
                     ) {
                         ConstructionRole::Literal
-                    } else {
+                    } else if aliases_allocation(typed, group.allocation, op) {
                         ConstructionRole::Alias
+                    } else {
+                        ConstructionRole::Argument
                     };
                     f.operation_emission[op.0 as usize] =
                         OperationEmission::Construction { group: id, role };

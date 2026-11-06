@@ -322,10 +322,19 @@ pub(super) fn operations(c: &mut Context<'_, '_>) -> Result<(), ExpressionError>
     let f = c.planned.facts();
     for op in c.planned.execution().operations() {
         let owner = f.operation_owners()[op.id().0 as usize];
-        let (statement, emission) = if let OperationOwner::Construction(group) = owner {
+        let member = match owner {
+            OperationOwner::Construction { group, role } => Some((group, role)),
+            _ => None,
+        };
+        // Only the constructor call prints the `new`; allocation, aliases and
+        // literal definitions stay provenance. An argument producer keeps its own
+        // statement and position, so the object is published as late as before.
+        let (statement, emission) = if let Some((group, role)) = member
+            && !matches!(role, crate::p5::ConstructionRole::Argument)
+        {
             let group = &c.code.constructions[group.0 as usize];
             (
-                if group.allocation == op.id() {
+                if role == crate::p5::ConstructionRole::Initialization {
                     Some(group.statement)
                 } else {
                     None
@@ -374,9 +383,12 @@ pub(super) fn operations(c: &mut Context<'_, '_>) -> Result<(), ExpressionError>
                     c.syncs[scope.0 as usize]
                         .ok_or(bug("release lost selected synchronized ownership"))?,
                 ),
-                OperationOwner::Construction(_) => {
-                    return Err(bug("compound member reached ordinary lowering"));
-                }
+                // A construction argument producer prints as an ordinary
+                // statement at its own position.
+                OperationOwner::Construction { .. } => Emission::Block {
+                    node: c.op_nodes[op.id().0 as usize]
+                        .ok_or(bug("construction argument lost its execution portion"))?,
+                },
             };
             (Some(statement), emission)
         };

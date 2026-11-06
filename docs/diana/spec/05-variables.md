@@ -68,7 +68,11 @@ snapshot obligations. No new SSA value or alternate method chain is created.
 The planner consumes P4's position-related allocation binding and initialization.
 It requires a same-occurrence receiver before construction, an unshared linear
 normal corridor, and transparent object aliases/literal definitions inside that
-corridor. Branches, external entries, required intervening transfers, other
+corridor. The corridor may also prepare constructor arguments: such an operation
+keeps its own statement and position, so the printed `new` stands at the original
+constructor call and only the allocation itself moves there. A corridor operation
+that writes a slot carrying the object under construction still separates the
+group, and publication covers only the allocation and its transparent aliases. Branches, external entries, required intervening transfers, other
 operations and unavailable arguments retain explicit plans. Arguments use existing
 storage or P4-proven literal views; the planner does not inline arbitrary effectful
 computations or move allocation to the constructor site.

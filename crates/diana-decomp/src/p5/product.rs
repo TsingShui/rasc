@@ -423,6 +423,9 @@ pub enum ConstructionRole {
     Alias,
     Literal,
     Initialization,
+    /// Prepares a constructor argument. It keeps its own statement and position;
+    /// only the allocation moves to the constructor call.
+    Argument,
 }
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum OperationEmission {

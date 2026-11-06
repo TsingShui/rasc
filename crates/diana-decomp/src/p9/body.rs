@@ -57,6 +57,9 @@ impl Expressions<'_, '_> {
         if let StatementKind::Construction(g) = s.kind {
             for &member in &self.code.constructions()[g.0 as usize].members {
                 let source = &self.code.operations()[member.0 as usize];
+                if !matches!(source.emission, Emission::Construction(_)) {
+                    continue;
+                }
                 self.out.span(
                     start,
                     Origin::Operation {
@@ -456,13 +459,6 @@ impl Expressions<'_, '_> {
         }
         match &b.end {
             BlockEnd::None => Ok(()),
-            BlockEnd::ConstructionFollow { group, target } => {
-                self.out.indent()?;
-                self.out
-                    .fmt(format_args!("resume construction g{} at ", group.0))?;
-                self.label_name(*target)?;
-                self.out.put(";\n")
-            }
             BlockEnd::Terminal(t) => self.terminal(*t),
             BlockEnd::Transfers(ts) => {
                 for &t in ts {

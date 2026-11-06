@@ -91,7 +91,6 @@ pub(super) fn construct(code: &mut MethodCode) -> Result<(), ExpressionError> {
     }
     for block in &code.emission.blocks {
         match &block.end {
-            BlockEnd::ConstructionFollow { target, .. } => mark_label(&mut labels, *target)?,
             BlockEnd::Terminal(block) => mark_terminal_targets(code, &mut labels, *block)?,
             BlockEnd::None | BlockEnd::Transfers(_) => {}
         }
@@ -381,7 +380,7 @@ fn drop_duplicate_continuation(code: &mut MethodCode) -> Result<(), ExpressionEr
                 _ => None,
             },
             BlockEnd::Transfers(transfers) => transfers.last().copied(),
-            BlockEnd::None | BlockEnd::ConstructionFollow { .. } => None,
+            BlockEnd::None => None,
         };
         let Some(transfer) = transfer else {
             continue;

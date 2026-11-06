@@ -51,10 +51,19 @@ pub enum MonitorRole {
 }
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum OperationOwner {
-    Ordinary { node: NodeId, region: RegionId },
-    Construction(GroupId),
+    Ordinary {
+        node: NodeId,
+        region: RegionId,
+    },
+    Construction {
+        group: GroupId,
+        role: crate::p5::ConstructionRole,
+    },
     CatchCapture(TryId),
-    Synchronized { scope: SyncId, role: MonitorRole },
+    Synchronized {
+        scope: SyncId,
+        role: MonitorRole,
+    },
 }
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum TerminalOwner {

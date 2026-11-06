@@ -136,7 +136,9 @@ records whether its route still needs an inline marker: a natural single route
 targeting an enclosing printed catch does not, because the chain line and the catch
 scope already state it. Other sites keep a compact chain reference.
 
-P5-selected construction groups become `New` expressions. The group retains
+P5-selected construction groups become `New` expressions placed at the original
+constructor call. Corridor operations that prepare arguments print as their own
+statements at their original positions, so only the allocation moves. The group retains
 allocation and initialization operations, member/edge provenance, arguments,
 normal publication point and all throwing sites. Its selected common snapshot
 prelude executes once. Alias publications occur only after successful
@@ -184,8 +186,8 @@ Matched releases print at their original nodes. Their after-release copies and
 routing terminals also stay at their original nodes and therefore keep original
 lexical try/catch ownership. The synchronized container has explicit planned
 exits, not another implicit release at its closing brace. A selected compound
-construction resumes at the original initializer node when it crosses nodes;
-absorbed statements remain suppressed even for backward-PC channels. These are
+construction prints at the original constructor call; correlated members that
+only alias the object or define literals remain suppressed. These are
 placements of existing plans, not region identification or a new dispatcher.
 
 ## Composition before publication
