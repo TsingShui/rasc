@@ -362,7 +362,9 @@ fn method(
                 attachments,
             )?;
             if let Some(code) = result.code() {
+                let block_start = out.position();
                 out.open()?;
+                let body_start = out.position();
                 let mut pending = Vec::new();
                 pending
                     .try_reserve_exact(code.emission().controls().len())
@@ -378,10 +380,13 @@ fn method(
                     statement: None,
                 };
                 context.body()?;
-                out.close()?;
+                if out.position() == body_start {
+                    out.close_empty(block_start)?;
+                } else {
+                    out.close()?;
+                }
             } else if matches!(header.kind, p7::MethodKind::ClassInitializer) {
-                out.open()?;
-                out.close()?;
+                out.put(" { }\n")?;
             } else {
                 out.put("; // no code item\n")?;
             }

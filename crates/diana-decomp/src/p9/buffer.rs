@@ -85,6 +85,19 @@ impl Buffer {
             .ok_or(RenderError::OutputInvariant("unbalanced output scope"))?;
         self.line("}")
     }
+    /// Closes a block whose body printed nothing as `{ }` on its header line.
+    /// `start` is the text position before the header line's opening brace; the
+    /// replaced text is only that brace line and its closing-brace indentation,
+    /// so no printed body text is discarded. A zero-length anchor recorded at
+    /// the empty body start still points into the rewritten `{ }`.
+    pub fn close_empty(&mut self, start: TextOffset) -> Result<(), RenderError> {
+        self.depth = self
+            .depth
+            .checked_sub(1)
+            .ok_or(RenderError::OutputInvariant("unbalanced output scope"))?;
+        self.text.truncate(start.0);
+        self.put(" { }\n")
+    }
     /// Exact UTF-16 identity is retained through escaping; comments and names
     /// cannot inject new source structure. Only valid scalars are encoded as UTF-8.
     pub fn quote(&mut self, s: &str) -> Result<(), RenderError> {

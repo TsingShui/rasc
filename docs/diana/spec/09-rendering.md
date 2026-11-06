@@ -63,11 +63,14 @@ the closing brace performs the same exit and nothing is attached to that return.
 A return with copies, phases, a site or an unavailable definition keeps its text,
 and so does any return that other statements follow.
 
+A method body that emits no text prints `{ }` on its declaration line. A body
+with any printed content keeps its own lines.
+
 A labeled or graph scope prints its `R<id>:` control name only when a printed
 transfer still names that control; the control, its braces, its graph header and
 its children remain in the product. A named scope whose only child is another
-unnamed printed control prints that child directly, and it keeps its braces while
-a bare `break` or `continue` targets the scope.
+unnamed printed control prints that child directly; P7 marks it transparent and
+P9 omits the scope's own brace pair.
 
 A selected `FullSignature` call prints its original target as a trailing
 `[binding ...]` suffix; a natural call prints only the receiver, member and

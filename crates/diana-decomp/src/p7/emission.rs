@@ -150,6 +150,10 @@ pub struct EmissionControl {
     pub label_required: bool,
     /// Display-only omission; the original control remains in the product.
     pub omitted: bool,
+    /// A labelled scope whose own braces print nothing but one unnamed printed
+    /// child. P9 prints that child directly; the control, its labels and its
+    /// transfers stay in the product.
+    pub transparent: bool,
     pub continuation: Option<LabelId>,
     pub layout: EmissionLayout,
 }
@@ -656,6 +660,7 @@ pub(super) fn construct(code: &mut MethodCode) -> Result<(), ExpressionError> {
                 label: super::references::text(format_args!("R{}", c.id.0))?,
                 label_required: true,
                 omitted: false,
+                transparent: false,
                 continuation: match c.continuation {
                     Continuation::Goto(label) => Some(label),
                     _ => None,
