@@ -52,7 +52,7 @@ fn construct(
     super::loops::construct(storage, f, &graph, &structure)?;
     super::locks::construct(storage, f, &graph)?;
     super::protection::plan(storage, f, &graph, &structure)?;
-    super::regions::construct(storage, f, &graph, &structure)
+    super::compose::construct(storage, f, &graph, &structure)
 }
 pub(super) fn push<T>(v: &mut Vec<T>, x: T) -> Result<(), RegionError> {
     owned::push(v, x).map_err(Into::into)
