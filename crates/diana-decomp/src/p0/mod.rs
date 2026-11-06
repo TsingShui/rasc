@@ -6,8 +6,8 @@ mod relations;
 
 pub use collect::collect;
 pub use facts::{
-    ClassFacts, Fact, FieldDirectoryEntry, InitialValue, MethodDeclaration, MethodMetadata,
-    OriginalText, OwnerFacts, ScalarValue,
+    ClassFacts, Fact, FieldDeclaration, FieldDirectoryEntry, InitialValue, InterfaceDeclaration,
+    MethodDeclaration, MethodDirectoryEntry, MethodMetadata, OriginalText, OwnerFacts, ScalarValue,
 };
 pub use relations::SuperclassGap;
 pub(crate) use relations::{OwnerContext, SuperclassRelation};

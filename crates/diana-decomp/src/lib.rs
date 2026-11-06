@@ -13,9 +13,10 @@ pub mod p4;
 pub mod p5;
 pub mod p6;
 pub mod p7;
+pub mod p8;
 pub use engine::{
-    DexImage, Engine, MethodOutcome, MethodSelector, Options, RecoveryPolicy, RepresentationPolicy,
-    Request,
+    DexImage, Engine, MethodOutcome, MethodSelector, Options, Presentation, RecoveryPolicy,
+    RepresentationPolicy, Request, SingleMethodAnalysis,
 };
 pub use input::annotation_facts::{
     AnnotationExtent, AnnotationLocation, AnnotationParameterIndex, AnnotationPrefix,

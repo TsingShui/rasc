@@ -25,14 +25,18 @@ reader does not resolve the declaration record again. Fields retain storage grou
 static ordinal, original declaration and encoded static preparation bytes. An omitted static entry is `implicit_default`, distinct
 from an explicitly encoded default. Instance fields have no encoded static initial
 value. Scalar strings and floating-point bits retain their original values. Other
-encoded values retain their complete checked bytes and format tag.
+encoded values retain checked bytes, format tags and flat value events. Reference
+values retain an owned declaration pool, not only numeric IDs; nested annotation
+descriptors are delivered too. Field and interface declarations preserve original
+TypeIds alongside descriptor-read states.
 
 The collector retains class, field, method and parameter annotations with their
 original associations, visibility, descriptor, physical ranges and value events.
 Nested metadata uses the shared reader's flat container-event representation. System annotations
 retain raw facts; P0 does not infer nested ownership or generic source declarations.
 MethodMetadata shares these owned immutable records with the method chain. Its
-read-only iterator exposes only the selected method and parameter records. Class
+read-only iterators expose only the selected method/parameter records and their
+referenced declaration leaves. Class
 traversal extent/issue remains explicit: an incomplete traversal does not establish
 absence of later method annotations.
 
@@ -48,6 +52,10 @@ A fact uses `present`, `absent`, `not_read` or `unavailable`. A failed local rea
 MUST NOT become an absent fact. Declaration failures and annotation prefixes retain
 the independently available members and metadata. Section diagnostics explain
 incomplete traversal; a delivered prefix MUST NOT claim complete coverage.
+An unlocatable member-record suffix terminates the shared walk without discarding
+located members. A damaged composite preparation retains its decoded prefix;
+the already checked root count still establishes independently omitted defaults.
+Unlocated encoded entries remain NotRead, not zero/null or implicit defaults.
 Allocation failures and internal invariants stop collection or rendering.
 One member's declaration or preparation failure does not discard independently
 readable siblings. Each direct interface keeps its own fact state, so an
@@ -86,7 +94,7 @@ cached as absent definitions.
 
 ## Development inspection
 
-The engine development shell is the single P0–P7 observation entry:
+The engine development shell is the single P0–P8 observation entry:
 
 ```sh
 cargo run -p diana-decomp --example dbg_shell --locked -- \

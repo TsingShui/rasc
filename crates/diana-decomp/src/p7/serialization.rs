@@ -1,15 +1,4 @@
-pub(super) fn debug<T: std::fmt::Debug, S: serde::Serializer>(
-    value: &T,
-    serializer: S,
-) -> Result<S::Ok, S::Error> {
-    struct Display<'a, T>(&'a T);
-    impl<T: std::fmt::Debug> std::fmt::Display for Display<'_, T> {
-        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            std::fmt::Debug::fmt(self.0, f)
-        }
-    }
-    serializer.collect_str(&Display(value))
-}
+pub(super) use crate::substrate::serialization::debug;
 pub(super) fn metadata<S: serde::Serializer>(
     value: &crate::p0::MethodMetadata,
     serializer: S,
@@ -17,10 +6,16 @@ pub(super) fn metadata<S: serde::Serializer>(
     use serde::ser::{SerializeSeq, SerializeStruct};
     struct Records<'a>(&'a crate::p0::MethodMetadata);
     struct Record<'a>(&'a crate::AnnotationRecord);
-    struct Debug<'a, T>(&'a T);
-    impl<T: std::fmt::Debug> serde::Serialize for Debug<'_, T> {
+    struct References<'a>(&'a crate::p0::MethodMetadata);
+    impl serde::Serialize for References<'_> {
         fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
-            debug(self.0, s)
+            s.collect_seq(self.0.references().map(Debug))
+        }
+    }
+    struct Debug<T>(T);
+    impl<T: std::fmt::Debug> serde::Serialize for Debug<T> {
+        fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+            debug(&self.0, s)
         }
     }
     impl serde::Serialize for Record<'_> {
@@ -46,9 +41,10 @@ pub(super) fn metadata<S: serde::Serializer>(
             a.end()
         }
     }
-    let mut m = serializer.serialize_struct("MethodMetadata", 3)?;
+    let mut m = serializer.serialize_struct("MethodMetadata", 4)?;
     m.serialize_field("extent", &Debug(&value.extent()))?;
     m.serialize_field("issue", &Debug(&value.issue()))?;
     m.serialize_field("records", &Records(value))?;
+    m.serialize_field("references", &References(value))?;
     m.end()
 }

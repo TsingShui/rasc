@@ -7,7 +7,8 @@ only from the analyzed input.
 
 The active method chain is P0 class facts → method reader → P1 disassembly → P2
 execution model → P3 SSA → P4 value/use interpretation → P5 storage/transfer
-plans → P6 control/protection/monitor plans → P7 owned method expressions. `Engine::analyze_method` and class requests use one method task. The
+plans → P6 control/protection/monitor plans → P7 owned method expressions,
+followed by P8 class assembly and type-name planning. `Engine::analyze_method` and class requests use one method task. The
 application decompilation interface is being rebuilt.
 The approved architecture is [PIPELINE_DESIGN](../../docs/diana/PIPELINE_DESIGN.md).
 
@@ -112,8 +113,17 @@ calls, conversions, checks, copies, exception sites and initialization positions
 P5 natural constructions become `New` expressions, and P6 controls/outlets have
 explicit emission ownership. Metadata and bootstrap declaration facts now travel
 from their owning producers; P7 does not reopen input. See the
-[P7 chapter](../../docs/diana/spec/07-java.md). P8/P9 class assembly and source
-printing remain inactive.
+[P7 chapter](../../docs/diana/spec/07-java.md).
+
+P8 produces owned `ClassResult`/`TypeNamePlan` from the original directory and
+joined method deliveries. Success, no-code and stopped members remain distinct.
+The same execution retains inspection while sharing immutable owned P7 results.
+Static preparation and annotation expressions preserve original event order and
+reference identities. Names handle imports, conflicting short names, lexical
+shadowing, array ranks and original `$` spelling; standalone methods remain fully
+qualified. Unknown package scope and uninterpreted signatures retain explicit
+naming reasons. See the [P8 chapter](../../docs/diana/spec/08-class.md).
+P9 source rendering remains inactive.
 
 Independent translation checking compiles only under `cfg(test)`; ordinary
 Engine requests do not run symbolic replay, output audits or duplicate dominator
@@ -172,7 +182,7 @@ lock events, release outlets, copy emission ownership and selected operation rol
 `p6-all` aggregates those plans and
 construction stops. `p7` (alias `expressions`) and `p7-all` expose owned
 expression counts, detailed products and classified expression stops. The timed
-Engine traversal includes P7, even when a command
+Engine traversal includes P8, even when a command
 inspects a retained earlier product. Each shell command creates a
 fresh Engine. `Engine::with_method_jobs(n)` enables a bounded Rayon pool for
 multi-member class requests when `n > 1`; the default is one. Single-method calls
@@ -181,7 +191,9 @@ keep the same sequential chain. The shell exposes this setting as
 concurrency need joint configuration rather than multiplying both blindly.
 `p5-all` with `details:true` also exposes each class member's retained P3/P4/P5
 products and the P6 plan from that one class request. `p7-all` with
-`details:true` exposes each member's owned method result.
+`details:true` exposes each member's owned method result. `p8` (aliases `assembly`
+and `names`) and `p8-all` expose class/member delivery, metadata expressions and
+name plans; adding `method` selects standalone naming.
 
 Earlier engine format/check/Clippy and release builds passed for unified component
 projection, scoped check bounds and same-DEX ancestor relationships; those changes
@@ -394,6 +406,33 @@ error. The synthetic DEX 038/039 cases separately cover the changed dynamic fact
 the real-input corpus does not supply those opcodes. Engine fmt/check/Clippy,
 release library/shell and debug/release core tests passed. Workspace build/Clippy
 remain blocked by CLI references to removed result APIs.
+
+### Class assembly and naming observations
+
+The sole core test now checks P8 directory coverage/order, field/interface
+availability, static preparation, metadata expressions, type-use identities,
+imports, local shadowing, shared annotation scopes and standalone names. It also
+checks readable/native/bridge members beside a stopped body, damaged declarations,
+preparation prefixes, independently known omitted defaults and directory tails.
+Owned class products remain readable after Engine/input release.
+
+Fifteen mutations compiled and triggered the intended obligations: lost fields,
+methods, interfaces and method type uses; reordered preparation; invented explicit
+defaults; ambiguous imports; ignored local shadows; shortened standalone names;
+merged annotation scopes; changed literal strings; discarded preparation/directory
+prefixes; lost stopped-code bytes; and wrong package selection. All were removed.
+These are finite correspondence observations, not VM or universal naming proofs.
+
+A fresh fixed-binary 55-DEX traversal produced 544,430 class results, preserving
+1,472,798 fields and 2,907,992 methods, including 263,414 no-code declarations.
+P8/upstream/class stops and retention errors were zero; the existing one type
+issue remained. It retained 369,299 static preparations and 1,299,169 annotations.
+All 5,560 P2–P6 products for 1,112 focused methods matched. P7 code and headers
+excluding intentionally expanded metadata also matched for those methods.
+Serial/four-worker P8 products matched across 19 classes and 4,585 members.
+All 48,102,163 instruction roundtrips were rerun with zero mismatch, skip or
+method/class error. Actual allocator exhaustion and every stopped-stage prefix
+remain outside the exercised execution evidence.
 
 ## Method scheduling observations
 

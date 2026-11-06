@@ -68,6 +68,13 @@ is not an active engine module. P1 does not require source names, generic metada
 line numbers or debug local names to analyze code. Current range/metadata behavior
 must be inspected in the reader rather than inferred from removed debug schemas.
 
+`RawMethodView` can retain its already checked code range as an owned
+`RetainedCode` for a stopped-member delivery. P1 keeps this original source view
+beside a decoded prefix. Retention copies bytes and established items without
+re-decoding, inferring boundaries or promoting the prefix to a complete product.
+The shared metadata value reader supplies owned reference-declaration leaves for
+P0 preparation/annotation consumers; P8 receives those facts rather than an index.
+
 ## P1 disassembly facts
 
 `decode_method_source` uses the method reader product and the selected index's

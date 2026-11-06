@@ -37,31 +37,31 @@ impl<'a> ProgramIndex<'a> {
             .type_descriptor(crate::TypeId(source.declaration().return_type_id))?;
         let items = match self.build_items(code) {
             Ok(items) => items,
-            Err((prefix, error)) => return outcome(prefix, error),
+            Err((prefix, error)) => return outcome(code, prefix, error),
         };
         let references = match self.read_reference_facts(&items, return_shape) {
             Ok(facts) => facts,
-            Err(error) => return outcome(items, error),
+            Err(error) => return outcome(code, items, error),
         };
         let layout = match self.check_method_layout(code, &items, &references.facts) {
             Ok(layout) => layout,
-            Err(error) => return outcome(items, error),
+            Err(error) => return outcome(code, items, error),
         };
         #[cfg(test)]
         if let Err(error) = check_reference_coverage(&items, &references.facts) {
-            return outcome(items, error);
+            return outcome(code, items, error);
         }
         let protection = match crate::input::protection::read(&layout).map_err(method_error) {
             Ok(protection) => protection,
-            Err(error) => return outcome(items, error),
+            Err(error) => return outcome(code, items, error),
         };
         let entry = match build_entry_layout(source, code) {
             Ok(entry) => entry,
-            Err(error) => return outcome(items, error),
+            Err(error) => return outcome(code, items, error),
         };
         let declaration = match source.declaration().try_copy().map_err(method_error) {
             Ok(declaration) => declaration,
-            Err(error) => return outcome(items, error),
+            Err(error) => return outcome(code, items, error),
         };
         Ok(DecodedOutcome {
             decoded: Some(crate::input::ProgramIndex::assemble_decoded(
@@ -84,6 +84,7 @@ impl<'a> ProgramIndex<'a> {
             )),
             prefix: Vec::new(),
             error: None,
+            source: None,
         })
     }
 
@@ -574,6 +575,7 @@ fn method_error(error: RequestError) -> MethodError {
 }
 
 fn outcome<'a>(
+    source: &crate::input::RawMethodView<'a>,
     prefix: Vec<crate::p1::DecodedItem>,
     error: MethodError,
 ) -> Result<DecodedOutcome<'a>, MethodError> {
@@ -581,5 +583,6 @@ fn outcome<'a>(
         decoded: None,
         prefix,
         error: Some(error),
+        source: Some(source.clone()),
     })
 }

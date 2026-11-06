@@ -34,23 +34,23 @@ pub(crate) fn build_method<'a>(
             if let Some(header) = partial.header.take() {
                 MethodBuild::Ready(ExpressedMethod {
                     planned,
-                    result: MethodResult {
+                    result: std::sync::Arc::new(MethodResult {
                         header,
                         code: Some(partial.code),
-                    },
+                    }),
                 })
             } else {
                 MethodBuild::Stopped(ExpressionStop {
                     planned,
                     error: bug("completed method expression has no declaration"),
-                    partial,
+                    partial: std::sync::Arc::new(partial),
                 })
             }
         }
         Err(error) => MethodBuild::Stopped(ExpressionStop {
             planned,
             error,
-            partial,
+            partial: std::sync::Arc::new(partial),
         }),
     }
 }
@@ -71,7 +71,7 @@ fn header(
         owner_descriptor: copy(owner.descriptor().units())?,
         access_flags: flags,
         declaration: declaration.try_copy()?,
-        name_form: super::references::name_form(declaration.name_units()),
+        name_form: crate::substrate::names::name_form(declaration.name_units()),
         kind: if declaration
             .name_units()
             .iter()

@@ -228,14 +228,17 @@ impl MethodResult {
 /// P8 consumes only `into_result`, which releases all retained method analysis.
 pub struct ExpressedMethod<'a> {
     pub(super) planned: PlannedMethod<'a>,
-    pub(super) result: MethodResult,
+    pub(super) result: std::sync::Arc<MethodResult>,
 }
 impl<'a> ExpressedMethod<'a> {
     pub fn result(&self) -> &MethodResult {
         &self.result
     }
-    pub fn into_result(self) -> MethodResult {
+    pub fn into_result(self) -> std::sync::Arc<MethodResult> {
         self.result
+    }
+    pub(crate) fn shared_result(&self) -> std::sync::Arc<MethodResult> {
+        self.result.clone()
     }
     pub fn inspection(&self) -> MethodInspection<'_, 'a> {
         MethodInspection {
@@ -279,7 +282,7 @@ impl<'f, 'a> MethodInspection<'f, 'a> {
 pub struct ExpressionStop<'a> {
     pub(super) planned: PlannedMethod<'a>,
     pub(super) error: ExpressionError,
-    pub(super) partial: ExpressionPartial,
+    pub(super) partial: std::sync::Arc<ExpressionPartial>,
 }
 impl<'a> ExpressionStop<'a> {
     pub fn error(&self) -> &ExpressionError {
@@ -288,6 +291,9 @@ impl<'a> ExpressionStop<'a> {
     pub fn partial(&self) -> &ExpressionPartial {
         &self.partial
     }
+    pub(crate) fn shared_partial(&self) -> std::sync::Arc<ExpressionPartial> {
+        self.partial.clone()
+    }
     pub fn inspection(&self) -> MethodInspection<'_, 'a> {
         MethodInspection {
             planned: &self.planned,
@@ -295,11 +301,21 @@ impl<'a> ExpressionStop<'a> {
     }
 }
 /// Unpublished construction prefix; it is not a MethodResult or a MethodCode.
+#[derive(Serialize)]
 pub struct ExpressionPartial {
     pub(super) header: Option<MethodHeader>,
     pub(super) code: MethodCode,
 }
 impl ExpressionPartial {
+    pub fn type_uses(&self) -> &[TypeUse] {
+        &self.code.types
+    }
+    pub fn local_declarations(&self) -> &[LocalDeclaration] {
+        &self.code.locals
+    }
+    pub fn reference_declarations(&self) -> &[Reference] {
+        &self.code.references
+    }
     pub fn header(&self) -> Option<&MethodHeader> {
         self.header.as_ref()
     }

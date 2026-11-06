@@ -536,6 +536,39 @@ impl Shell {
                     .map(|_| class_id(request))
                     .transpose()?,
             ),
+            "p8-all" => assembly_all(
+                &engine,
+                index.class_count(),
+                request
+                    .get("class")
+                    .map(|_| class_id(request))
+                    .transpose()?,
+                request.get("details").and_then(Value::as_bool) == Some(true),
+            ),
+            "p8" | "assembly" | "names" => {
+                let class = class_key(class_id(request)?);
+                let details = request.get("details").and_then(Value::as_bool) == Some(true);
+                if request.get("method").is_some() {
+                    let method = engine.analyze_method(class, MethodId(method_id(request)?))?;
+                    Ok(match &method.display {
+                        diana_decomp::p8::MethodDisplayOutcome::Ready(r) => {
+                            json!({"stage":"p8","method":method.key.method.0,"standalone":true,"names":r.names(),"result":details.then(||json!(r))})
+                        }
+                        diana_decomp::p8::MethodDisplayOutcome::Stopped(s) => assembly_stop_json(s),
+                    })
+                } else {
+                    let analysis = engine.analyze(Request {
+                        class,
+                        method: None,
+                    })?;
+                    let diana_decomp::Presentation::Class(result) = &analysis.presentation else {
+                        return Err(RequestError::InternalInvariant(
+                            "class request returned method display",
+                        ));
+                    };
+                    Ok(assembly_json(result, details))
+                }
+            }
             "p7-all" => expression_all(
                 &engine,
                 index.class_count(),
@@ -1875,6 +1908,127 @@ fn expression_counts(counts: &mut BTreeMap<String, u64>, result: &diana_decomp::
         *counts.entry(key.into()).or_default() += 1;
     }
 }
+fn assembly_counts(counts: &mut BTreeMap<String, u64>, r: &diana_decomp::p8::ClassResult) {
+    for (key, n) in [
+        ("fields", r.fields().len()),
+        ("methods", r.methods().len()),
+        ("preparations", r.preparation_order().len()),
+        ("type_uses", r.names().uses().len()),
+        ("type_targets", r.names().targets().len()),
+        ("imports", r.names().imports().len()),
+        (
+            "name_issues",
+            r.names()
+                .uses()
+                .iter()
+                .filter(|u| u.reason.is_some())
+                .count(),
+        ),
+        ("encoded_expressions", r.values().expressions().len()),
+        ("annotations", r.values().annotations().len()),
+    ] {
+        *counts.entry(key.into()).or_default() += n as u64;
+    }
+}
+fn assembly_stop_json(s: &diana_decomp::p8::AssemblyStop) -> Value {
+    json!({"stage":"p8","stopped":true,"kind":format!("{:?}",s.error().kind()),"error":s.error().to_string(),"retained_methods":s.methods().len(),"partial_name_uses":s.partial_name_uses().len(),"partial_values":s.partial_values().len()})
+}
+fn assembly_json(result: &diana_decomp::p8::ClassOutcome, details: bool) -> Value {
+    match result {
+        diana_decomp::p8::ClassOutcome::Ready(r) => {
+            let mut counts = BTreeMap::new();
+            assembly_counts(&mut counts, r);
+            json!({"stage":"p8","class":r.key().class_def.0,"counts":counts,"result":details.then(||json!(r))})
+        }
+        diana_decomp::p8::ClassOutcome::Stopped(s) => assembly_stop_json(s),
+    }
+}
+fn assembly_all(
+    engine: &Engine<'_>,
+    classes: u32,
+    selected: Option<u32>,
+    details: bool,
+) -> Result<Value, RequestError> {
+    use diana_decomp::p8::{ClassOutcome, MethodDelivery};
+    let start = std::time::Instant::now();
+    let mut analysis_time = std::time::Duration::ZERO;
+    let mut ready = 0u64;
+    let mut failed = 0u64;
+    let mut class_errors = 0u64;
+    let mut methods = 0u64;
+    let mut no_code = 0u64;
+    let mut expressed = 0u64;
+    let mut stopped_members = 0u64;
+    let mut retention_errors = 0u64;
+    let mut type_issues = 0u64;
+    let mut storage_issues = 0u64;
+    let mut counts = BTreeMap::new();
+    let mut first_failure = None;
+    let mut products = details.then(Vec::new);
+    for ordinal in 0..selected.map_or(classes, |_| 1) {
+        let class = selected.unwrap_or(ordinal);
+        let began = std::time::Instant::now();
+        let analysis = engine.analyze(Request {
+            class: class_key(class),
+            method: None,
+        });
+        analysis_time += began.elapsed();
+        let analysis = match analysis {
+            Ok(v) => v,
+            Err(e) => {
+                class_errors += 1;
+                first_failure.get_or_insert(json!({"class":class,"error":e.to_string()}));
+                continue;
+            }
+        };
+        for m in &analysis.methods {
+            if let Ok(MethodOutcome::Expressed(m)) = &m.result {
+                type_issues += m.inspection().type_facts().issues().len() as u64;
+                storage_issues += m.inspection().storage_facts().issues().len() as u64;
+            }
+        }
+        let diana_decomp::Presentation::Class(result) = &analysis.presentation else {
+            return Err(RequestError::InternalInvariant(
+                "class batch received method display",
+            ));
+        };
+        let members = match result {
+            ClassOutcome::Ready(r) => {
+                ready += 1;
+                assembly_counts(&mut counts, r);
+                r.methods()
+            }
+            ClassOutcome::Stopped(s) => {
+                failed += 1;
+                first_failure.get_or_insert(assembly_stop_json(s));
+                s.methods()
+            }
+        };
+        for m in members {
+            methods += 1;
+            match &m.delivery {
+                Ok(MethodDelivery::Expressed(_)) => expressed += 1,
+                Ok(MethodDelivery::Declared(_)) => no_code += 1,
+                Ok(MethodDelivery::Stopped(_)) => stopped_members += 1,
+                Err(e) => {
+                    retention_errors += 1;
+                    first_failure.get_or_insert(
+                        json!({"class":class,"method":m.id.0,"error":e.to_string()}),
+                    );
+                }
+            }
+        }
+        if let Some(products) = &mut products {
+            products.push(assembly_json(result, true));
+        }
+    }
+    let mut result = json!({"stage":"p8","classes":selected.map_or(classes,|_|1),"ready":ready,"failed":failed,"class_errors":class_errors,"methods":methods,"no_code":no_code,"expressed":expressed,"stopped_members":stopped_members,"retention_errors":retention_errors,"upstream_type_issues":type_issues,"upstream_storage_issues":storage_issues,"counts":counts,"complete":true,"first_failure":first_failure,"analysis_ns":analysis_time.as_nanos(),"elapsed_ms":start.elapsed().as_millis()});
+    if let Some(products) = products {
+        result["products"] = json!(products);
+    }
+    Ok(result)
+}
+
 fn expression_json(result: &diana_decomp::p7::MethodResult, details: bool) -> Value {
     let mut counts = BTreeMap::new();
     expression_counts(&mut counts, result);

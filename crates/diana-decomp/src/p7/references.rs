@@ -5,113 +5,15 @@ use crate::p1::{
 };
 use crate::p4::{SignaturePart, TypeOrigin};
 use crate::raw::{OperandReference, ReferenceSlot};
-use crate::{ByteRange, FailureKind, RequestError, TypeId};
+use crate::{ByteRange, FailureKind, TypeId};
 use serde::Serialize;
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum NameForm {
-    Identifier,
-    Original,
-}
+pub use crate::substrate::names::NameForm;
+use crate::substrate::names::name_form;
 #[derive(Debug, Serialize)]
 pub struct MemberName {
     pub units: Vec<u16>,
     pub form: NameForm,
-}
-pub(super) fn name_form(units: &[u16]) -> NameForm {
-    use unicode_general_category::{GeneralCategory as C, get_general_category as category};
-    let start = |c: char| {
-        matches!(
-            category(c),
-            C::UppercaseLetter
-                | C::LowercaseLetter
-                | C::TitlecaseLetter
-                | C::ModifierLetter
-                | C::OtherLetter
-                | C::LetterNumber
-                | C::CurrencySymbol
-                | C::ConnectorPunctuation
-        )
-    };
-    let mut chars = char::decode_utf16(units.iter().copied());
-    if !matches!(chars.next(),Some(Ok(c))if start(c)) {
-        return NameForm::Original;
-    }
-    for c in chars {
-        let Ok(c) = c else {
-            return NameForm::Original;
-        };
-        if !(start(c)
-            || matches!(
-                category(c),
-                C::DecimalNumber | C::SpacingMark | C::NonspacingMark
-            ))
-        {
-            return NameForm::Original;
-        }
-    }
-    for word in [
-        "abstract",
-        "assert",
-        "boolean",
-        "break",
-        "byte",
-        "case",
-        "catch",
-        "char",
-        "class",
-        "const",
-        "continue",
-        "default",
-        "do",
-        "double",
-        "else",
-        "enum",
-        "extends",
-        "final",
-        "finally",
-        "float",
-        "for",
-        "goto",
-        "if",
-        "implements",
-        "import",
-        "instanceof",
-        "int",
-        "interface",
-        "long",
-        "native",
-        "new",
-        "package",
-        "private",
-        "protected",
-        "public",
-        "return",
-        "short",
-        "static",
-        "strictfp",
-        "super",
-        "switch",
-        "synchronized",
-        "this",
-        "throw",
-        "throws",
-        "transient",
-        "try",
-        "void",
-        "volatile",
-        "while",
-        "true",
-        "false",
-        "null",
-        "_",
-    ] {
-        if units.iter().copied().eq(word.bytes().map(u16::from)) {
-            return NameForm::Original;
-        }
-    }
-    NameForm::Identifier
 }
 fn owned_name(value: crate::input::DexString<'_>) -> Result<MemberName, ExpressionError> {
     let units = crate::substrate::owned::copy_units(value)?;
@@ -125,33 +27,8 @@ pub struct SourceFailure {
     pub kind: FailureKind,
     pub detail: String,
 }
-struct Text {
-    value: String,
-    error: Option<std::collections::TryReserveError>,
-}
-impl std::fmt::Write for Text {
-    fn write_str(&mut self, s: &str) -> std::fmt::Result {
-        if let Err(e) = self.value.try_reserve(s.len()) {
-            self.error = Some(e);
-            return Err(std::fmt::Error);
-        }
-        self.value.push_str(s);
-        Ok(())
-    }
-}
 pub(super) fn text(args: std::fmt::Arguments<'_>) -> Result<String, ExpressionError> {
-    use std::fmt::Write;
-    let mut out = Text {
-        value: String::new(),
-        error: None,
-    };
-    if out.write_fmt(args).is_err() {
-        return Err(match out.error {
-            Some(e) => RequestError::Allocation(e).into(),
-            None => super::build::bug("formatting original fact failed"),
-        });
-    }
-    Ok(out.value)
+    crate::substrate::text::text(args).map_err(Into::into)
 }
 pub(super) fn failure(
     kind: FailureKind,

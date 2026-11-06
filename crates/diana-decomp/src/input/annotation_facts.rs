@@ -22,7 +22,10 @@ pub enum AnnotationValueKind {
         reference: StringId,
         units: Vec<u16>,
     },
-    Reference(crate::raw::OperandReference),
+    Reference {
+        original: crate::raw::OperandReference,
+        declaration: super::value_facts::ValueReferenceId,
+    },
     Null,
     Boolean(bool),
     Array {
@@ -30,6 +33,7 @@ pub enum AnnotationValueKind {
     },
     Annotation {
         type_id: TypeId,
+        descriptor: Vec<u16>,
         count: u32,
     },
 }
@@ -147,6 +151,7 @@ pub struct OriginalAnnotations {
     owner: ClassKey,
     directory: ByteOffset,
     records: Vec<AnnotationRecord>,
+    references: Vec<super::value_facts::ValueReference>,
     prefix: Option<AnnotationPrefix>,
     extent: AnnotationExtent,
 }
@@ -156,6 +161,9 @@ impl OriginalAnnotations {
     }
     pub fn directory(&self) -> ByteOffset {
         self.directory
+    }
+    pub fn references(&self) -> &[super::value_facts::ValueReference] {
+        &self.references
     }
     pub fn records(&self) -> &[AnnotationRecord] {
         &self.records
@@ -186,6 +194,60 @@ fn bytes(index: &ProgramIndex<'_>, range: ByteRange) -> Result<Vec<u8>, RequestE
     }
     Ok(result)
 }
+pub(crate) fn own_token(
+    index: &ProgramIndex<'_>,
+    step: ValueStep<'_>,
+    references: &mut Vec<super::value_facts::ValueReference>,
+) -> Result<AnnotationToken, RequestError> {
+    Ok(match step {
+        ValueStep::EndContainer => AnnotationToken::EndContainer,
+        ValueStep::Value(value) => {
+            let name = match value.name {
+                Some(id) => Some(copy_units(index.string(id)?)?),
+                None => None,
+            };
+            let kind = match value.kind {
+                EncodedKind::Signed(value) => AnnotationValueKind::Signed(value),
+                EncodedKind::Unsigned(value) => AnnotationValueKind::Unsigned(value),
+                EncodedKind::Bits { width, bits } => AnnotationValueKind::Bits { width, bits },
+                EncodedKind::Reference(crate::raw::OperandReference::String(reference)) => {
+                    AnnotationValueKind::String {
+                        reference,
+                        units: copy_units(index.string(reference)?)?,
+                    }
+                }
+                EncodedKind::Reference(reference) => {
+                    let declaration = super::value_facts::ValueReferenceId(
+                        u32::try_from(references.len())
+                            .map_err(|_| RequestError::PlatformCapacity)?,
+                    );
+                    push(references, super::value_facts::reference(index, reference)?)?;
+                    AnnotationValueKind::Reference {
+                        original: reference,
+                        declaration,
+                    }
+                }
+                EncodedKind::Null => AnnotationValueKind::Null,
+                EncodedKind::Boolean(value) => AnnotationValueKind::Boolean(value),
+                EncodedKind::Array { count } => AnnotationValueKind::Array { count },
+                EncodedKind::Annotation { type_id, count } => AnnotationValueKind::Annotation {
+                    type_id,
+                    descriptor: copy_units(index.type_name(type_id)?)?,
+                    count,
+                },
+            };
+            AnnotationToken::Value(AnnotationValue {
+                name,
+                name_id: value.name,
+                range: value.range,
+                tag: value.tag,
+                arg: value.arg,
+                kind,
+            })
+        }
+    })
+}
+
 fn hard(error: &RequestError) -> bool {
     matches!(
         error.kind(),
@@ -223,45 +285,7 @@ fn read_set(
         let mut tokens = Vec::new();
         let body = (|| -> Result<(), RequestError> {
             while let Some(step) = values.next(index)? {
-                let token = match step {
-                    ValueStep::EndContainer => AnnotationToken::EndContainer,
-                    ValueStep::Value(value) => {
-                        let name = match value.name {
-                            Some(id) => Some(copy_units(index.string(id)?)?),
-                            None => None,
-                        };
-                        let kind = match value.kind {
-                            EncodedKind::Signed(value) => AnnotationValueKind::Signed(value),
-                            EncodedKind::Unsigned(value) => AnnotationValueKind::Unsigned(value),
-                            EncodedKind::Bits { width, bits } => {
-                                AnnotationValueKind::Bits { width, bits }
-                            }
-                            EncodedKind::Reference(crate::raw::OperandReference::String(
-                                reference,
-                            )) => AnnotationValueKind::String {
-                                reference,
-                                units: copy_units(index.string(reference)?)?,
-                            },
-                            EncodedKind::Reference(reference) => {
-                                AnnotationValueKind::Reference(reference)
-                            }
-                            EncodedKind::Null => AnnotationValueKind::Null,
-                            EncodedKind::Boolean(value) => AnnotationValueKind::Boolean(value),
-                            EncodedKind::Array { count } => AnnotationValueKind::Array { count },
-                            EncodedKind::Annotation { type_id, count } => {
-                                AnnotationValueKind::Annotation { type_id, count }
-                            }
-                        };
-                        AnnotationToken::Value(AnnotationValue {
-                            name,
-                            name_id: value.name,
-                            range: value.range,
-                            tag: value.tag,
-                            arg: value.arg,
-                            kind,
-                        })
-                    }
-                };
+                let token = own_token(index, step, &mut facts.references)?;
                 push(&mut tokens, token)?;
             }
             Ok(())
@@ -383,6 +407,7 @@ pub(crate) fn collect(
             owner,
             directory: context.annotations_offset,
             records: Vec::new(),
+            references: Vec::new(),
             prefix: None,
             extent: AnnotationExtent::Complete,
         },

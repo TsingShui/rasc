@@ -33,6 +33,7 @@ const VOID: u16 = 8;
 
 #[test]
 fn dynamic_instructions_preserve_layout_references_and_completions() {
+    check_assembly_cases();
     check_expression_owned_facts();
     check_expression_call_surface();
     check_metamorphic_relations();
@@ -186,6 +187,929 @@ fn dynamic_instructions_preserve_layout_references_and_completions() {
             assert_invalid_reference(&fixture.bytes);
         }
     }
+}
+
+struct AssemblyFixture {
+    bytes: Vec<u8>,
+    class: usize,
+    fields: usize,
+    methods: usize,
+    codes: Vec<usize>,
+    values: usize,
+    annotation: usize,
+    directory: usize,
+}
+fn assembly_fixture() -> AssemblyFixture {
+    // Self-encoded DEX 039: three static fields, six instance fields, four
+    // methods, one implemented interface and a shared method annotation set.
+    let types = [
+        "Lsample/Case;",
+        "Ljava/lang/Object;",
+        "Ljava/util/List;",
+        "Ljava/util/Date;",
+        "Ljava/sql/Date;",
+        "Lsample/Local;",
+        "Lother/Outer$Inner;",
+        "Ljava/lang/String;",
+        "Lother/v0;",
+        "I",
+        "[[Ljava/util/List;",
+        "Lsample/Anno;",
+        "V",
+        "Lsample/Face;",
+        "Ldalvik/annotation/Signature;",
+    ]
+    .map(str::to_owned)
+    .to_vec();
+    let field_names = [
+        "items", "number", "implicit", "left", "right", "other", "Local", "text", "grid",
+    ];
+    let mut strings = types.clone();
+    strings.extend(field_names.iter().map(|s| s.to_string()));
+    strings.extend(
+        [
+            "body",
+            "nativeMethod",
+            "bridgeMethod",
+            "broken",
+            "value",
+            "L",
+            "I",
+            "V",
+            "Ljava/util/List; stays literal",
+            "<T:Ljava/lang/Object;>Ljava/lang/Object;",
+        ]
+        .map(str::to_owned),
+    );
+    strings.sort();
+    strings.dedup();
+    let sid =
+        |s: &str| u32::try_from(strings.binary_search_by(|a| a.as_str().cmp(s)).unwrap()).unwrap();
+    let mut b = vec![0u8; 112];
+    let mut map = vec![(0u16, 1u32, 0usize)];
+    let mut table = |kind: u16, n: usize, w: usize| {
+        let at = b.len();
+        b.resize(at + n * w, 0);
+        map.push((kind, n as u32, at));
+        at
+    };
+    let string_ids = table(1, strings.len(), 4);
+    let type_ids = table(2, types.len(), 4);
+    let protos = table(3, 2, 12);
+    let fields = table(4, 9, 8);
+    let methods = table(5, 4, 8);
+    let class = table(6, 1, 32);
+    let data = b.len();
+    map.push((0x1001, 1, b.len()));
+    let interfaces = b.len();
+    b.extend(1u32.to_le_bytes());
+    b.extend(13u16.to_le_bytes());
+    align(&mut b);
+    map.push((0x2002, strings.len() as u32, b.len()));
+    for (i, s) in strings.iter().enumerate() {
+        let at = b.len();
+        put32(&mut b, string_ids + i * 4, at as u32);
+        uleb(&mut b, s.len() as u32);
+        b.extend(s.as_bytes());
+        b.push(0);
+    }
+    for (i, t) in types.iter().enumerate() {
+        put32(&mut b, type_ids + i * 4, sid(t));
+    }
+    for (i, (shorty, ret)) in [("V", 12u32), ("L", 8)].into_iter().enumerate() {
+        put32(&mut b, protos + i * 12, sid(shorty));
+        put32(&mut b, protos + i * 12 + 4, ret);
+    }
+    for (i, ty) in [2u16, 9, 9, 3, 4, 6, 5, 7, 10].into_iter().enumerate() {
+        put16(&mut b, fields + i * 8, 0);
+        put16(&mut b, fields + i * 8 + 2, ty);
+        put32(&mut b, fields + i * 8 + 4, sid(field_names[i]));
+    }
+    for (i, (name, proto)) in [
+        ("body", 0u16),
+        ("nativeMethod", 1),
+        ("bridgeMethod", 0),
+        ("broken", 0),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        put16(&mut b, methods + i * 8, 0);
+        put16(&mut b, methods + i * 8 + 2, proto);
+        put32(&mut b, methods + i * 8 + 4, sid(name));
+    }
+    let values = b.len();
+    map.push((0x2005, 1, values));
+    b.extend([2, 0x1c, 3, 4, 42, 0x18, 5, 0x1e, 4, 0]);
+    align(&mut b);
+    map.push((0x2001, 2, b.len()));
+    let mut codes = vec![];
+    for words in [&[0x001cu16, 8, 0x000e][..], &[0x1012, 0x0073, 0x000e][..]] {
+        align(&mut b);
+        codes.push(b.len());
+        for x in [1u16, 0, 0, 0] {
+            b.extend(x.to_le_bytes());
+        }
+        b.extend(0u32.to_le_bytes());
+        b.extend((words.len() as u32).to_le_bytes());
+        for w in words {
+            b.extend(w.to_le_bytes());
+        }
+    }
+    let class_data = b.len();
+    map.push((0x2000, 1, class_data));
+    for n in [3, 6, 4, 0] {
+        uleb(&mut b, n);
+    }
+    for i in 0..3 {
+        uleb(&mut b, if i == 0 { 0 } else { 1 });
+        uleb(&mut b, 0x19);
+    }
+    for i in 0..6 {
+        uleb(&mut b, if i == 0 { 3 } else { 1 });
+        uleb(&mut b, 1);
+    }
+    for (i, (flags, code)) in [(9u32, codes[0]), (0x109, 0), (0x1149, 0), (9, codes[1])]
+        .into_iter()
+        .enumerate()
+    {
+        uleb(&mut b, if i == 0 { 0 } else { 1 });
+        uleb(&mut b, flags);
+        uleb(&mut b, code as u32);
+    }
+    // Spare bytes meet the count header's minimum-size check. A fifth entry
+    // mutation reaches a genuinely truncated ULEB, after four located methods.
+    b.extend([0x80, 0x80, 0x80]);
+    let annotation = b.len();
+    map.push((0x2004, 1, annotation));
+    b.extend([
+        1,
+        11,
+        1,
+        sid("value") as u8,
+        0x17,
+        sid("Ljava/util/List; stays literal") as u8,
+    ]);
+    align(&mut b);
+    let set = b.len();
+    map.push((0x1003, 1, set));
+    b.extend(1u32.to_le_bytes());
+    b.extend((annotation as u32).to_le_bytes());
+    let directory = b.len();
+    map.push((0x2006, 1, directory));
+    for x in [set as u32, 0, 2, 0, 0, set as u32, 1, set as u32] {
+        b.extend(x.to_le_bytes());
+    }
+    put32(&mut b, class, 0);
+    put32(&mut b, class + 4, 1);
+    put32(&mut b, class + 8, 1);
+    put32(&mut b, class + 12, interfaces as u32);
+    put32(&mut b, class + 16, u32::MAX);
+    put32(&mut b, class + 20, directory as u32);
+    put32(&mut b, class + 24, class_data as u32);
+    put32(&mut b, class + 28, values as u32);
+    align(&mut b);
+    let map_at = b.len();
+    map.push((0x1000, 1, map_at));
+    map.sort_unstable_by_key(|e| e.2);
+    b.extend((map.len() as u32).to_le_bytes());
+    for (k, n, p) in map {
+        b.extend(k.to_le_bytes());
+        b.extend(0u16.to_le_bytes());
+        b.extend(n.to_le_bytes());
+        b.extend((p as u32).to_le_bytes());
+    }
+    b[..8].copy_from_slice(b"dex\n039\0");
+    let len = b.len() as u32;
+    put32(&mut b, 32, len);
+    put32(&mut b, 36, 112);
+    put32(&mut b, 40, 0x12345678);
+    put32(&mut b, 52, map_at as u32);
+    for (i, (n, p)) in [
+        (strings.len(), string_ids),
+        (types.len(), type_ids),
+        (2, protos),
+        (9, fields),
+        (4, methods),
+        (1, class),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        put32(&mut b, 56 + i * 8, n as u32);
+        put32(&mut b, 60 + i * 8, p as u32);
+    }
+    put32(&mut b, 104, len - data as u32);
+    put32(&mut b, 108, data as u32);
+    AssemblyFixture {
+        bytes: b,
+        class,
+        fields,
+        methods,
+        codes,
+        values,
+        annotation,
+        directory,
+    }
+}
+
+fn assembly_name_correspondence(
+    facts: &crate::p0::ClassFacts,
+    names: &crate::p8::TypeNamePlan,
+    methods: &[crate::p8::MethodMember],
+    standalone: bool,
+) {
+    use crate::p0::Fact;
+    use crate::p8::*;
+    let mut seen = std::collections::HashSet::new();
+    for (i, u) in names.uses().iter().enumerate() {
+        assert_eq!(u.id.0 as usize, i);
+        assert!(
+            seen.insert(format!("{:?}", u.source)),
+            "P8 merged or duplicated a type-use identity"
+        );
+        let t = &names.targets()[u.target.0 as usize];
+        let expected = match u.source {
+            TypeSource::Owner => Some(facts.descriptor().units()),
+            TypeSource::Superclass => {
+                if let Fact::Present(v) = facts.superclass() {
+                    Some(v.units())
+                } else {
+                    None
+                }
+            }
+            TypeSource::Interface(n) => {
+                if let Fact::Present(v) = facts.interfaces() {
+                    assert_eq!(u.original, Some(v[n as usize].type_id));
+                    if let Fact::Present(d) = &v[n as usize].descriptor {
+                        Some(d.units())
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            }
+            TypeSource::Field(id) => {
+                if let Fact::Present(d) = facts.field_entry(id).unwrap().declaration() {
+                    assert_eq!(u.original, Some(d.type_id));
+                    Some(d.descriptor.units())
+                } else {
+                    None
+                }
+            }
+            TypeSource::Return(id) => {
+                if let Fact::Present(d) = facts.method_entry(id).unwrap().declaration() {
+                    assert_eq!(u.original, Some(crate::TypeId(d.return_type_id)));
+                    Some(d.return_type.units())
+                } else {
+                    None
+                }
+            }
+            TypeSource::Parameter { method, index } => {
+                if let Fact::Present(d) = facts.method_entry(method).unwrap().declaration() {
+                    assert_eq!(
+                        u.original,
+                        Some(crate::TypeId(d.parameter_type_ids[index as usize]))
+                    );
+                    Some(d.parameter_types[index as usize].units())
+                } else {
+                    None
+                }
+            }
+            TypeSource::Method { method, usage } => {
+                let result = methods
+                    .iter()
+                    .find(|m| m.id == method)
+                    .unwrap()
+                    .delivery
+                    .as_ref()
+                    .unwrap()
+                    .result()
+                    .unwrap();
+                Some(
+                    result.code().unwrap().types()[usage.0 as usize]
+                        .units
+                        .as_slice(),
+                )
+            }
+            TypeSource::Annotation {
+                record,
+                range,
+                token: None,
+                ..
+            } => {
+                let a = &facts.annotations().records()[record.0 as usize];
+                assert_eq!(a.range(), range);
+                assert_eq!(u.original, Some(a.type_id()));
+                let scope = match a.location() {
+                    crate::AnnotationLocation::Class | crate::AnnotationLocation::Field(_) => {
+                        Scope::Class
+                    }
+                    crate::AnnotationLocation::Method(m)
+                    | crate::AnnotationLocation::Parameter { method: m, .. } => Scope::Method(m),
+                };
+                assert_eq!(u.scope, scope, "P8 shared annotation lost its owning scope");
+                Some(a.descriptor())
+            }
+            _ => None,
+        };
+        if let Some(expected) = expected {
+            assert_eq!(
+                t.descriptor, expected,
+                "P8 changed an original type descriptor"
+            );
+        }
+        assert_eq!(
+            t.dimensions as usize,
+            t.descriptor.iter().take_while(|&&v| v == 91).count()
+        );
+        if standalone {
+            assert!(
+                !matches!(u.spelling, Spelling::Simple),
+                "P8 shortened a standalone name"
+            );
+            assert!(u.import.is_none());
+        }
+        if let Some(id) = u.import {
+            let p = &names.imports()[id.0 as usize];
+            assert_eq!(
+                names.targets()[p.target.0 as usize].full,
+                t.full,
+                "P8 rebound an import"
+            );
+            assert_eq!(u.spelling, Spelling::Simple);
+        }
+    }
+    let mut imported = std::collections::HashSet::new();
+    let mut simple = std::collections::HashSet::new();
+    for p in names.imports() {
+        let t = &names.targets()[p.target.0 as usize];
+        assert!(imported.insert(t.full.clone()), "P8 duplicated an import");
+        assert!(
+            simple.insert(t.full[t.simple_start..].to_vec()),
+            "P8 imported conflicting short names"
+        );
+        assert!(!t.full.contains(&u16::from(b'*')));
+    }
+    for m in methods {
+        if let Ok(delivery) = &m.delivery
+            && let Some(r) = delivery.result()
+            && let Some(code) = r.code()
+        {
+            for t in code.types() {
+                assert!(
+                    names
+                        .find(TypeSource::Method {
+                            method: m.id,
+                            usage: t.id
+                        })
+                        .is_some(),
+                    "P8 lost a method type use"
+                );
+            }
+        }
+    }
+    if standalone {
+        assert!(names.package().is_none());
+        assert!(names.imports().is_empty());
+    }
+}
+fn assembly_values_correspondence(
+    facts: &crate::p0::ClassFacts,
+    names: &crate::p8::TypeNamePlan,
+    values: &crate::p8::ValuePlan,
+) {
+    use crate::p8::*;
+    use crate::{AnnotationToken as T, AnnotationValueKind as K};
+    for (i, v) in values.expressions().iter().enumerate() {
+        assert_eq!(v.id.0 as usize, i);
+        let (token, references) = match v.origin {
+            ValueOrigin::Annotation {
+                record,
+                range,
+                token,
+            } => {
+                let a = &facts.annotations().records()[record.0 as usize];
+                assert_eq!(a.range(), range);
+                (
+                    &a.tokens()[token as usize],
+                    facts.annotations().references(),
+                )
+            }
+            ValueOrigin::Preparation { field, token } => {
+                let crate::p0::Fact::Present(crate::p0::InitialValue::Encoded {
+                    tokens,
+                    references,
+                    ..
+                }) = facts.field_entry(field).unwrap().initial_value()
+                else {
+                    panic!()
+                };
+                (&tokens[token as usize], references.as_slice())
+            }
+        };
+        match (&v.kind, token) {
+            (ValueKind::EndContainer, T::EndContainer) => {}
+            (kind, T::Value(token)) => {
+                assert_eq!(v.name.as_ref().map(|n| n.units.as_slice()), token.name());
+                match (kind, token.kind()) {
+                    (ValueKind::Literal(Literal::Signed(a)), K::Signed(b)) => assert_eq!(a, b),
+                    (ValueKind::Literal(Literal::Unsigned(a)), K::Unsigned(b)) => assert_eq!(a, b),
+                    (
+                        ValueKind::Literal(Literal::Bits { width, bits }),
+                        K::Bits { width: w, bits: b },
+                    ) => {
+                        assert_eq!(*width, w.0);
+                        assert_eq!(bits, b);
+                    }
+                    (ValueKind::Literal(Literal::Null), K::Null) => {}
+                    (ValueKind::Literal(Literal::Boolean(a)), K::Boolean(b)) => assert_eq!(a, b),
+                    (ValueKind::Literal(Literal::String(a)), K::String { units, .. }) => {
+                        assert_eq!(a, units, "P8 rewrote a literal while naming types")
+                    }
+                    (ValueKind::Array { count: a }, K::Array { count: b }) => assert_eq!(a, b),
+                    (
+                        ValueKind::Annotation { type_use, count },
+                        K::Annotation {
+                            descriptor,
+                            count: c,
+                            ..
+                        },
+                    ) => {
+                        assert_eq!(count, c);
+                        let u = &names.uses()[type_use.0 as usize];
+                        assert_eq!(&names.targets()[u.target.0 as usize].descriptor, descriptor);
+                    }
+                    (
+                        ValueKind::Reference {
+                            original,
+                            syntax,
+                            types,
+                        },
+                        K::Reference {
+                            original: o,
+                            declaration,
+                        },
+                    ) => {
+                        assert_eq!(original, o);
+                        let leaf = &references[declaration.0 as usize];
+                        assert_eq!(original, &leaf.original);
+                        assert_eq!(
+                            matches!(syntax, ReferenceSyntax::Unavailable(_)),
+                            leaf.declaration.is_err()
+                        );
+                        for t in types {
+                            assert!(names.uses().get(t.0 as usize).is_some());
+                        }
+                    }
+                    _ => panic!("P8 changed encoded-value semantics"),
+                }
+            }
+            _ => panic!("P8 changed encoded-container order"),
+        }
+    }
+    for a in values.annotations() {
+        let original = &facts.annotations().records()[a.id.0 as usize];
+        assert_eq!(a.location, original.location());
+        assert_eq!(a.visibility, original.visibility());
+        assert_eq!(a.extent, original.extent());
+        assert_eq!(
+            (a.values.end - a.values.start) as usize,
+            original.tokens().len(),
+            "P8 lost annotation events"
+        );
+    }
+    for (field, range) in values.preparations() {
+        let crate::p0::Fact::Present(crate::p0::InitialValue::Encoded { tokens, .. }) =
+            facts.field_entry(*field).unwrap().initial_value()
+        else {
+            panic!()
+        };
+        assert_eq!(
+            (range.end - range.start) as usize,
+            tokens.len(),
+            "P8 lost static preparation events"
+        );
+    }
+}
+fn assembly_type_state<T>(a: &crate::p8::TypeExpression, b: &crate::p0::Fact<T>) {
+    assert!(
+        matches!(
+            (a, b),
+            (
+                crate::p8::TypeExpression::Present(_),
+                crate::p0::Fact::Present(_)
+            ) | (crate::p8::TypeExpression::Absent, crate::p0::Fact::Absent)
+                | (crate::p8::TypeExpression::NotRead, crate::p0::Fact::NotRead)
+                | (
+                    crate::p8::TypeExpression::Unavailable,
+                    crate::p0::Fact::Unavailable(_)
+                )
+        ),
+        "P8 changed class-type availability"
+    );
+}
+fn assembly_correspondence(result: &crate::p8::ClassResult) {
+    use crate::p8::*;
+    let f = result.facts();
+    assembly_type_state(&result.header().superclass, f.superclass());
+    match (&result.header().interfaces, f.interfaces()) {
+        (InterfaceList::Present(a), crate::p0::Fact::Present(b)) => {
+            assert_eq!(a.len(), b.len(), "P8 lost an original interface");
+            for (a, b) in a.iter().zip(b) {
+                assert_eq!(a.original, b.type_id);
+                assembly_type_state(&a.name, &b.descriptor);
+            }
+        }
+        (InterfaceList::Absent, crate::p0::Fact::Absent)
+        | (InterfaceList::NotRead, crate::p0::Fact::NotRead)
+        | (InterfaceList::Unavailable, crate::p0::Fact::Unavailable(_)) => {}
+        _ => panic!("P8 changed interface-list availability"),
+    }
+    assert_eq!(result.fields().len(), f.fields().len(), "P8 lost a field");
+    assert_eq!(
+        result.methods().len(),
+        f.methods().len(),
+        "P8 lost a known method"
+    );
+    assert_eq!(
+        result.methods().iter().map(|m| m.id).collect::<Vec<_>>(),
+        f.methods().iter().map(|m| m.method()).collect::<Vec<_>>(),
+        "P8 reordered original members"
+    );
+    for (a, b) in result.fields().iter().zip(f.fields()) {
+        assert_eq!(a.id, b.field());
+        assert_eq!(a.storage, b.storage());
+        assert_eq!(a.ordinal, b.group_ordinal());
+        assert_eq!(a.flags, b.access_flags().raw());
+        match (&a.expression, b.declaration()) {
+            (FieldExpression::Declared { name, .. }, crate::p0::Fact::Present(d)) => {
+                assert_eq!(name, d.name.units())
+            }
+            (FieldExpression::Unavailable, crate::p0::Fact::Unavailable(_)) => {}
+            (FieldExpression::NotRead, crate::p0::Fact::NotRead) => {}
+            (FieldExpression::Absent, crate::p0::Fact::Absent) => {}
+            _ => panic!("P8 changed declaration availability"),
+        };
+        let expected = match b.initial_value() {
+            crate::p0::Fact::Present(crate::p0::InitialValue::ImplicitDefault) => {
+                Preparation::ImplicitDefault
+            }
+            crate::p0::Fact::Present(crate::p0::InitialValue::Encoded { extent, .. }) => {
+                if *extent == crate::AnnotationExtent::Complete {
+                    Preparation::Encoded
+                } else {
+                    Preparation::EncodedPrefix
+                }
+            }
+            crate::p0::Fact::Absent => Preparation::Absent,
+            crate::p0::Fact::NotRead => Preparation::NotRead,
+            crate::p0::Fact::Unavailable(_) => Preparation::Unavailable,
+        };
+        assert_eq!(
+            a.preparation, expected,
+            "P8 changed static preparation presence"
+        );
+    }
+    assert_eq!(
+        result.preparation_order(),
+        f.fields()
+            .iter()
+            .enumerate()
+            .filter(|(_, f)| matches!(f.storage(), crate::FieldStorage::Static(_)))
+            .map(|(i, _)| i)
+            .collect::<Vec<_>>(),
+        "P8 reordered static preparation"
+    );
+    assembly_name_correspondence(f, result.names(), result.methods(), false);
+    assembly_values_correspondence(f, result.names(), result.values());
+}
+fn method_display_correspondence(result: &crate::p8::MethodDisplayOutcome) {
+    match result {
+        crate::p8::MethodDisplayOutcome::Ready(r) => {
+            assembly_name_correspondence(
+                r.facts(),
+                r.names(),
+                std::slice::from_ref(r.member()),
+                true,
+            );
+            assembly_values_correspondence(r.facts(), r.names(), r.values());
+        }
+        crate::p8::MethodDisplayOutcome::Stopped(s) => {
+            panic!("P8 stopped during an existing method case: {}", s.error())
+        }
+    }
+}
+
+fn assembled(bytes: &[u8]) -> crate::p8::ClassResult {
+    let engine = Engine::open(vec![DexImage {
+        bytes,
+        header_offset: ByteOffset(0),
+        origin: ImageOrigin { input: InputId(0) },
+    }])
+    .unwrap()
+    .with_method_jobs(4);
+    let response = engine
+        .analyze(crate::Request {
+            class: CLASS,
+            method: None,
+        })
+        .expect("P0/P8 discarded locatable original members");
+    let crate::Presentation::Class(crate::p8::ClassOutcome::Ready(r)) = response.presentation
+    else {
+        panic!("P8 did not publish a mixed original class")
+    };
+    assembly_correspondence(&r);
+    for (member, original) in r.methods().iter().zip(&response.methods) {
+        assert_eq!(member.id, original.key.method);
+        match (&member.delivery, &original.result) {
+            (Ok(crate::p8::MethodDelivery::Expressed(a)), Ok(MethodOutcome::Expressed(b))) => {
+                assert_eq!(
+                    serde_json::to_value(a.as_ref()).unwrap(),
+                    serde_json::to_value(b.result()).unwrap(),
+                    "P8 changed method execution expressions"
+                )
+            }
+            (Ok(crate::p8::MethodDelivery::Declared(a)), Ok(MethodOutcome::Declared(b))) => {
+                assert!(std::ptr::eq(a.as_ref(), b.as_ref()))
+            }
+            (
+                Ok(crate::p8::MethodDelivery::Stopped(s)),
+                Ok(MethodOutcome::DisassemblyStopped(p)),
+            ) => {
+                assert_eq!(s.stage, crate::p8::StoppedStage::P1);
+                assert!(!s.decoded_complete);
+                assert_eq!(
+                    format!("{:?}", s.decoded.as_ref().unwrap()),
+                    format!("{:?}", p.prefix)
+                );
+                let raw = s.raw.as_ref().unwrap().as_ref().unwrap();
+                assert_eq!(
+                    raw.bytes,
+                    &bytes[raw.range.as_range()],
+                    "P8 lost the original stopped code bytes"
+                );
+            }
+            (Ok(crate::p8::MethodDelivery::Stopped(s)), Err(e)) => {
+                assert_eq!(s.stage, crate::p8::StoppedStage::Reader);
+                assert_eq!(s.cause_kind, e.kind());
+            }
+            _ => panic!("P8 changed a known member outcome"),
+        }
+    }
+    r
+}
+fn check_assembly_cases() {
+    use crate::p8::*;
+    let (result, fixture) = {
+        let fixture = assembly_fixture();
+        let result = assembled(&fixture.bytes);
+        (result, fixture)
+    };
+    assert_eq!(
+        result.names().package().unwrap().units,
+        "sample".encode_utf16().collect::<Vec<_>>(),
+        "P8 changed the original package"
+    );
+    assert_eq!(
+        result.header().name.units,
+        "Case".encode_utf16().collect::<Vec<_>>(),
+        "P8 used a qualified type spelling as a declaration name"
+    );
+    assert_eq!(result.fields().len(), 9);
+    assert_eq!(result.methods().len(), 4);
+    assert_eq!(result.preparation_order(), [0, 1, 2]);
+    assert_eq!(result.fields()[0].preparation, Preparation::Encoded);
+    assert_eq!(result.fields()[1].preparation, Preparation::Encoded);
+    assert_eq!(result.fields()[2].preparation, Preparation::ImplicitDefault);
+    assert!(matches!(
+        result.methods()[0].delivery,
+        Ok(MethodDelivery::Expressed(_))
+    ));
+    assert!(matches!(
+        result.methods()[1].delivery,
+        Ok(MethodDelivery::Declared(_))
+    ));
+    assert!(
+        matches!(
+            result.methods()[2].delivery,
+            Ok(MethodDelivery::Declared(_))
+        ),
+        "P8 hid a synthetic bridge"
+    );
+    assert!(matches!(
+        result.methods()[3].delivery,
+        Ok(MethodDelivery::Stopped(_))
+    ));
+    let spelling = |source, expected: &str| {
+        let id = result.names().find(source).unwrap();
+        assert_eq!(
+            result.names().spelling(id).unwrap(),
+            expected.encode_utf16().collect::<Vec<_>>(),
+            "P8 selected a wrong type spelling"
+        );
+    };
+    spelling(TypeSource::Owner, "Case");
+    spelling(TypeSource::Field(crate::FieldId(0)), "List");
+    spelling(TypeSource::Field(crate::FieldId(3)), "java.util.Date");
+    spelling(TypeSource::Field(crate::FieldId(4)), "java.sql.Date");
+    spelling(TypeSource::Field(crate::FieldId(5)), "Outer$Inner");
+    spelling(TypeSource::Field(crate::FieldId(6)), "sample.Local");
+    spelling(TypeSource::Field(crate::FieldId(7)), "java.lang.String");
+    spelling(TypeSource::Field(crate::FieldId(8)), "List");
+    spelling(TypeSource::Return(MethodId(1)), "v0");
+    let grid = result
+        .names()
+        .find(TypeSource::Field(crate::FieldId(8)))
+        .unwrap();
+    assert_eq!(
+        result.names().targets()[result.names().uses()[grid.0 as usize].target.0 as usize]
+            .dimensions,
+        2
+    );
+    let imports = result
+        .names()
+        .imports()
+        .iter()
+        .map(|i| String::from_utf16(&result.names().targets()[i.target.0 as usize].full).unwrap())
+        .collect::<std::collections::HashSet<_>>();
+    assert_eq!(
+        imports,
+        ["java.util.List", "other.Outer$Inner", "other.v0"]
+            .map(str::to_owned)
+            .into_iter()
+            .collect(),
+        "P8 imports ignored conflict or duplicate-array targets"
+    );
+    let shadow = result
+        .names()
+        .uses()
+        .iter()
+        .find(|u| {
+            matches!(
+                u.source,
+                TypeSource::Method {
+                    method: MethodId(0),
+                    ..
+                }
+            ) && result.names().targets()[u.target.0 as usize].descriptor
+                == "Lother/v0;".encode_utf16().collect::<Vec<_>>()
+        })
+        .unwrap();
+    assert_eq!(
+        shadow.spelling,
+        Spelling::Qualified,
+        "P8 ignored a method-local qualifier shadow"
+    );
+    assert_eq!(shadow.reason, Some(NameReason::Shadowed));
+    assert!(result.values().expressions().iter().any(|v|matches!(&v.kind,ValueKind::Literal(Literal::String(s))if s==&"Ljava/util/List; stays literal".encode_utf16().collect::<Vec<_>>())));
+    let annotations = result.values().annotations();
+    assert_eq!(annotations.len(), 3);
+    assert_eq!(annotations[0].range, annotations[1].range);
+    assert_eq!(annotations[1].range, annotations[2].range);
+    assert_ne!(
+        annotations[1].type_use, annotations[2].type_use,
+        "P8 merged shared metadata across method scopes"
+    );
+    let raw_stop = match &result.methods()[3].delivery {
+        Ok(MethodDelivery::Stopped(s)) => s,
+        _ => panic!(),
+    };
+    assert_eq!(raw_stop.decoded.as_ref().unwrap().len(), 1);
+    assert_eq!(
+        raw_stop
+            .raw
+            .as_ref()
+            .unwrap()
+            .as_ref()
+            .unwrap()
+            .instructions
+            .start
+            .0,
+        fixture.codes[1] + 16
+    );
+    let engine = Engine::open(vec![DexImage {
+        bytes: &fixture.bytes,
+        header_offset: ByteOffset(0),
+        origin: ImageOrigin { input: InputId(0) },
+    }])
+    .unwrap();
+    let single = engine.analyze_method(CLASS, MethodId(1)).unwrap();
+    method_display_correspondence(&single.display);
+    let MethodDisplayOutcome::Ready(single) = single.display else {
+        panic!()
+    };
+    let id = single
+        .names()
+        .find(TypeSource::Return(MethodId(1)))
+        .unwrap();
+    assert_eq!(
+        single.names().spelling(id).unwrap(),
+        "other.v0".encode_utf16().collect::<Vec<_>>()
+    );
+    let mut damaged = assembly_fixture();
+    put32(&mut damaged.bytes, damaged.fields + 4, u32::MAX);
+    let partial = assembled(&damaged.bytes);
+    assert!(matches!(
+        partial.fields()[0].expression,
+        FieldExpression::Unavailable
+    ));
+    assert_eq!(
+        partial.fields()[0].preparation,
+        Preparation::Encoded,
+        "field declaration damage discarded independent static preparation"
+    );
+    assert_eq!(partial.methods().len(), 4);
+    let mut damaged = assembly_fixture();
+    damaged.bytes[damaged.values + 5] = 0x7f;
+    let partial = assembled(&damaged.bytes);
+    assert_eq!(
+        partial.fields()[0].preparation,
+        Preparation::EncodedPrefix,
+        "P0 discarded an independently decoded static value prefix"
+    );
+    assert_eq!(partial.fields()[1].preparation, Preparation::NotRead);
+    assert_eq!(
+        partial.fields()[2].preparation,
+        Preparation::ImplicitDefault,
+        "P0 lost an independently known omitted static entry"
+    );
+    assert_eq!(
+        partial.values().preparations()[0].1.end - partial.values().preparations()[0].1.start,
+        2
+    );
+    let mut damaged = assembly_fixture();
+    put16(&mut damaged.bytes, damaged.methods + 2, u16::MAX);
+    let partial = assembled(&damaged.bytes);
+    assert!(matches!(
+        partial.methods()[0].delivery,
+        Ok(MethodDelivery::Stopped(MemberStop {
+            stage: StoppedStage::Reader,
+            ..
+        }))
+    ));
+    assert!(matches!(
+        partial.methods()[1].delivery,
+        Ok(MethodDelivery::Declared(_))
+    ));
+    let mut metadata = assembly_fixture();
+    metadata.bytes[metadata.annotation + 1] = 14;
+    let result = assembled(&metadata.bytes);
+    assert!(
+        result.names().imports().is_empty(),
+        "P8 treated uninterpreted signature scope as absent"
+    );
+    assert!(
+        result
+            .names()
+            .uses()
+            .iter()
+            .any(|u| u.reason == Some(NameReason::UninterpretedMetadata))
+    );
+    let mut bad_interface = assembly_fixture();
+    put32(&mut bad_interface.bytes, bad_interface.class + 12, u32::MAX);
+    let result = assembled(&bad_interface.bytes);
+    assert!(
+        matches!(result.header().interfaces, InterfaceList::Unavailable),
+        "P8 erased an unavailable interface list"
+    );
+    assert_eq!(result.methods().len(), 4);
+    let mut no_metadata = assembly_fixture();
+    put32(&mut no_metadata.bytes, no_metadata.class + 20, 0);
+    let result = assembled(&no_metadata.bytes);
+    assert!(result.values().annotations().is_empty());
+    let mut shared = assembly_fixture();
+    put32(&mut shared.bytes, shared.directory, 0);
+    let result = assembled(&shared.bytes);
+    assert_eq!(
+        result.values().annotations().len(),
+        2,
+        "P8 invented absent class metadata"
+    );
+    let mut prefix = assembly_fixture();
+    let at = u32::from_le_bytes(
+        prefix.bytes[prefix.class + 24..prefix.class + 28]
+            .try_into()
+            .unwrap(),
+    ) as usize;
+    prefix.bytes[at + 2] = 5;
+    let result = assembled(&prefix.bytes);
+    assert_eq!(result.facts().class_data_shape().direct_methods, 5);
+    assert_eq!(result.facts().delivered_shape().direct_methods, 4);
+    assert!(!result.facts().method_traversal_complete());
+    assert_eq!(
+        result.methods().len(),
+        4,
+        "P8 fabricated an unlocated member"
+    );
+    // Independently owned facts/results outlive both input bytes and Engine.
+    let result = {
+        let f = assembly_fixture();
+        assembled(&f.bytes)
+    };
+    assert_eq!(result.methods().len(), 4);
+    assert!(serde_json::to_vec(&result).unwrap().len() > 100);
 }
 
 fn check_expression_call_surface() {
@@ -364,7 +1288,7 @@ fn check_expression_owned_facts() {
     assert!(declared.code().is_none());
     assert_eq!(declared.key().method, MethodId(2));
     assert_eq!(declared.header().metadata.records().count(), 1);
-    assert!(serde_json::to_vec(&owned).unwrap().len() > 100);
+    assert!(serde_json::to_vec(owned.as_ref()).unwrap().len() > 100);
     let mut fixture = dex_with_facts(
         39,
         &words,
@@ -5809,6 +6733,11 @@ fn check_local_recovery() {
             method: None,
         })
         .unwrap();
+    let crate::Presentation::Class(crate::p8::ClassOutcome::Ready(assembled)) = &class.presentation
+    else {
+        panic!("P8 lost mixed method recovery");
+    };
+    assembly_correspondence(assembled);
     assert_eq!(
         class
             .methods
@@ -8180,7 +9109,9 @@ fn analyze(bytes: &[u8]) -> MethodOutcome<'_> {
         origin: ImageOrigin { input: InputId(0) },
     }])
     .unwrap();
-    let outcome = engine.analyze_method(CLASS, ENTRY).unwrap().result.unwrap();
+    let analysis = engine.analyze_method(CLASS, ENTRY).unwrap();
+    method_display_correspondence(&analysis.display);
+    let outcome = analysis.result.unwrap();
     if let MethodOutcome::Expressed(method) = &outcome {
         storage_correspondence(method);
         region_correspondence(method);

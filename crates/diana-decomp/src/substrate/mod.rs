@@ -1,6 +1,9 @@
 pub(crate) mod fields;
 pub(crate) mod flags;
 pub(crate) mod ids;
+pub(crate) mod names;
 pub(crate) mod owned;
 pub(crate) mod report;
+pub(crate) mod serialization;
 pub(crate) mod slots;
+pub(crate) mod text;

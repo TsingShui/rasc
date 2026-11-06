@@ -1742,7 +1742,9 @@ P0 以只读 MethodMetadata 共享原方法/参数注解的拥有内容与覆盖
 方法 reader/P1 将它沿唯一链交付。动态引用 reader/P1 保留 call-site 的
 bootstrap 参数事件、原字节及叶声明池，P7 只复制既有事实，不重读输入。
 ExpressedMethod 私有保留本次 P6 产品供 MethodInspection 借用观察；
-into_result 释放保留分析，返回不带输入生命周期的 MethodResult。
+into_result 释放保留分析，返回不带输入生命周期的 Arc<MethodResult>。
+P8 与同次观察共享不可变拥有结果，不复制表达 arena；未发布表达前缀仍以
+ExpressionPartial 交付，不能改为成熟 MethodResult。
 观察接口不交出 owned predecessor、不提供构造或求解入口。
 
 已建立的方法分析临时数据在不再被消费时释放。P9 使用既有表达和显式
@@ -1875,7 +1877,8 @@ P4 只消费 Same、Ancestor、Unrelated 或带具体缺口的 Unknown，不获�
 
 P8 拥有类头/字段表达、静态准备、成员呈现归属、类范围的 package/import
 名称计划和类组装。其最终输入是 ClassFacts、全部方法结果和必要类级证据，
-产物为拥有的 ClassResult。
+产物为拥有的 ClassResult。封闭交付与名称选择接口见
+[P8 产品契约](spec/08-class.md)。
 
 组装以原始成员目录为依据，不以成功方法列表为依据。失败、声明-only 和
 生成成员保留原始身份；目录不完整时报告实际覆盖，不宣称全部成员已知。
@@ -2010,8 +2013,9 @@ P8 不移出构造器或 `<clinit>` 中的写入，不删除准备值后来的�
 
 ### 8.4 现有类级证据与前置调度的迁移约束
 
-当前 `engine/member_emission.rs`、`engine/constructor_chain.rs` 及其调用
-是迁移审查对象，不能整段挪进 P8 或改成新的方法分析入口。
+旧 `engine/member_emission.rs`、`engine/constructor_chain.rs` 属于归档
+迁移审查材料，不是当前调度入口；不能整段挪进 P8 或改成新的方法分析入口。
+当前链没有生产相应归属证据时，P8 保留原始成员，不恢复旧分析路线。
 
 | 事项 | 原始/分析事实生产者 | 类级或表达消费者 | 迁移义务 |
 |---|---|---|---|

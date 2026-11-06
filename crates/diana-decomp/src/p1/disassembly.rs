@@ -159,6 +159,14 @@ pub struct DecodedOutcome<'a> {
     pub decoded: Option<DecodedMethod<'a>>,
     pub prefix: Vec<DecodedItem>,
     pub error: Option<MethodError>,
+    pub(super) source: Option<RawMethodView<'a>>,
+}
+impl<'a> DecodedOutcome<'a> {
+    pub fn source(&self) -> Option<&RawMethodView<'a>> {
+        self.source
+            .as_ref()
+            .or_else(|| self.decoded.as_ref().map(DecodedMethod::source))
+    }
 }
 
 /// One decoded original item in PC order.

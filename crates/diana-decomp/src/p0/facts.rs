@@ -145,8 +145,14 @@ pub struct ClassDeclaration {
     pub access_flags: OriginalFlags,
     pub superclass: Fact<OriginalText>,
     pub superclass_type_index: Option<u32>,
-    pub interfaces: Fact<Vec<Fact<OriginalText>>>,
+    pub interfaces: Fact<Vec<InterfaceDeclaration>>,
     pub source_file: Fact<OriginalText>,
+}
+
+#[derive(Serialize)]
+pub struct InterfaceDeclaration {
+    pub type_id: TypeId,
+    pub descriptor: Fact<OriginalText>,
 }
 
 /// P0's immutable class declaration, shared by the class and its method products.
@@ -188,20 +194,21 @@ impl OwnerFacts {
     pub fn superclass_type_id(&self) -> Option<TypeId> {
         self.data.superclass_type_index.map(TypeId)
     }
-    pub fn interfaces(&self) -> &Fact<Vec<Fact<OriginalText>>> {
+    pub fn interfaces(&self) -> &Fact<Vec<InterfaceDeclaration>> {
         &self.data.interfaces
     }
 }
 
 #[derive(Serialize)]
 pub struct FieldDeclaration {
+    pub type_id: TypeId,
     pub name: OriginalText,
     pub descriptor: OriginalText,
 }
 
 /// Static preparation bytes exactly as encoded, with the decoded scalar when the
 /// format and tag determine one. Implicit and explicit defaults stay distinct.
-#[derive(Clone, Serialize)]
+#[derive(Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum InitialValue {
     ImplicitDefault,
@@ -211,6 +218,12 @@ pub enum InitialValue {
         range_bytes: [usize; 2],
         bytes: Vec<u8>,
         scalar: Option<ScalarValue>,
+        #[serde(serialize_with = "crate::substrate::serialization::debug")]
+        tokens: Vec<crate::AnnotationToken>,
+        #[serde(serialize_with = "crate::substrate::serialization::debug")]
+        references: Vec<crate::input::value_facts::ValueReference>,
+        #[serde(serialize_with = "crate::substrate::serialization::debug")]
+        extent: crate::AnnotationExtent,
     },
 }
 
@@ -389,6 +402,28 @@ impl MethodMetadata {
                 _ => false,
             })
     }
+    pub fn references(
+        &self,
+    ) -> impl Iterator<
+        Item = (
+            crate::input::value_facts::ValueReferenceId,
+            &crate::input::value_facts::ValueReference,
+        ),
+    > {
+        self.records()
+            .flat_map(|r| r.tokens())
+            .filter_map(|t| match t {
+                crate::AnnotationToken::Value(v) => match v.kind() {
+                    crate::AnnotationValueKind::Reference { declaration, .. } => self
+                        .annotations
+                        .references()
+                        .get(declaration.0 as usize)
+                        .map(|r| (*declaration, r)),
+                    _ => None,
+                },
+                _ => None,
+            })
+    }
     /// Class metadata traversal coverage; a prefix does not certify absence of
     /// later method records. Independently available records remain readable.
     pub fn extent(&self) -> crate::AnnotationExtent {
@@ -437,7 +472,7 @@ impl ClassFacts {
     pub fn superclass(&self) -> &Fact<OriginalText> {
         self.class.superclass()
     }
-    pub fn interfaces(&self) -> &Fact<Vec<Fact<OriginalText>>> {
+    pub fn interfaces(&self) -> &Fact<Vec<InterfaceDeclaration>> {
         self.class.interfaces()
     }
     pub fn source_file(&self) -> &Fact<OriginalText> {
@@ -539,7 +574,7 @@ impl ClassFacts {
             || match self.class.interfaces() {
                 Fact::Present(interfaces) => interfaces
                     .iter()
-                    .any(|interface| interface.unavailable().is_some()),
+                    .any(|interface| interface.descriptor.unavailable().is_some()),
                 _ => false,
             }
             || self.class.data.source_file.unavailable().is_some()
@@ -560,6 +595,9 @@ impl ClassFacts {
         self.fields_issue.as_ref()
     }
 
+    pub fn methods_issue(&self) -> Option<&RequestError> {
+        self.methods_issue.as_ref()
+    }
     pub fn fields(&self) -> &[FieldDirectoryEntry] {
         &self.fields
     }

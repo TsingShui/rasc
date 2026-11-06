@@ -879,7 +879,7 @@ impl<'i, 'a> ClassView<'i, 'a> {
         let mut traversal_error = None;
         let mut terminated_at = None;
         let mut delivered = [0u32; 4];
-        for (groups, kind) in [
+        'directory: for (groups, kind) in [
             ([counts[0], counts[1]], MemberKind::Field),
             ([counts[2], counts[3]], MemberKind::Method),
         ] {
@@ -904,16 +904,35 @@ impl<'i, 'a> ClassView<'i, 'a> {
                 let mut previous = Some(0u32);
                 for item in 0..count {
                     let record = cursor.position_byte();
-                    let delta = cursor.read_uleb32()?;
-                    let access_flags = cursor.read_uleb32()?;
-                    let member = match kind {
-                        MemberKind::Field => EncodedMember::Field,
-                        MemberKind::Method => {
-                            let offset = file_offset(cursor.read_uleb32()?, record)?;
-                            EncodedMember::Method {
-                                code_offset: (offset != ByteOffset(0)).then_some(offset),
+                    let header = (|| -> Result<_, InputError> {
+                        let delta = cursor.read_uleb32()?;
+                        let access_flags = cursor.read_uleb32()?;
+                        let member = match kind {
+                            MemberKind::Field => EncodedMember::Field,
+                            MemberKind::Method => {
+                                let offset = file_offset(cursor.read_uleb32()?, record)?;
+                                EncodedMember::Method {
+                                    code_offset: (offset != ByteOffset(0)).then_some(offset),
+                                }
                             }
+                        };
+                        Ok((delta, access_flags, member))
+                    })();
+                    let (delta, access_flags, member) = match header {
+                        Ok(v) => v,
+                        Err(e)
+                            if matches!(
+                                e.kind(),
+                                crate::FailureKind::Malformed | crate::FailureKind::Unsupported
+                            ) =>
+                        {
+                            traversal_error.get_or_insert(e);
+                            terminated_at.get_or_insert(record);
+                            // No next record boundary is established. Keep every
+                            // delivered member, but never scan beyond this suffix.
+                            break 'directory;
                         }
+                        Err(e) => return Err(e.into()),
                     };
                     let Some(index) = previous.and_then(|value| value.checked_add(delta)) else {
                         traversal_error

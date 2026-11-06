@@ -96,7 +96,7 @@ enum MemberKind {
 }
 
 pub(super) struct FieldPreparation {
-    pub initial: InitialValue,
+    pub initial: Option<InitialValue>,
     pub value: Option<ScalarValue>,
 }
 
@@ -114,7 +114,7 @@ pub(super) fn read_preparations(
     let Some(offset) = offset else {
         for _ in 0..count {
             prepared.push(FieldPreparation {
-                initial: InitialValue::ImplicitDefault,
+                initial: Some(InitialValue::ImplicitDefault),
                 value: None,
             });
         }
@@ -128,7 +128,7 @@ pub(super) fn read_preparations(
         for ordinal in 0..static_count {
             if ordinal >= values.count {
                 prepared.push(FieldPreparation {
-                    initial: InitialValue::ImplicitDefault,
+                    initial: Some(InitialValue::ImplicitDefault),
                     value: None,
                 });
                 continue;
@@ -155,23 +155,56 @@ pub(super) fn read_preparations(
             for &byte in value.bytes {
                 push(&mut bytes, byte)?;
             }
-            while depth != 0 {
-                match values.next(index)? {
-                    Some(ValueStep::EndContainer) => depth -= 1,
-                    Some(ValueStep::Value(child)) => {
-                        if matches!(
-                            child.kind,
-                            EncodedKind::Array { .. } | EncodedKind::Annotation { .. }
-                        ) {
-                            depth = depth.checked_add(1).ok_or(RequestError::PlatformCapacity)?;
+            let mut tokens = Vec::new();
+            let mut references = Vec::new();
+            push(
+                &mut tokens,
+                crate::input::annotation_facts::own_token(
+                    index,
+                    ValueStep::Value(value),
+                    &mut references,
+                )?,
+            )?;
+            let body = (|| -> Result<(), RequestError> {
+                while depth != 0 {
+                    let step = values.next(index)?;
+                    if let Some(step) = step {
+                        push(
+                            &mut tokens,
+                            crate::input::annotation_facts::own_token(
+                                index,
+                                step,
+                                &mut references,
+                            )?,
+                        )?;
+                    }
+                    match step {
+                        Some(ValueStep::EndContainer) => depth -= 1,
+                        Some(ValueStep::Value(child)) => {
+                            if matches!(
+                                child.kind,
+                                EncodedKind::Array { .. } | EncodedKind::Annotation { .. }
+                            ) {
+                                depth =
+                                    depth.checked_add(1).ok_or(RequestError::PlatformCapacity)?;
+                            }
+                        }
+                        None => {
+                            return Err(RequestError::InternalInvariant(
+                                "encoded preparation container ended early",
+                            ));
                         }
                     }
-                    None => {
-                        return Err(RequestError::InternalInvariant(
-                            "encoded preparation container ended early",
-                        ));
-                    }
                 }
+                Ok(())
+            })();
+            if body.as_ref().is_err_and(|e| {
+                matches!(
+                    e.kind(),
+                    FailureKind::ResourceExhausted | FailureKind::InternalInvariant
+                )
+            }) {
+                return body;
             }
             let range = crate::ByteRange {
                 start: value.range.start,
@@ -203,15 +236,23 @@ pub(super) fn read_preparations(
                 _ => None,
             };
             prepared.push(FieldPreparation {
-                initial: InitialValue::Encoded {
+                initial: Some(InitialValue::Encoded {
                     tag: value.tag,
                     value_arg: value.arg,
                     range_bytes: [range.start.0, range.end.0],
                     bytes,
                     scalar: None,
-                },
+                    tokens,
+                    references,
+                    extent: if body.is_ok() {
+                        crate::AnnotationExtent::Complete
+                    } else {
+                        crate::AnnotationExtent::Prefix
+                    },
+                }),
                 value: value_kind,
             });
+            body?;
         }
         if values.next(index)?.is_some() {
             return Err(RequestError::InternalInvariant(
@@ -222,7 +263,21 @@ pub(super) fn read_preparations(
     })();
     match result {
         Ok(()) => Ok((prepared, None)),
-        Err(error) => local_preparations(prepared, error),
+        Err(error) => {
+            let (mut prepared, issue) = local_preparations(prepared, error)?;
+            // The checked root count establishes omitted static entries even
+            // when an earlier encoded value has an unlocatable suffix.
+            let encoded =
+                usize::try_from(values.count).map_err(|_| RequestError::PlatformCapacity)?;
+            while prepared.len() < count {
+                let initial = (prepared.len() >= encoded).then_some(InitialValue::ImplicitDefault);
+                prepared.push(FieldPreparation {
+                    initial,
+                    value: None,
+                });
+            }
+            Ok((prepared, issue))
+        }
     }
 }
 
@@ -300,14 +355,26 @@ pub fn collect(index: &ProgramIndex<'_>, owner: ClassKey) -> Result<ClassFacts, 
                     Ok(OriginalText::new(copy_units(index.type_name(id)?)?))
                 })();
                 match name {
-                    Ok(name) => push(&mut result, Fact::Present(name))?,
+                    Ok(name) => push(
+                        &mut result,
+                        InterfaceDeclaration {
+                            type_id: id,
+                            descriptor: Fact::Present(name),
+                        },
+                    )?,
                     Err(error)
                         if matches!(
                             error.kind(),
                             crate::FailureKind::Malformed | crate::FailureKind::Unsupported
                         ) =>
                     {
-                        push(&mut result, Fact::Unavailable(error))?;
+                        push(
+                            &mut result,
+                            InterfaceDeclaration {
+                                type_id: id,
+                                descriptor: Fact::Unavailable(error),
+                            },
+                        )?;
                     }
                     Err(error) => return Err(error),
                 }
@@ -344,6 +411,7 @@ pub fn collect(index: &ProgramIndex<'_>, owner: ClassKey) -> Result<ClassFacts, 
                 };
                 let declaration = match field.declaration {
                     Ok(declaration) => Ok(FieldDeclaration {
+                        type_id: declaration.field_type_idx,
                         name: OriginalText::new(copy_units(declaration.name)?),
                         descriptor: OriginalText::new(copy_units(declaration.field_type)?),
                     }),
@@ -393,7 +461,13 @@ pub fn collect(index: &ProgramIndex<'_>, owner: ClassKey) -> Result<ClassFacts, 
                 "P0 header traversal acquired another member entry",
             )),
         })?;
-    let mut fields_issue = walk.issue.map(RequestError::from);
+    let mut fields_issue = if walk.delivered[0] == walk.shape.static_fields
+        && walk.delivered[1] == walk.shape.instance_fields
+    {
+        None
+    } else {
+        walk.issue.map(RequestError::from)
+    };
     let (prepared, preparation_issue) = match context.values_offset {
         Ok(offset) => read_preparations(index, offset, walk.shape.static_fields)?,
         Err(error) => {
@@ -404,27 +478,50 @@ pub fn collect(index: &ProgramIndex<'_>, owner: ClassKey) -> Result<ClassFacts, 
     if fields_issue.is_none() {
         fields_issue = preparation_issue;
     }
+    let mut prepared = prepared.into_iter().enumerate().peekable();
     for field in &mut fields {
         let crate::FieldStorage::Static(crate::StaticFieldOrdinal(ordinal)) = field.storage else {
             field.initial = Fact::Absent;
             continue;
         };
-        let Some(preparation) =
-            prepared.get(usize::try_from(ordinal).map_err(|_| RequestError::PlatformCapacity)?)
-        else {
+        let ordinal = usize::try_from(ordinal).map_err(|_| RequestError::PlatformCapacity)?;
+        while prepared.peek().is_some_and(|(n, _)| *n < ordinal) {
+            prepared.next();
+        }
+        let Some((n, preparation)) = prepared.next() else {
             continue;
         };
-        field.scalar = preparation.value.clone();
-        field.initial = Fact::Present(preparation.initial.clone());
+        if n != ordinal {
+            return Err(RequestError::InternalInvariant(
+                "static preparation ordinal differs from its field",
+            ));
+        }
+        field.scalar = preparation.value;
+        if let Some(initial) = preparation.initial {
+            field.initial = Fact::Present(initial);
+        }
         field.default_preparation = match (&field.initial, field.declaration()) {
             (Fact::Present(InitialValue::ImplicitDefault), _) => true,
-            (Fact::Present(InitialValue::Encoded { tag, .. }), Fact::Present(declaration)) => {
+            (
+                Fact::Present(InitialValue::Encoded {
+                    tag,
+                    extent: crate::AnnotationExtent::Complete,
+                    ..
+                }),
+                Fact::Present(declaration),
+            ) => {
                 preparation_is_default(declaration.descriptor.units(), *tag, field.scalar.as_ref())
             }
             _ => false,
         };
     }
-    let methods_issue = walk.issue.map(RequestError::from);
+    let methods_issue = if walk.delivered[2] == walk.shape.direct_methods
+        && walk.delivered[3] == walk.shape.virtual_methods
+    {
+        None
+    } else {
+        walk.issue.map(RequestError::from)
+    };
     let annotations = crate::input::annotation_facts::collect(index, owner)?;
     Ok(ClassFacts {
         class: OwnerFacts::new(owner, index.header.header_offset, declaration),

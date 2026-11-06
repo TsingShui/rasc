@@ -30,8 +30,11 @@ names and imports.
 `ExpressedMethod` pairs the result with privately retained P6 analysis for the
 existing inspection consumers. `inspection()` lends restricted read-only facts
 from that same execution. It exposes no owned predecessor or solver.
-`into_result()` releases retained analysis and returns the independently owned
-result. The production method chain has no parallel P6 success path.
+`into_result()` releases retained analysis and returns Arc<MethodResult>. P8 and
+the same-execution inspection response share this immutable owned expression,
+without duplicating arenas or borrowing DEX. Partial expressions likewise retain
+a shared unpublished prefix; its type-use and local-declaration views do not
+promote it to a completed MethodResult. The production method chain has no parallel P6 success path.
 
 ## Unified operation lowering
 

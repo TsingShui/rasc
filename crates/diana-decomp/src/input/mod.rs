@@ -14,9 +14,12 @@ mod error;
 pub(crate) mod formats;
 mod header;
 mod method;
+mod retained;
+pub use retained::RetainedCode;
 pub(crate) mod operands;
 pub(crate) mod protection;
 pub(crate) mod strings;
+pub mod value_facts;
 pub(crate) mod values;
 
 pub use crate::p1::{

@@ -169,11 +169,26 @@ impl<'a> Engine<'a> {
     }
 }
 
+mod delivery;
+
+pub(crate) struct ClassTask {
+    _sealed: (),
+}
+pub enum Presentation {
+    Class(crate::p8::ClassOutcome),
+    Method(crate::p8::MethodDisplayOutcome),
+}
+pub struct SingleMethodAnalysis<'a> {
+    pub key: MethodKey,
+    pub result: Result<MethodOutcome<'a>, RequestError>,
+    pub display: crate::p8::MethodDisplayOutcome,
+}
 pub struct ClassAnalysis<'a> {
     pub image: ImageFact,
     pub facts: std::sync::Arc<crate::p0::ClassFacts>,
     pub methods: Vec<MethodAnalysis<'a>>,
     pub diagnostics: Vec<Diagnostic>,
+    pub presentation: Presentation,
 }
 
 pub struct MethodAnalysis<'a> {
@@ -183,7 +198,7 @@ pub struct MethodAnalysis<'a> {
 
 /// The sole executable method path advances P1 -> P2 -> P3 -> P4 -> P5 -> P6 -> P7 or retains a classified stop.
 pub enum MethodOutcome<'a> {
-    Declared(crate::p7::MethodResult),
+    Declared(std::sync::Arc<crate::p7::MethodResult>),
     DisassemblyStopped(crate::p1::DecodedOutcome<'a>),
     Expressed(crate::p7::ExpressedMethod<'a>),
     ExpressionStopped(crate::p7::ExpressionStop<'a>),
@@ -238,7 +253,7 @@ impl MethodTask {
         let source = index.method_source(facts, method)?;
         if matches!(source.raw(), crate::input::RawPrintable::Declaration) {
             return crate::p7::build_declaration(&task, &source)
-                .map(MethodOutcome::Declared)
+                .map(|result| MethodOutcome::Declared(std::sync::Arc::new(result)))
                 .map_err(|error| match error {
                     crate::p7::ExpressionError::Request(error) => error,
                     crate::p7::ExpressionError::InternalInvariant(message) => {
@@ -303,19 +318,23 @@ impl<'a> Engine<'a> {
         &self,
         class: ClassKey,
         method: MethodId,
-    ) -> Result<MethodAnalysis<'a>, RequestError> {
+    ) -> Result<SingleMethodAnalysis<'a>, RequestError> {
         let facts = self.class_facts(class)?;
         let position = usize::try_from(class.dex.0).map_err(|_| RequestError::UnknownDex)?;
         let image = self.images.get(position).ok_or(RequestError::UnknownDex)?;
         let result = MethodTask::run(&image.index, &facts, method);
-        Ok(MethodAnalysis {
+        let mut members = Vec::new();
+        crate::substrate::owned::push(&mut members, delivery::member(method, &result))?;
+        let display = crate::p8::method_display(&ClassTask { _sealed: () }, facts, members, method);
+        Ok(SingleMethodAnalysis {
             key: MethodKey { class, method },
             result,
+            display,
         })
     }
 
-    /// Runs P0, the method reader and P1–P7 for one class request. Class assembly
-    /// and rendering belong to P8/P9 and are not part of this boundary.
+    /// Runs the unique method tasks, then P8 on their joined products. A selected
+    /// method uses the same name planner without class-wide package/import output.
     pub fn analyze(&self, request: Request) -> Result<ClassAnalysis<'a>, RequestError> {
         let position =
             usize::try_from(request.class.dex.0).map_err(|_| RequestError::UnknownDex)?;
@@ -335,6 +354,8 @@ impl<'a> Engine<'a> {
         }
         let mut methods = Vec::new();
         crate::substrate::owned::reserve(&mut methods, entries.len())?;
+        let mut members = Vec::new();
+        crate::substrate::owned::reserve(&mut members, entries.len())?;
         let analyze = |&method: &MethodId| MethodAnalysis {
             key: MethodKey {
                 class: request.class,
@@ -358,6 +379,23 @@ impl<'a> Engine<'a> {
                 methods.push(analyze(method));
             }
         }
+        for method in &methods {
+            members.push(delivery::member(method.key.method, &method.result));
+        }
+        let task = ClassTask { _sealed: () };
+        let presentation = if request.method.is_some() {
+            let selected = *entries.first().ok_or(RequestError::InternalInvariant(
+                "selected method has no scheduled entry",
+            ))?;
+            Presentation::Method(crate::p8::method_display(
+                &task,
+                facts.clone(),
+                members,
+                selected,
+            ))
+        } else {
+            Presentation::Class(crate::p8::assemble(&task, facts.clone(), members))
+        };
         Ok(ClassAnalysis {
             image: ImageFact {
                 dex: request.class.dex,
@@ -367,6 +405,7 @@ impl<'a> Engine<'a> {
             facts,
             methods,
             diagnostics: Vec::new(),
+            presentation,
         })
     }
 }
