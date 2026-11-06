@@ -1,5 +1,5 @@
 use super::archive::{EntryPayload, EntryRecord, read_entry};
-use super::input::{InputError, InputKind, InputLease};
+use super::input::{EntryIndex, InputError, InputKind, InputLease};
 
 /// One root DEX image borrowed from a lease. `entry` is `None` only for a bare
 /// DEX input; `label` is display metadata and never decides identity.
@@ -27,10 +27,17 @@ impl<'a> DexRoot<'a> {
 /// A bare DEX is one root labelled with the input file name. An archive
 /// contributes `classes.dex` and `classes<index>.dex` records; a duplicate root
 /// name still yields one root per physical record, in directory order, rather than
-/// being deduplicated by name.
-pub fn roots(lease: &InputLease) -> Result<Vec<DexRoot<'_>>, InputError> {
+/// being deduplicated by name. An explicit physical entry restricts payload
+/// reads before decompression; unrelated damaged entries are not dependencies.
+pub(super) fn roots(
+    lease: &InputLease,
+    selected: Option<EntryIndex>,
+) -> Result<Vec<DexRoot<'_>>, InputError> {
     match lease.kind() {
         InputKind::BareDex => {
+            if selected.is_some_and(|entry| entry.0 != 0) {
+                return Ok(Vec::new());
+            }
             let label = lease.identity().path().file_name().map_or_else(
                 || "input.dex".to_owned(),
                 |name| name.to_string_lossy().into_owned(),
@@ -47,7 +54,9 @@ pub fn roots(lease: &InputLease) -> Result<Vec<DexRoot<'_>>, InputError> {
             ))?;
             let mut roots = Vec::new();
             for entry in directory.entries() {
-                if !is_root_name(entry.name()) {
+                if selected.is_some_and(|index| index != entry.index())
+                    || !is_root_name(entry.name())
+                {
                     continue;
                 }
                 let payload =
@@ -59,7 +68,6 @@ pub fn roots(lease: &InputLease) -> Result<Vec<DexRoot<'_>>, InputError> {
                     payload,
                 });
             }
-            roots.try_reserve(1).map_err(InputError::Allocation)?;
             Ok(roots)
         }
         InputKind::Opaque => Err(InputError::NotDex),

@@ -58,8 +58,10 @@ pub enum SelectorError {
     Ambiguous,
     #[error("no definition matches the selector")]
     NotFound,
-    #[error("the request was stopped before resolution finished")]
-    Stopped,
+    #[error(transparent)]
+    Image(#[from] super::images::ImageError),
+    #[error(transparent)]
+    Read(#[from] diana_decomp::input::InputError),
 }
 
 impl SelectorError {
@@ -70,7 +72,7 @@ impl SelectorError {
             Self::InvalidIndex => 1,
             Self::NotFound => 3,
             Self::Ambiguous => 4,
-            Self::Stopped => 1,
+            Self::Image(_) | Self::Read(_) => 1,
         }
     }
 }
@@ -125,8 +127,11 @@ fn at_parts(text: &str) -> Result<Option<AtPrefix<'_>>, SelectorError> {
         return Ok(None);
     };
     let Some((entry, rest)) = rest.split_once(':') else {
-        return Err(SelectorError::Syntax("entry prefix requires e<entry>:"));
+        return Ok(None);
     };
+    if !entry.bytes().all(|byte| byte.is_ascii_digit()) {
+        return Ok(None);
+    }
     let Some(rest) = rest.strip_prefix('l') else {
         return Err(SelectorError::Syntax("locator requires l<logical>:"));
     };

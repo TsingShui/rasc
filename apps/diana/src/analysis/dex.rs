@@ -1,6 +1,7 @@
 use diana_decomp::input::{ClassView, FieldStorage, ProgramIndex};
 use diana_decomp::{ClassDefId, FieldId, MethodId, StringId};
 
+use super::images::LogicalDex;
 use super::query::{QueryError, Row};
 
 /// App-local order of the root images in one request. It is display metadata and
@@ -12,6 +13,7 @@ pub struct ImageIndex(pub usize);
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ClassRow {
     pub image: ImageIndex,
+    pub logical: LogicalDex,
     pub class_def: ClassDefId,
     pub descriptor: Vec<u16>,
     pub access_flags: u32,
@@ -22,6 +24,7 @@ pub struct ClassRow {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct MethodRow {
     pub image: ImageIndex,
+    pub logical: LogicalDex,
     pub class_def: ClassDefId,
     /// Original owner descriptor, needed for the canonical `at` locator.
     pub class_descriptor: Vec<u16>,
@@ -35,6 +38,7 @@ pub struct MethodRow {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct FieldRow {
     pub image: ImageIndex,
+    pub logical: LogicalDex,
     pub class_def: ClassDefId,
     /// Original owner descriptor, needed for the canonical `at` locator.
     pub class_descriptor: Vec<u16>,
@@ -49,6 +53,7 @@ pub struct FieldRow {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct StringRow {
     pub image: ImageIndex,
+    pub logical: LogicalDex,
     pub string: StringId,
     pub units: Vec<u16>,
 }
@@ -125,15 +130,28 @@ impl ClassFilter {
     }
 }
 
-/// Opens one root image for read-only table queries. No method body or analysis
-/// product is built here.
-pub(super) fn open<'a>(bytes: &'a [u8]) -> Result<ProgramIndex<'a>, QueryError> {
-    Ok(ProgramIndex::open(bytes)?)
+/// Visits each checked logical header without changing physical-root worker
+/// scheduling. The original container bytes remain the offset coordinate space.
+pub(super) fn visit_logical(
+    bytes: &[u8],
+    mut visit: impl FnMut(LogicalDex, ProgramIndex<'_>) -> Result<(), QueryError>,
+) -> Result<(), QueryError> {
+    let container = diana_decomp::input::DexContainer::open(bytes)?;
+    for (ordinal, offset) in container.logical_headers()?.into_iter().enumerate() {
+        let logical = LogicalDex(u32::try_from(ordinal).map_err(|_| {
+            diana_decomp::input::InputError::PlatformCapacity {
+                offset_byte: offset,
+            }
+        })?);
+        visit(logical, container.program(offset)?)?;
+    }
+    Ok(())
 }
 
 pub(super) fn classes(
     index: &ProgramIndex<'_>,
     image: ImageIndex,
+    logical: LogicalDex,
     filter: Option<&[u16]>,
     relation: &ClassFilter,
     emit: &mut dyn FnMut(Row) -> Result<(), QueryError>,
@@ -162,6 +180,7 @@ pub(super) fn classes(
             }
             forward(Row::Class(ClassRow {
                 image,
+                logical,
                 class_def,
                 descriptor,
                 access_flags: class.access_flags,
@@ -178,6 +197,7 @@ pub(super) fn classes(
 pub(super) fn methods(
     index: &ProgramIndex<'_>,
     image: ImageIndex,
+    logical: LogicalDex,
     class_filter: Option<&[u16]>,
     filter: Option<&[u16]>,
     emit: &mut dyn FnMut(Row) -> Result<(), QueryError>,
@@ -219,6 +239,7 @@ pub(super) fn methods(
                 prototype.extend(declaration.prototype.return_type.units()?);
                 forward(Row::Method(MethodRow {
                     image,
+                    logical,
                     class_def,
                     class_descriptor: class_descriptor.clone(),
                     method: method.method_idx,
@@ -238,6 +259,7 @@ pub(super) fn methods(
 pub(super) fn fields(
     index: &ProgramIndex<'_>,
     image: ImageIndex,
+    logical: LogicalDex,
     class_filter: Option<&[u16]>,
     filter: Option<&[u16]>,
     emit: &mut dyn FnMut(Row) -> Result<(), QueryError>,
@@ -271,6 +293,7 @@ pub(super) fn fields(
                 }
                 forward(Row::Field(FieldRow {
                     image,
+                    logical,
                     class_def,
                     class_descriptor: class_descriptor.clone(),
                     field: field.field_idx,
@@ -291,6 +314,7 @@ pub(super) fn fields(
 pub(super) fn strings(
     index: &ProgramIndex<'_>,
     image: ImageIndex,
+    logical: LogicalDex,
     filter: Option<&[u16]>,
     emit: &mut dyn FnMut(Row) -> Result<(), QueryError>,
 ) -> Result<(), QueryError> {
@@ -304,6 +328,7 @@ pub(super) fn strings(
         }
         emit(Row::String(StringRow {
             image,
+            logical,
             string,
             units,
         }))?;

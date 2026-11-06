@@ -4,9 +4,9 @@ Native Rust APK/DEX decompiler, designed to replace rasc.
 The engine currently implements P0 → method reader → P1 → P2 → P3 → P4 → P5 → P6
 planning → P7 independently owned method expressions → P8 class assembly and
 scope-aware type-name plans → P9 text/JSON with UTF-8 source spans.
-The CLI source remains in the workspace; decompilation/result integration is being
-rebuilt and the application package is not currently buildable. Readable output
-with original facts and uncertainty remains the goal, not Java compilability.
+The [CLI](apps/diana/README.md) delivers these same P9 products for class and
+standalone-method retrieval, as text or JSON schema 3. Readable output with
+original facts and uncertainty remains the goal, not Java compilability.
 Build and lint checks do not establish real-application coverage.
 
 ## Active project
@@ -61,8 +61,9 @@ dependencies. See [sources and download policy](docs/diana/SOURCE_MAP.md).
 ## Design
 
 The decompiler contract exposes recovered code by default. A failed method is
-shown as original DEX debug information or an explicit unavailable result alongside other recovered
-methods; Mixed is not a gate that suppresses the whole class. Class assembly records presentation coverage, not compilability. Hard failures
+shown with its available fragments, original DEX facts and explicit gaps alongside
+other recovered methods. A local failure does not suppress the whole class.
+Class assembly records presentation coverage, not compilability. Hard failures
 remain separate from readable availability.
 
 - [Documentation entry](docs/diana/README.md)

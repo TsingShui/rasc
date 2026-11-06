@@ -3,7 +3,8 @@ use diana_decomp::raw::LayoutKind;
 use diana_decomp::{ClassDefId, MethodId};
 
 use super::apk::DexRoot;
-use super::dex::ImageIndex;
+use super::dex::{self, ImageIndex};
+use super::images::LogicalDex;
 use super::query::{ImageInfo, QueryError};
 use super::request::RequestScope;
 
@@ -51,6 +52,7 @@ pub enum Matched {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct XrefRow {
     pub image: ImageIndex,
+    pub logical: LogicalDex,
     pub class_def: ClassDefId,
     /// Original owner descriptor for the canonical method locator.
     pub class_descriptor: Vec<u16>,
@@ -115,20 +117,22 @@ impl<'a> Xref<'a> {
             |ordinal, emit| {
                 let root = &self.roots[ordinal];
 
-                scan_root(root, ImageIndex(ordinal), &self.plan, emit)
+                dex::visit_logical(root.bytes(), |logical, index| {
+                    scan_logical(&index, ImageIndex(ordinal), logical, &self.plan, emit)
+                })
             },
             sink,
         )
     }
 }
 
-fn scan_root(
-    root: &DexRoot<'_>,
+fn scan_logical(
+    index: &ProgramIndex<'_>,
     image: ImageIndex,
+    logical: LogicalDex,
     plan: &XrefPlan,
     emit: &mut dyn FnMut(XrefRow) -> Result<(), QueryError>,
 ) -> Result<(), QueryError> {
-    let index = ProgramIndex::open(root.bytes())?;
     let failure: std::cell::RefCell<Option<QueryError>> = std::cell::RefCell::new(None);
     let result = {
         let mut forward = |row: XrefRow| -> Result<(), diana_decomp::input::InputError> {
@@ -159,8 +163,15 @@ fn scan_root(
                 })?;
                 prototype.push(u16::from(b')'));
                 prototype.extend(declaration.prototype.return_type.units()?);
-                let Ok(MethodBody::Code(view)) = &method.body else {
-                    return Ok(());
+                let view = match method.body {
+                    Ok(MethodBody::Code(view)) => view,
+                    Ok(MethodBody::DeclarationOnly) => return Ok(()),
+                    Err(error) => {
+                        *failure.borrow_mut() = Some(error.into());
+                        return Err(diana_decomp::input::InputError::InternalInvariant(
+                            "xref method reader stopped",
+                        ));
+                    }
                 };
                 let mut sites = Vec::new();
                 let collected = {
@@ -198,6 +209,7 @@ fn scan_root(
                     let row = match (copy(&name), copy(&prototype)) {
                         (Ok(method_name), Ok(method_prototype)) => XrefRow {
                             image,
+                            logical,
                             class_def,
                             class_descriptor: class_descriptor.clone(),
                             method: method.method_idx,

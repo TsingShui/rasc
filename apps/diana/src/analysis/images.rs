@@ -1,62 +1,72 @@
-//! Root images as engine input: one borrowed slice per logical DEX.
+//! Logical DEX identities over borrowed physical input roots.
 //!
-//! A bare DEX and each `classes*.dex` entry contribute one image; the logical
-//! ordinal and the container header offset map back to the physical entry.
+//! Engine IDs follow the logical image vector, not physical root ordinals.
+//! Every image retains its original header offset and physical entry.
 
 use diana_decomp::input::{DexContainer, ProgramIndex};
-use diana_decomp::{ByteOffset, DexId};
+use diana_decomp::{ByteOffset, ClassDefId, DexId};
 
 use super::apk::DexRoot;
-use super::input::EntryIndex;
+use super::input::{EntryIndex, InputError};
 use super::request::RequestScope;
-use super::selector::SelectorError;
+use super::selector::{ClassSelector, SelectorError};
 
-/// Failure to build or open a root image.
+/// Original header-chain ordinal within one physical DEX container.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize)]
+#[serde(transparent)]
+pub struct LogicalDex(pub u32);
+
 #[derive(Debug, thiserror::Error)]
 pub enum ImageError {
     #[error(transparent)]
-    Input(#[from] super::input::InputError),
+    Input(#[from] InputError),
     #[error(transparent)]
     Engine(#[from] diana_decomp::input::InputError),
 }
 
 /// One logical DEX inside the leased input.
 #[derive(Debug)]
-pub struct ImageRef {
+pub(super) struct ImageRef {
     pub dex: DexId,
-    pub label: String,
     pub entry: Option<EntryIndex>,
-    pub logical: u32,
+    pub logical: LogicalDex,
     pub header_offset: ByteOffset,
     root: usize,
 }
 
-/// All root images of one request, in directory order.
+/// All logical images in physical directory/header-chain order.
 #[derive(Debug)]
-pub struct ImageSet<'a> {
+pub(super) struct ImageSet<'a> {
     roots: Vec<DexRoot<'a>>,
     images: Vec<ImageRef>,
 }
 
 impl<'a> ImageSet<'a> {
-    /// Resolves the root images. A logical-DEX ordinal is a physical header chain
-    /// position; nothing is copied per member.
-    pub fn open(scope: &'a RequestScope) -> Result<Self, ImageError> {
-        let roots = scope.roots()?;
+    /// Materializes selected physical roots, then checks their logical headers.
+    /// Engine IDs are assigned within this request's resulting image vector.
+    pub fn open(scope: &'a RequestScope, entry: Option<u32>) -> Result<Self, ImageError> {
+        let roots = match entry {
+            Some(entry) => scope.roots_in_entry(EntryIndex(
+                usize::try_from(entry).map_err(|_| InputError::PlatformCapacity)?,
+            ))?,
+            None => scope.roots()?,
+        };
         let mut images = Vec::new();
         for (ordinal, root) in roots.iter().enumerate() {
             let container = DexContainer::open(root.bytes())?;
-            let mut logical = 0u32;
-            for header in container.logical_headers()? {
+            for (logical, header) in container.logical_headers()?.into_iter().enumerate() {
+                let dex =
+                    DexId(u32::try_from(images.len()).map_err(|_| InputError::PlatformCapacity)?);
+                let logical =
+                    LogicalDex(u32::try_from(logical).map_err(|_| InputError::PlatformCapacity)?);
+                images.try_reserve(1).map_err(InputError::Allocation)?;
                 images.push(ImageRef {
-                    dex: DexId(u32::try_from(ordinal).unwrap_or(u32::MAX)),
-                    label: root.label().to_owned(),
+                    dex,
                     entry: root.entry().map(|entry| entry.index()),
                     logical,
                     header_offset: header,
                     root: ordinal,
                 });
-                logical = logical.saturating_add(1);
             }
         }
         Ok(Self { roots, images })
@@ -66,269 +76,72 @@ impl<'a> ImageSet<'a> {
         &self.images
     }
 
-    /// Borrowed original bytes of one root image.
+    /// Original root bytes; offsets remain container-relative for DEX 041.
     pub fn bytes<'s>(&'s self, image: &ImageRef) -> &'s [u8] {
         self.roots[image.root].bytes()
     }
 
-    /// Opens one logical image for checked reads.
     pub fn program<'s>(&'s self, image: &ImageRef) -> Result<ProgramIndex<'s>, ImageError> {
-        let bytes = self.bytes(image);
-        let container = DexContainer::open(bytes)?;
-        Ok(container.program(image.header_offset)?)
-    }
-
-    fn find(&self, entry: Option<u32>, logical: Option<u32>) -> Result<&ImageRef, SelectorError> {
-        let mut found = None;
-        for image in &self.images {
-            if let Some(entry) = entry {
-                // A bare DEX is the single physical entry `e0`.
-                let actual = image.entry.map_or(0, |value| value.0);
-                if actual != usize::try_from(entry).unwrap_or(usize::MAX) {
-                    continue;
-                }
-            }
-            if let Some(logical) = logical
-                && image.logical != logical
-            {
-                continue;
-            }
-            if found.is_some() {
-                return Err(SelectorError::Ambiguous);
-            }
-            found = Some(image);
-        }
-        found.ok_or(SelectorError::NotFound)
+        Ok(DexContainer::open(self.bytes(image))?.program(image.header_offset)?)
     }
 }
 
-/// A parsed locator is validated against the checked tables before use.
+/// An original class whose locator agrees with its checked table entry.
 #[derive(Debug)]
-pub struct Selection<'a> {
+pub(super) struct ClassSelection<'a> {
     pub image: &'a ImageRef,
-    pub class_def: diana_decomp::ClassDefId,
+    pub class_def: ClassDefId,
     pub descriptor: Vec<u16>,
-    pub method: Option<diana_decomp::MethodId>,
-    pub name: Vec<u16>,
-    pub member_type: Vec<u16>,
 }
 
-pub fn resolve_class<'a>(
-    images: &'a ImageSet<'a>,
-    selector: &super::selector::ClassSelector,
-) -> Result<Selection<'a>, SelectorError> {
-    resolve_class_inner(images, selector, None, None)
-}
-
-/// Classifies an engine failure during resolution: a resource stop
-/// is not a stale locator.
-fn stopped(error: ImageError) -> SelectorError {
-    let ImageError::Engine(error) = error else {
-        return SelectorError::Stopped;
-    };
-    engine_stopped(error)
-}
-
-fn engine_stopped(error: diana_decomp::input::InputError) -> SelectorError {
-    match error.kind() {
-        diana_decomp::FailureKind::ResourceExhausted
-        | diana_decomp::FailureKind::InternalInvariant => SelectorError::Stopped,
-        _ => SelectorError::InvalidIndex,
-    }
-}
-
-fn resolve_class_inner<'a>(
-    images: &'a ImageSet<'a>,
-    selector: &super::selector::ClassSelector,
-    method: Option<(u32, &[u16], &[u16])>,
-    field: Option<(u32, &[u16], &[u16])>,
-) -> Result<Selection<'a>, SelectorError> {
-    let mut candidates = Vec::new();
-    let image_list: Vec<&ImageRef> = match selector.entry {
-        Some(_) => vec![images.find(selector.entry, selector.logical)?],
-        None => images.images().iter().collect(),
-    };
-    for image in image_list {
-        let index = images.program(image).map_err(stopped)?;
-        if let Some(class_def) = selector.class_def {
-            let class = index
-                .class(diana_decomp::ClassDefId(class_def))
-                .map_err(engine_stopped)?;
-            if !class
-                .descriptor
-                .matches(&selector.descriptor)
-                .map_err(engine_stopped)?
-            {
-                // The index exists but names a different object: a stale locator.
-                return Err(SelectorError::InvalidIndex);
-            }
-            candidates.push((image, diana_decomp::ClassDefId(class_def)));
+/// Resolves a class without opening method bodies. A locator is checked against
+/// its descriptor; a name must select one definition, including within one DEX.
+pub(super) fn resolve_class<'a>(
+    images: &'a ImageSet<'_>,
+    selector: &ClassSelector,
+) -> Result<ClassSelection<'a>, SelectorError> {
+    let mut found = None;
+    for image in images.images() {
+        if let Some(entry) = selector.entry
+            && image.entry.map_or(0, |value| value.0)
+                != usize::try_from(entry).map_err(|_| SelectorError::InvalidIndex)?
+        {
             continue;
         }
-        let mut found = None;
-        index
-            .visit_classes(|class_def, class| {
-                let class = class?;
-                if class.descriptor.matches(&selector.descriptor)? {
-                    found = Some(class_def);
+        if let Some(logical) = selector.logical
+            && image.logical.0 != logical
+        {
+            continue;
+        }
+        let index = images.program(image)?;
+        if let Some(id) = selector.class_def {
+            if id >= index.class_count() {
+                return Err(SelectorError::InvalidIndex);
+            }
+            let class = index.class(ClassDefId(id))?;
+            if !class.descriptor.matches(&selector.descriptor)? {
+                return Err(SelectorError::InvalidIndex);
+            }
+            if found.replace((image, ClassDefId(id))).is_some() {
+                return Err(SelectorError::Ambiguous);
+            }
+        } else {
+            for id in 0..index.class_count() {
+                let class = index.class(ClassDefId(id))?;
+                if class.descriptor.matches(&selector.descriptor)?
+                    && found.replace((image, ClassDefId(id))).is_some()
+                {
+                    return Err(SelectorError::Ambiguous);
                 }
-                Ok(())
-            })
-            .map_err(engine_stopped)?;
-        if let Some(class_def) = found {
-            candidates.push((image, class_def));
+            }
         }
     }
-    if candidates.is_empty() {
-        return Err(SelectorError::NotFound);
-    }
-    if candidates.len() > 1 {
-        return Err(SelectorError::Ambiguous);
-    }
-    let (image, class_def) = candidates[0];
-    let index = images.program(image).map_err(stopped)?;
-    let class = index.class(class_def).map_err(engine_stopped)?;
-    let descriptor = class.descriptor.units().map_err(engine_stopped)?;
-    let (method_id, name, member_type) = if let Some((id, name, prototype)) = method {
-        let id = diana_decomp::MethodId(id);
-        let diana_decomp::input::ReferenceFacts::Method {
-            name: actual_name,
-            prototype: actual_prototype,
-            ..
-        } = index
-            .reference_facts(diana_decomp::raw::OperandReference::Method(id))
-            .map_err(engine_stopped)?
-        else {
-            return Err(SelectorError::InvalidIndex);
-        };
-        if !actual_name.matches(name).map_err(engine_stopped)?
-            || !actual_prototype
-                .matches(prototype)
-                .map_err(engine_stopped)?
-        {
-            return Err(SelectorError::InvalidIndex);
-        }
-        (
-            Some(id),
-            actual_name.units().map_err(engine_stopped)?,
-            prototype.to_vec(),
-        )
-    } else if let Some((id, name, field_type)) = field {
-        let id = diana_decomp::FieldId(id);
-        let diana_decomp::input::ReferenceFacts::Field {
-            name: actual_name,
-            field_type: actual_type,
-            ..
-        } = index
-            .reference_facts(diana_decomp::raw::OperandReference::Field(id))
-            .map_err(engine_stopped)?
-        else {
-            return Err(SelectorError::InvalidIndex);
-        };
-        if !actual_name.matches(name).map_err(engine_stopped)?
-            || !actual_type.matches(field_type).map_err(engine_stopped)?
-        {
-            return Err(SelectorError::InvalidIndex);
-        }
-        (
-            None,
-            actual_name.units().map_err(engine_stopped)?,
-            field_type.to_vec(),
-        )
-    } else {
-        (None, Vec::new(), Vec::new())
-    };
-    Ok(Selection {
+    let (image, class_def) = found.ok_or(SelectorError::NotFound)?;
+    let index = images.program(image)?;
+    let descriptor = index.class(class_def)?.descriptor.units()?;
+    Ok(ClassSelection {
         image,
         class_def,
         descriptor,
-        method: method_id,
-        name,
-        member_type,
-    })
-}
-
-pub fn resolve_method<'a>(
-    images: &'a ImageSet<'a>,
-    selector: &super::selector::MethodSelector,
-) -> Result<Selection<'a>, SelectorError> {
-    let Some(id) = selector.method else {
-        // A short reference resolves through defined members, so an overload that
-        // is not written out cannot be guessed.
-        let class = resolve_class(images, &selector.class)?;
-        let index = images.program(class.image).map_err(stopped)?;
-        let mut found = None;
-        index
-            .class(class.class_def)
-            .map_err(engine_stopped)?
-            .visit_methods(|method| {
-                let declaration = method.declaration?;
-                if declaration.name.matches(&selector.name)?
-                    && declaration.prototype.matches(&selector.prototype)?
-                    && found.replace(method.method_idx).is_some()
-                {
-                    return Err(diana_decomp::input::InputError::InternalInvariant(
-                        "duplicate member selection",
-                    ));
-                }
-                Ok(())
-            })
-            .map_err(engine_stopped)?;
-        return match found {
-            Some(id) => resolve_class_inner(
-                images,
-                &selector.class,
-                Some((id.0, &selector.name, &selector.prototype)),
-                None,
-            ),
-            None => Err(SelectorError::NotFound),
-        };
-    };
-    resolve_class_inner(
-        images,
-        &selector.class,
-        Some((id, &selector.name, &selector.prototype)),
-        None,
-    )
-}
-
-pub fn resolve_field<'a>(
-    images: &'a ImageSet<'a>,
-    selector: &super::selector::FieldSelector,
-) -> Result<Selection<'a>, SelectorError> {
-    let id = selector.field.ok_or(SelectorError::Syntax(
-        "a field-at is required for this selection",
-    ))?;
-    resolve_class_inner(
-        images,
-        &selector.class,
-        None,
-        Some((id, &selector.name, &selector.field_type)),
-    )
-}
-
-/// One validated string locator.
-#[derive(Debug)]
-pub struct StringSelection<'a> {
-    pub image: &'a ImageRef,
-    pub string: diana_decomp::StringId,
-    pub units: Vec<u16>,
-}
-
-pub fn resolve_string<'a>(
-    images: &'a ImageSet<'a>,
-    selector: &super::selector::StringSelector,
-) -> Result<StringSelection<'a>, SelectorError> {
-    let image = images.find(selector.entry, selector.logical)?;
-    let index = images.program(image).map_err(stopped)?;
-    let string = diana_decomp::StringId(selector.string);
-    let units = index
-        .string(string)
-        .and_then(|value| value.units())
-        .map_err(engine_stopped)?;
-    Ok(StringSelection {
-        image,
-        string,
-        units,
     })
 }

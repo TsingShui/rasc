@@ -5,7 +5,7 @@
 
 | Directory | Target | Current state |
 |---|---|---|
-| [diana/](diana/README.md) | Native CLI | Source present; result/engine integration is being rebuilt. |
+| [diana/](diana/README.md) | Native CLI | Class/method retrieval delivers Engine/P9 text and JSON; input/query/extraction commands remain native. |
 | [diana-gui/](diana-gui/README.md) | Future GUI | Documentation placeholder only |
 | [diana-web-ui/](diana-web-ui/README.md) | Future web interface (WASM-based or otherwise undecided) | Documentation placeholder only |
 

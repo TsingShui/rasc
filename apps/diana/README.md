@@ -1,63 +1,57 @@
 # Diana CLI
 
-Diana is the command-line front end of the native Diana decompiler. Its source
-currently depends on result APIs being rebuilt during the engine refactoring, so the application
-package is not buildable during this refactoring. The command descriptions below
-record the application surface, not successful execution of the current tree.
-The binary name is `diana` (`diana.exe` on Windows); it never delegates to rasc,
-dexdec or an external runtime. Old command names and flags (`getclass`, `findrefs`, `skill`,
-`--require-java`, `--class-id`, `--members`, `--offset`, `--limit`) do not exist and
-are rejected as unknown arguments.
+Diana is the native command-line front end of the
+[Diana engine](../../crates/diana-decomp/README.md). `get-class` and `get-method`
+deliver the existing P0–P9 Engine result, without a second analysis or renderer.
+The binary is `diana` (`diana.exe` on Windows). The `0.0.0` version is an
+unpublished development marker.
 
-The engine lives in [diana-decomp](../../crates/diana-decomp/README.md) and borrows
-DEX bytes supplied by this package. The
-[approved architecture](../../docs/diana/PIPELINE_DESIGN.md) owns product boundaries;
-this README owns command and publication descriptions. Old decompilation schema 2
-is not the current Engine analysis interface. The `0.0.0` version is an unpublished
-scaffold marker.
+The [approved architecture](../../docs/diana/PIPELINE_DESIGN.md) owns product
+boundaries. This package owns input snapshots, APK/ZIP access, selection,
+command routing and file publication. Decompilation uses only the analyzed input;
+external classpaths, declarations and runtimes are not required.
 
 ## Commands
 
 ```text
 get-class   Decompile one class
+get-method  Decompile one method
 entries     List physical archive entries
 extract     Extract one physical entry
 strings     List original string values
 xref        Find original reference sites
 manifest    Decode the binary AndroidManifest.xml
 classes     List class definitions
-get-method  Decompile one method
 fields      List defined fields
 methods     List defined methods
 help        Print help for a command
 ```
 
-Every command accepts `--format text|json` and `-o <file>. Output order is completion order, not a stable sequence. There is no
-pagination, cursor or preview: a successful query returns every match, and an empty
-match is a normal empty result.
+Commands accept `--format text|json` and `-o <file>`. Extraction always writes
+the requested payload to `-o`, with no stdout result. Queries return every match,
+without pagination or previews. An empty match is a normal empty result.
+Independent query results arrive in completion order, not a guaranteed sequence.
 
-| Command | Columns |
+| Command | Presentation |
 |---|---|
 | `entries` | `name, compressed_size, uncompressed_size, compression` |
-| `classes` | `at` |
-| `fields` | `at` |
-| `methods` | `at` |
+| `classes`, `fields`, `methods` | `at` |
 | `strings` | `at, value, entry` |
 | `xref` | `entry, context, match, use` |
-| `manifest` | text XML, or JSON `{schema_version, command, entry, status, xml, warnings}` |
-| `get-class` | text display, or JSON schema 2 |
-| `get-method` | text display, or JSON schema 2 |
-| `extract` | one file written to `-o`; stdout stays empty |
+| `manifest` | XML, or JSON with `entry, status, xml, warnings` |
+| `get-class`, `get-method` | P9 Java-like text, or JSON schema 3 |
+| `extract` | One output file |
 
-`classes` can be restricted with `--filter`, `--extends`, `--implements`,
-`--subinterface` and `--kind`; the three hierarchy options follow only the
-definition's own direct `super_class` or interface edges. `fields` and `methods`
-accept `--class` (descriptor or dotted name) and `--filter`. `--filter` is a
-case-insensitive literal over the semantic name/descriptor, not a regular
-expression. `--jobs` bounds how many independent DEX images are scanned at once and
-must be positive.
+`classes` supports `--filter`, `--extends`, `--implements`, `--subinterface`
+and `--kind`. Hierarchy filters inspect direct original superclass/interface
+edges. `fields` and `methods` accept `--class` as a descriptor or dotted name,
+and `--filter` as a case-insensitive literal name substring.
 
-## Original identity: `at`
+Query `--jobs` bounds concurrent physical DEX roots. Logical headers within a
+root retain their own identities. `get-class --jobs` instead sets Engine's
+method worker count; its default is one. Explicit job counts must be positive.
+
+## Original identity and selection
 
 ```text
 class-at  = e<entry>:l<logical>:c<class-def>::<descriptor>
@@ -66,102 +60,116 @@ field-at  = e<entry>:l<logical>:c<class-def>:f<field-id>::<owner>-><name>:<type>
 string-at = e<entry>:l<logical>:s<string-id>
 ```
 
-`e` is the physical ZIP central-directory record index, `l` the logical DEX ordinal
-inside that entry (`0` for an ordinary DEX, several for a 041 container), and `c`,
-`m`, `f`, `s` are the original table indices. The suffix after `::` is the original
-descriptor or the complete reference, so a stale index that names another object is
-rejected instead of resolved. A bare DEX is `e0:l0`. An `at` printed by one command
-can be passed back to another verbatim; shell-quote it when it contains `$` or a
-space.
+`e` is the physical ZIP central-directory record index. A bare DEX uses `e0`.
+`l` is the original header-chain ordinal within that physical container: zero
+for an ordinary DEX, potentially several ordinals for DEX 041. `c`, `m`, `f`
+and `s` are original table indices. Engine's request-local `DexId` is a separate
+coordinate; it is not a physical entry or logical-header ordinal. A canonical
+locator opens only its physical root. Unrelated DEX payloads are not decompressed
+or required to be readable. An unqualified class name searches all roots to
+establish a unique match.
 
-## Selectors
+`get-class` accepts a class-at, descriptor or dotted class name. `get-method`
+accepts a method-at or the complete `Lowner;->name(args)return` reference.
+Use locators printed by `classes` and `methods`, shell-quoting dollar signs,
+spaces and arrows. An ambiguous class or method reference is not guessed.
 
-`get-class` and `--class` accept a class-at, `Lowner;` or a dotted class name.
-`get-method` accepts a method-at or the complete `Lowner;->name(args)return`; a bare
-method name and a separate proto option do not exist. `xref` takes the kind
-`string`, `type`, `method` or `field` plus the exact target: a complete UTF-16
-string, a type descriptor or dotted name, and a complete method/field reference.
-A short class name with several definitions is reported as ambiguous (exit 4)
-instead of picking one.
+Class locators must agree with their checked descriptor. Method selection
+consumes the same Engine's cached P0 directory and checks membership, original
+MethodId, name and complete prototype. A reference in `method_ids` alone is not
+a definition in the selected class. An unavailable declaration or unfinished
+directory does not establish that a method is absent.
 
-## Text and JSON
+Class retrieval analyzes all known original members. Single-method retrieval
+calls `Engine::analyze_method` with the selected ID and uses its standalone
+P8/P9 display; it does not analyze siblings or slice text out of a class result.
 
-Text is UTF-8 TSV with the exact column header, or XML for `manifest`/`extract`.
-Fields escape `\\`, tab, CR, LF and NUL, and an isolated surrogate is printed as
-`\uXXXX`; no value is replaced or split across lines. A table in JSON is
-`{schema_version, command, items:[{column: value}]}`; `get-class`/`get-method` use
-the decompilation report schema 2, and `manifest` uses its own report with a
-`status` of `complete` or `partial`.
+`xref` takes `string`, `type`, `method` or `field` and the corresponding
+exact value/reference. Its `--class` restricts the referencing class by
+descriptor or dotted name. It searches operand sites without requiring the target
+to have a definition in the input. A reader failure is reported, not silently
+counted as an empty method.
 
-`manifest` and a decoded `extract` keep the document usable: a recovered gap is
-reported as an in-place `<!-- diana: ... -->` comment, in the warning list of the
-JSON result and on stderr. `--strict` makes such a partial document exit non-zero
-after it is published.
+## Decompilation text and JSON
 
-## Exit codes
+Text is exactly the existing P9 UTF-8 text. The notation is
+`diana-java-like-v1`, described in [P9 rendering](../../docs/diana/spec/09-rendering.md).
+Available expressions, original members, explicit operations and local recovery
+gaps remain visible. Java legality or compilability is not an output gate.
+Diagnostics are not hidden behind a verbosity flag.
+
+Schema 3 has these top-level fields:
+
+- `schema_version: 3` and `command: "get-class" | "get-method"`.
+- `selection`: physical `entry` (`null` for bare DEX), `logical` header
+  ordinal, container-relative byte `header_offset`, Engine `class` key,
+  optional `method` ID, `class_at` and optional `method_at`.
+- `result`: the native P9 `{kind, product}` publication. A `ready` product
+  contains `class, notation, source, text, spans, issues`.
+
+`product.text` is byte-for-byte the text presentation. Spans are half-open UTF-8
+byte ranges within that text, not offsets into JSON. The frozen `source` keeps
+the same P8/P7 products and original facts, including original UTF-16 units,
+stopped members and retained bytes. Inspection-formatted diagnostic fields are
+not an alternate executable representation. JSON serialization does not run
+another renderer or choose a different recovery mode.
+
+`ready` describes publication completion, not semantic verification. Local
+member failures remain content of that publication. A shared rendering failure
+retains P9's `stopped` product: JSON includes its source, error and text prefix;
+text writes that same prefix. Both report the concrete stop on stderr and exit 1.
+An unfinished prefix is never reported as a successful complete result.
+
+The old schema 2, Java/Mixed status projections, whole-class method-text slicing,
+`--verbose` diagnostic gate and declaration-catalog adapter are removed.
+
+## Query and manifest output
+
+Query text is UTF-8 TSV with the column header. Display fields escape backslash,
+tab, CR, LF and NUL; isolated surrogates remain escaped instead of being replaced.
+Query JSON uses `{schema_version: 1, command, items}`. `entries` reads the ZIP
+central directory only; it does not open or decompress DEX payloads.
+
+`manifest` uses XML or JSON with `schema_version, command, entry, status, xml,
+warnings`. Recoverable AXML gaps remain XML comments, JSON warnings and stderr
+diagnostics. `--strict` reports a partial document as failure after publication.
+
+## File publication and exit codes
+
+Result serialization writes directly to stdout or a private temporary file beside
+the requested target. A file is renamed into place only after serialization and
+flush complete. Writer/serializer/flush/rename failures do not replace the target.
+A P9 rendering stop is a fully delivered failure report, not an interrupted file
+write. Its text remains explicitly incomplete as described above.
+
+A directory, symbolic-link target or input-file alias is refused. On Unix the
+alias check also covers hard links. A closed stdout pipe is an output error,
+not successful truncation. The CLI/host owns process termination; there are no
+cooperative cancellation callbacks or numeric work/allocation/output quotas.
 
 | Code | Meaning |
 |---|---|
-| 0 | A result was delivered, including a partial document |
-| 1 | Input, decode, allocation, internal or I/O failure |
-| 2 | Unknown command/flag or an invalid selector |
+| 0 | A result was delivered, including local recovery gaps or a partial XML document |
+| 1 | Input, unresolved selection, construction, rendering or output failure |
+| 2 | Invalid command, flag or selector syntax |
 | 3 | The requested single object or entry does not exist |
-| 4 | The selector matches several objects |
+| 4 | The selector matches several definitions |
 
-## Extract
+`extract <input> <entry> -o <file>` writes one physical record. Duplicate names
+require `--entry-index`; name and index must agree. Size and CRC validation
+applies to the original decompressed bytes. Binary XML is decoded by default;
+`--raw` keeps the payload. An existing extraction target needs `--force`.
+Extraction refuses directories, symbolic links and input aliases.
 
-`extract <input> <entry> -o <file>` writes exactly one physical record. A duplicate
-name requires `--entry-index`; the index and the name must agree. The payload is
-validated (size and CRC) over the original decompressed bytes; a binary XML entry is
-decoded to text by default and `--raw` keeps the original payload. Publication is
-atomic from a private temporary file in the target directory, an existing file needs
-`--force`, and a directory, a symbolic link, the input itself or a hardlink alias are
-refused. Nothing is printed to stdout.
+## Development
 
-## Allocation failure and process termination
-
-Diana exposes no numeric work, allocation or output quotas. Every read is range-,
-count- and arithmetic-checked, container growth uses `try_reserve`, and an actual
-allocation failure is reported as a classified error instead of a truncated result.
-The CLI/host owns process termination, including signals. There is no cooperative
-request cancellation API or engine callback. Process termination is not a promise
-to deliver an in-progress result or clean up every interrupted write.
-
-## Internal P0–P3 inspection
-
-Use the engine development shell with a bare DEX:
+Build from the repository root:
 
 ```sh
-cargo run -p diana-decomp --example dbg_shell --locked -- \
-  --dex classes.dex \
-  --exec '{"id":1,"cmd":"p0","class":0}' \
-  --exec '{"id":2,"cmd":"p1","class":0,"method":0}'
+cargo build --locked -p diana
+cargo run --locked -p diana -- get-class classes.dex 'Lexample/Main;'
+cargo run --locked -p diana -- get-method classes.dex 'Lexample/Main;->run()V' --format json
 ```
 
-It writes one JSON response per command. See the engine package for the
-supported `class`, `p0`, `methods`, `p1`, `decoded`, `p2`, `p2-all`, `p3`, `p3-all` and byte-roundtrip
-inspection commands.
-
-## Agent usage
-
-This section is ordinary documentation, not an installed agent skill, and the binary
-provides no skill-install command.
-
-1. Run `diana entries app.apk` to see the physical entries and pick the DEX or XML
-   you need. `classes`, `fields`, `methods` and `strings` list original symbols
-   without decompiling.
-2. Read an `at` and pass it back: `diana get-class app.apk 'e0:l0:c7::Lcom/example/App;'`
-   or `diana get-method app.apk 'e0:l0:c7:m23::Lcom/example/App;->check(I)Z'`.
-   Mixed output is the normal display: every member is present and each failed one
-   carries its reason and original facts. Do not treat Mixed as a valid Java
-   compilation unit.
-3. Use `--format json` for machine reading of the same result. Warning lists,
-   statuses and spans are part of that report.
-4. `xref` finds definition-independent usages: `diana xref app.apk method
-   'Lcom/example/Dep;->f()V'` with `--class` to restrict the referencing class.
-5. `diana extract app.apk 'AndroidManifest.xml' -o manifest.xml` decodes the binary
-   manifest; `--raw` keeps the original AXML bytes. Extraction writes only the
-   requested file.
-
-Do not delete or move a user's installed rasc skill when adopting Diana; this
-document is additive.
+Use the engine's [`dbg_shell`](../../crates/diana-decomp/README.md) for P0–P9
+inspection. The CLI does not expose separate phase constructors or a retry chain.

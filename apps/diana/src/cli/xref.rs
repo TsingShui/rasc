@@ -59,7 +59,7 @@ pub fn run(
             "{}@cu:{:#06x}",
             at::method(
                 image.entry.map(|entry| entry.0),
-                0,
+                row.logical.0,
                 row.class_def.0,
                 row.method.0,
                 &row.class_descriptor,
@@ -80,6 +80,7 @@ pub fn run(
         &["entry", "context", "match", "use"],
         "xref",
         format,
+        input,
         output,
     )
 }

@@ -1,8 +1,9 @@
 //! Command-line front end: argument parsing and result publication.
 //!
 //! The commands borrow the public analysis modules; they add no second decoding
-//! path. Output is written as a complete artifact: a temporary file in the target
-//! directory is renamed into place, so a failed run never leaves a half file.
+//! path. File publication is atomic after complete serialization. A classified
+//! rendering stop retains its prefix but exits nonzero; a sink failure does not
+//! replace an existing output file.
 
 mod extract_cli;
 mod get;
@@ -27,9 +28,6 @@ use table::Record;
 #[derive(Parser)]
 #[command(name = "diana", about = "Native APK/DEX analysis", version)]
 struct Cli {
-    /// Include member uncertainty annotations and diagnostic detail
-    #[arg(long, global = true)]
-    verbose: bool,
     #[command(subcommand)]
     command: Command,
 }
@@ -150,12 +148,12 @@ enum Command {
     },
     /// Decompile one class
     #[command(
-        long_about = "Displays the readable report with every member and the reason of each failure. JSON follows schema 2."
+        long_about = "Displays the Engine/P9 Java-like text, including original members and local recovery gaps. JSON schema 3 carries the same text, source facts and byte spans."
     )]
     GetClass {
         /// Input file (APK, ZIP or bare DEX)
         input: PathBuf,
-        /// Class or method locator; see `at` in the package README
+        /// Original class locator, descriptor or dotted name
         selector: String,
         #[arg(long, value_enum, default_value_t = Format::Text)]
         /// Presentation of the same result
@@ -163,18 +161,18 @@ enum Command {
         #[arg(short, long)]
         /// Write the result to this file instead of stdout
         output: Option<PathBuf>,
-        /// Parallel workers for independent method analysis
+        /// Parallel method workers (default: 1)
         #[arg(long, value_parser = clap::value_parser!(u32).range(1..))]
         jobs: Option<u32>,
     },
     /// Decompile one method
     #[command(
-        long_about = "Displays exactly the selected member: Java, declaration-only, debug facts or an unavailable reason with its excerpt."
+        long_about = "Displays the selected original method through the shared Engine/P9 chain, without analyzing sibling methods."
     )]
     GetMethod {
         /// Input file (APK, ZIP or bare DEX)
         input: PathBuf,
-        /// Class or method locator; see `at` in the package README
+        /// Original method locator or complete owner/name/prototype reference
         selector: String,
         #[arg(long, value_enum, default_value_t = Format::Text)]
         /// Presentation of the same result
@@ -265,7 +263,6 @@ enum KindArg {
 /// Runs one command and maps its classified failure to an exit code.
 pub fn run() -> std::process::ExitCode {
     let cli = Cli::parse();
-    let verbose = cli.verbose;
     let result = match cli.command {
         Command::Entries {
             input,
@@ -288,13 +285,10 @@ pub fn run() -> std::process::ExitCode {
             &input,
             &selector,
             get::Kind::Class {
-                jobs: jobs.map_or_else(default_jobs, |jobs| {
-                    usize::try_from(jobs).unwrap_or(usize::MAX)
-                }),
+                jobs: jobs.unwrap_or(1),
             },
             format,
             output.as_deref(),
-            verbose,
         ),
         Command::GetMethod {
             input,
@@ -307,7 +301,6 @@ pub fn run() -> std::process::ExitCode {
             get::Kind::Method,
             format,
             output.as_deref(),
-            verbose,
         ),
         Command::Extract {
             input,
@@ -501,7 +494,7 @@ fn entries(
             .to_string()
         }
     };
-    publish(output, text.as_bytes(), format)
+    publish(output, input, text.as_bytes(), format)
 }
 
 fn manifest_command(
@@ -547,7 +540,7 @@ fn manifest_command(
         })
         .to_string(),
     };
-    publish(output, text.as_bytes(), format)?;
+    publish(output, input, text.as_bytes(), format)?;
     if strict && manifest.is_partial() {
         return Err(Failure {
             code: 1,
@@ -620,15 +613,20 @@ fn query_command(
             Row::Method(row) => row.image.0,
             Row::Field(row) => row.image.0,
             Row::String(row) => row.image.0,
-            Row::Entry(row) => row.image.0,
+            Row::Entry(_) => continue,
         };
         let image = &images[image_index];
         let entry = image.entry.map(|entry| entry.0);
         let record = match row {
-            Row::Class(row) => Record::new(at::class(entry, 0, row.class_def.0, &row.descriptor)),
+            Row::Class(row) => Record::new(at::class(
+                entry,
+                row.logical.0,
+                row.class_def.0,
+                &row.descriptor,
+            )),
             Row::Method(row) => Record::new(at::method(
                 entry,
-                0,
+                row.logical.0,
                 row.class_def.0,
                 row.method.0,
                 &row.class_descriptor,
@@ -637,14 +635,14 @@ fn query_command(
             )),
             Row::Field(row) => Record::new(at::field(
                 entry,
-                0,
+                row.logical.0,
                 row.class_def.0,
                 row.field.0,
                 &row.class_descriptor,
                 &row.name,
                 &row.field_type,
             )),
-            Row::String(row) => Record::new(at::string(entry, 0, row.string.0))
+            Row::String(row) => Record::new(at::string(entry, row.logical.0, row.string.0))
                 .with_value(at::escape_units(&row.units))
                 .with_entry(image.label.clone()),
             Row::Entry(_) => continue,
@@ -662,5 +660,5 @@ fn query_command(
         QueryKind::Strings => "strings",
         QueryKind::Entries => "entries",
     };
-    table::publish_records(&records, columns, command, format, output)
+    table::publish_records(&records, columns, command, format, input, output)
 }

@@ -73,8 +73,8 @@ pub enum InputError {
 impl InputError {
     /// One failure kind for callers that must classify an input-side error.
     /// I/O, path policy and an unsupported container are `Unsupported`; damaged
-    /// archive records are `Malformed`; an exceeded configured bound or an actual
-    /// allocation failure is `BudgetExceeded`.
+    /// archive records are `Malformed`; platform capacity and actual allocation
+    /// failures are `ResourceExhausted`.
     pub fn kind(&self) -> diana_decomp::FailureKind {
         use diana_decomp::FailureKind as Kind;
         match self {

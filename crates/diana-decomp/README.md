@@ -9,7 +9,8 @@ The active method chain is P0 class facts → method reader → P1 disassembly �
 execution model → P3 SSA → P4 value/use interpretation → P5 storage/transfer
 plans → P6 control/protection/monitor plans → P7 owned method expressions,
 followed by P8 class assembly/type-name planning and P9 text/JSON with UTF-8 source spans. `Engine::analyze_method` and class requests use one method task. The
-application decompilation interface is being rebuilt.
+[CLI](../../apps/diana/README.md) delivers the same owned P9 publication, without
+another renderer or analysis route.
 The approved architecture is [PIPELINE_DESIGN](../../docs/diana/PIPELINE_DESIGN.md).
 
 P1 retains complete instruction/payload facts, original references, entry layout
@@ -412,8 +413,7 @@ coverage, not universal semantic acceptance. All 48,102,163 instruction roundtri
 were rerun across those 55 DEX entries with zero mismatch, skip or method/class
 error. The synthetic DEX 038/039 cases separately cover the changed dynamic facts;
 the real-input corpus does not supply those opcodes. Engine fmt/check/Clippy,
-release library/shell and debug/release core tests passed. Workspace build/Clippy
-remain blocked by CLI references to removed result APIs.
+release library/shell and debug/release core tests passed.
 
 ### Class assembly and naming observations
 
@@ -474,9 +474,10 @@ parameter-name and exact UTF-16 serialization fields; no call-qualification
 change occurred in that selection. Serial/four-worker P9 products matched for
 19 classes and 4,585 members. The single core test passes in debug and release;
 engine format/check/strict Clippy and release library/shell builds pass.
-Workspace gates remain blocked by the CLI's removed result APIs. Actual allocator
-exhaustion, all stopped-stage prefixes and arbitrary VM/heap/callee behavior remain
-outside this execution evidence.
+Workspace strict Clippy and release builds also pass after CLI integration.
+The existing single core test was rerun in debug and release without adding CLI
+tests. Actual allocator exhaustion, all stopped-stage prefixes and arbitrary
+VM/heap/callee behavior remain outside this execution evidence.
 
 ## Method scheduling observations
 

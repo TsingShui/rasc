@@ -1,14 +1,15 @@
-//! Engine adapter: one validated locator to one owned report and rendered text.
+//! One validated selection to the same Engine execution's owned P9 publication.
 
+use diana_decomp::p0::{ClassFacts, Fact};
+use diana_decomp::p9::RenderOutcome;
 use diana_decomp::{
-    ClassKey, DexImage, Engine, ImageOrigin, InputId, MethodSelector, Options, RenderedReport,
-    Report, Request, RequestError,
+    ByteOffset, ClassKey, DexImage, Engine, ImageOrigin, InputId, MethodId, Request, RequestError,
 };
+use serde::Serialize;
 
-use super::images::{ImageError, ImageSet, Selection, resolve_class, resolve_method};
-use super::input::InputError;
+use super::images::{ImageError, ImageSet, LogicalDex, resolve_class};
 use super::request::RequestScope;
-use super::selector::{Selector, SelectorError};
+use super::selector::{MethodSelector, Selector, SelectorError};
 
 #[derive(Debug, thiserror::Error)]
 pub enum DecompileError {
@@ -17,143 +18,191 @@ pub enum DecompileError {
     #[error(transparent)]
     Image(#[from] ImageError),
     #[error(transparent)]
-    Input(#[from] InputError),
-    #[error(transparent)]
     Engine(#[from] diana_decomp::input::InputError),
     #[error(transparent)]
     Request(#[from] RequestError),
+    #[error("method selection is unresolved ({kind:?}): {detail}")]
+    Unresolved {
+        kind: diana_decomp::FailureKind,
+        detail: String,
+    },
 }
 
 impl DecompileError {
     pub fn code(&self) -> u8 {
         match self {
             Self::Selector(error) => error.code(),
-            Self::Image(_) | Self::Input(_) | Self::Engine(_) | Self::Request(_) => 1,
+            _ => 1,
         }
     }
 }
 
-/// One original selection plus the engine products for it. The report and the
-/// rendered text are owned; no borrow of the leased input escapes.
-pub struct Decompiled {
+/// Maps request-local Engine identities to the original physical/logical input.
+#[derive(Debug, Serialize)]
+pub struct Selection {
     pub entry: Option<usize>,
-    pub logical: u32,
-    pub header_offset: diana_decomp::ByteOffset,
+    pub logical: LogicalDex,
+    #[serde(serialize_with = "byte_offset")]
+    pub header_offset: ByteOffset,
     pub class: ClassKey,
-    pub method: Option<diana_decomp::MethodId>,
+    pub method: Option<MethodId>,
     pub class_at: String,
     pub method_at: Option<String>,
-    pub status: &'static str,
-    pub report: Report,
-    pub rendered: RenderedReport,
 }
 
-impl std::fmt::Debug for Decompiled {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter
-            .debug_struct("Decompiled")
-            .field("class_at", &self.class_at)
-            .field("method_at", &self.method_at)
-            .field("status", &self.status)
-            .finish_non_exhaustive()
-    }
+fn byte_offset<S: serde::Serializer>(
+    offset: &ByteOffset,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    offset.0.serialize(serializer)
 }
 
-/// Runs the shared engine chain for one locator.
+/// Owns the original selection and P9 result, including a classified render stop.
+/// Neither product borrows the input lease or Engine.
+#[derive(Serialize)]
+pub struct Decompiled {
+    pub selection: Selection,
+    #[serde(rename = "result")]
+    pub rendered: RenderOutcome,
+}
+
+/// Runs the shared Engine chain with one method worker.
 pub fn run(scope: &RequestScope, selector: &Selector) -> Result<Decompiled, DecompileError> {
-    run_with_catalog(scope, selector)
-}
-
-/// Runs the engine with an explicit declaration catalog. The CLI passes the
-/// catalog assembled for the request; library callers provide their own.
-pub fn run_with_catalog(
-    scope: &RequestScope,
-    selector: &Selector,
-) -> Result<Decompiled, DecompileError> {
     run_with_jobs(scope, selector, 1)
 }
 
-/// Runs class member analysis with the selected Rayon worker count. A parallel
-/// Analysis uses the borrowed input selected for this request.
+/// Uses the selected method ID directly, or analyzes every known class member.
+/// Method lookup consumes the same Engine's cached P0 directory; it does not
+/// read bodies, recreate declarations or analyze siblings of a selected method.
 pub fn run_with_jobs(
     scope: &RequestScope,
     selector: &Selector,
     jobs: usize,
 ) -> Result<Decompiled, DecompileError> {
-    let images = ImageSet::open(scope)?;
-    let selection = resolve(scope, &images, selector)?;
-    let mut dex_images = Vec::new();
+    let class_selector = match selector {
+        Selector::Class(class) => class,
+        Selector::Method(method) => &method.class,
+        Selector::Field(_) | Selector::String(_) => {
+            return Err(SelectorError::Syntax("this command selects a class or a method").into());
+        }
+    };
+    let images = ImageSet::open(scope, class_selector.entry)?;
+    let selected = resolve_class(&images, class_selector)?;
+    let mut inputs = Vec::new();
+    inputs
+        .try_reserve_exact(images.images().len())
+        .map_err(RequestError::Allocation)?;
     for image in images.images() {
-        dex_images
-            .try_reserve(1)
-            .map_err(|_| DecompileError::Request(RequestError::PlatformCapacity))?;
-        dex_images.push(DexImage {
+        inputs.push(DexImage {
             bytes: images.bytes(image),
             header_offset: image.header_offset,
             origin: ImageOrigin {
-                input: InputId(u64::try_from(image.entry.map_or(0, |entry| entry.0)).unwrap_or(0)),
+                input: InputId(
+                    u64::try_from(image.entry.map_or(0, |entry| entry.0))
+                        .map_err(|_| RequestError::PlatformCapacity)?,
+                ),
             },
         });
     }
-    let engine = Engine::open(dex_images, Options::default())
-        .map_err(DecompileError::Engine)?
-        .with_method_jobs(jobs);
+    let engine = Engine::open(inputs)?.with_method_jobs(jobs);
     let class = ClassKey {
-        dex: selection.image.dex,
-        class_def: selection.class_def,
+        dex: selected.image.dex,
+        class_def: selected.class_def,
     };
-    let request = Request {
-        class,
-        method: selection.method.map(|_method| MethodSelector {
-            name: selection.name.clone(),
-            prototype: selection.member_type.clone(),
-        }),
-    };
-    let report = engine.decompile(request)?;
-    let rendered = diana_decomp::render(&report)?;
-    let entry = selection.image.entry.map(|entry| entry.0);
-    let logical = selection.image.logical;
-    let class_at = super::at::class(entry, logical, selection.class_def.0, &selection.descriptor);
-    let method_at = selection.method.map(|method| {
-        super::at::method(
-            entry,
-            logical,
-            selection.class_def.0,
-            method.0,
-            &selection.descriptor,
-            &selection.name,
-            &selection.member_type,
-        )
-    });
-    let status = match report.class() {
-        diana_decomp::ClassOutput::JavaUnit { .. } => "java_unit",
-        diana_decomp::ClassOutput::Mixed { .. } => "mixed",
+    let entry = selected.image.entry.map(|entry| entry.0);
+    let logical = selected.image.logical;
+    let class_at = super::at::class(entry, logical.0, class.class_def.0, &selected.descriptor);
+    let (method, method_at, rendered) = match selector {
+        Selector::Method(selector) => {
+            let facts = engine.class_facts(class)?;
+            let method = select_method(&facts, selector)?;
+            let method_at = super::at::method(
+                entry,
+                logical.0,
+                class.class_def.0,
+                method.0,
+                &selected.descriptor,
+                &selector.name,
+                &selector.prototype,
+            );
+            let result = engine.analyze_method(class, method)?;
+            (Some(method), Some(method_at), result.rendered)
+        }
+        Selector::Class(_) => {
+            let result = engine.analyze(Request {
+                class,
+                method: None,
+            })?;
+            (None, None, result.rendered)
+        }
+        Selector::Field(_) | Selector::String(_) => unreachable!("selection checked above"),
     };
     Ok(Decompiled {
-        entry,
-        logical,
-        header_offset: selection.image.header_offset,
-        class,
-        method: selection.method,
-        class_at,
-        method_at,
-        status,
-        report,
+        selection: Selection {
+            entry,
+            logical,
+            header_offset: selected.image.header_offset,
+            class,
+            method,
+            class_at,
+            method_at,
+        },
         rendered,
     })
 }
 
-fn resolve<'a>(
-    scope: &RequestScope,
-    images: &'a ImageSet<'a>,
-    selector: &Selector,
-) -> Result<Selection<'a>, DecompileError> {
-    match selector {
-        Selector::Class(class) => Ok(resolve_class(images, class)?),
-        Selector::Method(method) => Ok(resolve_method(images, method)?),
-        Selector::Field(_) | Selector::String(_) => {
-            let _ = scope;
-            Err(SelectorError::Syntax("this command selects a class or a method").into())
+fn select_method(
+    facts: &ClassFacts,
+    selector: &MethodSelector,
+) -> Result<MethodId, DecompileError> {
+    let mut found = None;
+    let mut unavailable = facts.methods_issue();
+    let mut not_read = false;
+    for entry in facts.methods() {
+        if let Some(id) = selector.method
+            && entry.method().0 != id
+        {
+            continue;
+        }
+        match entry.declaration() {
+            Fact::Present(declaration) => {
+                if declaration.name_units() != selector.name
+                    || declaration.prototype_units() != selector.prototype
+                {
+                    if selector.method.is_some() {
+                        return Err(SelectorError::InvalidIndex.into());
+                    }
+                    continue;
+                }
+                if found.replace(entry.method()).is_some() {
+                    return Err(SelectorError::Ambiguous.into());
+                }
+            }
+            Fact::Unavailable(error) => {
+                unavailable = Some(error);
+            }
+            Fact::Absent | Fact::NotRead => not_read = true,
         }
     }
+    if let Some(method) = found {
+        return Ok(method);
+    }
+    if let Some(error) = unavailable {
+        return Err(DecompileError::Unresolved {
+            kind: error.kind(),
+            detail: error.to_string(),
+        });
+    }
+    if not_read {
+        return Err(DecompileError::Unresolved {
+            kind: diana_decomp::FailureKind::Unsupported,
+            detail: "original method declaration was not delivered".to_owned(),
+        });
+    }
+    Err(if selector.method.is_some() {
+        SelectorError::InvalidIndex
+    } else {
+        SelectorError::NotFound
+    }
+    .into())
 }

@@ -9,7 +9,6 @@ use super::request::RequestScope;
 /// One physical ZIP record, listed in directory order.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct EntryRow {
-    pub image: ImageIndex,
     pub entry: EntryIndex,
     pub name: String,
     pub compressed_size: u64,
@@ -100,7 +99,7 @@ pub struct Query<'a> {
     class: Option<Vec<u16>>,
     class_filter: super::dex::ClassFilter,
     jobs: usize,
-    entries: Vec<EntryRecord>,
+    entries: Option<&'a [EntryRecord]>,
 }
 
 impl<'a> Query<'a> {
@@ -110,7 +109,11 @@ impl<'a> Query<'a> {
         if plan.jobs == 0 {
             return Err(QueryError::InvalidJobs);
         }
-        let roots = scope.roots()?;
+        let roots = if plan.kind == QueryKind::Entries {
+            Vec::new()
+        } else {
+            scope.roots()?
+        };
         let mut images = Vec::new();
         for (ordinal, root) in roots.iter().enumerate() {
             images.try_reserve(1).map_err(|_| QueryError::WorkerLost)?;
@@ -120,11 +123,7 @@ impl<'a> Query<'a> {
                 entry: root.entry().map(EntryRecord::index),
             });
         }
-        let entries = scope
-            .input()
-            .archive()
-            .map(|directory| directory.entries().to_vec())
-            .unwrap_or_default();
+        let entries = scope.input().archive().map(|directory| directory.entries());
         Ok(Self {
             roots,
             images,
@@ -149,15 +148,9 @@ impl<'a> Query<'a> {
         sink: &mut impl FnMut(Row) -> Result<(), QueryError>,
     ) -> Result<(), QueryError> {
         if self.kind == QueryKind::Entries {
-            if self.images.is_empty() {
-                return Ok(());
-            }
-            if self.entries.is_empty() {
-                return Err(QueryError::NotArchive);
-            }
-            for entry in &self.entries {
+            let entries = self.entries.ok_or(QueryError::NotArchive)?;
+            for entry in entries {
                 let row = EntryRow {
-                    image: ImageIndex(0),
                     entry: entry.index(),
                     name: entry.name().to_owned(),
                     compressed_size: entry.compressed_size().0,
@@ -184,25 +177,15 @@ impl<'a> Query<'a> {
                 let image = ImageIndex(ordinal);
                 let filter = self.filter.as_deref();
                 let class = self.class.as_deref();
-                match kind {
+                dex::visit_logical(root.bytes(), |logical, index| match kind {
                     QueryKind::Entries => Ok(()),
-                    QueryKind::Classes => match dex::open(root.bytes()) {
-                        Ok(index) => dex::classes(&index, image, filter, &self.class_filter, emit),
-                        Err(error) => Err(error),
-                    },
-                    QueryKind::Methods => match dex::open(root.bytes()) {
-                        Ok(index) => dex::methods(&index, image, class, filter, emit),
-                        Err(error) => Err(error),
-                    },
-                    QueryKind::Fields => match dex::open(root.bytes()) {
-                        Ok(index) => dex::fields(&index, image, class, filter, emit),
-                        Err(error) => Err(error),
-                    },
-                    QueryKind::Strings => match dex::open(root.bytes()) {
-                        Ok(index) => dex::strings(&index, image, filter, emit),
-                        Err(error) => Err(error),
-                    },
-                }
+                    QueryKind::Classes => {
+                        dex::classes(&index, image, logical, filter, &self.class_filter, emit)
+                    }
+                    QueryKind::Methods => dex::methods(&index, image, logical, class, filter, emit),
+                    QueryKind::Fields => dex::fields(&index, image, logical, class, filter, emit),
+                    QueryKind::Strings => dex::strings(&index, image, logical, filter, emit),
+                })
             },
             sink,
         )

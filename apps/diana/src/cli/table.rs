@@ -33,6 +33,7 @@ pub fn publish_rows(
     columns: &[&str],
     command: &str,
     format: Format,
+    input: &std::path::Path,
     output: Option<&std::path::Path>,
 ) -> Result<(), Failure> {
     let text = match format {
@@ -68,7 +69,7 @@ pub fn publish_rows(
             .to_string()
         }
     };
-    publish(output, text.as_bytes(), format)
+    publish(output, input, text.as_bytes(), format)
 }
 
 pub fn publish_records(
@@ -76,6 +77,7 @@ pub fn publish_records(
     columns: &[&str],
     command: &str,
     format: Format,
+    input: &std::path::Path,
     output: Option<&std::path::Path>,
 ) -> Result<(), Failure> {
     let text = match format {
@@ -124,7 +126,7 @@ pub fn publish_records(
             .to_string()
         }
     };
-    publish(output, text.as_bytes(), format)
+    publish(output, input, text.as_bytes(), format)
 }
 
 /// Escapes a display field so one record never spans over two lines.
