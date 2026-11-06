@@ -47,8 +47,15 @@ The following forms have fixed execution meanings:
 | `synchronized R(lock) with_explicit_exits` | The header owns the original acquire. This lexical container does not implicitly release at its closing brace or on an abrupt exit. |
 | `release synchronized R(lock)` | Execute that outlet's original release read/effect at its original node. Only the named lock scope ends; enclosing try scopes remain unchanged. |
 | `on_exception_entry { copies }` | Receive saved values only on exceptional arrival, after the original capture when present. |
-| `exception_chain` and site route annotations | Preserve original selection priority, handler targets and delivered natural/explicit protection. Method-local impossible-release findings do not delete original exception facts. |
+| `exception_chain` and `[exn cN]` site markers | Preserve original selection priority, handler targets and delivered natural/explicit protection. A marker is printed only when the enclosing printed catch does not already express that route; it names the chain whose line carries the clauses. Method-local impossible-release findings do not delete original exception facts. |
 | `graph ... entry label` / `no_implicit_entry` | Preserve the supplied graph entry or its explicit absence. The first printed child is not an invented entry. |
+
+A selected `FullSignature` call prints its original target as a trailing
+`[binding ...]` suffix; a natural call prints only the receiver, member and
+arguments. The owned reference still carries the original target identity,
+dispatch kind and prototype, and the printed member keeps its source span. A jump
+to the statement printed immediately after it is sequencing, not an emitted
+`goto`.
 
 P7 fixes condition/header ownership, loop repetition, child roles and necessary
 continuations. P9 prints those choices. In particular, predicate-exit copies do
@@ -79,6 +86,16 @@ values use P8's flat events; call-site bootstrap values use P7's owned events an
 leaf declarations. Counts, reference identities and local gaps remain visible.
 Neither path parses encoded input again or interprets Signature as recovered
 generic syntax.
+
+P9 prints the supplied class, field and method access flags as Java modifier
+words where the kind has one. A DEX-only bit that the declaration form does not
+already show keeps an explicit `dex_flags<...>` marker; the class kind word and an
+`<init>`/`<clinit>` name already convey the interface/annotation/enum and
+constructor bits. Bits with no defined meaning for that kind remain visible as
+`unknown_flags<0x...>` and are never folded into the whole original word. The raw
+word itself remains in the source product. A `declared_synchronized` marker is a
+declaration fact: the VM does not lock such a method automatically, so P9 does not
+invent a lock and prints only the monitor operations delivered for its body.
 
 P9 MUST preserve P8's base spelling and array rank. Original-name forms and raw
 descriptors remain explicit. Literal strings do not pass through name planning.

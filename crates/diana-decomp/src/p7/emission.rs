@@ -153,6 +153,9 @@ pub struct EmissionPlan {
     pub(super) controls: Vec<EmissionControl>,
     pub(super) blocks: Vec<EmissionBlock>,
     pub(super) show_chains: Vec<bool>,
+    /// Whether a route annotation still adds information beyond the printed
+    /// chains and catch scopes.
+    pub(super) site_annotations: Vec<bool>,
     pub(super) composed_uses: Vec<Option<ComposedExpression>>,
     pub(super) composed_operations: Vec<bool>,
     pub(super) hidden_locals: Vec<bool>,
@@ -170,6 +173,7 @@ impl EmissionPlan {
             controls: Vec::new(),
             blocks: Vec::new(),
             show_chains: Vec::new(),
+            site_annotations: Vec::new(),
             composed_uses: Vec::new(),
             composed_operations: Vec::new(),
             hidden_locals: Vec::new(),
@@ -192,6 +196,12 @@ impl EmissionPlan {
     }
     pub fn show_chains(&self) -> &[bool] {
         &self.show_chains
+    }
+    pub fn site_annotation(&self, id: SiteId) -> bool {
+        self.site_annotations
+            .get(id.0 as usize)
+            .copied()
+            .unwrap_or(true)
     }
     pub fn composed_use(&self, id: ExprId) -> Option<ComposedExpression> {
         self.composed_uses.get(id.0 as usize).copied().flatten()
@@ -283,6 +293,7 @@ pub(super) fn local_spelling(types: &[TypeUse], l: &LocalDeclaration) -> LocalSp
 pub(super) fn construct(code: &mut MethodCode) -> Result<(), ExpressionError> {
     let mut plan = EmissionPlan::empty();
     plan.show_chains = filled(code.chains.len(), true)?;
+    plan.site_annotations = filled(code.sites.len(), true)?;
     plan.composed_uses = filled(code.expressions.len(), None)?;
     plan.composed_operations = filled(code.operations.len(), false)?;
     plan.hidden_locals = filled(code.locals.len(), false)?;

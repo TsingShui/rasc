@@ -122,41 +122,162 @@ impl MethodNames {
         }
     }
 }
+/// The declaration form selects which original bits already have a visible
+/// meaning, so a redundant raw word is not printed beside its own modifiers.
 #[derive(Clone, Copy)]
 pub(super) enum FlagScope {
-    Class,
+    Class { interface: bool },
     Field,
-    Method,
+    Method { initializer: bool },
 }
+
+/// One original `access_flags` bit with the meaning this declaration form shows.
+#[derive(Clone, Copy)]
+struct Bit {
+    mask: u32,
+    /// Java modifier written before the declaration.
+    word: Option<&'static str>,
+    /// DEX-only bit with no Java modifier spelling.
+    marker: Option<&'static str>,
+}
+
+const NONE: Bit = Bit {
+    mask: 0,
+    word: None,
+    marker: None,
+};
+const fn java(mask: u32, word: &'static str) -> Bit {
+    Bit {
+        mask,
+        word: Some(word),
+        marker: None,
+    }
+}
+const fn dex(mask: u32, marker: &'static str) -> Bit {
+    Bit {
+        mask,
+        word: None,
+        marker: Some(marker),
+    }
+}
+/// A bit whose meaning the declaration form already displays, such as the class
+/// kind word or the `<init>`/`<clinit>` name. It is consumed, not dropped: the
+/// same bit remains in the original flag word of the source product.
+const fn conveyed(mask: u32) -> Bit {
+    Bit {
+        mask,
+        word: None,
+        marker: None,
+    }
+}
+
+const MAX_MARKERS: usize = 4;
+
+/// Prints the original flags without dumping a whole raw word. Undefined bits
+/// stay visible as their own residual mask.
 pub(super) fn flags(out: &mut Buffer, raw: u32, scope: FlagScope) -> Result<(), RenderError> {
-    let mut displayed = 0;
-    let specific: &[(u32, &str)] = match scope {
-        FlagScope::Class => &[(0x400, "abstract ")],
-        FlagScope::Field => &[(0x40, "volatile "), (0x80, "transient ")],
-        FlagScope::Method => &[
-            (0x20, "synchronized "),
-            (0x100, "native "),
-            (0x400, "abstract "),
-            (0x800, "strictfp "),
+    let common = [
+        java(0x1, "public "),
+        java(0x2, "private "),
+        java(0x4, "protected "),
+    ];
+    let specific: [Bit; 9] = match scope {
+        FlagScope::Class { interface } => [
+            java(0x8, "static "),
+            java(0x10, "final "),
+            conveyed(0x200),
+            if interface {
+                conveyed(0x400)
+            } else {
+                java(0x400, "abstract ")
+            },
+            dex(0x1000, "synthetic"),
+            conveyed(0x2000),
+            conveyed(0x4000),
+            NONE,
+            NONE,
+        ],
+        FlagScope::Field => [
+            java(0x8, "static "),
+            java(0x10, "final "),
+            java(0x40, "volatile "),
+            java(0x80, "transient "),
+            dex(0x1000, "synthetic"),
+            dex(0x4000, "enum"),
+            NONE,
+            NONE,
+            NONE,
+        ],
+        FlagScope::Method { initializer } => [
+            java(0x8, "static "),
+            java(0x10, "final "),
+            java(0x20, "synchronized "),
+            dex(0x40, "bridge"),
+            dex(0x80, "varargs"),
+            java(0x100, "native "),
+            java(0x400, "abstract "),
+            java(0x800, "strictfp "),
+            if initializer {
+                conveyed(0x10000)
+            } else {
+                dex(0x10000, "constructor")
+            },
         ],
     };
-    for &(bit, word) in [
-        (0x1, "public "),
-        (0x2, "private "),
-        (0x4, "protected "),
-        (0x8, "static "),
-        (0x10, "final "),
-    ]
-    .iter()
-    .chain(specific)
-    {
-        if raw & bit != 0 {
+    let mut known = 0u32;
+    for bit in common.iter().chain(specific.iter()) {
+        known |= bit.mask;
+        if bit.mask == 0 || raw & bit.mask == 0 {
+            continue;
+        }
+        if let Some(word) = bit.word {
             out.put(word)?;
-            displayed |= bit;
         }
     }
-    if raw & !displayed != 0 {
-        out.fmt(format_args!("flags<0x{raw:x}> "))?;
+    let mut markers = [None; MAX_MARKERS];
+    let mut count = 0usize;
+    for bit in common.iter().chain(specific.iter()) {
+        let Some(marker) = bit.marker else {
+            continue;
+        };
+        if bit.mask == 0 || raw & bit.mask == 0 {
+            continue;
+        }
+        if count == MAX_MARKERS {
+            return Err(RenderError::Invariant(
+                "access flag markers exceed the declared table",
+            ));
+        }
+        markers[count] = Some(marker);
+        count += 1;
+    }
+    // The declared-synchronized bit has meaning only on a method. Elsewhere it
+    // remains an undefined bit of that kind and is not given a method name.
+    if matches!(scope, FlagScope::Method { .. }) && raw & 0x20000 != 0 {
+        known |= 0x20000;
+        if count == MAX_MARKERS {
+            return Err(RenderError::Invariant(
+                "access flag markers exceed the declared table",
+            ));
+        }
+        markers[count] = Some("declared_synchronized");
+        count += 1;
+    }
+    if count > 0 {
+        out.put("dex_flags<")?;
+        for (i, marker) in markers.iter().take(count).enumerate() {
+            if i > 0 {
+                out.put(" ")?;
+            }
+            out.put(marker.ok_or(RenderError::Invariant(
+                "access flag marker was not retained",
+            ))?)?;
+        }
+        out.put("> ")?;
+    }
+    let unknown = raw & !known;
+    if unknown != 0 {
+        out.fmt(format_args!("unknown_flags<0x{unknown:x}> "))?;
     }
     Ok(())
 }

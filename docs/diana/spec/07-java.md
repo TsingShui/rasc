@@ -57,19 +57,23 @@ it is not an empty parameter list. An unavailable expression retains its concret
 gap and provenance. P7 MUST NOT substitute zero, null, NOP or a fabricated local.
 Reference-read errors and opcode-use errors remain distinct.
 
-Ordinary calls use a natural surface when no delivered fact requires explicit
-target qualification. A known difference between local storage/type sources and
-the formal parameter, an original-name form, a missing signature/layout, dynamic
-invocation, or a delivered return-only target ambiguity selects `FullSignature`.
-This comparison is not overload resolution or subtype checking. Unknown external
-declarations do not block ordinary calls. Both forms retain the complete original
+Ordinary calls use a natural surface unless the delivered references leave the
+binding ambiguous: an original-name form, a missing signature or argument layout,
+dynamic invocation, or another delivered reference with the same owner, name and
+arity but a different parameter list or return type. An argument whose displayed
+type only widens into the formal parameter is not such an ambiguity, so the call
+keeps its natural surface; P7 inserts no conversion for it. This comparison is
+not overload resolution, subtype checking or a claim about declarations outside
+the input. Unknown external declarations do not block ordinary calls. Both forms
+retain the complete original
 reference, dispatch kind, receiver, argument order and invocation prototype.
 P7 MUST NOT insert casts, typed aliases, boxing or helpers to influence binding.
 `LocalSpelling` uses a nominal name only for complete, equal delivered reference
 type sources; other locals retain their machine storage representation. Calls
 using such reference carriers select an explicit signature rather than pretending
 that the display supplies a nominal argument type. Header parameter names are
-fixed by P7, including no-code declarations.
+fixed by P7, including no-code declarations. P9 prints the selected suffix as
+`[binding ...]`; a natural call prints only the receiver, member and arguments.
 
 P1 supplies checked call-site IDs, bytes/range, argument count and flat bootstrap
 events. A separate flat leaf-declaration pool retains referenced strings, types,
@@ -91,6 +95,14 @@ steps. P7 maps storage reads and destinations without rebuilding a parallel-copy
 schedule. Unavailable assignments remain gaps; a plan ID alone does not authorize
 an assignment. Pure literal definitions can omit an emitted statement only when
 all publication plans are literal and no before/snapshot/after copy is attached.
+
+A jump whose destination is the statement printed immediately after it is
+ordinary sequencing, so the final plan prints no `goto`. The search may pass
+upward only through containers that print their children in order and add nothing
+after them; a loop body never falls through its own test. Each exception site also
+records whether its route still needs an inline marker: a natural single route
+targeting an enclosing printed catch does not, because the chain line and the catch
+scope already state it. Other sites keep a compact chain reference.
 
 P5-selected construction groups become `New` expressions. The group retains
 allocation and initialization operations, member/edge provenance, arguments,

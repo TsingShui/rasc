@@ -76,7 +76,16 @@ fn class_result(out: &mut Buffer, class: &p8::ClassResult) -> Result<(), RenderE
     super::values::metadata(out, &lookup, class.values())?;
     let start = out.position();
     let header = class.header();
-    super::names::flags(out, header.flags, super::names::FlagScope::Class)?;
+    super::names::flags(
+        out,
+        header.flags,
+        super::names::FlagScope::Class {
+            interface: matches!(
+                header.kind,
+                p8::ClassKind::Interface | p8::ClassKind::Annotation
+            ),
+        },
+    )?;
     out.put(match header.kind {
         p8::ClassKind::Class => "class ",
         p8::ClassKind::Interface => "interface ",
@@ -434,7 +443,16 @@ fn header_line(
     h: &p7::MethodHeader,
 ) -> Result<(), RenderError> {
     out.indent()?;
-    super::names::flags(out, h.access_flags, super::names::FlagScope::Method)?;
+    super::names::flags(
+        out,
+        h.access_flags,
+        super::names::FlagScope::Method {
+            initializer: matches!(
+                h.kind,
+                p7::MethodKind::Constructor | p7::MethodKind::ClassInitializer
+            ),
+        },
+    )?;
     if let Some(ty) = names.result {
         lookup.print(out, ty)?;
     } else {

@@ -6,10 +6,14 @@ mod expressions;
 use super::build::{bug, filled};
 use super::*;
 use crate::p2::BlockId;
+use crate::p5::ThrowSite;
 
 /// Retains only textually referenced labels and selects an ordinary loop test
 /// when its selected predicate node has no work other than its condition.
 pub(super) fn construct(code: &mut MethodCode) -> Result<(), ExpressionError> {
+    // Sequencing is fixed before labels are selected, so a collapsed jump no
+    // longer keeps a display label alive.
+    collapse_fallthrough_gotos(code)?;
     let mut labels = filled(code.labels.len(), false)?;
     let mut controls = filled(code.controls.len(), false)?;
     let mut chains = filled(code.chains.len(), false)?;
@@ -39,6 +43,7 @@ pub(super) fn construct(code: &mut MethodCode) -> Result<(), ExpressionError> {
         }
     }
     code.emission.show_chains = chains;
+    code.emission.site_annotations = site_annotations(code)?;
     for transfer in &code.emission.transfers {
         match transfer.spelling {
             TransferSpelling::Goto(label) => mark_label(&mut labels, label)?,
@@ -164,6 +169,164 @@ pub(super) fn construct(code: &mut MethodCode) -> Result<(), ExpressionError> {
     }
     expressions::construct(code)?;
     Ok(())
+}
+
+/// A jump to the statement printed immediately after it is ordinary sequencing.
+/// Only containers that print their children in order and add nothing after them
+/// may pass the search upward; a loop body does not fall through its own test.
+fn collapse_fallthrough_gotos(code: &mut MethodCode) -> Result<(), ExpressionError> {
+    let mut parent: Vec<Option<ControlId>> = filled(code.controls.len(), None)?;
+    let mut sibling: Vec<Option<ControlId>> = filled(code.controls.len(), None)?;
+    for control in &code.controls {
+        for &child in &control.children {
+            let slot = parent
+                .get_mut(child.0 as usize)
+                .ok_or(bug("control names an unknown child"))?;
+            if slot.replace(control.id).is_some() {
+                return Err(bug("control has two containment owners"));
+            }
+        }
+        if matches!(control.kind, ControlKind::Sequence) {
+            for pair in control.children.windows(2) {
+                let slot = sibling
+                    .get_mut(pair[0].0 as usize)
+                    .ok_or(bug("sequence names an unknown child"))?;
+                if slot.replace(pair[1]).is_some() {
+                    return Err(bug("sequence child has two print successors"));
+                }
+            }
+        }
+    }
+    for transfer in 0..code.emission.transfers.len() {
+        let TransferSpelling::Goto(label) = code.emission.transfers[transfer].spelling else {
+            continue;
+        };
+        let from = code.transfers[transfer].from;
+        let Some(owner) = code.labels.get(from.0 as usize).map(|label| label.owner) else {
+            continue;
+        };
+        let Some(next) = printed_successor(code, &parent, &sibling, owner) else {
+            continue;
+        };
+        if matches!(
+            code.emission.controls[next.0 as usize].layout,
+            EmissionLayout::Block(node) if node.0 == label.0
+        ) {
+            code.emission.transfers[transfer].spelling = TransferSpelling::Fallthrough;
+        }
+    }
+    Ok(())
+}
+fn printed_successor(
+    code: &MethodCode,
+    parent: &[Option<ControlId>],
+    sibling: &[Option<ControlId>],
+    start: ControlId,
+) -> Option<ControlId> {
+    let mut current = start;
+    for _ in 0..=code.controls.len() {
+        if let Some(next) = sibling.get(current.0 as usize).copied().flatten() {
+            return Some(next);
+        }
+        let parent = parent.get(current.0 as usize).copied().flatten()?;
+        if !matches!(
+            code.controls.get(parent.0 as usize)?.kind,
+            ControlKind::Sequence
+                | ControlKind::LabelledBlock { .. }
+                | ControlKind::Graph { .. }
+                | ControlKind::Synchronized { .. }
+        ) {
+            return None;
+        }
+        // A container with its own continuation prints that jump before the
+        // enclosing successor, so control does not fall into it.
+        if code.emission.controls[parent.0 as usize]
+            .continuation
+            .is_some()
+        {
+            return None;
+        }
+        current = parent;
+    }
+    None
+}
+/// A natural route already printed as the enclosing try/catch needs no repeated
+/// annotation. Explicit protection, several targets and unplaced routes keep one.
+fn site_annotations(code: &MethodCode) -> Result<Vec<bool>, ExpressionError> {
+    let mut parent: Vec<Option<ControlId>> = filled(code.controls.len(), None)?;
+    for control in &code.controls {
+        for &child in &control.children {
+            let slot = parent
+                .get_mut(child.0 as usize)
+                .ok_or(bug("control names an unknown child"))?;
+            if slot.replace(control.id).is_some() {
+                return Err(bug("control has two containment owners"));
+            }
+        }
+    }
+    let mut owner: Vec<Option<ControlId>> = filled(code.labels.len(), None)?;
+    for label in &code.labels {
+        *owner
+            .get_mut(label.node.0 as usize)
+            .ok_or(bug("label names an unknown node"))? = Some(label.owner);
+    }
+    let mut node_of_block: Vec<Option<u32>> = filled(code.terminals.len(), None)?;
+    for (node, block) in code.emission.blocks.iter().enumerate() {
+        if let BlockEnd::Terminal(terminal) = block.end {
+            *node_of_block
+                .get_mut(terminal.0 as usize)
+                .ok_or(bug("block end names an unknown terminal"))? =
+                Some(u32::try_from(node).map_err(|_| crate::RequestError::PlatformCapacity)?);
+        }
+    }
+    let mut required = filled(code.sites.len(), true)?;
+    for site in &code.sites {
+        if matches!(
+            site.syntax,
+            ExceptionSyntax::Propagate | ExceptionSyntax::ImpossibleRelease
+        ) {
+            required[site.id.0 as usize] = false;
+            continue;
+        }
+        if !matches!(site.syntax, ExceptionSyntax::Natural) {
+            continue;
+        }
+        let [route] = site.routes.as_slice() else {
+            continue;
+        };
+        let Delivery::Catch(target) = route.delivery else {
+            continue;
+        };
+        let node = match site.original {
+            ThrowSite::Operation(op) => code.operations.get(op.0 as usize).map(|o| o.node),
+            ThrowSite::Terminal(block) => node_of_block
+                .get(block.0 as usize)
+                .copied()
+                .flatten()
+                .map(crate::p6::NodeId),
+        };
+        let Some(start) = node.and_then(|node| owner.get(node.0 as usize).copied().flatten())
+        else {
+            continue;
+        };
+        if contains(&parent, start, target) {
+            required[site.id.0 as usize] = false;
+        }
+    }
+    Ok(required)
+}
+fn contains(parent: &[Option<ControlId>], start: ControlId, target: ControlId) -> bool {
+    let mut current = start;
+    for _ in 0..=parent.len() {
+        if current == target {
+            return true;
+        }
+        match parent.get(current.0 as usize).copied().flatten() {
+            Some(next) => current = next,
+            None => return false,
+        }
+    }
+    false
 }
 fn mark_label(labels: &mut [bool], label: LabelId) -> Result<(), ExpressionError> {
     *labels

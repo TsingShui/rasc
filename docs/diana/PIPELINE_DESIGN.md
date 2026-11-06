@@ -1687,8 +1687,8 @@ Java-like 调用的目标签名限定是绑定信息，不是泛型类型实参�
 运行时操作。下列两项保留不同的已交付原调用引用：
 
 ```text
-Api.register(h) [Static method#1; target Api.register<("Lsample/Listener;") -> "V">];
-Api.register(h) [Static method#2; target Api.register<("Lsample/Handler;") -> "V">];
+Api.register(h) [binding Api.register<("Lsample/Listener;") -> "V">];
+Api.register(h) [binding Api.register<("Lsample/Handler;") -> "V">];
 ```
 
 限定符不改变 h 的值、类型来源、求值次数、初始化状态或调用顺序，不引入
@@ -1697,11 +1697,13 @@ check-cast、辅助调用或新的异常位置，也不把原本不可用的来�
 限定形式是调用表达的语义，不是用注释替代不正确的调用目标。
 
 内部完整引用包括返回类型。参数简写不能准确区分原目标时，保留完整
-DEX descriptor。P9 当前将完整目标限定放在调用后的绑定后缀中；该后缀是
-调用语义而不是注释或新操作。
+DEX descriptor。只有 P7 选出 FullSignature 时 P9 才打印调用后的
+`[binding ...]` 后缀；该后缀是绑定信息，不是注释或新操作。
 原命名空间中的重复或歧义也不能被简写隐藏。P7 用已交付事实确定限定
 形式，P8 只落实既有类名/import 显示计划；P9 只打印既有表达，不求解重载
-或重新读取声明。polymorphic/custom 调用仍保留各自的原引用、独立调用
+或重新读取声明。默认自然调用只打印已确定的接收者、成员和实参；原引用
+身份、invoke kind 和调用原型保留在拥有的引用记录与来源 spans 中，不逐调用
+重复打印。实参显示类型只是向形参拓宽时不属于歧义。polymorphic/custom 调用仍保留各自的原引用、独立调用
 原型和 call-site/handle 身份，不能用限定符把它们重新绑定成普通调用。
 
 普通自然调用仍是默认显示；需要明确原目标时使用签名限定，不以生成

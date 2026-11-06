@@ -39,7 +39,7 @@ impl Expressions<'_, '_> {
         if !matches!(s.kind, StatementKind::Construction(_)) {
             self.phases(&phases.snapshots, "after_operands_before_effect")?;
         }
-        self.sites(&s.sites)?;
+        self.sites(&s.sites, start)?;
         self.out.put(";")?;
         for definition in &s.outputs {
             if let Materialization::Unavailable(gap) = definition.materialization() {
@@ -92,35 +92,23 @@ impl Expressions<'_, '_> {
         }
         self.out.put("\n")
     }
-    fn sites(&mut self, sites: &[SiteId]) -> Result<(), RenderError> {
+    fn sites(&mut self, sites: &[SiteId], statement: TextOffset) -> Result<(), RenderError> {
         for &id in sites {
             let s = &self.code.sites()[id.0 as usize];
-            let start = self.out.position();
-            if !matches!(s.syntax, ExceptionSyntax::Propagate) {
-                self.out
-                    .fmt(format_args!(" [s{} c{} {:?}", id.0, s.chain.0, s.syntax))?;
-                for route in &s.routes {
-                    self.out
-                        .fmt(format_args!(" e{}#{}=", route.edge.0, route.order))?;
-                    match route.delivery {
-                        Delivery::Explicit => self.out.put("explicit")?,
-                        Delivery::Catch(control) => {
-                            self.out.fmt(format_args!("catch:R{}", control.0))?
-                        }
-                        Delivery::ImpossibleRelease(statement) => self
-                            .out
-                            .fmt(format_args!("impossible_release:stmt{}", statement.0))?,
-                    }
-                }
-                self.out.put("]")?;
+            let origin = Origin::Site {
+                method: self.method,
+                site: id,
+            };
+            if !self.code.emission().site_annotation(id) {
+                // The route is already printed as the enclosing catch scope.
+                self.out.span(statement, origin)?;
+                continue;
             }
-            self.out.span(
-                start,
-                Origin::Site {
-                    method: self.method,
-                    site: id,
-                },
-            )?;
+            let start = self.out.position();
+            // The printed chain line carries clause order, catch types and
+            // handler targets; the site only names the chain it selects.
+            self.out.fmt(format_args!(" [exn c{}]", s.chain.0))?;
+            self.out.span(start, origin)?;
         }
         Ok(())
     }
@@ -268,7 +256,7 @@ impl Expressions<'_, '_> {
                 }
                 self.phases(&p.snapshots, "after_operands_before_effect")?;
                 if let Some(s) = t.site {
-                    self.sites(&[s])?;
+                    self.sites(&[s], start)?;
                 }
                 self.out.put(";\n")?;
             }
@@ -277,7 +265,7 @@ impl Expressions<'_, '_> {
                 self.operand(*v)?;
                 self.phases(&p.snapshots, "after_operands_before_effect")?;
                 if let Some(s) = t.site {
-                    self.sites(&[s])?;
+                    self.sites(&[s], start)?;
                 }
                 self.out.put(";\n")?;
             }
@@ -794,7 +782,7 @@ impl Expressions<'_, '_> {
                     self.operand(*lock)?;
                     self.out.put(") with_explicit_exits")?;
                     self.phases(&phase.snapshots, "after_operands_before_effect")?;
-                    self.sites(&self.code.statements()[statement.0 as usize].sites)?;
+                    self.sites(&self.code.statements()[statement.0 as usize].sites, a)?;
                     self.out.span(
                         a,
                         Origin::Operation {

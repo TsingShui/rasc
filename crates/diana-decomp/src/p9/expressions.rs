@@ -449,8 +449,12 @@ impl<S: ExpressionSource> Expressions<'_, '_, S> {
                     match m {
                         MemberDeclaration::Field { field_type, .. } => {
                             self.out.put("<")?;
-                            self.out
-                                .units(&self.code.types()[field_type.0 as usize].units, true)?;
+                            self.names.body(
+                                self.out,
+                                self.lookup,
+                                self.code.types(),
+                                *field_type,
+                            )?;
                             self.out.put(">")?;
                         }
                         MemberDeclaration::Method { prototype, .. } => self.signature(prototype)?,
@@ -516,24 +520,15 @@ impl<S: ExpressionSource> Expressions<'_, '_, S> {
         self.out.put("(")?;
         self.args(&c.arguments)?;
         self.out.put(")")?;
-        let original = self.code.references()[c.target.0 as usize]
-            .position
-            .reference;
-        self.out.fmt(format_args!(" [{:?} ", c.kind))?;
-        match original {
-            crate::raw::OperandReference::Method(id) => {
-                self.out.fmt(format_args!("method#{}", id.0))?
-            }
-            crate::raw::OperandReference::CallSite(id) => {
-                self.out.fmt(format_args!("call_site#{}", id.0))?
-            }
-            other => self.out.fmt(format_args!("{other:?}"))?,
-        }
+        // Only a selected explicit signature stays in the text; the original
+        // target id, dispatch kind and prototype remain owned reference facts
+        // and keep their source span without repeating after every call.
         if matches!(c.qualification, Qualification::FullSignature) {
-            self.out.put("; target ")?;
+            self.out.put(" [binding ")?;
             self.member(c.target, None, true)?;
+            self.out.put("]")?;
         }
-        self.out.put("]")
+        Ok(())
     }
     pub fn reference(&mut self, r: ReferenceId) -> Result<(), RenderError> {
         let reference = self

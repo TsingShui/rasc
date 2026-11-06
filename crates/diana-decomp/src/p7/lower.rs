@@ -6,6 +6,10 @@ use crate::p4::{ConstructorRelation, Family, Initialization, Interpretation};
 use crate::p5::ThrowSite;
 use crate::p6::{self, OperationOwner, TerminalOwner};
 
+/// A natural surface is used unless the delivered references leave the call
+/// ambiguous for a reader. Argument display types are not an ambiguity by
+/// themselves: widening a String argument into an Object parameter is not a
+/// different overload, and P7 does not invent casts or overload resolution.
 fn qualification(
     c: &Context<'_, '_>,
     target: ReferenceId,
@@ -29,6 +33,13 @@ fn qualification(
     if name.form == NameForm::Original || args.len() != prototype.parameters.len() {
         return Qualification::FullSignature;
     }
+    let owner_units = &c.code.types[owner.0 as usize].units;
+    let parameters: Vec<&[u16]> = prototype
+        .parameters
+        .iter()
+        .map(|t| c.code.types[t.0 as usize].units.as_slice())
+        .collect();
+    let returns = &c.code.types[prototype.returns.0 as usize].units;
     for other in &c.code.references {
         if other.position.reference == c.code.references[target.0 as usize].position.reference {
             continue;
@@ -41,65 +52,20 @@ fn qualification(
         else {
             continue;
         };
-        if other_name.units == name.units
-            && c.code.types[other_owner.0 as usize].units == c.code.types[owner.0 as usize].units
-            && other_prototype.parameters.len() == prototype.parameters.len()
-            && other_prototype
-                .parameters
-                .iter()
-                .zip(&prototype.parameters)
-                .all(|(a, b)| c.code.types[a.0 as usize].units == c.code.types[b.0 as usize].units)
-            && c.code.types[other_prototype.returns.0 as usize].units
-                != c.code.types[prototype.returns.0 as usize].units
+        if other_name.units != name.units
+            || c.code.types[other_owner.0 as usize].units != *owner_units
+            || other_prototype.parameters.len() != parameters.len()
         {
-            return Qualification::FullSignature;
+            continue;
         }
-    }
-    for (&arg, &formal) in args.iter().zip(&prototype.parameters) {
-        let formal = &c.code.types[formal.0 as usize].units;
-        if let ExprKind::Read { storage, .. } | ExprKind::Snapshot { storage } =
-            c.code.expressions[arg.0 as usize].kind
-        {
-            let local = &c.code.locals[storage.0 as usize];
-            if matches!(
-                super::emission::local_spelling(&c.code.types, local),
-                LocalSpelling::Machine(crate::p5::StorageType::Family {
-                    family: Family::Reference,
-                    ..
-                })
-            ) {
-                return Qualification::FullSignature;
-            }
-            if local
-                .declared_types
-                .iter()
-                .any(|t| c.code.types[t.0 as usize].units != *formal)
-            {
-                return Qualification::FullSignature;
-            }
-            let scalar = match local.original.storage_type() {
-                crate::p5::StorageType::Family {
-                    family: Family::Integral,
-                    ..
-                } => Some(b'I'),
-                crate::p5::StorageType::Family {
-                    family: Family::Long,
-                    ..
-                } => Some(b'J'),
-                crate::p5::StorageType::Family {
-                    family: Family::Float,
-                    ..
-                } => Some(b'F'),
-                crate::p5::StorageType::Family {
-                    family: Family::Double,
-                    ..
-                } => Some(b'D'),
-                crate::p5::StorageType::NumericBits { .. } => return Qualification::FullSignature,
-                _ => None,
-            };
-            if scalar.is_some_and(|letter| formal.as_slice() != [u16::from(letter)]) {
-                return Qualification::FullSignature;
-            }
+        let same_parameters = other_prototype
+            .parameters
+            .iter()
+            .zip(&parameters)
+            .all(|(a, b)| c.code.types[a.0 as usize].units == **b);
+        let other_returns = &c.code.types[other_prototype.returns.0 as usize].units;
+        if !same_parameters || other_returns != returns {
+            return Qualification::FullSignature;
         }
     }
     Qualification::Natural
