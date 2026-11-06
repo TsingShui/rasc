@@ -39,10 +39,11 @@ promote it to a completed MethodResult. The production method chain has no paral
 ## Unified operation lowering
 
 P7 uses exhaustive P2 operation/terminal matches for both natural and explicit
-control. Default expressions read established locals, snapshots or exact literal
-bits; operation results materialize at P5's original normal completion. P7 MUST
-NOT inline an effect merely because its result has one use. Unused calls, loads,
-checks and arithmetic effects retain their original execution and exception sites.
+control. Lowering starts from established locals, snapshots and exact literal bits.
+The final layout either retains P5's original materialization or composes a
+definition at an admitted adjacent use. P7 MUST NOT inline an effect merely
+because its result has one use. Unused calls, loads, checks and arithmetic effects
+retain their original execution and exception sites.
 
 The operation rules cover moves, constants, unary conversions, binary/compare
 operations, field/array reads and writes, array length/fill/allocation,
@@ -133,7 +134,7 @@ scope continuations. Syntax-owned header/predicate continuations are deferred to
 their owner, so a header cannot jump past its own test or monitor acquisition.
 Loop-condition edge copies stay inside that test's selected-edge clauses; they
 are not appended after a loop. `LoopPlacement` distinguishes infinite, head-test
-and tail-test forms without contradictory optional states.
+and tail-test forms and records when an empty predicate can use a compact form.
 
 Matched releases print at their original nodes. Their after-release copies and
 routing terminals also stay at their original nodes and therefore keep original
@@ -142,6 +143,47 @@ exits, not another implicit release at its closing brace. A selected compound
 construction resumes at the original initializer node when it crosses nodes;
 absorbed statements remain suppressed even for backward-PC channels. These are
 placements of existing plans, not region identification or a new dispatcher.
+
+## Composition before publication
+
+`p7/compose` consumes the lowered P7 operations, P5 materializations and the
+completed P6-derived emission layout. It does not decode input, rebuild SSA,
+identify regions or reschedule copies. Composition modifies the one final
+`EmissionPlan` before `MethodResult` is published. P9 prints that plan.
+
+The expression pass composes an integral/floating pure unary or binary definition
+only when its original result is a single available numeric local, has one
+compatible use, and has no associated effect, exception or copy/snapshot phase.
+An adjacent operation use must be its first captured operand and have no
+before-operation copies. A return use must be the next original node in the same
+block, with one incoming fallthrough, no intervening work or terminal phases,
+and adjacent selected sequence children. All operands remain in original order.
+Locals participating in copies or construction publication are not hidden. An
+unavailable copy dependency prevents this optional composition for that method.
+
+An original `instance-of` can compose with an immediately following equality or
+inequality branch only when its checked type reference is available, its original
+exception propagates without a local handler or snapshot, and the same adjacency
+and storage requirements hold. Its check and possible exception still occur once
+before branch selection. No cast or new SSA definition is invented.
+
+The current expression pass does not nest already composed operands. This keeps
+expression rendering stack usage independent of input expression depth. Original
+operations, PCs, statements, transfer records and gaps remain owned; composed
+operations map to the expression range, and a cross-node source control spans
+through its composed use.
+
+The layout pass keeps labels referenced by explicit transfers, graph entries,
+exception handlers and construction continuations. Unreferenced labels retain
+zero-length source anchors. An unreferenced Sequence or If wrapper can be
+transparent; graph and labeled scopes remain explicit. A loop condition becomes
+ordinary `while`/`do-while` only when the predicate block, terminal phases and
+both edge copy schedules contain no work. Otherwise the existing explicit test
+retains its edge obligations. Pure propagation chains can be implicit only when
+no displayed site or handler requires the chain.
+
+Integral literals encoded in integer arithmetic instructions retain their original
+bits and an integral view. Other bit-pattern literals keep their supplied views.
 
 ## Failure and evidence
 
@@ -155,17 +197,9 @@ Local input/type/storage/control uncertainty remains in the owned mature result
 and affects only its actual consumers. No error kind automatically truncates
 siblings or promotes a construction prefix to success.
 
-The sole authorized core test independently compares original operations,
-operand order, declarations, copies, construction publications, selected targets,
-handler ordering, capture ownership and outlet phases. Finite symbolic traces
-compare original/P5, P6 and owned P7 schedules, values and lock events. They use
-supplied path choices and opaque operation results, not a VM or heap/callee model.
-Natural compound construction uses correspondence obligations rather than that
-non-compound trace interpreter. Metadata/bootstrap fixtures supply independent
-encoded expectations and exercise result lifetime after input/Engine release.
-
-These checks compile only under `cfg(test)`. Ordinary Engine requests do not run
-independent replay, correspondence passes or a verification switch. P7 JSON support
-serializes the inspection product; final source and UTF-8 spans are owned by
-[P9](09-rendering.md), without a Java-legality gate. P8/P9 MUST consume the existing expression and naming products rather than
-repairing or re-analyzing execution.
+The previous core test was removed by operator decision. Ordinary Engine
+requests do not run independent replay, correspondence passes or a verification
+switch. P7 JSON serializes the inspection product; final text and UTF-8 spans are
+owned by [P9](09-rendering.md), without a Java-legality gate. P8/P9 MUST consume
+the existing expression and naming products rather than repairing or re-analyzing
+execution. Corpus completion is not an arbitrary VM, heap/callee or lock proof.

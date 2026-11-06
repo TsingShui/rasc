@@ -167,10 +167,7 @@ fn semantic(
             let second = if let Some(value) = literal {
                 let word = i32::try_from(*value)
                     .map_err(|_| bug("int literal is wider than its encoding"))?;
-                c.literal(
-                    u64::from(u32::from_le_bytes(word.to_le_bytes())),
-                    crate::SlotWidth::One,
-                )?
+                c.integral_literal(u32::from_le_bytes(word.to_le_bytes()))?
             } else {
                 c.argument(args, 1)?
             };

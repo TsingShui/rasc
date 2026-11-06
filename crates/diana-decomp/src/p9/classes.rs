@@ -268,12 +268,18 @@ fn method(
             header_line(out, lookup, &names, header)?;
             if let Some(code) = result.code() {
                 out.open()?;
+                let mut pending = Vec::new();
+                pending
+                    .try_reserve_exact(code.emission().controls().len())
+                    .map_err(RenderError::MethodScratch)?;
+                pending.resize(code.emission().controls().len(), None);
                 let mut context = Expressions {
                     out,
                     method: member.id,
                     code,
                     names: &names,
                     lookup,
+                    pending_controls: Some(&mut pending),
                 };
                 context.body()?;
                 out.close()?;
@@ -319,6 +325,7 @@ fn method(
                     code: prefix.as_ref(),
                     names: &names,
                     lookup,
+                    pending_controls: None,
                 };
                 for local in prefix.local_declarations() {
                     context.out.indent()?;

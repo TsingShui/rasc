@@ -153,8 +153,6 @@ remaining publication limits are recorded in the engine README.
 
 Use the single `dbg_shell` example with `p3` (`details:true` for records) or
 `p3-all`. P2 and byte-roundtrip commands observe products retained by the same
-Engine chain; they do not bypass P3 or start a second analysis route. The testing
-policy remains the root AGENTS.md scoped exception. The existing core test also
-covers SSA joins, loops, entry backedges, irreducible flow, exception-old-state
-binding, overlap invalidation and unproved sources; no separate suite or committed
-corpus fixture is introduced.
+Engine chain; they do not bypass P3 or start a second analysis route. The
+previous core test was removed by operator decision; the root AGENTS.md prohibits
+adding tests. Inspection does not prove SSA correspondence.

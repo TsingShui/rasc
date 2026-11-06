@@ -132,20 +132,9 @@ member names, call signatures and P7 execution products remain unchanged. The
 plan does not certify Java name binding, access legality or compilability.
 P9 consumes the chosen spelling; it does not decide imports or shorten names.
 
-## Independent evidence
+## Evidence boundary
 
-The sole authorized core test exercises public Engine requests. It checks member
-coverage and order, original IDs, declaration availability, explicit versus
-implicit preparation, metadata event semantics, source-to-type mapping, imports,
-local shadowing, shared annotation scopes and standalone naming. Fixtures include
-a stopped body beside readable/native/bridge members, damaged field declarations,
-composite-value prefixes and truncated directory tails. Owned products are read
-after Engine/input release.
-
-Name expectations are literal fixture expectations, not values derived from the
-planner. Method products are compared with the same execution's retained P7
-result. Mutation checks are accepted only after successful compilation and the
-intended obligation fails. These checks compile only under `cfg(test)`; normal
-Engine requests have no independent verifier or verification switch. Finite
-fixtures and corpus observations do not prove arbitrary metadata, scope, resource
-or VM execution behavior.
+The previous core test was removed by operator decision. Normal Engine requests
+have no independent verifier or verification switch. Corpus observations and
+successful assembly do not prove arbitrary metadata, scope, resource or VM
+execution behavior.

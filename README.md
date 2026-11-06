@@ -46,9 +46,9 @@ cargo build --workspace --release --locked
 Use `-p diana` or `-p diana-decomp` to select one package. Both share the root
 `Cargo.lock`; the archived reference retains its own lockfile. The active
 [Diana CI](.github/workflows/diana.yml) checks format, lint and release builds
-without publishing. Historical test cases and fixtures have been removed;
-[AGENTS.md](AGENTS.md) defines one scoped core-test exception. These checks do not establish
-semantic correctness or real-application coverage.
+without publishing. Test cases and fixtures have been removed by operator
+decision; [AGENTS.md](AGENTS.md) prohibits adding tests. These checks do not
+establish semantic correctness or real-application coverage.
 
 
 ## Local reference material

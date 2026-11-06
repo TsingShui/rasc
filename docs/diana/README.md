@@ -39,6 +39,6 @@ or method-analysis route.
 
 Engine inspection uses the single `dbg_shell` Cargo example. Build/lint success,
 byte roundtrip and finite corpus checks have different evidence scopes; none alone
-proves complete decompilation correctness. Historical test cases and fixtures
-were removed by operator decision; root AGENTS.md owns the scoped core-test
-exception. Production safety and stage-owned translation checks remain required.
+proves complete decompilation correctness. Test cases and fixtures were removed
+by operator decision; root AGENTS.md prohibits adding tests. Production safety
+and stage-owned transform checks remain required.

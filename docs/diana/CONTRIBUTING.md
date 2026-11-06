@@ -148,12 +148,10 @@ reproducible inputs; no private APKs are committed.
 
 ## Testing policy
 
-The root [AGENTS.md](../../AGENTS.md) owns the prohibition on unit-test development.
-Existing unit and integration cases, fixtures and test-only helpers are removed
-by operator decision. The root policy defines one operator-approved core
-unit-test exception for P2/P3 semantic cases through public Engine interfaces.
+The root [AGENTS.md](../../AGENTS.md) prohibits developing, adding or restoring
+tests. The previous core test and other cases were removed by operator decision.
 CI runs format, lint and build checks without test jobs.
-Contributors MUST NOT restore the removed cases or test-only construction paths.
+Contributors MUST NOT restore removed cases or test-only construction paths.
 
 Contributors MUST NOT write tests for non-core code, including maintenance
 scripts, downloaders, documentation generators and build/release helpers.
@@ -164,9 +162,9 @@ Production retains safe parsing, range/arithmetic checks, fallible allocation an
 necessary construction error handling. Independent output audits, symbolic replay,
 duplicate graph/dominance checks and transform-correspondence verification MUST
 compile only under `cfg(test)`. Ordinary debug/release requests MUST NOT execute
-them, and no runtime or feature switch enables them. Tests exercise the same
-Engine algorithms with those verifiers enabled; a successful production product
-means construction completed, not that an independent verifier accepted it.
+them, and no runtime or feature switch enables them. No test case is present to
+invoke these existing verifiers. A successful production product means construction
+completed, not that an independent verifier accepted it.
 
 Regression review checks original member identities, readable availability and
 classified failures. Respect unrelated uncommitted work and obtain operator

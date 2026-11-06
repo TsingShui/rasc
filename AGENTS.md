@@ -107,17 +107,13 @@ chapters describe the existing implementation until migrated to this target.
   It accepts a bare DEX, emits one JSON response per command, and exposes the
   delivered P0/P1/P2/P3/P4/P5/P6/P7/P8/P9 products. Do not add phase-specific debug binaries, renderers or
   debug examples.
-- Contributors MUST NOT develop, add or restore any unit tests, including inline
-  `#[test]` functions, `#[cfg(test)]` modules and private-phase test harnesses.
-  Existing test cases and fixtures are removed by operator decision.
-  The sole operator-approved exception is the one core test in
-  `crates/diana-decomp/src/dynamic_instructions_test.rs`, exercised through public
-  Engine interfaces with synthetic DEX input, including P2/P3 correspondence cases. Contributors MAY maintain this
-  scoped test and run it with `cargo nextest run`; this does not authorize other
-  tests, fixture suites or private-stage harnesses.
-- Contributors MUST NOT add tests, fixtures or CI test jobs for non-core tooling.
-  Production input safety and necessary construction errors remain enforced;
-  independent transform verification remains test-only. Build/lint success does not establish semantic correctness.
+- Contributors MUST NOT develop, add or restore unit, integration, end-to-end or
+  other automated tests, including inline `#[test]` functions, new `#[cfg(test)]`
+  modules, private-phase test harnesses, fixtures and CI test jobs. The previous
+  core test was removed by operator decision.
+- Production input safety, analysis invariants and semantics-preserving transform
+  checks remain required. Existing independent verifier code MUST NOT run in
+  ordinary requests. Build/lint success does not establish semantic correctness.
 - Respect uncommitted work; obtain approval before withdrawing or committing
   unrelated changes. Do not commit, push, publish or tag unless requested.
   Authorized commit subjects start with `[AUTOMATED] ` and a Conventional type.

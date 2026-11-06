@@ -31,8 +31,9 @@ as an execution representation. The notation identifier is
 The output is Java-like code with explicit forms for existing DEX operations and
 phase boundaries. These forms do not introduce runtime helpers or a dispatcher.
 Ordinary values use P7's locals, literal views and materializations. Calls retain
-original target IDs, dispatch and separate invocation prototypes; a signature
-qualifier is binding information, not a conversion or generic invocation.
+original target IDs, dispatch and separate invocation prototypes. A selected
+full signature is printed in the call's binding suffix; this is part of the
+Java-like call notation, not a conversion, generic invocation or mere comment.
 
 The following forms have fixed execution meanings:
 
@@ -42,7 +43,7 @@ The following forms have fixed execution meanings:
 | `[after_operands_before_effect { copies }]` | Capture the operation's original operands, run its supplied snapshot steps, then execute the original effect. A result assignment commits only on normal completion. |
 | `new T(arguments) [on_success publish (locals)]` | Execute the selected P5 construction and publish its aliases only after successful initialization. Its common snapshot prelude precedes allocation. |
 | `resume construction g at label` | Continue the selected compound expression at the original initializer's node. Absorbed members are not executed again; PC order is not an implicit continuation. |
-| `test { ... yield condition [on_original_true {...} on_original_false {...}]; }` | Evaluate the supplied predicate portion and execute copies only for the selected original edge. Outer negation changes repetition polarity, not which original edge owns copies. |
+| `test { ... yield condition [on_original_true {...} on_original_false {...}]; }` | Evaluate the supplied predicate portion and execute copies only for the selected original edge. Outer negation changes repetition polarity, not which original edge owns copies. An empty edge schedule needs no printed clause. |
 | `synchronized R(lock) with_explicit_exits` | The header owns the original acquire. This lexical container does not implicitly release at its closing brace or on an abrupt exit. |
 | `release synchronized R(lock)` | Execute that outlet's original release read/effect at its original node. Only the named lock scope ends; enclosing try scopes remain unchanged. |
 | `on_exception_entry { copies }` | Receive saved values only on exceptional arrival, after the original capture when present. |
@@ -52,8 +53,10 @@ The following forms have fixed execution meanings:
 P7 fixes condition/header ownership, loop repetition, child roles and necessary
 continuations. P9 prints those choices. In particular, predicate-exit copies do
 not appear in a loop's common continuation, where an independent break could
-execute them. Synchronized routing terminals and post-release copies remain at
-their original nodes rather than moving past surrounding catch scopes.
+execute them. A predicate with no separate work or edge copies can use the
+ordinary loop-condition spelling selected by P7. Synchronized routing terminals
+and post-release copies remain at their original nodes rather than moving past
+surrounding catch scopes. Uncaught propagation is not an unavailable handler.
 
 Unary conversions correspond to original conversion operations. A check-cast
 remains a check with no invented register write. Array fill preserves its one
@@ -95,7 +98,10 @@ Nested spans overlap intentionally. Empty schedules and implicit fallthrough can
 have zero-length anchors; these are not invented executed instructions.
 
 Suppressed literal statements and contracted interior transfers remain in the
-owned source products and coverage. P9 does not manufacture textual operations
+owned source products and coverage. A composed operation's range encloses its
+printed expression; its original statement and optional exception site retain
+separate origins. The original source-control range closes at the composed use
+for a cross-node composition. P9 does not manufacture textual operations
 merely to give every original instruction a nonempty range. Offsets are measured
 while writing; they are never reused from an earlier qualified-name rendering.
 
@@ -123,16 +129,7 @@ use checked arithmetic and fallible reservations; region traversal is iterative.
 
 ## Evidence boundary
 
-The existing single core test checks rendered member/operation/copy coverage,
-operand order, literal identity, selected type spelling, loop-edge copy placement,
-result-capture origins, snapshot phases and exception-entry ordering. An independent
-lexical scan checks actual try/catch and synchronized-container braces rather than
-trusting the printer's indentation or span claims. Text and JSON are compared from
-the same Engine publication, including after Engine/input release; sink failures
-are exercised separately from parser failures.
-
-These checks and P7's finite non-compound symbolic traces are test-only. They do
-not establish arbitrary VM, heap/callee, bootstrap or allocation-failure behavior.
-Mutation rejection requires successful compilation and a failure of the intended
-obligation. Corpus construction counts are observations, not per-instruction
-semantic proofs or Java-admission checks.
+The previous core test was removed by operator decision. Text/JSON use the same
+owned publication, but construction completion does not establish semantic
+equivalence. Corpus observations do not prove arbitrary VM, heap/callee,
+bootstrap, protection or allocation-failure behavior.

@@ -139,54 +139,22 @@ supply zero/null, silently omit required copies or treat an unavailable snapshot
 as an initialized local. `is_complete()` describes assignment availability within
 one plan, not method verification or source-language legality.
 
-## Test-only correspondence
+## Correspondence obligations and evidence
 
-The sole scoped core test in `src/dynamic_instructions_test.rs` consumes public
-Engine products. It does not construct P5 products, call private scheduling helpers
-or add a second analysis entry. The test checks binding/use/output/incoming
-coverage against the retained P3/P4 facts, including original state, transfer,
-interpretation, commit and handler-capture identities. Those upstream facts are
-trusted phase inputs, not independently reconstructed SSA or type conclusions.
+The normal-copy plan must realize each original incoming requirement using its
+ordered steps. Snapshot saves and receives retain their original throw and handler
+positions; temporary reads require a preceding save. An unavailable source or
+copy is not a no-op or an initialized default.
 
-After checking incoming requirements against upstream facts, the test evaluates
-simultaneous assignment from an immutable old symbolic store and compares it with
-P5's ordered steps. Distinct cell symbols expose overwritten old values; temporary
-reads require a preceding save. Literal bits and view associations remain explicit.
-A slow all-pairs least fixed point, separate from production's union/find worklist,
-checks missing-copy interference, consumer availability and reachability from each
-reported original missing-copy cause.
+Under independent storage bindings and P3's exact-slot incoming guarantee,
+different Phis on one transfer target have different slots. Snapshot namespaces
+similarly separate saved sources from destinations. This structural argument does
+not establish execution coverage of the generic cycle/temporary branch. Consumers
+MUST NOT fabricate private products to claim such coverage.
 
-Finite traces choose original branch/throw PCs, targets and catch order, not P5
-plan IDs. Reference Phi updates use the supplied original incoming. Physical
-storage follows P5 copies and materialization. Every original definition occurrence
-has a fresh symbol, preventing one iteration from borrowing a previous iteration's
-value. Snapshot and temporary storage starts undefined; tests do not seed defaults.
-Handler receives follow the original exception capture. Allocation failure produces
-no allocation result; constructor failure retains the previously committed carrier.
-For construction groups, the physical trace separates internal carrier storage
-from published locals. Group prelude saves execute once; successful initialization
-publishes each original alias, while both failure paths leave publications absent.
-Checks retain original events, reads, commits and once-only member ownership.
-These traces model storage correspondence, not concrete VM arithmetic, heap effects,
-external invocation behavior or ART admission.
-
-Under the current independent-storage policy, different value bindings have
-different locals. P3's exact-slot incoming guarantee means a normal Phi source
-shares its destination Phi's slot. Different Phis on one transfer target have
-different slots. Therefore, a source cannot be another destination in that copy
-set. Snapshot namespaces similarly separate saved sources from destinations.
-The test checks this structural invariant on its actual products. This argument
-does not verify the generic multi-storage cycle branch for arbitrary constructed
-copy graphs, or establish execution coverage of self-adapted temporary saves.
-Consumers MUST NOT weaken sealed products or fabricate a private constructor merely
-to claim such coverage.
-
-Acceptance: each targeted mutation reaches the relevant obligation and causes a
-P5-specific core-test failure after successful compilation. An unreachable branch,
-compiler error or unrelated upstream failure does not establish mutation rejection.
-All independent checks remain under the existing `cfg(test)` boundary, without a
-runtime switch. Execution results and remaining evidence gaps are recorded in the
-engine README.
+The previous core test was removed by operator decision. Ordinary Engine
+requests do not run independent replay or a verification switch. Corpus counts
+and output observations are not proofs of arbitrary copy or runtime behavior.
 
 ## Stops and safety
 

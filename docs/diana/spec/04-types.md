@@ -392,7 +392,7 @@ initialization states and component sources/gaps. Unknown component counts are
 separate from unreadable use views and typed recovery issues. Batch traversal completion is not a semantic correctness
 badge. P3 views still observe retained SSA through the same P4 method chain.
 
-The existing sole core test uses public Engine products with independently encoded
-DEX and expected interpretations. No independent verifier runs on ordinary requests.
-Observed runs and missing execution evidence belong to the engine README; constructor
-classification or zero construction stops do not certify every initialization path.
+The previous core test was removed by operator decision. No independent
+verifier runs on ordinary requests. Observed runs and missing execution evidence
+belong to the engine README; constructor classification or zero construction
+stops do not certify every initialization path.

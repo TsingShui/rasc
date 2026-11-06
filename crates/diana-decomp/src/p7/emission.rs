@@ -41,8 +41,23 @@ pub enum BlockEnd {
         target: LabelId,
     },
 }
+/// One original definition evaluated at its unique, adjacent terminal use.
+#[derive(Clone, Copy, Debug, Serialize)]
+pub struct ComposedExpression {
+    pub expression: ExprId,
+    pub operation: OpId,
+    pub statement: StatementId,
+    pub pc: crate::CodeUnitOffset,
+    pub result_pc: Option<crate::CodeUnitOffset>,
+    pub site: Option<SiteId>,
+    pub boolean: bool,
+    /// A cross-node composition closes the source control at this use.
+    pub source_control: Option<ControlId>,
+}
 #[derive(Debug, Serialize)]
 pub struct EmissionBlock {
+    /// An unreferenced entry remains a zero-length source anchor.
+    pub show_label: bool,
     pub actions: Vec<BodyAction>,
     pub end: BlockEnd,
 }
@@ -54,6 +69,8 @@ pub struct PredicateEmission {
     pub when_true: TransferId,
     pub when_false: TransferId,
     pub negate: bool,
+    /// Both selected edge schedules remain owned even when no steps print.
+    pub edge_copies: bool,
 }
 #[derive(Debug, Serialize)]
 pub enum LoopPlacement {
@@ -61,10 +78,12 @@ pub enum LoopPlacement {
     While {
         predicate: ControlId,
         test: PredicateEmission,
+        compact: bool,
     },
     DoWhile {
         predicate: ControlId,
         test: PredicateEmission,
+        compact: bool,
     },
 }
 #[derive(Debug, Serialize)]
@@ -103,6 +122,8 @@ pub enum EmissionLayout {
 #[derive(Debug, Serialize)]
 pub struct EmissionControl {
     pub label: String,
+    /// Retain a labeled scope only when another emitted transfer names it.
+    pub label_required: bool,
     pub continuation: Option<LabelId>,
     pub layout: EmissionLayout,
 }
@@ -131,6 +152,11 @@ pub struct EmissionPlan {
     pub(super) local_types: Vec<LocalSpelling>,
     pub(super) controls: Vec<EmissionControl>,
     pub(super) blocks: Vec<EmissionBlock>,
+    pub(super) show_chains: Vec<bool>,
+    pub(super) composed_uses: Vec<Option<ComposedExpression>>,
+    pub(super) composed_operations: Vec<bool>,
+    pub(super) hidden_locals: Vec<bool>,
+    pub(super) deferred_controls: Vec<bool>,
     pub(super) operations: Vec<EvaluationPhases>,
     pub(super) terminals: Vec<EvaluationPhases>,
     pub(super) transfers: Vec<EmissionTransfer>,
@@ -143,6 +169,11 @@ impl EmissionPlan {
             local_types: Vec::new(),
             controls: Vec::new(),
             blocks: Vec::new(),
+            show_chains: Vec::new(),
+            composed_uses: Vec::new(),
+            composed_operations: Vec::new(),
+            hidden_locals: Vec::new(),
+            deferred_controls: Vec::new(),
             operations: Vec::new(),
             terminals: Vec::new(),
             transfers: Vec::new(),
@@ -158,6 +189,30 @@ impl EmissionPlan {
     }
     pub fn blocks(&self) -> &[EmissionBlock] {
         &self.blocks
+    }
+    pub fn show_chains(&self) -> &[bool] {
+        &self.show_chains
+    }
+    pub fn composed_use(&self, id: ExprId) -> Option<ComposedExpression> {
+        self.composed_uses.get(id.0 as usize).copied().flatten()
+    }
+    pub fn composed_operation(&self, id: OpId) -> bool {
+        self.composed_operations
+            .get(id.0 as usize)
+            .copied()
+            .unwrap_or(false)
+    }
+    pub fn hidden_local(&self, id: StorageId) -> bool {
+        self.hidden_locals
+            .get(id.0 as usize)
+            .copied()
+            .unwrap_or(false)
+    }
+    pub fn deferred_control(&self, id: ControlId) -> bool {
+        self.deferred_controls
+            .get(id.0 as usize)
+            .copied()
+            .unwrap_or(false)
     }
     pub fn operations(&self) -> &[EvaluationPhases] {
         &self.operations
@@ -205,6 +260,7 @@ fn predicate(
         when_true,
         when_false,
         negate: repeat == Some(when_false),
+        edge_copies: true,
     })
 }
 pub(super) fn local_spelling(types: &[TypeUse], l: &LocalDeclaration) -> LocalSpelling {
@@ -226,6 +282,11 @@ pub(super) fn local_spelling(types: &[TypeUse], l: &LocalDeclaration) -> LocalSp
 }
 pub(super) fn construct(code: &mut MethodCode) -> Result<(), ExpressionError> {
     let mut plan = EmissionPlan::empty();
+    plan.show_chains = filled(code.chains.len(), true)?;
+    plan.composed_uses = filled(code.expressions.len(), None)?;
+    plan.composed_operations = filled(code.operations.len(), false)?;
+    plan.hidden_locals = filled(code.locals.len(), false)?;
+    plan.deferred_controls = filled(code.controls.len(), false)?;
     for l in &code.locals {
         let syntax = local_spelling(&code.types, l);
         push(&mut plan.local_types, syntax)?;
@@ -421,7 +482,14 @@ pub(super) fn construct(code: &mut MethodCode) -> Result<(), ExpressionError> {
                 }
             }
         };
-        push(&mut plan.blocks, EmissionBlock { actions, end })?;
+        push(
+            &mut plan.blocks,
+            EmissionBlock {
+                show_label: true,
+                actions,
+                end,
+            },
+        )?;
     }
     for c in &code.controls {
         let layout = match &c.kind {
@@ -442,12 +510,14 @@ pub(super) fn construct(code: &mut MethodCode) -> Result<(), ExpressionError> {
                     } => LoopPlacement::While {
                         predicate: child(c, 1)?,
                         test: predicate(code, *terminal, Some(*repeat))?,
+                        compact: false,
                     },
                     LoopSyntax::DoWhile {
                         terminal, repeat, ..
                     } => LoopPlacement::DoWhile {
                         predicate: child(c, 1)?,
                         test: predicate(code, *terminal, Some(*repeat))?,
+                        compact: false,
                     },
                 },
             },
@@ -478,6 +548,7 @@ pub(super) fn construct(code: &mut MethodCode) -> Result<(), ExpressionError> {
             &mut plan.controls,
             EmissionControl {
                 label: super::references::text(format_args!("R{}", c.id.0))?,
+                label_required: true,
                 continuation: match c.continuation {
                     Continuation::Goto(label) => Some(label),
                     _ => None,

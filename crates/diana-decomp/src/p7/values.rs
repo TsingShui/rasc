@@ -247,6 +247,24 @@ impl<'f, 'a> Context<'f, 'a> {
             None,
         )
     }
+    /// An integer literal embedded in an integer arithmetic opcode has an
+    /// established integral interpretation in addition to its original bits.
+    pub fn integral_literal(&mut self, value: u32) -> Result<ExprId, ExpressionError> {
+        let bits = Bits {
+            value: u64::from(value),
+            width: crate::SlotWidth::One,
+        };
+        self.expression(
+            ExprKind::Literal {
+                bits,
+                view: Interpretation::Literal {
+                    bits,
+                    family: crate::p4::Family::Integral,
+                },
+            },
+            None,
+        )
+    }
     pub fn reference(
         &mut self,
         op: OpId,

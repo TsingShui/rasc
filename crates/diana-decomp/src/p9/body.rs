@@ -7,6 +7,9 @@ use crate::{
 
 impl Expressions<'_, '_> {
     pub fn statement(&mut self, op: OpId, release: Option<ControlId>) -> Result<(), RenderError> {
+        if self.code.emission().composed_operation(op) {
+            return Ok(());
+        }
         let original = &self.code.operations()[op.0 as usize];
         let id = original.statement.ok_or(RenderError::Invariant(
             "emission operation has no statement",
@@ -83,8 +86,10 @@ impl Expressions<'_, '_> {
                 },
             )?;
         }
-        self.out.put(" ")?;
-        self.copies(&phases.after)?;
+        if !phases.after.is_empty() {
+            self.out.put(" ")?;
+            self.copies(&phases.after)?;
+        }
         self.out.put("\n")
     }
     fn sites(&mut self, sites: &[SiteId]) -> Result<(), RenderError> {
@@ -92,10 +97,22 @@ impl Expressions<'_, '_> {
             let s = &self.code.sites()[id.0 as usize];
             let start = self.out.position();
             if !matches!(s.syntax, ExceptionSyntax::Propagate) {
-                self.out.fmt(format_args!(
-                    " [site s{}: chain c{}; {:?}; routes {:?}]",
-                    id.0, s.chain.0, s.syntax, s.routes
-                ))?;
+                self.out
+                    .fmt(format_args!(" [s{} c{} {:?}", id.0, s.chain.0, s.syntax))?;
+                for route in &s.routes {
+                    self.out
+                        .fmt(format_args!(" e{}#{}=", route.edge.0, route.order))?;
+                    match route.delivery {
+                        Delivery::Explicit => self.out.put("explicit")?,
+                        Delivery::Catch(control) => {
+                            self.out.fmt(format_args!("catch:R{}", control.0))?
+                        }
+                        Delivery::ImpossibleRelease(statement) => self
+                            .out
+                            .fmt(format_args!("impossible_release:stmt{}", statement.0))?,
+                    }
+                }
+                self.out.put("]")?;
             }
             self.out.span(
                 start,
@@ -115,6 +132,28 @@ impl Expressions<'_, '_> {
                 self.operand(*right)
             }
             Condition::Zero { op, value, meaning } => {
+                if self
+                    .code
+                    .emission()
+                    .composed_use(*value)
+                    .is_some_and(|value| value.boolean)
+                {
+                    if !matches!(meaning, ZeroMeaning::IntegralZero) {
+                        return Err(RenderError::Invariant(
+                            "composed boolean lost its zero interpretation",
+                        ));
+                    }
+                    match op {
+                        BranchOp::Eqz => self.out.put("!")?,
+                        BranchOp::Nez => {}
+                        _ => {
+                            return Err(RenderError::Invariant(
+                                "composed boolean lost its branch role",
+                            ));
+                        }
+                    }
+                    return self.operand(*value);
+                }
                 self.operand(*value)?;
                 self.out.put(branch(*op))?;
                 self.out.put(match meaning {
@@ -143,9 +182,23 @@ impl Expressions<'_, '_> {
         )
     }
     fn transfer(&mut self, id: TransferId) -> Result<(), RenderError> {
+        self.transfer_with_indent(id, true)
+    }
+    fn transfer_with_indent(&mut self, id: TransferId, indent: bool) -> Result<(), RenderError> {
         let p = &self.code.emission().transfers()[id.0 as usize];
         let start = self.out.position();
-        self.out.indent()?;
+        if matches!(p.spelling, TransferSpelling::Fallthrough) && p.copies.is_empty() {
+            return self.out.span(
+                start,
+                Origin::Transfer {
+                    method: self.method,
+                    transfer: id,
+                },
+            );
+        }
+        if indent {
+            self.out.indent()?;
+        }
         self.copies(&p.copies)?;
         match p.spelling {
             TransferSpelling::Goto(label) => {
@@ -184,10 +237,12 @@ impl Expressions<'_, '_> {
         self.out.put(&self.code.labels()[id.0 as usize].name)
     }
     fn label(&mut self, id: LabelId) -> Result<(), RenderError> {
-        self.out.indent()?;
         let start = self.out.position();
-        self.label_name(id)?;
-        self.out.put(":\n")?;
+        if self.code.emission().blocks()[id.0 as usize].show_label {
+            self.out.indent()?;
+            self.label_name(id)?;
+            self.out.put(":\n")?;
+        }
         self.out.span(
             start,
             Origin::Label {
@@ -204,7 +259,7 @@ impl Expressions<'_, '_> {
         let start = self.out.position();
         match &t.kind {
             TerminalKind::None => {}
-            TerminalKind::Goto(t) => self.transfer(*t)?,
+            TerminalKind::Goto(t) => self.transfer_with_indent(*t, false)?,
             TerminalKind::Return(v) => {
                 self.out.put("return")?;
                 if let Some(v) = v {
@@ -311,11 +366,16 @@ impl Expressions<'_, '_> {
         }
         self.condition(condition)?;
         self.phases(&p.snapshots, "after_operands_before_effect")?;
-        self.out.put(" [on_original_true {")?;
-        self.selected(test.when_true, false)?;
-        self.out.put("} on_original_false {")?;
-        self.selected(test.when_false, false)?;
-        self.out.put("}]")?;
+        if test.edge_copies {
+            self.out.put(" [on_original_true {")?;
+            self.selected(test.when_true, false)?;
+            self.out.put("} on_original_false {")?;
+            self.selected(test.when_false, false)?;
+            self.out.put("}]")?;
+        } else {
+            self.selected(test.when_true, false)?;
+            self.selected(test.when_false, false)?;
+        }
         if test.negate {
             self.out.put(")")?;
         }
@@ -324,6 +384,27 @@ impl Expressions<'_, '_> {
             Origin::Terminal {
                 method: self.method,
                 block: test.terminal,
+            },
+        )
+    }
+    fn compact_predicate(
+        &mut self,
+        control: ControlId,
+        test: PredicateEmission,
+    ) -> Result<(), RenderError> {
+        let start = self.out.position();
+        let EmissionLayout::Block(node) =
+            self.code.emission().controls()[control.0 as usize].layout
+        else {
+            return Err(RenderError::Invariant("compact predicate lost its block"));
+        };
+        self.label(LabelId(node.0))?;
+        self.predicate(test)?;
+        self.out.span(
+            start,
+            Origin::Control {
+                method: self.method,
+                control,
             },
         )
     }
@@ -371,9 +452,11 @@ impl Expressions<'_, '_> {
         self.locals()?;
         self.exception_chains()?;
         self.bootstrap_definitions()?;
-        self.out.indent()?;
-        self.copies(self.code.emission().initial())?;
-        self.out.put("\n")?;
+        if !self.code.emission().initial().is_empty() {
+            self.out.indent()?;
+            self.copies(self.code.emission().initial())?;
+            self.out.put("\n")?;
+        }
         let mut work = Vec::new();
         if let Some(root) = self.code.root() {
             push(&mut work, Event::Control(root))?;
@@ -387,6 +470,11 @@ impl Expressions<'_, '_> {
                     push(&mut work, Event::End(id, start))?;
                     match &p.layout {
                         EmissionLayout::Block(node) => self.block(*node)?,
+                        EmissionLayout::Sequence if !p.label_required => {
+                            for &child in c.children.iter().rev() {
+                                push(&mut work, Event::Control(child))?;
+                            }
+                        }
                         EmissionLayout::Sequence
                         | EmissionLayout::Labelled
                         | EmissionLayout::Graph => {
@@ -426,11 +514,13 @@ impl Expressions<'_, '_> {
                             no,
                             test,
                         } => {
-                            self.out.indent()?;
-                            self.out.put(&p.label)?;
-                            self.out.put(":")?;
-                            self.out.open()?;
-                            push(&mut work, Event::Close)?;
+                            if p.label_required {
+                                self.out.indent()?;
+                                self.out.put(&p.label)?;
+                                self.out.put(":")?;
+                                self.out.open()?;
+                                push(&mut work, Event::Close)?;
+                            }
                             push(&mut work, Event::Close)?;
                             push(&mut work, Event::Control(*no))?;
                             push(&mut work, Event::Else(test.when_false))?;
@@ -440,24 +530,47 @@ impl Expressions<'_, '_> {
                         }
                         EmissionLayout::Loop { body, placement } => {
                             self.out.indent()?;
-                            self.out.put(&p.label)?;
-                            self.out.put(": ")?;
+                            if p.label_required {
+                                self.out.put(&p.label)?;
+                                self.out.put(": ")?;
+                            }
                             match placement {
-                                LoopPlacement::DoWhile { predicate, test } => {
+                                LoopPlacement::DoWhile {
+                                    predicate,
+                                    test,
+                                    compact,
+                                } => {
                                     self.out.put("do")?;
                                     self.out.open()?;
-                                    push(&mut work, Event::LoopTailEnd(*test))?;
-                                    push(&mut work, Event::Control(*predicate))?;
-                                    push(&mut work, Event::LoopTailStart)?;
+                                    if *compact {
+                                        push(&mut work, Event::CompactLoopTail(*predicate, *test))?;
+                                    } else {
+                                        push(&mut work, Event::LoopTailEnd(*test))?;
+                                        push(&mut work, Event::Control(*predicate))?;
+                                        push(&mut work, Event::LoopTailStart)?;
+                                    }
                                     push(&mut work, Event::Control(*body))?;
                                 }
-                                LoopPlacement::While { predicate, test } => {
-                                    self.out.put("while (test")?;
-                                    self.out.open()?;
-                                    push(&mut work, Event::Close)?;
-                                    push(&mut work, Event::Control(*body))?;
-                                    push(&mut work, Event::LoopHead(*test))?;
-                                    push(&mut work, Event::Control(*predicate))?;
+                                LoopPlacement::While {
+                                    predicate,
+                                    test,
+                                    compact,
+                                } => {
+                                    if *compact {
+                                        self.out.put("while (")?;
+                                        self.compact_predicate(*predicate, *test)?;
+                                        self.out.put(")")?;
+                                        self.out.open()?;
+                                        push(&mut work, Event::Close)?;
+                                        push(&mut work, Event::Control(*body))?;
+                                    } else {
+                                        self.out.put("while (test")?;
+                                        self.out.open()?;
+                                        push(&mut work, Event::Close)?;
+                                        push(&mut work, Event::Control(*body))?;
+                                        push(&mut work, Event::LoopHead(*test))?;
+                                        push(&mut work, Event::Control(*predicate))?;
+                                    }
                                 }
                                 LoopPlacement::Infinite => {
                                     self.out.put("while (true)")?;
@@ -479,8 +592,11 @@ impl Expressions<'_, '_> {
                         }
                         EmissionLayout::Try { body, catches } => {
                             self.out.indent()?;
-                            self.out.put(&p.label)?;
-                            self.out.put(": try")?;
+                            if p.label_required {
+                                self.out.put(&p.label)?;
+                                self.out.put(": ")?;
+                            }
+                            self.out.put("try")?;
                             self.out.open()?;
                             push(&mut work, Event::Close)?;
                             for (i, &handler) in catches.iter().enumerate().rev() {
@@ -509,13 +625,24 @@ impl Expressions<'_, '_> {
                         self.label_name(label)?;
                         self.out.put("; // planned continuation\n")?;
                     }
-                    self.out.span(
-                        start,
-                        Origin::Control {
-                            method: self.method,
-                            control: id,
-                        },
-                    )?;
+                    if self.code.emission().deferred_control(id) {
+                        let slot = self
+                            .pending_controls
+                            .as_deref_mut()
+                            .and_then(|pending| pending.get_mut(id.0 as usize))
+                            .ok_or(RenderError::Invariant("deferred control is unavailable"))?;
+                        if slot.replace(start).is_some() {
+                            return Err(RenderError::Invariant("control was deferred twice"));
+                        }
+                    } else {
+                        self.out.span(
+                            start,
+                            Origin::Control {
+                                method: self.method,
+                                control: id,
+                            },
+                        )?;
+                    }
                 }
                 Event::Close => self.out.close()?,
                 Event::If(test) => {
@@ -543,18 +670,32 @@ impl Expressions<'_, '_> {
                         },
                     )?;
                     self.out.open()?;
-                    self.out.indent()?;
-                    self.selected(test.when_true, false)?;
-                    self.out.put("\n")?;
+                    if !self.code.emission().transfers()[test.when_true.0 as usize]
+                        .copies
+                        .is_empty()
+                    {
+                        self.out.indent()?;
+                        self.selected(test.when_true, false)?;
+                        self.out.put("\n")?;
+                    } else {
+                        self.selected(test.when_true, false)?;
+                    }
                 }
                 Event::Else(edge) => {
                     self.out.close()?;
                     self.out.indent()?;
                     self.out.put("else")?;
                     self.out.open()?;
-                    self.out.indent()?;
-                    self.selected(edge, false)?;
-                    self.out.put("\n")?;
+                    if !self.code.emission().transfers()[edge.0 as usize]
+                        .copies
+                        .is_empty()
+                    {
+                        self.out.indent()?;
+                        self.selected(edge, false)?;
+                        self.out.put("\n")?;
+                    } else {
+                        self.selected(edge, false)?;
+                    }
                 }
                 Event::LoopHead(test) => {
                     self.out.indent()?;
@@ -565,6 +706,13 @@ impl Expressions<'_, '_> {
                     self.out.indent()?;
                     self.out.put(")")?;
                     self.out.open()?;
+                }
+                Event::CompactLoopTail(predicate, test) => {
+                    self.out.close()?;
+                    self.out.indent()?;
+                    self.out.put("while (")?;
+                    self.compact_predicate(predicate, test)?;
+                    self.out.put(");\n")?;
                 }
                 Event::LoopTailStart => {
                     self.out.close()?;
@@ -588,9 +736,12 @@ impl Expressions<'_, '_> {
                     self.out.indent()?;
                     self.copies(&self.code.emission().terminals()[terminal.0 as usize].before)?;
                     let a = self.out.position();
-                    self.out
-                        .put(&self.code.emission().controls()[id.0 as usize].label)?;
-                    self.out.put(": switch (")?;
+                    if self.code.emission().controls()[id.0 as usize].label_required {
+                        self.out
+                            .put(&self.code.emission().controls()[id.0 as usize].label)?;
+                        self.out.put(": ")?;
+                    }
+                    self.out.put("switch (")?;
                     self.operand(*selector)?;
                     self.phases(
                         &self.code.emission().terminals()[terminal.0 as usize].snapshots,
@@ -660,10 +811,18 @@ impl Expressions<'_, '_> {
                         },
                     )?;
                     self.out.open()?;
-                    self.out.indent()?;
-                    self.copies(&phase.after)?;
-                    self.selected(*enter, false)?;
-                    self.out.put("\n")?;
+                    if !phase.after.is_empty()
+                        || !self.code.emission().transfers()[enter.0 as usize]
+                            .copies
+                            .is_empty()
+                    {
+                        self.out.indent()?;
+                        self.copies(&phase.after)?;
+                        self.selected(*enter, false)?;
+                        self.out.put("\n")?;
+                    } else {
+                        self.selected(*enter, false)?;
+                    }
                 }
             }
         }
@@ -671,7 +830,9 @@ impl Expressions<'_, '_> {
     }
     fn locals(&mut self) -> Result<(), RenderError> {
         for l in self.code.locals() {
-            if matches!(l.original.kind(), crate::p5::LocalKind::Parameter { .. }) {
+            if self.code.emission().hidden_local(l.id)
+                || matches!(l.original.kind(), crate::p5::LocalKind::Parameter { .. })
+            {
                 continue;
             }
             self.out.indent()?;
@@ -717,13 +878,14 @@ impl Expressions<'_, '_> {
         if let Some(target) = c.target {
             self.label_name(target)?;
         } else {
-            self.out.put("unavailable_handler")?;
+            self.out.put("propagate")?;
         }
         Ok(())
     }
     fn exception_chains(&mut self) -> Result<(), RenderError> {
         for chain in self.code.chains() {
-            if chain.clauses.is_empty() {
+            if chain.clauses.is_empty() || !self.code.emission().show_chains()[chain.id.0 as usize]
+            {
                 continue;
             }
             self.out.indent()?;
@@ -825,6 +987,7 @@ enum Event {
     If(PredicateEmission),
     Else(TransferId),
     LoopHead(PredicateEmission),
+    CompactLoopTail(ControlId, PredicateEmission),
     LoopTailStart,
     LoopTailEnd(PredicateEmission),
     Switch(ControlId, BlockId),

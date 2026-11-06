@@ -18,6 +18,9 @@ pub(super) trait ExpressionSource {
     fn expressions(&self) -> &[Expression];
     fn constructions(&self) -> &[Construction];
     fn copies(&self) -> &[CopyBundle];
+    fn composed_use(&self, _id: ExprId) -> Option<ComposedExpression> {
+        None
+    }
 }
 impl ExpressionSource for MethodCode {
     fn payloads(&self) -> &[ArrayPayload] {
@@ -40,6 +43,9 @@ impl ExpressionSource for MethodCode {
     }
     fn copies(&self) -> &[CopyBundle] {
         self.copies()
+    }
+    fn composed_use(&self, id: ExprId) -> Option<ComposedExpression> {
+        self.emission().composed_use(id)
     }
 }
 impl ExpressionSource for ExpressionPartial {
@@ -71,6 +77,7 @@ pub(super) struct Expressions<'a, 'b, S: ExpressionSource = MethodCode> {
     pub code: &'a S,
     pub names: &'a MethodNames,
     pub lookup: &'a Lookup<'a>,
+    pub pending_controls: Option<&'b mut [Option<super::TextOffset>]>,
 }
 impl<S: ExpressionSource> Expressions<'_, '_, S> {
     pub fn assignment(&mut self, s: &Statement) -> Result<(), RenderError> {
@@ -245,9 +252,64 @@ impl<S: ExpressionSource> Expressions<'_, '_, S> {
             ))?;
         let start = self.out.position();
         match &e.kind {
-            ExprKind::Read { storage, .. } | ExprKind::Snapshot { storage } => {
-                self.local(*storage)?
+            ExprKind::Read { storage, .. } => {
+                if let Some(composed) = self.code.composed_use(id) {
+                    self.expr(composed.expression)?;
+                    self.out.span(
+                        start,
+                        Origin::Statement {
+                            method: self.method,
+                            statement: composed.statement,
+                        },
+                    )?;
+                    self.out.span(
+                        start,
+                        Origin::Operation {
+                            method: self.method,
+                            operation: composed.operation,
+                            pc: composed.pc,
+                        },
+                    )?;
+                    if let Some(control) = composed.source_control {
+                        let start = self
+                            .pending_controls
+                            .as_deref_mut()
+                            .and_then(|pending| pending.get_mut(control.0 as usize))
+                            .and_then(Option::take)
+                            .ok_or(RenderError::Invariant("composed control was not opened"))?;
+                        self.out.span(
+                            start,
+                            Origin::Control {
+                                method: self.method,
+                                control,
+                            },
+                        )?;
+                    }
+                    if let Some(site) = composed.site {
+                        let position = self.out.position();
+                        self.out.span(
+                            position,
+                            Origin::Site {
+                                method: self.method,
+                                site,
+                            },
+                        )?;
+                    }
+                    if let Some(pc) = composed.result_pc {
+                        self.out.span(
+                            start,
+                            Origin::ResultCommit {
+                                method: self.method,
+                                operation: composed.operation,
+                                pc,
+                            },
+                        )?;
+                    }
+                } else {
+                    self.local(*storage)?;
+                }
             }
+            ExprKind::Snapshot { storage } => self.local(*storage)?,
             ExprKind::Literal { bits, view } => literal(self.out, *bits, *view)?,
             ExprKind::Unavailable { gap } => self.out.fmt(format_args!("unavailable<{gap:?}>"))?,
             ExprKind::Unary { op, value } => {
@@ -435,25 +497,16 @@ impl<S: ExpressionSource> Expressions<'_, '_, S> {
                     },
                 )?;
             }
-            if matches!(c.qualification, Qualification::FullSignature) {
-                self.out.put("[target: ")?;
-                self.member(c.target, None, true)?;
-                self.out.put("]")?;
-            }
         } else {
             if initialization.is_some() {
                 self.out.put("initialize ")?;
-            } else if !matches!(
+            } else if matches!(
                 c.kind,
-                crate::p2::InvokeKind::Virtual | crate::p2::InvokeKind::Static
+                crate::p2::InvokeKind::Custom | crate::p2::InvokeKind::Polymorphic
             ) {
                 self.out.fmt(format_args!("invoke<{:?}> ", c.kind))?;
             }
-            self.member(
-                c.target,
-                c.receiver,
-                matches!(c.qualification, Qualification::FullSignature),
-            )?;
+            self.member(c.target, c.receiver, false)?;
         }
         if let Some(proto) = c.invocation_prototype {
             self.out.put(" [invocation prototype: ")?;
@@ -463,13 +516,24 @@ impl<S: ExpressionSource> Expressions<'_, '_, S> {
         self.out.put("(")?;
         self.args(&c.arguments)?;
         self.out.put(")")?;
-        self.out.fmt(format_args!(
-            " [target {:?}; dispatch {:?}]",
-            self.code.references()[c.target.0 as usize]
-                .position
-                .reference,
-            c.kind
-        ))
+        let original = self.code.references()[c.target.0 as usize]
+            .position
+            .reference;
+        self.out.fmt(format_args!(" [{:?} ", c.kind))?;
+        match original {
+            crate::raw::OperandReference::Method(id) => {
+                self.out.fmt(format_args!("method#{}", id.0))?
+            }
+            crate::raw::OperandReference::CallSite(id) => {
+                self.out.fmt(format_args!("call_site#{}", id.0))?
+            }
+            other => self.out.fmt(format_args!("{other:?}"))?,
+        }
+        if matches!(c.qualification, Qualification::FullSignature) {
+            self.out.put("; target ")?;
+            self.member(c.target, None, true)?;
+        }
+        self.out.put("]")
     }
     pub fn reference(&mut self, r: ReferenceId) -> Result<(), RenderError> {
         let reference = self

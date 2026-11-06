@@ -112,9 +112,11 @@ from that same execution; `into_result()` releases retained analysis. No-code
 members use `Declared(MethodResult)`. Unified operation lowering retains original
 calls, conversions, checks, copies, exception sites and initialization positions.
 P5 natural constructions become `New` expressions, and P6 controls/outlets have
-explicit emission ownership. Metadata and bootstrap declaration facts now travel
-from their owning producers; P7 does not reopen input. See the
-[P7 chapter](../../docs/diana/spec/07-java.md).
+explicit emission ownership. The P7 compose passes select only adjacent
+expressions and compact control forms admitted by their delivered facts; original
+operation and control origins remain in the final source spans. Metadata and
+bootstrap declarations travel from their owning producers; P7 does not reopen
+input. See the [P7 chapter](../../docs/diana/spec/07-java.md).
 
 P8 produces owned `ClassResult`/`TypeNamePlan` from the original directory and
 joined method deliveries. Success, no-code and stopped members remain distinct.
@@ -136,22 +138,11 @@ Engine requests do not run symbolic replay, output audits or duplicate dominator
 verification. There is no runtime or feature switch. Parsing and construction
 still enforce input safety, checked arithmetic and allocation failures.
 
-Test verification compares ordered local symbolic behavior and completion
-rules and matches every original transfer/coverage owner. It does not prove ART
-admission or concrete external-call behavior. Real-input corpus runs have not
-encountered custom/polymorphic invokes or method-handle/type constants. The scoped
-`src/dynamic_instructions_test.rs` unit test constructs DEX 038/039 inputs and
-checks public Engine products against independently specified references, ordered
-slots, result categories and normal/exception completion rules. It also checks
-classified stops for unsupported versions and retained local errors for references,
-argument layouts and results.
-The same test checks register-renaming relations, equivalent wide-copy/constant
-encodings, discarded call results, SSA joins/loops/exception/overlap cases, local
-recovery inside one method and continued analysis of an executable sibling. P4
-cases cover independent zero views, float bits versus numeric conversion, array
-components, local use conflicts, Phi/range/grounded-loop facts and constructor
-normal versus exceptional initialization.
-This is static synthetic-input evidence, not ART execution evidence.
+The previous core test was removed by operator decision; no test case is present
+in the current tree. The retained independent verifier code is not enabled on
+ordinary requests. Real-input corpus runs have not encountered custom/polymorphic
+invokes or method-handle/type constants.
+
 A [Verus trial](proofs/README.md) proves the wide-copy patch predicate used by
 test replay, using the same Rust function body. It is absent from production. The adapter and remaining
 P2 test checks are not machine-proved; this is not a proof of whole-method correctness.
@@ -303,50 +294,12 @@ evidence was reused because input and P1 were unchanged; no second full chain wa
 run merely to repeat that check. These are authorized private-input observations,
 not repository-reproducible fixtures or correctness rates.
 
-### P5 correspondence tests
-
-The existing scoped core test now checks P5 through public Engine products.
-Its original cases retain their independently specified expectations, including
-the four-worker class-recovery case. P5 coverage checks also run on those retained
-products. The new input variants exhaust runtime/literal choices for two two-way
-join values and cover wide transfer, entry backedges, multiple throwing producers,
-throw terminals, shared/split handler entries, snapshot fan-out, unavailable
-incoming, conflicting views and unresolved wide representation. Finite traces use
-fresh definition-occurrence symbols and undefined synthetic storage, not a full
-DEX interpreter or P5 construction helpers.
-
-The checks distinguish upstream-to-plan correspondence from simultaneous-copy
-versus ordered-step equivalence. A separate slow fixed point checks gap locality
-and whether each reported cause can actually reach its consumer. Normal/exception
-traces preserve old values, original captures, normal commit, allocation failure
-and constructor failure. Both debug and release runs of the sole core test passed.
-
-Eight temporary production mutations were rejected by P5-specific obligations:
-wrong storage source, omitted copy steps, wrong transfer identity, snapshot moved
-after commit, unknown source replaced by zero, omitted dependent-use gap,
-allocation materialized before normal commit and one lost fan-out save. Each
-mutation compiled, failed the core test and was removed. This demonstrates
-sensitivity to those faults, not a proof of all implementations or paths.
-
-Cross-destination cycles are structurally excluded under the current independent
-binding and exact-slot guarantees. The generic cycle/temporary branch still lacks
-an Engine-generated execution witness; no private product was fabricated to claim
-coverage. The [test contract](../../docs/diana/spec/05-variables.md#test-only-correspondence)
-states this boundary. Production input and P1 were unchanged, so prior corpus and
-byte-roundtrip observations were reused rather than rerun.
-
 ### Natural construction observations
 
 P4 now publishes original allocation-source sets and position-related receiver
 comparisons. P5 consumes these facts to select construction groups without
 rebuilding reference provenance. Original sites and commits remain facts; selected
-deferred publications happen only after normal initialization. The core test
-covers direct and aliased creation, precomputed/literal arguments, straight-line
-cross-block corridors, both failure stages, compatible snapshot hoisting, differing
-snapshots/protection, visible failed carriers and stale allocation occurrences.
-Debug/release execution passed. Six targeted mutations of occurrence identity,
-publication point, protection, alias coverage, once-only emission and snapshot
-merging were rejected and removed.
+deferred publications happen only after normal initialization.
 
 A 55-DEX P5 traversal delivered the same 2,644,578 code methods with no new stage
 stops or storage gaps. It selected 720,360 natural groups and retained 459,253
@@ -355,27 +308,6 @@ relation stayed unchanged. These observations are not whole-method equivalence o
 ART admission evidence.
 
 ### Region planning observations
-
-The same core test checks original operation/terminal ownership, selected
-control targets and edge copies, before-throw saves, catch order and exactly-once
-natural emission. Finite original-graph versus planned-target traces cover
-branches, nested regions, while/do-while conditions, repeated producers, exit-side
-work, nested loops, a divergent prefix, original switch fallthrough/shared targets,
-natural and explicit protection, and successful/failing lock paths. Additional
-cases cover internal-header/tail-condition selection, multiple releases and returns,
-break/continue corridors, nested captures, divergent held bodies, branched cleanup,
-secondary exceptions, handler receives and pre/post-release copies. The independent
-checker compares outlet obligations with original P5 locations and preserves
-unlocked calls and path-specific copies as explicit when required. Debug and
-release execution of the sole core test passed. The model consumes supplied
-branch roles and P5 storage; it is not a full VM or a P7/P9 execution test.
-
-Nine temporary P6 outlet mutations compiled and failed the targeted core
-obligations: blocked tail selection, missing release outlet, hoisted post-release
-copies, lost pre-release save, lost post-release copy, wrong unlocked continuation,
-wrong rethrow access, split loop/lock corridor and hidden cleanup escape.
-All mutations were removed. These finite checks do not prove every graph, caller,
-callee, monitor pattern or resource-failure path.
 
 A 55-DEX traversal delivered 2,644,578 PlannedMethod products without P6 stops or
 upstream/class stops. The pre-existing P4 issue remained and storage gaps stayed
@@ -390,19 +322,6 @@ byte-roundtrip evidence was retained rather than rerun.
 
 ### Method expression observations
 
-The sole core test now checks P7 operation/operand semantics, references and
-bootstrap values, selected control targets, copies, publication, exception delivery
-and exactly-once ownership. Finite non-compound traces compare original/P5, P6 and
-owned P7 event order, read values, final storage and locks. Synthetic annotation
-and bootstrap inputs cover exact signed/floating bits, nested containers and
-leaf references; owned results remain readable after Engine/input release.
-Ordinary call and explicit-signature cases retain target identity without casts.
-Fourteen temporary mutations compiled and triggered their specific obligations:
-argument reversal, lost copy steps, invented zero, lost construction publication,
-lost compound sites/prelude, reversed handler/arm order, late snapshots, reordered
-unlocked completion, lost bootstrap values/parameter metadata, overqualified
-ordinary calls and hidden dynamic signatures. All were removed. These checks are not VM, bootstrap, heap/callee or P9 execution proofs.
-
 A fresh fixed-binary traversal of all 55 DEX entries delivered 2,644,578 expressed
 methods and 263,414 declaration-only results, with no P7, upstream or class stops.
 Storage issues stayed zero and the one existing type issue remained. The result
@@ -411,25 +330,11 @@ Retained P2–P6 products matched for 1,112 focused methods; serial/four-worker 
 results matched for 19 classes and 4,585 members. These counts describe observed
 coverage, not universal semantic acceptance. All 48,102,163 instruction roundtrips
 were rerun across those 55 DEX entries with zero mismatch, skip or method/class
-error. The synthetic DEX 038/039 cases separately cover the changed dynamic facts;
-the real-input corpus does not supply those opcodes. Engine fmt/check/Clippy,
-release library/shell and debug/release core tests passed.
+error. Earlier synthetic DEX 038/039 observations covered the changed dynamic facts;
+the removed core test is no longer present. The real-input corpus does not supply
+those opcodes. Engine fmt/check/Clippy and release library/shell builds passed.
 
 ### Class assembly and naming observations
-
-The sole core test now checks P8 directory coverage/order, field/interface
-availability, static preparation, metadata expressions, type-use identities,
-imports, local shadowing, shared annotation scopes and standalone names. It also
-checks readable/native/bridge members beside a stopped body, damaged declarations,
-preparation prefixes, independently known omitted defaults and directory tails.
-Owned class products remain readable after Engine/input release.
-
-Fifteen mutations compiled and triggered the intended obligations: lost fields,
-methods, interfaces and method type uses; reordered preparation; invented explicit
-defaults; ambiguous imports; ignored local shadows; shortened standalone names;
-merged annotation scopes; changed literal strings; discarded preparation/directory
-prefixes; lost stopped-code bytes; and wrong package selection. All were removed.
-These are finite correspondence observations, not VM or universal naming proofs.
 
 A fresh fixed-binary 55-DEX traversal produced 544,430 class results, preserving
 1,472,798 fields and 2,907,992 methods, including 263,414 no-code declarations.
@@ -444,23 +349,18 @@ remain outside the exercised execution evidence.
 
 ### Rendering observations
 
-The existing core test now checks P9 member/operation/copy preservation, operand
-capture order, selected names and array ranks, UTF-8 ranges, UTF-16 escaping,
-original metadata scopes, preparation order, raw stopped bytes and result lifetime.
-A head-tested loop has distinct condition-exit and break copies; a non-contiguous,
-backward-PC construction checks its original normal continuation. Original-node
-and independent lexical-brace checks cover released routing terminals, try/catch
-ownership and explicit synchronization exits. Text/JSON agree and failing output
-sinks retain their I/O classification.
+After composition and the source-control span change, a fixed release binary
+freshly processed one authorized APK's 14 DEX entries with eight DEX processes
+and one method worker each. It rendered 118,925 classes and 748,075 methods,
+including 90,371 no-code declarations. The traversal reported no rendering issues,
+render stops, upstream stops or class errors; the existing one type issue remained.
+It emitted 1,439,037,024 UTF-8 bytes and 81,743,055 spans. One inspected method's
+four composed operations each retained an operation and statement span, with
+their source controls enclosing them; its text matched JSON and all 110 span
+endpoints lay on UTF-8 boundaries. These observations are not a proof for other
+methods or runtime behavior. No tests were written or run.
 
-Seventeen mutations compiled and failed their intended obligations: omitted
-operations, members, metadata, copies, stopped bytes and unlocked terminals;
-reordered operands and preparation; invented zero reads; shortened names; wrong
-loop polarity/edge ownership; acquisition-bypassing headers; snapshot phase changes;
-character-count spans; surrogate replacement; and moving unlocked terminals across
-actual protection braces. All mutations were restored.
-
-A fixed release binary freshly processed all 55 DEX files without reused results:
+Before composition, a fixed release binary freshly processed all 55 DEX files without reused results:
 544,430 rendered classes, 1,472,798 fields and 2,907,992 methods, including 263,414
 no-code declarations. Rendering failures/issues, upstream stops, class errors and
 retention errors were zero; the existing one type issue remained. The traversal
@@ -472,12 +372,10 @@ All 5,560 retained P2–P6 products for 1,112 focused methods matched. Existing 
 facts also matched after accounting for the new emission, type-source,
 parameter-name and exact UTF-16 serialization fields; no call-qualification
 change occurred in that selection. Serial/four-worker P9 products matched for
-19 classes and 4,585 members. The single core test passes in debug and release;
-engine format/check/strict Clippy and release library/shell builds pass.
-Workspace strict Clippy and release builds also pass after CLI integration.
-The existing single core test was rerun in debug and release without adding CLI
-tests. Actual allocator exhaustion, all stopped-stage prefixes and arbitrary
-VM/heap/callee behavior remain outside this execution evidence.
+19 classes and 4,585 members. Engine format/check/strict Clippy and release
+library/shell builds passed. Workspace strict Clippy and release builds also
+passed after CLI integration. Actual allocator exhaustion, all stopped-stage
+prefixes and arbitrary VM/heap/callee behavior remain outside this evidence.
 
 ## Method scheduling observations
 
@@ -511,10 +409,6 @@ Applicable engine gates:
 cargo fmt --all -- --check
 cargo clippy -p diana-decomp --all-targets --all-features --locked -- -D warnings
 cargo build -p diana-decomp --release --locked
-cargo nextest run -p diana-decomp --all-features --locked \
-  -E 'test(dynamic_instructions_preserve_layout_references_and_completions)'
-cargo nextest run -p diana-decomp --release --all-features --locked \
-  -E 'test(dynamic_instructions_preserve_layout_references_and_completions)'
 ```
 
 Dependency, reference-isolation and unit-test policies are owned by root/package

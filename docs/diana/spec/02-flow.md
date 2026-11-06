@@ -84,7 +84,8 @@ their original intervals and classified issues; they are not valid method variab
 
 ## Test-only translation validation
 
-`check.rs`, `oracle.rs`, `replay.rs` and their scratch/predicate helpers compile
+The previous core test was removed by operator decision; no current test case
+invokes these existing checks. `check.rs`, `oracle.rs`, `replay.rs` and their scratch/predicate helpers compile
 only under `cfg(test)`. Test builds check constructed products; ordinary debug
 and release requests do not run these passes and have no verification switch.
 Input parsing, required instruction associations and construction failures remain

@@ -231,25 +231,13 @@ plans and original continuation. Synchronized syntax and ordinary monitor emissi
 do not both own the same event. An explicit goto does not add release, finally,
 heap rollback or initialization. Independent proven nested regions remain available.
 
-## Test obligations
+## Correspondence and evidence
 
-The existing core test obtains `PlannedMethod` only through the formal Engine
-chain. Independent checks compare original block/operation/terminal ownership,
-normal edge targets and P5 copies, source-site completions, handler priority,
-snapshots and selected emission ownership. Target interpretation consumes region
-roles and labels, not a production region-builder helper.
+Regions retain original block/operation/terminal ownership, normal edge targets,
+P5 copies, source-site completions, handler priority and snapshot positions.
+Synchronized outlet phases retain original release and continuation locations.
+These obligations are not established merely by constructing a region.
 
-Finite symbolic traces compare original P2 control with P6 target interpretation,
-including branch roles, looping definitions, tail conditions, exit-side work,
-selector evaluation, selected copies, capture timing and monitor identity/order.
-Additional cases cover an internal header branch with a tail predicate, multiple
-releases/returns, loop-exit corridors, a held divergent prefix, nested acquisitions,
-branched cleanup with secondary exceptions, handler receives, pre-release saves,
-and single/multiple-outlet post-release copies. The independent checker compares
-outlet phases against original P5 locations and held closure against original
-transfers; it does not merely trust the outlet's own list of obligations.
-Control choices name original PCs and roles. Divergent prefixes are bounded test
-observations, not truncated production results. These checks do not implement a
-full VM, reconstruct SSA or prove external calls or ART behavior. Targeted
-mutations must compile and fail the corresponding core obligation before they
-count as rejected. All independent verification remains test-only.
+The previous core test was removed by operator decision. Ordinary requests do not
+run independent symbolic replay or a verification switch. Corpus observations do
+not prove arbitrary graphs, callers, callees, monitor patterns or resource paths.

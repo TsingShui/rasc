@@ -1,6 +1,7 @@
 //! P7 owns method expressions; analysis, storage scheduling and region selection
 //! remain with their producers. MethodResult has no borrowed input or stage product.
 mod build;
+mod compose;
 mod control;
 mod copies;
 mod emission;

@@ -136,7 +136,8 @@ fn construct(
     super::lower::operations(&mut c)?;
     super::lower::terminals(&mut c)?;
     super::control::construct(&mut c)?;
-    super::emission::construct(c.code)
+    super::emission::construct(c.code)?;
+    super::compose::construct(c.code)
 }
 pub(super) fn push<T>(v: &mut Vec<T>, x: T) -> Result<(), ExpressionError> {
     crate::substrate::owned::push(v, x).map_err(Into::into)
