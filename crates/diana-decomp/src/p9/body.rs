@@ -44,9 +44,13 @@ impl Expressions<'_, '_> {
             self.copies(&phases.snapshots)?;
         }
         if let Some(scope) = release {
+            let control = &self.code.emission().controls()[scope.0 as usize];
             self.out.put("release synchronized ")?;
-            self.out
-                .put(&self.code.emission().controls()[scope.0 as usize].label)?;
+            // A release names its control only when that control prints the
+            // label; otherwise the enclosing synchronized header identifies it.
+            if control.label_required {
+                self.out.put(&control.label)?;
+            }
             self.out.put("(")?;
             let StatementKind::Monitor { lock, .. } = s.kind else {
                 return Err(RenderError::Invariant("release syntax lost its monitor"));
@@ -897,15 +901,17 @@ impl Expressions<'_, '_> {
                         return Err(RenderError::Invariant("acquire lost its scope"));
                     };
                     let phase = &self.code.emission().operations()[operation.0 as usize];
+                    let control = &self.code.emission().controls()[id.0 as usize];
                     self.out.indent()?;
                     self.copies(&phase.before)?;
                     let a = self.out.position();
-                    self.out.put("synchronized ")?;
-                    self.out
-                        .put(&self.code.emission().controls()[id.0 as usize].label)?;
-                    self.out.put("(")?;
+                    if control.label_required {
+                        self.out.put(&control.label)?;
+                        self.out.put(": ")?;
+                    }
+                    self.out.put("synchronized (")?;
                     self.operand(*lock)?;
-                    self.out.put(") with_explicit_exits")?;
+                    self.out.put(")")?;
                     self.phases(&phase.snapshots, "after_operands_before_effect")?;
                     self.sites(&self.code.statements()[statement.0 as usize].sites, a)?;
                     self.out.span(
@@ -923,7 +929,9 @@ impl Expressions<'_, '_> {
                             statement,
                         },
                     )?;
-                    self.out.open()?;
+                    // The closing brace is not a release: the delivered
+                    // `release synchronized` statements are the only releases.
+                    self.out.open_note("// Diana: releases are explicit")?;
                     if !phase.after.is_empty()
                         || !self.code.emission().transfers()[enter.0 as usize]
                             .copies

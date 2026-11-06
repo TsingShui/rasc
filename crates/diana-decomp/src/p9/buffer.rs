@@ -64,6 +64,17 @@ impl Buffer {
     /// A block without a header line of its own, indented at the block start.
     pub fn open_plain(&mut self) -> Result<(), RenderError> {
         self.put("{\n")?;
+        self.enter()
+    }
+    /// Opens a block whose header states one trailing note on its `{` line,
+    /// the way a statement's note follows its `;`.
+    pub fn open_note(&mut self, note: &str) -> Result<(), RenderError> {
+        self.put(" { ")?;
+        self.put(note)?;
+        self.put("\n")?;
+        self.enter()
+    }
+    fn enter(&mut self) -> Result<(), RenderError> {
         self.depth = self.depth.checked_add(1).ok_or(RenderError::Capacity)?;
         Ok(())
     }
