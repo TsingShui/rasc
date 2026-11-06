@@ -210,9 +210,27 @@ fn candidates(
 ) -> Result<Vec<Candidate>, RegionError> {
     let mut out = Vec::new();
     for l in &f.loops {
+        // Backedge membership is not the lexical body: release/break corridors
+        // can lie outside that core. Include a closed scope atomically; all
+        // original entrances and edges are still checked by candidate acceptance.
+        let mut members = copy(&l.members)?;
+        for scope in &f.synchronized {
+            if scope.separation.is_none()
+                && l.members.contains(&g.op_node[scope.enter.0 as usize])
+                && !scope.members.contains(&l.header)
+                && l.follow.is_none_or(|n| !scope.members.contains(&n))
+            {
+                for &node in &scope.members {
+                    if !members.contains(&node) {
+                        push(&mut members, node)?;
+                    }
+                }
+            }
+        }
+        members.sort_unstable();
         let mut parts = Vec::new();
         let mut body = Vec::new();
-        for &node in &l.members {
+        for &node in &members {
             if Some(node) != l.condition() {
                 push(&mut body, node)?;
             }
@@ -249,7 +267,7 @@ fn candidates(
                 kind: RegionKind::Loop(l.id),
                 entry: l.header,
                 follow: l.follow,
-                members: copy(&l.members)?,
+                members,
                 parts,
             },
         )?;
@@ -286,6 +304,9 @@ fn candidates(
         )?;
     }
     for p in &f.synchronized {
+        if p.separation.is_some() {
+            continue;
+        }
         let entry = g.op_node[p.enter.0 as usize];
         let mut parts = Vec::new();
         push(
@@ -296,39 +317,15 @@ fn candidates(
                 follow: None,
             },
         )?;
-        let body_entry = g.outgoing[entry.0 as usize]
-            .first()
-            .map(|l| f.links[l.0 as usize].to);
-        let release = g.op_node[p.releases[0].0 as usize];
+        let body_entry = f.links[p.enter_link.0 as usize].to;
         push(
             &mut parts,
             Part {
                 nodes: copy(&p.body)?,
-                entry: body_entry.filter(|n| p.body.contains(n)),
-                follow: Some(release),
+                entry: Some(body_entry),
+                follow: p.follow,
             },
         )?;
-        for &op in &p.releases {
-            let n = g.op_node[op.0 as usize];
-            push(
-                &mut parts,
-                Part {
-                    nodes: copy(&[n])?,
-                    entry: Some(n),
-                    follow: p.follow,
-                },
-            )?;
-        }
-        for c in &p.cleanups {
-            push(
-                &mut parts,
-                Part {
-                    nodes: copy(&c.nodes)?,
-                    entry: c.nodes.first().copied(),
-                    follow: None,
-                },
-            )?;
-        }
         push(
             &mut out,
             Candidate {
@@ -482,6 +479,13 @@ fn accept(
     c: &Candidate,
 ) -> Result<Result<(), RecoveryReason>, RegionError> {
     let set = mask(f.nodes.len(), &c.members)?;
+    if f.synchronized.iter().any(|scope| {
+        scope.separation.is_none()
+            && scope.body.contains(&c.entry)
+            && c.members.iter().any(|n| !scope.body.contains(n))
+    }) {
+        return Ok(Err(RecoveryReason::LockBoundary));
+    }
     if !protection::closed_entry(storage, f, g, &set, c.entry) {
         return Ok(Err(RecoveryReason::MultipleEntry));
     }
@@ -532,50 +536,28 @@ fn deliveries(f: &RegionFacts) -> Result<Vec<ExceptionDelivery>, RegionError> {
         }
     }
     for r in &f.regions {
-        match r.kind {
-            RegionKind::Try(id) => {
-                let p = &f.tries[id.0 as usize];
-                for t in &f.throws {
-                    if !p.body.contains(&t.node) {
-                        continue;
-                    }
-                    let actual = protection::context_handlers(f, t.chain, p.outer_sync);
-                    let wanted = &f.chains[p.chain.0 as usize].clauses
-                        [p.clause_range.start as usize..p.clause_range.end as usize];
-                    if !protection::suffix(actual, wanted) {
-                        continue;
-                    }
-                    let start = actual.len() - wanted.len();
-                    for &edge in &t.edges[start..actual.len()] {
-                        if !matches!(
-                            out[edge.0 as usize],
-                            ExceptionDelivery::ImpossibleRelease(_)
-                        ) {
-                            out[edge.0 as usize] = ExceptionDelivery::Catch(id);
-                        }
+        if let RegionKind::Try(id) = r.kind {
+            let p = &f.tries[id.0 as usize];
+            for t in &f.throws {
+                if !p.body.contains(&t.node) {
+                    continue;
+                }
+                let actual = protection::handlers(&f.chains[t.chain.0 as usize]);
+                let wanted = &f.chains[p.chain.0 as usize].clauses
+                    [p.clause_range.start as usize..p.clause_range.end as usize];
+                if !protection::suffix(actual, wanted) {
+                    continue;
+                }
+                let start = actual.len() - wanted.len();
+                for &edge in &t.edges[start..actual.len()] {
+                    if !matches!(
+                        out[edge.0 as usize],
+                        ExceptionDelivery::ImpossibleRelease(_)
+                    ) {
+                        out[edge.0 as usize] = ExceptionDelivery::Catch(id);
                     }
                 }
             }
-            RegionKind::Synchronized(id) => {
-                let p = &f.synchronized[id.0 as usize];
-                for t in &f.throws {
-                    if !p.body.contains(&t.node) {
-                        continue;
-                    }
-                    for (&edge, c) in t.edges.iter().zip(&f.chains[t.chain.0 as usize].clauses) {
-                        if c.catch.is_none()
-                            && matches!(c.target,CatchTarget::Handler(n)if p.cleanups.iter().any(|c|c.nodes.first()==Some(&n)))
-                            && !matches!(
-                                out[edge.0 as usize],
-                                ExceptionDelivery::ImpossibleRelease(_)
-                            )
-                        {
-                            out[edge.0 as usize] = ExceptionDelivery::Cleanup(id);
-                        }
-                    }
-                }
-            }
-            _ => {}
         }
     }
     Ok(out)
@@ -593,7 +575,7 @@ fn protect(storage: &StorageMethod<'_>, f: &mut RegionFacts, g: &Graph) -> Resul
                 }
                 match selected[edge.0 as usize] {
                     ExceptionDelivery::Explicit => explicit = true,
-                    ExceptionDelivery::Catch(_) | ExceptionDelivery::Cleanup(_) => natural = true,
+                    ExceptionDelivery::Catch(_) => natural = true,
                     _ => {}
                 }
             }
@@ -603,7 +585,6 @@ fn protect(storage: &StorageMethod<'_>, f: &mut RegionFacts, g: &Graph) -> Resul
             for &edge in &t.edges {
                 for r in &f.regions {
                     if matches!((&r.kind,selected[edge.0 as usize]),(RegionKind::Try(a),ExceptionDelivery::Catch(b))if *a==b)
-                        || matches!((&r.kind,selected[edge.0 as usize]),(RegionKind::Synchronized(a),ExceptionDelivery::Cleanup(b))if *a==b)
                     {
                         withdraw[r.id.0 as usize] = true;
                     }
@@ -617,12 +598,11 @@ fn protect(storage: &StorageMethod<'_>, f: &mut RegionFacts, g: &Graph) -> Resul
                 }
             }
             for t in &mut f.throws {
-                t.protection = if t.edges.iter().any(|e| {
-                    matches!(
-                        selected[e.0 as usize],
-                        ExceptionDelivery::Catch(_) | ExceptionDelivery::Cleanup(_)
-                    )
-                }) {
+                t.protection = if t
+                    .edges
+                    .iter()
+                    .any(|e| matches!(selected[e.0 as usize], ExceptionDelivery::Catch(_)))
+                {
                     SiteProtection::Natural
                 } else {
                     SiteProtection::Explicit
@@ -656,6 +636,53 @@ fn protect(storage: &StorageMethod<'_>, f: &mut RegionFacts, g: &Graph) -> Resul
             }
         }
     }
+}
+fn scope_contexts(
+    storage: &StorageMethod<'_>,
+    f: &mut RegionFacts,
+    g: &Graph,
+) -> Result<(), RegionError> {
+    for index in 0..f.regions.len() {
+        let RegionKind::Synchronized(scope) = f.regions[index].kind else {
+            continue;
+        };
+        let mut failure = None;
+        for exit in &f.synchronized[scope.0 as usize].exits {
+            let SyncExitKind::Loop { loop_id, .. } = exit.kind else {
+                continue;
+            };
+            let mut at = f.parents[index];
+            let mut found = false;
+            while let Some(parent) = at {
+                if matches!(f.regions[parent.0 as usize].kind,RegionKind::Loop(id)if id==loop_id) {
+                    found = true;
+                    break;
+                }
+                at = f.parents[parent.0 as usize];
+            }
+            if !found {
+                failure = Some(LockSeparation::LoopContext(loop_id));
+                break;
+            }
+        }
+        if let Some(reason) = failure {
+            let r = &f.regions[index];
+            let entry = r.entry;
+            let kind = graph_kind(storage, f, g, &r.nodes, entry, RecoveryReason::LockBoundary)?;
+            f.regions[index].kind = kind;
+            f.synchronized[scope.0 as usize].separation = Some(reason);
+            if let Some(entry) = entry {
+                push(
+                    &mut f.issues,
+                    PlanningIssue::Graph {
+                        entry,
+                        reason: RecoveryReason::LockBoundary,
+                    },
+                )?;
+            }
+        }
+    }
+    Ok(())
 }
 fn own(storage: &StorageMethod<'_>, f: &mut RegionFacts, g: &Graph) -> Result<(), RegionError> {
     for op in storage.execution().operations() {
@@ -716,29 +743,34 @@ fn own(storage: &StorageMethod<'_>, f: &mut RegionFacts, g: &Graph) -> Result<()
                     scope: *id,
                     role: MonitorRole::Acquire,
                 };
-                for &op in &p.releases {
-                    f.operation_owners[op.0 as usize] = OperationOwner::Synchronized {
+                for exit in &p.exits {
+                    f.operation_owners[exit.release.0 as usize] = OperationOwner::Synchronized {
                         scope: *id,
                         role: MonitorRole::Release,
                     };
-                }
-                for c in &p.cleanups {
-                    for &node in &c.nodes {
-                        for op in f.nodes[node.0 as usize].operations.clone() {
-                            f.operation_owners[op as usize] = OperationOwner::Synchronized {
-                                scope: *id,
-                                role: MonitorRole::Cleanup,
-                            };
+                    for &node in &exit.routing {
+                        let part = &f.nodes[node.0 as usize];
+                        if part.terminal {
+                            f.terminal_owners[part.block.0 as usize] =
+                                TerminalOwner::SynchronizedExit(*id);
                         }
-                        if f.nodes[node.0 as usize].terminal {
-                            f.terminal_owners[f.nodes[node.0 as usize].block.0 as usize] =
-                                TerminalOwner::SynchronizedCleanup(*id);
+                    }
+                    for &plan in exit.before.iter().chain(&exit.after) {
+                        let owner = &mut f.copies[plan.0 as usize].owner;
+                        match *owner {
+                            CopyOwner::Original => *owner = CopyOwner::SynchronizedExit(*id),
+                            CopyOwner::SynchronizedExit(at) if at == *id => {}
+                            _ => return Err(bug("copy has two selected emission owners")),
                         }
                     }
                 }
             }
             _ => {}
         }
+    }
+    for plan in &mut f.link_plans {
+        plan.copies
+            .retain(|id| f.copies[id.0 as usize].owner == CopyOwner::Original);
     }
     Ok(())
 }
@@ -787,8 +819,11 @@ fn transfers(f: &mut RegionFacts, g: &Graph) -> Result<(), RegionError> {
                         handled = true;
                         break;
                     }
-                    if p.release_link == l.id {
-                        action = TransferAction::SynchronizedReleased(id);
+                    if let Some(exit) = p.exits.iter().find(|exit| exit.link == l.id) {
+                        action = TransferAction::SynchronizedReleased {
+                            region: id,
+                            release: exit.release,
+                        };
                         handled = true;
                         break;
                     }
@@ -816,14 +851,14 @@ fn transfers(f: &mut RegionFacts, g: &Graph) -> Result<(), RegionError> {
                     RegionKind::Synchronized(sync) => {
                         let p = &f.synchronized[sync.0 as usize];
                         if p.body.contains(&l.from)
-                            && let Some(&op) = p
-                                .releases
+                            && let Some(exit) = p
+                                .exits
                                 .iter()
-                                .find(|op| g.op_node[op.0 as usize] == l.to)
+                                .find(|exit| g.op_node[exit.release.0 as usize] == l.to)
                         {
                             action = TransferAction::LeaveSynchronized {
                                 region: id,
-                                release: op,
+                                release: exit.release,
                             };
                             break;
                         }
@@ -892,10 +927,11 @@ fn transfers(f: &mut RegionFacts, g: &Graph) -> Result<(), RegionError> {
                     continuation = Continuation::Parent
                 }
                 RegionKind::Synchronized(sync)
-                    if f.synchronized[sync.0 as usize]
-                        .releases
-                        .iter()
-                        .any(|op| g.op_node[op.0 as usize] == follow) =>
+                    if f.synchronized[sync.0 as usize].follow == Some(follow)
+                        || f.synchronized[sync.0 as usize]
+                            .exits
+                            .iter()
+                            .any(|exit| g.op_node[exit.release.0 as usize] == follow) =>
                 {
                     continuation = Continuation::Parent
                 }
@@ -976,6 +1012,7 @@ pub(super) fn construct(
         },
     )?);
     protect(storage, f, g)?;
+    scope_contexts(storage, f, g)?;
     for monitor in &mut f.monitors {
         if let MonitorMode::Natural(scope) = monitor.mode
             && !f
@@ -993,7 +1030,10 @@ pub(super) fn construct(
                     _ => None,
                 })
                 .ok_or(bug("unselected lock scope lost its separation reason"))?;
-            monitor.mode = MonitorMode::Explicit(LockSeparation::Region(reason));
+            let plan = &mut f.synchronized[scope.0 as usize];
+            let reason = plan.separation.unwrap_or(LockSeparation::Region(reason));
+            plan.separation = Some(reason);
+            monitor.mode = MonitorMode::Explicit(reason);
         }
     }
     own(storage, f, g)?;

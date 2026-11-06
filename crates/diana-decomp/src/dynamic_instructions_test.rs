@@ -2222,23 +2222,20 @@ fn region_action_target(method: &PlannedMethod<'_>, link: crate::p6::LinkId) -> 
             };
             let p = &f.synchronized()[id.0 as usize];
             assert_eq!(link, p.enter_link());
-            f.regions()[r.children()[1].0 as usize]
-                .entry()
-                .unwrap_or_else(|| {
-                    f.nodes()
-                        .iter()
-                        .find(|n| n.operations().contains(&p.releases()[0].0))
-                        .unwrap()
-                        .id()
-                })
+            f.regions()[r.children()[1].0 as usize].entry().unwrap()
         }
-        TransferAction::SynchronizedReleased(region) => {
+        TransferAction::SynchronizedReleased { region, release } => {
             let r = &f.regions()[region.0 as usize];
             let RegionKind::Synchronized(id) = r.kind() else {
                 panic!()
             };
-            assert_eq!(link, f.synchronized()[id.0 as usize].release_link());
-            r.follow().unwrap()
+            let exit = f.synchronized()[id.0 as usize]
+                .exits()
+                .iter()
+                .find(|e| e.release() == release)
+                .unwrap();
+            assert_eq!(link, exit.release_link());
+            exit.target()
         }
         TransferAction::LeaveSynchronized { region, release } => {
             assert!(ancestor(region));
@@ -2247,8 +2244,9 @@ fn region_action_target(method: &PlannedMethod<'_>, link: crate::p6::LinkId) -> 
             };
             assert!(
                 f.synchronized()[id.0 as usize]
-                    .releases()
-                    .contains(&release)
+                    .exits()
+                    .iter()
+                    .any(|e| e.release() == release)
             );
             f.nodes()
                 .iter()
@@ -2258,8 +2256,323 @@ fn region_action_target(method: &PlannedMethod<'_>, link: crate::p6::LinkId) -> 
         }
     }
 }
+fn region_sync_correspondence(method: &PlannedMethod<'_>) {
+    use crate::p5::{CopyEmission, CopyLocation, PlanId, ThrowSite, TransferSite};
+    use crate::p6::*;
+    use std::collections::HashSet;
+    let f = method.facts();
+    let flow = method.execution();
+    let storage = method.storage_facts();
+    let node_of = |op: crate::p2::OpId| {
+        f.nodes()
+            .iter()
+            .find(|n| n.operations().contains(&op.0))
+            .unwrap()
+            .id()
+    };
+    let outgoing = |node: NodeId| {
+        f.links()
+            .iter()
+            .filter(|l| l.from() == node)
+            .collect::<Vec<_>>()
+    };
+    let originals = |location: CopyLocation| {
+        storage
+            .copy_plans()
+            .iter()
+            .filter(|p| {
+                p.location() == location
+                    && storage.copy_emission(p.id()) == Some(CopyEmission::Original)
+            })
+            .map(|p| p.id())
+            .collect::<Vec<PlanId>>()
+    };
+    let transfer = |site: TransferSite| {
+        storage
+            .copy_plans()
+            .iter()
+            .filter(|p| {
+                matches!(p.location(),CopyLocation::Transfer{site:s,..}if s==site)
+                    && storage.copy_emission(p.id()) == Some(CopyEmission::Original)
+            })
+            .map(|p| p.id())
+            .collect::<Vec<PlanId>>()
+    };
+    let edge_copies = |link: &crate::p6::NormalLink| match link.origin() {
+        LinkOrigin::Edge(id) => transfer(TransferSite::NormalEdge(id)),
+        LinkOrigin::WithinBlock(_) => Vec::new(),
+    };
+    for scope in f.synchronized() {
+        let enter = node_of(scope.enter());
+        let held = scope.held_nodes().iter().copied().collect::<HashSet<_>>();
+        assert_eq!(held.len(), scope.held_nodes().len());
+        assert!(!held.contains(&enter));
+        let entry = &f.links()[scope.enter_link().0 as usize];
+        assert_eq!(entry.from(), enter);
+        assert!(held.contains(&entry.to()));
+        let releases = scope
+            .exits()
+            .iter()
+            .map(|e| node_of(e.release()))
+            .collect::<HashSet<_>>();
+        assert_eq!(
+            releases.len(),
+            scope.exits().len(),
+            "P6 duplicated a release outlet"
+        );
+        for &node in &held {
+            if releases.contains(&node) {
+                continue;
+            }
+            let normal = outgoing(node);
+            let throws = f
+                .throws()
+                .iter()
+                .filter(|t| t.node() == node)
+                .collect::<Vec<_>>();
+            assert!(
+                !normal.is_empty() || !throws.is_empty(),
+                "P6 omitted an abrupt held exit"
+            );
+            for link in normal {
+                assert!(
+                    held.contains(&link.to()),
+                    "P6 held path escaped without its release"
+                );
+            }
+            for site in throws {
+                for &edge in site.edges() {
+                    if matches!(
+                        f.edges()[edge.0 as usize].route(),
+                        EdgeRoute::Exception {
+                            delivery: ExceptionDelivery::ImpossibleRelease(_),
+                            ..
+                        }
+                    ) {
+                        continue;
+                    }
+                    let crate::p2::EdgeTarget::Block(block) =
+                        flow.edges()[edge.0 as usize].target()
+                    else {
+                        panic!("P6 hid an escaping held exception");
+                    };
+                    assert!(
+                        held.contains(&f.blocks()[block.0 as usize].parts()[0]),
+                        "P6 cleanup path escaped the held graph"
+                    );
+                }
+            }
+        }
+        let selected = f
+            .regions()
+            .iter()
+            .find(|r| matches!(r.kind(),RegionKind::Synchronized(id)if *id==scope.id()));
+        if let Some(region) = selected {
+            assert!(scope.separation().is_none());
+            assert_eq!(region.follow(), scope.follow());
+        }
+        let fallthroughs = scope
+            .exits()
+            .iter()
+            .filter(|e| matches!(e.kind(), SyncExitKind::Follow(_)))
+            .count();
+        let mut body = held.clone();
+        for exit in scope.exits() {
+            let at = node_of(exit.release());
+            assert!(held.contains(&at));
+            let lock = f
+                .locks()
+                .iter()
+                .find(|e| e.operation() == exit.release())
+                .unwrap();
+            assert_eq!(lock.matched(), Some(scope.enter()));
+            assert!(lock.release_cannot_throw());
+            let links = outgoing(at);
+            let [link] = links.as_slice() else {
+                panic!("P6 release lost its original successor");
+            };
+            assert_eq!(link.id(), exit.release_link());
+            assert_eq!(link.to(), exit.target());
+            let mut before = transfer(TransferSite::BeforeOperation(exit.release()));
+            before.extend(originals(CopyLocation::BeforeThrow(ThrowSite::Operation(
+                exit.release(),
+            ))));
+            let mut after = transfer(TransferSite::AfterCommit(exit.release()));
+            after.extend(edge_copies(link));
+            let mut current = exit.target();
+            for &node in exit.routing() {
+                assert_eq!(current, node, "P6 reordered post-release routing");
+                assert!(!held.contains(&node));
+                body.insert(node);
+                let part = &f.nodes()[node.0 as usize];
+                assert!(
+                    part.operations().is_empty(),
+                    "P6 moved post-release work under the lock"
+                );
+                if part.has_terminal() {
+                    after.extend(transfer(TransferSite::BeforeTerminal(part.block())));
+                    after.extend(originals(CopyLocation::BeforeThrow(ThrowSite::Terminal(
+                        part.block(),
+                    ))));
+                }
+                let links = outgoing(node);
+                for link in &links {
+                    after.extend(edge_copies(link));
+                }
+                if let [next] = links.as_slice() {
+                    current = next.to();
+                } else {
+                    assert!(links.is_empty());
+                }
+            }
+            assert_eq!(
+                exit.before_release(),
+                before,
+                "P6 lost pre-release storage obligations"
+            );
+            assert_eq!(
+                exit.after_release(),
+                after,
+                "P6 lost post-release storage obligations"
+            );
+            match exit.kind() {
+                SyncExitKind::Follow(target) => {
+                    assert_eq!(current, target, "P6 changed unlocked continuation");
+                    if selected.is_some() {
+                        assert_eq!(scope.follow(), Some(target));
+                    }
+                }
+                SyncExitKind::Loop {
+                    loop_id,
+                    kind,
+                    target,
+                } => {
+                    assert_eq!(current, target);
+                    let p = &f.loops()[loop_id.0 as usize];
+                    assert!(p.members().contains(&enter));
+                    assert_eq!(
+                        target,
+                        match kind {
+                            SyncLoopTransfer::Break => p.follow().unwrap(),
+                            SyncLoopTransfer::Continue => p.continue_target(),
+                        }
+                    );
+                    if let Some(region) = selected {
+                        let mut parent = f.parent(region.id());
+                        let mut found = false;
+                        while let Some(id) = parent {
+                            found |= matches!(f.regions()[id.0 as usize].kind(),RegionKind::Loop(actual)if *actual==loop_id);
+                            parent = f.parent(id);
+                        }
+                        assert!(found, "P6 intrinsic loop outlet has no loop context");
+                    }
+                }
+                SyncExitKind::ReturnVoid { terminal } => {
+                    assert_eq!(current, terminal);
+                    let b = f.nodes()[terminal.0 as usize].block();
+                    assert!(matches!(
+                        flow.blocks()[b.0 as usize].terminal(),
+                        Some(crate::p2::Terminal::Return { width: None, .. })
+                    ));
+                    assert!(storage.terminal_uses(b).unwrap().is_empty());
+                }
+                SyncExitKind::Rethrow {
+                    terminal,
+                    capture,
+                    exception,
+                } => {
+                    assert_eq!(current, terminal);
+                    let b = f.nodes()[terminal.0 as usize].block();
+                    assert!(matches!(
+                        flow.blocks()[b.0 as usize].terminal(),
+                        Some(crate::p2::Terminal::Throw { .. })
+                    ));
+                    assert_eq!(
+                        storage.terminal_uses(b).unwrap()[0].read(),
+                        Ok(exception),
+                        "P6 rethrow changed the original storage access"
+                    );
+                    assert!(held.contains(&node_of(capture)));
+                    assert!(
+                        f.handler_entries()
+                            .iter()
+                            .any(|h| h.capture() == Some(capture))
+                    );
+                    let crate::p5::StorageRead::Value { value, .. } = exception else {
+                        panic!()
+                    };
+                    let capture_local = storage
+                        .operation_definitions(capture)
+                        .unwrap()
+                        .iter()
+                        .find_map(|d| {
+                            if let crate::p5::Materialization::ExceptionCapture(l) =
+                                d.materialization()
+                            {
+                                Some(l)
+                            } else {
+                                None
+                            }
+                        })
+                        .unwrap();
+                    let (crate::p5::LocalKind::Value(captured)
+                    | crate::p5::LocalKind::ReferenceCarrier(captured)) =
+                        storage.locals()[capture_local.0 as usize].kind()
+                    else {
+                        panic!()
+                    };
+                    assert_eq!(
+                        method.type_facts().values()[value.0 as usize].identity(),
+                        method.type_facts().values()[captured.0 as usize].identity(),
+                        "P6 rethrow changed the captured exception"
+                    );
+                }
+            }
+            if selected.is_some()
+                && (!matches!(exit.kind(), SyncExitKind::Follow(_)) || fallthroughs != 1)
+            {
+                for &plan in exit.after_release() {
+                    let p = &storage.copy_plans()[plan.0 as usize];
+                    assert!(
+                        p.is_complete() && p.steps().is_empty(),
+                        "P6 hoisted path-specific post-release copies"
+                    );
+                }
+            }
+        }
+        assert_eq!(body, scope.body().iter().copied().collect::<HashSet<_>>());
+        body.insert(enter);
+        assert_eq!(
+            body,
+            scope.members().iter().copied().collect::<HashSet<_>>()
+        );
+    }
+}
+
+fn region_copy_owner(method: &PlannedMethod<'_>, plan: crate::p5::PlanId) -> crate::p6::CopyOwner {
+    use crate::p6::{CopyOwner, RegionKind};
+    if let Some(crate::p5::CopyEmission::Construction { group }) =
+        method.storage_facts().copy_emission(plan)
+    {
+        return CopyOwner::Construction(group);
+    }
+    let mut owner = CopyOwner::Original;
+    for r in method.facts().regions() {
+        if let RegionKind::Synchronized(scope) = r.kind()
+            && method.facts().synchronized()[scope.0 as usize]
+                .exits()
+                .iter()
+                .any(|e| e.before_release().contains(&plan) || e.after_release().contains(&plan))
+        {
+            assert!(owner == CopyOwner::Original || owner == CopyOwner::SynchronizedExit(*scope));
+            owner = CopyOwner::SynchronizedExit(*scope);
+        }
+    }
+    owner
+}
 fn region_correspondence(method: &PlannedMethod<'_>) {
-    use crate::p5::{CopyEmission, CopyLocation, OperationEmission, ThrowSite, TransferSite};
+    region_sync_correspondence(method);
+    use crate::p5::{CopyLocation, OperationEmission, ThrowSite, TransferSite};
     use crate::p6::*;
     use std::collections::HashSet;
     let f = method.facts();
@@ -2357,7 +2670,20 @@ fn region_correspondence(method: &PlannedMethod<'_>) {
                 if members.contains(&t.node()) {
                     continue;
                 }
-                for c in f.handler_chains()[t.chain().0 as usize].clauses() {
+                for (c, &edge) in f.handler_chains()[t.chain().0 as usize]
+                    .clauses()
+                    .iter()
+                    .zip(t.edges())
+                {
+                    if matches!(
+                        f.edges()[edge.0 as usize].route(),
+                        EdgeRoute::Exception {
+                            delivery: ExceptionDelivery::ImpossibleRelease(_),
+                            ..
+                        }
+                    ) {
+                        continue;
+                    }
                     if let CatchTarget::Handler(to) = c.target
                         && members.contains(&to)
                     {
@@ -2466,7 +2792,7 @@ fn region_correspondence(method: &PlannedMethod<'_>) {
                 };
                 assert_eq!(f.blocks()[to.0 as usize].parts()[0], l.to());
                 original_edges[id.0 as usize] += 1;
-                storage.copy_plans().iter().filter(|p|storage.copy_emission(p.id())==Some(CopyEmission::Original)&&matches!(p.location(),CopyLocation::Transfer{site:TransferSite::NormalEdge(e),..}if e==id)).map(|p|p.id()).collect::<Vec<_>>()
+                storage.copy_plans().iter().filter(|p|region_copy_owner(method,p.id())==CopyOwner::Original&&matches!(p.location(),CopyLocation::Transfer{site:TransferSite::NormalEdge(e),..}if e==id)).map(|p|p.id()).collect::<Vec<_>>()
             }
         };
         assert_eq!(p.copies(), copies, "P6 lost or moved selected-edge copies");
@@ -2480,11 +2806,9 @@ fn region_correspondence(method: &PlannedMethod<'_>) {
             "P6 moved a P5 copy position"
         );
         assert_eq!(
-            p.construction,
-            match storage.copy_emission(p.plan).unwrap() {
-                CopyEmission::Original => None,
-                CopyEmission::Construction { group } => Some(group),
-            }
+            p.owner,
+            region_copy_owner(method, p.plan),
+            "P6 copy emission ownership changed"
         );
     }
     let expected_sites = flow
@@ -2576,20 +2900,6 @@ fn region_correspondence(method: &PlannedMethod<'_>) {
                     };
                     assert!(p.handlers().contains(&n));
                 }
-                ExceptionDelivery::Cleanup(id) => {
-                    natural = true;
-                    let p = &f.synchronized()[id.0 as usize];
-                    assert!(
-                        f.regions()
-                            .iter()
-                            .any(|r| matches!(r.kind(),RegionKind::Synchronized(i)if *i==id))
-                    );
-                    assert!(p.body().contains(&t.node()));
-                    let CatchTarget::Handler(n) = c.target else {
-                        panic!()
-                    };
-                    assert!(p.cleanups().iter().any(|c| c.nodes.first() == Some(&n)));
-                }
             }
         }
         assert!(
@@ -2649,12 +2959,9 @@ fn region_correspondence(method: &PlannedMethod<'_>) {
                 );
                 match role {
                     MonitorRole::Acquire => assert_eq!(op.id(), p.enter()),
-                    MonitorRole::Release => assert!(p.releases().contains(&op.id())),
-                    MonitorRole::Cleanup => assert!(p.cleanups().iter().any(|c| {
-                        c.nodes
-                            .iter()
-                            .any(|n| f.nodes()[n.0 as usize].operations().contains(&op.id().0))
-                    })),
+                    MonitorRole::Release => {
+                        assert!(p.exits().iter().any(|e| e.release() == op.id()))
+                    }
                 }
             }
             _ => panic!("P6 changed an operation's unique emission owner"),
@@ -2721,24 +3028,17 @@ fn region_correspondence(method: &PlannedMethod<'_>) {
                     scope: *id,
                     role: MonitorRole::Acquire,
                 };
-                for op in p.releases() {
-                    expected_operations[op.0 as usize] = OperationOwner::Synchronized {
+                for exit in p.exits() {
+                    expected_operations[exit.release().0 as usize] = OperationOwner::Synchronized {
                         scope: *id,
                         role: MonitorRole::Release,
                     };
-                }
-                for c in p.cleanups() {
-                    for node in &c.nodes {
+                    for node in exit.routing() {
                         let n = &f.nodes()[node.0 as usize];
-                        for op in n.operations() {
-                            expected_operations[op as usize] = OperationOwner::Synchronized {
-                                scope: *id,
-                                role: MonitorRole::Cleanup,
-                            };
-                        }
+                        assert!(n.operations().is_empty());
                         if n.has_terminal() {
                             expected_terminals[n.block().0 as usize] =
-                                TerminalOwner::SynchronizedCleanup(*id);
+                                TerminalOwner::SynchronizedExit(*id);
                         }
                     }
                 }
@@ -2856,7 +3156,9 @@ impl<'f, 'a> RegionMachine<'f, 'a> {
                 .facts()
                 .copy_placements()
                 .iter()
-                .filter(|p| p.location == at && p.construction.is_none())
+                .filter(|p| {
+                    p.location == at && !matches!(p.owner, crate::p6::CopyOwner::Construction(_))
+                })
                 .map(|p| p.plan)
                 .collect()
         } else {
@@ -2881,7 +3183,7 @@ impl<'f, 'a> RegionMachine<'f, 'a> {
                 .iter()
                 .filter(|p| {
                     matches!(p.location,crate::p5::CopyLocation::Transfer{site:s,..}if s==site)
-                        && p.construction.is_none()
+                        && !matches!(p.owner, crate::p6::CopyOwner::Construction(_))
                 })
                 .map(|p| p.plan)
                 .collect::<Vec<_>>()
@@ -3177,9 +3479,17 @@ impl<'f, 'a> RegionMachine<'f, 'a> {
                 else {
                     panic!()
                 };
-                self.method.facts().link_plans()[link.0 as usize]
+                let mut plans = self.method.facts().link_plans()[link.0 as usize]
                     .copies()
-                    .to_vec()
+                    .to_vec();
+                for p in self.method.facts().copy_placements() {
+                    if matches!(p.owner, crate::p6::CopyOwner::SynchronizedExit(_))
+                        && matches!(p.location,crate::p5::CopyLocation::Transfer{site:crate::p5::TransferSite::NormalEdge(edge),..}if edge==id)
+                    {
+                        plans.push(p.plan);
+                    }
+                }
+                plans
             } else {
                 self.method.storage_facts().copy_plans().iter().filter(|p|matches!(p.location(),crate::p5::CopyLocation::Transfer{site:crate::p5::TransferSite::NormalEdge(e),..}if e==id)).map(|p|p.id()).collect()
             };
@@ -3356,6 +3666,7 @@ fn region_trace(
     reference.events
 }
 fn check_region_cases() {
+    check_region_outlets();
     use crate::p6::*;
     let has = |m: &PlannedMethod<'_>, predicate: fn(&RegionKind) -> bool| {
         m.facts().regions().iter().any(|r| predicate(r.kind()))
@@ -3599,7 +3910,11 @@ fn check_region_cases() {
     let nested_method = flowed(&nested.bytes);
     assert!(
         has(&nested_method, |k| matches!(k, RegionKind::Try(_))),
-        "P6 lost the typed catch inside a lock scope"
+        "P6 lost the typed catch inside a lock scope: issues={:?}, scopes={:?}, tries={:?}, regions={:?}",
+        nested_method.facts().issues(),
+        nested_method.facts().synchronized(),
+        nested_method.facts().tries(),
+        nested_method.facts().regions()
     );
     assert!(
         has(&nested_method, |k| matches!(k, RegionKind::Synchronized(_))),
@@ -3632,6 +3947,366 @@ fn check_region_cases() {
             .any(|l| matches!(l.normal(), LockState::Unknown(LockGap::Reference { .. })))
     );
     region_trace(&method, &[(2, RegionChoice::Exception(0))], None);
+}
+
+fn check_region_outlets() {
+    use crate::p6::*;
+    let natural = |m: &PlannedMethod<'_>| {
+        m.facts()
+            .regions()
+            .iter()
+            .any(|r| matches!(r.kind(), RegionKind::Synchronized(_)))
+    };
+    // Both header successors remain in the loop; only the tail exits it.
+    let f = dex(
+        39,
+        &[0x0538, 4, 0x05d8, 0x0105, 0x05d8, 0x0205, 0x053c, 0xfffa],
+        None,
+        6,
+        8,
+        3,
+        0,
+    );
+    let m = flowed(&f.bytes);
+    assert!(m.facts().regions().iter().any(|r|matches!(r.kind(),RegionKind::Loop(id)if matches!(m.facts().loops()[id.0 as usize].form(),LoopForm::DoWhile(_)))),"P6 head branch blocked a valid tail predicate");
+    for choices in [
+        &[(0, RegionChoice::True), (6, RegionChoice::False)][..],
+        &[
+            (0, RegionChoice::False),
+            (6, RegionChoice::True),
+            (0, RegionChoice::True),
+            (6, RegionChoice::False),
+        ][..],
+        &[
+            (0, RegionChoice::True),
+            (6, RegionChoice::True),
+            (0, RegionChoice::False),
+            (6, RegionChoice::True),
+            (0, RegionChoice::False),
+            (6, RegionChoice::False),
+        ][..],
+    ] {
+        region_trace(&m, choices, None);
+    }
+    // Distinct releases share one unlocked continuation; neither is duplicated.
+    let f = dex(
+        39,
+        &[0x041d, 0x0738, 4, 0x041e, 0x0228, 0x041e],
+        None,
+        9,
+        8,
+        4,
+        0,
+    );
+    let m = flowed(&f.bytes);
+    assert!(natural(&m), "P6 rejected multiple matching releases");
+    assert_eq!(m.facts().synchronized()[0].exits().len(), 2);
+    for side in [RegionChoice::True, RegionChoice::False] {
+        region_trace(&m, &[(1, side)], None);
+    }
+    region_trace(&m, &[(0, RegionChoice::Exception(0))], None);
+    // Two original returns are separate abrupt outlets, not a fabricated follow.
+    let f = dex(
+        39,
+        &[0x041d, 0x0738, 4, 0x041e, 0x000e, 0x041e],
+        None,
+        9,
+        8,
+        4,
+        0,
+    );
+    let m = flowed(&f.bytes);
+    assert!(
+        natural(&m),
+        "P6 imposed a common continuation on abrupt outlets"
+    );
+    assert!(m.facts().synchronized()[0].follow().is_none());
+    assert!(
+        m.facts().synchronized()[0]
+            .exits()
+            .iter()
+            .all(|e| matches!(e.kind(), SyncExitKind::ReturnVoid { .. }))
+    );
+    for side in [RegionChoice::True, RegionChoice::False] {
+        region_trace(&m, &[(1, side)], None);
+    }
+    // A closed divergent body has no actual release or invented normal exit.
+    let f = dex(39, &[0x041d, 0x0000, 0xff28], None, 9, 8, 4, 0);
+    let m = flowed(&f.bytes);
+    assert!(natural(&m));
+    assert!(m.facts().synchronized()[0].exits().is_empty());
+    region_trace(&m, &[], Some(5));
+    // A release/break corridor lies outside the original backedge core.
+    let f = dex(
+        39,
+        &[0x0738, 9, 0x041d, 0x0738, 4, 0x041e, 0xfa28, 0x041e, 0x0128],
+        None,
+        9,
+        8,
+        4,
+        0,
+    );
+    let m = flowed(&f.bytes);
+    assert!(
+        natural(&m),
+        "P6 split a closed scope at the natural-loop core"
+    );
+    let scope = &m.facts().synchronized()[0];
+    assert!(scope.exits().iter().any(|e| matches!(
+        e.kind(),
+        SyncExitKind::Loop {
+            kind: SyncLoopTransfer::Break,
+            ..
+        }
+    )));
+    assert!(scope.exits().iter().any(|e| matches!(
+        e.kind(),
+        SyncExitKind::Loop {
+            kind: SyncLoopTransfer::Continue,
+            ..
+        }
+    )));
+    region_trace(&m, &[(0, RegionChoice::True)], None);
+    region_trace(
+        &m,
+        &[(0, RegionChoice::False), (3, RegionChoice::True)],
+        None,
+    );
+    region_trace(
+        &m,
+        &[
+            (0, RegionChoice::False),
+            (3, RegionChoice::False),
+            (0, RegionChoice::False),
+            (3, RegionChoice::True),
+        ],
+        None,
+    );
+    // Real branched cleanup and a second exception retain their own handlers.
+    let mut f = dex_with_catches(
+        39,
+        &[0x041d, 0x30fc, 1, 0x0765, 0x041e],
+        None,
+        9,
+        8,
+        4,
+        3,
+        &[
+            0x000d, 0x30fc, 1, 0x0765, 0x0738, 4, 0x717b, 0x0228, 0x727b, 0x041e, 0x0027,
+        ],
+        None,
+        StorageCatchLayout::Nested {
+            start: 7,
+            count: 3,
+            handler: &[0x010d, 0x041e, 0x0127],
+        },
+    );
+    put32(&mut f.bytes, f.tries, 1);
+    put16(&mut f.bytes, f.tries + 4, 4);
+    let m = flowed(&f.bytes);
+    assert!(
+        natural(&m),
+        "P6 rejected exception-closed cleanup control: {:?}",
+        m.facts().monitor_plans()
+    );
+    assert!(
+        m.facts()
+            .regions()
+            .iter()
+            .filter(|r| matches!(r.kind(), RegionKind::Try(_)))
+            .count()
+            >= 2,
+        "P6 lost nested cleanup protection: tries={:?}; regions={:?}; issues={:?}; chains={:?}; throws={:?}; scopes={:?}; nodes={:?}",
+        m.facts().tries(),
+        m.facts().regions(),
+        m.facts().issues(),
+        m.facts().handler_chains(),
+        m.facts().throws(),
+        m.facts().synchronized(),
+        m.facts().nodes()
+    );
+    region_trace(&m, &[], None);
+    for side in [RegionChoice::True, RegionChoice::False] {
+        region_trace(&m, &[(1, RegionChoice::Exception(0)), (10, side)], None);
+    }
+    region_trace(
+        &m,
+        &[
+            (1, RegionChoice::Exception(0)),
+            (7, RegionChoice::Exception(0)),
+        ],
+        None,
+    );
+    // Handler receives and a real cleanup operation execute before release.
+    let mut f = dex_with_handler(
+        39,
+        &[
+            0x041d, 0x1112, 0x30fc, 1, 0x0765, 0x2112, 0x30fc, 1, 0x0765, 0x041e,
+        ],
+        None,
+        9,
+        8,
+        4,
+        3,
+        &[0x000d, 0x127b, 0x041e, 0x0027],
+        None,
+    );
+    put32(&mut f.bytes, f.tries, 1);
+    put16(&mut f.bytes, f.tries + 4, 10);
+    let m = flowed(&f.bytes);
+    assert!(
+        m.storage_facts().copy_plans().iter().any(|p| matches!(
+            p.location(),
+            crate::p5::CopyLocation::HandlerEntry { .. }
+        ) && !p.steps().is_empty()),
+        "cleanup receive fixture did not establish a receive"
+    );
+    assert!(
+        natural(&m),
+        "P6 treated handler receives as implicit cleanup"
+    );
+    assert!(
+        m.facts().synchronized()[0]
+            .exits()
+            .iter()
+            .flat_map(|e| e.before_release())
+            .any(|p| !m.storage_facts().copy_plans()[p.0 as usize]
+                .steps()
+                .is_empty()),
+        "release snapshot fixture has no pre-release save"
+    );
+    region_trace(&m, &[], None);
+    for site in [2, 6] {
+        region_trace(&m, &[(site, RegionChoice::Exception(0))], None);
+    }
+    // A single normal outlet may run its own copies after the scope closes.
+    let f = dex(
+        39,
+        &[
+            0x0738, 6, 0x041d, 0x1012, 0x041e, 0x0328, 0x2012, 0x0128, 0x017b,
+        ],
+        None,
+        9,
+        8,
+        4,
+        0,
+    );
+    let m = flowed(&f.bytes);
+    assert!(natural(&m));
+    assert!(
+        m.facts().synchronized()[0]
+            .exits()
+            .iter()
+            .flat_map(|e| e.after_release())
+            .any(|p| !m.storage_facts().copy_plans()[p.0 as usize]
+                .steps()
+                .is_empty()),
+        "single outlet fixture has no post-release copy"
+    );
+    for side in [RegionChoice::True, RegionChoice::False] {
+        region_trace(&m, &[(0, side)], None);
+    }
+    // Two acquisitions of one object are distinct nested obligations. A failed
+    // inner acquisition unwinds only the already successful outer acquisition.
+    let mut f = dex_with_handler(
+        39,
+        &[0x041d, 0x041d, 0x041e, 0x041e],
+        None,
+        9,
+        8,
+        4,
+        0,
+        &[0x000d, 0x041e, 0x0027],
+        None,
+    );
+    put32(&mut f.bytes, f.tries, 1);
+    put16(&mut f.bytes, f.tries + 4, 2);
+    let m = flowed(&f.bytes);
+    assert_eq!(
+        m.facts()
+            .regions()
+            .iter()
+            .filter(|r| matches!(r.kind(), RegionKind::Synchronized(_)))
+            .count(),
+        2,
+        "P6 mixed nested acquisition obligations"
+    );
+    region_trace(&m, &[], None);
+    region_trace(&m, &[(1, RegionChoice::Exception(0))], None);
+    // An unhandled cleanup exception really escapes while the lock is held.
+    let mut f = dex_with_handler(
+        39,
+        &[0x041d, 0x30fc, 1, 0x0765, 0x041e],
+        None,
+        9,
+        8,
+        4,
+        3,
+        &[0x000d, 0x30fc, 1, 0x0765, 0x041e, 0x0027],
+        None,
+    );
+    put32(&mut f.bytes, f.tries, 1);
+    put16(&mut f.bytes, f.tries + 4, 4);
+    let m = flowed(&f.bytes);
+    assert!(!natural(&m));
+    assert!(matches!(
+        m.facts().monitor_plans()[0].mode(),
+        MonitorMode::Explicit(LockSeparation::EscapingException(_))
+    ));
+    region_trace(
+        &m,
+        &[
+            (1, RegionChoice::Exception(0)),
+            (7, RegionChoice::Exception(0)),
+        ],
+        None,
+    );
+    // Different unlocked calls cannot be moved inside a synchronized body.
+    let f = dex(
+        39,
+        &[
+            0x041d, 0x0738, 7, 0x041e, 0x30fc, 1, 0x0765, 0x0628, 0x041e, 0x30fc, 1, 0x0765, 0x0128,
+        ],
+        None,
+        9,
+        8,
+        4,
+        3,
+    );
+    let m = flowed(&f.bytes);
+    assert!(!natural(&m));
+    assert!(matches!(
+        m.facts().monitor_plans()[0].mode(),
+        MonitorMode::Explicit(LockSeparation::IncompatibleContinuation { .. })
+    ));
+    for side in [RegionChoice::True, RegionChoice::False] {
+        region_trace(&m, &[(1, side)], None);
+    }
+    // These selected-edge Phi copies belong after release, not before it.
+    let f = dex(
+        39,
+        &[
+            0x041d, 0x0738, 5, 0x1012, 0x041e, 0x0428, 0x2012, 0x041e, 0x0128, 0x017b,
+        ],
+        None,
+        9,
+        8,
+        4,
+        0,
+    );
+    let m = flowed(&f.bytes);
+    assert!(!natural(&m));
+    assert!(
+        matches!(
+            m.facts().monitor_plans()[0].mode(),
+            MonitorMode::Explicit(LockSeparation::PostReleaseCopy(_))
+        ),
+        "post-release copy fixture did not exercise the copy boundary: {:?}",
+        m.facts().monitor_plans()
+    );
+    for side in [RegionChoice::True, RegionChoice::False] {
+        region_trace(&m, &[(1, side)], None);
+    }
 }
 
 fn type_use<'f>(typed: &'f PlannedMethod<'_>, pc: u32, argument: usize) -> &'f crate::p4::UseView {
@@ -5107,6 +5782,11 @@ enum StorageCatchLayout<'a> {
     CatchAll,
     Shared,
     Split(&'a [u16]),
+    Nested {
+        start: u32,
+        count: u16,
+        handler: &'a [u16],
+    },
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -5266,14 +5946,25 @@ fn dex_with_catches(
     words.push(0x000e);
     let handler = u32::try_from(words.len()).unwrap();
     words.extend(handler_words);
-    let fallback_handler = if let StorageCatchLayout::Split(body) = catches {
+    let fallback_handler = if let StorageCatchLayout::Split(body)
+    | StorageCatchLayout::Nested { handler: body, .. } = catches
+    {
         let target = u32::try_from(words.len()).unwrap();
         words.extend(body);
         target
     } else {
         handler
     };
-    for value in [registers, incoming, outgoing, 1] {
+    for value in [
+        registers,
+        incoming,
+        outgoing,
+        if matches!(catches, StorageCatchLayout::Nested { .. }) {
+            2
+        } else {
+            1
+        },
+    ] {
         bytes.extend(value.to_le_bytes());
     }
     bytes.extend(0u32.to_le_bytes());
@@ -5286,15 +5977,35 @@ fn dex_with_catches(
     bytes.extend(0u32.to_le_bytes());
     bytes.extend(u16::try_from(instruction.len()).unwrap().to_le_bytes());
     bytes.extend(1u16.to_le_bytes());
-    match catches {
-        StorageCatchLayout::CatchAll => bytes.extend([1, 0]),
-        // SLEB128 -1: one typed Object clause followed by a catch-all.
-        StorageCatchLayout::Shared | StorageCatchLayout::Split(_) => bytes.extend([1, 0x7f, 4]),
+    if let StorageCatchLayout::Nested { start, count, .. } = catches {
+        bytes.extend(start.to_le_bytes());
+        bytes.extend(count.to_le_bytes());
+        bytes.extend(0u16.to_le_bytes());
     }
-    uleb(&mut bytes, handler);
-    if !matches!(catches, StorageCatchLayout::CatchAll) {
-        uleb(&mut bytes, fallback_handler);
+    let nested = matches!(catches, StorageCatchLayout::Nested { .. });
+    let typed = matches!(
+        catches,
+        StorageCatchLayout::Shared | StorageCatchLayout::Split(_)
+    );
+    let mut handlers = vec![if nested { 2 } else { 1 }, if typed { 0x7f } else { 0 }];
+    // SLEB128 -1: one typed Object clause followed by a catch-all.
+    if typed {
+        handlers.push(4);
     }
+    uleb(&mut handlers, handler);
+    if typed {
+        uleb(&mut handlers, fallback_handler);
+    }
+    if nested {
+        put16(
+            &mut bytes,
+            tries + 14,
+            u16::try_from(handlers.len()).unwrap(),
+        );
+        handlers.push(0);
+        uleb(&mut handlers, fallback_handler);
+    }
+    bytes.extend(handlers);
     let target_code = target_words.map(|words| {
         align(&mut bytes);
         let offset = u32::try_from(bytes.len()).unwrap();

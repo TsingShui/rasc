@@ -194,7 +194,8 @@ pub(super) fn reachable(
         }
         if exceptional {
             for &e in &g.exceptions[p.0 as usize] {
-                if let Some(q) = Graph::exception_target(f, storage, e)
+                if Graph::exception_possible(f, e)
+                    && let Some(q) = Graph::exception_target(f, storage, e)
                     && Some(q) != stop
                     && !excluded[q.0 as usize]
                     && !result[q.0 as usize]
@@ -231,7 +232,8 @@ pub(super) fn closed_entry(
             continue;
         }
         for &e in edges {
-            if let Some(to) = Graph::exception_target(f, storage, e)
+            if Graph::exception_possible(f, e)
+                && let Some(to) = Graph::exception_target(f, storage, e)
                 && set[to.0 as usize]
                 && to != entry
             {
@@ -241,23 +243,45 @@ pub(super) fn closed_entry(
     }
     true
 }
-/// Only a proved enclosing lock cleanup is projected out of a catch frontier.
-/// The original site chain and every edge/order remain unchanged.
-pub(super) fn context_handlers(
+
+// A scoped abrupt outlet does not constrain a shared normal continuation. This
+// filters follow candidates only; region checks still see every original edge.
+fn normal_follow_roots(
     f: &RegionFacts,
-    chain: ChainId,
-    outer: Option<SyncId>,
-) -> &[HandlerClause] {
-    let raw = handlers(&f.chains[chain.0 as usize]);
-    if let Some(id) = outer
-        && let Some(last) = raw.last()
-        && last.catch.is_none()
-        && matches!(last.target,CatchTarget::Handler(n)if f.synchronized[id.0 as usize].cleanups.iter().any(|c|c.nodes.first()==Some(&n)))
-    {
-        &raw[..raw.len() - 1]
-    } else {
-        raw
+    g: &Graph,
+    scope: SyncId,
+    roots: &[NodeId],
+) -> Result<Vec<NodeId>, RegionError> {
+    let p = &f.synchronized[scope.0 as usize];
+    let mut body = filled(f.nodes.len(), false)?;
+    for &node in &p.body {
+        body[node.0 as usize] = true;
     }
+    let mut reaches = filled(f.nodes.len(), false)?;
+    let mut queue = Vec::new();
+    for exit in &p.exits {
+        if matches!(exit.kind, SyncExitKind::Follow(_)) {
+            let n = g.op_node[exit.release.0 as usize];
+            reaches[n.0 as usize] = true;
+            push(&mut queue, n)?;
+        }
+    }
+    while let Some(node) = queue.pop() {
+        for &link in &g.incoming[node.0 as usize] {
+            let from = f.links[link.0 as usize].from;
+            if !reaches[from.0 as usize] && body[from.0 as usize] {
+                reaches[from.0 as usize] = true;
+                push(&mut queue, from)?;
+            }
+        }
+    }
+    let mut selected = Vec::new();
+    for &node in roots {
+        if reaches[node.0 as usize] {
+            push(&mut selected, node)?;
+        }
+    }
+    Ok(selected)
 }
 struct Pattern {
     chain: ChainId,
@@ -278,11 +302,14 @@ pub(super) fn plan(
         } else {
             Some(SyncId(id(context - 1)?))
         };
+        if outer.is_some_and(|id| f.synchronized[id.0 as usize].separation.is_some()) {
+            continue;
+        }
         for t in &f.throws {
             if outer.is_some_and(|id| !f.synchronized[id.0 as usize].body.contains(&t.node)) {
                 continue;
             }
-            let clauses = context_handlers(f, t.chain, outer);
+            let clauses = handlers(&f.chains[t.chain.0 as usize]);
             for start in 0..clauses.len() {
                 let wanted = &clauses[start..];
                 if patterns.iter().any(|p| {
@@ -335,25 +362,42 @@ pub(super) fn plan(
             if outer.is_some_and(|id| !f.synchronized[id.0 as usize].body.contains(&t.node)) {
                 continue;
             }
-            if suffix(context_handlers(f, t.chain, outer), wanted) && !seeds.contains(&t.node) {
+            if suffix(handlers(&f.chains[t.chain.0 as usize]), wanted) && !seeds.contains(&t.node) {
                 push(&mut seeds, t.node)?;
             }
         }
         if seeds.is_empty() {
             continue;
         }
+        // Bounded scope frontiers must not absorb unlocked continuation work.
         if f.synchronized.iter().any(|sync| {
-            targets.iter().any(|target| {
-                sync.cleanups
-                    .iter()
-                    .any(|c| c.nodes.first() == Some(target))
-            }) && seeds.iter().all(|n| sync.members.contains(n))
+            sync.separation.is_none()
+                && outer.is_none_or(|parent| {
+                    sync.members.len() < f.synchronized[parent.0 as usize].members.len()
+                })
+                && targets.iter().all(|n| sync.body.contains(n))
+                && seeds.iter().all(|n| sync.body.contains(n))
         }) {
             continue;
         }
+        // A follow is after each guarded node, never the throwing seed itself.
+        // Abrupt handlers can leave just one normal completion constraint.
         let mut follows = Vec::new();
-        for &n in seeds.iter().chain(&targets) {
-            push(&mut follows, n)?;
+        for &seed in &seeds {
+            for &link in &g.outgoing[seed.0 as usize] {
+                let next = f.links[link.0 as usize].to;
+                if !follows.contains(&next) {
+                    push(&mut follows, next)?;
+                }
+            }
+        }
+        let handler_follows = outer
+            .map(|scope| normal_follow_roots(f, g, scope, &targets))
+            .transpose()?;
+        for &target in handler_follows.as_deref().unwrap_or(&targets) {
+            if !follows.contains(&target) {
+                push(&mut follows, target)?;
+            }
         }
         let follow = s.common_follow(&follows);
         let mut excluded = filled(f.nodes.len(), false)?;
@@ -382,7 +426,8 @@ pub(super) fn plan(
                 continue;
             }
             for &e in edges {
-                if let Some(to) = Graph::exception_target(f, storage, e)
+                if Graph::exception_possible(f, e)
+                    && let Some(to) = Graph::exception_target(f, storage, e)
                     && body[to.0 as usize]
                     && !entries.contains(&to)
                 {
@@ -407,7 +452,7 @@ pub(super) fn plan(
                                 ..
                             }
                         )
-                    }) || suffix(context_handlers(f, t.chain, outer), wanted)
+                    }) || suffix(handlers(&f.chains[t.chain.0 as usize]), wanted)
                         || f.chains[t.chain.0 as usize].clauses.iter().all(
                             |c| matches!(c.target,CatchTarget::Handler(n)if body[n.0 as usize]),
                         )
@@ -439,7 +484,8 @@ pub(super) fn plan(
             let arm = reachable(storage, f, g, &[target], follow, &exclude, true)?;
             if !arm[target.0 as usize]
                 || f.throws.iter().any(|t| {
-                    arm[t.node.0 as usize] && suffix(context_handlers(f, t.chain, outer), wanted)
+                    arm[t.node.0 as usize]
+                        && suffix(handlers(&f.chains[t.chain.0 as usize]), wanted)
                 })
             {
                 valid = false;
@@ -464,7 +510,8 @@ pub(super) fn plan(
                 }
                 for (from, edges) in g.exceptions.iter().enumerate() {
                     for &e in edges {
-                        if let Some(to) = Graph::exception_target(f, storage, e)
+                        if Graph::exception_possible(f, e)
+                            && let Some(to) = Graph::exception_target(f, storage, e)
                             && arm[to.0 as usize]
                             && (to == target || !arm[from])
                             && !(to == target && body_nodes.contains(&NodeId(id(from)?)))

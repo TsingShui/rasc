@@ -292,9 +292,10 @@ pub(super) fn construct(
             CopyPlacement {
                 plan: plan.id(),
                 location: plan.location(),
-                construction: match storage.facts().copy_emission(plan.id()) {
-                    Some(CopyEmission::Construction { group }) => Some(group),
-                    _ => None,
+                owner: match storage.facts().copy_emission(plan.id()) {
+                    Some(CopyEmission::Construction { group }) => CopyOwner::Construction(group),
+                    Some(CopyEmission::Original) => CopyOwner::Original,
+                    None => return Err(bug("P5 copy has no emission owner")),
                 },
             },
         )?;
@@ -356,6 +357,17 @@ pub(super) fn construct(
     })
 }
 impl Graph {
+    /// Raw completions/edges remain in the product; only a proved local release
+    /// has no executable exceptional entrance for region composition.
+    pub fn exception_possible(f: &RegionFacts, edge: crate::p2::EdgeId) -> bool {
+        !matches!(
+            f.edges[edge.0 as usize].route,
+            EdgeRoute::Exception {
+                delivery: ExceptionDelivery::ImpossibleRelease(_),
+                ..
+            }
+        )
+    }
     pub fn entry(f: &RegionFacts, block: crate::p2::BlockId) -> NodeId {
         f.blocks[block.0 as usize].parts[0]
     }

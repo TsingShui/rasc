@@ -7,6 +7,7 @@ mod loops;
 mod product;
 mod protection;
 mod regions;
+mod scopes;
 pub use build::RegionError;
 pub(crate) use build::{RegionBuild, build_regions};
 pub use product::*;

@@ -1573,7 +1573,16 @@ fn add_region_counts(counts: &mut BTreeMap<String, u64>, f: &diana_decomp::p6::R
             RegionKind::Switch { .. } => "switches",
             RegionKind::LabelledBlock { .. } => "labelled_blocks",
             RegionKind::Try(_) => "tries",
-            RegionKind::Synchronized(_) => "synchronized",
+            RegionKind::Synchronized(id) => {
+                let exits = f.synchronized()[id.0 as usize].exits();
+                *counts.entry("sync_outlets".into()).or_default() += exits.len() as u64;
+                *counts.entry("sync_rethrow_outlets".into()).or_default() += exits
+                    .iter()
+                    .filter(|e| matches!(e.kind(), SyncExitKind::Rethrow { .. }))
+                    .count()
+                    as u64;
+                "synchronized"
+            }
             RegionKind::Graph { .. } => "graphs",
         };
         *counts.entry(name.into()).or_default() += 1;
@@ -1599,7 +1608,7 @@ fn region_json(method: &diana_decomp::p6::PlannedMethod<'_>, details: bool) -> V
         result["throws"]=json!(f.throws().iter().map(|t|json!({"id":t.id().0,"site":format!("{:?}",t.site()),"node":t.node().0,"completion":format!("{:?}",t.completion()),"chain":t.chain().0,"edges":t.edges().iter().map(|e|e.0).collect::<Vec<_>>(),"snapshots":t.snapshots().iter().map(|p|p.0).collect::<Vec<_>>(),"construction":t.construction().map(|g|g.0),"protection":format!("{:?}",t.protection())})).collect::<Vec<_>>());
         result["handler_chains"]=json!(f.handler_chains().iter().map(|c|json!({"id":c.id().0,"clauses":c.clauses().iter().map(|c|json!({"order":c.order,"catch":c.catch.map(|t|t.0),"target":format!("{:?}",c.target)})).collect::<Vec<_>>()})).collect::<Vec<_>>());
         result["handler_entries"]=json!(f.handler_entries().iter().map(|h|json!({"node":h.node().0,"capture":h.capture().map(|op|op.0),"receives":h.receives().iter().map(|p|p.0).collect::<Vec<_>>()})).collect::<Vec<_>>());
-        result["copies"]=json!(f.copy_placements().iter().map(|p|json!({"plan":p.plan.0,"location":format!("{:?}",p.location),"construction":p.construction.map(|g|g.0)})).collect::<Vec<_>>());
+        result["copies"]=json!(f.copy_placements().iter().map(|p|json!({"plan":p.plan.0,"location":format!("{:?}",p.location),"owner":format!("{:?}",p.owner)})).collect::<Vec<_>>());
         result["loops"]=json!(f.loops().iter().map(|l|json!({"id":l.id().0,"header":l.header().0,"condition":l.condition().map(|n|n.0),"continue":l.continue_target().0,"follow":l.follow().map(|n|n.0),"form":format!("{:?}",l.form()),"members":l.members().iter().map(|n|n.0).collect::<Vec<_>>(),"latches":l.latches().iter().map(|l|l.0).collect::<Vec<_>>(),"exits":l.exits().iter().map(|l|l.0).collect::<Vec<_>>()})).collect::<Vec<_>>());
         result["locks"]=json!(f.locks().iter().map(|l|json!({"operation":l.operation().0,"receiver":format!("{:?}",l.receiver()),"before":format!("{:?}",l.before()),"normal":format!("{:?}",l.normal()),"exception":format!("{:?}",l.exception()),"matched":l.matched().map(|op|op.0),"release_cannot_throw":l.release_cannot_throw()})).collect::<Vec<_>>());
         result["tries"]=json!(f.tries().iter().map(|p|json!({"id":p.id().0,"chain":p.chain().0,"clauses":[p.clauses().start,p.clauses().end],"outer_sync":p.outer_sync().map(|id|id.0),"entry":p.entry().0,"follow":p.follow().map(|n|n.0),"body":p.body().iter().map(|n|n.0).collect::<Vec<_>>(),"handlers":p.handlers().iter().map(|n|n.0).collect::<Vec<_>>(),"members":p.members().iter().map(|n|n.0).collect::<Vec<_>>()})).collect::<Vec<_>>());
@@ -1609,7 +1618,7 @@ fn region_json(method: &diana_decomp::p6::PlannedMethod<'_>, details: bool) -> V
                 .map(|p| json!({"enter":p.enter().0,"mode":format!("{:?}",p.mode())}))
                 .collect::<Vec<_>>()
         );
-        result["synchronized"]=json!(f.synchronized().iter().map(|s|json!({"id":s.id().0,"enter":s.enter().0,"enter_link":s.enter_link().0,"release_link":s.release_link().0,"lock":format!("{:?}",s.lock()),"body":s.body().iter().map(|n|n.0).collect::<Vec<_>>(),"releases":s.releases().iter().map(|op|op.0).collect::<Vec<_>>(),"cleanups":s.cleanups().iter().map(|c|json!({"capture":c.capture.0,"release":c.release.0,"rethrow":c.rethrow.0,"nodes":c.nodes.iter().map(|n|n.0).collect::<Vec<_>>()})).collect::<Vec<_>>(),"members":s.members().iter().map(|n|n.0).collect::<Vec<_>>(),"follow":s.follow().map(|n|n.0)})).collect::<Vec<_>>());
+        result["synchronized"]=json!(f.synchronized().iter().map(|s|json!({"id":s.id().0,"enter":s.enter().0,"enter_link":s.enter_link().0,"lock":format!("{:?}",s.lock()),"held":s.held_nodes().iter().map(|n|n.0).collect::<Vec<_>>(),"body":s.body().iter().map(|n|n.0).collect::<Vec<_>>(),"exits":s.exits().iter().map(|e|json!({"release":e.release().0,"link":e.release_link().0,"target":e.target().0,"kind":format!("{:?}",e.kind()),"routing":e.routing().iter().map(|n|n.0).collect::<Vec<_>>(),"before":e.before_release().iter().map(|p|p.0).collect::<Vec<_>>(),"after":e.after_release().iter().map(|p|p.0).collect::<Vec<_>>()})).collect::<Vec<_>>(),"members":s.members().iter().map(|n|n.0).collect::<Vec<_>>(),"follow":s.follow().map(|n|n.0),"separation":s.separation().map(|p|format!("{p:?}"))})).collect::<Vec<_>>());
         result["operation_owners"] = json!(
             f.operation_owners()
                 .iter()

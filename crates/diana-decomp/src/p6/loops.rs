@@ -106,7 +106,8 @@ pub(super) fn construct(
             if inside == 1 {
                 form = LoopForm::While(condition_plan(header)?);
             }
-        } else if latches.len() == 1 {
+        }
+        if matches!(form, LoopForm::Infinite) && latches.len() == 1 {
             let latch = f.links[latches[0].0 as usize].from;
             if conditional(latch)
                 && g.outgoing[latch.0 as usize].len() == 2

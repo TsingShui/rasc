@@ -48,7 +48,6 @@ impl LabelPlan {
 pub enum MonitorRole {
     Acquire,
     Release,
-    Cleanup,
 }
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum OperationOwner {
@@ -63,7 +62,7 @@ pub enum TerminalOwner {
     IfCondition(RegionId),
     LoopCondition(LoopId),
     SwitchSelector(RegionId),
-    SynchronizedCleanup(SyncId),
+    SynchronizedExit(SyncId),
 }
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Continuation {
@@ -304,7 +303,7 @@ pub enum TransferAction {
     Continue(LoopId),
     EnterSynchronized(RegionId),
     LeaveSynchronized { region: RegionId, release: OpId },
-    SynchronizedReleased(RegionId),
+    SynchronizedReleased { region: RegionId, release: OpId },
 }
 #[derive(Debug)]
 pub struct LinkPlan {
@@ -327,7 +326,6 @@ impl LinkPlan {
 pub enum ExceptionDelivery {
     Explicit,
     Catch(TryId),
-    Cleanup(SyncId),
     ImpossibleRelease(OpId),
 }
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -352,11 +350,17 @@ impl EdgePlan {
         self.route
     }
 }
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CopyOwner {
+    Original,
+    Construction(GroupId),
+    SynchronizedExit(SyncId),
+}
 #[derive(Clone, Debug)]
 pub struct CopyPlacement {
     pub plan: PlanId,
     pub location: CopyLocation,
-    pub construction: Option<GroupId>,
+    pub owner: CopyOwner,
 }
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum RecoveryReason {
@@ -495,9 +499,9 @@ pub enum LockSeparation {
     NotHeld(NodeId),
     AbruptExit(NodeId),
     EscapingException(ThrowSiteId),
-    NoRelease,
-    MultipleReleases,
-    MultipleContinuations,
+    IncompatibleContinuation { release: OpId, target: NodeId },
+    PostReleaseCopy(PlanId),
+    LoopContext(LoopId),
     ExternalEntry,
     Region(RecoveryReason),
 }
@@ -552,56 +556,110 @@ impl LockEvent {
         self.release_cannot_throw
     }
 }
-#[derive(Debug)]
-pub struct Cleanup {
-    pub capture: OpId,
-    pub release: OpId,
-    pub rethrow: NodeId,
-    pub nodes: Vec<NodeId>,
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SyncLoopTransfer {
+    Break,
+    Continue,
 }
+/// The outlet's original continuation. Abrupt intents carry no new dispatcher
+/// state; a non-representable continuation keeps the scope explicit instead.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SyncExitKind {
+    Follow(NodeId),
+    Loop {
+        loop_id: LoopId,
+        kind: SyncLoopTransfer,
+        target: NodeId,
+    },
+    ReturnVoid {
+        terminal: NodeId,
+    },
+    Rethrow {
+        terminal: NodeId,
+        /// Original exception-value provenance, not an ambient/current handler token.
+        capture: OpId,
+        /// The exact original terminal read; do not substitute the capture local.
+        exception: StorageRead,
+    },
+}
+#[derive(Debug)]
+pub struct SyncExit {
+    pub(super) release: OpId,
+    pub(super) link: LinkId,
+    pub(super) target: NodeId,
+    pub(super) kind: SyncExitKind,
+    pub(super) routing: Vec<NodeId>,
+    pub(super) before: Vec<PlanId>,
+    pub(super) after: Vec<PlanId>,
+}
+impl SyncExit {
+    pub fn release(&self) -> OpId {
+        self.release
+    }
+    pub fn release_link(&self) -> LinkId {
+        self.link
+    }
+    pub fn target(&self) -> NodeId {
+        self.target
+    }
+    pub fn kind(&self) -> SyncExitKind {
+        self.kind
+    }
+    pub fn routing(&self) -> &[NodeId] {
+        &self.routing
+    }
+    pub fn before_release(&self) -> &[PlanId] {
+        &self.before
+    }
+    pub fn after_release(&self) -> &[PlanId] {
+        &self.after
+    }
+}
+/// Body nodes include syntax-owned exit anchors. `held_nodes` separately records
+/// original pre-release execution; exit routing must not become ordinary locked work.
 #[derive(Debug)]
 pub struct SyncPlan {
     pub(super) id: SyncId,
     pub(super) enter: OpId,
     pub(super) enter_link: LinkId,
-    pub(super) release_link: LinkId,
     pub(super) lock: StorageRead,
+    pub(super) held: Vec<NodeId>,
     pub(super) body: Vec<NodeId>,
-    pub(super) releases: Vec<OpId>,
-    pub(super) cleanups: Vec<Cleanup>,
+    pub(super) exits: Vec<SyncExit>,
     pub(super) members: Vec<NodeId>,
     pub(super) follow: Option<NodeId>,
+    pub(super) separation: Option<LockSeparation>,
 }
 impl SyncPlan {
-    pub fn enter_link(&self) -> LinkId {
-        self.enter_link
-    }
-    pub fn release_link(&self) -> LinkId {
-        self.release_link
-    }
     pub fn id(&self) -> SyncId {
         self.id
     }
     pub fn enter(&self) -> OpId {
         self.enter
     }
+    pub fn enter_link(&self) -> LinkId {
+        self.enter_link
+    }
     pub fn lock(&self) -> StorageRead {
         self.lock
+    }
+    pub fn held_nodes(&self) -> &[NodeId] {
+        &self.held
     }
     pub fn body(&self) -> &[NodeId] {
         &self.body
     }
-    pub fn releases(&self) -> &[OpId] {
-        &self.releases
-    }
-    pub fn cleanups(&self) -> &[Cleanup] {
-        &self.cleanups
+    pub fn exits(&self) -> &[SyncExit] {
+        &self.exits
     }
     pub fn members(&self) -> &[NodeId] {
         &self.members
     }
     pub fn follow(&self) -> Option<NodeId> {
         self.follow
+    }
+    pub fn separation(&self) -> Option<LockSeparation> {
+        self.separation
     }
 }
 #[derive(Clone, Debug)]

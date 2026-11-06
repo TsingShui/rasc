@@ -68,8 +68,10 @@ fallible and checked, without a configured numeric quota.
 link. Its polarity is preserved by those original edge roles. The body and the
 syntax-owned predicate have separate execution ownership.
 
-A header predicate becomes `while` only when its original evaluation position can
-be retained. Preceding producer operations remain in the loop body of
+A header predicate becomes `while` only when its original evaluation position and
+an actual exiting edge establish that candidate. An internal header branch does
+not suppress a valid tail candidate. P6 tries the tail when the header candidate
+has not succeeded. Preceding producer operations remain in the loop body of
 `while(true)` when lifting them would move or repeat execution. A tail predicate
 remains at the tail. `continue` in a do-while targets that predicate, not the next
 body execution. Traditional for, enhanced for and for-each are not region forms.
@@ -77,7 +79,10 @@ body execution. Traditional for, enhanced for and for-each are not region forms.
 A conditional loop's normal continuation is the actual destination of its exiting
 predicate link. It is not a common postdominator beyond exit-side work. Other loop
 exits retain their own targets. A non-terminating region does not acquire a
-synthetic exit to make postdomination convenient.
+synthetic exit to make postdomination convenient. `LoopPlan::members()` retains
+the backedge core. A loop region can additionally own closed synchronized scopes
+and their release/break corridors outside that core. Candidate acceptance still
+checks the enlarged region's original entrances and unique content ownership.
 
 Original switch case keys, default, roles and duplicate-target edges remain distinct.
 A switch body can contain a local graph with multiple case entrances and
@@ -109,6 +114,13 @@ before-terminal, before-throw and handler-only receiving positions. Assignment g
 and unavailable copy components remain P5 facts; a plan ID is not evidence that
 all of its assignments are available.
 
+`CopyPlacement::owner` selects original emission, a P5 construction group or a
+synchronized outlet. Outlet-owned plans retain their P5 locations and appear in
+that outlet's before/after-release references, not also in ordinary link emission.
+P7 MUST consume that ownership and phase order without reordering assignments.
+`SynchronizedReleased` identifies the particular original release and its link;
+the outlet separately records any syntax-owned routing to the final continuation.
+
 `OperationOwner` and `TerminalOwner` define one emission partition. A natural
 predicate, catch capture, synchronized operation or P5 construction member MUST
 NOT also execute through an ordinary block lowering. P6 retains all original
@@ -130,11 +142,20 @@ address equality. A shared target does not merge different catch roles. Normal o
 sibling-catch entrances into a natural catch body reject that wrapping. Shared
 handler tails require a common continuation or explicit representation.
 
-Proved enclosing synchronization supplies a bounded protection context: its
-implicit cleanup can be projected out while planning catches inside the body.
-The original chains remain unchanged. Remaining prefix and suffix clauses still
-have their original order. Candidate composition prefers the full catch frontier
+Proved enclosing synchronization supplies a bounded protection context containing
+the actual held graph and outlet anchors. Cleanup handlers remain ordinary
+protected content: P6 does not remove their clauses, captures, operations or P5
+receives in favor of an implicit cleanup template. Ordered prefix and suffix
+clauses remain unchanged. Candidate composition prefers the full catch frontier
 when equal memberships would otherwise let a suffix obscure it.
+
+Follow candidates start after guarded nodes. Within a synchronized context,
+handlers that complete through abrupt outlets do not constrain a shared normal
+follow; guarded nodes' own normal successors still constrain it. Exception-closed
+body/handler membership and entrance checks retain nested cleanup protection and
+secondary exceptions. A proved `ImpossibleRelease` supplies no executable
+exceptional entrance, but its original completion, chain, edges and snapshots
+remain in the product.
 
 A site does not execute both an explicit and a natural capture plan. If selected
 candidates cannot account for its original handler choices in one model, P6 expands
@@ -169,22 +190,46 @@ callee-behavior or VM-admission proof. An unresolved lock relationship retains
 explicit monitor operations and the original exceptional outcome.
 
 `MonitorPlan` records `Natural(SyncId)` or `Explicit(LockSeparation)` for each
-acquisition. The natural scope requires closed entrances, a matching normal
-release/continuation and faithful escaping-exception cleanup. The implemented
-normal-release rule has one release site and one continuation. Multiple release
-sites or incompatible continuations retain explicit plans with that reason.
+acquisition. Scope construction follows all executable normal and exceptional
+held paths. Each path stays held, diverges, or reaches its own stable matching
+release. A return or uncaught exception while still held rejects naturalization.
+A closed divergent body needs neither an invented release nor an invented exit.
+Acquisition failure does not enter the held body. Nested acquisitions remain
+distinct obligations even when they capture the same object.
 
-Cleanup preserves the original exception capture, stable lock operand, release and
-rethrow of that same exception. Extra cleanup effects, handler-only receives or
-before-rethrow saves that cannot execute in an implicit cleanup keep that scope
-explicit. A cleanup reached from a failing acquire cannot become a successful
-synchronized scope. Independent proven nested regions remain available.
+`SyncPlan::held_nodes()` records original held execution. `body()` additionally
+contains syntax-owned outlet anchors, not unlocked operations moved under the
+lock. Each `SyncExit` records its original release/link/target, routing, P5 plans
+before and after release, and continuation. Multiple releases are supported.
+A scope has at most one shared normal follow; other established outlets are
+operand-free returns, enclosing-loop break/continue, or rethrows of existing
+exception values. Loop outlets require the selected enclosing loop, not merely
+a loop analysis candidate. A rethrow retains the exact original P5 read. Its
+capture identifies provenance, not permission to substitute the current handler
+exception or the capture local.
 
-The synchronized entry and release links retain their exact P5 copies. Acquisition
-failure does not execute body or cleanup. Successful body completion executes the
-original release obligations before its continuation. Synchronized syntax and
-ordinary monitor emission do not both own the same event. An explicit goto does
-not add release, finally, heap rollback or initialization.
+Branched cleanup operations, nested handlers, handler-only receives and secondary
+exceptions remain at their original positions in the held graph. Only the matched
+monitor event is represented by the synchronized release. Every original terminal
+and operation retains one emission owner; cleanup effects are not silently
+absorbed into an implicit finally. A failing cleanup that actually escapes before
+release keeps the monitor scope explicit rather than acquiring an invented release.
+
+Outlet classification does not authorize copy motion. One normal outlet can
+execute its own post-release plans after the scope closes. Multiple normal outlets
+or abrupt outlets require their post-release plans to be complete and have no
+execution steps; P6 does not hoist path-specific assignments into the locked body
+or generate a dispatcher. Distinct unlocked continuations that cannot be expressed
+by the established outlet forms retain `IncompatibleContinuation`; unsatisfied
+post-release plans retain `PostReleaseCopy`. This also preserves value-returning
+paths when a natural combination has not been established. Scope/region rejection
+retains the original plans and a concrete reason, not a method failure.
+
+The synchronized entry and every release outlet retain their exact P5 obligations.
+Successful body completion executes the selected release before its after-release
+plans and original continuation. Synchronized syntax and ordinary monitor emission
+do not both own the same event. An explicit goto does not add release, finally,
+heap rollback or initialization. Independent proven nested regions remain available.
 
 ## Test obligations
 
@@ -197,6 +242,12 @@ roles and labels, not a production region-builder helper.
 Finite symbolic traces compare original P2 control with P6 target interpretation,
 including branch roles, looping definitions, tail conditions, exit-side work,
 selector evaluation, selected copies, capture timing and monitor identity/order.
+Additional cases cover an internal header branch with a tail predicate, multiple
+releases/returns, loop-exit corridors, a held divergent prefix, nested acquisitions,
+branched cleanup with secondary exceptions, handler receives, pre-release saves,
+and single/multiple-outlet post-release copies. The independent checker compares
+outlet phases against original P5 locations and held closure against original
+transfers; it does not merely trust the outlet's own list of obligations.
 Control choices name original PCs and roles. Divergent prefixes are bounded test
 observations, not truncated production results. These checks do not implement a
 full VM, reconstruct SSA or prove external calls or ART behavior. Targeted

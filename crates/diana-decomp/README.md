@@ -94,7 +94,9 @@ Construction plans now select natural groups for established allocation/construc
 correspondence, including private alias publication and compatible snapshot
 preludes; other relationships retain explicit operations and concrete reasons.
 P6 delivers Block/Sequence/If/Loop/original Switch/LabelledBlock/Try/Synchronized
-and explicit Graph regions through the same method chain. Normal LT dominators,
+and explicit Graph regions through the same method chain. Synchronized plans
+separate held execution from individual release outlets and retain cleanup control,
+handler receives and before/after-release P5 obligations. Normal LT dominators,
 finite-exit postdominator candidates and iterative SCC analysis drive composition.
 Labels and selected edge copies remain concrete. Ordered throw-site chains,
 original captures, P5 construction ownership and explicit monitor separation reasons
@@ -154,7 +156,8 @@ original reads/definitions, copy assignments/steps, snapshot routes, constructor
 receiver accesses and local gaps. `p5-all` aggregates the same facts, including
 unavailable plan components. `p6` (`details:true`) exposes the region arena,
 continuations, labels, original links and copy delivery, handler/site ownership,
-lock events and selected emission roles. `p6-all` aggregates those plans and
+lock events, release outlets, copy emission ownership and selected operation roles.
+`p6-all` aggregates those plans and
 construction stops. The timed Engine traversal includes P6, even when a command
 inspects a retained earlier product. Each shell command creates a
 fresh Engine. `Engine::with_method_jobs(n)` enables a bounded Rayon pool for
@@ -322,20 +325,28 @@ control targets and edge copies, before-throw saves, catch order and exactly-onc
 natural emission. Finite original-graph versus planned-target traces cover
 branches, nested regions, while/do-while conditions, repeated producers, exit-side
 work, nested loops, a divergent prefix, original switch fallthrough/shared targets,
-natural and explicit protection, and successful/failing lock paths. Debug and
+natural and explicit protection, and successful/failing lock paths. Additional
+cases cover internal-header/tail-condition selection, multiple releases and returns,
+break/continue corridors, nested captures, divergent held bodies, branched cleanup,
+secondary exceptions, handler receives and pre/post-release copies. The independent
+checker compares outlet obligations with original P5 locations and preserves
+unlocked calls and path-specific copies as explicit when required. Debug and
 release execution of the sole core test passed. The model consumes supplied
 branch roles and P5 storage; it is not a full VM or a P7/P9 execution test.
 
-Ten temporary P6 mutations compiled and failed the targeted core obligations:
-missing edge copies, reversed arm role, skipped tail condition, skipped exit-side
-work, reversed catch priority, lost snapshots, duplicate monitor emission, invented
-lock alias, duplicate construction emission and collapsed shared-entry catch roles.
+Nine temporary P6 outlet mutations compiled and failed the targeted core
+obligations: blocked tail selection, missing release outlet, hoisted post-release
+copies, lost pre-release save, lost post-release copy, wrong unlocked continuation,
+wrong rethrow access, split loop/lock corridor and hidden cleanup escape.
 All mutations were removed. These finite checks do not prove every graph, caller,
 callee, monitor pattern or resource-failure path.
 
 A 55-DEX traversal delivered 2,644,578 PlannedMethod products without P6 stops or
 upstream/class stops. The pre-existing P4 issue remained and storage gaps stayed
-zero. Natural and explicit plans coexist; recovery diagnostics are not execution-fact
+zero. It selected 28,695 synchronized regions with 64,777 release outlets, including
+28,469 existing-exception rethrow outlets. Natural and explicit plans coexist;
+incompatible unlocked continuations and unsatisfied post-release copy obligations
+retain complete explicit plans. Recovery diagnostics are not execution-fact
 failures or whole-method verification badges. All 4,448 retained P2/P3/P4/P5
 products for 1,112 focused methods matched. Serial/four-worker products including
 P6 matched for 19 classes and 4,585 members. Input/P1 were unchanged, so prior
