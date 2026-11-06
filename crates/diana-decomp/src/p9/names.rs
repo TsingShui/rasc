@@ -4,11 +4,23 @@ use crate::{MethodId, p7, p8};
 pub(super) struct Lookup<'a> {
     pub uses: &'a [p8::NamedUse],
     pub targets: &'a [p8::TypeTarget],
+    signatures: Option<&'a p8::SignaturePlan>,
     index: std::collections::HashMap<p8::TypeSource, p8::TypeUseId>,
 }
 impl<'a> Lookup<'a> {
     pub fn complete(plan: &'a p8::TypeNamePlan) -> Result<Self, RenderError> {
-        Self::new(plan.uses(), plan.targets())
+        let mut lookup = Self::new(plan.uses(), plan.targets())?;
+        lookup.signatures = Some(plan.signatures());
+        Ok(lookup)
+    }
+    pub fn signature(&self, owner: p8::SignatureOwner) -> Option<u32> {
+        self.signatures?.root(owner)
+    }
+    pub fn signature_node(&self, id: u32) -> Option<&p8::SignatureNode> {
+        self.signatures?.node(id)
+    }
+    pub fn find_use(&self, source: p8::TypeSource) -> Option<p8::TypeUseId> {
+        self.find(source)
     }
     pub fn new(
         uses: &'a [p8::NamedUse],
@@ -24,6 +36,7 @@ impl<'a> Lookup<'a> {
         Ok(Self {
             uses,
             targets,
+            signatures: None,
             index,
         })
     }
@@ -280,4 +293,73 @@ pub(super) fn flags(out: &mut Buffer, raw: u32, scope: FlagScope) -> Result<(), 
         out.fmt(format_args!("unknown_flags<0x{unknown:x}> "))?;
     }
     Ok(())
+}
+
+/// Prints an interpreted `@Signature`, falling back to the delivered descriptor
+/// only when the plan did not name that leaf.
+pub(super) fn signature(
+    out: &mut Buffer,
+    lookup: &Lookup<'_>,
+    root: u32,
+) -> Result<(), RenderError> {
+    let node = lookup.signature_node(root).ok_or(RenderError::Invariant(
+        "signature node is outside the delivered plan",
+    ))?;
+    match node {
+        p8::SignatureNode::Leaf { source, descriptor } => {
+            print_source(out, lookup, *source, descriptor)?;
+        }
+        p8::SignatureNode::Generic {
+            base,
+            base_descriptor,
+            args,
+        } => {
+            print_source(out, lookup, *base, base_descriptor)?;
+            out.put("<")?;
+            for (index, arg) in args.iter().enumerate() {
+                if index > 0 {
+                    out.put(", ")?;
+                }
+                match arg {
+                    p8::SignatureArg::Any => out.put("?")?,
+                    p8::SignatureArg::Node(id) => signature(out, lookup, *id)?,
+                    p8::SignatureArg::Extends(id) => {
+                        out.put("? extends ")?;
+                        signature(out, lookup, *id)?;
+                    }
+                    p8::SignatureArg::Super(id) => {
+                        out.put("? super ")?;
+                        signature(out, lookup, *id)?;
+                    }
+                }
+            }
+            out.put(">")?;
+        }
+        p8::SignatureNode::Array {
+            element,
+            dimensions,
+        } => {
+            signature(out, lookup, *element)?;
+            for _ in 0..*dimensions {
+                out.put("[]")?;
+            }
+        }
+    }
+    Ok(())
+}
+
+fn print_source(
+    out: &mut Buffer,
+    lookup: &Lookup<'_>,
+    source: p8::TypeSource,
+    descriptor: &[u16],
+) -> Result<(), RenderError> {
+    match lookup.find_use(source) {
+        Some(id) => lookup.print(out, id),
+        None => {
+            out.put("type<")?;
+            out.units(descriptor, true)?;
+            out.put(">")
+        }
+    }
 }

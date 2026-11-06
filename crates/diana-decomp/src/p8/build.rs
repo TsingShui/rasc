@@ -78,7 +78,9 @@ fn names(
         &collected.scopes,
         facts.descriptor().units(),
         standalone,
-    )
+    )?;
+    plan.signatures = collected.signatures;
+    Ok(())
 }
 pub(crate) fn assemble(
     _task: &crate::engine::ClassTask,

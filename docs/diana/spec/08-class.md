@@ -114,10 +114,21 @@ evidence. P8 never splits it into an inferred enclosing type.
 The planner groups delivered simple names to detect conflicts and examines
 class-field names, method-local names and delivered field-reference names for
 shadowing. The same target can be simple in one method and qualified in another.
+A field, method parameter list and return type use the declaration's own
+`@Signature` when that text parses and its erased form equals the delivered
+descriptor. The reader accepts primitives, classes, arrays, wildcards and nested
+arguments; a type variable, an inner class with outer arguments, a malformed
+encoding, an unsupported nesting depth or a descriptor mismatch keeps the erased
+type. A signature that produced a display type no longer blocks shortening; one
+that did not still does. Class-level type parameters and superclass/interface
+arguments are not interpreted yet.
+
 Incomplete lexical evidence or uninterpreted signature scope keeps qualified
-spelling. A reference into `java.lang` remains qualified when the input does not
-establish the current package's competing declarations. This is explicit
-PackageScopeUnknown, not a type error or an external classpath query.
+spelling. A reference into `java.lang` is not assumed to be unaffected by an
+unestablished same-package declaration: the planner adds an explicit single-type
+import for it, because Java resolves a single-type import before the package and
+before `java.lang.*`. The usage then shortens without asserting anything the
+input did not establish, and no external classpath query is involved.
 
 Unambiguous same-package uses shorten without import; other established simple
 uses receive explicit single-type imports. Imports are deduplicated by full binary

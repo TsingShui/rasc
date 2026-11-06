@@ -94,6 +94,11 @@ leaf declarations. Counts, reference identities and local gaps remain visible.
 Neither path parses encoded input again or interprets Signature as recovered
 generic syntax.
 
+A declared field type, method parameter and return type print their delivered
+generic arguments when the plan carries them, for example `Map<String, Face[]>`;
+otherwise the erased type prints. Each generic argument is an ordinary named type
+use, so imports and scope rules apply to it unchanged.
+
 P9 prints the supplied class, field and method access flags as Java modifier
 words where the kind has one. A DEX-only bit that the declaration form does not
 already show keeps an explicit `dex_flags<...>` marker; the class kind word and an

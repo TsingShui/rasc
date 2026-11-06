@@ -11,6 +11,13 @@ pub struct TargetId(pub u32);
 pub struct ImportId(pub u32);
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Serialize)]
 pub struct AnnotationId(pub u32);
+/// One original declaration whose `@Signature` can describe a generic type.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Serialize)]
+pub enum SignatureOwner {
+    Field(FieldId),
+    Parameter { method: MethodId, index: u32 },
+    Return(MethodId),
+}
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub enum TypeSource {
     Owner,
@@ -37,6 +44,11 @@ pub enum TypeSource {
         token: u32,
         part: u32,
     },
+    /// A type that appears only inside a declaration's own generic signature.
+    Signature {
+        declaration: SignatureOwner,
+        part: u32,
+    },
 }
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Scope {
@@ -56,7 +68,6 @@ pub enum NameReason {
     Shadowed,
     IncompleteScope,
     UninterpretedMetadata,
-    PackageScopeUnknown,
     OriginalName,
     InvalidDescriptor,
     Standalone,
@@ -103,6 +114,7 @@ pub struct TypeNamePlan {
     pub(super) imports: Vec<Import>,
     pub(super) targets: Vec<TypeTarget>,
     pub(super) uses: Vec<NamedUse>,
+    pub(super) signatures: super::product::SignaturePlan,
 }
 impl TypeNamePlan {
     pub(super) fn empty() -> Self {
@@ -111,6 +123,7 @@ impl TypeNamePlan {
             imports: Vec::new(),
             targets: Vec::new(),
             uses: Vec::new(),
+            signatures: super::product::SignaturePlan::empty(),
         }
     }
     pub fn package(&self) -> Option<&PackageName> {
@@ -121,6 +134,9 @@ impl TypeNamePlan {
     }
     pub fn targets(&self) -> &[TypeTarget] {
         &self.targets
+    }
+    pub fn signatures(&self) -> &super::product::SignaturePlan {
+        &self.signatures
     }
     pub fn uses(&self) -> &[NamedUse] {
         &self.uses
@@ -139,7 +155,7 @@ impl TypeNamePlan {
     }
 }
 pub(super) struct RawUse<'a> {
-    pub descriptor: &'a [u16],
+    pub descriptor: std::borrow::Cow<'a, [u16]>,
     pub source: TypeSource,
     pub original: Option<TypeId>,
     pub scope: Scope,
@@ -235,7 +251,7 @@ pub(super) fn construct(
     let mut order = Vec::new();
     reserve(&mut order, uses.len())?;
     order.extend(0..uses.len());
-    order.sort_unstable_by(|&a, &b| uses[a].descriptor.cmp(uses[b].descriptor));
+    order.sort_unstable_by(|&a, &b| uses[a].descriptor.as_ref().cmp(uses[b].descriptor.as_ref()));
     let mut targets = Vec::new();
     reserve(&mut targets, uses.len())?;
     targets.resize(uses.len(), TargetId(0));
@@ -247,7 +263,7 @@ pub(super) fn construct(
             targets[previous]
         } else {
             let at = TargetId(id(plan.targets.len())?);
-            push(&mut plan.targets, target(uses[index].descriptor, at)?)?;
+            push(&mut plan.targets, target(&uses[index].descriptor, at)?)?;
             at
         };
         targets[index] = at;
@@ -324,10 +340,6 @@ pub(super) fn construct(
             Some(NameReason::UninterpretedMetadata)
         } else if scope.names.iter().any(|n| n.matches(simple)) {
             Some(NameReason::Shadowed)
-        } else if t.full[..t.package_end] == [106, 97, 118, 97, 46, 108, 97, 110, 103]
-            && owner.full[..owner.package_end] != t.full[..t.package_end]
-        {
-            Some(NameReason::PackageScopeUnknown)
         } else {
             None
         };

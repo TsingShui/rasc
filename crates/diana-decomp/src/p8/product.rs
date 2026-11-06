@@ -1,4 +1,4 @@
-use super::names::{TypeNamePlan, TypeUseId};
+use super::names::{SignatureOwner, TypeNamePlan, TypeSource, TypeUseId};
 use crate::substrate::serialization::{debug, shared};
 use crate::{ClassKey, FieldId, MethodId, RequestError};
 use serde::Serialize;
@@ -73,6 +73,58 @@ pub struct MethodMember {
     pub id: MethodId,
     #[serde(serialize_with = "super::serialization::delivery")]
     pub delivery: Result<MethodDelivery, RequestError>,
+}
+/// Generic type arguments delivered by one declaration's original `@Signature`.
+/// Leaves keep their own type source so they participate in ordinary naming.
+#[derive(Serialize)]
+pub struct SignaturePlan {
+    pub(super) nodes: Vec<SignatureNode>,
+    pub(super) roots: Vec<(SignatureOwner, u32)>,
+}
+impl SignaturePlan {
+    pub(super) fn empty() -> Self {
+        Self {
+            nodes: Vec::new(),
+            roots: Vec::new(),
+        }
+    }
+    pub fn node(&self, id: u32) -> Option<&SignatureNode> {
+        self.nodes.get(id as usize)
+    }
+    pub fn root(&self, owner: SignatureOwner) -> Option<u32> {
+        self.roots
+            .iter()
+            .find(|(candidate, _)| *candidate == owner)
+            .map(|(_, root)| *root)
+    }
+    pub fn nodes(&self) -> &[SignatureNode] {
+        &self.nodes
+    }
+}
+#[derive(Serialize)]
+pub enum SignatureNode {
+    Leaf {
+        #[serde(serialize_with = "debug")]
+        source: TypeSource,
+        descriptor: Vec<u16>,
+    },
+    Generic {
+        #[serde(serialize_with = "debug")]
+        base: TypeSource,
+        base_descriptor: Vec<u16>,
+        args: Vec<SignatureArg>,
+    },
+    Array {
+        element: u32,
+        dimensions: u32,
+    },
+}
+#[derive(Serialize)]
+pub enum SignatureArg {
+    Node(u32),
+    Any,
+    Extends(u32),
+    Super(u32),
 }
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 pub enum Preparation {

@@ -4,11 +4,12 @@ mod collect;
 mod names;
 mod product;
 mod serialization;
+mod signature;
 mod values;
 pub(crate) use build::{assemble, method_display};
 pub use names::{
-    AnnotationId, Import, ImportId, NameReason, NamedUse, PackageName, Scope, Spelling, TargetId,
-    TypeNamePlan, TypeSource, TypeTarget, TypeUseId,
+    AnnotationId, Import, ImportId, NameReason, NamedUse, PackageName, Scope, SignatureOwner,
+    Spelling, TargetId, TypeNamePlan, TypeSource, TypeTarget, TypeUseId,
 };
 pub use product::*;
 pub use values::{

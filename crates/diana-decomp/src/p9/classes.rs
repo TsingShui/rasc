@@ -122,7 +122,10 @@ fn class_result(out: &mut Buffer, class: &p8::ClassResult) -> Result<(), RenderE
                 form,
                 field_type,
             } => {
-                lookup.print(out, *field_type)?;
+                match lookup.signature(p8::SignatureOwner::Field(f.id)) {
+                    Some(root) => super::names::signature(out, &lookup, root)?,
+                    None => lookup.print(out, *field_type)?,
+                }
                 out.put(" ")?;
                 out.name(name, *form)?;
             }
@@ -453,12 +456,17 @@ fn header_line(
             ),
         },
     )?;
-    if let Some(ty) = names.result {
-        lookup.print(out, ty)?;
-    } else {
-        out.put("type<")?;
-        out.units(h.declaration.return_type.units(), true)?;
-        out.put(">")?;
+    let method = h.key.method;
+    match lookup.signature(p8::SignatureOwner::Return(method)) {
+        Some(root) => super::names::signature(out, lookup, root)?,
+        None => match names.result {
+            Some(ty) => lookup.print(out, ty)?,
+            None => {
+                out.put("type<")?;
+                out.units(h.declaration.return_type.units(), true)?;
+                out.put(">")?;
+            }
+        },
     }
     out.put(" ")?;
     out.name(h.declaration.name_units(), h.name_form)?;
@@ -466,6 +474,13 @@ fn header_line(
     for (i, ty) in h.declaration.parameter_types.iter().enumerate() {
         if i > 0 {
             out.put(", ")?;
+        }
+        let index = u32::try_from(i).map_err(|_| RenderError::Capacity)?;
+        if let Some(root) = lookup.signature(p8::SignatureOwner::Parameter { method, index }) {
+            super::names::signature(out, lookup, root)?;
+            out.put(" ")?;
+            out.put(&h.parameter_names[i])?;
+            continue;
         }
         if let Some(id) = names.parameters[i] {
             lookup.print(out, id)?;

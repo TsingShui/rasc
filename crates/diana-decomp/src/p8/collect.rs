@@ -1,5 +1,6 @@
-use super::names::{RawUse, Scope, ScopeFacts, ScopeName, TypeSource, id};
-use super::product::MethodMember;
+use super::names::{RawUse, Scope, ScopeFacts, ScopeName, SignatureOwner, TypeSource, id};
+use super::product::{MethodMember, SignatureArg, SignatureNode, SignaturePlan};
+use super::signature;
 use crate::input::value_facts::{ValueDeclaration, ValueMember, ValuePrototype, ValueType};
 use crate::p0::{ClassFacts, Fact, InitialValue};
 use crate::substrate::owned::push;
@@ -8,10 +9,195 @@ use crate::{AnnotationLocation, AnnotationToken, AnnotationValueKind, MethodId, 
 pub(super) struct Collected<'a> {
     pub uses: Vec<RawUse<'a>>,
     pub scopes: Vec<ScopeFacts<'a>>,
+    pub signatures: SignaturePlan,
+}
+
+/// The delivered `@Signature` annotation text of one declaration, joined in
+/// token order. Only a complete record is usable; a prefix cannot describe the
+/// whole declaration.
+fn signature_text(
+    records: &[crate::AnnotationRecord],
+    location: AnnotationLocation,
+) -> Option<Vec<u16>> {
+    let record = records
+        .iter()
+        .find(|a| a.location() == location && signature(a.descriptor()))?;
+    if record.extent() != crate::AnnotationExtent::Complete {
+        return None;
+    }
+    let mut text = Vec::new();
+    for token in record.tokens() {
+        let AnnotationToken::Value(value) = token else {
+            continue;
+        };
+        match value.kind() {
+            AnnotationValueKind::String { units, .. } => {
+                text.try_reserve(units.len()).ok()?;
+                text.extend_from_slice(units);
+            }
+            AnnotationValueKind::Array { .. } => {}
+            _ => return None,
+        }
+    }
+    (!text.is_empty()).then_some(text)
+}
+
+/// Builds the display arena for one parsed signature. Every descriptor becomes a
+/// type use in the declaration's scope, so it participates in ordinary naming.
+fn emit_signature<'a>(
+    node: &signature::Node,
+    owner: SignatureOwner,
+    part: &mut u32,
+    uses: &mut Vec<RawUse<'a>>,
+    plan: &mut SignaturePlan,
+    scope: Scope,
+) -> Result<u32, RequestError> {
+    let built = match node {
+        signature::Node::Plain(descriptor) => {
+            let source = signature_source(owner, part)?;
+            add(
+                uses,
+                std::borrow::Cow::Owned(descriptor.clone()),
+                None,
+                source,
+                scope,
+            )?;
+            SignatureNode::Leaf {
+                source,
+                descriptor: descriptor.clone(),
+            }
+        }
+        signature::Node::Generic { base, args } => {
+            let mut built = Vec::new();
+            for arg in args {
+                let arg = match arg {
+                    signature::Arg::Exact(node) => {
+                        SignatureArg::Node(emit_signature(node, owner, part, uses, plan, scope)?)
+                    }
+                    signature::Arg::Any => SignatureArg::Any,
+                    signature::Arg::Extends(node) => {
+                        SignatureArg::Extends(emit_signature(node, owner, part, uses, plan, scope)?)
+                    }
+                    signature::Arg::Super(node) => {
+                        SignatureArg::Super(emit_signature(node, owner, part, uses, plan, scope)?)
+                    }
+                };
+                push(&mut built, arg)?;
+            }
+            let source = signature_source(owner, part)?;
+            add(
+                uses,
+                std::borrow::Cow::Owned(base.clone()),
+                None,
+                source,
+                scope,
+            )?;
+            SignatureNode::Generic {
+                base: source,
+                base_descriptor: base.clone(),
+                args: built,
+            }
+        }
+        signature::Node::Array {
+            element,
+            dimensions,
+        } => SignatureNode::Array {
+            element: emit_signature(element, owner, part, uses, plan, scope)?,
+            dimensions: *dimensions,
+        },
+    };
+    let id = u32::try_from(plan.nodes.len()).map_err(|_| RequestError::PlatformCapacity)?;
+    push(&mut plan.nodes, built)?;
+    Ok(id)
+}
+
+/// Interprets one field's `@Signature`. Returns whether the declaration's
+/// generic type was used; a rejected signature keeps the erased type.
+fn field_signature<'a>(
+    facts: &'a ClassFacts,
+    field: crate::FieldId,
+    declaration: &crate::p0::FieldDeclaration,
+    uses: &mut Vec<RawUse<'a>>,
+    plan: &mut SignaturePlan,
+) -> Result<bool, RequestError> {
+    let Some(text) = signature_text(
+        facts.annotations().records(),
+        AnnotationLocation::Field(field),
+    ) else {
+        return Ok(false);
+    };
+    let Some(node) = signature::field(&text) else {
+        return Ok(false);
+    };
+    if signature::erased(&node).as_deref() != Some(declaration.descriptor.units()) {
+        return Ok(false);
+    }
+    let owner = SignatureOwner::Field(field);
+    let mut part = 0;
+    let root = emit_signature(&node, owner, &mut part, uses, plan, Scope::Class)?;
+    push(&mut plan.roots, (owner, root))?;
+    Ok(true)
+}
+
+fn method_signature<'a>(
+    facts: &'a ClassFacts,
+    method: MethodId,
+    declaration: &crate::p0::MethodDeclaration,
+    uses: &mut Vec<RawUse<'a>>,
+    plan: &mut SignaturePlan,
+) -> Result<bool, RequestError> {
+    let Some(text) = signature_text(
+        facts.annotations().records(),
+        AnnotationLocation::Method(method),
+    ) else {
+        return Ok(false);
+    };
+    let Some(signature::Declaration::Method {
+        parameters,
+        returns,
+    }) = signature::method(&text)
+    else {
+        return Ok(false);
+    };
+    if parameters.len() != declaration.parameter_types.len() {
+        return Ok(false);
+    }
+    for (node, declared) in parameters.iter().zip(&declaration.parameter_types) {
+        if signature::erased(node).as_deref() != Some(declared.units()) {
+            return Ok(false);
+        }
+    }
+    if signature::erased(&returns).as_deref() != Some(declaration.return_type.units()) {
+        return Ok(false);
+    }
+    let scope = Scope::Method(method);
+    for (index, node) in parameters.iter().enumerate() {
+        let owner = SignatureOwner::Parameter {
+            method,
+            index: id(index)?,
+        };
+        let mut part = 0;
+        let root = emit_signature(node, owner, &mut part, uses, plan, scope)?;
+        push(&mut plan.roots, (owner, root))?;
+    }
+    let owner = SignatureOwner::Return(method);
+    let mut part = 0;
+    let root = emit_signature(&returns, owner, &mut part, uses, plan, scope)?;
+    push(&mut plan.roots, (owner, root))?;
+    Ok(true)
+}
+
+fn signature_source(owner: SignatureOwner, part: &mut u32) -> Result<TypeSource, RequestError> {
+    let source = TypeSource::Signature {
+        declaration: owner,
+        part: *part,
+    };
+    *part = part.checked_add(1).ok_or(RequestError::PlatformCapacity)?;
+    Ok(source)
 }
 fn add<'a>(
     uses: &mut Vec<RawUse<'a>>,
-    descriptor: &'a [u16],
+    descriptor: impl Into<std::borrow::Cow<'a, [u16]>>,
     original: Option<crate::TypeId>,
     source: TypeSource,
     scope: Scope,
@@ -19,7 +205,7 @@ fn add<'a>(
     push(
         uses,
         RawUse {
-            descriptor,
+            descriptor: descriptor.into(),
             original,
             source,
             scope,
@@ -141,6 +327,7 @@ fn method_scope<'a>(
     method: MethodId,
     member: &'a MethodMember,
     class: &ScopeFacts<'a>,
+    signature_used: bool,
 ) -> Result<ScopeFacts<'a>, RequestError> {
     let mut names = super::names::copy(&class.names)?;
     if let Ok(delivery) = &member.delivery
@@ -158,7 +345,15 @@ fn method_scope<'a>(
             }
         }
     }
-    let metadata=class.metadata||facts.annotations().records().iter().any(|a|matches!(a.location(),AnnotationLocation::Method(m)|AnnotationLocation::Parameter{method:m,..}if m==method)&&signature(a.descriptor()));
+    // A signature that produced a display type no longer blocks shortening; an
+    // uninterpreted one still does.
+    let metadata = class.metadata
+        || (!signature_used
+            && facts.annotations().records().iter().any(|a| {
+                matches!(a.location(), AnnotationLocation::Method(m)
+                    | AnnotationLocation::Parameter { method: m, .. } if m == method)
+                    && signature(a.descriptor())
+            }));
     Ok(ScopeFacts {
         scope: Scope::Method(method),
         names,
@@ -180,6 +375,7 @@ pub(super) fn collect<'a>(
 ) -> Result<Collected<'a>, RequestError> {
     let mut uses = Vec::new();
     let mut scopes = Vec::new();
+    let mut signatures = SignaturePlan::empty();
     let mut class = ScopeFacts {
         scope: Scope::Class,
         names: Vec::new(),
@@ -238,6 +434,7 @@ pub(super) fn collect<'a>(
                     TypeSource::Field(f.field()),
                     Scope::Class,
                 )?;
+                field_signature(facts, f.field(), d, &mut uses, &mut signatures)?;
             }
             if let Fact::Present(InitialValue::Encoded {
                 tokens: t,
@@ -261,7 +458,7 @@ pub(super) fn collect<'a>(
     }
     for m in methods {
         let scope = Scope::Method(m.id);
-        push(&mut scopes, method_scope(facts, m.id, m, &class)?)?;
+        let mut signature_used = false;
         if let Some(entry) = facts.method_entry(m.id)
             && let Fact::Present(d) = entry.declaration()
         {
@@ -289,7 +486,12 @@ pub(super) fn collect<'a>(
                     scope,
                 )?;
             }
+            signature_used = method_signature(facts, m.id, d, &mut uses, &mut signatures)?;
         }
+        push(
+            &mut scopes,
+            method_scope(facts, m.id, m, &class, signature_used)?,
+        )?;
         if let Ok(delivery) = &m.delivery
             && let Some(code) = delivery.expressions()
         {
@@ -363,5 +565,9 @@ pub(super) fn collect<'a>(
         )?;
     }
     push(&mut scopes, class)?;
-    Ok(Collected { uses, scopes })
+    Ok(Collected {
+        uses,
+        scopes,
+        signatures,
+    })
 }
