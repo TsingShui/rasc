@@ -87,16 +87,14 @@ original position, or as `((T) v)` inside the immediately following statement wh
 that statement's first evaluated value is the checked local; the check then keeps
 its own statement and operation origins at the use. A check with a printed route,
 copy phase or later first operand stays a statement, and that statement carries one
-trailing comment naming the original `check-cast` and why the value is not
-reassigned.
+short trailing comment naming the original `check-cast` and the fact that the value
+is not reassigned.
 
-The same single trailing comment marks the other statements printed in Diana syntax
-rather than Java, naming the original instruction and the fact the form hides:
-`capture_exception` (`move-exception`, it holds the caught throwable),
-`allocate_uninitialized` (`new-instance`, the object exists before its constructor
-runs) and an explicit `initialize` (`invoke-direct`, the constructor runs at this
-point). Bracket annotations and block headers that are already visibly not Java keep
-no comment. Array fill preserves its one
+The same short comment marks the other statements printed in Diana syntax rather
+than Java: `capture_exception` (move-exception, the caught throwable),
+`allocate_uninitialized` (new-instance, the object exists before its constructor)
+and an explicit `initialize` (invoke-direct, the constructor call). Bracket
+annotations and block headers that are already visibly not Java keep no comment. Array fill preserves its one
 original operation, element width/count and bits. Explicit allocation and
 initialization stay separate when P5 did not select a compound construction.
 Unavailable reads and argument layouts print their supplied gaps and original

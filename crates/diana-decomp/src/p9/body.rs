@@ -10,27 +10,17 @@ impl Expressions<'_, '_> {
     /// It names the original instruction and the one fact the form hides.
     fn generated_note(&self, s: &Statement) -> Option<&'static str> {
         match &s.kind {
-            StatementKind::CheckCast { .. } => Some(
-                "// Diana generated this from check-cast: a failed check throws \
-                 ClassCastException and the value is not reassigned",
-            ),
-            StatementKind::CaptureException => Some(
-                "// Diana generated this from move-exception: it holds the throwable \
-                 caught by this handler",
-            ),
+            StatementKind::CheckCast { .. } => Some("// Diana: check-cast, value not reassigned"),
+            StatementKind::CaptureException => Some("// Diana: move-exception, caught throwable"),
             StatementKind::Initialize {
                 syntax: InitializationSyntax::Explicit,
                 ..
-            } => Some(
-                "// Diana generated this from invoke-direct: the constructor runs at this \
-                 point",
-            ),
+            } => Some("// Diana: invoke-direct, constructor call"),
             StatementKind::Move { expression, .. } | StatementKind::Evaluate { expression } => {
                 match &self.code.expressions().get(expression.0 as usize)?.kind {
-                    ExprKind::AllocateInstance { .. } => Some(
-                        "// Diana generated this from new-instance: the object exists before \
-                         its constructor runs",
-                    ),
+                    ExprKind::AllocateInstance { .. } => {
+                        Some("// Diana: new-instance, object exists before its constructor")
+                    }
                     _ => None,
                 }
             }
