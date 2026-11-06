@@ -60,7 +60,9 @@ pub(super) fn render(out: &mut Buffer, source: &SourceProduct) -> Result<(), Ren
 }
 fn class_result(out: &mut Buffer, class: &p8::ClassResult) -> Result<(), RenderError> {
     let lookup = Lookup::complete(class.names())?;
-    if let Some(package) = class.names().package() {
+    if let Some(package) = class.names().package()
+        && !package.units.is_empty()
+    {
         out.put("package ")?;
         out.name(&package.units, package.form)?;
         out.put(";\n\n")?;

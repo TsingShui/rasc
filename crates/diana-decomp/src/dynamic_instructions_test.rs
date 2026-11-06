@@ -879,6 +879,50 @@ fn check_assembly_cases() {
         "Case".encode_utf16().collect::<Vec<_>>(),
         "P8 used a qualified type spelling as a declaration name"
     );
+    // Preserve the same encoded length and directory offsets while placing the
+    // class in the default package. P8 distinguishes that from standalone names.
+    let mut default_package = fixture.bytes.clone();
+    let original = b"Lsample/Case;";
+    let at = default_package
+        .windows(original.len())
+        .position(|window| window == original)
+        .unwrap();
+    default_package[at..at + original.len()].copy_from_slice(b"Lsample0Case;");
+    let engine = Engine::open(vec![DexImage {
+        bytes: &default_package,
+        header_offset: ByteOffset(0),
+        origin: ImageOrigin { input: InputId(0) },
+    }])
+    .unwrap();
+    let default_result = engine
+        .analyze(crate::Request {
+            class: CLASS,
+            method: None,
+        })
+        .unwrap();
+    rendering_correspondence(&default_result.rendered);
+    let crate::p9::RenderOutcome::Ready(output) = &default_result.rendered else {
+        panic!("P9 could not render a default-package class")
+    };
+    assert!(
+        output.text().contains("class sample0Case"),
+        "P9 lost the default-package class name"
+    );
+    assert!(
+        !output.text().contains("package ;"),
+        "P9 printed an empty package declaration"
+    );
+    let crate::Presentation::Class(crate::p8::ClassOutcome::Ready(names)) =
+        &default_result.presentation
+    else {
+        panic!("P8 could not assemble a default-package class")
+    };
+    assert!(
+        names.names().package().unwrap().units.is_empty(),
+        "P8 lost the original default-package fact"
+    );
+    drop(default_result);
+    drop(engine);
     assert_eq!(result.fields().len(), 9);
     assert_eq!(result.methods().len(), 4);
     assert_eq!(result.preparation_order(), [0, 1, 2]);
