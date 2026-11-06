@@ -6,6 +6,7 @@ mod control;
 mod copies;
 mod emission;
 pub use emission::*;
+mod local_names;
 mod lower;
 mod product;
 mod references;
