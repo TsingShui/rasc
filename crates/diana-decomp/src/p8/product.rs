@@ -205,6 +205,9 @@ pub struct ClassResult {
     pub(super) names: TypeNamePlan,
     /// Original static field order, before any original class initializer body.
     pub(super) preparation_order: Vec<usize>,
+    /// Whether that order states any encoded value. A list of implicit defaults
+    /// describes no value, because the class initializer assigns those fields.
+    pub(super) preparation_has_values: bool,
 }
 impl ClassResult {
     pub fn key(&self) -> ClassKey {
@@ -230,6 +233,11 @@ impl ClassResult {
     }
     pub fn preparation_order(&self) -> &[usize] {
         &self.preparation_order
+    }
+    /// Whether the preparation list has anything to print. The per-field
+    /// `Preparation` states remain available either way.
+    pub fn preparation_has_values(&self) -> bool {
+        self.preparation_has_values
     }
 }
 #[derive(Serialize)]

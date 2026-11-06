@@ -83,11 +83,10 @@ words, not zero, null or an empty argument list.
 ## Declarations, metadata and literal identity
 
 Static preparation prints one `name = value` line per original static ordinal
-before the class initializer. A list whose entries are all implicit defaults prints
-no block at all, because it states no value and the class initializer follows.
-Otherwise, each line uses the field declaration name and the original
-index when that declaration is unavailable. An entry the encoded array does not
-cover prints `implicit_default`; a decoded entry prints its expression, with an
+before the class initializer, when the class result reports that the list states an
+encoded value. Each line uses the field declaration name and the original index
+when that declaration is unavailable. An entry the encoded array does not cover
+prints `implicit_default`; a decoded entry prints its expression, with an
 explicit prefix marker when the traversal stopped early. These are encoded values,
 not executed assignments, so they are not folded into the field declaration.
 

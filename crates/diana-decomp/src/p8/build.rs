@@ -190,15 +190,21 @@ pub(crate) fn assemble(
         Ok((header, fields, preparation_order))
     })();
     match result {
-        Ok((header, fields, preparation_order)) => ClassOutcome::Ready(Arc::new(ClassResult {
-            facts,
-            header,
-            values,
-            fields,
-            methods,
-            names: plan,
-            preparation_order,
-        })),
+        Ok((header, fields, preparation_order)) => {
+            let preparation_has_values = preparation_order
+                .iter()
+                .any(|&index| fields[index].preparation != Preparation::ImplicitDefault);
+            ClassOutcome::Ready(Arc::new(ClassResult {
+                facts,
+                header,
+                values,
+                fields,
+                methods,
+                names: plan,
+                preparation_order,
+                preparation_has_values,
+            }))
+        }
         Err(error) => ClassOutcome::Stopped(Arc::new(AssemblyStop {
             facts,
             methods,

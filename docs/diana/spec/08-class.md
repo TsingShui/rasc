@@ -74,7 +74,10 @@ Reference expressions retain checked leaf declarations and their type-use IDs.
 Their values, names and ordered container events are not recovered from bytes.
 
 The static-preparation list follows original static ordinals and precedes every
-original class-initializer body. Implicit defaults remain distinct from explicitly
+original class-initializer body. P8 also records whether that list states any
+encoded value: a list made only of implicit defaults describes no value, because
+the class initializer assigns those fields. The per-field `Preparation` states
+remain in the product either way. Implicit defaults remain distinct from explicitly
 encoded defaults. P8 MUST NOT add an assignment for an implicit default, move a
 constructor or `<clinit>` write into a field declaration, or suppress a later
 write because preparation was already displayed.
