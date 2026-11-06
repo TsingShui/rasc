@@ -351,13 +351,13 @@ impl Expressions<'_, '_> {
                 self.phases(&p.snapshots, "after_operands_before_effect")?;
                 self.out.put(")")?;
                 self.out.open()?;
-                self.branch_transfer(*when_true)?;
+                self.branch_transfer(*when_true, true)?;
                 self.out.close()?;
                 if !self.code.emission().empty_else(id) {
                     self.out.indent()?;
                     self.out.put("else")?;
                     self.out.open()?;
-                    self.branch_transfer(*when_false)?;
+                    self.branch_transfer(*when_false, true)?;
                     self.out.close()?;
                 }
             }
@@ -373,16 +373,18 @@ impl Expressions<'_, '_> {
             },
         )
     }
-    fn branch_transfer(&mut self, id: TransferId) -> Result<(), RenderError> {
+    fn branch_transfer(&mut self, id: TransferId, indent: bool) -> Result<(), RenderError> {
         if matches!(
             self.code.emission().transfers()[id.0 as usize].spelling,
             TransferSpelling::Selected
         ) {
-            self.out.indent()?;
+            if indent {
+                self.out.indent()?;
+            }
             self.selected(id, true)?;
             self.out.put("\n")
         } else {
-            self.transfer(id)
+            self.transfer_with_indent(id, indent)
         }
     }
     fn switch(
@@ -409,7 +411,8 @@ impl Expressions<'_, '_> {
                 Some(crate::p2::NormalEdge::SwitchDefault) => self.out.put("default: ")?,
                 _ => return Err(RenderError::Invariant("switch arm lost its original role")),
             }
-            self.branch_transfer(arm)?;
+            // The arm label already indented this line; only the transfer text follows.
+            self.branch_transfer(arm, false)?;
         }
         Ok(())
     }
