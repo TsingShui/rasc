@@ -58,6 +58,11 @@ without a label, and the label is then omitted. A `continue` that ends its loop
 body prints nothing, because reaching the body end already starts the predicate;
 its copies still print in order.
 
+A void `return` that is the last printed action of a method body prints nothing:
+the closing brace performs the same exit and nothing is attached to that return.
+A return with copies, phases, a site or an unavailable definition keeps its text,
+and so does any return that other statements follow.
+
 A labeled or graph scope prints its `R<id>:` control name only when a printed
 transfer still names that control; the control, its braces, its graph header and
 its children remain in the product. A named scope whose only child is another

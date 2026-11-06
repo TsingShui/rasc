@@ -130,6 +130,10 @@ composed, so reading them before the value cannot be observed and the store's
 null/bounds check still follows the value. A narrow element store keeps its
 original width marker.
 
+A void `return` that is the last printed action of a method body is the same as
+reaching the closing brace, so P7 marks it display-omitted when nothing is attached
+to it: no copies, phases, site or unavailable definition, and no statement after it.
+
 A break or continue whose target is the innermost enclosing scope needs no label,
 and a continue that ends the loop body is the same as reaching the body end, so the
 final plan prints neither. Its attached copies remain ordered statements.

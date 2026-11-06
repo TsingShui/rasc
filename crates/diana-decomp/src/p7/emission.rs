@@ -180,6 +180,9 @@ pub struct EmissionPlan {
     pub(super) terminals: Vec<EvaluationPhases>,
     /// Display-only omission of a copy-free fallthrough false arm.
     pub(super) empty_else: Vec<bool>,
+    /// Display-only omission of a method body's closing void return, whose
+    /// closing brace performs the same exit.
+    pub(super) omitted_returns: Vec<bool>,
     pub(super) transfers: Vec<EmissionTransfer>,
     pub(super) initial: Vec<CopyPlanId>,
     pub(super) statement_operations: Vec<Option<OpId>>,
@@ -203,6 +206,7 @@ impl EmissionPlan {
             operations: Vec::new(),
             terminals: Vec::new(),
             empty_else: Vec::new(),
+            omitted_returns: Vec::new(),
             transfers: Vec::new(),
             initial: Vec::new(),
             statement_operations: Vec::new(),
@@ -279,6 +283,12 @@ impl EmissionPlan {
     }
     pub fn empty_else(&self, id: BlockId) -> bool {
         self.empty_else.get(id.0 as usize).copied().unwrap_or(false)
+    }
+    pub fn omitted_return(&self, id: BlockId) -> bool {
+        self.omitted_returns
+            .get(id.0 as usize)
+            .copied()
+            .unwrap_or(false)
     }
     pub fn terminals(&self) -> &[EvaluationPhases] {
         &self.terminals
@@ -364,6 +374,7 @@ pub(super) fn construct(code: &mut MethodCode) -> Result<(), ExpressionError> {
     plan.terminals
         .resize_with(code.terminals.len(), EvaluationPhases::default);
     plan.empty_else = filled(code.terminals.len(), false)?;
+    plan.omitted_returns = filled(code.terminals.len(), false)?;
     plan.statement_operations = filled(code.statements.len(), None)?;
     let mut nodes = Vec::new();
     crate::substrate::owned::reserve(&mut nodes, code.blocks.len())?;

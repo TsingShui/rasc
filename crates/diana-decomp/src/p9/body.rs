@@ -300,6 +300,11 @@ impl Expressions<'_, '_> {
         )
     }
     fn terminal(&mut self, id: BlockId) -> Result<(), RenderError> {
+        // The closing brace of the method body performs a void return that
+        // prints nothing else, so P7 omits that redundant `return;`.
+        if self.code.emission().omitted_return(id) {
+            return Ok(());
+        }
         let t = &self.code.terminals()[id.0 as usize];
         let p = &self.code.emission().terminals()[id.0 as usize];
         self.out.indent()?;
