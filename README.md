@@ -13,7 +13,7 @@ Build and lint checks do not establish real-application coverage.
 
 ```text
 apps/diana/             # Diana CLI/application package
-apps/diana-gui/         # Native GPUI Kit UI demo; no Engine integration
+apps/diana-gui/         # Native GPUI Kit GUI; bare DEX class preview
 apps/diana-web-ui/      # Future web interface: documentation placeholder only
 crates/diana-decomp/    # Independent native engine library
 docs/diana/            # Core design, algorithms and contribution rules
@@ -26,7 +26,7 @@ archived reference tree removed at commit 5cb156c; it is not a production depend
 and are not built, tested or released by this branch’s CI or root Cargo commands.
 
 [Application targets](apps/README.md) share the `apps/` layout. The native GUI
-is a GPUI Kit UI demo with authored display content; run it with
+opens bare DEX files and displays class results; run it with
 `cargo run -p diana-gui --locked`. It is a workspace member but not a default
 member. The web UI remains a documentation placeholder with no selected framework.
 

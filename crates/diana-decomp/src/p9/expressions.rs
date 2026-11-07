@@ -36,6 +36,12 @@ pub(super) trait ExpressionSource {
     fn statement_sites(&self, _statement: StatementId) -> &[SiteId] {
         &[]
     }
+    fn statement_construction(&self, _statement: StatementId) -> Option<&Construction> {
+        None
+    }
+    fn operation_pc(&self, _operation: crate::p2::OpId) -> Option<crate::CodeUnitOffset> {
+        None
+    }
     /// A partial product has no selected store form.
     fn natural_store(&self, _statement: StatementId) -> bool {
         false
@@ -85,6 +91,18 @@ impl ExpressionSource for MethodCode {
         self.statements()
             .get(statement.0 as usize)
             .map_or(&[], |statement| statement.sites.as_slice())
+    }
+    fn statement_construction(&self, statement: StatementId) -> Option<&Construction> {
+        let StatementKind::Construction(id) = self.statements().get(statement.0 as usize)?.kind
+        else {
+            return None;
+        };
+        self.constructions().get(id.0 as usize)
+    }
+    fn operation_pc(&self, operation: crate::p2::OpId) -> Option<crate::CodeUnitOffset> {
+        self.operations()
+            .get(operation.0 as usize)
+            .map(|source| source.pc)
     }
     fn natural_store(&self, statement: StatementId) -> bool {
         self.emission().natural_store(statement)
@@ -903,14 +921,42 @@ impl<S: ExpressionSource> Expressions<'_, '_, S> {
                 statement: composed.statement,
             },
         )?;
-        self.out.span(
-            start,
-            Origin::Operation {
-                method: self.method,
-                operation: composed.operation,
-                pc: composed.pc,
-            },
-        )?;
+        if let Some(group) = self.code.statement_construction(composed.statement) {
+            for &operation in &group.members {
+                let pc = self
+                    .code
+                    .operation_pc(operation)
+                    .ok_or(RenderError::Invariant(
+                        "composed construction lost an operation",
+                    ))?;
+                self.out.span(
+                    start,
+                    Origin::Operation {
+                        method: self.method,
+                        operation,
+                        pc,
+                    },
+                )?;
+            }
+            for &site in self.code.statement_sites(composed.statement) {
+                self.out.span(
+                    start,
+                    Origin::Site {
+                        method: self.method,
+                        site,
+                    },
+                )?;
+            }
+        } else {
+            self.out.span(
+                start,
+                Origin::Operation {
+                    method: self.method,
+                    operation: composed.operation,
+                    pc: composed.pc,
+                },
+            )?;
+        }
         if let Some(control) = composed.source_control {
             let start = self
                 .pending_controls

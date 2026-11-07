@@ -17,6 +17,7 @@ pub fn refresh(demo_open: bool, mode: Option<ViewMode>, code_size: f32, cx: &mut
             MenuItem::action("Quit Diana", Quit),
         ]),
         Menu::new("File").items([
+            MenuItem::action("Open DEX…", OpenDex),
             MenuItem::action("Open Demo Workspace", OpenDemo).disabled(demo_open),
             MenuItem::separator(),
             MenuItem::action("Close Document", CloseTab).disabled(no_document),

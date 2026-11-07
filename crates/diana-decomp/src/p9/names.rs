@@ -60,18 +60,29 @@ impl<'a> Lookup<'a> {
         let use_ = self.uses.get(id.0 as usize)?;
         Some(self.targets.get(use_.target.0 as usize)?.dimensions)
     }
+    pub fn varargs_dimensions(&self, id: p8::TypeUseId) -> Option<u32> {
+        let use_ = self.uses.get(id.0 as usize)?;
+        let target = self.targets.get(use_.target.0 as usize)?;
+        (!target.full.is_empty() && target.dimensions > 0).then_some(target.dimensions)
+    }
+    pub fn print_varargs(&self, out: &mut Buffer, id: p8::TypeUseId) -> Result<(), RenderError> {
+        self.varargs_dimensions(id)
+            .ok_or(RenderError::Invariant("varargs type is unavailable"))?;
+        self.print_parts(out, id, true, true)
+    }
     pub fn print(&self, out: &mut Buffer, id: p8::TypeUseId) -> Result<(), RenderError> {
-        self.print_parts(out, id, true)
+        self.print_parts(out, id, true, false)
     }
     /// Prints the base type without its trailing array dimensions.
     pub fn print_element(&self, out: &mut Buffer, id: p8::TypeUseId) -> Result<(), RenderError> {
-        self.print_parts(out, id, false)
+        self.print_parts(out, id, false, false)
     }
     fn print_parts(
         &self,
         out: &mut Buffer,
         id: p8::TypeUseId,
         dimensions: bool,
+        varargs: bool,
     ) -> Result<(), RenderError> {
         let start = out.position();
         let u = self.uses.get(id.0 as usize).ok_or(RenderError::Invariant(
@@ -100,8 +111,16 @@ impl<'a> Lookup<'a> {
             }
         }
         if dimensions && !t.full.is_empty() {
-            for _ in 0..t.dimensions {
+            let count = if varargs {
+                t.dimensions - 1
+            } else {
+                t.dimensions
+            };
+            for _ in 0..count {
                 out.put("[]")?;
+            }
+            if varargs {
+                out.put("...")?;
             }
         }
         out.span(start, Origin::Type(id))
@@ -176,7 +195,7 @@ impl MethodNames {
 pub(super) enum FlagScope {
     Class { interface: bool },
     Field,
-    Method { initializer: bool },
+    Method { initializer: bool, varargs: bool },
 }
 
 /// Original `access_flags` bits with the meaning this declaration form shows.
@@ -262,14 +281,21 @@ pub(super) fn flags(out: &mut Buffer, raw: u32, scope: FlagScope) -> Result<(), 
             NONE,
             NONE,
         ],
-        FlagScope::Method { initializer } => [
+        FlagScope::Method {
+            initializer,
+            varargs,
+        } => [
             java(0x8, "static "),
             java(0x10, "final "),
             // Both bits convey the modifier, but only 0x20 requests VM locking.
             // The declaration word does not add a lock to the delivered body.
             java(0x20 | 0x20000, "synchronized "),
             dex(0x40, "bridge"),
-            dex(0x80, "varargs"),
+            if varargs {
+                conveyed(0x80)
+            } else {
+                dex(0x80, "varargs")
+            },
             java(0x100, "native "),
             java(0x400, "abstract "),
             java(0x800, "strictfp "),
@@ -325,6 +351,60 @@ pub(super) fn flags(out: &mut Buffer, raw: u32, scope: FlagScope) -> Result<(), 
         out.fmt(format_args!("unknown_flags<0x{unknown:x}> "))?;
     }
     Ok(())
+}
+
+pub(super) fn signature_varargs_available(lookup: &Lookup<'_>, root: u32) -> bool {
+    match lookup.signature_node(root) {
+        Some(p8::SignatureNode::Array {
+            element,
+            dimensions,
+        }) => {
+            *dimensions > 0
+                && match lookup.signature_node(*element) {
+                    Some(p8::SignatureNode::Variable { .. }) => true,
+                    Some(p8::SignatureNode::Generic { base, .. }) => lookup
+                        .find_use(*base)
+                        .and_then(|id| lookup.target_name(id))
+                        .is_some_and(|name| !name.is_empty()),
+                    Some(p8::SignatureNode::Leaf { source, .. }) => lookup
+                        .find_use(*source)
+                        .and_then(|id| lookup.target_name(id))
+                        .is_some_and(|name| !name.is_empty()),
+                    _ => false,
+                }
+        }
+        Some(p8::SignatureNode::Leaf { source, .. }) => lookup
+            .find_use(*source)
+            .and_then(|id| lookup.varargs_dimensions(id))
+            .is_some(),
+        _ => false,
+    }
+}
+
+pub(super) fn signature_varargs(
+    out: &mut Buffer,
+    lookup: &Lookup<'_>,
+    root: u32,
+) -> Result<(), RenderError> {
+    match lookup.signature_node(root) {
+        Some(p8::SignatureNode::Array {
+            element,
+            dimensions,
+        }) if *dimensions > 0 => {
+            signature(out, lookup, *element)?;
+            for _ in 1..*dimensions {
+                out.put("[]")?;
+            }
+            out.put("...")
+        }
+        Some(p8::SignatureNode::Leaf { source, .. }) => {
+            let id = lookup.find_use(*source).ok_or(RenderError::Invariant(
+                "varargs signature type is unavailable",
+            ))?;
+            lookup.print_varargs(out, id)
+        }
+        _ => Err(RenderError::Invariant("varargs signature is not an array")),
+    }
 }
 
 /// Prints an interpreted `@Signature`, falling back to the delivered descriptor

@@ -550,11 +550,13 @@ fn header_line(
         out.put("static")?;
         return Ok(());
     }
+    let varargs = varargs_parameter(lookup, names, h);
     super::names::flags(
         out,
         h.access_flags,
         super::names::FlagScope::Method {
             initializer: matches!(h.kind, p7::MethodKind::Constructor),
+            varargs,
         },
     )?;
     let method = h.key.method;
@@ -576,7 +578,7 @@ fn header_line(
                 (None, None) => out.name(h.declaration.name_units(), h.name_form)?,
             }
             out.put("(")?;
-            parameters(out, lookup, names, h, attachments)?;
+            parameters(out, lookup, names, h, attachments, varargs)?;
             out.put(")")?;
             return Ok(());
         }
@@ -596,8 +598,36 @@ fn header_line(
     out.put(" ")?;
     out.name(h.declaration.name_units(), h.name_form)?;
     out.put("(")?;
-    parameters(out, lookup, names, h, attachments)?;
+    parameters(out, lookup, names, h, attachments, varargs)?;
     out.put(")")
+}
+
+fn varargs_parameter(lookup: &Lookup<'_>, names: &MethodNames, h: &p7::MethodHeader) -> bool {
+    if h.access_flags & crate::substrate::flags::VARARGS == 0 {
+        return false;
+    }
+    let Some((index, ty)) = h.declaration.parameter_types.iter().enumerate().next_back() else {
+        return false;
+    };
+    if ty.units().first() != Some(&u16::from(b'[')) {
+        return false;
+    }
+    let Ok(parameter) = u32::try_from(index) else {
+        return false;
+    };
+    match lookup.signature(p8::SignatureOwner::Parameter {
+        method: h.key.method,
+        index: parameter,
+    }) {
+        Some(root) => super::names::signature_varargs_available(lookup, root),
+        None => names
+            .parameters
+            .get(index)
+            .copied()
+            .flatten()
+            .and_then(|id| lookup.varargs_dimensions(id))
+            .is_some(),
+    }
 }
 
 fn parameters(
@@ -606,6 +636,7 @@ fn parameters(
     names: &MethodNames,
     h: &p7::MethodHeader,
     attachments: Option<&Attachments<'_>>,
+    varargs: bool,
 ) -> Result<(), RenderError> {
     let method = h.key.method;
     for (i, ty) in h.declaration.parameter_types.iter().enumerate() {
@@ -619,13 +650,21 @@ fn parameters(
             attachments.print_parameter(out, lookup, method, index)?;
         }
         if let Some(root) = lookup.signature(p8::SignatureOwner::Parameter { method, index }) {
-            super::names::signature(out, lookup, root)?;
+            if varargs && i + 1 == h.declaration.parameter_types.len() {
+                super::names::signature_varargs(out, lookup, root)?;
+            } else {
+                super::names::signature(out, lookup, root)?;
+            }
             out.put(" ")?;
             out.put(&h.parameter_names[i])?;
             continue;
         }
         if let Some(id) = names.parameters[i] {
-            lookup.print(out, id)?;
+            if varargs && i + 1 == h.declaration.parameter_types.len() {
+                lookup.print_varargs(out, id)?;
+            } else {
+                lookup.print(out, id)?;
+            }
         } else {
             out.put("type<")?;
             out.units(ty.units(), true)?;

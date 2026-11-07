@@ -16,6 +16,35 @@ pub(super) fn construct(
     code: &mut MethodCode,
     key: crate::MethodKey,
 ) -> Result<(), ExpressionError> {
+    for group in &code.constructions {
+        for argument in &group.prepared_arguments {
+            let source = code
+                .operations
+                .get(argument.operation.0 as usize)
+                .ok_or(bug("prepared construction argument lost its operation"))?;
+            let statement = code
+                .statements
+                .get(argument.statement.0 as usize)
+                .ok_or(bug("prepared construction argument lost its statement"))?;
+            code.emission.composed_uses[argument.operand.0 as usize] = Some(ComposedExpression {
+                expression: argument.expression,
+                operation: argument.operation,
+                statement: argument.statement,
+                pc: source.pc,
+                result_pc: source.result_pc,
+                site: statement.sites.first().copied(),
+                predicate: ComposedPredicate::Value,
+                result: ComposedResult::Value,
+                source_control: None,
+            });
+            code.emission.composed_operations[argument.operation.0 as usize] = true;
+            *code
+                .emission
+                .hidden_locals
+                .get_mut(argument.local.0 as usize)
+                .ok_or(bug("prepared construction argument lost its local"))? = true;
+        }
+    }
     let Some(access) = super::access::local_access(code)? else {
         return Ok(());
     };
@@ -62,6 +91,27 @@ pub(super) fn construct(
         }
     }
     for node in 0..code.emission.blocks.len() {
+        if let Some((group, use_id, control)) =
+            construction_throw(code, node, &last, &incoming, &sibling, &access)
+        {
+            let construction = &code.constructions[group.0 as usize];
+            let source = &code.operations[construction.initialization.0 as usize];
+            let local = construction.publications[0].destination;
+            code.emission.composed_uses[use_id.0 as usize] = Some(ComposedExpression {
+                expression: construction.expression,
+                operation: construction.initialization,
+                statement: construction.statement,
+                pc: source.pc,
+                result_pc: source.result_pc,
+                site: None,
+                predicate: ComposedPredicate::Value,
+                result: ComposedResult::Value,
+                source_control: Some(control),
+            });
+            code.emission.composed_operations[construction.initialization.0 as usize] = true;
+            code.emission.hidden_locals[local.0 as usize] = true;
+            code.emission.deferred_controls[control.0 as usize] = true;
+        }
         let candidate = terminal_use(code, node, &last, &incoming, &sibling, &access);
         if let Some((producer, use_id, control)) = candidate {
             install(code, producer, use_id, Some(control), key)?;
@@ -80,6 +130,201 @@ pub(super) fn construct(
         }
     }
     Ok(())
+}
+
+fn construction_throw(
+    code: &MethodCode,
+    node: usize,
+    last: &[Option<OpId>],
+    incoming: &[u8],
+    sibling: &[Option<ControlId>],
+    access: &LocalAccess,
+) -> Option<(ConstructionId, ExprId, ControlId)> {
+    let block = code.emission.blocks.get(node)?;
+    let BodyAction::Statement {
+        operation,
+        statement,
+    } = *block.actions.last()?
+    else {
+        return None;
+    };
+    let StatementKind::Construction(id) = code.statements.get(statement.0 as usize)?.kind else {
+        return None;
+    };
+    let group = code.constructions.get(id.0 as usize)?;
+    let source = code.operations.get(operation.0 as usize)?;
+    if group.initialization != operation
+        || group.statement != statement
+        || last
+            .get(source.original_block.0 as usize)
+            .copied()
+            .flatten()
+            != Some(operation)
+        || group.prelude.is_some()
+        || !group.snapshot_members.is_empty()
+        || group.publications.len() != 1
+    {
+        return None;
+    }
+    let phases = code.emission.operations.get(operation.0 as usize)?;
+    if !phases.before.is_empty() || !phases.snapshots.is_empty() || !phases.after.is_empty() {
+        return None;
+    }
+    let construction_statement = code.statements.get(statement.0 as usize)?;
+    for &member in &group.members {
+        let operation = code.operations.get(member.0 as usize)?;
+        if operation.effects.may_throw()
+            && (operation.exceptional.is_none()
+                || !construction_statement.sites.iter().any(|site| {
+                    code.sites.get(site.0 as usize).is_some_and(|site| {
+                        site.original == crate::p5::ThrowSite::Operation(member)
+                    })
+                }))
+        {
+            return None;
+        }
+    }
+    for &site in &construction_statement.sites {
+        let site = code.sites.get(site.0 as usize)?;
+        if !matches!(site.syntax, ExceptionSyntax::Propagate) || !site.source_snapshots.is_empty() {
+            return None;
+        }
+    }
+    let publication = &group.publications[0];
+    let local = publication.destination;
+    let [definition] = construction_statement.outputs.as_slice() else {
+        return None;
+    };
+    if !matches!(definition.materialization(), Materialization::Deferred { group: owner, local: destination } if owner.0 == id.0 && destination.0 == local.0)
+    {
+        return None;
+    }
+    let declaration = code.locals.get(local.0 as usize)?;
+    if declaration.gap.is_some()
+        || !matches!(declaration.original.kind(), LocalKind::AllocationCarrier { value, operation } if value == publication.original.value && operation == group.allocation)
+        || access.reads.get(local.0 as usize).copied()? != 1
+    {
+        return None;
+    }
+    for copy in &code.copies {
+        for assignment in &copy.assignments {
+            if assignment.issue().is_some()
+                || assignment.destination().is_err()
+                || assignment.source().is_err()
+                || assignment
+                    .destination()
+                    .ok()
+                    .is_some_and(|destination| destination.0 == local.0)
+                || assignment
+                    .source()
+                    .ok()
+                    .and_then(|source| source.local())
+                    .is_some_and(|source| source.0 == local.0)
+            {
+                return None;
+            }
+        }
+        for step in &copy.steps {
+            match *step {
+                CopyStatement::Save {
+                    destination,
+                    source,
+                } if destination == local || source == local => return None,
+                CopyStatement::Assign {
+                    destination,
+                    original,
+                    ..
+                } if destination == local
+                    || original.local().is_some_and(|source| source.0 == local.0) =>
+                {
+                    return None;
+                }
+                _ => {}
+            }
+        }
+    }
+    let BlockEnd::Transfers(links) = &block.end else {
+        return None;
+    };
+    let [link] = links.as_slice() else {
+        return None;
+    };
+    let transfer = code.transfers.get(link.0 as usize)?;
+    let emitted = code.emission.transfers.get(link.0 as usize)?;
+    if transfer.edge.is_some()
+        || !matches!(emitted.spelling, TransferSpelling::Fallthrough)
+        || !emitted.copies.is_empty()
+    {
+        return None;
+    }
+    let next_node = transfer.destination.0 as usize;
+    let next = code.emission.blocks.get(next_node)?;
+    if next.show_label
+        || !next.actions.is_empty()
+        || incoming.get(next_node).copied()? != 1
+        || code.blocks.get(next_node)?.original_block != source.original_block
+    {
+        return None;
+    }
+    let owner = code.labels.get(node)?.owner;
+    let control = code.emission.controls.get(owner.0 as usize)?;
+    if !matches!(control.layout, EmissionLayout::Block(n) if n.0 as usize == node)
+        || control.continuation.is_some()
+        || code
+            .emission
+            .deferred_controls
+            .get(owner.0 as usize)
+            .copied()?
+    {
+        return None;
+    }
+    let following = sibling.get(owner.0 as usize).copied().flatten()?;
+    let following_control = code.emission.controls.get(following.0 as usize)?;
+    if !matches!(following_control.layout, EmissionLayout::Block(target) if target.0 as usize == next_node)
+        || following_control.continuation.is_some()
+    {
+        return None;
+    }
+    let BlockEnd::Terminal(terminal) = next.end else {
+        return None;
+    };
+    let target = code.terminals.get(terminal.0 as usize)?;
+    if !matches!(target.emission, TerminalEmission::Block) {
+        return None;
+    }
+    let TerminalKind::Throw(use_id) = target.kind else {
+        return None;
+    };
+    let phases = code.emission.terminals.get(terminal.0 as usize)?;
+    if !phases.before.is_empty() || !phases.snapshots.is_empty() || !phases.after.is_empty() {
+        return None;
+    }
+    let site = code.sites.get(target.site?.0 as usize)?;
+    if !matches!(site.syntax, ExceptionSyntax::Propagate) || !site.source_snapshots.is_empty() {
+        return None;
+    }
+    let expression = code.expressions.get(use_id.0 as usize)?;
+    let ExprKind::Read {
+        storage,
+        view: Interpretation::Direct(Family::Reference),
+    } = expression.kind
+    else {
+        return None;
+    };
+    let origin = expression.origin.as_ref()?;
+    if storage != local
+        || origin.initialization != Some(Initialization::Initialized)
+        || origin.site
+            != (UseSite::Terminal {
+                block: terminal,
+                argument: 0,
+            })
+        || !matches!(origin.read, Ok(StorageRead::Value { local: source, value, .. }) if source.0 == local.0 && value == publication.original.value)
+        || code.emission.composed_use(use_id).is_some()
+    {
+        return None;
+    }
+    Some((id, use_id, owner))
 }
 
 #[derive(Clone, Copy)]

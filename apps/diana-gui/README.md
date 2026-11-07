@@ -1,8 +1,8 @@
 # Diana GUI
 
-Native GPUI Kit 0.9.0 UI demo. Project names, Java-like text, DEX instructions
-and diagnostics are authored display content, not Engine results. The application
-does not read APK/DEX files or run analysis.
+Native GPUI Kit 0.9.0 application. Open a bare DEX file and select a class to
+view the Diana Engine P9 result. The separate demo workspace contains authored
+content.
 
 ## Run
 
@@ -17,14 +17,16 @@ cargo run -p diana-gui --release --locked
 
 [DESIGN.md](DESIGN.md) defines the resource, identity, navigation, view and result
 contracts for multi-format integration. It specifies responsibilities and local
-failure behavior, not a linked backend or a frozen Rust trait. The current
-application remains the UI demo described here.
+failure behavior, not a frozen Rust trait. The current backend accepts bare DEX
+files and displays class results.
 
 ## Startup
 
-The application starts with an empty welcome view containing only
-“Open an APK or DEX file to get started.” No tree or document tabs are shown.
-The hint is presentational; file opening is not connected.
+The application starts with an empty welcome view. Choose Open DEX or press
+Cmd-O / Ctrl-O, then select a class. APK input is not yet connected.
+The sidebar groups classes by logical DEX and shared package prefixes. A path
+without branches or classes is shown as one compact package node. Package nodes
+start collapsed; selecting a class opens its Engine result.
 
 The existing authored workspace is available explicitly through File → Open Demo
 Workspace on macOS, or Cmd-Shift-D / Ctrl-Shift-D. Closing its last tab keeps the
@@ -101,8 +103,8 @@ into native macOS menus; the workspace observer updates it outside rendering.
 roles and reading dimensions; it uses installed Fira Code when available and
 otherwise retains Kit's platform monospace fallback. `demo.rs` owns display content, `project_tree.rs` projects
 its identities into Tree, `search.rs` adapts symbol matching to List, and
-`workspace.rs` composes controls and manages documents. The GUI links neither
-the Engine nor the CLI. Select it explicitly with `-p diana-gui`; default workspace
+`workspace.rs` composes controls and manages documents. `backend.rs` owns the
+bare DEX snapshot and calls the Engine. Select it explicitly with `-p diana-gui`; default workspace
 members remain unchanged.
 
 ```sh
@@ -111,11 +113,5 @@ cargo clippy -p diana-gui --all-targets --all-features --locked -- -D warnings
 cargo build -p diana-gui --release --locked
 ```
 
-The package format, Clippy and release build checks pass on macOS. A native
-window was launched and visually inspected; a complete interaction walkthrough
-has not been performed. Build success does not establish interaction correctness
-or accessibility. The root testing policy applies; this package adds no tests,
-fixtures or test jobs.
-Windows/Linux and assistive-technology behavior have not been exercised.
-Workspace-wide checks remain blocked by the CLI's existing Engine/result
-integration errors.
+Build success does not establish interaction correctness or accessibility.
+The root testing policy applies; this package adds no tests, fixtures or test jobs.

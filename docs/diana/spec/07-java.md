@@ -231,9 +231,10 @@ a natural single route targeting an enclosing printed catch does not, because th
 chain line and the catch scope already state it. Other sites keep a compact chain
 reference.
 
-P5-selected construction groups become `New` expressions placed at the original
-constructor call. Corridor operations that prepare arguments print as their own
-statements at their original positions, so only the allocation moves. The group retains
+P5-selected construction groups become `New` expressions. P7 places each
+P5-selected string preparation in its designated constructor argument, so `new`
+evaluates allocation, preparations and initialization in their original order.
+P5 retains an explicit plan for other intervening operations. The group retains
 allocation and initialization operations, member/edge provenance, arguments,
 normal publication point and all throwing sites. Its selected common snapshot
 prelude executes once. Alias publications occur only after successful
@@ -342,7 +343,8 @@ The string resolution still precedes every observable consumer event; a receiver
 expression, earlier call or other non-leaf operand refuses this composition.
 String definitions retain their propagation-only exception site, original string
 reference and UTF-16 units; they are not treated as effect-free literals.
-Construction arguments do not use this later-call-argument rule. Stores
+Construction arguments use the separate P5-selected preparation facts, not this
+later-call-argument rule. Stores
 retain the existing pure-producer rule because their selected spelling can print
 the receiver before the value. A return or predicate use must be the next original
 node in the same block, with one incoming fallthrough, no intervening work or
@@ -354,6 +356,13 @@ statement instead of being moved into an otherwise empty If. All operands remain
 in original order. Locals participating in copies or construction publication are
 not hidden. An unavailable copy dependency prevents this optional composition
 for that method.
+
+P7 may compose a selected construction into an immediately following `throw`
+when its single published local has one initialized read at that terminal, no
+copy involvement, and the intervening fallthrough and printed controls carry no
+other work. Construction and throw sites must propagate without snapshots. The
+construction, its members and their sites remain in the delivered product and
+the composed expression retains their origins.
 
 For later test runs of an ordered Condition, P7 also supports a store-preserving
 composition when the result has additional reads. `ComposedResult::Store` names

@@ -417,11 +417,8 @@ pub(super) fn operations(c: &mut Context<'_, '_>) -> Result<(), ExpressionError>
             _ => None,
         };
         // Only the constructor call prints the `new`; allocation, aliases and
-        // literal definitions stay provenance. An argument producer keeps its own
-        // statement and position, so the object is published as late as before.
-        let (statement, emission) = if let Some((group, role)) = member
-            && !matches!(role, crate::p5::ConstructionRole::Argument)
-        {
+        // literal definitions stay provenance.
+        let (statement, emission) = if let Some((group, role)) = member {
             let group = &c.code.constructions[group.0 as usize];
             (
                 if role == crate::p5::ConstructionRole::Initialization {

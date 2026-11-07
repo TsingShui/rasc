@@ -3,8 +3,8 @@
 Diana is a native Rust APK/DEX decompiler. The application in `apps/diana/` owns
 files, APK/ZIP handling, selection and output. The engine in
 `crates/diana-decomp/` borrows DEX bytes and derives facts from that input.
-The GUI package is a native UI demo with authored display content, not an Engine
-consumer. The web directory remains a documentation placeholder outside the workspace.
+The GUI package displays bare DEX class results from the Engine and includes an
+authored UI demo. The web directory remains a documentation placeholder outside the workspace.
 
 The approved architecture and complete product chain are defined in
 [PIPELINE_DESIGN](../PIPELINE_DESIGN.md). The current implementation and scheduling

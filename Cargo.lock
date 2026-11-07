@@ -1332,6 +1332,7 @@ dependencies = [
 name = "diana-gui"
 version = "0.0.0"
 dependencies = [
+ "diana-decomp",
  "gpui-kit",
 ]
 

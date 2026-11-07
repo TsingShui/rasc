@@ -423,8 +423,7 @@ pub enum ConstructionRole {
     Alias,
     Literal,
     Initialization,
-    /// Prepares a constructor argument. It keeps its own statement and position;
-    /// only the allocation moves to the constructor call.
+    /// A resolved string evaluated as a constructor argument after allocation.
     Argument,
 }
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -456,9 +455,17 @@ pub struct ConstructionGroup {
     pub(super) members: Vec<OpId>,
     pub(super) interior_edges: Vec<crate::p2::EdgeId>,
     pub(super) arguments: Vec<StorageRead>,
+    pub(super) prepared_arguments: Vec<PreparedArgument>,
     pub(super) publications: Vec<Publication>,
     pub(super) prelude: Option<PlanId>,
     pub(super) snapshot_members: Vec<PlanId>,
+}
+/// A checked argument producer inside the allocation-to-initialization corridor.
+#[derive(Clone, Copy, Debug)]
+pub struct PreparedArgument {
+    pub operation: OpId,
+    pub argument: u32,
+    pub local: LocalId,
 }
 impl ConstructionGroup {
     pub fn id(&self) -> GroupId {
@@ -481,6 +488,9 @@ impl ConstructionGroup {
     }
     pub fn arguments(&self) -> &[StorageRead] {
         &self.arguments
+    }
+    pub fn prepared_arguments(&self) -> &[PreparedArgument] {
+        &self.prepared_arguments
     }
     pub fn publications(&self) -> &[Publication] {
         &self.publications

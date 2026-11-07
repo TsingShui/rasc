@@ -28,6 +28,7 @@ actions!(
     [
         OpenSearch,
         OpenDemo,
+        OpenDex,
         FindInDocument,
         CopyDocument,
         ToggleFacts,
@@ -101,6 +102,11 @@ pub struct Workspace {
     active: Option<ClassId>,
     demo_open: bool,
     code_size: f32,
+    resource: Option<crate::backend::Resource>,
+    real_editor: Option<Entity<EditorState>>,
+    real_status: String,
+    real_selected: Option<(diana_decomp::ByteOffset, diana_decomp::ClassDefId)>,
+    generation: u64,
 }
 
 impl Workspace {
@@ -113,6 +119,11 @@ impl Workspace {
             {
                 // Tree owns keyboard focus and preview selection; do not steal it.
                 view.activate(id, false, window, cx);
+            } else if let Some(resource) = &view.resource
+                && let Some(class) = project_tree::resource_selection(tree.read(cx), resource)
+                && view.real_selected != Some((class.header, class.id))
+            {
+                view.open_real_class(class, window, cx);
             }
         });
         let menu_observation = cx.observe_self(|view, cx| {
@@ -133,10 +144,166 @@ impl Workspace {
             active: None,
             demo_open: false,
             code_size: style::CODE_SIZE,
+            resource: None,
+            real_editor: None,
+            real_status: String::new(),
+            real_selected: None,
+            generation: 0,
         };
         view.focus.focus(window, cx);
         cx.notify();
         view
+    }
+
+    fn open_dex(&mut self, _: &OpenDex, window: &mut Window, cx: &mut Context<Self>) {
+        let prompt = cx.prompt_for_paths(PathPromptOptions {
+            files: true,
+            directories: false,
+            multiple: false,
+            prompt: Some("Open DEX".into()),
+        });
+        cx.spawn_in(window, async move |this, cx| {
+            let path = match prompt.await {
+                Ok(Ok(Some(paths))) => paths.into_iter().next(),
+                _ => None,
+            };
+            let Some(path) = path else {
+                return;
+            };
+            let Ok(generation) = this.update(cx, |view, _| {
+                view.generation = view.generation.wrapping_add(1);
+                if view.real_editor.is_none() {
+                    view.real_selected = None;
+                }
+                view.generation
+            }) else {
+                return;
+            };
+            let result = cx
+                .background_spawn(async move { crate::backend::open(path) })
+                .await;
+            _ = this.update_in(cx, |view, _, cx| {
+                if view.generation != generation {
+                    return;
+                }
+                match result {
+                    Ok(resource) => {
+                        view.demo_open = false;
+                        project_tree::set_resource(&view.tree, &resource, cx);
+                        view.real_editor = None;
+                        view.real_selected = None;
+                        view.real_status = if resource.issues.is_empty() {
+                            format!("{} classes", resource.classes.len())
+                        } else {
+                            resource.issues.join("\n")
+                        };
+                        view.resource = Some(resource);
+                    }
+                    Err(error) => {
+                        view.real_status = format!("Cannot open DEX: {error}");
+                    }
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    fn open_real_class(
+        &mut self,
+        class: crate::backend::Class,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(resource) = &self.resource else {
+            return;
+        };
+        let key = (class.header, class.id);
+        if self.real_selected == Some(key) {
+            return;
+        }
+        let bytes = resource.bytes.clone();
+        self.real_selected = Some(key);
+        self.generation = self.generation.wrapping_add(1);
+        let generation = self.generation;
+        self.real_status = format!("Decompiling {}…", class.label);
+        self.real_editor = None;
+        cx.notify();
+        cx.spawn_in(window, async move |this, cx| {
+            let result = cx
+                .background_spawn(async move { crate::backend::decompile(bytes, class) })
+                .await;
+            _ = this.update_in(cx, |view, window, cx| {
+                if view.generation != generation {
+                    return;
+                }
+                match result {
+                    Ok(text) => {
+                        view.real_editor = Some(cx.new(|cx| {
+                            let mut editor = EditorState::new(window, cx)
+                                .language("java")
+                                .default_value(text)
+                                .line_number(true)
+                                .searchable(true)
+                                .soft_wrap(false);
+                            editor.set_readonly(true, cx);
+                            editor
+                        }));
+                        view.real_status = "Diana Engine · Java-like".into();
+                    }
+                    Err(error) => {
+                        view.real_selected = None;
+                        view.real_status = format!("Decompilation failed: {error}");
+                    }
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    fn real_view(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let resource = self.resource.as_ref();
+        h_flex()
+            .flex_1()
+            .min_h_0()
+            .w_full()
+            .child(
+                v_flex()
+                    .w(px(style::SIDEBAR_WIDTH))
+                    .h_full()
+                    .bg(cx.theme().sidebar)
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_h_0()
+                            .child(project_tree::view(&self.tree)),
+                    ),
+            )
+            .child(
+                v_flex()
+                    .flex_1()
+                    .min_w_0()
+                    .h_full()
+                    .child(div().p_2().child(self.real_status.clone()))
+                    .when_some(resource, |view, resource| {
+                        view.children(
+                            resource
+                                .issues
+                                .iter()
+                                .map(|issue| div().p_2().child(issue.clone())),
+                        )
+                    })
+                    .when_some(self.real_editor.as_ref(), |view, editor| {
+                        view.child(
+                            Editor::new(editor)
+                                .readonly(true)
+                                .bordered(false)
+                                .w_full()
+                                .h_full(),
+                        )
+                    }),
+            )
     }
 
     fn active_document(&self) -> Option<&Document> {
@@ -331,6 +498,10 @@ impl Workspace {
     }
 
     fn reset(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.generation = self.generation.wrapping_add(1);
+        self.resource = None;
+        self.real_editor = None;
+        self.real_selected = None;
         self.demo_open = true;
         project_tree::reset(&self.tree, cx);
         self.documents = vec![
@@ -525,9 +696,8 @@ impl Workspace {
 
     fn welcome(&self) -> impl IntoElement {
         Empty::new().header(
-            EmptyHeader::new().description(
-                EmptyDescription::new().child("Open an APK or DEX file to get started."),
-            ),
+            EmptyHeader::new()
+                .description(EmptyDescription::new().child("Open a DEX file to get started.")),
         )
     }
 
@@ -589,6 +759,7 @@ impl Render for Workspace {
             .track_focus(&self.focus)
             .key_context("DianaWorkspace")
             .on_action(cx.listener(Self::open_search))
+            .on_action(cx.listener(Self::open_dex))
             .on_action(cx.listener(|view, _: &OpenDemo, window, cx| {
                 if !view.demo_open {
                     view.reset(window, cx);
@@ -637,8 +808,16 @@ impl Render for Workspace {
                 }
             })
             .map(|root| {
+                if self.resource.is_some() {
+                    return root.child(self.real_view(cx));
+                }
                 if !self.demo_open {
-                    return root.child(self.welcome());
+                    return root
+                        .child(self.welcome())
+                        .child(Button::new("open-dex").label("Open DEX…").on_click(
+                            cx.listener(|view, _, window, cx| view.open_dex(&OpenDex, window, cx)),
+                        ))
+                        .child(div().child(self.real_status.clone()));
                 }
                 root.child(
                     h_flex()
@@ -670,6 +849,15 @@ pub fn bind_keys(cx: &mut App) {
     };
     cx.bind_keys([
         KeyBinding::new(search, OpenSearch, Some("DianaWorkspace")),
+        KeyBinding::new(
+            if cfg!(target_os = "macos") {
+                "cmd-o"
+            } else {
+                "ctrl-o"
+            },
+            OpenDex,
+            Some("DianaWorkspace"),
+        ),
         KeyBinding::new(
             if cfg!(target_os = "macos") {
                 "cmd-shift-d"

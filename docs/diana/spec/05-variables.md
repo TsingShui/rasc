@@ -70,17 +70,18 @@ snapshot obligations. No new SSA value or alternate method chain is created.
 
 The planner consumes P4's position-related allocation binding and initialization.
 It requires a same-occurrence receiver before construction, an unshared linear
-normal corridor, and transparent object aliases/literal definitions inside that
-corridor. The corridor may also prepare constructor arguments: such an operation
-keeps its own statement and position, so the printed `new` stands at the original
-constructor call and only the allocation itself moves there. A nested natural
-construction is argument preparation only when every one of its members lies in this
-corridor; it keeps its own group, prints before this constructor, and completes there. A corridor operation
-that writes a slot carrying the object under construction still separates the
-group, and publication covers only the allocation and its transparent aliases. Branches, external entries, required intervening transfers, other
-operations and unavailable arguments retain explicit plans. Arguments use existing
-storage or P4-proven literal views; the planner does not inline arbitrary effectful
-computations or move allocation to the constructor site.
+normal corridor, and transparent object aliases or unmaterialized literal
+definitions inside that corridor. P5 may also select resolved string preparations
+as constructor arguments when each has one initialized reference use at that
+constructor, no Phi or copy involvement, and the preparation order matches the
+argument order. Allocation, preparation and initialization must each have one
+uncaught exception route and no snapshot. The group identifies each selected
+operation, argument and local; P7 consumes these facts to evaluate each string
+inside `new`, after allocation and before initialization. Other intervening
+operations, including nested constructions, retain an explicit plan at their
+original positions. Branches, external entries, required intervening transfers
+and unavailable arguments also retain explicit plans. Other arguments use
+existing storage or P4-proven literal views.
 
 A private carrier can be deferred only when original uses cannot observe it
 without the constructor's normal transfer. The planner decides that per arrival: a

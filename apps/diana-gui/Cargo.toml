@@ -8,6 +8,7 @@ license = "Apache-2.0"
 publish = false
 
 [dependencies]
+diana-decomp = { path = "../../crates/diana-decomp" }
 gpui-kit = { version = "=0.9.0", features = ["syntect"] }
 
 [lints.rust]

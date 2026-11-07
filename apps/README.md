@@ -6,7 +6,7 @@
 | Directory | Target | Current state |
 |---|---|---|
 | [diana/](diana/README.md) | Native CLI | Class/method retrieval delivers Engine/P9 text and JSON; input/query/extraction commands remain native. |
-| [diana-gui/](diana-gui/README.md) | Native GUI | GPUI Kit UI demo; authored content, no Engine integration |
+| [diana-gui/](diana-gui/README.md) | Native GUI | Bare DEX class preview and authored UI demo |
 | [diana-web-ui/](diana-web-ui/README.md) | Future web interface (WASM-based or otherwise undecided) | Documentation placeholder only |
 
 The GUI is a Cargo workspace member selected explicitly with `-p diana-gui`.

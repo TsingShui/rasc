@@ -2,9 +2,9 @@
 
 The root `AGENTS.md` and `docs/diana/CONTRIBUTING.md` apply.
 
-- This package is a native GPUI Kit UI demo. Keep authored display content visibly
-  distinct from actual Engine results. Do not add Engine/file/APK integration
-  without a separate user request.
+- This package is a native GPUI Kit application. Keep authored demo content visibly
+  distinct from actual Engine results. Additional input integration requires a
+  separate user request.
 - Prefer composing GPUI Kit's existing styled controls and interaction behavior
   over custom widgets or painting. On macOS, use the system title bar and native
   application menus instead of an in-window toolbar. Other desktop platforms

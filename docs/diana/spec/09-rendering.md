@@ -140,6 +140,12 @@ original arm identities and selected-edge phases do not change. Synchronized rou
 and post-release copies remain at their original nodes rather than moving past
 surrounding catch scopes. Uncaught propagation is not an unavailable handler.
 
+A construction composed into `throw` prints at that terminal. Its statement,
+member operations and exception sites retain source spans on the construction;
+each composed string preparation also retains its own expression, operation,
+statement and site origins. P9 consumes the selected composition without
+reconstructing its ordering proof.
+
 Array allocation prints as `new Element[length]`, followed by one empty `[]`
 per remaining original dimension; the delivered element spelling and rank are
 unchanged. An element that is itself a combined expression keeps the explicit
@@ -267,8 +273,16 @@ constructor bits. Bits with no defined meaning for that kind remain visible as
 `unknown_flags<0x...>` and are never folded into the whole original word. The raw
 word itself remains in the source product. A field's `enum` marker identifies an
 enumerated value, not merely a field whose enclosing type is an enum; ordinary
-field syntax does not convey that fact. `synthetic`, `bridge` and `varargs` retain
-their marker spellings, not Java modifier words.
+field syntax does not convey that fact. `synthetic` and `bridge` retain their
+marker spellings, not Java modifier words.
+
+When a method or constructor carries `varargs` and its final original parameter
+is an array with a displayable type, P9 prints the outermost array dimension as
+`...` and omits the redundant `varargs` marker. The same rule applies to the
+delivered generic parameter signature. If the parameter or its type display is
+unavailable, or the final parameter is not an array, P9 retains the marker and
+the existing parameter display. The original flag word remains in the source
+product.
 
 For methods, either `ACC_SYNCHRONIZED` (0x20) or `ACC_DECLARED_SYNCHRONIZED`
 (0x20000) prints one `synchronized` declaration word, including when both are set.

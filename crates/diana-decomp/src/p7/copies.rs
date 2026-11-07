@@ -46,6 +46,15 @@ pub struct Publication {
     pub destination: StorageId,
 }
 #[derive(Debug, Serialize)]
+pub struct PreparedExpression {
+    pub local: StorageId,
+    #[serde(serialize_with = "super::debug")]
+    pub operation: crate::p2::OpId,
+    pub statement: StatementId,
+    pub expression: ExprId,
+    pub operand: ExprId,
+}
+#[derive(Debug, Serialize)]
 pub struct Construction {
     pub id: ConstructionId,
     pub statement: StatementId,
@@ -62,6 +71,7 @@ pub struct Construction {
     pub interior_edges: Vec<crate::p2::EdgeId>,
     #[serde(serialize_with = "super::debug")]
     pub arguments: Vec<StorageRead>,
+    pub prepared_arguments: Vec<PreparedExpression>,
     pub publications: Vec<Publication>,
     pub prelude: Option<CopyPlanId>,
     pub snapshot_members: Vec<CopyPlanId>,
@@ -122,8 +132,33 @@ pub(super) fn construct(c: &mut Context<'_, '_>) -> Result<(), ExpressionError> 
         let reference = c.first_reference(group.allocation())?;
         let constructor = c.first_reference(group.initialization())?;
         let mut arguments = Vec::new();
-        for &read in group.arguments() {
-            push(&mut arguments, c.source_read(read, None)?)?;
+        let mut prepared_arguments = Vec::new();
+        for (index, &read) in group.arguments().iter().enumerate() {
+            let operand = c.source_read(read, None)?;
+            if let Some(prepared) = group
+                .prepared_arguments()
+                .iter()
+                .find(|prepared| usize::try_from(prepared.argument) == Ok(index))
+            {
+                let reference = c.first_reference(prepared.operation)?;
+                let expression = c.expression(ExprKind::String(reference), None)?;
+                let statement = c.statement(
+                    StatementKind::Evaluate { expression },
+                    prepared.operation,
+                    Arguments::Known(Vec::new()),
+                )?;
+                push(
+                    &mut prepared_arguments,
+                    PreparedExpression {
+                        local: StorageId(prepared.local.0),
+                        operation: prepared.operation,
+                        statement,
+                        expression,
+                        operand,
+                    },
+                )?;
+            }
+            push(&mut arguments, operand)?;
         }
         let expression = c.expression(
             ExprKind::New {
@@ -175,6 +210,7 @@ pub(super) fn construct(c: &mut Context<'_, '_>) -> Result<(), ExpressionError> 
                 members: copy(group.members())?,
                 interior_edges: copy(group.interior_edges())?,
                 arguments: copy(group.arguments())?,
+                prepared_arguments,
                 publications,
                 prelude,
                 snapshot_members,

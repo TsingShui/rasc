@@ -321,34 +321,18 @@ fn candidate(
         Ok(v) => v,
         Err(e) => return Ok(Err(e)),
     };
-    // Slots that carry the object under construction. A corridor operation may
-    // prepare constructor arguments as long as it never writes them.
-    let mut object_slots = Vec::new();
-    crate::substrate::owned::reserve(&mut object_slots, members.len().saturating_add(1))?;
-    for slot in flow.writes(&flow.operations()[allocation.0 as usize]) {
-        crate::substrate::owned::push(&mut object_slots, *slot)?;
-    }
     let aliases_object =
         |operation: crate::p2::OpId| aliases_allocation(typed, allocation, operation);
-    for &operation in &members {
-        if operation != allocation && operation != init && aliases_object(operation) {
-            for slot in flow.writes(&flow.operations()[operation.0 as usize]) {
-                crate::substrate::owned::push(&mut object_slots, *slot)?;
-            }
-        }
-    }
+    let mut preparations = Vec::new();
     for &operation in &members {
         match f.operation_emission[operation.0 as usize] {
             OperationEmission::Ordinary => {}
             OperationEmission::Construction { group, .. } => {
-                // A nested natural construction may prepare an argument: its own
-                // statements print in their original order and it completes before
-                // this constructor runs. A group that reaches outside this corridor
-                // is not argument preparation.
                 let nested = &f.construction_groups()[group.0 as usize];
                 if nested.members().iter().any(|m| !members.contains(m)) {
                     return Ok(Err(Separation::SharedAllocation));
                 }
+                return Ok(Err(Separation::InterveningOperation(operation)));
             }
         }
         if operation == allocation || operation == init || aliases_object(operation) {
@@ -363,16 +347,13 @@ fn candidate(
         if literal {
             continue;
         }
-        // Any other operation may prepare an argument for the constructor. It
-        // keeps its own statement and position; only the allocation itself moves
-        // to the constructor call, so the object never escapes earlier.
-        if flow
-            .writes(op)
-            .iter()
-            .any(|slot| object_slots.contains(slot))
-        {
-            return Ok(Err(Separation::InterveningOperation(operation)));
+        if matches!(op.kind(), OpKind::ConstString { .. }) {
+            push(&mut preparations, operation)?;
+            continue;
         }
+        // Moving allocation across another operation changes the order of its
+        // failure and any state observed on that failure path.
+        return Ok(Err(Separation::InterveningOperation(operation)));
     }
     for plan in &f.copies {
         if matches!(plan.location,CopyLocation::Transfer{site:TransferSite::NormalEdge(e),..}if interior_edges.contains(&e))
@@ -458,9 +439,7 @@ fn candidate(
             ));
         }
     };
-    // Arguments are read by the constructor call itself, so they must be ready
-    // at that instruction. An argument may be prepared by a corridor operation
-    // that runs after the allocation; it keeps its own statement and position.
+    // Arguments must be ready at the constructor call.
     let init_point = s
         .operation_site(init)
         .ok_or(StorageError::InternalInvariant(
@@ -476,6 +455,154 @@ fn candidate(
             return Ok(Err(Separation::ArgumentNotAvailable(input.site())));
         }
         push(&mut arguments, read)?;
+    }
+    let mut prepared_arguments = Vec::new();
+    let mut previous_argument = None;
+    for &operation in &preparations {
+        let op = &flow.operations()[operation.0 as usize];
+        let handlers = protection(typed, operation)?;
+        if !matches!(
+            flow.reference_fact(op.pc(), crate::raw::ReferenceSlot::First),
+            Some(Ok(crate::p1::CheckedReferenceFact::String { .. }))
+        ) || flow
+            .reference_use_issue(op.pc(), crate::raw::ReferenceSlot::First)
+            .is_some()
+            || !op.effects().may_throw()
+            || op.exceptional().is_none()
+            || !matches!(
+                handlers.as_slice(),
+                [Handler {
+                    catch: None,
+                    target: None,
+                    ..
+                }]
+            )
+        {
+            return Ok(Err(Separation::InterveningOperation(operation)));
+        }
+        let Some([definition]) = f.operation_definitions(operation) else {
+            return Ok(Err(Separation::InterveningOperation(operation)));
+        };
+        let Materialization::Store(local) = definition.materialization() else {
+            return Ok(Err(Separation::InterveningOperation(operation)));
+        };
+        if definition.commit() != crate::p2::CommitRule::AtOperation || f.local_gap(local).is_some()
+        {
+            return Ok(Err(Separation::InterveningOperation(operation)));
+        }
+        let Some(produced) = value(s, definition.state()) else {
+            return Ok(Err(Separation::InterveningOperation(operation)));
+        };
+        let Some(definition_state) = s.state(definition.state()) else {
+            return Ok(Err(Separation::InterveningOperation(operation)));
+        };
+        if !matches!(f.locals.get(local.0 as usize).map(|local| local.kind()), Some(LocalKind::ReferenceCarrier(value) | LocalKind::Value(value)) if value == produced)
+        {
+            return Ok(Err(Separation::InterveningOperation(operation)));
+        }
+        let mut matching = s
+            .uses()
+            .iter()
+            .filter(|usage| value(s, usage.state()) == Some(produced));
+        let Some(usage) = matching.next() else {
+            return Ok(Err(Separation::InterveningOperation(operation)));
+        };
+        let UseSite::Operation {
+            operation: target,
+            argument,
+        } = usage.site()
+        else {
+            return Ok(Err(Separation::InterveningOperation(operation)));
+        };
+        if target != init
+            || argument == 0
+            || s.state(usage.state())
+                .is_none_or(|state| !state.availability().is_available())
+            || matching.next().is_some()
+            || previous_argument.is_some_and(|previous| previous >= argument)
+            || s.uses().iter().any(|other| {
+                other.slot() == definition_state.slot() && value(s, other.state()).is_none()
+            })
+            || s.phis().iter().any(|phi| {
+                phi.incoming().iter().any(|incoming| {
+                    value(s, incoming.state()) == Some(produced)
+                        || (phi.slot() == definition_state.slot()
+                            && value(s, incoming.state()).is_none())
+                })
+            })
+            || f.copies.iter().any(|copy| {
+                copy.assignments.iter().any(|assignment| {
+                    assignment.issue.is_some()
+                        || assignment.destination.is_err()
+                        || assignment.destination == Ok(local)
+                        || assignment
+                            .source
+                            .map_or(true, |read| read.local() == Some(local))
+                }) || copy.steps.iter().any(|step| match *step {
+                    CopyStep::Save {
+                        destination,
+                        source,
+                    } => destination == local || source == local,
+                    CopyStep::Assign {
+                        destination,
+                        source,
+                        ..
+                    } => destination == local || source.local() == Some(local),
+                })
+            })
+        {
+            return Ok(Err(Separation::InterveningOperation(operation)));
+        }
+        let Ok(argument_index) = usize::try_from(argument - 1) else {
+            return Ok(Err(Separation::InterveningOperation(operation)));
+        };
+        let Some(read) = arguments.get(argument_index) else {
+            return Ok(Err(Separation::InterveningOperation(operation)));
+        };
+        let Some(input_index) = argument_index.checked_add(1) else {
+            return Ok(Err(Separation::InterveningOperation(operation)));
+        };
+        if !matches!(read, StorageRead::Value { value, local: source, view: crate::p4::Interpretation::Direct(crate::p4::Family::Reference), .. } if *value == produced && *source == local)
+            || inputs
+                .get(input_index)
+                .is_none_or(|input| input.initialization() != Some(Initialization::Initialized))
+        {
+            return Ok(Err(Separation::InterveningOperation(operation)));
+        }
+        previous_argument = Some(argument);
+        push(
+            &mut prepared_arguments,
+            PreparedArgument {
+                operation,
+                argument: argument - 1,
+                local,
+            },
+        )?;
+    }
+    let mut protected = false;
+    if !prepared_arguments.is_empty() {
+        for op in [allocation, init] {
+            let operation = &flow.operations()[op.0 as usize];
+            let handlers = protection(typed, op)?;
+            protected |= !operation.effects().may_throw()
+                || operation.exceptional().is_none()
+                || !matches!(
+                    handlers.as_slice(),
+                    [Handler {
+                        catch: None,
+                        target: None,
+                        ..
+                    }]
+                );
+        }
+    }
+    if !prepared_arguments.is_empty()
+        && (protected || f.copies.iter().any(|plan| {
+            matches!(plan.location, CopyLocation::BeforeThrow(ThrowSite::Operation(op)) if op == allocation || op == init || preparations.contains(&op))
+                && (!plan.assignments.is_empty() || !plan.steps.is_empty())
+        }))
+    {
+        return Ok(Err(Separation::InterveningOperation(preparations[0])));
     }
     let mut snapshots = Vec::new();
     for plan in &f.copies {
@@ -514,8 +641,7 @@ fn candidate(
         }
     }
     // Only the allocated object and its transparent aliases become visible when
-    // the constructor succeeds. A corridor operation that prepares an argument
-    // keeps its own storage and is not published here.
+    // the constructor succeeds.
     let mut publications = Vec::new();
     for &op in &members {
         if op != allocation && !aliases_allocation(typed, allocation, op) {
@@ -545,6 +671,7 @@ fn candidate(
         members,
         interior_edges,
         arguments,
+        prepared_arguments,
         publications,
         prelude,
         snapshot_members: snapshots,
@@ -589,14 +716,6 @@ pub(super) fn construct(typed: &TypedMethod<'_>, f: &mut StorageFacts) -> Result
             Ok(group) => {
                 let id = group.id;
                 for &op in &group.members {
-                    // An argument's own natural construction keeps its group: it
-                    // prints, and completes, before this constructor call runs.
-                    if matches!(
-                        f.operation_emission[op.0 as usize],
-                        OperationEmission::Construction { group: nested, .. } if nested != id
-                    ) {
-                        continue;
-                    }
                     let role = if op == group.allocation {
                         ConstructionRole::Allocation
                     } else if op == group.initialization {
@@ -608,8 +727,16 @@ pub(super) fn construct(typed: &TypedMethod<'_>, f: &mut StorageFacts) -> Result
                         ConstructionRole::Literal
                     } else if aliases_allocation(typed, group.allocation, op) {
                         ConstructionRole::Alias
-                    } else {
+                    } else if group
+                        .prepared_arguments
+                        .iter()
+                        .any(|prepared| prepared.operation == op)
+                    {
                         ConstructionRole::Argument
+                    } else {
+                        return Err(StorageError::InternalInvariant(
+                            "construction retained an intervening operation",
+                        ));
                     };
                     f.operation_emission[op.0 as usize] =
                         OperationEmission::Construction { group: id, role };

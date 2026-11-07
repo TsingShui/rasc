@@ -6,9 +6,8 @@ relevant work. Package-local instructions refine their respective scopes.
 ## Project layout and reference isolation
 
 - `apps/diana/`: CLI, input, snapshot, ZIP, query and output.
-- `apps/diana-gui/`: native GPUI Kit UI demo, selected with `-p diana-gui`.
-  Its authored content is not Engine output; input/analysis integration requires
-  a separate user request.
+- `apps/diana-gui/`: native GPUI Kit GUI, selected with `-p diana-gui`.
+  It displays bare DEX class results and has a separate authored demo.
 - `apps/diana-web-ui/`: README-only future target placeholder, outside the workspace.
   Do not initialize its framework, browser UI or WASM bindings until separately requested.
 - `crates/diana-decomp/`: independent native engine and public library.
