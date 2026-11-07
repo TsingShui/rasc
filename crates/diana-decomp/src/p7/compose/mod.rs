@@ -181,5 +181,6 @@ pub(super) fn construct(
         "transparent_scopes",
         scopes::transparent_labelled_scopes(code)
     );
+    references::call_owners(code)?;
     Ok(())
 }

@@ -118,14 +118,30 @@ their existing qualification rules. This comparison is not Java overload
 resolution, assignability, inheritance, widening or a claim about declarations
 outside the input.
 
-The binding suffix discloses the original target; it is not a Java-legality
+The signature qualification discloses the original reference; it is not a Java-legality
 device. Both forms retain the complete original reference, dispatch kind,
 receiver, argument order and invocation prototype. P7 MUST NOT insert casts,
 typed aliases, boxing or helpers to influence binding. `LocalSpelling` uses a
 nominal name only for complete, equal delivered reference type sources; other
 locals retain their machine storage representation. Header parameter names are
-fixed by P7, including no-code declarations. P9 prints the selected suffix as
-`[binding ...]`; a natural call prints only the receiver, member and arguments.
+fixed by P7, including no-code declarations.
+
+P7 selects `Parameters` when the parameter list distinguishes the original
+reference from its competing delivered overloads. A competing reference with the
+same parameters and a different return type selects `FullSignature`; other
+mandatory disclosures also retain that full form. The selection scans all
+competing references, so their delivery order cannot hide a return-type collision.
+Both qualified forms carry an owner-disclosure flag. For an instance call, P7
+omits that disclosure only when the final receiver remains a local read whose
+nominal `LocalSpelling` has exactly the original owner's type units, with no
+composed producer or inline check at that read. Owner selection runs after
+expression and check composition. This is display
+selection, not hierarchy resolution; inheritance or multiple implementations
+alone do not select qualification. Static calls already print the owner.
+P9 prints the selected signature and owner according to
+[the call notation](09-rendering.md#expression-and-control-notation), without
+recomputing these decisions. Unread references keep their concrete unavailable
+form rather than a guessed signature.
 
 P1 supplies checked call-site IDs, bytes/range, argument count and flat bootstrap
 events. A separate flat leaf-declaration pool retains referenced strings, types,

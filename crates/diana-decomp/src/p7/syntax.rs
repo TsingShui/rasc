@@ -51,11 +51,12 @@ pub enum Arguments {
         words: Vec<crate::RegisterId>,
     },
 }
-#[derive(Debug, Serialize)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Qualification {
     Natural,
-    FullSignature,
+    Parameters { owner: bool },
+    FullSignature { owner: bool },
 }
 #[derive(Debug, Serialize)]
 pub struct Call {

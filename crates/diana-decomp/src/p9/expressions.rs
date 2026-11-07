@@ -124,10 +124,12 @@ enum ExprEvent {
     Member(ReferenceId, Option<ExprId>, bool),
     /// `invoke-super` names its target through `super`, so the receiver is the
     /// implicit `this` and is not printed again; its read keeps an anchor.
-    SuperMember(ReferenceId, ExprId),
+    SuperMember(ReferenceId, ExprId, Qualification),
+    CallMember(ReferenceId, Option<ExprId>, Qualification),
+    CallMemberEnd(ReferenceId, bool, Qualification, super::TextOffset),
+    Via(TypeUseId),
     MemberEnd(ReferenceId, bool, bool, super::TextOffset),
     InvocationPrototype(ReferenceId),
-    CallEnd(ReferenceId, bool),
     UnavailableArguments(ExprId),
     ArrayEnd(crate::p2::ValueKind),
     Dimensions(u32),
@@ -345,11 +347,20 @@ impl<S: ExpressionSource> Expressions<'_, '_, S> {
                 };
                 let explicit = matches!(syntax, InitializationSyntax::Explicit);
                 if explicit && let Some(receiver) = c.receiver {
+                    if self.call_owner(c.target, c.qualification).is_some() {
+                        self.out.put("(")?;
+                    }
                     self.operand(receiver)?;
-                    self.out.put(".<init>(")?;
+                    if let Some(owner) = self.call_owner(c.target, c.qualification) {
+                        self.via(owner)?;
+                    }
+                    self.out.put(".<init>")?;
+                    self.call_signature(c.target, c.qualification)?;
+                    self.call_use_issue(c.target)?;
+                    self.out.put("(")?;
                     self.args(&c.arguments)?;
                     self.out.put(")")?;
-                    let start = self.out.position();
+                    let start = a;
                     self.out.span(
                         start,
                         Origin::Reference {
@@ -360,11 +371,6 @@ impl<S: ExpressionSource> Expressions<'_, '_, S> {
                     if let Some(proto) = c.invocation_prototype {
                         self.out.put(" [invocation prototype: ")?;
                         self.reference(proto)?;
-                        self.out.put("]")?;
-                    }
-                    if matches!(c.qualification, Qualification::FullSignature) {
-                        self.out.put(" [binding ")?;
-                        self.member(c.target, None, true)?;
                         self.out.put("]")?;
                     }
                 } else {
@@ -491,34 +497,55 @@ impl<S: ExpressionSource> Expressions<'_, '_, S> {
                 ExprEvent::MemberEnd(reference, receiver, signature, start) => {
                     self.member_end(reference, receiver, signature, start)?;
                 }
-                ExprEvent::SuperMember(reference, receiver) => {
+                ExprEvent::SuperMember(reference, receiver, qualification) => {
                     let start = self.out.position();
+                    let owner = self.call_owner(reference, qualification);
+                    if owner.is_some() {
+                        self.out.put("(")?;
+                    }
+                    let receiver_start = self.out.position();
                     self.out.put("super")?;
-                    // The original receiver read is the implicit `this`; keep its
-                    // provenance at the text that replaces it.
                     self.out.span(
-                        start,
+                        receiver_start,
                         Origin::Expression {
                             method: self.method,
                             expression: receiver,
                         },
                     )?;
+                    if let Some(owner) = owner {
+                        self.via(owner)?;
+                    }
                     self.out.put(".")?;
-                    // `super` already names the dispatch, so only the member name
-                    // prints; the owner would repeat what `super` selects.
-                    self.super_member_end(reference, start)?;
+                    self.call_member_end(reference, true, qualification, start)?;
                 }
+                ExprEvent::CallMember(reference, receiver, qualification) => {
+                    let start = self.out.position();
+                    push_event(
+                        &mut work,
+                        ExprEvent::CallMemberEnd(
+                            reference,
+                            receiver.is_some(),
+                            qualification,
+                            start,
+                        ),
+                    )?;
+                    if let Some(receiver) = receiver {
+                        push_event(&mut work, ExprEvent::Text("."))?;
+                        if let Some(owner) = self.call_owner(reference, qualification) {
+                            self.out.put("(")?;
+                            push_event(&mut work, ExprEvent::Via(owner))?;
+                        }
+                        push_event(&mut work, ExprEvent::Expression(receiver, true))?;
+                    }
+                }
+                ExprEvent::CallMemberEnd(reference, receiver, qualification, start) => {
+                    self.call_member_end(reference, receiver, qualification, start)?;
+                }
+                ExprEvent::Via(owner) => self.via(owner)?,
                 ExprEvent::InvocationPrototype(reference) => {
                     self.out.put(" [invocation prototype: ")?;
                     self.reference(reference)?;
                     self.out.put("]")?;
-                }
-                ExprEvent::CallEnd(reference, qualified) => {
-                    if qualified {
-                        self.out.put(" [binding ")?;
-                        self.member(reference, None, true)?;
-                        self.out.put("]")?;
-                    }
                 }
                 ExprEvent::UnavailableArguments(id) => {
                     let args = match &self
@@ -793,13 +820,6 @@ impl<S: ExpressionSource> Expressions<'_, '_, S> {
                 ) {
                     self.out.fmt(format_args!("invoke<{:?}> ", call.kind))?;
                 }
-                push_event(
-                    work,
-                    ExprEvent::CallEnd(
-                        call.target,
-                        matches!(call.qualification, Qualification::FullSignature),
-                    ),
-                )?;
                 push_event(work, ExprEvent::Text(")"))?;
                 self.argument_events(work, id, &call.arguments)?;
                 push_event(work, ExprEvent::Text("("))?;
@@ -807,10 +827,14 @@ impl<S: ExpressionSource> Expressions<'_, '_, S> {
                     push_event(work, ExprEvent::InvocationPrototype(proto))?;
                 }
                 match (call.kind, call.receiver) {
-                    (crate::p2::InvokeKind::Super, Some(receiver)) => {
-                        push_event(work, ExprEvent::SuperMember(call.target, receiver))?
-                    }
-                    _ => push_event(work, ExprEvent::Member(call.target, call.receiver, false))?,
+                    (crate::p2::InvokeKind::Super, Some(receiver)) => push_event(
+                        work,
+                        ExprEvent::SuperMember(call.target, receiver, call.qualification),
+                    )?,
+                    _ => push_event(
+                        work,
+                        ExprEvent::CallMember(call.target, call.receiver, call.qualification),
+                    )?,
                 }
             }
             ExprKind::New {
@@ -966,17 +990,21 @@ impl<S: ExpressionSource> Expressions<'_, '_, S> {
                 == self.code.types()[type_use.0 as usize].units
     }
     pub fn signature(&mut self, p: &Prototype) -> Result<(), RenderError> {
+        self.signature_parts(p, true)
+    }
+    fn signature_parts(&mut self, p: &Prototype, returns: bool) -> Result<(), RenderError> {
         self.out.put("<(")?;
         for (i, &ty) in p.parameters.iter().enumerate() {
             if i > 0 {
                 self.out.put(", ")?;
             }
-            self.out
-                .units(&self.code.types()[ty.0 as usize].units, true)?;
+            self.ty(ty)?;
         }
-        self.out.put(") -> ")?;
-        self.out
-            .units(&self.code.types()[p.returns.0 as usize].units, true)?;
+        self.out.put(")")?;
+        if returns {
+            self.out.put(" -> ")?;
+            self.ty(p.returns)?;
+        }
         self.out.put(">")
     }
     pub fn member(
@@ -993,21 +1021,92 @@ impl<S: ExpressionSource> Expressions<'_, '_, S> {
         self.member_end(r, receiver.is_some(), signature, start)
     }
 
-    /// The member name alone, for a call whose receiver text already names the
-    /// dispatch target (`super`).
-    fn super_member_end(
+    fn call_owner(&self, r: ReferenceId, qualification: Qualification) -> Option<TypeUseId> {
+        if !matches!(
+            qualification,
+            Qualification::Parameters { owner: true }
+                | Qualification::FullSignature { owner: true }
+        ) {
+            return None;
+        }
+        match &self.code.references()[r.0 as usize].declaration {
+            Ok(ReferenceDeclaration::Member(MemberDeclaration::Method { owner, .. })) => {
+                Some(*owner)
+            }
+            _ => None,
+        }
+    }
+
+    fn via(&mut self, owner: TypeUseId) -> Result<(), RenderError> {
+        self.out.put(" via ")?;
+        self.ty(owner)?;
+        self.out.put(")")
+    }
+
+    fn call_signature(
         &mut self,
         r: ReferenceId,
+        qualification: Qualification,
+    ) -> Result<(), RenderError> {
+        if matches!(qualification, Qualification::Natural) {
+            return Ok(());
+        }
+        match &self.code.references()[r.0 as usize].declaration {
+            Ok(ReferenceDeclaration::Member(MemberDeclaration::Method { prototype, .. })) => {
+                self.signature_parts(
+                    prototype,
+                    matches!(qualification, Qualification::FullSignature { .. }),
+                )?;
+            }
+            _ => {
+                self.out.put("<")?;
+                self.reference(r)?;
+                self.out.put(">")?;
+            }
+        }
+        Ok(())
+    }
+
+    fn call_use_issue(&mut self, r: ReferenceId) -> Result<(), RenderError> {
+        let reference = &self.code.references()[r.0 as usize];
+        if matches!(
+            reference.declaration,
+            Ok(ReferenceDeclaration::Member(
+                MemberDeclaration::Method { .. }
+            ))
+        ) && let Some(issue) = &reference.use_issue
+        {
+            self.out.put(" [reference_use_unavailable: ")?;
+            self.out.quote(&issue.detail)?;
+            self.out.put("]")?;
+        }
+        Ok(())
+    }
+
+    fn call_member_end(
+        &mut self,
+        r: ReferenceId,
+        has_receiver: bool,
+        qualification: Qualification,
         start: super::TextOffset,
     ) -> Result<(), RenderError> {
         let reference = &self.code.references()[r.0 as usize];
-        let Ok(ReferenceDeclaration::Member(m)) = &reference.declaration else {
-            return self.member_end(r, true, false, start);
+        let Ok(ReferenceDeclaration::Member(MemberDeclaration::Method { owner, name, .. })) =
+            &reference.declaration
+        else {
+            return self.member_end(r, has_receiver, false, start);
         };
-        let name = match m {
-            MemberDeclaration::Field { name, .. } | MemberDeclaration::Method { name, .. } => name,
-        };
-        self.out.name(&name.units, name.form)?;
+        if name.units.iter().copied().eq("<init>".encode_utf16()) {
+            self.ty(*owner)?;
+        } else {
+            if !has_receiver {
+                self.ty(*owner)?;
+                self.out.put(".")?;
+            }
+            self.out.name(&name.units, name.form)?;
+        }
+        self.call_signature(r, qualification)?;
+        self.call_use_issue(r)?;
         self.out.span(
             start,
             Origin::Reference {
@@ -1101,6 +1200,15 @@ impl<S: ExpressionSource> Expressions<'_, '_, S> {
                     "super"
                 },
             )?;
+            self.call_signature(c.target, c.qualification)?;
+            self.call_use_issue(c.target)?;
+            self.out.span(
+                start,
+                Origin::Reference {
+                    method: self.method,
+                    reference: c.target,
+                },
+            )?;
             if let Some(receiver) = c.receiver {
                 self.out.span(
                     start,
@@ -1129,7 +1237,18 @@ impl<S: ExpressionSource> Expressions<'_, '_, S> {
                 ) => None,
                 _ => c.receiver,
             };
-            self.member(c.target, receiver, false)?;
+            let start = self.out.position();
+            if let Some(receiver) = receiver {
+                if self.call_owner(c.target, c.qualification).is_some() {
+                    self.out.put("(")?;
+                }
+                self.operand(receiver)?;
+                if let Some(owner) = self.call_owner(c.target, c.qualification) {
+                    self.via(owner)?;
+                }
+                self.out.put(".")?;
+            }
+            self.call_member_end(c.target, receiver.is_some(), c.qualification, start)?;
             if receiver.is_none()
                 && let Some(receiver) = c.receiver
             {
@@ -1151,14 +1270,6 @@ impl<S: ExpressionSource> Expressions<'_, '_, S> {
         self.out.put("(")?;
         self.args(&c.arguments)?;
         self.out.put(")")?;
-        // Only a selected explicit signature stays in the text; the original
-        // target id, dispatch kind and prototype remain owned reference facts
-        // and keep their source span without repeating after every call.
-        if matches!(c.qualification, Qualification::FullSignature) {
-            self.out.put(" [binding ")?;
-            self.member(c.target, None, true)?;
-            self.out.put("]")?;
-        }
         Ok(())
     }
     pub fn reference(&mut self, r: ReferenceId) -> Result<(), RenderError> {

@@ -1687,8 +1687,8 @@ Java-like 调用的目标签名限定是绑定信息，不是泛型类型实参�
 运行时操作。下列两项保留不同的已交付原调用引用：
 
 ```text
-Api.register(h) [binding Api.register<("Lsample/Listener;") -> "V">];
-Api.register(h) [binding Api.register<("Lsample/Handler;") -> "V">];
+Api.register<(Listener)>(h);
+Api.register<(Handler)>(h);
 ```
 
 限定符不改变 h 的值、类型来源、求值次数、初始化状态或调用顺序，不引入
@@ -1696,9 +1696,21 @@ check-cast、辅助调用或新的异常位置，也不把原本不可用的来�
 目标原型读取不全时，P7 MUST 保留原引用和具体未知，不能猜一个参数签名。
 限定形式是调用表达的语义，不是用注释替代不正确的调用目标。
 
-内部完整引用包括返回类型。参数简写不能准确区分原目标时，保留完整
-DEX descriptor。只有 P7 选出 FullSignature 时 P9 才打印调用后的
-`[binding ...]` 后缀；该后缀是绑定信息，不是注释或新操作。
+内部完整引用包括返回类型。P7 在需要披露引用差异时选择参数表限定
+`method<(ParameterTypes)>`；存在参数表相同而返回类型不同的原引用时，
+选择 `method<(ParameterTypes) -> ReturnType>`。其他必须明确引用的情况
+保留完整签名。类型名称由 P8 规划，P9 不直接打印带引号的 DEX descriptor；
+不可自然命名的类型保留既有明确形式。
+
+已限定的实例调用在接收者的既有名义声明类型不能准确给出原 owner 时，
+P7 选择 `(receiver via Owner).method<...>(arguments)`。`via` 表示原始方法
+引用的 owner，不是实际声明所在类、运行时对象类型或已选择的具体实现。
+它不引入转换、检查或新的求值；virtual/interface 分派方式不变。
+静态调用以 `Owner.method` 给出 owner。super 调用仍以 `super` 表示原分派；
+需要披露其 owner 时写作 `(super via Owner).method<...>(arguments)`。
+构造委托继续使用 `this<...>(arguments)` 或 `super<...>(arguments)`，
+已分配对象的显式初始化在 `<init>` 后打印选定签名。
+
 原命名空间中的重复或歧义也不能被简写隐藏。P7 用已交付事实确定限定
 形式，P8 只落实既有类名/import 显示计划；P9 只打印既有表达，不求解重载
 或重新读取声明。默认自然调用只打印已确定的接收者、成员和实参；原引用
