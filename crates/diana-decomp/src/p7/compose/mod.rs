@@ -485,10 +485,7 @@ fn collapse_fallthrough_gotos(code: &mut MethodCode) -> Result<(), ExpressionErr
         let Some(next) = printed_successor(code, &parent, owner, &mut buffer) else {
             continue;
         };
-        if matches!(
-            code.emission.controls[next.0 as usize].layout,
-            EmissionLayout::Block(node) if node.0 == label.0
-        ) {
+        if printed_entry_is(code, next, label) {
             code.emission.transfers[transfer].spelling = TransferSpelling::Fallthrough;
         }
     }
@@ -711,14 +708,49 @@ fn collapse_planned_continuations(code: &mut MethodCode) -> Result<(), Expressio
         let Some(next) = printed_successor(code, &parent, control, &mut buffer) else {
             continue;
         };
-        if matches!(
-            code.emission.controls[next.0 as usize].layout,
-            EmissionLayout::Block(node) if node.0 == label.0
-        ) {
+        if printed_entry_is(code, next, label) {
             code.emission.controls[index].continuation = None;
         }
     }
     Ok(())
+}
+
+/// Follow only layouts that print their established entry before any control
+/// action. Entering a loop, protected scope or graph can have different effects
+/// from jumping to a block inside it, so those boundaries remain explicit.
+fn printed_entry_is(code: &MethodCode, mut current: ControlId, target: LabelId) -> bool {
+    for _ in 0..code.controls.len() {
+        let Some(control) = code.controls.get(current.0 as usize) else {
+            return false;
+        };
+        let Some(emission) = code.emission.controls.get(current.0 as usize) else {
+            return false;
+        };
+        if let EmissionLayout::Block(node) = emission.layout {
+            return node.0 == target.0;
+        }
+        if emission.omitted || control.entry.is_none_or(|entry| entry.0 != target.0) {
+            return false;
+        }
+        current = match &emission.layout {
+            EmissionLayout::Sequence => {
+                let Some(&first) = emission.children(control).first() else {
+                    return false;
+                };
+                first
+            }
+            EmissionLayout::If { header, .. }
+            | EmissionLayout::Condition { header, .. }
+            | EmissionLayout::Switch { header, .. } => *header,
+            EmissionLayout::Block(_)
+            | EmissionLayout::Labelled
+            | EmissionLayout::Graph
+            | EmissionLayout::Loop { .. }
+            | EmissionLayout::Try { .. }
+            | EmissionLayout::Synchronized { .. } => return false,
+        };
+    }
+    false
 }
 
 /// The caller reserves space for all controls (at least three slots). Layout

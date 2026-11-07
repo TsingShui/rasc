@@ -187,6 +187,10 @@ sequencing, so P7 MUST omit its displayed `goto`. The search follows the final
 emission layout through Sequence, Labelled and Graph containers and the last
 printed If branch. It stops at a parent's continuation and at Loop, Try, Switch
 and Synchronized boundaries, whose trailing text or actions prevent fallthrough.
+For the successor, P7 follows the established entry through a Sequence's first
+child or an If, Condition or Switch header only when every traversed container
+has the target as its entry. It does not enter a loop, protected scope or graph to find
+a target. This same entry rule applies to transfers and planned continuations.
 
 P7 MUST omit an `else` emptied by this collapse only when its false-edge copies
 are empty and its control is an empty Block or a label-free Sequence of empty
