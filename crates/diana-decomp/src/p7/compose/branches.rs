@@ -7,7 +7,6 @@ use super::super::*;
 pub(super) fn construct(code: &mut MethodCode) -> Result<(), ExpressionError> {
     let mut empty = filled(code.controls.len(), false)?;
     let mut single_if = filled(code.controls.len(), false)?;
-    let mut abrupt = filled(code.controls.len(), false)?;
     let mut work = Vec::new();
     if let Some(root) = code.root {
         push(&mut work, (root, false))?;
@@ -43,9 +42,6 @@ pub(super) fn construct(code: &mut MethodCode) -> Result<(), ExpressionError> {
                 IfShape::Empty
             } else if yes_empty && !no_empty && !displayed_predicate_site(code, test) {
                 IfShape::Inverted
-            } else if !yes_empty && !no_empty && !single_if[id.0 as usize] && abrupt[yes.0 as usize]
-            {
-                IfShape::NoElse
             } else if !no_empty
                 && arm_prints_nothing(code, test.when_false, true)
                 && single_if[no.0 as usize]
@@ -102,7 +98,6 @@ pub(super) fn construct(code: &mut MethodCode) -> Result<(), ExpressionError> {
                 empty[id.0 as usize] = block.actions.is_empty()
                     && !block.show_label
                     && display_empty_end(code, &block.end);
-                abrupt[id.0 as usize] = display_abrupt_end(code, &block.end);
             }
             EmissionLayout::Sequence => {
                 empty[id.0 as usize] = true;
@@ -118,17 +113,14 @@ pub(super) fn construct(code: &mut MethodCode) -> Result<(), ExpressionError> {
                     }
                     empty[id.0 as usize] = false;
                     single_if[id.0 as usize] = single_if[child.0 as usize];
-                    abrupt[id.0 as usize] = abrupt[child.0 as usize];
                 }
             }
             EmissionLayout::If {
                 header,
                 test,
                 shape,
-                no,
                 ..
             } => {
-                abrupt[id.0 as usize] = !matches!(shape, IfShape::Empty) && abrupt[no.0 as usize];
                 if matches!(shape, IfShape::Empty) {
                     empty[id.0 as usize] = empty[header.0 as usize];
                 } else if empty[header.0 as usize]
@@ -139,15 +131,6 @@ pub(super) fn construct(code: &mut MethodCode) -> Result<(), ExpressionError> {
                     // Nothing may print between `else ` and the inner `if`.
                     single_if[id.0 as usize] = true;
                 }
-            }
-            EmissionLayout::Graph | EmissionLayout::Labelled => {
-                // An explicit container prints its children in order, so only
-                // the last printed child decides whether control leaves. Its own
-                // transfers keep jumping to the original targets.
-                abrupt[id.0 as usize] = code.emission.controls[id.0 as usize]
-                    .children(&code.controls[id.0 as usize])
-                    .last()
-                    .is_some_and(|last| abrupt[last.0 as usize]);
             }
             _ => {}
         }
@@ -236,27 +219,6 @@ fn arm_prints_nothing(code: &MethodCode, id: TransferId, syntax_owned: bool) -> 
     let transfer = &code.emission.transfers[id.0 as usize];
     transfer.copies.is_empty()
         && (syntax_owned || matches!(transfer.spelling, TransferSpelling::Fallthrough))
-}
-
-/// Whether control leaves this point unconditionally, so nothing after it can be
-/// reached by falling out of the containing statement.
-fn display_abrupt_end(code: &MethodCode, end: &BlockEnd) -> bool {
-    match end {
-        BlockEnd::None => false,
-        BlockEnd::Terminal(id) => matches!(
-            code.terminals[id.0 as usize].kind,
-            TerminalKind::Return(_) | TerminalKind::Throw(..) | TerminalKind::Goto(_)
-        ),
-        BlockEnd::Transfers(transfers) => match transfers.as_slice() {
-            [single] => matches!(
-                code.emission.transfers[single.0 as usize].spelling,
-                TransferSpelling::Goto(_)
-                    | TransferSpelling::Break(_)
-                    | TransferSpelling::Continue(_)
-            ),
-            _ => false,
-        },
-    }
 }
 
 fn display_empty_end(code: &MethodCode, end: &BlockEnd) -> bool {

@@ -1002,21 +1002,6 @@ impl Expressions<'_, '_> {
                                         },
                                     )?;
                                 }
-                                IfShape::NoElse => {
-                                    // The true arm never falls out of the branch,
-                                    // so the false arm prints after the closed if.
-                                    push(&mut work, Event::Control(*no))?;
-                                    push(&mut work, Event::Close)?;
-                                    push(&mut work, Event::Control(*yes))?;
-                                    push(
-                                        &mut work,
-                                        Event::If {
-                                            test: *test,
-                                            chained,
-                                            omitted_false: false,
-                                        },
-                                    )?;
-                                }
                                 IfShape::IfElse | IfShape::ElseIf => {
                                     if matches!(shape, IfShape::ElseIf) {
                                         push(&mut work, Event::ChainedControl(*no))?;
