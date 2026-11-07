@@ -511,9 +511,17 @@ impl Expressions<'_, '_> {
     }
     fn terminal(&mut self, id: BlockId) -> Result<(), RenderError> {
         // The closing brace of the method body performs a void return that
-        // prints nothing else, so P7 omits that redundant `return;`.
+        // prints nothing else, so P7 omits that redundant `return;`. The original
+        // terminal keeps a zero-length anchor where its text would have stood.
         if self.code.emission().omitted_return(id) {
-            return Ok(());
+            let position = self.out.position();
+            return self.out.span(
+                position,
+                Origin::Terminal {
+                    method: self.method,
+                    block: id,
+                },
+            );
         }
         if self.code.emission().empty_if(id) {
             let TerminalKind::If {
