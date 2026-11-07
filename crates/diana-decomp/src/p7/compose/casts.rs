@@ -40,6 +40,7 @@ pub(super) fn construct(
     let mut found: Vec<(StatementId, InlineCheck)> = Vec::new();
     statement_uses(code, &mut found)?;
     copy_uses(code, &mut found)?;
+    terminal_uses(code, &mut found)?;
     // A redundant check has no text to carry, so its value's read keeps its own
     // spelling and the check's statement only contributes its origins.
     found.retain(|(statement, _)| {
@@ -58,6 +59,9 @@ pub(super) fn construct(
                 }
                 CheckCarrier::Copy { bundle, .. } => {
                     &mut code.emission.copy_check_uses[bundle.0 as usize]
+                }
+                CheckCarrier::Terminal(terminal) => {
+                    &mut code.emission.terminal_check_uses[terminal.0 as usize]
                 }
             };
             push(uses, index)?;
@@ -340,6 +344,196 @@ fn copy_uses(
     Ok(())
 }
 
+/// The checked value read by the first evaluated operand of this block's own
+/// terminal. The check is the block's last action, so the terminal follows it
+/// with nothing printed in between; a before-terminal copy, snapshot or selected
+/// arm would move the check past that event and keeps the standalone statement.
+fn terminal_uses(
+    code: &MethodCode,
+    found: &mut Vec<(StatementId, InlineCheck)>,
+) -> Result<(), ExpressionError> {
+    for node in 0..code.emission.blocks.len() {
+        let block = &code.emission.blocks[node];
+        let Some((last, _)) = block.actions.split_last() else {
+            continue;
+        };
+        let BodyAction::Statement {
+            operation,
+            statement,
+        } = *last
+        else {
+            continue;
+        };
+        let Some((storage, reference)) = eligible_check(code, operation, statement) else {
+            continue;
+        };
+        // The terminal may sit in a following portion of the same original
+        // block: a plain within-block link with no copy prints nothing between
+        // the check and the terminal operand.
+        let Some(terminal) = terminal_after(code, node)? else {
+            continue;
+        };
+        let phases = &code.emission.terminals[terminal.0 as usize];
+        if !phases.before.is_empty() {
+            continue;
+        }
+        let target = &code.terminals[terminal.0 as usize];
+        let operand = match &target.kind {
+            TerminalKind::Return(Some(value)) | TerminalKind::Throw(value) => *value,
+            TerminalKind::If { condition, .. } => match condition {
+                Condition::Pair { left, .. } => *left,
+                Condition::Zero { value, .. } => *value,
+            },
+            TerminalKind::Switch { selector, .. } => *selector,
+            TerminalKind::Return(None) | TerminalKind::None | TerminalKind::Goto(_) => continue,
+        };
+        let Some(occurrence) = leftmost(code, operand) else {
+            continue;
+        };
+        if !reads(code, occurrence, storage) || !once_in(code, operand, occurrence)? {
+            continue;
+        }
+        let carried = carried_check(
+            code,
+            operation,
+            statement,
+            storage,
+            reference,
+            CheckCarrier::Terminal(terminal),
+            occurrence,
+        )?;
+        if unclaimed_occurrence(found, &carried.1) {
+            push(found, carried)?;
+        }
+    }
+    Ok(())
+}
+
+/// The terminal this block reaches without printing anything in between: its own
+/// end, or a chain of empty blocks joined by single copy-free within-block links.
+fn terminal_after(
+    code: &MethodCode,
+    mut node: usize,
+) -> Result<Option<crate::p2::BlockId>, ExpressionError> {
+    for _ in 0..code.emission.blocks.len() {
+        let block = &code.emission.blocks[node];
+        match &block.end {
+            BlockEnd::Terminal(terminal) => return Ok(Some(*terminal)),
+            BlockEnd::None => {
+                // A syntax-owned predicate portion: the If or loop control prints
+                // this terminal's operand, and nothing else stands between.
+                if let BlockCompletion::Syntax {
+                    terminal,
+                    owner: TerminalEmission::If(_) | TerminalEmission::Loop(_),
+                } = code.blocks[node].completion
+                {
+                    return Ok(Some(terminal));
+                }
+                return Ok(None);
+            }
+            BlockEnd::Transfers(transfers) => {
+                let [only] = transfers.as_slice() else {
+                    return Ok(None);
+                };
+                let transfer = code
+                    .emission
+                    .transfers
+                    .get(only.0 as usize)
+                    .ok_or(bug("check-cast carrier names an unknown transfer"))?;
+                if !transfer.copies.is_empty()
+                    || !matches!(transfer.spelling, TransferSpelling::Fallthrough)
+                {
+                    return Ok(None);
+                }
+                let from = code
+                    .transfers
+                    .get(only.0 as usize)
+                    .ok_or(bug("check-cast carrier names an unknown transfer plan"))?;
+                if from.edge.is_some() {
+                    return Ok(None);
+                }
+                let next = from.destination.0 as usize;
+                if code
+                    .emission
+                    .blocks
+                    .get(next)
+                    .is_none_or(|next| !next.actions.is_empty())
+                {
+                    return Ok(None);
+                }
+                node = next;
+            }
+        }
+    }
+    Err(bug("check-cast carrier walk did not reach a terminal"))
+}
+
+/// Whether this expression tree renders the occurrence exactly once. A composed
+/// subtree prints under another carrier, so it is not a position of this one.
+fn once_in(code: &MethodCode, root: ExprId, occurrence: ExprId) -> Result<bool, ExpressionError> {
+    let mut work = Vec::new();
+    push(&mut work, root)?;
+    let mut seen = 0u8;
+    while let Some(id) = work.pop() {
+        if id == occurrence {
+            seen = seen.saturating_add(1);
+            if seen > 1 {
+                return Ok(false);
+            }
+        }
+        let expression = code
+            .expressions
+            .get(id.0 as usize)
+            .ok_or(bug("terminal expression is outside its arena"))?;
+        if code.emission.composed_use(id).is_some() {
+            continue;
+        }
+        match &expression.kind {
+            ExprKind::Unary { value, .. } => push(&mut work, *value)?,
+            ExprKind::Binary { left, right, .. } | ExprKind::Compare { left, right, .. } => {
+                push(&mut work, *left)?;
+                push(&mut work, *right)?;
+            }
+            ExprKind::Array { array, index, .. } => {
+                push(&mut work, *array)?;
+                push(&mut work, *index)?;
+            }
+            ExprKind::Field {
+                receiver: Some(receiver),
+                ..
+            } => push(&mut work, *receiver)?,
+            ExprKind::ArrayLength(array) => push(&mut work, *array)?,
+            ExprKind::InstanceOf { value, .. } => push(&mut work, *value)?,
+            ExprKind::NewArray { length, .. } => push(&mut work, *length)?,
+            ExprKind::Call(call) => {
+                if let Some(receiver) = call.receiver {
+                    push(&mut work, receiver)?;
+                }
+                if let Arguments::Known(args) = &call.arguments {
+                    for &argument in args {
+                        push(&mut work, argument)?;
+                    }
+                }
+            }
+            ExprKind::New { arguments, .. } => {
+                for &argument in arguments {
+                    push(&mut work, argument)?;
+                }
+            }
+            ExprKind::FilledArray {
+                elements: Arguments::Known(elements),
+                ..
+            } => {
+                for &element in elements {
+                    push(&mut work, element)?;
+                }
+            }
+            _ => {}
+        }
+    }
+    Ok(seen == 1)
+}
+
 /// The leftmost value this statement evaluates in its printed form. This is the
 /// exact expression occurrence the check can print at.
 fn first_leaf(code: &MethodCode, statement: StatementId) -> Option<ExprId> {
@@ -354,9 +548,11 @@ fn first_leaf(code: &MethodCode, statement: StatementId) -> Option<ExprId> {
             receiver, value, ..
         } => {
             if code.emission.natural_store(statement.id) {
+                // A static store names its owner without evaluating a receiver,
+                // so the value is the first evaluated operand it prints.
                 match receiver {
                     Some(receiver) => leftmost(code, *receiver),
-                    None => None,
+                    None => leftmost(code, *value),
                 }
             } else {
                 leftmost(code, *value)

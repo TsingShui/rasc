@@ -586,7 +586,7 @@ impl Expressions<'_, '_> {
                 self.out.put("return")?;
                 if let Some(v) = v {
                     self.out.put(" ")?;
-                    self.operand(*v)?;
+                    self.carried(id, |render| render.operand(*v))?;
                 }
                 self.phases(&p.snapshots, "after_operands_before_effect")?;
                 if let Some(s) = t.site {
@@ -596,7 +596,7 @@ impl Expressions<'_, '_> {
             }
             TerminalKind::Throw(v) => {
                 self.out.put("throw ")?;
-                self.operand(*v)?;
+                self.carried(id, |render| render.operand(*v))?;
                 self.phases(&p.snapshots, "after_operands_before_effect")?;
                 if let Some(s) = t.site {
                     self.sites(&[s], start)?;
@@ -608,9 +608,15 @@ impl Expressions<'_, '_> {
                 when_true,
                 when_false,
             } => {
+                // The predicate evaluates its operands before selection, so the
+                // terminal's own carrier wraps only that evaluation.
+                let previous = self.check_carrier.replace(CheckCarrier::Terminal(id));
                 self.out.put("if (")?;
-                self.condition(condition, false)?;
-                self.phases(&p.snapshots, "after_operands_before_effect")?;
+                let rendered = self.condition(condition, false);
+                let rendered = rendered
+                    .and_then(|()| self.phases(&p.snapshots, "after_operands_before_effect"));
+                self.check_carrier = previous;
+                rendered?;
                 self.out.put(")")?;
                 self.out.open()?;
                 self.branch_transfer(*when_true, true)?;
@@ -636,6 +642,19 @@ impl Expressions<'_, '_> {
                 block: id,
             },
         )
+    }
+    /// Renders one terminal operand under this terminal's check carrier, so a
+    /// check-cast prints at its exact read and the previous carrier is restored
+    /// even when rendering fails.
+    fn carried(
+        &mut self,
+        terminal: BlockId,
+        render: impl FnOnce(&mut Self) -> Result<(), RenderError>,
+    ) -> Result<(), RenderError> {
+        let previous = self.check_carrier.replace(CheckCarrier::Terminal(terminal));
+        let rendered = render(self);
+        self.check_carrier = previous;
+        rendered
     }
     fn branch_transfer(&mut self, id: TransferId, indent: bool) -> Result<(), RenderError> {
         if matches!(
@@ -754,7 +773,12 @@ impl Expressions<'_, '_> {
     fn predicate(&mut self, test: PredicateEmission) -> Result<(), RenderError> {
         let start = self.out.position();
         self.copies(&self.code.emission().terminals()[test.terminal.0 as usize].before)?;
-        self.predicate_expression(test, true)?;
+        let previous = self
+            .check_carrier
+            .replace(CheckCarrier::Terminal(test.terminal));
+        let rendered = self.predicate_expression(test, true);
+        self.check_carrier = previous;
+        rendered?;
         self.out.span(
             start,
             Origin::Terminal {
@@ -1346,7 +1370,12 @@ impl Expressions<'_, '_> {
                     )?;
                     let a = self.out.position();
                     self.out.put("if (")?;
-                    self.predicate_expression(test, false)?;
+                    let previous = self
+                        .check_carrier
+                        .replace(CheckCarrier::Terminal(test.terminal));
+                    let rendered = self.predicate_expression(test, false);
+                    self.check_carrier = previous;
+                    rendered?;
                     self.out.put(")")?;
                     self.out.span(
                         a,
