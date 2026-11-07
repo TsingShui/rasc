@@ -307,6 +307,7 @@ fn add<'a>(
             original,
             source,
             scope,
+            printed: true,
         },
     )
 }
@@ -503,6 +504,113 @@ fn method_scope<'a>(
                 && signature_names(facts, AnnotationLocation::Method(method), owner_simple)),
     })
 }
+
+/// A complete P7 method can establish that a constructor owner is represented
+/// by `this` or `super` and is not printed as a type. Partial products keep the
+/// import because they cannot establish that absence.
+fn delegation_owner_not_printed(code: &crate::p7::MethodCode, ty: &crate::p7::TypeUse) -> bool {
+    use crate::p4::{SignaturePart, TypeOrigin};
+    use crate::p7::{
+        Bootstrap, BootstrapLiteral, ExprKind, InitializationSyntax, MemberDeclaration,
+        Qualification, ReferenceDeclaration, StatementKind, TypeSource as MethodTypeSource,
+    };
+
+    let (pc, slot) = match &ty.source {
+        MethodTypeSource::Analysis(TypeOrigin::Reference {
+            pc,
+            slot,
+            part: SignaturePart::Owner,
+            ..
+        }) => (*pc, *slot),
+        MethodTypeSource::Reference {
+            position,
+            part: SignaturePart::Owner,
+            ..
+        } if position.bootstrap.is_none() => (position.pc, position.slot),
+        _ => return false,
+    };
+    if code
+        .locals()
+        .iter()
+        .any(|local| local.declared_types.contains(&ty.id))
+    {
+        return false;
+    }
+    let Some(reference) = code.references().iter().find(|reference| {
+        reference.position.pc == pc && reference.position.slot == slot && reference.position.bootstrap.is_none()
+            && matches!(&reference.declaration, Ok(ReferenceDeclaration::Member(MemberDeclaration::Method { owner, .. })) if *owner == ty.id || matches!(ty.source, MethodTypeSource::Analysis(_)))
+    }) else { return false; };
+    let target = reference.id;
+    if reference.use_issue.is_some() {
+        return false;
+    }
+    let mut candidate = None;
+    for expression in code.expressions() {
+        let uses_target = match &expression.kind {
+            ExprKind::String(r)
+            | ExprKind::Class(r)
+            | ExprKind::MethodHandle(r)
+            | ExprKind::MethodType(r) => *r == target,
+            ExprKind::Field { reference, .. }
+            | ExprKind::InstanceOf { reference, .. }
+            | ExprKind::AllocateInstance { reference }
+            | ExprKind::NewArray { reference, .. }
+            | ExprKind::FilledArray { reference, .. } => *reference == target,
+            ExprKind::Call(call) => {
+                call.target == target || call.invocation_prototype == Some(target)
+            }
+            ExprKind::New {
+                reference,
+                constructor,
+                ..
+            } => *reference == target || *constructor == target,
+            _ => false,
+        };
+        if !uses_target {
+            continue;
+        }
+        let ExprKind::Call(call) = &expression.kind else {
+            return false;
+        };
+        if call.target != target
+            || call.invocation_prototype == Some(target)
+            || !matches!(call.qualification, Qualification::Natural)
+            || candidate.replace(expression.id).is_some()
+        {
+            return false;
+        }
+    }
+    let Some(expression) = candidate else {
+        return false;
+    };
+    let mut delegations = 0usize;
+    for statement in code.statements() {
+        match &statement.kind {
+            StatementKind::Initialize {
+                expression: id,
+                syntax: InitializationSyntax::This | InitializationSyntax::Super,
+                ..
+            } if *id == expression => delegations += 1,
+            StatementKind::FieldStore { reference, .. }
+            | StatementKind::CheckCast { reference, .. }
+                if *reference == target =>
+            {
+                return false;
+            }
+            _ => {}
+        }
+    }
+    if delegations != 1 {
+        return false;
+    }
+    for other in code.references() {
+        if let Ok(ReferenceDeclaration::CallSite { bootstrap_member, arguments, .. }) = &other.declaration
+            && (*bootstrap_member == target || arguments.iter().any(|argument| matches!(argument, Bootstrap::Value { value: BootstrapLiteral::Reference { declaration, .. }, .. } if *declaration == target)))
+        { return false; }
+    }
+    true
+}
+
 pub(super) fn collect<'a>(
     facts: &'a ClassFacts,
     methods: &'a [MethodMember],
@@ -566,6 +674,21 @@ pub(super) fn collect<'a>(
                 TypeSource::Superclass,
                 Scope::Class,
             )?;
+            let flags = facts.access_flags();
+            if flags.is_interface()
+                || flags.is_annotation()
+                || flags.is_enum()
+                || t.units()
+                    .iter()
+                    .copied()
+                    .eq(b"Ljava/lang/Object;".iter().copied().map(u16::from))
+            {
+                uses.last_mut()
+                    .ok_or(RequestError::InternalInvariant(
+                        "superclass use disappeared",
+                    ))?
+                    .printed = false;
+            }
         }
         if let Fact::Present(items) = facts.interfaces() {
             for (i, t) in items.iter().enumerate() {
@@ -665,6 +788,18 @@ pub(super) fn collect<'a>(
         if let Ok(delivery) = &m.delivery
             && let Some(code) = delivery.expressions()
         {
+            let delegation = code.complete.filter(|method| {
+                method.statements().iter().any(|statement| {
+                    matches!(
+                        statement.kind,
+                        crate::p7::StatementKind::Initialize {
+                            syntax: crate::p7::InitializationSyntax::This
+                                | crate::p7::InitializationSyntax::Super,
+                            ..
+                        }
+                    )
+                })
+            });
             for t in code.types {
                 let original = match t.source {
                     crate::p7::TypeSource::Reference { original, .. } => original,
@@ -688,6 +823,13 @@ pub(super) fn collect<'a>(
                     },
                     scope,
                 )?;
+                if delegation.is_some_and(|method| delegation_owner_not_printed(method, t)) {
+                    uses.last_mut()
+                        .ok_or(RequestError::InternalInvariant(
+                            "method type use disappeared",
+                        ))?
+                        .printed = false;
+                }
             }
         }
     }

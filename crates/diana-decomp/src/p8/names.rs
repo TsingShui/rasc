@@ -75,6 +75,8 @@ pub enum NameReason {
     OriginalName,
     InvalidDescriptor,
     Standalone,
+    /// The selected display does not need this original type use.
+    NotPrinted,
 }
 #[derive(Serialize)]
 pub struct NamedUse {
@@ -163,6 +165,7 @@ pub(super) struct RawUse<'a> {
     pub source: TypeSource,
     pub original: Option<TypeId>,
     pub scope: Scope,
+    pub printed: bool,
 }
 #[derive(Clone, Copy)]
 pub(super) enum ScopeName<'a> {
@@ -341,6 +344,8 @@ pub(super) fn construct(
             None
         } else if t.original {
             Some(NameReason::OriginalName)
+        } else if !u.printed {
+            Some(NameReason::NotPrinted)
         } else if standalone {
             Some(NameReason::Standalone)
         } else if conflicts[at.0 as usize] {

@@ -42,6 +42,7 @@ pub(super) struct ExpressionFacts<'a> {
     pub types: &'a [crate::p7::TypeUse],
     pub locals: &'a [crate::p7::LocalDeclaration],
     pub references: &'a [crate::p7::Reference],
+    pub complete: Option<&'a crate::p7::MethodCode>,
 }
 impl MethodDelivery {
     pub(super) fn expressions(&self) -> Option<ExpressionFacts<'_>> {
@@ -50,11 +51,13 @@ impl MethodDelivery {
                 types: c.types(),
                 locals: c.locals(),
                 references: c.references(),
+                complete: Some(c),
             }),
             Self::Stopped(s) => s.expression.as_ref().map(|p| ExpressionFacts {
                 types: p.type_uses(),
                 locals: p.local_declarations(),
                 references: p.reference_declarations(),
+                complete: None,
             }),
         }
     }

@@ -326,8 +326,8 @@ declared modifier.
 An interface, annotation or enum prints no superclass clause: Java has none there
 and the delivered Object/Enum entry is implicit. An ordinary class whose delivered
 superclass is exactly `java.lang.Object` prints no clause either, because Java
-source never states that relationship; the delivered type use and its planned
-import stay unchanged. A missing, unread or unavailable superclass fact still
+source never states that relationship; the delivered type use remains available
+without requiring its own import. A missing, unread or unavailable superclass fact still
 prints, so the gap stays visible, and every other superclass keeps its clause. P8
 selects that clause and P9 prints the selected form.
 

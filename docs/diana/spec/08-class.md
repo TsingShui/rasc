@@ -35,7 +35,8 @@ clause there, which covers an interface, annotation or enum, an absent original
 entry, and an ordinary class whose delivered superclass is exactly
 `java.lang.Object`. `SuperclassClause::Printed` keeps the delivered spelling,
 including a missing, unread or unavailable fact, so a gap stays visible. The
-original superclass type use and its planned import are unchanged either way.
+original superclass type use remains in the plan. An implicit superclass does
+not by itself require an import.
 
 `ClassResult` also records the class initializers whose printed body states
 nothing, because such a block prints no text. The delivered member stays in the
@@ -129,6 +130,12 @@ evidence. P8 never splits it into an inferred enclosing type.
 The planner groups delivered simple names to detect conflicts and examines
 class-field names, method-local names and delivered field-reference names for
 shadowing. The same target can be simple in one method and qualified in another.
+For complete P7 methods, P8 also consumes the owned expressions, statements,
+local type uses and references to identify a natural `this` or `super` constructor
+delegation whose owner is not printed. An unavailable or incomplete method keeps
+its potential imports. Other uses of the same type continue to require their
+own planned imports. A nonprinting use keeps its original identity and a qualified
+fallback spelling; it does not itself add an import.
 A field, method parameter list and return type use the declaration's own
 `@Signature` when that text parses and its erased form equals the delivered
 descriptor. A class signature establishes its parameter scope only when its
