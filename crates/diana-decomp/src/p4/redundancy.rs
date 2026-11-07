@@ -60,6 +60,9 @@ struct Link {
 struct Node {
     key: Query,
     established: bool,
+    /// The original event at this very point that already proves membership, if
+    /// the value is born here.
+    grounded: Option<CheckSource>,
     /// The first unsupported dependency on this value at this point, if any.
     gap: Option<CheckGap>,
     links: Vec<Link>,
@@ -101,6 +104,7 @@ impl Solver<'_, '_> {
             Node {
                 key,
                 established: false,
+                grounded: None,
                 gap: None,
                 links: Vec::new(),
                 users: Vec::new(),
@@ -137,6 +141,12 @@ impl Solver<'_, '_> {
             }
             let source = self.refs.source(state)?;
             if self.refs.definition(state) == Some(point) && matches!(source, Source::Leaf) {
+                // A value created by an original `new-instance` of exactly the
+                // checked type is an instance of that type on every execution of
+                // the site, so this check adds no behavior here. The allocation
+                // itself is not a claim that two executions share an object.
+                let target = self.nodes[index].key.target;
+                self.nodes[index].grounded = allocation(&self.refs, state, target)?;
                 index += 1;
                 continue;
             }
@@ -178,8 +188,9 @@ impl Solver<'_, '_> {
         }
         while let Some(index) = queue.pop() {
             queued[index] = false;
-            let mut established = !self.nodes[index].links.is_empty();
-            if established {
+            let mut established =
+                self.nodes[index].grounded.is_some() || !self.nodes[index].links.is_empty();
+            if self.nodes[index].grounded.is_none() && established {
                 for i in 0..self.nodes[index].links.len() {
                     let link = self.nodes[index].links[i];
                     if self.local(index, link).is_none() && !self.nodes[link.source].established {
@@ -207,6 +218,9 @@ impl Solver<'_, '_> {
         let mut sources = Vec::new();
         if !self.nodes[root].established {
             return Ok(sources);
+        }
+        if let Some(source) = self.nodes[root].grounded {
+            push(&mut sources, source)?;
         }
         let mut seen = filled(self.nodes.len(), false)?;
         let mut work = Vec::new();
@@ -252,6 +266,34 @@ impl Solver<'_, '_> {
         }
         Ok(gap)
     }
+}
+
+/// The original `new-instance` that produced `state` at its own definition point
+/// and allocates exactly `target`. The value is that allocation's result, so the
+/// site's type is the value's type on every execution; no initialization state,
+/// reference comparison or declaration is consulted.
+fn allocation(
+    refs: &References<'_, '_>,
+    state: StateId,
+    target: crate::TypeId,
+) -> Result<Option<CheckSource>, TypeError> {
+    let Some(value) = refs.value(state) else {
+        return Ok(None);
+    };
+    let facts = refs.ssa.facts();
+    let ValueOrigin::Operation { operation, output } = facts.values()[value.0 as usize].origin()
+    else {
+        return Ok(None);
+    };
+    if output != 0
+        || !matches!(
+            refs.ssa.execution().operations()[operation.0 as usize].kind(),
+            OpKind::NewInstance { type_id } if *type_id == target
+        )
+    {
+        return Ok(None);
+    }
+    Ok(Some(CheckSource::Allocation { operation }))
 }
 
 /// Whether a transfer is the normal completion of its source point, not an

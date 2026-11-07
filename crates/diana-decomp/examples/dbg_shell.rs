@@ -1110,6 +1110,7 @@ fn check_json(check: &diana_decomp::p4::CheckView) -> Value {
             "sources":evidence.sources().iter().map(|source| match source {
                 CheckSource::SuccessfulCast { operation } => json!({"kind":"successful_cast","operation":operation.0}),
                 CheckSource::InstanceOfTrue { operation } => json!({"kind":"instanceof_true","operation":operation.0}),
+                CheckSource::Allocation { operation } => json!({"kind":"allocation","operation":operation.0}),
             }).collect::<Vec<_>>()})
         }
         CheckDisposition::Retained => json!({"kind":"retained"}),

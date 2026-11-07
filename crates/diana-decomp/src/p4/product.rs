@@ -406,6 +406,11 @@ pub enum CheckSource {
     SuccessfulCast { operation: OpId },
     /// An original `instanceof` on the branch where its result is nonzero.
     InstanceOfTrue { operation: OpId },
+    /// The value is the result of an original `new-instance` of exactly the
+    /// checked type. Every dynamic execution of that site allocates an instance
+    /// of that type, so the check cannot fail; this states no claim that two
+    /// executions are the same object.
+    Allocation { operation: OpId },
 }
 /// Why redundancy of one original check is neither established nor excluded.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
