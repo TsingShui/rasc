@@ -15,7 +15,7 @@ impl Expressions<'_, '_> {
             StatementKind::Initialize {
                 syntax: InitializationSyntax::Explicit,
                 ..
-            } => Some("// Diana: invoke-direct, constructor call"),
+            } => None,
             StatementKind::Move { expression, .. } | StatementKind::Evaluate { expression } => {
                 match &self.code.expressions().get(expression.0 as usize)?.kind {
                     ExprKind::AllocateInstance { .. } => {
@@ -142,7 +142,11 @@ impl Expressions<'_, '_> {
             // the check's first use.
             let previous = self.check_carrier.replace(CheckCarrier::Statement(id));
             let statement = self.statement.replace(id);
-            let rendered = self.assignment(s).and_then(|()| self.semantic(s));
+            let rendered = if self.code.emission().allocation_declaration(id) {
+                self.allocation_declaration(s)
+            } else {
+                self.assignment(s).and_then(|()| self.semantic(s))
+            };
             self.check_carrier = previous;
             self.statement = statement;
             rendered?;
@@ -210,7 +214,63 @@ impl Expressions<'_, '_> {
         }
         self.out.put("\n")
     }
+    /// A new-instance statement states the allocated type and its local where the
+    /// original allocation runs. The constructor call stays at its own position,
+    /// so the object is never claimed to be initialized here.
+    fn allocation_declaration(&mut self, s: &Statement) -> Result<(), RenderError> {
+        let StatementKind::Evaluate { expression } = s.kind else {
+            return Err(RenderError::Invariant(
+                "allocation declaration lost its evaluate statement",
+            ));
+        };
+        let ExprKind::AllocateInstance { reference } = self
+            .code
+            .expressions()
+            .get(expression.0 as usize)
+            .ok_or(RenderError::Invariant(
+                "allocation declaration lost its expression",
+            ))?
+            .kind
+        else {
+            return Err(RenderError::Invariant(
+                "allocation declaration lost its new-instance",
+            ));
+        };
+        let [output] = s.outputs.as_slice() else {
+            return Err(RenderError::Invariant(
+                "allocation declaration lost its publication",
+            ));
+        };
+        let local = match output.materialization() {
+            crate::p5::Materialization::Store(local)
+            | crate::p5::Materialization::AllocationCarrier(local) => StorageId(local.0),
+            _ => {
+                return Err(RenderError::Invariant(
+                    "allocation declaration lost its local",
+                ));
+            }
+        };
+        let start = self.out.position();
+        self.reference(reference)?;
+        self.out.put(" ")?;
+        self.local(local)?;
+        self.out.put(" = new ")?;
+        // No argument list: the constructor has not run at this position, so a
+        // `()` would claim a default constructor that this allocation never ran.
+        self.reference(reference)?;
+        self.out.span(
+            start,
+            Origin::Expression {
+                method: self.method,
+                expression,
+            },
+        )
+    }
     fn sites(&mut self, sites: &[SiteId], statement: TextOffset) -> Result<(), RenderError> {
+        // One statement can own several original sites from one chain, as a
+        // contracted construction does. The marker names only that chain, so its
+        // text prints once; every site keeps its own zero-length anchor.
+        let mut printed: Vec<u32> = Vec::new();
         for &id in sites {
             let s = &self.code.sites()[id.0 as usize];
             let origin = Origin::Site {
@@ -222,6 +282,12 @@ impl Expressions<'_, '_> {
                 self.out.span(statement, origin)?;
                 continue;
             }
+            if printed.contains(&s.chain.0) {
+                self.out.span(statement, origin)?;
+                continue;
+            }
+            printed.try_reserve(1).map_err(RenderError::MethodScratch)?;
+            printed.push(s.chain.0);
             let start = self.out.position();
             // The printed chain line carries clause order, catch types and
             // handler targets; the site only names the chain it selects.
@@ -1456,8 +1522,10 @@ impl Expressions<'_, '_> {
     fn locals(&mut self) -> Result<(), RenderError> {
         for l in self.code.locals() {
             if self.code.emission().hidden_local(l.id)
+                || self.code.emission().allocation_local(l.id)
                 || matches!(l.original.kind(), crate::p5::LocalKind::Parameter { .. })
             {
+                // An allocated object's declaration stands at its allocation.
                 continue;
             }
             self.out.indent()?;

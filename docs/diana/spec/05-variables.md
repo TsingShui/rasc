@@ -60,7 +60,10 @@ absence of an initialization record does not mean initialized.
 
 `ConstructionMode` selects either a natural construction group or explicit
 operations with a concrete `Separation`. Every new-instance has an allocation
-plan, including unmatched or unresolved initialization. `ConstructionGroup`
+plan, including unmatched or unresolved initialization. A contracted construction
+prints one `new` at the original constructor call; its statement owns every member
+site, and P9 prints one marker per original chain even when several member sites
+select the same chain. `ConstructionGroup`
 retains the original allocation, exact constructor, argument reads, original
 normal continuation, member operations, interior edges, normal publications and
 snapshot obligations. No new SSA value or alternate method chain is created.
@@ -70,7 +73,9 @@ It requires a same-occurrence receiver before construction, an unshared linear
 normal corridor, and transparent object aliases/literal definitions inside that
 corridor. The corridor may also prepare constructor arguments: such an operation
 keeps its own statement and position, so the printed `new` stands at the original
-constructor call and only the allocation itself moves there. A corridor operation
+constructor call and only the allocation itself moves there. A nested natural
+construction is argument preparation only when every one of its members lies in this
+corridor; it keeps its own group, prints before this constructor, and completes there. A corridor operation
 that writes a slot carrying the object under construction still separates the
 group, and publication covers only the allocation and its transparent aliases. Branches, external entries, required intervening transfers, other
 operations and unavailable arguments retain explicit plans. Arguments use existing
@@ -78,7 +83,14 @@ storage or P4-proven literal views; the planner does not inline arbitrary effect
 computations or move allocation to the constructor site.
 
 A private carrier can be deferred only when original uses cannot observe it
-without the constructor's normal transfer. Relevant failure-path reads or uncertain
+without the constructor's normal transfer. The planner decides that per arrival: a
+merged Phi imports the allocation only through the incomings that carry it, and an
+incoming whose transfer is that constructor's own normal continuation cannot
+deliver an unconstructed object, because the same transfer is the omitted one. Only
+an incoming carrying the allocation over another transfer, reachable while skipping
+construction success, remains an early observation. An object that escapes through
+a field, static, argument or handler read is not a Phi import and keeps the explicit
+plan. Relevant failure-path reads or uncertain
 instance relations prevent contraction. Original definition/commit points remain
 facts; `Deferred` marks the selected emission, not a rewritten DEX commit.
 Publication occurs on the constructor's original normal continuation. Allocation

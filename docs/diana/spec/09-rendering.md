@@ -45,6 +45,7 @@ The following forms have fixed execution meanings:
 | `store value -> receiver.field` or `store value -> array[index]` | Fallback when a non-value slot is an inlined expression or an unavailable operand, so Java's left-to-right order would not match the delivered store. |
 | `[after_operands_before_effect { copies }]` | Capture the operation's original operands, run its supplied snapshot steps, then execute the original effect. A result assignment commits only on normal completion. |
 | `new T(arguments)` / `target = new T(arguments)` | Execute the selected P5 construction. A single publication that is the construction's own deferred carrier prints as an ordinary assignment, because Java assigns only after `new` completes. |
+| `T local` | The original `new-instance` published to that local. The object exists at this position and its constructor has not run, so the constructor call keeps its own statement and position. This declaration stands where the allocation runs, and the method header omits that local. |
 | `new T(arguments) [on_success publish (locals)]` | Fallback when more than one alias publishes, or the publication is not that carrier. Aliases become visible only after successful initialization. |
 | `test { ... yield condition [repeat {...}] [exit {...}]; }` | A loop condition whose predicate node also carries statements or phases keeps this block form. Copies belong to the original repeating or exiting edge; an empty edge prints no clause. Outer negation changes repetition polarity, not which original edge owns copies. |
 | `while (condition [repeat {...}])` | When the predicate node holds nothing but the condition, P7 selects this compact form and the copies stay attached to their own original edge. |
@@ -153,10 +154,12 @@ keep a source position. P9 reads that plan decision; it does not prove or search
 redundancy, and an ordinary check that P4 retained prints exactly as before.
 
 The same short comment marks the other statements printed in Diana syntax rather
-than Java: `capture_exception` (move-exception, the caught throwable),
-`allocate_uninitialized` (new-instance, the object exists before its constructor)
-and an explicit `initialize` (invoke-direct, the constructor call). Bracket
-annotations and block headers that are already visibly not Java keep no comment. Array fill preserves its one
+than Java: `capture_exception` (move-exception, the caught throwable) and an
+allocated object whose constructor has not run. That allocation prints as the
+allocated type and its local, and its constructor call prints as
+`receiver.<init>(arguments)`; the comment says the object exists before its
+constructor. Bracket annotations and block headers that are already visibly not
+Java keep no comment. Array fill preserves its one
 original operation, element width/count and bits. Explicit allocation and
 initialization stay separate when P5 did not select a compound construction.
 Unavailable reads and argument layouts print their supplied gaps and original
@@ -213,15 +216,14 @@ A constructor delegation whose receiver is still before its constructor prints a
 `this(...)` or `super(...)` exactly when it is the first statement the body prints,
 the target has P7's natural qualification and the earlier operations printed
 nothing (argument definitions that become their uses' values do not count). The
-original code offset is not the test. Otherwise the delegation keeps the explicit
-`initialize <Owner>(...)` form: a `this`/`super` receiver is not repeated as a
-qualifier, because that would name the object under construction instead of the
-original constructor's owner, and an ambiguous target still prints its
-`[binding ...]`.
+original code offset is not the test. Otherwise the delegation prints its original
+relation, `super(...)` or `this(...)`, or `receiver.<init>(...)` when the receiver
+is an allocated object rather than the class under construction. An ambiguous
+target still prints its `[binding ...]`.
 
 A constructor reference prints the type it constructs, never a wrapper around the
-`<init>` name: `initialize v5.ArrayList()` names the object and its constructor,
-and a `[binding ...]` carries the same spelling with the original prototype. An
+`<init>` name: `new ArrayList()` names the object and its constructor, and a
+`[binding ...]` carries the same spelling with the original prototype. An
 annotation record for a constructor names that type too. The delivered `<init>`
 identity remains in the owned reference and declaration facts.
 

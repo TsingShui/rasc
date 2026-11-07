@@ -325,7 +325,48 @@ impl<S: ExpressionSource> Expressions<'_, '_, S> {
                     return Err(RenderError::Invariant("initialization lost its invocation"));
                 };
                 let a = self.out.position();
-                self.call(c, Some(*syntax), Some(*relation))?;
+                // An explicit constructor run on an allocated object keeps that
+                // object and its own position: `<init>` names the call without
+                // repeating the type the allocation already stated.
+                // A constructor's own delegation names its target by relation:
+                // `super(...)` calls the superclass initializer and `this(...)`
+                // another initializer of the same class.
+                let syntax = match (syntax, relation) {
+                    (InitializationSyntax::Explicit, crate::p4::ConstructorRelation::Super) => {
+                        InitializationSyntax::Super
+                    }
+                    (InitializationSyntax::Explicit, crate::p4::ConstructorRelation::This) => {
+                        InitializationSyntax::This
+                    }
+                    (syntax, _) => *syntax,
+                };
+                let explicit = matches!(syntax, InitializationSyntax::Explicit);
+                if explicit && let Some(receiver) = c.receiver {
+                    self.operand(receiver)?;
+                    self.out.put(".<init>(")?;
+                    self.args(&c.arguments)?;
+                    self.out.put(")")?;
+                    let start = self.out.position();
+                    self.out.span(
+                        start,
+                        Origin::Reference {
+                            method: self.method,
+                            reference: c.target,
+                        },
+                    )?;
+                    if let Some(proto) = c.invocation_prototype {
+                        self.out.put(" [invocation prototype: ")?;
+                        self.reference(proto)?;
+                        self.out.put("]")?;
+                    }
+                    if matches!(c.qualification, Qualification::FullSignature) {
+                        self.out.put(" [binding ")?;
+                        self.member(c.target, None, true)?;
+                        self.out.put("]")?;
+                    }
+                } else {
+                    self.call(c, Some(syntax), Some(*relation))?;
+                }
                 self.out.span(
                     a,
                     Origin::Expression {
