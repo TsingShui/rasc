@@ -159,6 +159,21 @@ fn method_signature<'a>(
     ) else {
         return Ok(false);
     };
+    let Some((record_index, record)) =
+        facts
+            .annotations()
+            .records()
+            .iter()
+            .enumerate()
+            .find(|(_, record)| {
+                record.location() == AnnotationLocation::Method(method)
+                    && signature(record.descriptor())
+            })
+    else {
+        return Err(RequestError::InternalInvariant(
+            "method signature lost its source record",
+        ));
+    };
     let Some(signature::Method {
         type_parameters,
         parameters,
@@ -167,6 +182,11 @@ fn method_signature<'a>(
     else {
         return Ok(false);
     };
+    let fully_represented = canonical_method_signature(record)
+        && !text.contains(&u16::from(b'^'))
+        && !type_parameters
+            .iter()
+            .any(|parameter| parameter.bound.as_ref().is_some_and(signature::is_object));
     if parameters.len() != declaration.parameter_types.len() {
         return Ok(false);
     }
@@ -184,6 +204,8 @@ fn method_signature<'a>(
         &mut plan.method_parameters,
         MethodTypeParameters {
             method,
+            record: super::names::AnnotationId(id(record_index)?),
+            fully_represented,
             parameters: built_parameters,
         },
     )?;
@@ -201,6 +223,28 @@ fn method_signature<'a>(
     let root = emit_signature(&returns, owner, &mut part, uses, plan, scope)?;
     push(&mut plan.roots, (owner, root))?;
     Ok(true)
+}
+
+/// Hide only the system Signature's complete `value` array. Any other record
+/// shape or visibility remains independently visible.
+fn canonical_method_signature(record: &crate::AnnotationRecord) -> bool {
+    if record.visibility() != 2 || record.extent() != crate::AnnotationExtent::Complete {
+        return false;
+    }
+    let [
+        AnnotationToken::Value(header),
+        middle @ ..,
+        AnnotationToken::EndContainer,
+    ] = record.tokens()
+    else {
+        return false;
+    };
+    let AnnotationValueKind::Array { count } = header.kind() else {
+        return false;
+    };
+    header.name().is_some_and(|name| name.iter().copied().eq(b"value".iter().copied().map(u16::from)))
+        && usize::try_from(*count) == Ok(middle.len())
+        && middle.iter().all(|token| matches!(token, AnnotationToken::Value(value) if value.name().is_none() && matches!(value.kind(), AnnotationValueKind::String { .. })))
 }
 
 fn emit_parameters<'a>(
@@ -835,6 +879,18 @@ pub(super) fn collect<'a>(
     }
     for (record, a) in facts.annotations().records().iter().enumerate() {
         let record = super::names::AnnotationId(id(record)?);
+        let hidden_signature = match a.location() {
+            AnnotationLocation::Method(method) => {
+                signatures.method_signature_record(method) == Some((record, true))
+                    && methods.iter().any(|member| {
+                        member.id == method
+                            && matches!(&member.delivery,
+                                Ok(super::MethodDelivery::Expressed(result) | super::MethodDelivery::Declared(result))
+                                if !matches!(result.header().kind, crate::p7::MethodKind::ClassInitializer))
+                    })
+            }
+            _ => false,
+        };
         let scope = match a.location() {
             AnnotationLocation::Class | AnnotationLocation::Field(_) => {
                 if standalone {
@@ -851,6 +907,7 @@ pub(super) fn collect<'a>(
             }
         };
         let range = a.range();
+        let first_use = uses.len();
         add(
             &mut uses,
             a.descriptor(),
@@ -875,6 +932,11 @@ pub(super) fn collect<'a>(
             },
             scope,
         )?;
+        if hidden_signature {
+            for usage in &mut uses[first_use..] {
+                usage.printed = false;
+            }
+        }
     }
     push(&mut scopes, class)?;
     Ok(Collected {

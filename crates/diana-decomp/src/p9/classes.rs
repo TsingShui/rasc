@@ -272,6 +272,11 @@ fn type_expression(
         p8::TypeExpression::Unavailable => out.put("unavailable_type"),
     }
 }
+struct MethodRenderState {
+    prints_nothing: bool,
+    header_printed: bool,
+}
+
 fn member(
     out: &mut Buffer,
     lookup: &Lookup<'_>,
@@ -283,6 +288,10 @@ fn member(
 ) -> Result<(), RenderError> {
     let initial_depth = out.depth;
     let start = out.position();
+    let mut state = MethodRenderState {
+        prints_nothing,
+        header_printed: false,
+    };
     let result = method(
         out,
         lookup,
@@ -290,7 +299,7 @@ fn member(
         attachments,
         member,
         class_name,
-        prints_nothing,
+        &mut state,
     );
     match result {
         Ok(()) => {}
@@ -298,6 +307,11 @@ fn member(
             out.problem(member.id, super::LocalRenderError::Invariant(message))?;
             while out.depth > initial_depth {
                 out.close()?;
+            }
+            if !state.header_printed
+                && let Some(attachments) = attachments
+            {
+                attachments.print_unrepresented_method_signature(out, lookup, member.id)?;
             }
         }
         Err(RenderError::MethodScratch(error)) => {
@@ -308,6 +322,11 @@ fn member(
             out.problem(member.id, super::LocalRenderError::Scratch(error))?;
             while out.depth > initial_depth {
                 out.close()?;
+            }
+            if !state.header_printed
+                && let Some(attachments) = attachments
+            {
+                attachments.print_unrepresented_method_signature(out, lookup, member.id)?;
             }
         }
         Err(e) => return Err(e),
@@ -321,12 +340,12 @@ fn method(
     attachments: Option<&Attachments<'_>>,
     member: &p8::MethodMember,
     class_name: Option<&p8::ValueName>,
-    prints_nothing: bool,
+    state: &mut MethodRenderState,
 ) -> Result<(), RenderError> {
     // P8 omits the `static { ... }` block of a class initializer whose printed
     // body states nothing, because Java writes no empty initializer. The member
     // stays in the product; its own span still anchors it here.
-    if prints_nothing {
+    if state.prints_nothing {
         return Ok(());
     }
     // A record of this member prints above the header that names it; that header
@@ -361,6 +380,7 @@ fn method(
                 lookup.find_use(p8::TypeSource::Owner),
                 attachments,
             )?;
+            state.header_printed = true;
             if let Some(code) = result.code() {
                 let block_start = out.position();
                 out.open()?;
@@ -389,7 +409,7 @@ fn method(
             } else if matches!(header.kind, p7::MethodKind::ClassInitializer) {
                 out.put(" { }\n")?;
             } else {
-                out.put("; // no code item\n")?;
+                out.put(";\n")?;
             }
         }
         Ok(p8::MethodDelivery::Stopped(stop)) => {
