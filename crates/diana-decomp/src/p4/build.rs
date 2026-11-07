@@ -42,6 +42,7 @@ fn construct(ssa: &SsaMethod<'_>, f: &mut TypeFacts) -> Result<(), TypeError> {
     let mut work = super::constraints::collect(ssa, f)?;
     super::refinements::construct(ssa, f, &work)?;
     super::solve::sources(ssa.facts(), f, &work)?;
+    super::redundancy::construct(ssa, f, &work)?;
     super::components::finish(ssa, f, &work)?;
     super::solve::families(ssa.facts(), f, &mut work)?;
     super::views::finish(ssa.facts(), f)?;

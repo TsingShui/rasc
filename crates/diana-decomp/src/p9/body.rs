@@ -37,6 +37,85 @@ impl Expressions<'_, '_> {
         ))?;
         let s = &self.code.statements()[id.0 as usize];
         let phases = &self.code.emission().operations()[op.0 as usize];
+        if release.is_none()
+            && let Some(omitted) = self.code.emission().omitted_check(id)
+        {
+            // P4 established from pre-check facts that this check cannot add
+            // behavior at this position, so the plan prints no text for it. Its
+            // statement, operation, routes, checked value and resolved target
+            // name keep zero-length anchors here; its phases and definitions
+            // were empty by admission.
+            let position = self.out.position();
+            let StatementKind::CheckCast { value, reference } = s.kind else {
+                return Err(RenderError::Invariant(
+                    "omitted check lost its original check-cast kind",
+                ));
+            };
+            self.out.span(
+                position,
+                Origin::Expression {
+                    method: self.method,
+                    expression: value,
+                },
+            )?;
+            self.out.span(
+                position,
+                Origin::Reference {
+                    method: self.method,
+                    reference,
+                },
+            )?;
+            // The printed check's delivered type name keeps its original Type
+            // origin. P8 already maps this reference's method-scoped type use to
+            // the named use it printed before omission; this adds no type fact.
+            let declaration =
+                self.code
+                    .references()
+                    .get(reference.0 as usize)
+                    .ok_or(RenderError::Invariant(
+                        "omitted check lost its reference declaration",
+                    ))?;
+            if let Ok(ReferenceDeclaration::Type { type_use }) = &declaration.declaration
+                && let Some(name) = self.names.body.get(type_use.0 as usize).copied().flatten()
+            {
+                self.out.span(position, Origin::Type(name))?;
+            }
+            for &site in &s.sites {
+                self.out.span(
+                    position,
+                    Origin::Site {
+                        method: self.method,
+                        site,
+                    },
+                )?;
+            }
+            self.out.span(
+                position,
+                Origin::Statement {
+                    method: self.method,
+                    statement: id,
+                },
+            )?;
+            self.out.span(
+                position,
+                Origin::Operation {
+                    method: self.method,
+                    operation: omitted.operation,
+                    pc: omitted.pc,
+                },
+            )?;
+            if let Some(pc) = original.result_pc {
+                self.out.span(
+                    position,
+                    Origin::ResultCommit {
+                        method: self.method,
+                        operation: omitted.operation,
+                        pc,
+                    },
+                )?;
+            }
+            return Ok(());
+        }
         self.out.indent()?;
         self.copies(&phases.before)?;
         let start = self.out.position();
@@ -61,10 +140,12 @@ impl Expressions<'_, '_> {
             // Only the statement's own operands may carry an inlined check: the
             // copies printed before it and any snapshot value after it are not
             // the check's first use.
-            self.statement = Some(id);
-            self.assignment(s)?;
-            self.semantic(s)?;
-            self.statement = None;
+            let previous = self.check_carrier.replace(CheckCarrier::Statement(id));
+            let statement = self.statement.replace(id);
+            let rendered = self.assignment(s).and_then(|()| self.semantic(s));
+            self.check_carrier = previous;
+            self.statement = statement;
+            rendered?;
         }
         if !matches!(s.kind, StatementKind::Construction(_)) {
             self.phases(&phases.snapshots, "after_operands_before_effect")?;
@@ -219,6 +300,16 @@ impl Expressions<'_, '_> {
         let p = &self.code.emission().transfers()[id.0 as usize];
         matches!(p.spelling, TransferSpelling::Fallthrough) && p.copies.is_empty()
     }
+    /// A fallthrough whose bundles only carry source facts prints no words.
+    /// Their Copy and Transfer origins are emitted as zero-width anchors.
+    fn transfer_prints_no_words(&self, id: TransferId) -> bool {
+        let p = &self.code.emission().transfers()[id.0 as usize];
+        matches!(p.spelling, TransferSpelling::Fallthrough)
+            && p.copies.iter().all(|&copy| {
+                let bundle = &self.code.copies()[copy.0 as usize];
+                bundle.steps.is_empty() && bundle.assignments.iter().all(|c| c.issue().is_none())
+            })
+    }
     fn transfer_with_indent(&mut self, id: TransferId, indent: bool) -> Result<(), RenderError> {
         let p = &self.code.emission().transfers()[id.0 as usize];
         let start = self.out.position();
@@ -337,6 +428,42 @@ impl Expressions<'_, '_> {
         }
         let t = &self.code.terminals()[id.0 as usize];
         let p = &self.code.emission().terminals()[id.0 as usize];
+        // A terminal that prints no words keeps zero-width anchors for itself
+        // and for its delivered route, including empty copy bundles. It must
+        // not leave indentation behind for the next statement.
+        let silent = p.before.is_empty()
+            && p.snapshots.is_empty()
+            && match &t.kind {
+                TerminalKind::None => true,
+                TerminalKind::Goto(transfer) => self.transfer_prints_no_words(*transfer),
+                _ => false,
+            };
+        if silent {
+            let start = self.out.position();
+            if let TerminalKind::Goto(transfer) = &t.kind {
+                let copies = self.code.emission().transfers()[transfer.0 as usize]
+                    .copies
+                    .len();
+                for index in 0..copies {
+                    let copy = self.code.emission().transfers()[transfer.0 as usize].copies[index];
+                    self.copies(std::slice::from_ref(&copy))?;
+                }
+                self.out.span(
+                    start,
+                    Origin::Transfer {
+                        method: self.method,
+                        transfer: *transfer,
+                    },
+                )?;
+            }
+            return self.out.span(
+                start,
+                Origin::Terminal {
+                    method: self.method,
+                    block: id,
+                },
+            );
+        }
         self.out.indent()?;
         self.copies(&p.before)?;
         if !p.before.is_empty() {
@@ -385,6 +512,8 @@ impl Expressions<'_, '_> {
                     self.out.open()?;
                     self.branch_transfer(*when_false, true)?;
                     self.out.close()?;
+                } else {
+                    self.selected(*when_false, false)?;
                 }
             }
             TerminalKind::Switch { selector, arms } => {
@@ -463,10 +592,33 @@ impl Expressions<'_, '_> {
                 "predicate lost its original condition",
             ));
         };
-        if test.negate {
+        // Negating the delivered boolean zero-test cancels its exact Eqz
+        // negation; it does not change branch identities or selected-edge phases.
+        let positive_boolean = match condition {
+            Condition::Zero {
+                op: BranchOp::Eqz,
+                value,
+                meaning: ZeroMeaning::IntegralZero,
+            } if test.negate
+                && self
+                    .code
+                    .emission()
+                    .composed_use(*value)
+                    .is_some_and(|value| value.boolean) =>
+            {
+                Some(*value)
+            }
+            _ => None,
+        };
+        let wrap = test.negate && positive_boolean.is_none();
+        if wrap {
             self.out.put("!(")?;
         }
-        self.condition(condition)?;
+        if let Some(value) = positive_boolean {
+            self.operand(value)?;
+        } else {
+            self.condition(condition)?;
+        }
         self.phases(&p.snapshots, "after_operands_before_effect")?;
         // Copies belong to one selected original edge. Naming the looping role
         // is shorter than the truth value and keeps the same ownership.
@@ -476,19 +628,23 @@ impl Expressions<'_, '_> {
             (test.when_true, test.when_false)
         };
         if loop_edges {
+            // Each role is one selected original edge, and only its copies
+            // print. `selected` keeps the transfer origin on those copies and
+            // anchors an edge with nothing to print where it was selected.
             for (role, edge) in [("repeat", repeat), ("exit", exit)] {
-                if self.code.emission().transfers()[edge.0 as usize]
+                let prints = !self.code.emission().transfers()[edge.0 as usize]
                     .copies
-                    .is_empty()
-                {
-                    continue;
+                    .is_empty();
+                if prints {
+                    self.out.fmt(format_args!(" [{role}: "))?;
                 }
-                self.out.fmt(format_args!(" [{role}: "))?;
-                self.copies(&self.code.emission().transfers()[edge.0 as usize].copies)?;
-                self.out.put("]")?;
+                self.selected(edge, false)?;
+                if prints {
+                    self.out.put("]")?;
+                }
             }
         }
-        if test.negate {
+        if wrap {
             self.out.put(")")?;
         }
         Ok(())
@@ -511,20 +667,56 @@ impl Expressions<'_, '_> {
         test: PredicateEmission,
     ) -> Result<(), RenderError> {
         let start = self.out.position();
-        let EmissionLayout::Block(node) =
-            self.code.emission().controls()[control.0 as usize].layout
-        else {
-            return Err(RenderError::Invariant("compact predicate lost its block"));
-        };
-        self.label(LabelId(node.0))?;
+        let mut stack = Vec::new();
+        let mut controls = Vec::new();
+        push(&mut stack, control)?;
+        while let Some(id) = stack.pop() {
+            push(&mut controls, id)?;
+            match self.code.emission().controls()[id.0 as usize].layout {
+                EmissionLayout::Block(node) => self.block(node)?,
+                EmissionLayout::Sequence => {
+                    for &child in self.code.emission().controls()[id.0 as usize]
+                        .children(&self.code.controls()[id.0 as usize])
+                        .iter()
+                        .rev()
+                    {
+                        push(&mut stack, child)?;
+                    }
+                }
+                _ => {
+                    return Err(RenderError::Invariant(
+                        "compact predicate lost its evaluation",
+                    ));
+                }
+            }
+            if self.code.emission().deferred_control(id) {
+                let slot = self
+                    .pending_controls
+                    .as_deref_mut()
+                    .and_then(|pending| pending.get_mut(id.0 as usize))
+                    .ok_or(RenderError::Invariant(
+                        "deferred predicate control is unavailable",
+                    ))?;
+                if slot.replace(start).is_some() {
+                    return Err(RenderError::Invariant(
+                        "predicate control was deferred twice",
+                    ));
+                }
+            }
+        }
         self.predicate(test)?;
-        self.out.span(
-            start,
-            Origin::Control {
-                method: self.method,
-                control,
-            },
-        )
+        for id in controls {
+            if !self.code.emission().deferred_control(id) {
+                self.out.span(
+                    start,
+                    Origin::Control {
+                        method: self.method,
+                        control: id,
+                    },
+                )?;
+            }
+        }
+        Ok(())
     }
     fn block(&mut self, node: crate::p6::NodeId) -> Result<(), RenderError> {
         self.label(LabelId(node.0))?;
@@ -586,7 +778,7 @@ impl Expressions<'_, '_> {
                     match &p.layout {
                         EmissionLayout::Block(node) => self.block(*node)?,
                         EmissionLayout::Sequence if !p.label_required => {
-                            for &child in c.children.iter().rev() {
+                            for &child in p.children(c).iter().rev() {
                                 push(
                                     &mut work,
                                     if chained {
@@ -598,7 +790,7 @@ impl Expressions<'_, '_> {
                             }
                         }
                         EmissionLayout::Labelled if p.transparent => {
-                            for &child in c.children.iter().rev() {
+                            for &child in p.children(c).iter().rev() {
                                 push(&mut work, Event::Control(child))?;
                             }
                         }
@@ -644,7 +836,7 @@ impl Expressions<'_, '_> {
                                 self.out.open_plain()?;
                             }
                             push(&mut work, Event::Close)?;
-                            for &child in c.children.iter().rev() {
+                            for &child in p.children(c).iter().rev() {
                                 push(&mut work, Event::Control(child))?;
                             }
                         }
@@ -672,6 +864,7 @@ impl Expressions<'_, '_> {
                                         Event::If {
                                             test: *test,
                                             chained,
+                                            omitted_false: false,
                                         },
                                     )?;
                                 }
@@ -692,10 +885,21 @@ impl Expressions<'_, '_> {
                                         Event::If {
                                             test: *test,
                                             chained,
+                                            omitted_false: self.code.emission().omitted(*no),
                                         },
                                     )?;
                                 }
                             }
+                            push(&mut work, Event::Control(*header))?;
+                        }
+                        EmissionLayout::Condition { header, .. } => {
+                            push(
+                                &mut work,
+                                Event::Condition {
+                                    control: id,
+                                    chained,
+                                },
+                            )?;
                             push(&mut work, Event::Control(*header))?;
                         }
                         EmissionLayout::Loop { body, placement } => {
@@ -830,6 +1034,155 @@ impl Expressions<'_, '_> {
                     }
                 }
                 Event::Close => self.out.close()?,
+                Event::Condition { control, chained } => {
+                    let (count, yes, no, fall) =
+                        match &self.code.emission().controls()[control.0 as usize].layout {
+                            EmissionLayout::Condition {
+                                tests,
+                                yes,
+                                no,
+                                fall,
+                                ..
+                            } => (tests.len(), *yes, *no, *fall),
+                            _ => {
+                                return Err(RenderError::Invariant(
+                                    "condition control lost its delivered layout",
+                                ));
+                            }
+                        };
+                    if !chained {
+                        self.out.indent()?;
+                    }
+                    self.out.put("if (")?;
+                    for i in 0..count {
+                        if i > 0 {
+                            self.out.put(" || ")?;
+                        }
+                        let test = match &self.code.emission().controls()[control.0 as usize].layout
+                        {
+                            EmissionLayout::Condition { tests, .. } => tests[i],
+                            _ => {
+                                return Err(RenderError::Invariant(
+                                    "condition control lost its delivered layout",
+                                ));
+                            }
+                        };
+                        let start = self.out.position();
+                        self.predicate_expression(test, false)?;
+                        self.out.span(
+                            start,
+                            Origin::Terminal {
+                                method: self.method,
+                                block: test.terminal,
+                            },
+                        )?;
+                        // Both original test edges keep their identity at the
+                        // test's own evaluation position. The final other edge
+                        // is already the printed `else` route when that arm
+                        // exists; anchoring it twice would duplicate a source
+                        // span for one original transfer.
+                        let (select, other) = if test.negate {
+                            (test.when_false, test.when_true)
+                        } else {
+                            (test.when_true, test.when_false)
+                        };
+                        self.selected(select, false)?;
+                        if i + 1 < count || no.is_none() {
+                            self.selected(other, false)?;
+                        }
+                    }
+                    self.out.put(")")?;
+                    self.out.open()?;
+                    push(&mut work, Event::Close)?;
+                    // Later test runs print no words of their own. Their
+                    // delivered controls, labels, routes and copies keep
+                    // zero-width anchors at the shared arm.
+                    let run_count =
+                        count.min(self.code.controls()[control.0 as usize].children.len());
+                    for i in (1..run_count).rev() {
+                        let run = self.code.controls()[control.0 as usize].children[i];
+                        push(&mut work, Event::Anchors(run))?;
+                    }
+                    if let Some(no) = no {
+                        push(&mut work, Event::Control(no))?;
+                        push(&mut work, Event::Else(fall))?;
+                    }
+                    push(&mut work, Event::Control(yes))?;
+                }
+                Event::Anchors(control) => {
+                    let start = self.out.position();
+                    self.out.span(
+                        start,
+                        Origin::Control {
+                            method: self.method,
+                            control,
+                        },
+                    )?;
+                    let node = match self.code.emission().controls()[control.0 as usize].layout {
+                        EmissionLayout::Block(node) => Some(node),
+                        _ => None,
+                    };
+                    if let Some(node) = node {
+                        let start = self.out.position();
+                        self.out.span(
+                            start,
+                            Origin::Label {
+                                method: self.method,
+                                label: LabelId(node.0),
+                            },
+                        )?;
+                        let transfers = match &self.code.emission().blocks()[node.0 as usize].end {
+                            BlockEnd::Transfers(links) => links.len(),
+                            _ => 0,
+                        };
+                        for at in 0..transfers {
+                            let link = match &self.code.emission().blocks()[node.0 as usize].end {
+                                BlockEnd::Transfers(links) => links[at],
+                                _ => {
+                                    return Err(RenderError::Invariant(
+                                        "anchored block lost its transfer",
+                                    ));
+                                }
+                            };
+                            let start = self.out.position();
+                            let copies = self.code.emission().transfers()[link.0 as usize]
+                                .copies
+                                .len();
+                            for index in 0..copies {
+                                let copy =
+                                    self.code.emission().transfers()[link.0 as usize].copies[index];
+                                self.copies(std::slice::from_ref(&copy))?;
+                            }
+                            self.out.span(
+                                start,
+                                Origin::Transfer {
+                                    method: self.method,
+                                    transfer: link,
+                                },
+                            )?;
+                        }
+                        let terminal = match &self.code.emission().blocks()[node.0 as usize].end {
+                            BlockEnd::Terminal(terminal) => Some(*terminal),
+                            _ => None,
+                        };
+                        if let Some(terminal) = terminal {
+                            let start = self.out.position();
+                            self.out.span(
+                                start,
+                                Origin::Terminal {
+                                    method: self.method,
+                                    block: terminal,
+                                },
+                            )?;
+                        }
+                    } else {
+                        let children = self.code.emission().controls()[control.0 as usize]
+                            .children(&self.code.controls()[control.0 as usize]);
+                        for &child in children.iter().rev() {
+                            push(&mut work, Event::Anchors(child))?;
+                        }
+                    }
+                }
                 Event::EmptyIf(test) => {
                     let start = self.out.position();
                     self.selected(test.when_true, false)?;
@@ -842,7 +1195,11 @@ impl Expressions<'_, '_> {
                         },
                     )?;
                 }
-                Event::If { test, chained } => {
+                Event::If {
+                    test,
+                    chained,
+                    omitted_false,
+                } => {
                     if !chained {
                         self.out.indent()?;
                     }
@@ -860,6 +1217,9 @@ impl Expressions<'_, '_> {
                             block: test.terminal,
                         },
                     )?;
+                    if omitted_false {
+                        self.selected(test.when_false, false)?;
+                    }
                     if test.negate {
                         // P7 admits only nonprinting true-edge bundles here;
                         // their plan IDs retain zero-length original origins.
@@ -1254,8 +1614,16 @@ enum Event {
     If {
         test: PredicateEmission,
         chained: bool,
+        omitted_false: bool,
     },
     EmptyIf(PredicateEmission),
+    Condition {
+        control: ControlId,
+        chained: bool,
+    },
+    /// A delivered control subtree that prints no text still anchors its
+    /// original controls, labels, transfers and copies.
+    Anchors(ControlId),
     Else(TransferId),
     ElseIf(TransferId),
     LoopHead(PredicateEmission),
@@ -1267,7 +1635,7 @@ enum Event {
     Catch(ControlId, usize),
     Acquire(ControlId, OpId),
 }
-fn push(work: &mut Vec<Event>, event: Event) -> Result<(), RenderError> {
+fn push<T>(work: &mut Vec<T>, event: T) -> Result<(), RenderError> {
     work.try_reserve(1).map_err(RenderError::MethodScratch)?;
     work.push(event);
     Ok(())

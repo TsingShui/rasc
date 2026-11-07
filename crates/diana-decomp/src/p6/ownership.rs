@@ -216,6 +216,13 @@ pub(super) fn own(
                 f.terminal_owners[f.nodes[node.0 as usize].block.0 as usize] =
                     TerminalOwner::IfCondition(r.id);
             }
+            RegionKind::Condition(id) => {
+                for test in &f.conditions[id.0 as usize].tests {
+                    let node = test.predicate;
+                    f.terminal_owners[f.nodes[node.0 as usize].block.0 as usize] =
+                        TerminalOwner::IfCondition(r.id);
+                }
+            }
             RegionKind::Switch { .. } => {
                 let node = r.entry.ok_or(bug("switch has no selector entry"))?;
                 f.terminal_owners[f.nodes[node.0 as usize].block.0 as usize] =

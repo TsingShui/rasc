@@ -20,7 +20,7 @@
 //! Each condition is a conservative fact over the owned arenas. When any of them
 //! cannot be established, the copies stay on their original edge.
 
-use super::super::build::bug;
+use super::super::build::{bug, filled};
 use super::super::*;
 use crate::p3::UseSite;
 
@@ -361,4 +361,93 @@ fn observed_outside(
         }
     }
     Ok(false)
+}
+
+/// Compactness consumes the delivered ordered evaluation subtree. Only
+/// suppressed composed producers and copy-free original sequencing may precede
+/// its syntax-owned terminal; all other prelude work keeps explicit test phases.
+pub(super) fn select_compact(code: &mut MethodCode) -> Result<(), ExpressionError> {
+    let mut compact = filled(code.controls.len(), false)?;
+    for (index, control) in code.emission.controls.iter().enumerate() {
+        let (predicate, test) = match control.layout {
+            EmissionLayout::Loop {
+                placement:
+                    LoopPlacement::While {
+                        predicate, test, ..
+                    }
+                    | LoopPlacement::DoWhile {
+                        predicate, test, ..
+                    },
+                ..
+            } => (predicate, test),
+            _ => continue,
+        };
+        let phases = &code.emission.terminals[test.terminal.0 as usize];
+        if !phases.before.is_empty() || !phases.snapshots.is_empty() || !phases.after.is_empty() {
+            continue;
+        }
+        let mut stack = Vec::new();
+        super::super::build::push(&mut stack, predicate)?;
+        let mut empty = true;
+        while let Some(id) = stack.pop() {
+            let control = &code.emission.controls[id.0 as usize];
+            if control.label_required || control.continuation.is_some() {
+                empty = false;
+                break;
+            }
+            match &control.layout {
+                EmissionLayout::Sequence => {
+                    for &child in control.children(&code.controls[id.0 as usize]) {
+                        super::super::build::push(&mut stack, child)?;
+                    }
+                }
+                EmissionLayout::Block(node) => {
+                    let block = &code.emission.blocks[node.0 as usize];
+                    if block.show_label
+                        || block.actions.iter().any(|action| {
+                            !matches!(action, BodyAction::Statement { operation, .. }
+                            if code.emission.composed_operation(*operation))
+                        })
+                    {
+                        empty = false;
+                        break;
+                    }
+                    let end_empty = match &block.end {
+                        BlockEnd::None => true,
+                        BlockEnd::Transfers(transfers) => transfers.iter().all(|transfer| {
+                            let transfer = &code.emission.transfers[transfer.0 as usize];
+                            matches!(transfer.spelling, TransferSpelling::Fallthrough)
+                                && transfer.copies.is_empty()
+                        }),
+                        BlockEnd::Terminal(_) => false,
+                    };
+                    if !end_empty {
+                        empty = false;
+                        break;
+                    }
+                }
+                _ => {
+                    empty = false;
+                    break;
+                }
+            }
+        }
+        compact[index] = empty;
+    }
+    for (index, control) in code.emission.controls.iter_mut().enumerate() {
+        if let EmissionLayout::Loop {
+            placement:
+                LoopPlacement::While {
+                    compact: selected, ..
+                }
+                | LoopPlacement::DoWhile {
+                    compact: selected, ..
+                },
+            ..
+        } = &mut control.layout
+        {
+            *selected = compact[index];
+        }
+    }
+    Ok(())
 }

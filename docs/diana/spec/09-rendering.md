@@ -79,8 +79,10 @@ dispatch kind and prototype, and the printed member keeps its source span. A jum
 whose target prints next is sequencing, not an emitted `goto`, including planned
 continuations and the last printed If branch. P7 selects this omission and marks
 an emptied, label-free, copy-free `else` as omitted; P9 MUST print neither its
-`else` header nor its control. For an explicit If terminal, P9 consumes P7's
-separate empty-false-arm flag and omits that arm's text and span. P7 also selects
+`else` header nor its control. The omitted false edge retains a zero-width
+Transfer anchor at the predicate. For an explicit If terminal, P9 consumes P7's
+separate empty-false-arm flag and omits that arm's text, retaining the original
+false transfer and any nonprinting copy bundles as zero-width anchors. P7 also selects
 an exactly negated single-arm If when only the original false arm prints, an
 empty-If display when neither arm nor the predicate has work, and `else if` for a
 single nested printable If. P9 consumes those shapes without recomputing
@@ -90,11 +92,27 @@ An empty If retains its header and original terminal facts, with a zero-length
 terminal anchor for a suppressed explicit test. A chained If owns its own braces
 and arm emission.
 
+An ordered condition prints one `if (test0 || test1 ...)`. Each test keeps its
+own terminal span around its predicate text and both original test-edge transfer
+spans at the same evaluation position; the final `else` route keeps the selected
+`other` link. Later test runs print no text, so P7 delivers those run controls
+and P9 anchors their controls, block labels, transfers and empty copy bundles as
+zero-length spans, without recovering control from the graph. A terminal whose
+route prints no words keeps both its Transfer and Terminal anchors, including
+zero-step copy bundles, and leaves no indentation in the text.
+
 P7 fixes condition/header ownership, loop repetition, child roles and necessary
-continuations. P9 prints those choices. In particular, predicate-exit copies do
+continuations. P9 prints those choices. An explicit Condition uses the selected
+P6-derived order and child completions in the emission controls, not the retained
+source control's tests/shared/other order or source continuation evidence. In particular, predicate-exit copies do
 not appear in a loop's common continuation, where an independent break could
 execute them. A predicate with no separate work or edge copies can use the
-ordinary loop-condition spelling selected by P7. Synchronized routing terminals
+ordinary loop-condition spelling selected by P7. A compact evaluation
+Sequence retains its supplied block, link and control anchors; a composed producer's
+control range closes at its condition use, with the original operation, statement,
+result PC and exception site origins. P9 traverses only that delivered layout. An
+exactly negated composed boolean Eqz prints its operand without double negation;
+original arm identities and selected-edge phases do not change. Synchronized routing terminals
 and post-release copies remain at their original nodes rather than moving past
 surrounding catch scopes. Uncaught propagation is not an unavailable handler.
 
@@ -105,12 +123,26 @@ form.
 
 Unary conversions correspond to original conversion operations. A check-cast
 remains a check with no invented register write. It prints as `cast v to T` at its
-original position, or as `((T) v)` inside the immediately following statement when
-that statement's first evaluated value is the checked local; the check then keeps
-its own statement and operation origins at the use. A check with a printed route,
-copy phase or later first operand stays a statement, and that statement carries one
-short trailing comment naming the original `check-cast` and the fact that the value
-is not reassigned.
+original position, or as `((T) v)` at the first printed read of the checked local;
+the check then keeps its own statement, operation, type and route origins at the
+use. That read is either the first evaluated value of the following statement or
+the first executed step of the single unconditional transfer copy set that ends the
+same block. P7 records the exact statement and read-expression occurrence, and only
+that occurrence prints the check: another read of the same local, including one
+later in the same statement, keeps its own plain text. A composed first value that
+would print under another statement's carrier, a later copy step, a selected
+branch, a terminal, a copy phase or a printed route keeps the cast a statement, and
+that statement carries one short trailing comment naming the original `check-cast`
+and the fact that the value is not reassigned. Composition moves the check's text
+only: the original operation, statement, exception site and every copy step still
+execute once in their original order, and no assignment, local or value is created.
+
+A check P4 published as `Redundant` prints no text at all. Its plan action stays at
+its original position and carries zero-length `Statement`, `Operation`,
+`Expression`, `Reference`, `Type` and `Site` anchors there, so the printed body has
+no redundant cast while the original event, its resolved type name and its routes
+keep a source position. P9 reads that plan decision; it does not prove or search for
+redundancy, and an ordinary check that P4 retained prints exactly as before.
 
 The same short comment marks the other statements printed in Diana syntax rather
 than Java: `capture_exception` (move-exception, the caught throwable),

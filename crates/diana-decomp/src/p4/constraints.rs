@@ -25,10 +25,20 @@ pub(super) struct CastBound {
     pub operation: OpId,
     pub receiver: StateId,
     pub target: TypeNameId,
+    /// The original type identity this check resolves to.
+    pub target_id: crate::TypeId,
+}
+/// One original `instanceof` whose result is available and whose type resolved.
+pub(super) struct InstanceBound {
+    pub operation: OpId,
+    /// The reference value the result was tested on.
+    pub receiver: StateId,
+    pub target: crate::TypeId,
 }
 pub(super) struct Work {
     pub arrays: Vec<ArraySite>,
     pub casts: Vec<CastBound>,
+    pub instances: Vec<InstanceBound>,
     pub rules: Vec<Rule>,
     pub compatible: Vec<(usize, usize)>,
 }
@@ -250,6 +260,7 @@ pub(super) fn collect(ssa: &SsaMethod<'_>, f: &mut TypeFacts) -> Result<Work, Ty
     let mut work = Work {
         arrays: Vec::new(),
         casts: Vec::new(),
+        instances: Vec::new(),
         rules: Vec::new(),
         compatible: Vec::new(),
     };
@@ -543,6 +554,27 @@ pub(super) fn collect(ssa: &SsaMethod<'_>, f: &mut TypeFacts) -> Result<Work, Ty
                 if let Some(v) = out {
                     primitive(f, v, b'Z')?;
                 }
+                // A result without a resolved type reference or an available
+                // tested operand cannot establish any membership later.
+                if let OpKind::InstanceOf { type_id } = op.kind()
+                    && out.is_some()
+                    && flow
+                        .reference_fact(op.pc(), ReferenceSlot::First)
+                        .is_some_and(|fact| matches!(fact, Ok(Reference::Type { .. })))
+                    && flow
+                        .reference_use_issue(op.pc(), ReferenceSlot::First)
+                        .is_none()
+                    && let Some(input) = use_index(s, op.id(), 0)
+                {
+                    push(
+                        &mut work.instances,
+                        InstanceBound {
+                            operation: op.id(),
+                            receiver: s.uses()[input].state(),
+                            target: *type_id,
+                        },
+                    )?;
+                }
             }
             OpKind::Cast { .. }
             | OpKind::NewInstance { .. }
@@ -572,7 +604,8 @@ pub(super) fn collect(ssa: &SsaMethod<'_>, f: &mut TypeFacts) -> Result<Work, Ty
                     _ => None,
                 };
                 if matches!(op.kind(), OpKind::Cast { .. }) {
-                    if let Some(target) = name
+                    if let OpKind::Cast { type_id } = op.kind()
+                        && let Some(target) = name
                         && flow
                             .reference_use_issue(op.pc(), ReferenceSlot::First)
                             .is_none()
@@ -584,6 +617,7 @@ pub(super) fn collect(ssa: &SsaMethod<'_>, f: &mut TypeFacts) -> Result<Work, Ty
                                 operation: op.id(),
                                 receiver: s.uses()[input].state(),
                                 target,
+                                target_id: *type_id,
                             },
                         )?;
                     }

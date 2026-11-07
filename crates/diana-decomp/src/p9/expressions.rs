@@ -25,7 +25,12 @@ pub(super) trait ExpressionSource {
     fn field_qualification(&self, _reference: ReferenceId) -> bool {
         true
     }
-    fn inline_check(&self, _statement: StatementId, _value: StorageId) -> Option<InlineCheck> {
+    fn inline_check(
+        &self,
+        _carrier: CheckCarrier,
+        _occurrence: ExprId,
+        _value: StorageId,
+    ) -> Option<InlineCheck> {
         None
     }
     fn statement_sites(&self, _statement: StatementId) -> &[SiteId] {
@@ -68,8 +73,13 @@ impl ExpressionSource for MethodCode {
     fn field_qualification(&self, reference: ReferenceId) -> bool {
         self.emission().field_qualification(reference)
     }
-    fn inline_check(&self, statement: StatementId, value: StorageId) -> Option<InlineCheck> {
-        self.emission().inline_check(statement, value)
+    fn inline_check(
+        &self,
+        carrier: CheckCarrier,
+        occurrence: ExprId,
+        value: StorageId,
+    ) -> Option<InlineCheck> {
+        self.emission().inline_check(carrier, occurrence, value)
     }
     fn statement_sites(&self, statement: StatementId) -> &[SiteId] {
         self.statements()
@@ -113,9 +123,13 @@ pub(super) struct Expressions<'a, 'b, S: ExpressionSource = MethodCode> {
     pub names: &'a MethodNames,
     pub lookup: &'a Lookup<'a>,
     pub pending_controls: Option<&'b mut [Option<super::TextOffset>]>,
-    /// The statement currently printing, so an inlined check-cast can wrap the
-    /// read that carries it.
+    /// The statement currently printing, so an inlined check-cast or an
+    /// allocation's array literal can find the text it states.
     pub statement: Option<StatementId>,
+    /// The printed occurrence currently rendering an inlined check-cast. A copy
+    /// bundle is not a statement, so this context names its exact step; a copy
+    /// phase, gap report or unrelated occurrence renders with no carrier.
+    pub check_carrier: Option<CheckCarrier>,
 }
 impl<S: ExpressionSource> Expressions<'_, '_, S> {
     /// A construction whose only publication is its own deferred carrier is an
@@ -372,10 +386,11 @@ impl<S: ExpressionSource> Expressions<'_, '_, S> {
         match &e.kind {
             ExprKind::Read { storage, .. } => {
                 if let Some(check) = self
-                    .statement
-                    .and_then(|statement| self.code.inline_check(statement, *storage))
+                    .check_carrier
+                    .and_then(|carrier| self.code.inline_check(carrier, id, *storage))
                 {
-                    // The check prints at its first use and keeps its own origin.
+                    // The check prints at its selected first use and keeps its
+                    // own origin; any other read of the same storage stays plain.
                     self.out.put("((")?;
                     self.reference(check.reference)?;
                     self.out.put(") ")?;
@@ -409,9 +424,13 @@ impl<S: ExpressionSource> Expressions<'_, '_, S> {
                 } else if let Some(composed) = self.code.composed_use(id) {
                     // Inline checks belong to the producer statement even when
                     // its expression prints at the adjacent consuming branch.
-                    let previous = self.statement.replace(composed.statement);
+                    let previous = self
+                        .check_carrier
+                        .replace(CheckCarrier::Statement(composed.statement));
+                    let statement = self.statement.replace(composed.statement);
                     let rendered = self.expr(composed.expression);
-                    self.statement = previous;
+                    self.check_carrier = previous;
+                    self.statement = statement;
                     rendered?;
                     self.out.span(
                         start,
@@ -906,7 +925,16 @@ impl<S: ExpressionSource> Expressions<'_, '_, S> {
                 } => {
                     self.local(*destination)?;
                     self.out.put(" = ")?;
-                    self.operand(*expression)?;
+                    // Only this step's right-hand side reads the checked value.
+                    // Another step of the same bundle and the gap reports below
+                    // stay at their own positions with no carrier.
+                    let step = u32::try_from(index).map_err(|_| RenderError::Capacity)?;
+                    let previous = self
+                        .check_carrier
+                        .replace(CheckCarrier::Copy { bundle: id, step });
+                    let rendered = self.operand(*expression);
+                    self.check_carrier = previous;
+                    rendered?;
                 }
                 CopyStatement::Save {
                     destination,

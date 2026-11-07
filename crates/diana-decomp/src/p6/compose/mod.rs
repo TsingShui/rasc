@@ -14,6 +14,8 @@
 
 mod accept;
 mod candidates;
+mod conditions;
+mod loop_exits;
 pub(super) mod parts;
 mod stack;
 mod switch;
@@ -35,6 +37,7 @@ pub(super) fn construct(
     g: &Graph,
     s: &Structure,
 ) -> Result<(), RegionError> {
+    loop_exits::construct(storage, f, g)?;
     let mut owners = Vec::new();
     for n in 0..f.nodes.len() {
         let node = NodeId(id(n)?);
@@ -147,5 +150,6 @@ pub(super) fn construct(
         }
     }
     own(storage, f, g)?;
-    transfers(f, g)
+    transfers(f, g)?;
+    super::condition_layout::construct(f, g)
 }

@@ -3,7 +3,7 @@
 //! No control, storage or type solver runs here. A candidate that cannot retain
 //! operand, commit, exception and copy order remains an ordinary statement.
 
-use super::super::build::{bug, filled};
+use super::super::build::{bug, filled, push};
 use super::super::*;
 use crate::p2::{BranchOp, CommitRule, Effects, OpId};
 use crate::p3::{StateId, UseSite, ValueId};
@@ -37,8 +37,9 @@ pub(super) fn construct(code: &mut MethodCode) -> Result<(), ExpressionError> {
         *count = count.saturating_add(1).min(2);
     }
     for control in &code.controls {
-        if matches!(control.kind, ControlKind::Sequence) {
-            for pair in control.children.windows(2) {
+        let emitted = &code.emission.controls[control.id.0 as usize];
+        if matches!(emitted.layout, EmissionLayout::Sequence) {
+            for pair in emitted.children(control).windows(2) {
                 let next = sibling
                     .get_mut(pair[0].0 as usize)
                     .ok_or(bug("sequence names an unknown child"))?;
@@ -84,6 +85,7 @@ fn producer(
     statement: StatementId,
     reads: &[u8],
     protected: &[bool],
+    conditional: bool,
 ) -> Option<Producer> {
     let source = code.operations.get(operation.0 as usize)?;
     if code.emission.composed_operation(operation)
@@ -134,6 +136,10 @@ fn producer(
     let boolean = match &expr.kind {
         ExprKind::Unary { value, .. } if leaf(code, *value) => false,
         ExprKind::Binary { left, right, .. } if leaf(code, *left) && leaf(code, *right) => false,
+        // A field read keeps its original receiver evaluation and, when it may
+        // throw, its original exception position. The caller's adjacent-test
+        // check below decides whether that position is preserved.
+        ExprKind::Field { receiver, .. } if receiver.is_none_or(|r| leaf(code, r)) => false,
         ExprKind::InstanceOf { value, reference } if leaf(code, *value) => {
             let reference = code.references.get(reference.0 as usize)?;
             if !matches!(reference.declaration, Ok(ReferenceDeclaration::Type { .. }))
@@ -181,7 +187,19 @@ fn producer(
         || source.exceptional.is_some()
         || !statement_ref.sites.is_empty()
     {
-        return None;
+        // An effectful producer may be composed only into a condition at the
+        // same execution position: one delivered site with nothing saved, so the
+        // original throw route and evaluation count stay unchanged.
+        if !conditional || source.exceptional.is_none() {
+            return None;
+        }
+        let [site] = statement_ref.sites.as_slice() else {
+            return None;
+        };
+        let site = code.sites.get(site.0 as usize)?;
+        if !matches!(site.syntax, ExceptionSyntax::Propagate) || !site.source_snapshots.is_empty() {
+            return None;
+        }
     }
     Some(Producer {
         operation,
@@ -223,7 +241,7 @@ fn operation_use(
     if next.get(operation.0 as usize).copied().flatten()? != consumer {
         return None;
     }
-    let producer = producer(code, operation, statement, reads, protected)?;
+    let producer = producer(code, operation, statement, reads, protected, false)?;
     if producer.boolean
         || !code
             .emission
@@ -320,7 +338,7 @@ fn terminal_use(
     {
         return None;
     }
-    let producer = producer(code, operation, statement, reads, protected)?;
+    let producer = producer(code, operation, statement, reads, protected, false)?;
     let BlockEnd::Transfers(links) = &block.end else {
         return None;
     };
@@ -375,33 +393,60 @@ fn terminal_use(
         // The producer is the last original operation; its sole fallthrough
         // reaches this empty, single-entry header with no copies or phases.
         // Thus even an effectful call stays at the same evaluation position.
-        let EmissionLayout::If { header, test, .. } = following_control.layout else {
-            return None;
+        let terminal = match following_control.layout {
+            EmissionLayout::If { header, test, .. } => {
+                let header = code.emission.controls.get(header.0 as usize)?;
+                if !matches!(header.layout, EmissionLayout::Block(target) if target.0 as usize == next_node)
+                    || header.continuation.is_some()
+                {
+                    return None;
+                }
+                let target = code.terminals.get(test.terminal.0 as usize)?;
+                if !matches!(target.emission, TerminalEmission::If(control) if control == following)
+                {
+                    return None;
+                }
+                test.terminal
+            }
+            EmissionLayout::Block(target) if target.0 as usize == next_node => {
+                let BlockCompletion::Syntax {
+                    terminal,
+                    owner: TerminalEmission::Loop(control),
+                } = code.blocks.get(next_node)?.completion
+                else {
+                    return None;
+                };
+                let EmissionLayout::Loop { placement, .. } =
+                    &code.emission.controls.get(control.0 as usize)?.layout
+                else {
+                    return None;
+                };
+                let test = match placement {
+                    LoopPlacement::While { test, .. } | LoopPlacement::DoWhile { test, .. } => test,
+                    LoopPlacement::Infinite => return None,
+                };
+                if test.terminal != terminal || following_control.continuation.is_some() {
+                    return None;
+                }
+                terminal
+            }
+            _ => return None,
         };
-        let header = code.emission.controls.get(header.0 as usize)?;
-        if !matches!(header.layout, EmissionLayout::Block(target) if target.0 as usize == next_node)
-            || header.continuation.is_some()
-            || !matches!(next.end, BlockEnd::None)
-        {
+        if !matches!(next.end, BlockEnd::None) {
             return None;
         }
-        let target = code.terminals.get(test.terminal.0 as usize)?;
-        if !matches!(target.emission, TerminalEmission::If(control) if control == following) {
-            return None;
-        }
+        let target = code.terminals.get(terminal.0 as usize)?;
         let TerminalKind::If {
-            condition:
-                Condition::Zero {
-                    op: BranchOp::Eqz | BranchOp::Nez,
-                    value: use_id,
-                    meaning: ZeroMeaning::IntegralZero,
-                },
+            condition: Condition::Zero { value: use_id, .. },
             ..
         } = target.kind
         else {
             return None;
         };
-        (test.terminal, use_id)
+        if !supported_role(code, terminal, producer.boolean, 0) {
+            return None;
+        }
+        (terminal, use_id)
     };
     let target = code.terminals.get(terminal.0 as usize)?;
     let phases = code.emission.terminals.get(terminal.0 as usize)?;
@@ -482,4 +527,360 @@ fn leaf(code: &MethodCode, id: ExprId) -> bool {
             code.expressions.get(id.0 as usize).map(|v| &v.kind),
             Some(ExprKind::Read { .. } | ExprKind::Literal { .. })
         )
+}
+
+/// Composes every delivered short-circuit test at its original evaluation
+/// position. The P6 plan already fixes the test order, both original links and
+/// the shared arm; this pass only decides whether each test's scheduled prelude
+/// can be stated as the condition operand. A test whose prelude cannot keep its
+/// facts prints the established explicit schedule instead.
+pub(super) fn conditions(code: &mut MethodCode) -> Result<(), ExpressionError> {
+    let access = super::local_access(code)?;
+    let mut layouts = Vec::new();
+    for index in 0..code.emission.controls.len() {
+        if matches!(
+            code.emission.controls[index].layout,
+            EmissionLayout::Condition { .. }
+        ) {
+            push(&mut layouts, index)?;
+        }
+    }
+    for index in layouts {
+        let composed = match &access {
+            Some((reads, protected)) => compose(code, index, reads, protected)?,
+            // An unavailable copy dependency cannot establish which locals the
+            // scheduled statements define. Every dependent condition keeps its
+            // complete explicit schedule; independent facts remain available.
+            None => false,
+        };
+        if !composed {
+            explicit(code, index)?;
+        }
+    }
+    Ok(())
+}
+
+/// One test's prelude states its operands only as an ordered suffix of the run's
+/// statements. The suffix order must equal the terminal's operand order, because
+/// P9 evaluates a pair's left operand first. A later run prints no header of its
+/// own, so every statement in it must participate in that suffix.
+fn compose(
+    code: &mut MethodCode,
+    index: usize,
+    reads: &[u8],
+    protected: &[bool],
+) -> Result<bool, ExpressionError> {
+    let count = match &code.emission.controls[index].layout {
+        EmissionLayout::Condition { tests, .. } => tests.len(),
+        _ => return Ok(false),
+    };
+    let mut work = Vec::new();
+    for position in 0..count {
+        let test = {
+            let EmissionLayout::Condition { tests, .. } = &code.emission.controls[index].layout
+            else {
+                return Ok(false);
+            };
+            tests[position]
+        };
+        let Some(&control) = code.controls[index].children.get(position) else {
+            return Ok(false);
+        };
+        let Some(nodes) = run_nodes(code, control)? else {
+            return Ok(false);
+        };
+        let Some(predicate) = nodes.last().copied() else {
+            return Ok(false);
+        };
+        if code.blocks[predicate.0 as usize].original_block != test.terminal
+            || !matches!(
+                code.emission.blocks[predicate.0 as usize].end,
+                BlockEnd::None
+            )
+            || {
+                let transfers = &code.blocks[predicate.0 as usize].transfers;
+                transfers.len() != 2
+                    || !transfers.contains(&test.when_true)
+                    || !transfers.contains(&test.when_false)
+            }
+        {
+            return Ok(false);
+        }
+        let TerminalKind::If { condition, .. } = &code.terminals[test.terminal.0 as usize].kind
+        else {
+            return Ok(false);
+        };
+        let phases = &code.emission.terminals[test.terminal.0 as usize];
+        if !phases.before.is_empty()
+            || !phases.snapshots.is_empty()
+            || !phases.after.is_empty()
+            || code.terminals[test.terminal.0 as usize].site.is_some()
+            || !code.emission.transfers[test.when_true.0 as usize]
+                .copies
+                .is_empty()
+            || !code.emission.transfers[test.when_false.0 as usize]
+                .copies
+                .is_empty()
+        {
+            return Ok(false);
+        }
+        let mut operands = Vec::new();
+        match condition {
+            Condition::Pair { left, right, .. } => {
+                push(&mut operands, (*left, 0u32))?;
+                push(&mut operands, (*right, 1u32))?;
+            }
+            Condition::Zero { value, .. } => push(&mut operands, (*value, 0u32))?,
+        }
+        let Some((scheduled, all)) = scheduled(
+            code,
+            &nodes,
+            test.terminal,
+            &operands,
+            reads,
+            protected,
+            position > 0,
+        )?
+        else {
+            return Ok(false);
+        };
+        if position != 0 && !all {
+            return Ok(false);
+        }
+        for item in scheduled {
+            push(&mut work, item)?;
+        }
+    }
+    for (producer, operand) in work {
+        install(code, producer, operand, None)?;
+    }
+    if let EmissionLayout::Condition { tests, .. } = &code.emission.controls[index].layout {
+        for test in tests {
+            code.emission.transfers[test.when_true.0 as usize].spelling =
+                TransferSpelling::Fallthrough;
+            code.emission.transfers[test.when_false.0 as usize].spelling =
+                TransferSpelling::Fallthrough;
+        }
+    }
+    Ok(true)
+}
+
+/// A producer composes into a branch only under the established branch-role
+/// policy. A boolean value is a zero test with an integral-zero meaning; it is
+/// not a pair operand or a different comparison operator.
+fn supported_role(
+    code: &MethodCode,
+    terminal: crate::p2::BlockId,
+    boolean: bool,
+    argument: u32,
+) -> bool {
+    if !boolean {
+        return true;
+    }
+    argument == 0
+        && matches!(
+            code.terminals[terminal.0 as usize].kind,
+            TerminalKind::If {
+                condition: Condition::Zero {
+                    op: BranchOp::Eqz | BranchOp::Nez,
+                    meaning: ZeroMeaning::IntegralZero,
+                    ..
+                },
+                ..
+            }
+        )
+}
+
+/// The block nodes of one straight test run, in original order.
+fn run_nodes(
+    code: &MethodCode,
+    control: ControlId,
+) -> Result<Option<Vec<crate::p6::NodeId>>, ExpressionError> {
+    let Some(plan) = code.emission.controls.get(control.0 as usize) else {
+        return Ok(None);
+    };
+    if plan.continuation.is_some() {
+        return Ok(None);
+    }
+    let mut out = Vec::new();
+    match plan.layout {
+        EmissionLayout::Block(node) => push(&mut out, node)?,
+        EmissionLayout::Sequence => {
+            let Some(control) = code.controls.get(control.0 as usize) else {
+                return Ok(None);
+            };
+            for &child in plan.children(control) {
+                let Some(child) = code.emission.controls.get(child.0 as usize) else {
+                    return Ok(None);
+                };
+                let EmissionLayout::Block(node) = child.layout else {
+                    return Ok(None);
+                };
+                if child.continuation.is_some() {
+                    return Ok(None);
+                }
+                push(&mut out, node)?;
+            }
+        }
+        _ => return Ok(None),
+    }
+    Ok(Some(out))
+}
+
+/// The ordered producer suffix of one run and whether it covers the whole run.
+type Scheduled = (Vec<(Producer, ExprId)>, bool);
+
+/// The ordered producer suffix of one run. `all` is true when every statement
+/// is a producer. Each producer must name one distinct terminal operand and the
+/// matched operand positions must strictly increase, so the composed spelling
+/// evaluates the original effects in their original order.
+fn scheduled(
+    code: &MethodCode,
+    nodes: &[crate::p6::NodeId],
+    terminal: crate::p2::BlockId,
+    operands: &[(ExprId, u32)],
+    reads: &[u8],
+    protected: &[bool],
+    skipped: bool,
+) -> Result<Option<Scheduled>, ExpressionError> {
+    let mut actions = Vec::new();
+    for &node in nodes {
+        let Some(block) = code.emission.blocks.get(node.0 as usize) else {
+            return Ok(None);
+        };
+        for action in &block.actions {
+            let BodyAction::Statement {
+                operation,
+                statement,
+            } = *action
+            else {
+                return Ok(None);
+            };
+            push(&mut actions, (operation, statement))?;
+        }
+    }
+    if !straight(code, nodes, skipped)? {
+        return Ok(None);
+    }
+    let mut producers = Vec::new();
+    for &(operation, statement) in &actions {
+        match producer(code, operation, statement, reads, protected, true) {
+            Some(producer) => push(&mut producers, Some(producer))?,
+            None => push(&mut producers, None)?,
+        }
+    }
+    let mut start = 0;
+    for (at, producer) in producers.iter().enumerate() {
+        if producer.is_none() {
+            start = at + 1;
+        }
+    }
+    let all = start == 0;
+    let mut last = None;
+    let mut out = Vec::new();
+    for producer in producers.iter().skip(start) {
+        let Some(producer) = *producer else {
+            return Ok(None);
+        };
+        let mut matched = None;
+        for &(operand, argument) in operands {
+            if matches_use(
+                code,
+                producer,
+                operand,
+                UseSite::Terminal {
+                    block: terminal,
+                    argument,
+                },
+            ) {
+                if matched.is_some() {
+                    return Ok(None);
+                }
+                matched = Some((operand, argument));
+            }
+        }
+        let Some((operand, argument)) = matched else {
+            return Ok(None);
+        };
+        if !supported_role(code, terminal, producer.boolean, argument)
+            || last.is_some_and(|previous| argument <= previous)
+        {
+            return Ok(None);
+        }
+        last = Some(argument);
+        push(&mut out, (producer, operand))?;
+    }
+    Ok(Some((out, all)))
+}
+
+/// A test run is one straight fallthrough chain: every node except the last
+/// transfers only to the next listed node, and the last node owns the predicate
+/// terminal. A skipped run may not carry copies whose steps would disappear.
+fn straight(
+    code: &MethodCode,
+    nodes: &[crate::p6::NodeId],
+    skipped: bool,
+) -> Result<bool, ExpressionError> {
+    if nodes.is_empty() {
+        return Ok(false);
+    }
+    for window in nodes.windows(2) {
+        let BlockEnd::Transfers(links) = &code.emission.blocks[window[0].0 as usize].end else {
+            return Ok(false);
+        };
+        let [link] = links.as_slice() else {
+            return Ok(false);
+        };
+        let Some(transfer) = code.transfers.get(link.0 as usize) else {
+            return Ok(false);
+        };
+        if code.blocks[window[0].0 as usize].transfers.as_slice() != [*link]
+            || code.labels[transfer.destination.0 as usize].node != window[1]
+        {
+            return Ok(false);
+        }
+        if skipped && !code.emission.transfers[link.0 as usize].copies.is_empty() {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
+/// Selects P6's complete explicit alternative. Predicate portions, child order
+/// and child completions were established before P6 publication; this consumer
+/// neither walks subtrees nor changes retained source roles or continuations.
+fn explicit(code: &mut MethodCode, index: usize) -> Result<(), ExpressionError> {
+    let ControlKind::Condition {
+        tests, explicit, ..
+    } = &code.controls[index].kind
+    else {
+        return Err(bug("explicit condition lost its delivered plan"));
+    };
+    for test in tests {
+        let block = code
+            .blocks
+            .get(test.predicate.0 as usize)
+            .ok_or(bug("explicit condition lost its predicate portion"))?;
+        code.emission.blocks[test.predicate.0 as usize].end =
+            BlockEnd::Terminal(block.original_block);
+    }
+    for &link in &explicit.gotos {
+        let transfer = code
+            .transfers
+            .get(link.0 as usize)
+            .ok_or(bug("explicit condition lost an original branch edge"))?;
+        code.emission.transfers[link.0 as usize].spelling =
+            TransferSpelling::Goto(transfer.destination);
+    }
+    for completion in &explicit.completions {
+        code.emission.controls[completion.child.0 as usize].continuation =
+            match &completion.continuation {
+                Continuation::Goto(label) => Some(*label),
+                Continuation::None | Continuation::Parent | Continuation::Next(_) => None,
+            };
+    }
+    let children = super::super::build::copy(&explicit.children)?;
+    code.emission.controls[index].explicit_children = Some(children);
+    code.emission.controls[index].layout = EmissionLayout::Sequence;
+    Ok(())
 }

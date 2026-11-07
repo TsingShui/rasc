@@ -8,6 +8,7 @@ ids!(
     RegionId,
     LoopId,
     ChainId,
+    ConditionId,
     TryId,
     SyncId,
     LabelId,
@@ -179,6 +180,9 @@ pub struct LoopPlan {
     pub(super) id: LoopId,
     pub(super) header: NodeId,
     pub(super) members: Vec<NodeId>,
+    pub(super) evaluation: Vec<NodeId>,
+    pub(super) lexical_members: Vec<NodeId>,
+    pub(super) private_exits: Vec<LinkId>,
     pub(super) latches: Vec<LinkId>,
     pub(super) exits: Vec<LinkId>,
     pub(super) follow: Option<NodeId>,
@@ -193,6 +197,18 @@ impl LoopPlan {
     }
     pub fn members(&self) -> &[NodeId] {
         &self.members
+    }
+    /// Original ordered predicate evaluation, separate from repeated body work.
+    pub fn evaluation(&self) -> &[NodeId] {
+        &self.evaluation
+    }
+    /// Backedge core plus proved private lexical exit content.
+    pub fn lexical_members(&self) -> &[NodeId] {
+        &self.lexical_members
+    }
+    /// Original exits whose single-entry abrupt corridors are lexical body content.
+    pub fn private_exits(&self) -> &[LinkId] {
+        &self.private_exits
     }
     pub fn latches(&self) -> &[LinkId] {
         &self.latches
@@ -382,6 +398,93 @@ pub enum RecoveryReason {
     ConstructionSplit,
     Unstructured,
 }
+/// One original predicate of a condition region. `select` is the delivered link
+/// that reaches the shared result arm; `other` leaves the test. The zone between
+/// the previous test and this predicate stays in the region as its own part.
+#[derive(Clone, Copy, Debug)]
+pub struct ConditionTest {
+    pub(super) predicate: NodeId,
+    pub(super) select: LinkId,
+    pub(super) other: LinkId,
+}
+impl ConditionTest {
+    pub fn predicate(&self) -> NodeId {
+        self.predicate
+    }
+    pub fn select(&self) -> LinkId {
+        self.select
+    }
+    pub fn other(&self) -> LinkId {
+        self.other
+    }
+}
+/// Ordered short-circuit tests. The shared arm is entered by every `select` link;
+/// the last `other` link reaches the other result arm or the follow directly.
+#[derive(Debug)]
+pub struct ConditionPlan {
+    pub(super) id: ConditionId,
+    pub(super) tests: Vec<ConditionTest>,
+    pub(super) shared: NodeId,
+    pub(super) else_arm: bool,
+    pub(super) explicit: Option<ConditionSchedule>,
+}
+/// Explicit alternative of an accepted condition. Child interiors, entry and
+/// abrupt-exit scopes retain their source plans. `completions` supplies every
+/// child's normal delivery under this order; `gotos` supplies original links
+/// whose implicit delivery crosses the changed child boundaries.
+#[derive(Debug)]
+pub struct ConditionSchedule {
+    pub(super) children: Vec<RegionId>,
+    pub(super) completions: Vec<ConditionCompletion>,
+    pub(super) gotos: Vec<LinkId>,
+}
+/// Normal completion of an intact child under the explicit parent layout.
+/// This carries no edge copies: those remain on their original selected links.
+#[derive(Clone, Copy, Debug)]
+pub struct ConditionCompletion {
+    pub(super) child: RegionId,
+    pub(super) continuation: Continuation,
+}
+impl ConditionCompletion {
+    pub fn child(&self) -> RegionId {
+        self.child
+    }
+    pub fn continuation(&self) -> Continuation {
+        self.continuation
+    }
+}
+impl ConditionSchedule {
+    pub fn children(&self) -> &[RegionId] {
+        &self.children
+    }
+    pub fn completions(&self) -> &[ConditionCompletion] {
+        &self.completions
+    }
+    pub fn gotos(&self) -> &[LinkId] {
+        &self.gotos
+    }
+}
+impl ConditionPlan {
+    pub fn id(&self) -> ConditionId {
+        self.id
+    }
+    pub fn tests(&self) -> &[ConditionTest] {
+        &self.tests
+    }
+    pub fn shared(&self) -> NodeId {
+        self.shared
+    }
+    /// Present for every selected Condition region; rejected proposals have no
+    /// layout. Entry, follow and exact predicate portions retain their source IDs.
+    pub fn explicit(&self) -> Option<&ConditionSchedule> {
+        self.explicit.as_ref()
+    }
+    /// Whether the last test's other link reaches a second result arm rather
+    /// than leaving the region directly.
+    pub fn else_arm(&self) -> bool {
+        self.else_arm
+    }
+}
 #[derive(Debug)]
 pub enum RegionKind {
     Block(NodeId),
@@ -390,6 +493,9 @@ pub enum RegionKind {
         true_link: LinkId,
         false_link: LinkId,
     },
+    /// Ordered tests whose selected edges share one result arm. Each test keeps
+    /// its original predicate, links and evaluation order.
+    Condition(ConditionId),
     Loop(LoopId),
     Switch {
         arms: Vec<LinkId>,
@@ -706,6 +812,7 @@ pub struct RegionFacts {
     pub(super) throws: Vec<ThrowPlan>,
     pub(super) handlers: Vec<HandlerEntry>,
     pub(super) tries: Vec<TryPlan>,
+    pub(super) conditions: Vec<ConditionPlan>,
     pub(super) locks: Vec<LockEvent>,
     pub(super) monitors: Vec<MonitorPlan>,
     pub(super) synchronized: Vec<SyncPlan>,
@@ -732,6 +839,7 @@ impl RegionFacts {
             throws: Vec::new(),
             handlers: Vec::new(),
             tries: Vec::new(),
+            conditions: Vec::new(),
             locks: Vec::new(),
             monitors: Vec::new(),
             synchronized: Vec::new(),
@@ -790,6 +898,9 @@ impl RegionFacts {
     }
     pub fn tries(&self) -> &[TryPlan] {
         &self.tries
+    }
+    pub fn conditions(&self) -> &[ConditionPlan] {
+        &self.conditions
     }
     pub fn locks(&self) -> &[LockEvent] {
         &self.locks

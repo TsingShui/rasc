@@ -113,13 +113,13 @@ impl<'s, 'a> References<'s, 'a> {
             Source::Leaf => Ok(state),
         }
     }
-    pub fn canonical(
+    pub fn canonical<E>(
         &self,
         state: StateId,
         other: Option<StateId>,
         mut point: PointId,
         incoming: &[Vec<TransferId>],
-        events: Option<&[Option<usize>]>,
+        events: Option<&[Option<E>]>,
     ) -> PointId {
         let definition = self.definition(state);
         let other_definition = other.and_then(|s| self.definition(s));
@@ -159,7 +159,7 @@ pub(super) fn alias_query(
     point: PointId,
 ) -> Result<usize, TypeError> {
     let (a, b) = if a < b { (a, b) } else { (b, a) };
-    let point = refs.canonical(a, Some(b), point, incoming, None);
+    let point = refs.canonical::<()>(a, Some(b), point, incoming, None);
     graph.intern(AliasQuery { a, b, point })
 }
 pub(super) fn aliases(

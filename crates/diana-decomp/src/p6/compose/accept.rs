@@ -68,23 +68,33 @@ pub(super) fn match_branch_loops(
     f: &RegionFacts,
     c: &Candidate,
 ) -> Result<Result<(), RecoveryReason>, RegionError> {
-    if !matches!(c.kind, RegionKind::If { .. }) {
+    if !matches!(c.kind, RegionKind::If { .. } | RegionKind::Condition(_)) {
         return Ok(Ok(()));
     }
     let set = mask(f.nodes.len(), &c.members)?;
     for plan in &f.loops {
-        let inside = plan.members.iter().filter(|n| set[n.0 as usize]).count();
-        let owns_loop = inside == plan.members.len();
+        let inside = plan
+            .lexical_members
+            .iter()
+            .filter(|n| set[n.0 as usize])
+            .count();
+        let owns_loop = inside == plan.lexical_members.len();
         // All established plans constrain branches, before any loop is selected.
         if inside != 0 && !owns_loop && inside != c.members.len() {
             return Ok(Err(RecoveryReason::Overlap));
         }
+        let owns_private_exit = c.follow == Some(plan.continue_target())
+            && plan.private_exits.iter().any(|exit| {
+                let link = f.links[exit.0 as usize];
+                set[link.from.0 as usize] && set[link.to.0 as usize]
+            });
         if !owns_loop
             && (set[plan.continue_target().0 as usize]
-                || plan
-                    .latches
-                    .iter()
-                    .any(|l| set[f.links[l.0 as usize].from.0 as usize]))
+                || (!owns_private_exit
+                    && plan
+                        .latches
+                        .iter()
+                        .any(|l| set[f.links[l.0 as usize].from.0 as usize])))
         {
             return Ok(Err(RecoveryReason::Overlap));
         }

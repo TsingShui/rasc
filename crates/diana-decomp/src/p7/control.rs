@@ -203,6 +203,14 @@ pub enum ControlKind {
         when_true: TransferId,
         when_false: TransferId,
     },
+    /// Ordered short-circuit tests delivered by one P6 condition region. The
+    /// children are the test runs, then the shared arm, then the optional other
+    /// arm; each test keeps its original terminal, links and evaluation order.
+    Condition {
+        tests: Vec<ConditionTest>,
+        else_arm: bool,
+        explicit: ConditionSchedule,
+    },
     Loop {
         syntax: LoopSyntax,
         continue_target: LabelId,
@@ -242,6 +250,26 @@ pub enum Continuation {
     Parent,
     Next(LabelId),
     Goto(LabelId),
+}
+/// One delivered predicate of a short-circuit condition. `select` is the
+/// original edge to the shared arm, so it also fixes the printed polarity.
+#[derive(Debug, Serialize)]
+pub struct ConditionTest {
+    pub predicate: p6::NodeId,
+    pub select: TransferId,
+    pub other: TransferId,
+}
+/// P6's explicit alternative, lowered without changing source child roles.
+#[derive(Debug, Serialize)]
+pub struct ConditionSchedule {
+    pub children: Vec<ControlId>,
+    pub completions: Vec<ConditionCompletion>,
+    pub gotos: Vec<TransferId>,
+}
+#[derive(Debug, Serialize)]
+pub struct ConditionCompletion {
+    pub child: ControlId,
+    pub continuation: Continuation,
 }
 #[derive(Debug, Serialize)]
 pub struct Control {
@@ -284,6 +312,17 @@ fn ids<T: Copy, U>(source: &[T], map: impl Fn(T) -> U) -> Result<Vec<U>, Express
 }
 fn control(value: Option<ControlId>) -> Result<ControlId, ExpressionError> {
     value.ok_or(bug("transfer names an unselected control region"))
+}
+fn continuation(
+    c: &Context<'_, '_>,
+    source: p6::Continuation,
+) -> Result<Continuation, ExpressionError> {
+    Ok(match source {
+        p6::Continuation::None => Continuation::None,
+        p6::Continuation::Parent => Continuation::Parent,
+        p6::Continuation::Next(n) => Continuation::Next(label(c, n)?),
+        p6::Continuation::Goto(l) => Continuation::Goto(LabelId(l.0)),
+    })
 }
 
 fn outlet_copies(
@@ -575,6 +614,42 @@ pub(super) fn construct(c: &mut Context<'_, '_>) -> Result<(), ExpressionError> 
                 when_true: TransferId(true_link.0),
                 when_false: TransferId(false_link.0),
             },
+            RegionKind::Condition(id) => {
+                let plan = &f.conditions()[id.0 as usize];
+                let mut tests = Vec::new();
+                for test in plan.tests() {
+                    push(
+                        &mut tests,
+                        ConditionTest {
+                            predicate: test.predicate(),
+                            select: TransferId(test.select().0),
+                            other: TransferId(test.other().0),
+                        },
+                    )?;
+                }
+                let explicit = plan
+                    .explicit()
+                    .ok_or(bug("selected condition has no explicit schedule"))?;
+                let mut completions = Vec::new();
+                for completion in explicit.completions() {
+                    push(
+                        &mut completions,
+                        ConditionCompletion {
+                            child: ControlId(completion.child().0),
+                            continuation: continuation(c, completion.continuation())?,
+                        },
+                    )?;
+                }
+                ControlKind::Condition {
+                    tests,
+                    else_arm: plan.else_arm(),
+                    explicit: ConditionSchedule {
+                        children: ids(explicit.children(), |r| ControlId(r.0))?,
+                        completions,
+                        gotos: ids(explicit.gotos(), |l| TransferId(l.0))?,
+                    },
+                }
+            }
             RegionKind::Loop(id) => {
                 let p = &f.loops()[id.0 as usize];
                 let syntax = match p.form() {
@@ -725,12 +800,7 @@ pub(super) fn construct(c: &mut Context<'_, '_>) -> Result<(), ExpressionError> 
                 }
             }
         };
-        let continuation = match r.continuation() {
-            p6::Continuation::None => Continuation::None,
-            p6::Continuation::Parent => Continuation::Parent,
-            p6::Continuation::Next(n) => Continuation::Next(label(c, n)?),
-            p6::Continuation::Goto(l) => Continuation::Goto(LabelId(l.0)),
-        };
+        let continuation = continuation(c, r.continuation())?;
         let entry = r.entry().map(|n| label(c, n)).transpose()?;
         let follow = r.follow().map(|n| label(c, n)).transpose()?;
         push(

@@ -7,6 +7,7 @@ mod constraints;
 mod dataflow;
 mod initialization;
 mod product;
+mod redundancy;
 mod references;
 mod refinements;
 mod solve;

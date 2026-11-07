@@ -35,6 +35,11 @@ pub(super) fn transfers(f: &mut RegionFacts, g: &Graph) -> Result<(), RegionErro
                 }
                 RegionKind::Loop(loop_id) => {
                     let p = &f.loops[loop_id.0 as usize];
+                    if p.evaluation.windows(2).any(|pair| pair == [l.from, l.to]) {
+                        action = TransferAction::Next(l.to);
+                        handled = true;
+                        break;
+                    }
                     if p.condition() == Some(l.from) {
                         action = TransferAction::LoopCondition {
                             region: id,
@@ -65,6 +70,7 @@ pub(super) fn transfers(f: &mut RegionFacts, g: &Graph) -> Result<(), RegionErro
             at = f.parents[id.0 as usize];
         }
         if !handled {
+            let mut crossed_loop = false;
             let mut at = Some(f.labels[l.from.0 as usize].owner);
             while let Some(id) = at {
                 let r = &f.regions[id.0 as usize];
@@ -75,10 +81,13 @@ pub(super) fn transfers(f: &mut RegionFacts, g: &Graph) -> Result<(), RegionErro
                             action = TransferAction::Continue(*loop_id);
                             break;
                         }
-                        if p.follow == Some(l.to) && !p.members.contains(&l.to) {
+                        if p.follow == Some(l.to) && !r.nodes.contains(&l.to) {
                             action = TransferAction::Break(id);
                             break;
                         }
+                        // Reaching an outer sibling is not fallthrough through
+                        // this loop's closing brace: repetition would run first.
+                        crossed_loop |= !r.nodes.contains(&l.to);
                     }
                     RegionKind::Synchronized(sync) => {
                         let p = &f.synchronized[sync.0 as usize];
@@ -101,7 +110,7 @@ pub(super) fn transfers(f: &mut RegionFacts, g: &Graph) -> Result<(), RegionErro
                         action = TransferAction::Break(id);
                         break;
                     }
-                    RegionKind::Sequence => {
+                    RegionKind::Sequence if !crossed_loop => {
                         for pair in r.children.windows(2) {
                             let a = &f.regions[pair[0].0 as usize];
                             let b = &f.regions[pair[1].0 as usize];
@@ -115,7 +124,9 @@ pub(super) fn transfers(f: &mut RegionFacts, g: &Graph) -> Result<(), RegionErro
                             break;
                         }
                     }
-                    RegionKind::If { .. } | RegionKind::Try(_) if r.follow == Some(l.to) => {
+                    RegionKind::If { .. } | RegionKind::Condition(_) | RegionKind::Try(_)
+                        if !crossed_loop && r.follow == Some(l.to) =>
+                    {
                         action = TransferAction::Next(l.to);
                         break;
                     }
@@ -146,6 +157,7 @@ pub(super) fn transfers(f: &mut RegionFacts, g: &Graph) -> Result<(), RegionErro
                     }
                 }
                 RegionKind::If { .. }
+                | RegionKind::Condition(_)
                 | RegionKind::Switch { .. }
                 | RegionKind::Try(_)
                 | RegionKind::LabelledBlock { .. }

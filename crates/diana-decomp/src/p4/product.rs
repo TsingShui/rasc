@@ -397,6 +397,85 @@ pub struct ArrayFillView {
     pub element: Result<ArrayElementType, Problem>,
 }
 
+/// Original events that establish, before a `check-cast` executes, that one
+/// reference value is null or an instance of one exact type. Both carry the
+/// operation they name; no printed spelling or declared type is used.
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, serde::Serialize)]
+pub enum CheckSource {
+    /// An original `check-cast` of the same target that completed normally.
+    SuccessfulCast { operation: OpId },
+    /// An original `instanceof` on the branch where its result is nonzero.
+    InstanceOfTrue { operation: OpId },
+}
+/// Why redundancy of one original check is neither established nor excluded.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CheckGap {
+    /// The original type reference or the checked operand layout is unavailable.
+    UnresolvedCheck,
+    /// A reaching read has no established SSA value availability.
+    SourceUnavailable(StateId),
+    /// A reaching state has no value: undefined, invalidated or outside frame.
+    UndefinedSource(StateId),
+}
+/// Pre-check evidence for one original check-cast, from established reaching
+/// transfers only. The check's own success never contributes.
+#[derive(Clone, Debug)]
+pub struct CheckEvidence {
+    pub(super) receiver: StateId,
+    pub(super) value: ValueId,
+    pub(super) target: TypeNameId,
+    pub(super) sources: Vec<CheckSource>,
+}
+impl CheckEvidence {
+    pub fn receiver(&self) -> StateId {
+        self.receiver
+    }
+    pub fn value(&self) -> ValueId {
+        self.value
+    }
+    pub fn target(&self) -> TypeNameId {
+        self.target
+    }
+    /// Every original event the all-path proof relied on, in product order.
+    pub fn sources(&self) -> &[CheckSource] {
+        &self.sources
+    }
+}
+/// What pre-check facts establish about one original `check-cast`.
+#[derive(Clone, Debug)]
+pub enum CheckDisposition {
+    /// Every reaching transfer establishes membership-or-null in this exact
+    /// target for this exact value before the check executes, so the check
+    /// cannot add behavior there.
+    Redundant(CheckEvidence),
+    /// Established facts leave a reaching transfer without that establishment;
+    /// the original check keeps its behavior.
+    Retained,
+    /// A reaching dependency is unavailable or unsupported, so redundancy is
+    /// neither established nor excluded.
+    Unknown(CheckGap),
+}
+/// One original `check-cast` operation, in operation order.
+#[derive(Clone, Debug)]
+pub struct CheckView {
+    pub(super) operation: OpId,
+    pub(super) target: Option<TypeNameId>,
+    pub(super) disposition: CheckDisposition,
+}
+impl CheckView {
+    pub fn operation(&self) -> OpId {
+        self.operation
+    }
+    /// The published target name, absent when the original type reference or
+    /// checked operand layout was unavailable.
+    pub fn target(&self) -> Option<TypeNameId> {
+        self.target
+    }
+    pub fn disposition(&self) -> &CheckDisposition {
+        &self.disposition
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ConstructorRelation {
     Allocation,
@@ -490,6 +569,7 @@ pub struct TypeFacts {
     pub(super) array_accesses: Vec<ArrayAccessView>,
     pub(super) array_fills: Vec<ArrayFillView>,
     pub(super) initialization: Vec<InitializationUse>,
+    pub(super) checks: Vec<CheckView>,
     pub(super) issues: Vec<TypeIssue>,
 }
 impl TypeFacts {
@@ -503,6 +583,7 @@ impl TypeFacts {
             array_accesses: Vec::new(),
             array_fills: Vec::new(),
             initialization: Vec::new(),
+            checks: Vec::new(),
             issues: Vec::new(),
         }
     }
@@ -536,6 +617,11 @@ impl TypeFacts {
     }
     pub fn initialization(&self) -> &[InitializationUse] {
         &self.initialization
+    }
+    /// One entry per original `check-cast` operation, in operation order, with
+    /// the pre-check disposition of its target membership.
+    pub fn checks(&self) -> &[CheckView] {
+        &self.checks
     }
     pub fn issues(&self) -> &[TypeIssue] {
         &self.issues

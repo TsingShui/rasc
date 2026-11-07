@@ -8,6 +8,7 @@ use super::super::dominance::Structure;
 use super::super::graph::Graph;
 use super::super::protection;
 use super::super::*;
+use super::conditions;
 use super::parts::*;
 use crate::p2::{EdgeRole, NormalEdge, Terminal};
 use crate::p5::StorageMethod;
@@ -79,36 +80,22 @@ pub(super) fn candidates(
 ) -> Result<Vec<Candidate>, RegionError> {
     let mut out = Vec::new();
     for l in &f.loops {
-        // Backedge membership is not the lexical body: release/break corridors
-        // can lie outside that core. Include a closed scope atomically; all
-        // original entrances and edges are still checked by candidate acceptance.
-        let mut members = copy(&l.members)?;
-        for scope in &f.synchronized {
-            if scope.separation.is_none()
-                && l.members.contains(&g.op_node[scope.enter.0 as usize])
-                && !scope.members.contains(&l.header)
-                && l.follow.is_none_or(|n| !scope.members.contains(&n))
-            {
-                for &node in &scope.members {
-                    if !members.contains(&node) {
-                        push(&mut members, node)?;
-                    }
-                }
-            }
-        }
-        members.sort_unstable();
+        let members = copy(&l.lexical_members)?;
         let mut parts = Vec::new();
         let mut body = Vec::new();
         for &node in &members {
-            if Some(node) != l.condition() {
+            if !l.evaluation.contains(&node) {
                 push(&mut body, node)?;
             }
         }
         let entry = if matches!(l.form, LoopForm::While(_)) {
-            g.outgoing[l.header.0 as usize]
-                .iter()
-                .map(|e| f.links[e.0 as usize].to)
-                .find(|p| body.contains(p))
+            match l.form {
+                LoopForm::While(condition) => {
+                    let target = f.links[condition.repeat.0 as usize].to;
+                    body.contains(&target).then_some(target)
+                }
+                _ => None,
+            }
         } else {
             body.contains(&l.header).then_some(l.header)
         };
@@ -121,13 +108,13 @@ pub(super) fn candidates(
                 follow: Some(l.continue_target()),
             },
         )?;
-        if let Some(condition) = l.condition() {
+        if l.condition().is_some() {
             push(
                 &mut parts,
                 Part {
                     completion: PartCompletion::Ordinary,
-                    nodes: copy(&[condition])?,
-                    entry: Some(condition),
+                    nodes: copy(&l.evaluation)?,
+                    entry: l.evaluation.first().copied(),
                     follow: None,
                 },
             )?;
@@ -215,11 +202,13 @@ pub(super) fn candidates(
             },
         )?;
     }
-    for n in &f.nodes {
-        if !n.terminal {
+    for index in 0..f.nodes.len() {
+        if !f.nodes[index].terminal {
             continue;
         }
-        let terminal = storage.execution().blocks()[n.block.0 as usize].terminal();
+        let n = f.nodes[index].id();
+        let block = f.nodes[index].block();
+        let terminal = storage.execution().blocks()[block.0 as usize].terminal();
         if !matches!(
             terminal,
             Some(Terminal::Branch { .. } | Terminal::Switch { .. })
@@ -228,19 +217,23 @@ pub(super) fn candidates(
         }
         if storage
             .facts()
-            .terminal_uses(n.block)
+            .terminal_uses(block)
             .is_none_or(|uses| uses.iter().any(|u| u.read().is_err()))
         {
             continue;
         }
-        if f.loops.iter().any(|l| l.condition() == Some(n.id)) {
+        if f.loops.iter().any(|l| l.condition() == Some(n)) {
             continue;
         }
-        let follow = s.follow(n.id);
+        let follow = s.follow(n);
         if matches!(terminal, Some(Terminal::Branch { .. })) {
+            if let Some(proposal) = conditions::candidate(storage, f, g, s, n)? {
+                push(&mut out, proposal)?;
+                continue;
+            }
             let mut yes = None;
             let mut no = None;
-            for &l in &g.outgoing[n.id.0 as usize] {
+            for &l in &g.outgoing[n.0 as usize] {
                 if let LinkOrigin::Edge(e) = f.links[l.0 as usize].origin {
                     match storage.execution().edges()[e.0 as usize].role() {
                         EdgeRole::Normal(NormalEdge::ConditionalTrue) => yes = Some(l),
@@ -252,9 +245,9 @@ pub(super) fn candidates(
             let (Some(yes), Some(no)) = (yes, no) else {
                 return Err(bug("conditional terminal lost its original arms"));
             };
-            if let Some(proposal) = branch_proposal(storage, f, g, n.id, yes, no, follow)? {
+            if let Some(proposal) = branch_proposal(storage, f, g, n, yes, no, follow)? {
                 let set = mask(f.nodes.len(), &proposal.members)?;
-                if protection::closed_entry(storage, f, g, &set, n.id) {
+                if protection::closed_entry(storage, f, g, &set, n) {
                     push(&mut out, proposal)?;
                     continue;
                 }
@@ -267,8 +260,7 @@ pub(super) fn candidates(
                     (SuccessorBoundary::False(no), no),
                 ] {
                     let follow = Some(f.links[link.0 as usize].to);
-                    if let Some(mut proposal) =
-                        branch_proposal(storage, f, g, n.id, yes, no, follow)?
+                    if let Some(mut proposal) = branch_proposal(storage, f, g, n, yes, no, follow)?
                     {
                         proposal.successor_boundary = Some(boundary);
                         push(&mut out, proposal)?;
@@ -283,22 +275,22 @@ pub(super) fn candidates(
             &mut parts,
             Part {
                 completion: PartCompletion::Ordinary,
-                nodes: copy(&[n.id])?,
-                entry: Some(n.id),
+                nodes: copy(&[n])?,
+                entry: Some(n),
                 follow: None,
             },
         )?;
-        let arms = copy(&g.outgoing[n.id.0 as usize])?;
+        let arms = copy(&g.outgoing[n.0 as usize])?;
         let mut starts = Vec::new();
         for &l in &arms {
             push(&mut starts, f.links[l.0 as usize].to)?;
         }
         let body = protection::reachable(storage, f, g, &starts, follow, &empty, false)?;
-        if body[n.id.0 as usize] {
+        if body[n.0 as usize] {
             continue;
         }
         let mut set = copy(&body)?;
-        set[n.id.0 as usize] = true;
+        set[n.0 as usize] = true;
         let members = list(&set)?;
         push(
             &mut parts,
@@ -317,7 +309,7 @@ pub(super) fn candidates(
             &mut out,
             Candidate {
                 kind,
-                entry: n.id,
+                entry: n,
                 follow,
                 members,
                 parts,

@@ -43,6 +43,7 @@ failures retain their classification, and method-task stops do not truncate sibl
 | `InitializationUse` | Initialization states at the original use position, including failure, mixed paths and unknowns; a finite allocation comparison when a single original allocation is known. |
 | `ArrayAccessView` | Original get/put/fill operation and SSA array state, with component bounds at that execution position and explicit coverage gaps. |
 | `ArrayFillView` | Original fill operation and SSA array state, with a source-supported primitive element interpretation or local problem; width/count/bits remain in the execution payload fact. |
+| `CheckView` | One original `check-cast`, in operation order, with its target name when it resolved and the pre-check disposition of its membership: `Redundant` with typed evidence, `Retained`, or `Unknown` with a concrete gap. |
 
 `ValueFacts::allocations()` preserves known new-instance origins through the
 existing copy/Phi rules, including partial sources. This set is not a dynamic
@@ -106,6 +107,37 @@ repair unavailable SSA input. Uncovered unknown siblings remain unknown. Null-on
 grounded but supply no element type; a successful cast of null MUST NOT contribute
 a component type to a different non-null alternative. Neither null nor construction
 bottom establishes an array execution or non-nullness.
+
+### Pre-check redundancy of an original check-cast
+
+`redundancy.rs` answers one question for each original `check-cast` without
+running another CFG, SSA or dominance chain: does every reaching transfer already
+establish that this exact reference is null or an instance of this exact original
+target before the check executes? Only two original events establish it.
+
+1. A same-target `check-cast` that completed normally on the same value. Its
+   exceptional completion establishes nothing.
+2. An `instanceof` on the outcome where its result is nonzero, resolved through
+   the original result value, its P3 terminal use, the original branch outcome and
+   the P4 copy/alias rules. The zero outcome and a merged boolean establish
+   nothing; `instanceof` is false for null, so its true outcome also proves
+   non-nullness.
+
+Target identity is the original type identity, never a descriptor spelling,
+declared type, generic argument or assignability guess. The value comparison uses
+the same private alias relation as component refinement. A local proof is read at
+the transfer leaving its establishing point, so the check's own success never
+justifies that same check. The disposition is a must-fact: a node without reaching
+transfers is unestablished, a join requires every reaching transfer, and the
+least fixpoint starts from unestablished, so a loop's first failing check stays
+retained. A merged alias, an undefined or unavailable reaching state, and an
+unresolved type reference or operand layout publish `Retained` or `Unknown`; they
+never remove a check and never fail the method. The worklist grows finite
+point/state sets from the input.
+
+The unpublished `TypePartial` carries no `CheckView`, so a stopped P4 never
+publishes a disposition. P7 consumes the published disposition; P4 does not decide
+display.
 
 The sparse worklist grows finite name/gap sets. Queries beyond every input
 descriptor's array rank share one no-nominal-evidence depth; this closes recursive

@@ -14,7 +14,9 @@ pub(super) fn construct(code: &mut MethodCode) -> Result<(), ExpressionError> {
     while let Some((id, visited)) = work.pop() {
         if !visited {
             push(&mut work, (id, true))?;
-            for &child in &code.controls[id.0 as usize].children {
+            for &child in
+                code.emission.controls[id.0 as usize].children(&code.controls[id.0 as usize])
+            {
                 push(&mut work, (child, false))?;
             }
             continue;
@@ -99,7 +101,9 @@ pub(super) fn construct(code: &mut MethodCode) -> Result<(), ExpressionError> {
             }
             EmissionLayout::Sequence => {
                 empty[id.0 as usize] = true;
-                for &child in &code.controls[id.0 as usize].children {
+                for &child in
+                    code.emission.controls[id.0 as usize].children(&code.controls[id.0 as usize])
+                {
                     if empty[child.0 as usize] {
                         continue;
                     }

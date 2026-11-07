@@ -2,7 +2,7 @@ use super::build::*;
 use super::dominance::Structure;
 use super::graph::Graph;
 use super::*;
-use crate::p2::{EdgeRole, NormalEdge, Terminal};
+use crate::p2::{EdgeRole, NormalEdge, OpKind, Terminal};
 use crate::p5::StorageMethod;
 
 pub(super) fn construct(
@@ -95,17 +95,51 @@ pub(super) fn construct(
                     Some(Terminal::Branch { .. })
                 )
         };
-        if conditional(header)
-            && f.nodes[header.0 as usize].operations.is_empty()
-            && g.outgoing[header.0 as usize].len() == 2
-        {
-            let inside = g.outgoing[header.0 as usize]
-                .iter()
-                .filter(|l| member[f.links[l.0 as usize].to.0 as usize])
-                .count();
-            if inside == 1 {
-                form = LoopForm::While(condition_plan(header)?);
+        let mut evaluation = Vec::new();
+        let block = f.nodes[header.0 as usize].block;
+        let mut at = header;
+        // Only the original private, straight WithinBlock prefix is an entry
+        // evaluation. No rotation, cross-block hoisting or bypassed arrival.
+        loop {
+            if !member[at.0 as usize]
+                || f.nodes[at.0 as usize].operations.clone().any(|op| {
+                    matches!(
+                        storage.execution().operations()[op as usize].kind(),
+                        OpKind::Monitor { .. }
+                    )
+                })
+            {
+                evaluation.clear();
+                break;
             }
+            push(&mut evaluation, at)?;
+            if conditional(at) && g.outgoing[at.0 as usize].len() == 2 {
+                let inside = g.outgoing[at.0 as usize]
+                    .iter()
+                    .filter(|l| member[f.links[l.0 as usize].to.0 as usize])
+                    .count();
+                if inside == 1 {
+                    form = LoopForm::While(condition_plan(at)?);
+                }
+                break;
+            }
+            let [link] = g.outgoing[at.0 as usize].as_slice() else {
+                break;
+            };
+            let link = f.links[link.0 as usize];
+            if link.origin != LinkOrigin::WithinBlock(block)
+                || g.incoming[link.to.0 as usize].as_slice() != [link.id]
+                || g.exceptions.iter().flatten().any(|&e| {
+                    Graph::exception_possible(f, e)
+                        && Graph::exception_target(f, storage, e) == Some(link.to)
+                })
+            {
+                break;
+            }
+            at = link.to;
+        }
+        if !matches!(form, LoopForm::While(_)) {
+            evaluation.clear();
         }
         if matches!(form, LoopForm::Infinite) && latches.len() == 1 {
             let latch = f.links[latches[0].0 as usize].from;
@@ -116,6 +150,7 @@ pub(super) fn construct(
                     .any(|l| !member[f.links[l.0 as usize].to.0 as usize])
             {
                 form = LoopForm::DoWhile(condition_plan(latch)?);
+                push(&mut evaluation, latch)?;
             }
         }
         // A conditional loop's normal continuation is its actual false/release
@@ -129,7 +164,10 @@ pub(super) fn construct(
             LoopPlan {
                 id: loop_id,
                 header,
+                lexical_members: Vec::new(),
+                private_exits: Vec::new(),
                 members,
+                evaluation,
                 latches,
                 exits,
                 follow,
@@ -165,7 +203,9 @@ pub(super) fn construct(
     // Edge roles are retained on original links, not inferred from target equality.
     for loop_plan in &f.loops {
         if matches!(loop_plan.form, LoopForm::While(_)) {
-            for &l in &g.outgoing[loop_plan.header.0 as usize] {
+            for &l in
+                &g.outgoing[loop_plan.condition().ok_or(bug("while lost condition"))?.0 as usize]
+            {
                 if let LinkOrigin::Edge(e) = f.links[l.0 as usize].origin
                     && !matches!(
                         storage.execution().edges()[e.0 as usize].role(),

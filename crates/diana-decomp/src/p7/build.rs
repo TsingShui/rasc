@@ -137,7 +137,7 @@ fn construct(
     super::lower::terminals(&mut c)?;
     super::control::construct(&mut c)?;
     super::emission::construct(c.code)?;
-    super::compose::construct(c.code)?;
+    super::compose::construct(c.code, planned.type_facts())?;
     super::local_names::construct(
         c.code,
         planned.storage_facts().definitions(),

@@ -378,6 +378,7 @@ fn method(
                     lookup,
                     pending_controls: Some(&mut pending),
                     statement: None,
+                    check_carrier: None,
                 };
                 context.body()?;
                 if out.position() == body_start {
@@ -431,6 +432,7 @@ fn method(
                     lookup,
                     pending_controls: None,
                     statement: None,
+                    check_carrier: None,
                 };
                 for local in prefix.local_declarations() {
                     context.out.indent()?;

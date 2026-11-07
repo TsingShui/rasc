@@ -34,6 +34,18 @@ pub enum BlockEnd {
     Terminal(BlockId),
     Transfers(Vec<TransferId>),
 }
+/// The exact printed carrier scope that shows an original `check-cast` instead
+/// of its own statement. A check writes no register, so only a read of the
+/// checked value can carry it.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+pub enum CheckCarrier {
+    /// A statement scope; `InlineCheck::occurrence` names its exact read.
+    Statement(StatementId),
+    /// One step of one original copy bundle. Only this step's right-hand side
+    /// reads the value; the bundle's other steps and gap reports keep their own
+    /// text at their own positions.
+    Copy { bundle: CopyPlanId, step: u32 },
+}
 /// A `check-cast` printed at the first use of its value instead of as its own
 /// statement. The check and its operation keep their provenance there.
 #[derive(Clone, Copy, Debug, Serialize)]
@@ -43,7 +55,27 @@ pub struct InlineCheck {
     pub pc: crate::CodeUnitOffset,
     pub value: StorageId,
     pub reference: ReferenceId,
-    pub target: StatementId,
+    pub carrier: CheckCarrier,
+    /// The one printed expression occurrence that reads `value` for this
+    /// carrier: the statement's first evaluated read, or the copy step's
+    /// right-hand side. P9 matches it exactly, so another read of the same
+    /// storage never prints the check again.
+    pub occurrence: ExprId,
+}
+/// A `check-cast` whose own display action cannot add behavior: P4 established
+/// from pre-check facts that every reaching transfer already proves the exact
+/// membership this check would resolve. The statement, operation, route and any
+/// copy keep their original facts and positions; only its text disappears, and
+/// its origins stay as zero-length anchors at that position.
+#[derive(Clone, Debug, Serialize)]
+pub struct OmittedCheck {
+    pub check: StatementId,
+    pub operation: OpId,
+    pub pc: crate::CodeUnitOffset,
+    pub value: StorageId,
+    pub reference: ReferenceId,
+    /// The original establishing events P4 relied on, for this product's reader.
+    pub sources: Vec<crate::p4::CheckSource>,
 }
 /// One original definition evaluated at its unique, adjacent terminal use.
 /// A payload printed as the allocation's own array literal. The allocation, the
@@ -120,6 +152,15 @@ pub enum EmissionLayout {
         test: PredicateEmission,
         shape: IfShape,
     },
+    /// Several original predicates print as one short-circuit condition. The
+    /// shared arm prints on `select`; the optional other arm prints otherwise.
+    Condition {
+        header: ControlId,
+        tests: Vec<PredicateEmission>,
+        yes: ControlId,
+        no: Option<ControlId>,
+        fall: TransferId,
+    },
     Loop {
         body: ControlId,
         placement: LoopPlacement,
@@ -156,7 +197,17 @@ pub struct EmissionControl {
     /// transfers stay in the product.
     pub transparent: bool,
     pub continuation: Option<LabelId>,
+    /// Selected P6 explicit order; the retained control still owns its original
+    /// tests/shared/other roles. Other layouts use the source child list.
+    pub explicit_children: Option<Vec<ControlId>>,
     pub layout: EmissionLayout,
+}
+impl EmissionControl {
+    pub fn children<'a>(&'a self, source: &'a Control) -> &'a [ControlId] {
+        self.explicit_children
+            .as_deref()
+            .unwrap_or(&source.children)
+    }
 }
 #[derive(Clone, Copy, Debug, Serialize)]
 pub enum TransferSpelling {
@@ -199,10 +250,15 @@ pub struct EmissionPlan {
     pub(super) inline_checks: Vec<InlineCheck>,
     /// Indices into `inline_checks`, by the statement that carries the check.
     pub(super) check_uses: Vec<Vec<u32>>,
+    /// Indices into `inline_checks`, by the copy bundle that carries the check.
+    pub(super) copy_check_uses: Vec<Vec<u32>>,
     pub(super) composed_uses: Vec<Option<ComposedExpression>>,
     pub(super) composed_operations: Vec<bool>,
     /// By the statement whose allocation prints the payload.
     pub(super) array_literals: Vec<Option<ArrayLiteral>>,
+    /// By the statement whose check prints nothing because P4 established it
+    /// cannot add behavior at that position.
+    pub(super) omitted_checks: Vec<Option<OmittedCheck>>,
     pub(super) hidden_locals: Vec<bool>,
     pub(super) deferred_controls: Vec<bool>,
     pub(super) operations: Vec<EvaluationPhases>,
@@ -231,9 +287,11 @@ impl EmissionPlan {
             natural_stores: Vec::new(),
             inline_checks: Vec::new(),
             check_uses: Vec::new(),
+            copy_check_uses: Vec::new(),
             composed_uses: Vec::new(),
             composed_operations: Vec::new(),
             array_literals: Vec::new(),
+            omitted_checks: Vec::new(),
             hidden_locals: Vec::new(),
             deferred_controls: Vec::new(),
             operations: Vec::new(),
@@ -263,11 +321,26 @@ impl EmissionPlan {
     pub fn show_chains(&self) -> &[bool] {
         &self.show_chains
     }
-    /// The check-cast carried by this statement for one read of `value`.
-    pub fn inline_check(&self, statement: StatementId, value: StorageId) -> Option<InlineCheck> {
-        for &index in self.check_uses.get(statement.0 as usize)? {
+    /// Every check-cast this plan prints at a use instead of its own statement.
+    pub fn inline_checks(&self) -> &[InlineCheck] {
+        &self.inline_checks
+    }
+    /// The check-cast carried by this exact printed occurrence for a read of
+    /// `value`. A statement carrier also requires the expression occurrence P7
+    /// selected, so another read of the same storage never prints the check.
+    pub fn inline_check(
+        &self,
+        carrier: CheckCarrier,
+        occurrence: ExprId,
+        value: StorageId,
+    ) -> Option<InlineCheck> {
+        let uses = match carrier {
+            CheckCarrier::Statement(statement) => self.check_uses.get(statement.0 as usize)?,
+            CheckCarrier::Copy { bundle, .. } => self.copy_check_uses.get(bundle.0 as usize)?,
+        };
+        for &index in uses {
             let check = self.inline_checks.get(index as usize)?;
-            if check.value == value {
+            if check.carrier == carrier && check.occurrence == occurrence && check.value == value {
                 return Some(*check);
             }
         }
@@ -302,6 +375,11 @@ impl EmissionPlan {
     }
     pub fn array_literal(&self, id: StatementId) -> Option<ArrayLiteral> {
         self.array_literals.get(id.0 as usize).copied().flatten()
+    }
+    /// The original check this statement's own display omits, if P4 established
+    /// it cannot add behavior at this position.
+    pub fn omitted_check(&self, id: StatementId) -> Option<&OmittedCheck> {
+        self.omitted_checks.get(id.0 as usize)?.as_ref()
     }
     pub fn hidden_local(&self, id: StorageId) -> bool {
         self.hidden_locals
@@ -352,6 +430,35 @@ fn child(c: &Control, n: usize) -> Result<ControlId, ExpressionError> {
         .copied()
         .ok_or(bug("syntax role has no selected child"))
 }
+/// A test prints the condition that selects the shared arm. `select` is an
+/// original conditional edge, so negation only inverts the delivered role.
+fn chained_predicate(
+    code: &MethodCode,
+    test: &super::ConditionTest,
+) -> Result<PredicateEmission, ExpressionError> {
+    let block = code
+        .blocks
+        .get(test.predicate.0 as usize)
+        .ok_or(bug("condition test lost its block"))?
+        .original_block;
+    let TerminalKind::If {
+        when_true,
+        when_false,
+        ..
+    } = code.terminals[block.0 as usize].kind
+    else {
+        return Err(bug("condition test lost its original branch"));
+    };
+    if test.select != when_true && test.select != when_false {
+        return Err(bug("condition select is not an original branch edge"));
+    }
+    Ok(PredicateEmission {
+        terminal: block,
+        when_true,
+        when_false,
+        negate: test.select == when_false,
+    })
+}
 fn predicate(
     code: &MethodCode,
     terminal: BlockId,
@@ -399,9 +506,11 @@ pub(super) fn construct(code: &mut MethodCode) -> Result<(), ExpressionError> {
     plan.field_qualifications = filled(code.references.len(), true)?;
     plan.natural_stores = filled(code.statements.len(), false)?;
     plan.check_uses = filled(code.statements.len(), Vec::new())?;
+    plan.copy_check_uses = filled(code.copies.len(), Vec::new())?;
     plan.composed_uses = filled(code.expressions.len(), None)?;
     plan.composed_operations = filled(code.operations.len(), false)?;
     plan.array_literals = filled(code.statements.len(), None)?;
+    plan.omitted_checks = filled(code.statements.len(), None)?;
     plan.hidden_locals = filled(code.locals.len(), false)?;
     plan.deferred_controls = filled(code.controls.len(), false)?;
     for l in &code.locals {
@@ -605,6 +714,28 @@ pub(super) fn construct(code: &mut MethodCode) -> Result<(), ExpressionError> {
         let layout = match &c.kind {
             ControlKind::Block { node } => EmissionLayout::Block(*node),
             ControlKind::Sequence => EmissionLayout::Sequence,
+            ControlKind::Condition {
+                tests, else_arm, ..
+            } => {
+                let runs = tests.len();
+                let mut emitted = Vec::new();
+                let mut last = None;
+                for test in tests {
+                    last = Some(test.other);
+                    push(&mut emitted, chained_predicate(code, test)?)?;
+                }
+                EmissionLayout::Condition {
+                    header: child(c, 0)?,
+                    tests: emitted,
+                    yes: child(c, runs)?,
+                    no: if *else_arm {
+                        Some(child(c, runs + 1)?)
+                    } else {
+                        None
+                    },
+                    fall: last.ok_or(bug("condition control has no test"))?,
+                }
+            }
             ControlKind::If { terminal, .. } => EmissionLayout::If {
                 header: child(c, 0)?,
                 yes: child(c, 1)?,
@@ -677,6 +808,7 @@ pub(super) fn construct(code: &mut MethodCode) -> Result<(), ExpressionError> {
                 label_required: true,
                 omitted: false,
                 transparent: false,
+                explicit_children: None,
                 continuation: match c.continuation {
                     Continuation::Goto(label) => Some(label),
                     _ => None,

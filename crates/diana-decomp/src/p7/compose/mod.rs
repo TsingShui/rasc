@@ -2,6 +2,7 @@
 //! The input is the same method's closed P7 product; no predecessor is reopened.
 
 mod branches;
+mod casts;
 mod expressions;
 mod loops;
 
@@ -12,7 +13,12 @@ use crate::p5::ThrowSite;
 
 /// Retains only textually referenced labels and selects an ordinary loop test
 /// when its selected predicate node has no work other than its condition.
-pub(super) fn construct(code: &mut MethodCode) -> Result<(), ExpressionError> {
+pub(super) fn construct(
+    code: &mut MethodCode,
+    types: &crate::p4::TypeFacts,
+) -> Result<(), ExpressionError> {
+    // Select complete condition alternatives before generic layout and labels.
+    expressions::conditions(code)?;
     // Sequencing is fixed before labels are selected, so a collapsed jump no
     // longer keeps a display label alive.
     collapse_fallthrough_gotos(code)?;
@@ -102,60 +108,10 @@ pub(super) fn construct(code: &mut MethodCode) -> Result<(), ExpressionError> {
         control.label_required = controls[index];
     }
 
-    // Determine shape before mutating controls, so each decision observes the
-    // same completed schedules, not partial results of earlier decisions.
-    let mut loop_compact = filled(code.emission.controls.len(), false)?;
-    for (index, control) in code.emission.controls.iter().enumerate() {
-        let (predicate, test) = match &control.layout {
-            EmissionLayout::Loop {
-                placement:
-                    LoopPlacement::While {
-                        predicate, test, ..
-                    }
-                    | LoopPlacement::DoWhile {
-                        predicate, test, ..
-                    },
-                ..
-            } => (*predicate, *test),
-            _ => continue,
-        };
-        let predicate = code
-            .emission
-            .controls
-            .get(predicate.0 as usize)
-            .ok_or(bug("loop predicate lost its control"))?;
-        let EmissionLayout::Block(node) = predicate.layout else {
-            continue;
-        };
-        let block = code
-            .emission
-            .blocks
-            .get(node.0 as usize)
-            .ok_or(bug("loop predicate lost its block"))?;
-        let phases = code
-            .emission
-            .terminals
-            .get(test.terminal.0 as usize)
-            .ok_or(bug("loop predicate lost its terminal phases"))?;
-        loop_compact[index] = !block.show_label
-            && block.actions.is_empty()
-            && matches!(block.end, BlockEnd::None)
-            && predicate.continuation.is_none()
-            && phases.before.is_empty()
-            && phases.snapshots.is_empty();
-    }
-    for (index, control) in code.emission.controls.iter_mut().enumerate() {
-        if let EmissionLayout::Loop {
-            placement: LoopPlacement::While { compact, .. } | LoopPlacement::DoWhile { compact, .. },
-            ..
-        } = &mut control.layout
-        {
-            *compact = loop_compact[index];
-        }
-    }
     expressions::construct(code)?;
+    loops::select_compact(code)?;
     natural_stores(code)?;
-    inline_check_casts(code)?;
+    casts::construct(code, types)?;
     branches::construct(code)?;
     omit_trailing_void_return(code)?;
     array_literals(code)?;
@@ -641,8 +597,12 @@ fn drop_trailing_continues(code: &mut MethodCode) -> Result<(), ExpressionError>
             let Some(control) = code.controls.get(up.0 as usize) else {
                 break;
             };
-            if !matches!(control.kind, ControlKind::Sequence)
-                || control.children.last() != Some(&current)
+            let emitted = &code.emission.controls[up.0 as usize];
+            if code.emission.controls[current.0 as usize]
+                .continuation
+                .is_some()
+                || !matches!(emitted.layout, EmissionLayout::Sequence)
+                || emitted.children(control).last() != Some(&current)
             {
                 break;
             }
@@ -714,8 +674,12 @@ fn drop_duplicate_continuation(code: &mut MethodCode) -> Result<(), ExpressionEr
                 let Some(parent_control) = code.controls.get(up.0 as usize) else {
                     break;
                 };
-                if !matches!(parent_control.kind, ControlKind::Sequence)
-                    || parent_control.children.last() != Some(&current)
+                let emitted = &code.emission.controls[up.0 as usize];
+                if code.emission.controls[current.0 as usize]
+                    .continuation
+                    .is_some()
+                    || !matches!(emitted.layout, EmissionLayout::Sequence)
+                    || emitted.children(parent_control).last() != Some(&current)
                 {
                     break;
                 }
@@ -767,13 +731,23 @@ fn printed_parts<'a>(
     let parts: &[ControlId] = match &code.emission.controls[control.0 as usize].layout {
         EmissionLayout::Block(_) => return &[],
         EmissionLayout::Sequence | EmissionLayout::Labelled | EmissionLayout::Graph => {
-            return &code.controls[control.0 as usize].children;
+            return code.emission.controls[control.0 as usize]
+                .children(&code.controls[control.0 as usize]);
         }
         EmissionLayout::If {
             header, yes, no, ..
         } => {
             buffer[..3].copy_from_slice(&[*header, *yes, *no]);
             return &buffer[..if code.emission.omitted(*no) { 2 } else { 3 }];
+        }
+        EmissionLayout::Condition {
+            header, yes, no, ..
+        } => {
+            buffer[..2].copy_from_slice(&[*header, *yes]);
+            if let Some(no) = no {
+                buffer[2] = *no;
+            }
+            return &buffer[..if no.is_some() { 3 } else { 2 }];
         }
         EmissionLayout::Loop { body, .. } => std::slice::from_ref(body),
         EmissionLayout::Switch { header, bodies, .. } => {
@@ -867,11 +841,11 @@ fn trailing_void_return(code: &MethodCode) -> Result<Option<BlockId>, Expression
         let block = match &control.layout {
             // An unlabeled Sequence prints nothing around its children.
             EmissionLayout::Sequence if !control.label_required => {
-                let children = &code
+                let source = code
                     .controls
                     .get(current.0 as usize)
-                    .ok_or(bug("trailing return names an unknown control"))?
-                    .children;
+                    .ok_or(bug("trailing return names an unknown control"))?;
+                let children = control.children(source);
                 let Some(last) = children
                     .iter()
                     .rev()
@@ -1097,169 +1071,4 @@ fn mark_terminal_targets(
         _ => {}
     }
     Ok(())
-}
-
-/// A `check-cast` whose value is read by the very next statement, at that
-/// statement's first evaluated leaf, prints inside that use. Nothing is
-/// reordered: the check still happens before every effect of that statement, and
-/// the checked local is not written.
-fn inline_check_casts(code: &mut MethodCode) -> Result<(), ExpressionError> {
-    let mut found: Vec<(StatementId, InlineCheck)> = Vec::new();
-    for node in 0..code.emission.blocks.len() {
-        let actions = &code.emission.blocks[node].actions;
-        for index in 0..actions.len().saturating_sub(1) {
-            let BodyAction::Statement {
-                operation,
-                statement,
-            } = actions[index]
-            else {
-                continue;
-            };
-            let StatementKind::CheckCast { value, reference } =
-                code.statements[statement.0 as usize].kind
-            else {
-                continue;
-            };
-            let ExprKind::Read { storage, .. } = code.expressions[value.0 as usize].kind else {
-                continue;
-            };
-            let phases = &code.emission.operations[operation.0 as usize];
-            if !phases.before.is_empty()
-                || !phases.snapshots.is_empty()
-                || !phases.after.is_empty()
-                || code.statements[statement.0 as usize]
-                    .sites
-                    .iter()
-                    .any(|&site| code.emission.site_annotation(site))
-            {
-                continue;
-            }
-            let BodyAction::Statement {
-                statement: next, ..
-            } = actions[index + 1]
-            else {
-                continue;
-            };
-            if code.statements[next.0 as usize]
-                .outputs
-                .iter()
-                .any(|output| {
-                    matches!(
-                        output.materialization(),
-                        crate::p5::Materialization::Store(local) if StorageId(local.0) == storage
-                    )
-                })
-            {
-                continue;
-            }
-            if first_leaf(code, next).is_none_or(|leaf| !reads(code, leaf, storage)) {
-                continue;
-            }
-            super::build::push(
-                &mut found,
-                (
-                    statement,
-                    InlineCheck {
-                        check: statement,
-                        operation,
-                        pc: code.operations[operation.0 as usize].pc,
-                        value: storage,
-                        reference,
-                        target: next,
-                    },
-                ),
-            )?;
-        }
-    }
-    if found.is_empty() {
-        return Ok(());
-    }
-    for (_, check) in &found {
-        let index = u32::try_from(code.emission.inline_checks.len())
-            .map_err(|_| crate::RequestError::PlatformCapacity)?;
-        super::build::push(&mut code.emission.inline_checks, *check)?;
-        super::build::push(
-            &mut code.emission.check_uses[check.target.0 as usize],
-            index,
-        )?;
-    }
-    // The check statement prints nothing of its own; its provenance moves to the
-    // use. Removing the collected statements keeps every other action in place.
-    for block in &mut code.emission.blocks {
-        block.actions.retain(|action| match action {
-            BodyAction::Statement { statement, .. } | BodyAction::Release { statement, .. } => {
-                !found.iter().any(|(check, _)| check == statement)
-            }
-            BodyAction::Receive { .. } => true,
-        });
-    }
-    Ok(())
-}
-
-/// The leftmost value this statement evaluates in its printed form.
-fn first_leaf(code: &MethodCode, statement: StatementId) -> Option<ExprId> {
-    let statement = code.statements.get(statement.0 as usize)?;
-    match &statement.kind {
-        StatementKind::Move { expression, .. } | StatementKind::Evaluate { expression } => {
-            leftmost(code, *expression)
-        }
-        // A natural store prints its receiver or array first; the explicit form
-        // prints the value first.
-        StatementKind::FieldStore {
-            receiver, value, ..
-        } => {
-            if code.emission.natural_store(statement.id) {
-                match receiver {
-                    Some(receiver) => leftmost(code, *receiver),
-                    None => None,
-                }
-            } else {
-                leftmost(code, *value)
-            }
-        }
-        StatementKind::ArrayStore { array, value, .. } => {
-            if code.emission.natural_store(statement.id) {
-                leftmost(code, *array)
-            } else {
-                leftmost(code, *value)
-            }
-        }
-        _ => None,
-    }
-}
-
-fn leftmost(code: &MethodCode, expression: ExprId) -> Option<ExprId> {
-    let expression = code.expressions.get(expression.0 as usize)?;
-    if let Some(composed) = code.emission.composed_use(expression.id) {
-        return leftmost(code, composed.expression);
-    }
-    match &expression.kind {
-        ExprKind::Read { .. }
-        | ExprKind::Snapshot { .. }
-        | ExprKind::Literal { .. }
-        | ExprKind::Unavailable { .. } => Some(expression.id),
-        ExprKind::Unary { value, .. } => leftmost(code, *value),
-        ExprKind::Binary { left, .. } | ExprKind::Compare { left, .. } => leftmost(code, *left),
-        ExprKind::Array { array, .. } => leftmost(code, *array),
-        ExprKind::Field { receiver, .. } => receiver.and_then(|r| leftmost(code, r)),
-        ExprKind::ArrayLength(a) => leftmost(code, *a),
-        ExprKind::InstanceOf { value, .. } => leftmost(code, *value),
-        ExprKind::NewArray { length, .. } => leftmost(code, *length),
-        ExprKind::Call(call) => match call.receiver {
-            Some(receiver) => leftmost(code, receiver),
-            None => match &call.arguments {
-                Arguments::Known(args) => args.first().and_then(|a| leftmost(code, *a)),
-                Arguments::Unavailable { .. } => None,
-            },
-        },
-        ExprKind::New { arguments, .. } => arguments.first().and_then(|a| leftmost(code, *a)),
-        _ => None,
-    }
-}
-
-fn reads(code: &MethodCode, expression: ExprId, storage: StorageId) -> bool {
-    matches!(
-        code.expressions.get(expression.0 as usize).map(|e| &e.kind),
-        Some(ExprKind::Read { storage: read, .. }) if *read == storage
-    )
 }

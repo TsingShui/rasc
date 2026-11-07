@@ -60,7 +60,31 @@ operations, field/array reads and writes, array length/fill/allocation,
 instance-of, check-cast, invocation, object allocation/initialization, monitors,
 exception capture and unresolved invocation/result layouts. Reverse subtraction
 retains operand orientation. Literal interpretation is P4's view, not a guessed
-Java type. `check-cast` is a statement with no invented SSA write.
+Java type. `check-cast` is a check with no invented SSA write or replacement
+binding.
+
+P7 composes a check-cast's display into the first printed read of its checked
+local only when that read is the first evaluated value of the following statement
+or the first executed step of this block's single unconditional transfer copy set.
+The carrier names that exact statement and read-expression occurrence, so a second
+read of the same storage in the printed form never carries the check. The check's
+own statement, operation, exception site, reference, resolved type name and
+original copy steps MUST stay in the product with their source origins; composition
+removes one display action, not the check event, and P7 MUST refuse the composition
+when a phase, route, later operand, second transfer, selected branch or earlier copy
+step would move the check past an event it precedes.
+
+P7 omits a check-cast's own text only from P4's published `Redundant` disposition,
+which is a must-fact over every reaching transfer. The omitted statement keeps its
+statement, operation, pc, reference, resolved type name, original route and a
+zero-length source anchor at its original position (`OmittedCheck`), and the check
+never composes: the surviving carrier prints its original text, so no redundant
+`((T) v)` is invented.
+A check that carries a before/snapshot/after copy phase, a printed route or an
+output definition keeps its statement even when P4 established redundancy, because
+its removal could not keep those obligations. `Retained` and `Unknown`
+dispositions always keep the statement. P7 performs no alias, reachability or
+dominance reasoning of its own.
 
 `Arguments::Unavailable` retains the original register words and storage reason;
 it is not an empty parameter list. An unavailable expression retains its concrete
@@ -147,9 +171,11 @@ assignments, so moving them introduces no effect or exception site. A head-test
 predicate is reached on entry with different state, so those copies stay on their
 edge.
 
-A loop predicate becomes an inline condition only when its block holds no label,
-statement, continuation or terminal phase. Edge copies may remain: they are printed
-inside the condition by their original repeating or exiting role, so a break still
+A loop predicate becomes an inline condition only when its delivered evaluation
+subtree consists of label-free, continuation-free Sequences and Blocks with no
+remaining statement or terminal phase. Suppressed composed producers and copy-free
+original fallthrough links retain their origins in that subtree. Edge copies may
+remain: they are printed inside the condition by their original repeating or exiting role, so a break still
 does not execute exiting-edge copies.
 
 A control's planned continuation contributes no second jump when its last printed
@@ -278,6 +304,11 @@ completed P6-derived emission layout. It does not decode input, rebuild SSA,
 identify regions or reschedule copies. Composition modifies the one final
 `EmissionPlan` before `MethodResult` is published. P9 prints that plan.
 
+Ordinary If, ordered Condition and Loop predicates share one producer,
+exact-use matcher, branch-role gate and composition installer. Generic layout
+consumers use selected emission children and continuations; retained source
+children continue to describe lexical ancestry, not printed succession.
+
 The expression pass composes an integral/floating pure unary or binary definition
 only when its original result is a single available numeric local, has one
 compatible use, and has no associated effect, exception or copy/snapshot phase.
@@ -299,10 +330,39 @@ storage family is integral and its complete, nonempty recovered type sources all
 name primitive boolean (`Z`). Its receiver and arguments remain leaf reads or
 literals, and its exception route propagates without snapshots. The call is the
 last original operation before the empty, single-entry branch header; no copies,
-phases or intervening evaluation move across it. Call results retain their
+phases or intervening evaluation move across it. The same eligibility and installation
+path accepts a P6-owned loop predicate when its producer and terminal are adjacent
+children of the delivered evaluation Sequence. P7 does not find another loop or
+exit corridor. The producer still executes initially and on every original head
+continue, or stays at its original tail position. Call results retain their
 `AfterResult` commit and move-result PC origin; other candidates still require
 `AtOperation`. Non-boolean calls, calls with other uses and calls with printed
 exception routes remain statements.
+
+A delivered ordered condition composes a test's prelude only as an ordered
+suffix of that test run's statements. Each composed definition must name a
+distinct terminal operand and the matched operand positions must strictly
+increase, so P9's left-to-right operand evaluation reproduces the original field
+read, call, exception and commit order. Earlier statements stay printed in the
+header when that run prints; a later run must be composed completely because it
+prints no header of its own. A boolean definition composes only into the same
+`Eqz`/`Nez` integral-zero branch role as the ordinary boolean path; a pair or a
+different comparison keeps its numeric materialization. When any run cannot meet
+these order, copy, phase or branch-role conditions, the condition keeps the
+complete explicit schedule from its delivered P6 plan, including when local copy
+access is unavailable. P7 restores terminals at the delivered predicate portions
+and lowers the delivered child order, goto links and per-child normal completions
+into `EmissionPlan` before selecting labels or display omissions. P7 MUST NOT
+collect descendant blocks to discover that order or infer completion from a
+printed successor. It MUST retain the Condition's tests/shared/other source roles
+and original continuation evidence. Each referenced child keeps its existing
+operations, terminal phases, copies, handlers and abrupt-exit scopes; its emission
+continuation comes from the selected P6 alternative.
+The ordinary display pass can omit a goto to the next printed target, as for
+other completed layouts; that does not reconstruct a condition schedule.
+A resolved statement's
+operations, statements and result PC remain owned and print at the composed
+operand; no call is deduplicated.
 
 The current expression pass does not nest already composed operands. This keeps
 expression rendering stack usage independent of input expression depth. Original
@@ -320,10 +380,11 @@ continuation or deferred composition, and has one unnamed printed child; P9
 then prints that child without the scope's own braces. The original control,
 labels and transfers remain in the product, including a bare `break` whose
 stored target is the transparent scope. A loop condition becomes ordinary
-`while`/`do-while` only when the predicate block, terminal phases and both edge
-copy schedules contain no work. Otherwise the existing explicit test retains
-its edge obligations. Pure propagation chains can be implicit only when no
-displayed site or handler requires the chain.
+`while`/`do-while` when its delivered evaluation subtree has no remaining prelude
+work after shared adjacent-expression composition. Terminal phases still constrain
+compactness; selected-edge copies retain their original repeat/exit clauses.
+Otherwise the existing explicit test retains all prelude and edge obligations.
+Pure propagation chains can be implicit only when no displayed site or handler requires the chain.
 
 Integral literals encoded in integer arithmetic instructions retain their original
 bits and an integral view. Other bit-pattern literals keep their supplied views.

@@ -1075,6 +1075,7 @@ fn type_json(typed: diana_decomp::p5::AnalysisEvidence<'_, '_>, details: bool) -
         "array_accesses":f.array_accesses().len(),"unknown_array_components":f.array_accesses().iter().filter(|a|!a.component().is_complete()).count(),
         "catch_types":catch_types_json(flow.catch_types()),
         "issues":f.issues().len(),"missing_facts":missing,
+        "checks":f.checks().iter().map(check_json).collect::<Vec<_>>(),
         "unknown_views":f.uses().iter().filter(|u|matches!(u.interpretation(),Interpretation::Unknown(_))).count(),
         "conflict_values":f.values().iter().filter(|v|v.families().is_conflict()).count(),
         "details":details.then(||json!({
@@ -1098,6 +1099,23 @@ fn type_json(typed: diana_decomp::p5::AnalysisEvidence<'_, '_>, details: bool) -
             "issues":f.issues().iter().map(|i|json!({"site":format!("{:?}",i.site),"problem":format!("{:?}",i.problem)})).collect::<Vec<_>>()
         }))
     })
+}
+
+fn check_json(check: &diana_decomp::p4::CheckView) -> Value {
+    use diana_decomp::p4::{CheckDisposition, CheckSource};
+    let disposition = match check.disposition() {
+        CheckDisposition::Redundant(evidence) => {
+            json!({"kind":"redundant","receiver":evidence.receiver().0,
+            "value":evidence.value().0,"target":evidence.target().0,
+            "sources":evidence.sources().iter().map(|source| match source {
+                CheckSource::SuccessfulCast { operation } => json!({"kind":"successful_cast","operation":operation.0}),
+                CheckSource::InstanceOfTrue { operation } => json!({"kind":"instanceof_true","operation":operation.0}),
+            }).collect::<Vec<_>>()})
+        }
+        CheckDisposition::Retained => json!({"kind":"retained"}),
+        CheckDisposition::Unknown(gap) => json!({"kind":"unknown","gap":format!("{gap:?}")}),
+    };
+    json!({"operation":check.operation().0,"target":check.target().map(|n|n.0),"disposition":disposition})
 }
 
 fn ssa_json(
@@ -1712,6 +1730,7 @@ fn add_region_counts(counts: &mut BTreeMap<String, u64>, f: &diana_decomp::p6::R
             RegionKind::Block(_) => "block_regions",
             RegionKind::Sequence => "sequences",
             RegionKind::If { .. } => "ifs",
+            RegionKind::Condition(_) => "conditions",
             RegionKind::Loop(id) => match f.loops()[id.0 as usize].form() {
                 LoopForm::While(_) => "while",
                 LoopForm::DoWhile(_) => "do_while",
@@ -1744,6 +1763,17 @@ fn region_json(method: diana_decomp::p7::MethodInspection<'_, '_>, details: bool
         result["nodes"]=json!(f.nodes().iter().map(|n|json!({"id":n.id().0,"block":n.block().0,"operations":[n.operations().start,n.operations().end],"terminal":n.has_terminal(),"reachable":n.reachable()})).collect::<Vec<_>>());
         result["blocks"]=json!(f.blocks().iter().map(|b|json!({"id":b.block().0,"parts":b.parts().iter().map(|n|n.0).collect::<Vec<_>>()})).collect::<Vec<_>>());
         result["regions"]=json!(f.regions().iter().map(|r|json!({"id":r.id().0,"kind":format!("{:?}",r.kind()),"entry":r.entry().map(|n|n.0),"follow":r.follow().map(|n|n.0),"continuation":format!("{:?}",r.continuation()),"parent":f.parent(r.id()).map(|r|r.0),"children":r.children().iter().map(|r|r.0).collect::<Vec<_>>(),"nodes":r.nodes().iter().map(|n|n.0).collect::<Vec<_>>()})).collect::<Vec<_>>());
+        result["conditions"] = json!(f.conditions().iter().map(|p| json!({
+            "id": p.id().0,
+            "tests": p.tests().iter().map(|t| json!({"predicate":t.predicate().0,"select":t.select().0,"other":t.other().0})).collect::<Vec<_>>(),
+            "shared": p.shared().0,
+            "else_arm": p.else_arm(),
+            "explicit": p.explicit().map(|s| json!({
+                "children":s.children().iter().map(|r|r.0).collect::<Vec<_>>(),
+                "completions":s.completions().iter().map(|c|json!({"child":c.child().0,"continuation":format!("{:?}",c.continuation())})).collect::<Vec<_>>(),
+                "gotos":s.gotos().iter().map(|l|l.0).collect::<Vec<_>>()
+            }))
+        })).collect::<Vec<_>>());
         result["links"]=json!(f.links().iter().zip(f.link_plans()).map(|(l,p)|json!({"id":l.id().0,"from":l.from().0,"to":l.to().0,"origin":format!("{:?}",l.origin()),"action":format!("{:?}",p.action()),"copies":p.copies().iter().map(|p|p.0).collect::<Vec<_>>()})).collect::<Vec<_>>());
         result["edges"] = json!(
             f.edges()
@@ -1756,7 +1786,7 @@ fn region_json(method: diana_decomp::p7::MethodInspection<'_, '_>, details: bool
         result["handler_chains"]=json!(f.handler_chains().iter().map(|c|json!({"id":c.id().0,"clauses":c.clauses().iter().map(|c|json!({"order":c.order,"catch":c.catch.map(|t|t.0),"target":format!("{:?}",c.target)})).collect::<Vec<_>>()})).collect::<Vec<_>>());
         result["handler_entries"]=json!(f.handler_entries().iter().map(|h|json!({"node":h.node().0,"capture":h.capture().map(|op|op.0),"receives":h.receives().iter().map(|p|p.0).collect::<Vec<_>>()})).collect::<Vec<_>>());
         result["copies"]=json!(f.copy_placements().iter().map(|p|json!({"plan":p.plan.0,"location":format!("{:?}",p.location),"owner":format!("{:?}",p.owner)})).collect::<Vec<_>>());
-        result["loops"]=json!(f.loops().iter().map(|l|json!({"id":l.id().0,"header":l.header().0,"condition":l.condition().map(|n|n.0),"continue":l.continue_target().0,"follow":l.follow().map(|n|n.0),"form":format!("{:?}",l.form()),"members":l.members().iter().map(|n|n.0).collect::<Vec<_>>(),"latches":l.latches().iter().map(|l|l.0).collect::<Vec<_>>(),"exits":l.exits().iter().map(|l|l.0).collect::<Vec<_>>()})).collect::<Vec<_>>());
+        result["loops"]=json!(f.loops().iter().map(|l|json!({"id":l.id().0,"header":l.header().0,"condition":l.condition().map(|n|n.0),"continue":l.continue_target().0,"follow":l.follow().map(|n|n.0),"form":format!("{:?}",l.form()),"private_exits":l.private_exits().iter().map(|l|l.0).collect::<Vec<_>>(),"evaluation":l.evaluation().iter().map(|n|n.0).collect::<Vec<_>>(),"lexical_members":l.lexical_members().iter().map(|n|n.0).collect::<Vec<_>>(),"members":l.members().iter().map(|n|n.0).collect::<Vec<_>>(),"latches":l.latches().iter().map(|l|l.0).collect::<Vec<_>>(),"exits":l.exits().iter().map(|l|l.0).collect::<Vec<_>>()})).collect::<Vec<_>>());
         result["locks"]=json!(f.locks().iter().map(|l|json!({"operation":l.operation().0,"receiver":format!("{:?}",l.receiver()),"before":format!("{:?}",l.before()),"normal":format!("{:?}",l.normal()),"exception":format!("{:?}",l.exception()),"matched":l.matched().map(|op|op.0),"release_cannot_throw":l.release_cannot_throw()})).collect::<Vec<_>>());
         result["tries"]=json!(f.tries().iter().map(|p|json!({"id":p.id().0,"chain":p.chain().0,"clauses":[p.clauses().start,p.clauses().end],"outer_sync":p.outer_sync().map(|id|id.0),"entry":p.entry().0,"follow":p.follow().map(|n|n.0),"body":p.body().iter().map(|n|n.0).collect::<Vec<_>>(),"handlers":p.handlers().iter().map(|n|n.0).collect::<Vec<_>>(),"members":p.members().iter().map(|n|n.0).collect::<Vec<_>>()})).collect::<Vec<_>>());
         result["monitor_plans"] = json!(
@@ -1901,6 +1931,14 @@ fn expression_counts(counts: &mut BTreeMap<String, u64>, result: &diana_decomp::
         ("handlers", code.handlers().len()),
         ("payloads", code.payloads().len()),
         ("issues", code.issues().len()),
+        ("inline_checks", code.emission().inline_checks().len()),
+        (
+            "omitted_checks",
+            code.statements()
+                .iter()
+                .filter(|s| code.emission().omitted_check(s.id).is_some())
+                .count(),
+        ),
     ] {
         *counts.entry(name.into()).or_default() += n as u64;
     }
