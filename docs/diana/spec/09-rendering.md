@@ -30,7 +30,9 @@ as an execution representation. The notation identifier is
 
 The output is Java-like code with explicit forms for existing DEX operations and
 phase boundaries. These forms do not introduce runtime helpers or a dispatcher.
-Ordinary values use P7's locals, literal views and materializations. Calls retain
+Ordinary values use P7's locals, literal views and materializations. P9 renders
+nested composed expressions with a fallibly allocated work stack, preserving each
+producer's statement, operation, site, result-commit and control spans. Calls retain
 original target IDs, dispatch and separate invocation prototypes. A selected
 full signature is printed in the call's binding suffix; this is part of the
 Java-like call notation, not a conversion, generic invocation or mere comment.

@@ -313,15 +313,27 @@ exact-use matcher, branch-role gate and composition installer. Generic layout
 consumers use selected emission children and continuations; retained source
 children continue to describe lexical ancestry, not printed succession.
 
-The expression pass composes an integral/floating pure unary or binary definition
-only when its original result is a single available numeric local, has one
-compatible use, and has no associated effect, exception or copy/snapshot phase.
-An adjacent operation use must be its first captured operand and have no
-before-operation copies. A return use must be the next original node in the same
-block, with one incoming fallthrough, no intervening work or terminal phases,
-and adjacent selected sequence children. All operands remain in original order.
-Locals participating in copies or construction publication are not hidden. An
-unavailable copy dependency prevents this optional composition for that method.
+The expression pass composes a move, an integral/floating unary or binary
+definition, or a numeric/reference field or call definition only when its
+original result is a single available value or reference carrier, has one
+compatible use, and carries no copy/snapshot phase. A move's source must be a
+delivered direct value read with a compatible view. A reference source and use
+must each have an established initialized state; allocation carriers and other
+position-related initialization states remain separate.
+
+An adjacent operation use must be both the first original capture and the first
+operand in its selected spelling, and have no before-operation copies. Stores
+retain the existing pure-producer rule because their selected spelling can print
+the receiver before the value. A return or predicate use must be the next original
+node in the same block, with one incoming fallthrough, no intervening work or
+terminal phases, and adjacent selected Sequence or Graph children. An effectful
+producer must have one original exception site that propagates without a snapshot.
+A predicate uses the producer as its first captured operand. When both original
+branch transfers have the same destination and no copies, the producer remains a
+statement instead of being moved into an otherwise empty If. All operands remain
+in original order. Locals participating in copies or construction publication are
+not hidden. An unavailable copy dependency prevents this optional composition
+for that method.
 
 An original `instance-of` can compose with an immediately following equality or
 inequality branch only when its checked type reference is available, its original
@@ -329,18 +341,20 @@ exception propagates without a local handler or snapshot, and the same adjacency
 and storage requirements hold. Its check and possible exception still occur once
 before branch selection. No cast or new SSA definition is invented.
 
-A call can use the same adjacent boolean branch path only when its delivered
-storage family is integral and its complete, nonempty recovered type sources all
-name primitive boolean (`Z`). Its receiver and arguments remain leaf reads or
-literals, and its exception route propagates without snapshots. The call is the
-last original operation before the empty, single-entry branch header; no copies,
-phases or intervening evaluation move across it. The same eligibility and installation
-path accepts a P6-owned loop predicate when its producer and terminal are adjacent
-children of the delivered evaluation Sequence. P7 does not find another loop or
-exit corridor. The producer still executes initially and on every original head
-continue, or stays at its original tail position. Call results retain their
-`AfterResult` commit and move-result PC origin; other candidates still require
-`AtOperation`. Non-boolean calls, calls with other uses and calls with printed
+A call can compose at an adjacent use when its receiver and arguments are leaf
+reads or literals and its exception route propagates without snapshots. P7 treats
+the call result as boolean only when its delivered storage family is integral and
+its complete, nonempty recovered type sources all name primitive boolean (`Z`);
+other call results keep their numeric or reference interpretation. A boolean call
+composes only into a terminal, not an operation. For a terminal, the call is the
+last original operation before the empty, single-entry header; no copies, phases
+or intervening evaluation move across it. The same
+eligibility and installation path accepts a P6-owned loop predicate when its
+producer and terminal are adjacent children of the delivered evaluation Sequence.
+P7 does not find another loop or exit corridor. The producer still executes
+initially and on every original head continue, or stays at its original tail
+position. Call results retain their `AfterResult` commit and move-result PC origin;
+other candidates still require `AtOperation`. Calls with other uses or printed
 exception routes remain statements.
 
 A delivered ordered condition composes a test's prelude only as an ordered
@@ -368,11 +382,15 @@ A resolved statement's
 operations, statements and result PC remain owned and print at the composed
 operand; no call is deduplicated.
 
-The current expression pass does not nest already composed operands. This keeps
-expression rendering stack usage independent of input expression depth. Original
-operations, PCs, statements, transfer records and gaps remain owned; composed
-operations map to the expression range, and a cross-node source control spans
-through its composed use.
+The expression pass selects terminal uses before adjacent operations and visits
+operation pairs from the end. An earlier producer may compose into an already
+composed consumer when the same first-operand and original-order conditions hold.
+A producer composed into a store is a nesting boundary, because the store can
+print a receiver before its value. P9 renders composed expressions with a
+fallibly allocated work stack rather than host recursion. Original operations,
+PCs, statements, transfer records and gaps remain owned; composed operations map
+to the expression range, and a cross-node source control spans through its
+composed use.
 
 The layout pass keeps labels referenced by explicit transfers, graph entries,
 exception handlers and construction continuations. Unreferenced labels retain

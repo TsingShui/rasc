@@ -116,6 +116,33 @@ impl ExpressionSource for ExpressionPartial {
         self.copies()
     }
 }
+enum ExprEvent {
+    Expression(ExprId, bool),
+    End(ExprId, super::TextOffset),
+    Text(&'static str),
+    Reference(ReferenceId),
+    Member(ReferenceId, Option<ExprId>, bool),
+    MemberEnd(ReferenceId, bool, bool, super::TextOffset),
+    InvocationPrototype(ReferenceId),
+    CallEnd(ReferenceId, bool),
+    UnavailableArguments(ExprId),
+    ArrayEnd(crate::p2::ValueKind),
+    Dimensions(u32),
+    Initializer(ReferenceId, ReferenceId),
+    CompositionEnd {
+        composed: ComposedExpression,
+        start: super::TextOffset,
+        previous_carrier: Option<CheckCarrier>,
+        previous_statement: Option<StatementId>,
+    },
+}
+
+fn push_event(work: &mut Vec<ExprEvent>, event: ExprEvent) -> Result<(), RenderError> {
+    work.try_reserve(1).map_err(RenderError::MethodScratch)?;
+    work.push(event);
+    Ok(())
+}
+
 pub(super) struct Expressions<'a, 'b, S: ExpressionSource = MethodCode> {
     pub out: &'b mut Buffer,
     pub method: MethodId,
@@ -375,6 +402,122 @@ impl<S: ExpressionSource> Expressions<'_, '_, S> {
         Ok(())
     }
     pub fn expr(&mut self, id: ExprId) -> Result<(), RenderError> {
+        let mut work = Vec::new();
+        push_event(&mut work, ExprEvent::Expression(id, false))?;
+        while let Some(event) = work.pop() {
+            match event {
+                ExprEvent::Expression(id, operand) => {
+                    if operand
+                        && !matches!(
+                            self.code.expressions().get(id.0 as usize).map(|e| &e.kind),
+                            Some(
+                                ExprKind::Read { .. }
+                                    | ExprKind::Snapshot { .. }
+                                    | ExprKind::Literal { .. }
+                                    | ExprKind::Unavailable { .. }
+                            )
+                        )
+                    {
+                        return Err(RenderError::Invariant(
+                            "operand is not a delivered leaf read",
+                        ));
+                    }
+                    self.expression_event(id, &mut work)?;
+                }
+                ExprEvent::End(id, start) => self.out.span(
+                    start,
+                    Origin::Expression {
+                        method: self.method,
+                        expression: id,
+                    },
+                )?,
+                ExprEvent::Text(value) => self.out.put(value)?,
+                ExprEvent::Reference(reference) => self.reference(reference)?,
+                ExprEvent::Member(reference, receiver, signature) => {
+                    let start = self.out.position();
+                    push_event(
+                        &mut work,
+                        ExprEvent::MemberEnd(reference, receiver.is_some(), signature, start),
+                    )?;
+                    if let Some(receiver) = receiver {
+                        push_event(&mut work, ExprEvent::Text("."))?;
+                        push_event(&mut work, ExprEvent::Expression(receiver, true))?;
+                    }
+                }
+                ExprEvent::MemberEnd(reference, receiver, signature, start) => {
+                    self.member_end(reference, receiver, signature, start)?;
+                }
+                ExprEvent::InvocationPrototype(reference) => {
+                    self.out.put(" [invocation prototype: ")?;
+                    self.reference(reference)?;
+                    self.out.put("]")?;
+                }
+                ExprEvent::CallEnd(reference, qualified) => {
+                    if qualified {
+                        self.out.put(" [binding ")?;
+                        self.member(reference, None, true)?;
+                        self.out.put("]")?;
+                    }
+                }
+                ExprEvent::UnavailableArguments(id) => {
+                    let args = match &self
+                        .code
+                        .expressions()
+                        .get(id.0 as usize)
+                        .ok_or(RenderError::Invariant(
+                            "argument owner is outside its arena",
+                        ))?
+                        .kind
+                    {
+                        ExprKind::Call(call) => &call.arguments,
+                        ExprKind::FilledArray { elements, .. } => elements,
+                        _ => {
+                            return Err(RenderError::Invariant(
+                                "argument owner lost its arguments",
+                            ));
+                        }
+                    };
+                    let Arguments::Unavailable { gap, words } = args else {
+                        return Err(RenderError::Invariant("unavailable arguments became known"));
+                    };
+                    self.out.fmt(format_args!(
+                        "unavailable_arguments<{gap:?}; original_words={words:?}>"
+                    ))?;
+                }
+                ExprEvent::ArrayEnd(kind) => self.out.fmt(format_args!("] /* {kind:?} load */"))?,
+                ExprEvent::Dimensions(dimensions) => {
+                    self.out.put("]")?;
+                    for _ in 1..dimensions {
+                        self.out.put("[]")?;
+                    }
+                }
+                ExprEvent::Initializer(reference, constructor) => {
+                    if !self.redundant_initializer(reference, constructor) {
+                        self.out.put(" [initializer: ")?;
+                        self.member(constructor, None, true)?;
+                        self.out.put("]")?;
+                    }
+                }
+                ExprEvent::CompositionEnd {
+                    composed,
+                    start,
+                    previous_carrier,
+                    previous_statement,
+                } => {
+                    self.check_carrier = previous_carrier;
+                    self.statement = previous_statement;
+                    self.composition_end(composed, start)?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn expression_event(
+        &mut self,
+        id: ExprId,
+        work: &mut Vec<ExprEvent>,
+    ) -> Result<(), RenderError> {
         let e = self
             .code
             .expressions()
@@ -383,6 +526,7 @@ impl<S: ExpressionSource> Expressions<'_, '_, S> {
                 "expression reference is outside its arena",
             ))?;
         let start = self.out.position();
+        push_event(work, ExprEvent::End(id, start))?;
         match &e.kind {
             ExprKind::Read { storage, .. } => {
                 if let Some(check) = self
@@ -422,66 +566,22 @@ impl<S: ExpressionSource> Expressions<'_, '_, S> {
                         )?;
                     }
                 } else if let Some(composed) = self.code.composed_use(id) {
-                    // Inline checks belong to the producer statement even when
-                    // its expression prints at the adjacent consuming branch.
-                    let previous = self
+                    // Inline checks belong to the producer statement. Restore
+                    // each enclosing carrier after its nested expression prints.
+                    let previous_carrier = self
                         .check_carrier
                         .replace(CheckCarrier::Statement(composed.statement));
-                    let statement = self.statement.replace(composed.statement);
-                    let rendered = self.expr(composed.expression);
-                    self.check_carrier = previous;
-                    self.statement = statement;
-                    rendered?;
-                    self.out.span(
-                        start,
-                        Origin::Statement {
-                            method: self.method,
-                            statement: composed.statement,
+                    let previous_statement = self.statement.replace(composed.statement);
+                    push_event(
+                        work,
+                        ExprEvent::CompositionEnd {
+                            composed,
+                            start,
+                            previous_carrier,
+                            previous_statement,
                         },
                     )?;
-                    self.out.span(
-                        start,
-                        Origin::Operation {
-                            method: self.method,
-                            operation: composed.operation,
-                            pc: composed.pc,
-                        },
-                    )?;
-                    if let Some(control) = composed.source_control {
-                        let start = self
-                            .pending_controls
-                            .as_deref_mut()
-                            .and_then(|pending| pending.get_mut(control.0 as usize))
-                            .and_then(Option::take)
-                            .ok_or(RenderError::Invariant("composed control was not opened"))?;
-                        self.out.span(
-                            start,
-                            Origin::Control {
-                                method: self.method,
-                                control,
-                            },
-                        )?;
-                    }
-                    if let Some(site) = composed.site {
-                        let position = self.out.position();
-                        self.out.span(
-                            position,
-                            Origin::Site {
-                                method: self.method,
-                                site,
-                            },
-                        )?;
-                    }
-                    if let Some(pc) = composed.result_pc {
-                        self.out.span(
-                            start,
-                            Origin::ResultCommit {
-                                method: self.method,
-                                operation: composed.operation,
-                                pc,
-                            },
-                        )?;
-                    }
+                    push_event(work, ExprEvent::Expression(composed.expression, false))?;
                 } else {
                     self.local(*storage)?;
                 }
@@ -492,22 +592,22 @@ impl<S: ExpressionSource> Expressions<'_, '_, S> {
             ExprKind::Unary { op, value } => {
                 self.out.put("(")?;
                 self.out.put(unary(*op))?;
-                self.operand(*value)?;
-                self.out.put(")")?;
+                push_event(work, ExprEvent::Text(")"))?;
+                push_event(work, ExprEvent::Expression(*value, true))?;
             }
             ExprKind::Binary { op, left, right } => {
                 self.out.put("(")?;
-                self.operand(*left)?;
-                self.out.put(binary(*op))?;
-                self.operand(*right)?;
-                self.out.put(")")?;
+                push_event(work, ExprEvent::Text(")"))?;
+                push_event(work, ExprEvent::Expression(*right, true))?;
+                push_event(work, ExprEvent::Text(binary(*op)))?;
+                push_event(work, ExprEvent::Expression(*left, true))?;
             }
             ExprKind::Compare { op, left, right } => {
                 self.out.fmt(format_args!("compare<{op:?}>("))?;
-                self.operand(*left)?;
-                self.out.put(", ")?;
-                self.operand(*right)?;
-                self.out.put(")")?;
+                push_event(work, ExprEvent::Text(")"))?;
+                push_event(work, ExprEvent::Expression(*right, true))?;
+                push_event(work, ExprEvent::Text(", "))?;
+                push_event(work, ExprEvent::Expression(*left, true))?;
             }
             ExprKind::String(r) => self.reference(*r)?,
             ExprKind::Class(r) => {
@@ -520,24 +620,24 @@ impl<S: ExpressionSource> Expressions<'_, '_, S> {
                 receiver,
             } => {
                 let qualified = self.code.field_qualification(*reference);
-                self.member(*reference, *receiver, qualified)?;
+                push_event(work, ExprEvent::Member(*reference, *receiver, qualified))?;
             }
             ExprKind::Array { array, index, kind } => {
-                self.operand(*array)?;
-                self.out.put("[")?;
-                self.operand(*index)?;
-                self.out.fmt(format_args!("] /* {kind:?} load */"))?;
+                push_event(work, ExprEvent::ArrayEnd(*kind))?;
+                push_event(work, ExprEvent::Expression(*index, true))?;
+                push_event(work, ExprEvent::Text("["))?;
+                push_event(work, ExprEvent::Expression(*array, true))?;
             }
             ExprKind::ArrayLength(a) => {
-                self.operand(*a)?;
-                self.out.put(".length")?;
+                push_event(work, ExprEvent::Text(".length"))?;
+                push_event(work, ExprEvent::Expression(*a, true))?;
             }
             ExprKind::InstanceOf { value, reference } => {
                 self.out.put("(")?;
-                self.operand(*value)?;
-                self.out.put(" instanceof ")?;
-                self.reference(*reference)?;
-                self.out.put(")")?;
+                push_event(work, ExprEvent::Text(")"))?;
+                push_event(work, ExprEvent::Reference(*reference))?;
+                push_event(work, ExprEvent::Text(" instanceof "))?;
+                push_event(work, ExprEvent::Expression(*value, true))?;
             }
             ExprKind::AllocateInstance { reference } => {
                 self.out.put("allocate_uninitialized ")?;
@@ -597,17 +697,14 @@ impl<S: ExpressionSource> Expressions<'_, '_, S> {
                         Some((type_use, dimensions)) if dimensions > 0 => {
                             self.lookup.print_element(self.out, type_use)?;
                             self.out.put("[")?;
-                            self.operand(*length)?;
-                            self.out.put("]")?;
-                            for _ in 1..dimensions {
-                                self.out.put("[]")?;
-                            }
+                            push_event(work, ExprEvent::Dimensions(dimensions))?;
+                            push_event(work, ExprEvent::Expression(*length, true))?;
                         }
                         _ => {
                             self.reference(*reference)?;
                             self.out.put("[")?;
-                            self.operand(*length)?;
-                            self.out.put("]")?;
+                            push_event(work, ExprEvent::Text("]"))?;
+                            push_event(work, ExprEvent::Expression(*length, true))?;
                         }
                     }
                 }
@@ -619,10 +716,31 @@ impl<S: ExpressionSource> Expressions<'_, '_, S> {
                 self.out.put("new ")?;
                 self.reference(*reference)?;
                 self.out.put(" {")?;
-                self.args(elements)?;
-                self.out.put("}")?;
+                push_event(work, ExprEvent::Text("}"))?;
+                self.argument_events(work, id, elements)?;
             }
-            ExprKind::Call(call) => self.call(call, None, None)?,
+            ExprKind::Call(call) => {
+                if matches!(
+                    call.kind,
+                    crate::p2::InvokeKind::Custom | crate::p2::InvokeKind::Polymorphic
+                ) {
+                    self.out.fmt(format_args!("invoke<{:?}> ", call.kind))?;
+                }
+                push_event(
+                    work,
+                    ExprEvent::CallEnd(
+                        call.target,
+                        matches!(call.qualification, Qualification::FullSignature),
+                    ),
+                )?;
+                push_event(work, ExprEvent::Text(")"))?;
+                self.argument_events(work, id, &call.arguments)?;
+                push_event(work, ExprEvent::Text("("))?;
+                if let Some(proto) = call.invocation_prototype {
+                    push_event(work, ExprEvent::InvocationPrototype(proto))?;
+                }
+                push_event(work, ExprEvent::Member(call.target, call.receiver, false))?;
+            }
             ExprKind::New {
                 reference,
                 constructor,
@@ -631,25 +749,99 @@ impl<S: ExpressionSource> Expressions<'_, '_, S> {
                 self.out.put("new ")?;
                 self.reference(*reference)?;
                 self.out.put("(")?;
-                self.args_known(arguments)?;
-                self.out.put(")")?;
-                // `new T(...)` already states T's constructor. The suffix stays
-                // when the delivered initializer is a different declaration.
-                if !self.redundant_initializer(*reference, *constructor) {
-                    self.out.put(" [initializer: ")?;
-                    self.member(*constructor, None, true)?;
-                    self.out.put("]")?;
-                }
+                push_event(work, ExprEvent::Initializer(*reference, *constructor))?;
+                push_event(work, ExprEvent::Text(")"))?;
+                self.known_argument_events(work, arguments)?;
             }
         }
+        Ok(())
+    }
+    fn argument_events(
+        &self,
+        work: &mut Vec<ExprEvent>,
+        owner: ExprId,
+        arguments: &Arguments,
+    ) -> Result<(), RenderError> {
+        match arguments {
+            Arguments::Known(arguments) => self.known_argument_events(work, arguments),
+            Arguments::Unavailable { .. } => {
+                push_event(work, ExprEvent::UnavailableArguments(owner))
+            }
+        }
+    }
+
+    fn known_argument_events(
+        &self,
+        work: &mut Vec<ExprEvent>,
+        arguments: &[ExprId],
+    ) -> Result<(), RenderError> {
+        for (index, &argument) in arguments.iter().enumerate().rev() {
+            push_event(work, ExprEvent::Expression(argument, true))?;
+            if index != 0 {
+                push_event(work, ExprEvent::Text(", "))?;
+            }
+        }
+        Ok(())
+    }
+
+    fn composition_end(
+        &mut self,
+        composed: ComposedExpression,
+        start: super::TextOffset,
+    ) -> Result<(), RenderError> {
         self.out.span(
             start,
-            Origin::Expression {
+            Origin::Statement {
                 method: self.method,
-                expression: id,
+                statement: composed.statement,
             },
-        )
+        )?;
+        self.out.span(
+            start,
+            Origin::Operation {
+                method: self.method,
+                operation: composed.operation,
+                pc: composed.pc,
+            },
+        )?;
+        if let Some(control) = composed.source_control {
+            let start = self
+                .pending_controls
+                .as_deref_mut()
+                .and_then(|pending| pending.get_mut(control.0 as usize))
+                .and_then(Option::take)
+                .ok_or(RenderError::Invariant("composed control was not opened"))?;
+            self.out.span(
+                start,
+                Origin::Control {
+                    method: self.method,
+                    control,
+                },
+            )?;
+        }
+        if let Some(site) = composed.site {
+            let position = self.out.position();
+            self.out.span(
+                position,
+                Origin::Site {
+                    method: self.method,
+                    site,
+                },
+            )?;
+        }
+        if let Some(pc) = composed.result_pc {
+            self.out.span(
+                start,
+                Origin::ResultCommit {
+                    method: self.method,
+                    operation: composed.operation,
+                    pc,
+                },
+            )?;
+        }
+        Ok(())
     }
+
     fn redundant_initializer(&self, reference: ReferenceId, constructor: ReferenceId) -> bool {
         let (
             Ok(ReferenceDeclaration::Type { type_use }),
@@ -686,12 +878,22 @@ impl<S: ExpressionSource> Expressions<'_, '_, S> {
         receiver: Option<ExprId>,
         signature: bool,
     ) -> Result<(), RenderError> {
-        let reference = &self.code.references()[r.0 as usize];
         let start = self.out.position();
         if let Some(recv) = receiver {
             self.operand(recv)?;
             self.out.put(".")?;
         }
+        self.member_end(r, receiver.is_some(), signature, start)
+    }
+
+    fn member_end(
+        &mut self,
+        r: ReferenceId,
+        has_receiver: bool,
+        signature: bool,
+        start: super::TextOffset,
+    ) -> Result<(), RenderError> {
+        let reference = &self.code.references()[r.0 as usize];
         match &reference.declaration {
             Ok(ReferenceDeclaration::Member(m)) => {
                 let (owner, name, initializer) = match m {
@@ -709,11 +911,11 @@ impl<S: ExpressionSource> Expressions<'_, '_, S> {
                     // would print the type twice.
                     self.ty(owner)?;
                 } else {
-                    if receiver.is_none() {
+                    if !has_receiver {
                         self.ty(owner)?;
                         self.out.put(".")?;
                     }
-                    if signature && receiver.is_some() {
+                    if signature && has_receiver {
                         self.out.put("binding<")?;
                         self.ty(owner)?;
                         self.out.put(">::")?;

@@ -7,7 +7,7 @@ use super::super::build::{bug, filled, push};
 use super::super::*;
 use crate::p2::{BranchOp, CommitRule, Effects, OpId};
 use crate::p3::{StateId, UseSite, ValueId};
-use crate::p4::{Family, Interpretation};
+use crate::p4::{Family, Initialization, Interpretation};
 use crate::p5::{LocalId, LocalKind, Materialization, StorageRead, StorageType};
 
 pub(super) fn construct(code: &mut MethodCode) -> Result<(), ExpressionError> {
@@ -19,6 +19,10 @@ pub(super) fn construct(code: &mut MethodCode) -> Result<(), ExpressionError> {
     let mut next: Vec<Option<OpId>> = filled(code.operations.len(), None)?;
     let mut incoming = filled(code.blocks.len(), 0u8)?;
     let mut sibling = filled(code.controls.len(), None)?;
+    // A store may print a plain receiver before its value. Its existing pure
+    // producer can move there, but further nesting could move an effect across
+    // that receiver, so that composition is a boundary for earlier producers.
+    let mut nested = filled(code.operations.len(), true)?;
     for operation in &code.operations {
         let previous = last
             .get_mut(operation.original_block.0 as usize)
@@ -38,7 +42,10 @@ pub(super) fn construct(code: &mut MethodCode) -> Result<(), ExpressionError> {
     }
     for control in &code.controls {
         let emitted = &code.emission.controls[control.id.0 as usize];
-        if matches!(emitted.layout, EmissionLayout::Sequence) {
+        if matches!(
+            emitted.layout,
+            EmissionLayout::Sequence | EmissionLayout::Graph
+        ) {
             for pair in emitted.children(control).windows(2) {
                 let next = sibling
                     .get_mut(pair[0].0 as usize)
@@ -50,16 +57,21 @@ pub(super) fn construct(code: &mut MethodCode) -> Result<(), ExpressionError> {
         }
     }
     for node in 0..code.emission.blocks.len() {
-        let count = code.emission.blocks[node].actions.len();
-        for index in 0..count.saturating_sub(1) {
-            let candidate = operation_use(code, node, index, &next, &reads, &protected);
-            if let Some((producer, use_id)) = candidate {
-                install(code, producer, use_id, None)?;
-            }
-        }
         let candidate = terminal_use(code, node, &last, &incoming, &sibling, &reads, &protected);
         if let Some((producer, use_id, control)) = candidate {
             install(code, producer, use_id, Some(control))?;
+        }
+        // Select the use nearest the end first. An earlier producer can then
+        // compose into the already selected expression without moving its use.
+        let count = code.emission.blocks[node].actions.len();
+        for index in (0..count.saturating_sub(1)).rev() {
+            let candidate = operation_use(code, node, index, &next, &reads, &protected, &nested);
+            if let Some((producer, use_id, allows_nested)) = candidate {
+                *nested
+                    .get_mut(producer.operation.0 as usize)
+                    .ok_or(bug("composed operation lost its nesting boundary"))? = allows_nested;
+                install(code, producer, use_id, None)?;
+            }
         }
     }
     Ok(())
@@ -85,7 +97,6 @@ fn producer(
     statement: StatementId,
     reads: &[u8],
     protected: &[bool],
-    conditional: bool,
 ) -> Option<Producer> {
     let source = code.operations.get(operation.0 as usize)?;
     if code.emission.composed_operation(operation)
@@ -98,8 +109,10 @@ fn producer(
         return None;
     }
     let statement_ref = code.statements.get(statement.0 as usize)?;
-    let StatementKind::Evaluate { expression } = statement_ref.kind else {
-        return None;
+    let (expression, moving) = match statement_ref.kind {
+        StatementKind::Evaluate { expression } => (expression, false),
+        StatementKind::Move { expression, .. } => (expression, true),
+        _ => return None,
     };
     if statement_ref.outputs.len() != 1 {
         return None;
@@ -124,23 +137,51 @@ fn producer(
     if declared.gap.is_some() || protected[local.0 as usize] || reads[local.0 as usize] != 1 {
         return None;
     }
-    let LocalKind::Value(value) = declared.original.kind() else {
-        return None;
+    let value = match declared.original.kind() {
+        LocalKind::Value(value) | LocalKind::ReferenceCarrier(value) => value,
+        _ => return None,
     };
     let StorageType::Family { family, .. } = declared.original.storage_type() else {
         return None;
     };
-    if matches!(family, Family::Reference) {
-        return None;
-    }
     let boolean = match &expr.kind {
-        ExprKind::Unary { value, .. } if leaf(code, *value) => false,
-        ExprKind::Binary { left, right, .. } if leaf(code, *left) && leaf(code, *right) => false,
+        ExprKind::Read { storage, view } if moving => {
+            let origin = expr.origin.as_ref()?;
+            if !compatible(*view, family)
+                || !initialized(origin.initialization, family)
+                || origin.site
+                    != (UseSite::Operation {
+                        operation,
+                        argument: 0,
+                    })
+                || !matches!(origin.read, Ok(StorageRead::Value { local, view: read_view, .. })
+                    if local.0 == storage.0 && read_view == *view)
+            {
+                return None;
+            }
+            boolean_type(code, declared, family)
+                && code
+                    .locals
+                    .get(storage.0 as usize)
+                    .is_some_and(|source| boolean_type(code, source, family))
+        }
+        ExprKind::Unary { value, .. }
+            if !moving && family != Family::Reference && leaf(code, *value) =>
+        {
+            false
+        }
+        ExprKind::Binary { left, right, .. }
+            if family != Family::Reference && leaf(code, *left) && leaf(code, *right) =>
+        {
+            false
+        }
         // A field read keeps its original receiver evaluation and, when it may
-        // throw, its original exception position. The caller's adjacent-test
-        // check below decides whether that position is preserved.
+        // throw, its original exception position. The consumer checks below
+        // decide whether that position is preserved.
         ExprKind::Field { receiver, .. } if receiver.is_none_or(|r| leaf(code, r)) => false,
-        ExprKind::InstanceOf { value, reference } if leaf(code, *value) => {
+        ExprKind::InstanceOf { value, reference }
+            if family == Family::Integral && leaf(code, *value) =>
+        {
             let reference = code.references.get(reference.0 as usize)?;
             if !matches!(reference.declaration, Ok(ReferenceDeclaration::Type { .. }))
                 || reference.use_issue.is_some()
@@ -150,23 +191,16 @@ fn producer(
             true
         }
         ExprKind::Call(call)
-            if call.receiver.is_none_or(|receiver| leaf(code, receiver))
-                && matches!(&call.arguments, Arguments::Known(args) if args.iter().all(|&arg| leaf(code, arg)))
-                && family == Family::Integral
-                && !declared.type_source_unknown
-                && !declared.declared_types.is_empty()
-                && declared.declared_types.iter().all(|id| {
-                    code.types
-                        .get(id.0 as usize)
-                        .is_some_and(|ty| ty.units == [u16::from(b'Z')])
-                }) =>
+            if !moving
+                && call.receiver.is_none_or(|receiver| leaf(code, receiver))
+                && matches!(&call.arguments, Arguments::Known(args) if args.iter().all(|&arg| leaf(code, arg))) =>
         {
-            true
+            boolean_type(code, declared, family)
         }
         _ => return None,
     };
-    if boolean {
-        // The adjacent branch is the first consumer. The original check or
+    if boolean && !moving {
+        // The adjacent terminal is the first consumer. The original check or
         // call can throw, so only an uncaught route without saved state is eligible.
         if !matches!(
             source.original,
@@ -187,12 +221,10 @@ fn producer(
         || source.exceptional.is_some()
         || !statement_ref.sites.is_empty()
     {
-        // An effectful producer may be composed only into a condition at the
-        // same execution position: one delivered site with nothing saved, so the
-        // original throw route and evaluation count stay unchanged.
-        if !conditional || source.exceptional.is_none() {
-            return None;
-        }
+        // An effectful producer stays at the same execution position: one
+        // delivered site with nothing saved, so the original throw route and
+        // evaluation count stay unchanged.
+        source.exceptional?;
         let [site] = statement_ref.sites.as_slice() else {
             return None;
         };
@@ -222,7 +254,8 @@ fn operation_use(
     next: &[Option<OpId>],
     reads: &[u8],
     protected: &[bool],
-) -> Option<(Producer, ExprId)> {
+    nested: &[bool],
+) -> Option<(Producer, ExprId, bool)> {
     let block = code.emission.blocks.get(node)?;
     let BodyAction::Statement {
         operation,
@@ -238,10 +271,13 @@ fn operation_use(
     else {
         return None;
     };
-    if next.get(operation.0 as usize).copied().flatten()? != consumer {
+    if next.get(operation.0 as usize).copied().flatten()? != consumer
+        || (code.emission.composed_operation(consumer)
+            && !nested.get(consumer.0 as usize).copied()?)
+    {
         return None;
     }
-    let producer = producer(code, operation, statement, reads, protected, false)?;
+    let producer = producer(code, operation, statement, reads, protected)?;
     if producer.boolean
         || !code
             .emission
@@ -256,59 +292,66 @@ fn operation_use(
     let Arguments::Known(inputs) = &consumer_statement.inputs else {
         return None;
     };
-    // The producer's original reads precede every consumer operand capture.
-    // Substituting a later argument would reverse that original read order.
-    for (argument, &use_id) in inputs.iter().enumerate() {
-        let argument = u32::try_from(argument).ok()?;
-        if argument == 0
-            && rendered_operand(code, consumer_statement, use_id)
-            && matches_use(
-                code,
-                producer,
-                use_id,
-                UseSite::Operation {
-                    operation: consumer,
-                    argument,
-                },
-            )
-        {
-            return Some((producer, use_id));
-        }
-    }
-    None
-}
-
-fn rendered_operand(code: &MethodCode, statement: &Statement, id: ExprId) -> bool {
-    match &statement.kind {
-        StatementKind::Move { expression, .. } => *expression == id,
+    // The producer preceded every original capture. It may occupy that same
+    // position only when the first delivered capture is also the first operand
+    // in the selected spelling. A store can print its plain receiver before its
+    // value; only the existing pure-producer path can cross that local read.
+    let &use_id = inputs.first()?;
+    let store = match &consumer_statement.kind {
+        StatementKind::FieldStore {
+            receiver, value, ..
+        } => *value == use_id || *receiver == Some(use_id),
         StatementKind::ArrayStore {
             array,
             index,
             value,
             ..
-        } => [*value, *array, *index].contains(&id),
-        StatementKind::FieldStore {
-            receiver, value, ..
-        } => *value == id || *receiver == Some(id),
+        } => [*array, *index, *value].contains(&use_id),
+        _ => false,
+    };
+    if store {
+        let source = code.operations.get(operation.0 as usize)?;
+        if source.effects != Effects::default()
+            || source.exceptional.is_some()
+            || !code.statements.get(statement.0 as usize)?.sites.is_empty()
+        {
+            return None;
+        }
+    } else if first_operand(code, consumer_statement)? != use_id {
+        return None;
+    }
+    matches_use(
+        code,
+        producer,
+        use_id,
+        UseSite::Operation {
+            operation: consumer,
+            argument: 0,
+        },
+    )
+    .then_some((producer, use_id, !store))
+}
+
+fn first_operand(code: &MethodCode, statement: &Statement) -> Option<ExprId> {
+    match &statement.kind {
+        StatementKind::Move { expression, .. } => Some(*expression),
         StatementKind::Evaluate { expression } => {
-            let Some(expr) = code.expressions.get(expression.0 as usize) else {
-                return false;
-            };
-            match &expr.kind {
-                ExprKind::Unary { value, .. } | ExprKind::ArrayLength(value) => *value == id,
-                ExprKind::Binary { left, right, .. } | ExprKind::Compare { left, right, .. } => {
-                    *left == id || *right == id
-                }
-                ExprKind::Array { array, index, .. } => *array == id || *index == id,
-                ExprKind::NewArray { length, .. } => *length == id,
-                ExprKind::Call(call) => {
-                    call.receiver == Some(id)
-                        || matches!(&call.arguments, Arguments::Known(args) if args.contains(&id))
-                }
-                _ => false,
+            match &code.expressions.get(expression.0 as usize)?.kind {
+                ExprKind::Unary { value, .. }
+                | ExprKind::ArrayLength(value)
+                | ExprKind::InstanceOf { value, .. } => Some(*value),
+                ExprKind::Binary { left, .. } | ExprKind::Compare { left, .. } => Some(*left),
+                ExprKind::Field { receiver, .. } => *receiver,
+                ExprKind::Array { array, .. } => Some(*array),
+                ExprKind::NewArray { length, .. } => Some(*length),
+                ExprKind::Call(call) => call.receiver.or_else(|| match &call.arguments {
+                    Arguments::Known(args) => args.first().copied(),
+                    Arguments::Unavailable { .. } => None,
+                }),
+                _ => None,
             }
         }
-        _ => false,
+        _ => None,
     }
 }
 
@@ -338,7 +381,7 @@ fn terminal_use(
     {
         return None;
     }
-    let producer = producer(code, operation, statement, reads, protected, false)?;
+    let producer = producer(code, operation, statement, reads, protected)?;
     let BlockEnd::Transfers(links) = &block.end else {
         return None;
     };
@@ -371,86 +414,110 @@ fn terminal_use(
     }
     let following = sibling.get(owner.0 as usize).copied().flatten()?;
     let following_control = code.emission.controls.get(following.0 as usize)?;
-    let (terminal, use_id) = if !producer.boolean {
-        let EmissionLayout::Block(target) = following_control.layout else {
-            return None;
-        };
-        if target.0 as usize != next_node {
-            return None;
-        }
-        let BlockEnd::Terminal(terminal) = next.end else {
-            return None;
-        };
-        let target = code.terminals.get(terminal.0 as usize)?;
-        if !matches!(target.emission, TerminalEmission::Block) {
-            return None;
-        }
-        let TerminalKind::Return(Some(use_id)) = target.kind else {
-            return None;
-        };
-        (terminal, use_id)
-    } else {
-        // The producer is the last original operation; its sole fallthrough
-        // reaches this empty, single-entry header with no copies or phases.
-        // Thus even an effectful call stays at the same evaluation position.
-        let terminal = match following_control.layout {
-            EmissionLayout::If { header, test, .. } => {
-                let header = code.emission.controls.get(header.0 as usize)?;
-                if !matches!(header.layout, EmissionLayout::Block(target) if target.0 as usize == next_node)
-                    || header.continuation.is_some()
-                {
-                    return None;
-                }
-                let target = code.terminals.get(test.terminal.0 as usize)?;
-                if !matches!(target.emission, TerminalEmission::If(control) if control == following)
-                {
-                    return None;
-                }
-                test.terminal
+    // The producer's only normal delivery reaches this empty, single-entry
+    // header in the same original block. The selected layout must print that
+    // header immediately after its source; no operation or copy moves across it.
+    let terminal = match following_control.layout {
+        EmissionLayout::If { header, test, .. } => {
+            let header = code.emission.controls.get(header.0 as usize)?;
+            if !matches!(header.layout, EmissionLayout::Block(target) if target.0 as usize == next_node)
+                || header.continuation.is_some()
+                || !matches!(next.end, BlockEnd::None)
+            {
+                return None;
             }
-            EmissionLayout::Block(target) if target.0 as usize == next_node => {
-                let BlockCompletion::Syntax {
+            let target = code.terminals.get(test.terminal.0 as usize)?;
+            if !matches!(target.emission, TerminalEmission::If(control) if control == following) {
+                return None;
+            }
+            test.terminal
+        }
+        EmissionLayout::Block(target) if target.0 as usize == next_node => {
+            match code.blocks.get(next_node)?.completion {
+                BlockCompletion::Syntax {
                     terminal,
                     owner: TerminalEmission::Loop(control),
-                } = code.blocks.get(next_node)?.completion
-                else {
-                    return None;
-                };
-                let EmissionLayout::Loop { placement, .. } =
-                    &code.emission.controls.get(control.0 as usize)?.layout
-                else {
-                    return None;
-                };
-                let test = match placement {
-                    LoopPlacement::While { test, .. } | LoopPlacement::DoWhile { test, .. } => test,
-                    LoopPlacement::Infinite => return None,
-                };
-                if test.terminal != terminal || following_control.continuation.is_some() {
-                    return None;
+                } => {
+                    let EmissionLayout::Loop { placement, .. } =
+                        &code.emission.controls.get(control.0 as usize)?.layout
+                    else {
+                        return None;
+                    };
+                    let test = match placement {
+                        LoopPlacement::While { test, .. } | LoopPlacement::DoWhile { test, .. } => {
+                            test
+                        }
+                        LoopPlacement::Infinite => return None,
+                    };
+                    if test.terminal != terminal
+                        || following_control.continuation.is_some()
+                        || !matches!(next.end, BlockEnd::None)
+                    {
+                        return None;
+                    }
+                    terminal
                 }
-                terminal
+                _ => {
+                    let BlockEnd::Terminal(terminal) = next.end else {
+                        return None;
+                    };
+                    if !matches!(
+                        code.terminals.get(terminal.0 as usize)?.emission,
+                        TerminalEmission::Block
+                    ) {
+                        return None;
+                    }
+                    terminal
+                }
             }
-            _ => return None,
-        };
-        if !matches!(next.end, BlockEnd::None) {
-            return None;
         }
-        let target = code.terminals.get(terminal.0 as usize)?;
-        let TerminalKind::If {
-            condition: Condition::Zero { value: use_id, .. },
-            ..
-        } = target.kind
-        else {
-            return None;
-        };
-        if !supported_role(code, terminal, producer.boolean, 0) {
-            return None;
+        _ => return None,
+    };
+    let target = code.terminals.get(terminal.0 as usize)?;
+    let use_id = match &target.kind {
+        TerminalKind::If {
+            condition,
+            when_true,
+            when_false,
+        } => {
+            let yes = code.transfers.get(when_true.0 as usize)?;
+            let no = code.transfers.get(when_false.0 as usize)?;
+            if yes.destination == no.destination
+                && code
+                    .emission
+                    .transfers
+                    .get(when_true.0 as usize)?
+                    .copies
+                    .is_empty()
+                && code
+                    .emission
+                    .transfers
+                    .get(when_false.0 as usize)?
+                    .copies
+                    .is_empty()
+            {
+                // A predicate with no distinct delivery can disappear. Keep
+                // its producer as a statement instead of creating an empty If.
+                return None;
+            }
+            if !supported_role(code, terminal, producer.boolean, 0) {
+                return None;
+            }
+            match condition {
+                Condition::Pair { left, .. } => *left,
+                Condition::Zero { value, .. } => *value,
+            }
         }
-        (terminal, use_id)
+        TerminalKind::Return(Some(value)) => *value,
+        _ => return None,
     };
     let target = code.terminals.get(terminal.0 as usize)?;
     let phases = code.emission.terminals.get(terminal.0 as usize)?;
-    if !phases.before.is_empty() || !phases.snapshots.is_empty() || target.site.is_some() {
+    if !phases.before.is_empty()
+        || !phases.snapshots.is_empty()
+        || !phases.after.is_empty()
+        || target.site.is_some()
+    {
         return None;
     }
     matches_use(
@@ -465,21 +532,46 @@ fn terminal_use(
     .then_some((producer, use_id, owner))
 }
 
+fn boolean_type(code: &MethodCode, local: &LocalDeclaration, family: Family) -> bool {
+    family == Family::Integral
+        && !local.type_source_unknown
+        && !local.declared_types.is_empty()
+        && local.declared_types.iter().all(|id| {
+            code.types
+                .get(id.0 as usize)
+                .is_some_and(|ty| ty.units == [u16::from(b'Z')])
+        })
+}
+
+fn compatible(view: Interpretation, family: Family) -> bool {
+    matches!(view, Interpretation::Direct(actual) if actual == family)
+        || matches!(view, Interpretation::IntegralView { .. } if family == Family::Integral)
+}
+
+fn initialized(initialization: Option<Initialization>, family: Family) -> bool {
+    if family == Family::Reference {
+        matches!(initialization, Some(Initialization::Initialized))
+    } else {
+        initialization.is_none()
+    }
+}
+
 fn matches_use(code: &MethodCode, producer: Producer, id: ExprId, site: UseSite) -> bool {
+    if code.emission.composed_use(id).is_some() {
+        return false;
+    }
     let Some(expression) = code.expressions.get(id.0 as usize) else {
         return false;
     };
     let ExprKind::Read { storage, view } = expression.kind else {
         return false;
     };
-    let compatible = matches!(view, Interpretation::Direct(actual) if actual == producer.family)
-        || matches!(view, Interpretation::IntegralView { .. } if producer.family == Family::Integral);
     let Some(origin) = &expression.origin else {
         return false;
     };
     storage == producer.local
-        && compatible
-        && origin.initialization.is_none()
+        && compatible(view, producer.family)
+        && initialized(origin.initialization, producer.family)
         && origin.site == site
         && matches!(origin.read, Ok(StorageRead::Value { local, value, state, .. })
             if local == producer.destination && value == producer.value && state == producer.state)
@@ -764,10 +856,29 @@ fn scheduled(
     }
     let mut producers = Vec::new();
     for &(operation, statement) in &actions {
-        match producer(code, operation, statement, reads, protected, true) {
-            Some(producer) => push(&mut producers, Some(producer))?,
-            None => push(&mut producers, None)?,
+        let mut matched = None;
+        if let Some(producer) = producer(code, operation, statement, reads, protected) {
+            for &(operand, argument) in operands {
+                if matches_use(
+                    code,
+                    producer,
+                    operand,
+                    UseSite::Terminal {
+                        block: terminal,
+                        argument,
+                    },
+                ) && supported_role(code, terminal, producer.boolean, argument)
+                {
+                    if matched.is_some() {
+                        return Ok(None);
+                    }
+                    matched = Some((producer, operand, argument));
+                }
+            }
         }
+        // A producer for some other use remains in this run's printed prefix;
+        // it must not prevent composing an independently matched suffix.
+        push(&mut producers, matched)?;
     }
     let mut start = 0;
     for (at, producer) in producers.iter().enumerate() {
@@ -779,32 +890,10 @@ fn scheduled(
     let mut last = None;
     let mut out = Vec::new();
     for producer in producers.iter().skip(start) {
-        let Some(producer) = *producer else {
+        let Some((producer, operand, argument)) = *producer else {
             return Ok(None);
         };
-        let mut matched = None;
-        for &(operand, argument) in operands {
-            if matches_use(
-                code,
-                producer,
-                operand,
-                UseSite::Terminal {
-                    block: terminal,
-                    argument,
-                },
-            ) {
-                if matched.is_some() {
-                    return Ok(None);
-                }
-                matched = Some((operand, argument));
-            }
-        }
-        let Some((operand, argument)) = matched else {
-            return Ok(None);
-        };
-        if !supported_role(code, terminal, producer.boolean, argument)
-            || last.is_some_and(|previous| argument <= previous)
-        {
+        if last.is_some_and(|previous| argument <= previous) {
             return Ok(None);
         }
         last = Some(argument);
