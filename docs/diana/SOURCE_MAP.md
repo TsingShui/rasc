@@ -12,6 +12,7 @@ References are identified by **public repository URL, pinned commit, and reposit
 | KU | [Noelo-Lab/kuna](https://github.com/Noelo-Lab/kuna) | `29c44b57f8c1d9b35044aa4ee3f636c193288009` | Paths are relative to that repository's root. [Pinned phases document](https://github.com/Noelo-Lab/kuna/blob/29c44b57f8c1d9b35044aa4ee3f636c193288009/docs/phases.md) |
 | RG | [MG1937/radguard](https://github.com/MG1937/radguard), `0.1.3` | **`290de20c925c4a2c7642b1a63c9997185a06e130`** | Paths are relative to radguard's own repository root. [Pinned manifest](https://github.com/MG1937/radguard/blob/290de20c925c4a2c7642b1a63c9997185a06e130/Cargo.toml). An earlier version incorrectly identified the parent repository's commit as the radguard commit; the parent contains only a gitlink. This corrects that mistake. |
 | ZD | [zed-industries/zed](https://github.com/zed-industries/zed) | `654efae441bc8eb117d0042bb28cd7cf3570bdc9` | GUI design reference: `crates/ui/src/components/{list/list_item,tab}.rs`; MIT color data: `assets/themes/ayu/ayu.json`. See §6.2. |
+| RX | [TsingShui/RxD](https://github.com/TsingShui/RxD) | `54b38408e16371971c2cc1f5fbf70e8e0642907a` | GUI capability reference only: workspace features, CLI adapters, backend public surfaces and NOTICE. See §6.3. |
 
 Explicitly obtain pinned references in the current checkout as described in [SOURCE_MAP.md](SOURCE_MAP.md#10-reproducible-inputs-and-tools). References are for review and implementation, not implicit dependencies of production or E2E test runs. Offline collaborators use source bundles verified at the same commits; do not automatically switch to main or the author's machine paths.
 
@@ -151,6 +152,24 @@ ZD at the commit in §1 supplies two distinct inputs:
 The design reference does not establish pixel equivalence or interaction
 correctness. Current GUI capabilities and verification scope belong in its
 [README](../../apps/diana-gui/README.md).
+
+### 6.3 RxD capability reference
+
+RX at the commit in §1 was read for the GUI contracts in
+[DESIGN](../../apps/diana-gui/DESIGN.md), not copied or built. Review targets were
+`Cargo.toml`, `src/query/{catalog,mod,schema}.rs`, `src/cli/` command definitions,
+backend public library surfaces, and `NOTICE`. These establish interface shapes
+and declared command availability, not successful execution on any input.
+
+The review distinguishes format crates from container readers, reconstruction
+from instruction/metadata views, and compiled support from runtime availability.
+`crates/rxd-dotnet/src/native.rs` uses NativeAOT FFI and configures a reference
+directory; `crates/rxd-kuna-cli/src/lib.rs` captures linked CLI output, while
+`src/cli/kuna/mod.rs` also configures process environment for isolated workers.
+These are constraints to resolve before integration, not approved Diana paths.
+RxD's LICENSE/NOTICE do not override Diana's existing reference-reuse or product
+rules. No dependency, runtime exception or third-party extraction is authorized
+by this capability review.
 
 ## 7. Additional one-command references and reading targets
 

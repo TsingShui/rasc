@@ -28,6 +28,7 @@ construction boundaries and later-stage responsibilities are in [phases](phases.
 | [spec/09-rendering.md](spec/09-rendering.md) | P9 pure rendering, explicit phase notation, source spans and output failure locality. |
 | [Engine README](../../crates/diana-decomp/README.md) | Implemented engine capabilities and inspection commands. |
 | [CLI README](../../apps/diana/README.md) | Application commands, selectors and publication behavior. |
+| [GUI DESIGN](../../apps/diana-gui/DESIGN.md) | Host-level resource, identity, navigation, view and result contracts; not an Engine integration status claim. |
 | [SOURCE_MAP.md](SOURCE_MAP.md) | Source attribution, reproducibility and evidence boundaries. |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Contribution, Rust and acceptance rules. |
 | [WRITING.md](WRITING.md) | Documentation conventions. |

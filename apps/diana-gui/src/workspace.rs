@@ -27,6 +27,7 @@ actions!(
     diana_workspace,
     [
         OpenSearch,
+        OpenDemo,
         FindInDocument,
         CopyDocument,
         ToggleFacts,
@@ -98,6 +99,7 @@ pub struct Workspace {
     search: Option<SearchSession>,
     documents: Vec<Document>,
     active: Option<ClassId>,
+    demo_open: bool,
     code_size: f32,
 }
 
@@ -105,7 +107,8 @@ impl Workspace {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let tree = project_tree::new(cx);
         let observation = cx.observe_in(&tree, window, |view, tree, window, cx| {
-            if let Some(id) = project_tree::selection(tree.read(cx))
+            if view.demo_open
+                && let Some(id) = project_tree::selection(tree.read(cx))
                 && view.active != Some(id)
             {
                 // Tree owns keyboard focus and preview selection; do not steal it.
@@ -114,12 +117,13 @@ impl Workspace {
         });
         let menu_observation = cx.observe_self(|view, cx| {
             crate::menus::refresh(
+                view.demo_open,
                 view.active_document().map(|document| document.mode),
                 view.code_size,
                 cx,
             );
         });
-        let mut view = Self {
+        let view = Self {
             focus: cx.focus_handle(),
             tree,
             _tree_observation: observation,
@@ -127,9 +131,11 @@ impl Workspace {
             search: None,
             documents: Vec::new(),
             active: None,
+            demo_open: false,
             code_size: style::CODE_SIZE,
         };
-        view.reset(window, cx);
+        view.focus.focus(window, cx);
+        cx.notify();
         view
     }
 
@@ -213,6 +219,9 @@ impl Workspace {
     }
 
     fn open_search(&mut self, _: &OpenSearch, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.demo_open {
+            return;
+        }
         if window.has_active_dialog(cx) {
             if let Some(search) = &self.search {
                 search.list.update(cx, |list, cx| list.focus(window, cx));
@@ -322,6 +331,8 @@ impl Workspace {
     }
 
     fn reset(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.demo_open = true;
+        project_tree::reset(&self.tree, cx);
         self.documents = vec![
             Document::new(ClassId::NotesRepository, window, cx),
             Document::new(ClassId::MainActivity, window, cx),
@@ -512,6 +523,14 @@ impl Workspace {
             }))
     }
 
+    fn welcome(&self) -> impl IntoElement {
+        Empty::new().header(
+            EmptyHeader::new().description(
+                EmptyDescription::new().child("Open an APK or DEX file to get started."),
+            ),
+        )
+    }
+
     fn reader(&self, cx: &mut Context<Self>) -> impl IntoElement {
         v_flex()
             .flex_1()
@@ -570,6 +589,11 @@ impl Render for Workspace {
             .track_focus(&self.focus)
             .key_context("DianaWorkspace")
             .on_action(cx.listener(Self::open_search))
+            .on_action(cx.listener(|view, _: &OpenDemo, window, cx| {
+                if !view.demo_open {
+                    view.reset(window, cx);
+                }
+            }))
             .on_action(cx.listener(Self::find_in_document))
             .on_action(cx.listener(Self::copy_document))
             .on_action(
@@ -600,31 +624,41 @@ impl Render for Workspace {
                 });
             }))
             .on_action(cx.listener(|view, _: &ResetLayout, window, cx| {
-                window.close_sheet(cx);
-                project_tree::reset(&view.tree, cx);
-                view.reset(window, cx);
+                if view.demo_open {
+                    window.close_sheet(cx);
+                    view.reset(window, cx);
+                }
             }))
             .when(!cfg!(target_os = "macos"), |root| {
-                root.child(self.toolbar(cx))
+                if self.demo_open {
+                    root.child(self.toolbar(cx))
+                } else {
+                    root.child(TitleBar::new().bg(cx.theme().title_bar))
+                }
             })
-            .child(
-                h_flex()
-                    .flex_1()
-                    .min_h_0()
-                    .w_full()
-                    .items_start()
-                    .child(self.sidebar(cx))
-                    .child(
-                        v_flex()
-                            .flex_1()
-                            .min_w_0()
-                            .h_full()
-                            .when(!self.documents.is_empty(), |content| {
-                                content.child(self.tabs(cx))
-                            })
-                            .child(self.reader(cx)),
-                    ),
-            )
+            .map(|root| {
+                if !self.demo_open {
+                    return root.child(self.welcome());
+                }
+                root.child(
+                    h_flex()
+                        .flex_1()
+                        .min_h_0()
+                        .w_full()
+                        .items_start()
+                        .child(self.sidebar(cx))
+                        .child(
+                            v_flex()
+                                .flex_1()
+                                .min_w_0()
+                                .h_full()
+                                .when(!self.documents.is_empty(), |content| {
+                                    content.child(self.tabs(cx))
+                                })
+                                .child(self.reader(cx)),
+                        ),
+                )
+            })
     }
 }
 
@@ -636,6 +670,15 @@ pub fn bind_keys(cx: &mut App) {
     };
     cx.bind_keys([
         KeyBinding::new(search, OpenSearch, Some("DianaWorkspace")),
+        KeyBinding::new(
+            if cfg!(target_os = "macos") {
+                "cmd-shift-d"
+            } else {
+                "ctrl-shift-d"
+            },
+            OpenDemo,
+            Some("DianaWorkspace"),
+        ),
         KeyBinding::new(find, FindInDocument, Some("DianaWorkspace")),
         KeyBinding::new(close, CloseTab, Some("DianaWorkspace")),
         KeyBinding::new("ctrl-tab", NextTab, Some("DianaWorkspace")),

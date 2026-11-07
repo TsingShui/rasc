@@ -13,6 +13,23 @@ From the repository root with Rust 1.93+ and the native tools described in
 cargo run -p diana-gui --release --locked
 ```
 
+## Backend contracts
+
+[DESIGN.md](DESIGN.md) defines the resource, identity, navigation, view and result
+contracts for multi-format integration. It specifies responsibilities and local
+failure behavior, not a linked backend or a frozen Rust trait. The current
+application remains the UI demo described here.
+
+## Startup
+
+The application starts with an empty welcome view containing only
+“Open an APK or DEX file to get started.” No tree or document tabs are shown.
+The hint is presentational; file opening is not connected.
+
+The existing authored workspace is available explicitly through File → Open Demo
+Workspace on macOS, or Cmd-Shift-D / Ctrl-Shift-D. Closing its last tab keeps the
+loaded demo tree available; it does not change the project into a welcome state.
+
 ## UI composition
 
 The application uses GPUI Kit controls with a shared Ayu Dark color mapping.
@@ -30,7 +47,7 @@ Kit still owns control rendering, focus, selection and keyboard interaction:
 | Symbol search | `Dialog`, searchable `List`, `ListItem` |
 | Readonly code and in-document find | `Editor` and its built-in search panel |
 | Original-fact inspector | `Sheet`, `DescriptionList`, `Alert` |
-| No open documents | `Empty` |
+| Welcome and no open documents | `Empty` |
 
 On macOS, the window has no drawn toolbar or Search/Copy/Facts/View button row.
 Commands live in the screen's native application menu bar. Other desktop
@@ -42,6 +59,8 @@ and action handlers. Basic flex layout fixes the tree column's width. Kit's
 does not add an adapter just to place a Tree inside it.
 
 ## Interaction
+
+After explicitly opening the demo workspace:
 
 - Select one of eight classes in the APK → DEX → package → class tree. Kit owns
   expansion, selection, scrolling and arrow-key navigation. Tree selection

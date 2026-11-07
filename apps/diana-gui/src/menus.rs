@@ -3,7 +3,7 @@ use gpui_kit::{component::input, *};
 
 use crate::{Quit, demo::ViewMode, workspace::*};
 
-pub fn refresh(mode: Option<ViewMode>, code_size: f32, cx: &mut App) {
+pub fn refresh(demo_open: bool, mode: Option<ViewMode>, code_size: f32, cx: &mut App) {
     if !cfg!(target_os = "macos") {
         return;
     }
@@ -16,8 +16,11 @@ pub fn refresh(mode: Option<ViewMode>, code_size: f32, cx: &mut App) {
             MenuItem::separator(),
             MenuItem::action("Quit Diana", Quit),
         ]),
-        Menu::new("File")
-            .items([MenuItem::action("Close Document", CloseTab).disabled(no_document)]),
+        Menu::new("File").items([
+            MenuItem::action("Open Demo Workspace", OpenDemo).disabled(demo_open),
+            MenuItem::separator(),
+            MenuItem::action("Close Document", CloseTab).disabled(no_document),
+        ]),
         Menu::new("Edit").items([
             MenuItem::os_action("Undo", input::Undo, OsAction::Undo),
             MenuItem::os_action("Redo", input::Redo, OsAction::Redo),
@@ -40,13 +43,13 @@ pub fn refresh(mode: Option<ViewMode>, code_size: f32, cx: &mut App) {
             MenuItem::separator(),
             MenuItem::action("Original Facts…", ToggleFacts).disabled(no_document),
             MenuItem::separator(),
-            MenuItem::action("Smaller Font", SmallerFont).disabled(code_size <= 11.),
-            MenuItem::action("Larger Font", LargerFont).disabled(code_size >= 18.),
+            MenuItem::action("Smaller Font", SmallerFont).disabled(no_document || code_size <= 11.),
+            MenuItem::action("Larger Font", LargerFont).disabled(no_document || code_size >= 18.),
             MenuItem::separator(),
-            MenuItem::action("Reset Layout", ResetLayout),
+            MenuItem::action("Reset Layout", ResetLayout).disabled(!demo_open),
         ]),
         Menu::new("Navigate").items([
-            MenuItem::action("Go to Symbol…", OpenSearch),
+            MenuItem::action("Go to Symbol…", OpenSearch).disabled(!demo_open),
             MenuItem::action("Next Document", NextTab).disabled(no_document),
         ]),
     ]);

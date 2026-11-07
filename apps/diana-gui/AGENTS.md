@@ -15,6 +15,12 @@ The root `AGENTS.md` and `docs/diana/CONTRIBUTING.md` apply.
   Use bundled icons sparingly for conventional affordances; do not replace
   standard icon controls with forced text labels. Use concise, conventional UI
   copy rather than forced translations.
+- Start with an empty welcome view and a concise APK/DEX-opening hint. Do not
+  populate a project tree or documents automatically. Keep authored demo content
+  behind an explicit demo command; a static hint does not imply file integration.
+- Read `DESIGN.md` before changing resource, identity, navigation, view or result
+  interfaces. Its host-level contracts do not widen Engine stage access or
+  authorize backend integration exceptions.
 - Keep state changes in event handlers; rendering consumes existing state. Use
   stable class identities for open documents, not current list positions.
 - Keep readonly code views selectable and copyable. Highlighting is presentation,
