@@ -140,6 +140,15 @@ pub(super) fn construct(code: &mut MethodCode) -> Result<(), ExpressionError> {
                     single_if[id.0 as usize] = true;
                 }
             }
+            EmissionLayout::Graph | EmissionLayout::Labelled => {
+                // An explicit container prints its children in order, so only
+                // the last printed child decides whether control leaves. Its own
+                // transfers keep jumping to the original targets.
+                abrupt[id.0 as usize] = code.emission.controls[id.0 as usize]
+                    .children(&code.controls[id.0 as usize])
+                    .last()
+                    .is_some_and(|last| abrupt[last.0 as usize]);
+            }
             _ => {}
         }
     }
