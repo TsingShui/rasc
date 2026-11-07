@@ -244,14 +244,10 @@ fn statement_uses(
                 refuse("next_statement_writes_the_value");
                 continue;
             }
-            let Some(occurrence) = first_leaf(code, next) else {
-                refuse("next_statement_has_no_first_leaf");
+            let Some(occurrence) = observable_carrier(code, next, storage)? else {
+                refuse("first_observable_is_another_value");
                 continue;
             };
-            if !reads(code, occurrence, storage) {
-                refuse("first_leaf_is_another_value");
-                continue;
-            }
             if !rendered_once(code, next, occurrence)? {
                 refuse("first_leaf_renders_twice");
                 continue;
@@ -585,37 +581,116 @@ fn once_in(code: &MethodCode, root: ExprId, occurrence: ExprId) -> Result<bool, 
 
 /// The leftmost value this statement evaluates in its printed form. This is the
 /// exact expression occurrence the check can print at.
-fn first_leaf(code: &MethodCode, statement: StatementId) -> Option<ExprId> {
-    let statement = code.statements.get(statement.0 as usize)?;
+/// The exact occurrence where a check may print inside this statement: the first
+/// evaluation a reader could observe. Evaluation walks the whole expression in
+/// order; a plain local read or literal before the checked value neither acts nor
+/// throws, so the check moving past it is not observable. An acting node (call,
+/// field read, array access, allocation, instance-of) ends the walk.
+fn observable_carrier(
+    code: &MethodCode,
+    statement: StatementId,
+    storage: StorageId,
+) -> Result<Option<ExprId>, ExpressionError> {
+    enum Step {
+        Visit(ExprId),
+        /// This value has acted; nothing later may carry the check.
+        Act,
+    }
+    let Some(statement) = code.statements.get(statement.0 as usize) else {
+        return Ok(None);
+    };
+    let mut roots = Vec::new();
     match &statement.kind {
         StatementKind::Move { expression, .. } | StatementKind::Evaluate { expression } => {
-            leftmost(code, *expression)
+            push(&mut roots, *expression)?;
         }
-        // A natural store prints its receiver or array first; the explicit form
-        // prints the value first.
         StatementKind::FieldStore {
             receiver, value, ..
         } => {
             if code.emission.natural_store(statement.id) {
-                // A static store names its owner without evaluating a receiver,
-                // so the value is the first evaluated operand it prints.
-                match receiver {
-                    Some(receiver) => leftmost(code, *receiver),
-                    None => leftmost(code, *value),
+                if let Some(receiver) = receiver {
+                    push(&mut roots, *receiver)?;
                 }
+                push(&mut roots, *value)?;
             } else {
-                leftmost(code, *value)
+                push(&mut roots, *value)?;
             }
         }
-        StatementKind::ArrayStore { array, value, .. } => {
+        StatementKind::ArrayStore {
+            array,
+            index,
+            value,
+            ..
+        } => {
             if code.emission.natural_store(statement.id) {
-                leftmost(code, *array)
+                push(&mut roots, *array)?;
+                push(&mut roots, *index)?;
+                push(&mut roots, *value)?;
             } else {
-                leftmost(code, *value)
+                push(&mut roots, *value)?;
             }
         }
-        _ => None,
+        _ => return Ok(None),
     }
+    let mut work = Vec::new();
+    for root in roots.into_iter().rev() {
+        push(&mut work, Step::Visit(root))?;
+    }
+    while let Some(step) = work.pop() {
+        let id = match step {
+            Step::Act => return Ok(None),
+            Step::Visit(id) => id,
+        };
+        let Some(expression) = code.expressions.get(id.0 as usize) else {
+            return Ok(None);
+        };
+        if code.emission.composed_use(id).is_some() {
+            // The composed subtree prints under another carrier.
+            return Ok(None);
+        }
+        match &expression.kind {
+            ExprKind::Read { storage: read, .. } if *read == storage => return Ok(Some(id)),
+            ExprKind::Read { .. } | ExprKind::Literal { .. } => {}
+            ExprKind::Unary { value, .. } => {
+                push(&mut work, Step::Act)?;
+                push(&mut work, Step::Visit(*value))?;
+            }
+            ExprKind::Binary { left, right, .. } | ExprKind::Compare { left, right, .. } => {
+                push(&mut work, Step::Act)?;
+                push(&mut work, Step::Visit(*right))?;
+                push(&mut work, Step::Visit(*left))?;
+            }
+            ExprKind::Call(call) => {
+                push(&mut work, Step::Act)?;
+                if let Arguments::Known(args) = &call.arguments {
+                    for &argument in args.iter().rev() {
+                        push(&mut work, Step::Visit(argument))?;
+                    }
+                }
+                if let Some(receiver) = call.receiver {
+                    push(&mut work, Step::Visit(receiver))?;
+                }
+            }
+            ExprKind::Field {
+                receiver: Some(receiver),
+                ..
+            } => {
+                push(&mut work, Step::Act)?;
+                push(&mut work, Step::Visit(*receiver))?;
+            }
+            ExprKind::Array { array, index, .. } => {
+                push(&mut work, Step::Act)?;
+                push(&mut work, Step::Visit(*index))?;
+                push(&mut work, Step::Visit(*array))?;
+            }
+            ExprKind::InstanceOf { value, .. } => {
+                push(&mut work, Step::Act)?;
+                push(&mut work, Step::Visit(*value))?;
+            }
+            _ => return Ok(None),
+        }
+    }
+    Ok(None)
 }
 
 /// Whether this statement's printed expression trees render the occurrence
