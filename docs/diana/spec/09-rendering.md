@@ -76,6 +76,15 @@ the closing brace performs the same exit and nothing is attached to that return.
 A return with copies, phases, a site or an unavailable definition keeps its text,
 and so does any return that other statements follow.
 
+A local with P7's selected `local_initializer` prints its existing type spelling
+at that assignment, for example `Object service = receiver.getService(type)`.
+P9 omits the corresponding standalone declaration from the method header.
+The original statement, operation, result-commit and expression spans still
+cover the same evaluation; the printed type carries its existing P8 type origin.
+A local without that selection retains its existing declaration, including
+storage diagnostics. Parameters, hidden locals and allocation declarations
+retain their existing forms. Partial products have no initializer selection.
+
 A method body that emits no text prints `{ }` on its declaration line. A body
 with any printed content keeps its own lines.
 

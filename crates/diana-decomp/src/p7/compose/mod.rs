@@ -10,6 +10,7 @@ mod branches;
 mod casts;
 mod continuations;
 mod continues;
+mod declarations;
 mod expressions;
 mod fallthrough;
 mod labels;
@@ -182,5 +183,6 @@ pub(super) fn construct(
         scopes::transparent_labelled_scopes(code)
     );
     references::call_owners(code)?;
+    declarations::construct(code)?;
     Ok(())
 }

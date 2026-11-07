@@ -18,6 +18,9 @@ pub(super) trait ExpressionSource {
     fn expressions(&self) -> &[Expression];
     fn constructions(&self) -> &[Construction];
     fn copies(&self) -> &[CopyBundle];
+    fn local_initializer(&self, _local: StorageId) -> Option<(StatementId, LocalSpelling)> {
+        None
+    }
     fn composed_use(&self, _id: ExprId) -> Option<ComposedExpression> {
         None
     }
@@ -52,6 +55,12 @@ pub(super) trait ExpressionSource {
     }
 }
 impl ExpressionSource for MethodCode {
+    fn local_initializer(&self, local: StorageId) -> Option<(StatementId, LocalSpelling)> {
+        Some((
+            self.emission().local_initializer(local)?,
+            self.emission().local_types()[local.0 as usize],
+        ))
+    }
     fn payloads(&self) -> &[ArrayPayload] {
         self.payloads()
     }
@@ -220,7 +229,17 @@ impl<S: ExpressionSource> Expressions<'_, '_, S> {
                 if !first {
                     self.out.put(", ")?;
                 }
-                self.local(StorageId(local.0))?;
+                let local = StorageId(local.0);
+                if let Some((statement, spelling)) = self.code.local_initializer(local)
+                    && statement == s.id
+                {
+                    match spelling {
+                        LocalSpelling::Named(ty) => self.ty(ty)?,
+                        LocalSpelling::Machine(ty) => machine_type(self.out, ty)?,
+                    }
+                    self.out.put(" ")?;
+                }
+                self.local(local)?;
                 first = false;
             }
         }

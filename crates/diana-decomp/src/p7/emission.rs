@@ -270,7 +270,7 @@ pub struct EmissionTransfer {
     pub copies: Vec<CopyPlanId>,
     pub spelling: TransferSpelling,
 }
-#[derive(Debug, Serialize)]
+#[derive(Clone, Copy, Debug, Serialize)]
 pub enum LocalSpelling {
     Named(TypeUseId),
     Machine(#[serde(serialize_with = "super::debug")] crate::p5::StorageType),
@@ -280,6 +280,8 @@ pub enum LocalSpelling {
 #[derive(Debug, Serialize)]
 pub struct EmissionPlan {
     pub(super) local_types: Vec<LocalSpelling>,
+    /// A declaration attached to its existing assignment; absence keeps the header form.
+    pub(super) local_initializers: Vec<Option<StatementId>>,
     pub(super) controls: Vec<EmissionControl>,
     pub(super) blocks: Vec<EmissionBlock>,
     pub(super) show_chains: Vec<bool>,
@@ -335,6 +337,7 @@ impl EmissionPlan {
     pub(super) fn empty() -> Self {
         Self {
             local_types: Vec::new(),
+            local_initializers: Vec::new(),
             controls: Vec::new(),
             blocks: Vec::new(),
             show_chains: Vec::new(),
@@ -363,6 +366,12 @@ impl EmissionPlan {
             initial: Vec::new(),
             statement_operations: Vec::new(),
         }
+    }
+    pub fn local_initializer(&self, local: StorageId) -> Option<StatementId> {
+        self.local_initializers
+            .get(local.0 as usize)
+            .copied()
+            .flatten()
     }
     pub fn local_types(&self) -> &[LocalSpelling] {
         &self.local_types
@@ -597,6 +606,7 @@ pub(super) fn construct(code: &mut MethodCode) -> Result<(), ExpressionError> {
     plan.allocation_declarations = filled(code.statements.len(), false)?;
     plan.allocation_locals = filled(code.locals.len(), false)?;
     plan.hidden_locals = filled(code.locals.len(), false)?;
+    plan.local_initializers = filled(code.locals.len(), None)?;
     plan.deferred_controls = filled(code.controls.len(), false)?;
     for l in &code.locals {
         let syntax = local_spelling(&code.types, l);

@@ -112,7 +112,9 @@ from that same execution; `into_result()` releases retained analysis. No-code
 members use `Declared(MethodResult)`. Unified operation lowering retains original
 calls, conversions, checks, copies, exception sites and initialization positions.
 P5 natural constructions become `New` expressions, and P6 controls/outlets have
-explicit emission ownership. The P7 compose passes select only adjacent
+explicit emission ownership. P7 also attaches local declarations to their first
+assignment when later reads and writes remain in scope; joins, copy destinations
+and unknown placements retain outer declarations. The P7 compose passes select only adjacent
 expressions and compact control forms admitted by their delivered facts; original
 operation and control origins remain in the final source spans. Metadata and
 bootstrap declarations travel from their owning producers; P7 does not reopen

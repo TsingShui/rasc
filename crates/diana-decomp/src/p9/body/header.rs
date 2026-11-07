@@ -9,9 +9,10 @@ impl Expressions<'_, '_> {
         for l in self.code.locals() {
             if self.code.emission().hidden_local(l.id)
                 || self.code.emission().allocation_local(l.id)
+                || self.code.emission().local_initializer(l.id).is_some()
                 || matches!(l.original.kind(), crate::p5::LocalKind::Parameter { .. })
             {
-                // An allocated object's declaration stands at its allocation.
+                // The declaration is carried by its existing statement, or is implicit.
                 continue;
             }
             self.out.indent()?;

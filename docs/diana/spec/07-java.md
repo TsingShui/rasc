@@ -312,6 +312,29 @@ allocation runs, and the header omits that local's declaration. The constructor
 call stays at its own statement, so neither the allocation nor its publication
 moves.
 
+P7 selects a local's `local_initializer` after expression, cast and control
+composition. The selection attaches its declaration to an existing single-output
+move, evaluation or construction statement. The earliest candidate assignment
+must precede every other identified write to that storage. A
+construction qualifies only when its sole publication is its own deferred
+carrier. The initializer's expression, exception sites and commit stay in place.
+P9 uses the selected statement ID and existing `LocalSpelling`; it does not
+choose scope or infer an initializer.
+
+The declaration pass consumes selected control roles, original read origins,
+composition links, copy locations and construction arguments/publications.
+It follows composition links to each access's final display location. P7 MUST
+retain an outer declaration unless every identified read and write follows the
+selected assignment and remains in its lexical scope or a nested scope. Branch arms, loop bodies and predicates, catch bodies and switch
+cases have separate scope boundaries. Cross-branch merges, copy destinations,
+snapshots, parallel temporaries and unavailable local storage
+retain their outer declarations. A read without an established display location
+keeps that local's outer declaration. Explicit graphs and predicate evaluation
+blocks retain their existing declaration form. These choices do not change the
+original storage identities, copies or recovery gaps, and do not rebuild CFG,
+SSA or dominance. Plan scratch failures retain the existing P7 error classification
+and partial-product behavior.
+
 `EmissionPlan` is P9's sole execution layout. It binds the supplied P5 copy
 locations to operation, terminal and selected-edge phases without rescheduling
 steps. It fixes child roles, condition polarity, method-local control names and
