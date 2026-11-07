@@ -166,7 +166,7 @@ pub(super) fn construct(
     traced!("loop_compact", loops::select_compact(code));
     traced!("natural_stores", stores::natural_stores(code));
     literals::omit_materialized_literals(code)?;
-    traced!("casts", casts::construct(code, types));
+    traced!("casts", casts::construct(code, types, key));
     traced!("branches", branches::construct(code));
     traced!(
         "omit_trailing_void_return",

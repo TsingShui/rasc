@@ -69,6 +69,19 @@ pub fn snapshot(code: &super::super::MethodCode) -> Snapshot {
     }
 }
 
+/// Why one original check-cast keeps its own statement: the first refusal that
+/// stopped it from printing at a read. The tag names that condition, so a sweep
+/// can group the remaining checks by cause instead of reading each one.
+pub fn cast_refused(key: crate::MethodKey, statement: crate::p7::StatementId, why: &'static str) {
+    if !ENABLED {
+        return;
+    }
+    eprintln!(
+        "[cast] class={} method={} statement={} why={why}",
+        key.class.class_def.0, key.method.0, statement.0
+    );
+}
+
 /// Prints the counters this pass changed, if any.
 pub fn report(key: crate::MethodKey, pass: &'static str, before: &Snapshot, after: &Snapshot) {
     if !ENABLED || before == after {

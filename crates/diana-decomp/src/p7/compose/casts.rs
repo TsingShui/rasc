@@ -35,12 +35,13 @@ use crate::p5::{CopyLocation, Materialization, TransferSite};
 pub(super) fn construct(
     code: &mut MethodCode,
     types: &crate::p4::TypeFacts,
+    key: crate::MethodKey,
 ) -> Result<(), ExpressionError> {
-    let omitted = redundant(code, types)?;
+    let omitted = redundant(code, types, key)?;
     let mut found: Vec<(StatementId, InlineCheck)> = Vec::new();
-    statement_uses(code, &mut found)?;
-    copy_uses(code, &mut found)?;
-    terminal_uses(code, &mut found)?;
+    statement_uses(code, &mut found, key)?;
+    copy_uses(code, &mut found, key)?;
+    terminal_uses(code, &mut found, key)?;
     // A redundant check has no text to carry, so its value's read keeps its own
     // spelling and the check's statement only contributes its origins.
     found.retain(|(statement, _)| {
@@ -89,6 +90,7 @@ pub(super) fn construct(
 fn redundant(
     code: &MethodCode,
     types: &crate::p4::TypeFacts,
+    key: crate::MethodKey,
 ) -> Result<Vec<Option<OmittedCheck>>, ExpressionError> {
     let mut omitted: Vec<Option<OmittedCheck>> =
         super::super::build::filled(code.statements.len(), None)?;
@@ -102,7 +104,8 @@ fn redundant(
         let Some(statement) = operation.statement else {
             continue;
         };
-        let Some((value, reference)) = eligible_check(code, check.operation(), statement) else {
+        let Some((value, reference)) = eligible_check(code, check.operation(), statement, key)
+        else {
             continue;
         };
         let at = omitted
@@ -127,25 +130,36 @@ fn eligible_check(
     code: &MethodCode,
     operation: OpId,
     statement: StatementId,
+    key: crate::MethodKey,
 ) -> Option<(StorageId, ReferenceId)> {
+    let refuse = |why: &'static str| super::trace::cast_refused(key, statement, why);
     let s = code.statements.get(statement.0 as usize)?;
+    // Only a real check-cast can be refused; every other statement simply has no
+    // carrier question, so it is silent.
     let StatementKind::CheckCast { value, reference } = s.kind else {
         return None;
     };
     if !s.outputs.is_empty() {
+        refuse("check_has_output");
         return None;
     }
     let ExprKind::Read { storage, .. } = code.expressions.get(value.0 as usize)?.kind else {
+        refuse("value_not_a_read");
         return None;
     };
-    let phases = code.emission.operations.get(operation.0 as usize)?;
-    if !phases.before.is_empty()
-        || !phases.snapshots.is_empty()
-        || !phases.after.is_empty()
-        || s.sites
-            .iter()
-            .any(|&site| code.emission.site_annotation(site))
+    let Some(phases) = code.emission.operations.get(operation.0 as usize) else {
+        refuse("no_phase_record");
+        return None;
+    };
+    if !phases.before.is_empty() || !phases.snapshots.is_empty() || !phases.after.is_empty() {
+        refuse("check_has_copy_phase");
+        return None;
+    }
+    if s.sites
+        .iter()
+        .any(|&site| code.emission.site_annotation(site))
     {
+        refuse("check_site_is_printed");
         return None;
     }
     Some((storage, reference))
@@ -194,6 +208,7 @@ fn unclaimed_occurrence(found: &[(StatementId, InlineCheck)], check: &InlineChec
 fn statement_uses(
     code: &MethodCode,
     found: &mut Vec<(StatementId, InlineCheck)>,
+    key: crate::MethodKey,
 ) -> Result<(), ExpressionError> {
     for node in 0..code.emission.blocks.len() {
         let actions = &code.emission.blocks[node].actions;
@@ -205,13 +220,15 @@ fn statement_uses(
             else {
                 continue;
             };
-            let Some((storage, reference)) = eligible_check(code, operation, statement) else {
+            let Some((storage, reference)) = eligible_check(code, operation, statement, key) else {
                 continue;
             };
+            let refuse = |why: &'static str| super::trace::cast_refused(key, statement, why);
             let BodyAction::Statement {
                 statement: next, ..
             } = actions[index + 1]
             else {
+                refuse("next_action_is_not_a_statement");
                 continue;
             };
             if code.statements[next.0 as usize]
@@ -224,12 +241,19 @@ fn statement_uses(
                     )
                 })
             {
+                refuse("next_statement_writes_the_value");
                 continue;
             }
             let Some(occurrence) = first_leaf(code, next) else {
+                refuse("next_statement_has_no_first_leaf");
                 continue;
             };
-            if !reads(code, occurrence, storage) || !rendered_once(code, next, occurrence)? {
+            if !reads(code, occurrence, storage) {
+                refuse("first_leaf_is_another_value");
+                continue;
+            }
+            if !rendered_once(code, next, occurrence)? {
+                refuse("first_leaf_renders_twice");
                 continue;
             }
             let carried = carried_check(
@@ -257,6 +281,7 @@ fn statement_uses(
 fn copy_uses(
     code: &MethodCode,
     found: &mut Vec<(StatementId, InlineCheck)>,
+    key: crate::MethodKey,
 ) -> Result<(), ExpressionError> {
     for node in 0..code.emission.blocks.len() {
         let block = &code.emission.blocks[node];
@@ -270,15 +295,18 @@ fn copy_uses(
         else {
             continue;
         };
-        let Some((storage, reference)) = eligible_check(code, operation, statement) else {
+        let Some((storage, reference)) = eligible_check(code, operation, statement, key) else {
             continue;
         };
+        let refuse = |why: &'static str| super::trace::cast_refused(key, statement, why);
         let BlockEnd::Transfers(transfers) = &block.end else {
             // A terminal evaluates its own operands and selects between its
             // original edges, so the check still precedes both outcomes.
+            refuse("block_ends_in_a_terminal");
             continue;
         };
         let [transfer] = transfers.as_slice() else {
+            refuse("block_has_two_transfers");
             continue;
         };
         let Some(planned) = code.emission.transfers.get(transfer.0 as usize) else {
@@ -286,9 +314,11 @@ fn copy_uses(
         };
         if matches!(planned.spelling, TransferSpelling::Selected) {
             // A selected arm prints this bundle for one outcome only.
+            refuse("transfer_is_a_selected_arm");
             continue;
         }
         let [bundle] = planned.copies.as_slice() else {
+            refuse("transfer_has_not_exactly_one_bundle");
             continue;
         };
         let Some(bundle) = code.copies.get(bundle.0 as usize) else {
@@ -299,14 +329,17 @@ fn copy_uses(
             ..
         } = bundle.location
         else {
+            refuse("bundle_is_not_a_normal_edge_copy");
             continue;
         };
         // The bundle must be this transfer's own normal edge, not a copy another
         // composition step placed here from a different origin.
         if code.transfers.get(transfer.0 as usize).and_then(|t| t.edge) != Some(edge) {
+            refuse("bundle_edge_is_not_this_transfer");
             continue;
         }
         if !matches!(bundle.emission, CopyEmission::Original) {
+            refuse("bundle_was_relocated");
             continue;
         }
         let Some(CopyStatement::Assign {
@@ -315,13 +348,16 @@ fn copy_uses(
             ..
         }) = bundle.steps.first()
         else {
+            refuse("first_copy_step_is_not_an_assignment");
             continue;
         };
         if *destination == storage {
             // The surviving assignment would look like the check wrote the local.
+            refuse("copy_writes_the_checked_local");
             continue;
         }
         if !reads(code, *expression, storage) {
+            refuse("copy_rhs_is_another_value");
             continue;
         }
         let carried = carried_check(
@@ -351,6 +387,7 @@ fn copy_uses(
 fn terminal_uses(
     code: &MethodCode,
     found: &mut Vec<(StatementId, InlineCheck)>,
+    key: crate::MethodKey,
 ) -> Result<(), ExpressionError> {
     for node in 0..code.emission.blocks.len() {
         let block = &code.emission.blocks[node];
@@ -364,17 +401,20 @@ fn terminal_uses(
         else {
             continue;
         };
-        let Some((storage, reference)) = eligible_check(code, operation, statement) else {
+        let Some((storage, reference)) = eligible_check(code, operation, statement, key) else {
             continue;
         };
         // The terminal may sit in a following portion of the same original
         // block: a plain within-block link with no copy prints nothing between
         // the check and the terminal operand.
+        let refuse = |why: &'static str| super::trace::cast_refused(key, statement, why);
         let Some(terminal) = terminal_after(code, node)? else {
+            refuse("no_terminal_follows");
             continue;
         };
         let phases = &code.emission.terminals[terminal.0 as usize];
         if !phases.before.is_empty() {
+            refuse("terminal_has_before_copies");
             continue;
         }
         let target = &code.terminals[terminal.0 as usize];
@@ -385,12 +425,21 @@ fn terminal_uses(
                 Condition::Zero { value, .. } => *value,
             },
             TerminalKind::Switch { selector, .. } => *selector,
-            TerminalKind::Return(None) | TerminalKind::None | TerminalKind::Goto(_) => continue,
+            TerminalKind::Return(None) | TerminalKind::None | TerminalKind::Goto(_) => {
+                refuse("terminal_has_no_operand");
+                continue;
+            }
         };
         let Some(occurrence) = leftmost(code, operand) else {
+            refuse("terminal_operand_has_no_first_leaf");
             continue;
         };
-        if !reads(code, occurrence, storage) || !once_in(code, operand, occurrence)? {
+        if !reads(code, occurrence, storage) {
+            refuse("terminal_first_leaf_is_another_value");
+            continue;
+        }
+        if !once_in(code, operand, occurrence)? {
+            refuse("terminal_operand_renders_twice");
             continue;
         }
         let carried = carried_check(
