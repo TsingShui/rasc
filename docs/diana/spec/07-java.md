@@ -325,16 +325,24 @@ exact-use matcher, branch-role gate and composition installer. Generic layout
 consumers use selected emission children and continuations; retained source
 children continue to describe lexical ancestry, not printed succession.
 
-The expression pass composes a move, an integral/floating unary or binary
-definition, or a numeric/reference field or call definition only when its
+The expression pass composes a move, a resolved string, an integral/floating unary
+or binary definition, or a numeric/reference field or call definition only when its
 original result is a single available value or reference carrier, has one
 compatible use, and carries no copy/snapshot phase. A move's source must be a
 delivered direct value read with a compatible view. A reference source and use
 must each have an established initialized state; allocation carriers and other
 position-related initialization states remain separate.
 
-An adjacent operation use must be both the first original capture and the first
-operand in its selected spelling, and have no before-operation copies. Stores
+An adjacent operation use ordinarily must be both the first original capture and
+the first operand in its selected spelling, and have no before-operation copies.
+A resolved string definition with one compatible read can instead occupy a later
+call argument when all preceding printed operands are uncomposed local reads or
+literals. The argument must retain its exact original operation/use identity.
+The string resolution still precedes every observable consumer event; a receiver
+expression, earlier call or other non-leaf operand refuses this composition.
+String definitions retain their propagation-only exception site, original string
+reference and UTF-16 units; they are not treated as effect-free literals.
+Construction arguments do not use this later-call-argument rule. Stores
 retain the existing pure-producer rule because their selected spelling can print
 the receiver before the value. A return or predicate use must be the next original
 node in the same block, with one incoming fallthrough, no intervening work or
@@ -346,6 +354,28 @@ statement instead of being moved into an otherwise empty If. All operands remain
 in original order. Locals participating in copies or construction publication are
 not hidden. An unavailable copy dependency prevents this optional composition
 for that method.
+
+For later test runs of an ordered Condition, P7 also supports a store-preserving
+composition when the result has additional reads. `ComposedResult::Store` names
+the original local; P9 prints `(local = expression)` at the exact matched
+terminal read, and the local's declaration and other reads remain visible.
+The original value/state/use identity, initialization, commit, exception and
+phase requirements still apply. A local read by original normal-edge copies
+requires store retention, even if its expression arena has only one read.
+Copy destinations, snapshots, non-edge copy phases, relocated copies and
+construction publications pin the definition to its separate statement.
+The first test run keeps a multi-read definition
+in its printed prefix; ordinary operation, If and Loop composition still require
+one read. P7 MUST NOT substitute a second evaluation for the retained store.
+
+A single-use `cmp-long` can compose with an integral-zero branch when both source
+operands have established long views. P7 delivers `ComposedPredicate::LongComparison`
+with those original operands and the branch operator; P9 prints that relation,
+not a subtraction that could overflow. The comparison's original operation,
+expression and consumed read retain origins at the predicate. Pair comparisons,
+other uses of the numeric comparison result, store-retaining compositions and
+floating `cmpl`/`cmpg` remain outside this rule. The shared adjacency, phase and
+exact-use requirements still apply.
 
 An original `instance-of` can compose with an immediately following equality or
 inequality branch only when its checked type reference is available, its original
@@ -369,8 +399,9 @@ the delivered evaluation Sequence. P7 does not find another loop or exit corrido
 The producer still executes initially and on every original head continue, or
 stays at its original tail position. Call results retain their `AfterResult`
 commit and move-result PC origin; other candidates still require `AtOperation`.
-Calls with other uses or printed
-exception routes remain statements.
+Calls with printed exception routes remain statements. Additional reads require
+the store-preserving Condition form described above; value substitution retains
+the single-read requirement.
 
 A delivered ordered condition composes a test's prelude only as an ordered
 suffix of that test run's statements. Each composed definition must name a
@@ -393,9 +424,28 @@ operations, terminal phases, copies, handlers and abrupt-exit scopes; its emissi
 continuation comes from the selected P6 alternative.
 The ordinary display pass can omit a goto to the next printed target, as for
 other completed layouts; that does not reconstruct a condition schedule.
-A resolved statement's
-operations, statements and result PC remain owned and print at the composed
-operand; no call is deduplicated.
+The tests' selected edges and all intermediate other edges require no copy
+bundles. The final other edge can retain copies at an explicit else position:
+every bundle must retain original emission, name that same original normal edge,
+and have no unavailable assignment. With no other-arm body, P7 selects
+`ConditionElse::Copies`; with a delivered body, it retains
+`ConditionElse::Body`. Copies remain on the final other edge, never in the common
+continuation or on an earlier selected edge. P7 adds no region, local or copy
+schedule to represent this else.
+
+P7 installs compositions only after every test run admits its schedule; a
+refused later run leaves no hidden local, relocated store or copy-only else. A resolved
+statement's operations, statements and result PC remain owned and print at the
+composed operand; no call is deduplicated.
+
+With `trace-passes`, the condition pass reports one final layout decision per
+Condition, identified by method and control. An explicit decision reports the
+first blocking test and, when identified, statement and admission reason.
+Installed store compositions additionally report their operation, statement,
+operand and storage identities. A copy-only else reports its original transfer,
+bundle and executable-step count. These are decisions, not counts of removable
+gotos or independent semantic verification. An ordinary build emits no such
+diagnostics.
 
 The expression pass selects terminal uses before adjacent operations and visits
 operation pairs from the end. An earlier producer may compose into an already

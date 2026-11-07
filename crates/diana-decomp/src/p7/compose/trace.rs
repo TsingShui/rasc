@@ -82,6 +82,101 @@ pub fn cast_refused(key: crate::MethodKey, statement: crate::p7::StatementId, wh
     );
 }
 
+/// One final layout decision per P6-owned condition. Test indices are zero-based;
+/// the reason is the first blocking admission check, not every possible cause.
+pub fn condition_refused(
+    key: crate::MethodKey,
+    control: crate::p7::ControlId,
+    test: Option<usize>,
+    statement: Option<crate::p7::StatementId>,
+    why: &'static str,
+) {
+    if !ENABLED {
+        return;
+    }
+    eprintln!(
+        "[condition] dex={} class={} method={} control={} layout=explicit test={test:?} statement={:?} why={why}",
+        key.class.dex.0,
+        key.class.class_def.0,
+        key.method.0,
+        control.0,
+        statement.map(|id| id.0),
+    );
+}
+
+pub fn condition_selected(
+    key: crate::MethodKey,
+    control: crate::p7::ControlId,
+    values: usize,
+    stores: usize,
+) {
+    if !ENABLED {
+        return;
+    }
+    eprintln!(
+        "[condition] dex={} class={} method={} control={} layout=short_circuit values={values} stores={stores}",
+        key.class.dex.0, key.class.class_def.0, key.method.0, control.0,
+    );
+}
+
+/// Only installed store compositions print this event; refused proposals do not.
+pub fn condition_store(
+    key: crate::MethodKey,
+    control: crate::p7::ControlId,
+    operation: crate::p2::OpId,
+    statement: crate::p7::StatementId,
+    operand: crate::p7::ExprId,
+    storage: crate::p7::StorageId,
+) {
+    if !ENABLED {
+        return;
+    }
+    eprintln!(
+        "[condition-store] dex={} class={} method={} control={} operation={} statement={} operand={} storage={}",
+        key.class.dex.0,
+        key.class.class_def.0,
+        key.method.0,
+        control.0,
+        operation.0,
+        statement.0,
+        operand.0,
+        storage.0,
+    );
+}
+
+/// This else contains the original final-other edge's copies and no body.
+pub fn condition_copy_else(
+    key: crate::MethodKey,
+    control: crate::p7::ControlId,
+    transfer: crate::p7::TransferId,
+    copy: crate::p7::CopyPlanId,
+    steps: usize,
+) {
+    if !ENABLED {
+        return;
+    }
+    eprintln!(
+        "[condition-copy-else] dex={} class={} method={} control={} transfer={} copy={} steps={steps}",
+        key.class.dex.0, key.class.class_def.0, key.method.0, control.0, transfer.0, copy.0,
+    );
+}
+
+pub fn expression_selected(
+    key: crate::MethodKey,
+    kind: &'static str,
+    operation: crate::p2::OpId,
+    statement: crate::p7::StatementId,
+    operand: crate::p7::ExprId,
+) {
+    if !ENABLED {
+        return;
+    }
+    eprintln!(
+        "[expression] dex={} class={} method={} kind={kind} operation={} statement={} operand={}",
+        key.class.dex.0, key.class.class_def.0, key.method.0, operation.0, statement.0, operand.0,
+    );
+}
+
 /// Prints the counters this pass changed, if any.
 pub fn report(key: crate::MethodKey, pass: &'static str, before: &Snapshot, after: &Snapshot) {
     if !ENABLED || before == after {

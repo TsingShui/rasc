@@ -80,7 +80,6 @@ pub struct OmittedCheck {
     /// The original establishing events P4 relied on, for this product's reader.
     pub sources: Vec<crate::p4::CheckSource>,
 }
-/// One original definition evaluated at its unique, adjacent terminal use.
 /// A payload printed as the allocation's own array literal. The allocation, the
 /// fill statement and the payload keep their original facts; only the spelling
 /// and the omitted fill statement change.
@@ -92,6 +91,27 @@ pub struct ArrayLiteral {
     pub operation: OpId,
     pub pc: crate::CodeUnitOffset,
 }
+/// Whether the composed producer replaces its only read or still commits its
+/// original local before the surrounding expression consumes that value.
+#[derive(Clone, Copy, Debug, Serialize)]
+pub enum ComposedResult {
+    Value,
+    Store(StorageId),
+}
+/// The predicate spelling selected by P7, not inferred by the renderer.
+#[derive(Clone, Copy, Debug, Serialize)]
+pub enum ComposedPredicate {
+    Value,
+    Boolean,
+    LongComparison {
+        #[serde(serialize_with = "super::debug")]
+        op: crate::p2::BranchOp,
+        left: ExprId,
+        right: ExprId,
+    },
+}
+/// One original producer evaluated at a selected adjacent read occurrence.
+/// Store retention preserves its other reads and its original materialization.
 #[derive(Clone, Copy, Debug, Serialize)]
 pub struct ComposedExpression {
     pub expression: ExprId,
@@ -100,7 +120,8 @@ pub struct ComposedExpression {
     pub pc: crate::CodeUnitOffset,
     pub result_pc: Option<crate::CodeUnitOffset>,
     pub site: Option<SiteId>,
-    pub boolean: bool,
+    pub predicate: ComposedPredicate,
+    pub result: ComposedResult,
     /// A cross-node composition closes the source control at this use.
     pub source_control: Option<ControlId>,
 }
@@ -144,6 +165,14 @@ pub enum IfShape {
     /// Only the header remains; evaluating the predicate has no displayed work.
     Empty,
 }
+/// The last condition test's original other edge either reaches the common
+/// follow, executes only its copies there, or enters its delivered body.
+#[derive(Clone, Copy, Debug, Serialize)]
+pub enum ConditionElse {
+    None,
+    Copies,
+    Body(ControlId),
+}
 #[derive(Debug, Serialize)]
 pub enum EmissionLayout {
     Block(crate::p6::NodeId),
@@ -161,7 +190,7 @@ pub enum EmissionLayout {
         header: ControlId,
         tests: Vec<PredicateEmission>,
         yes: ControlId,
-        no: Option<ControlId>,
+        no: ConditionElse,
         fall: TransferId,
     },
     Loop {
@@ -781,9 +810,9 @@ pub(super) fn construct(code: &mut MethodCode) -> Result<(), ExpressionError> {
                     tests: emitted,
                     yes: child(c, runs)?,
                     no: if *else_arm {
-                        Some(child(c, runs + 1)?)
+                        ConditionElse::Body(child(c, runs + 1)?)
                     } else {
-                        None
+                        ConditionElse::None
                     },
                     fall: last.ok_or(bug("condition control has no test"))?,
                 }

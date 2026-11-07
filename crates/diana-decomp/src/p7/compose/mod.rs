@@ -47,7 +47,7 @@ pub(super) fn construct(
         }};
     }
     // Select complete condition alternatives before generic layout and labels.
-    traced!("conditions", expressions::conditions(code));
+    traced!("conditions", expressions::conditions(code, key));
     // Sequencing is fixed before labels are selected, so a collapsed jump no
     // longer keeps a display label alive.
     traced!(
@@ -162,7 +162,7 @@ pub(super) fn construct(
         control.label_required = controls[index];
     }
 
-    traced!("expressions", expressions::construct(code));
+    traced!("expressions", expressions::construct(code, key));
     traced!("loop_compact", loops::select_compact(code));
     traced!("natural_stores", stores::natural_stores(code));
     literals::omit_materialized_literals(code)?;

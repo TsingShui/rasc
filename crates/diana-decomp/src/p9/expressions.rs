@@ -642,6 +642,12 @@ impl<S: ExpressionSource> Expressions<'_, '_, S> {
                             previous_statement,
                         },
                     )?;
+                    if let ComposedResult::Store(destination) = composed.result {
+                        self.out.put("(")?;
+                        self.local(destination)?;
+                        self.out.put(" = ")?;
+                        push_event(work, ExprEvent::Text(")"))?;
+                    }
                     push_event(work, ExprEvent::Expression(composed.expression, false))?;
                 } else {
                     self.local(*storage)?;
@@ -848,6 +854,41 @@ impl<S: ExpressionSource> Expressions<'_, '_, S> {
             }
         }
         Ok(())
+    }
+
+    /// P7 selected a relation over the original cmp-long operands. Both the
+    /// numeric producer and its consumed read keep their expression origins.
+    pub(super) fn comparison_predicate(
+        &mut self,
+        carrier: ExprId,
+        composed: ComposedExpression,
+        left: ExprId,
+        right: ExprId,
+        operator: &'static str,
+    ) -> Result<(), RenderError> {
+        let start = self.out.position();
+        let previous_carrier = self
+            .check_carrier
+            .replace(CheckCarrier::Statement(composed.statement));
+        let previous_statement = self.statement.replace(composed.statement);
+        let rendered = (|| {
+            self.operand(left)?;
+            self.out.put(operator)?;
+            self.operand(right)
+        })();
+        self.check_carrier = previous_carrier;
+        self.statement = previous_statement;
+        rendered?;
+        for expression in [composed.expression, carrier] {
+            self.out.span(
+                start,
+                Origin::Expression {
+                    method: self.method,
+                    expression,
+                },
+            )?;
+        }
+        self.composition_end(composed, start)
     }
 
     fn composition_end(

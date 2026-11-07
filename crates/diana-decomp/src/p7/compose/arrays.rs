@@ -8,7 +8,7 @@ use super::*;
 /// the separate `new Element[count]` and `fill_array` statements: a display flag
 /// is only ever set from facts that already decide each condition.
 pub(super) fn array_literals(code: &mut MethodCode) -> Result<(), ExpressionError> {
-    let Some((_, protected)) = super::access::local_access(code)? else {
+    let Some(access) = super::access::local_access(code)? else {
         return Ok(());
     };
     let mut literals: Vec<Option<ArrayLiteral>> = filled(code.statements.len(), None)?;
@@ -31,7 +31,7 @@ pub(super) fn array_literals(code: &mut MethodCode) -> Result<(), ExpressionErro
             };
             let Some(literal) = array_literal(
                 code,
-                &protected,
+                &access.protection,
                 allocation_operation,
                 allocation,
                 fill_operation,
@@ -66,7 +66,7 @@ pub(super) fn array_literals(code: &mut MethodCode) -> Result<(), ExpressionErro
 
 pub(super) fn array_literal(
     code: &MethodCode,
-    protected: &[bool],
+    protected: &[super::access::LocalProtection],
     allocation_operation: crate::p2::OpId,
     allocation: StatementId,
     fill_operation: crate::p2::OpId,
@@ -109,7 +109,10 @@ pub(super) fn array_literal(
             declared.original.kind(),
             crate::p5::LocalKind::Value(_) | crate::p5::LocalKind::ReferenceCarrier(_)
         )
-        || protected[storage.0 as usize]
+        || !matches!(
+            protected[storage.0 as usize],
+            super::access::LocalProtection::None
+        )
     {
         return None;
     }

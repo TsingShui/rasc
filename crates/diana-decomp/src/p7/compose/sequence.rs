@@ -63,10 +63,11 @@ pub(super) fn printed_parts<'a>(
             header, yes, no, ..
         } => {
             buffer[..2].copy_from_slice(&[*header, *yes]);
-            if let Some(no) = no {
+            if let ConditionElse::Body(no) = no {
                 buffer[2] = *no;
+                return &buffer[..3];
             }
-            return &buffer[..if no.is_some() { 3 } else { 2 }];
+            return &buffer[..2];
         }
         EmissionLayout::Loop { body, .. } => std::slice::from_ref(body),
         EmissionLayout::Switch { header, bodies, .. } => {

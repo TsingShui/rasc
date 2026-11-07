@@ -32,8 +32,16 @@ The output is Java-like code with explicit forms for existing DEX operations and
 phase boundaries. These forms do not introduce runtime helpers or a dispatcher.
 Ordinary values use P7's locals, literal views and materializations. P9 renders
 nested composed expressions with a fallibly allocated work stack, preserving each
-producer's statement, operation, site, result-commit and control spans. Calls retain
-original target IDs, dispatch and separate invocation prototypes. A selected
+producer's statement, operation, site, result-commit and control spans. A delivered
+`ComposedResult::Store` prints `(local = expression)`: the original local is
+assigned only after the expression completes normally, before its value is used
+by the surrounding predicate. P9 does not infer store retention from read counts.
+A delivered `ComposedPredicate::LongComparison` prints the original left and
+right operands with P7's selected relation. Predicate negation complements that
+relation; P9 does not infer a comparison from numeric syntax or fold floating
+NaN behavior. Both the comparison expression and its consumed read retain spans,
+as do its original statement, operation and source control.
+Calls retain original target IDs, dispatch and separate invocation prototypes. A selected
 full signature is printed in the call's binding suffix; this is part of the
 Java-like call notation, not a conversion, generic invocation or mere comment.
 
@@ -97,8 +105,15 @@ and arm emission.
 
 An ordered condition prints one `if (test0 || test1 ...)`. Each test keeps its
 own terminal span around its predicate text and both original test-edge transfer
-spans at the same evaluation position; the final `else` route keeps the selected
-`other` link. Later test runs print no text, so P7 delivers those run controls
+spans at the same evaluation position except for the final other edge when an
+else is present. `ConditionElse::Copies` prints an else containing only that
+edge's original bundles, in their delivered order. Its Copy and Transfer spans
+occur there once; P9 does not emit those copies while printing the tests or again
+after the condition. `ConditionElse::Body` prints the edge's copies before the
+delivered body. The shared predicate renderer establishes
+and restores that terminal's check carrier for ordinary If, Loop and ordered
+Condition tests, including on rendering failure. The final `else` route keeps the
+selected `other` link. Later test runs print no text, so P7 delivers those run controls
 and P9 anchors their controls, block labels, transfers and empty copy bundles as
 zero-length spans, without recovering control from the graph. A terminal whose
 route prints no words keeps both its Transfer and Terminal anchors, including

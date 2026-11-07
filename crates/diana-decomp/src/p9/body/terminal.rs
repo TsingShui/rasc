@@ -159,11 +159,23 @@ impl Expressions<'_, '_> {
                 self.operand(*right)
             }
             Condition::Zero { op, value, meaning } => {
+                if let Some(composed) = self.code.emission().composed_use(*value)
+                    && let ComposedPredicate::LongComparison { op, left, right } =
+                        composed.predicate
+                {
+                    return self.comparison_predicate(
+                        *value,
+                        composed,
+                        left,
+                        right,
+                        branch(op_of(op)),
+                    );
+                }
                 if self
                     .code
                     .emission()
                     .composed_use(*value)
-                    .is_some_and(|value| value.boolean)
+                    .is_some_and(|value| matches!(value.predicate, ComposedPredicate::Boolean))
                 {
                     if !matches!(meaning, ZeroMeaning::IntegralZero) {
                         return Err(RenderError::Invariant(
@@ -198,6 +210,21 @@ impl Expressions<'_, '_> {
         test: PredicateEmission,
         loop_edges: bool,
     ) -> Result<(), RenderError> {
+        // Every predicate layout uses its original terminal occurrence, including
+        // an individual test inside a short-circuit Condition.
+        let previous = self
+            .check_carrier
+            .replace(CheckCarrier::Terminal(test.terminal));
+        let rendered = self.predicate_value(test, loop_edges);
+        self.check_carrier = previous;
+        rendered
+    }
+
+    fn predicate_value(
+        &mut self,
+        test: PredicateEmission,
+        loop_edges: bool,
+    ) -> Result<(), RenderError> {
         let t = &self.code.terminals()[test.terminal.0 as usize];
         let p = &self.code.emission().terminals()[test.terminal.0 as usize];
         let TerminalKind::If { condition, .. } = &t.kind else {
@@ -217,7 +244,7 @@ impl Expressions<'_, '_> {
                     .code
                     .emission()
                     .composed_use(*value)
-                    .is_some_and(|value| value.boolean) =>
+                    .is_some_and(|value| matches!(value.predicate, ComposedPredicate::Boolean)) =>
             {
                 Some(*value)
             }
@@ -259,12 +286,7 @@ impl Expressions<'_, '_> {
     pub(super) fn predicate(&mut self, test: PredicateEmission) -> Result<(), RenderError> {
         let start = self.out.position();
         self.copies(&self.code.emission().terminals()[test.terminal.0 as usize].before)?;
-        let previous = self
-            .check_carrier
-            .replace(CheckCarrier::Terminal(test.terminal));
-        let rendered = self.predicate_expression(test, true);
-        self.check_carrier = previous;
-        rendered?;
+        self.predicate_expression(test, true)?;
         self.out.span(
             start,
             Origin::Terminal {

@@ -17,8 +17,8 @@ use crate::p2::{BlockId, BranchOp};
 use crate::{
     p2::OpId,
     p7::{
-        BlockEnd, CheckCarrier, ControlCompletion, ControlId, ControlKind, EmissionLayout, IfShape,
-        LabelId, LoopPlacement, PredicateEmission, TerminalKind, TransferId,
+        BlockEnd, ConditionElse, ControlCompletion, ControlId, ControlKind, EmissionLayout,
+        IfShape, LabelId, LoopPlacement, PredicateEmission, TerminalKind, TransferId,
     },
 };
 
@@ -382,7 +382,7 @@ impl Expressions<'_, '_> {
                             (test.when_true, test.when_false)
                         };
                         self.selected(select, false)?;
-                        if i + 1 < count || no.is_none() {
+                        if i + 1 < count || matches!(no, ConditionElse::None) {
                             self.selected(other, false)?;
                         }
                     }
@@ -398,9 +398,13 @@ impl Expressions<'_, '_> {
                         let run = self.code.controls()[control.0 as usize].children[i];
                         push(&mut work, Event::Anchors(run))?;
                     }
-                    if let Some(no) = no {
-                        push(&mut work, Event::Control(no))?;
-                        push(&mut work, Event::Else(fall))?;
+                    match no {
+                        ConditionElse::Body(no) => {
+                            push(&mut work, Event::Control(no))?;
+                            push(&mut work, Event::Else(fall))?;
+                        }
+                        ConditionElse::Copies => push(&mut work, Event::Else(fall))?,
+                        ConditionElse::None => {}
                     }
                     push(&mut work, Event::Control(yes))?;
                 }
@@ -503,12 +507,7 @@ impl Expressions<'_, '_> {
                     )?;
                     let a = self.out.position();
                     self.out.put("if (")?;
-                    let previous = self
-                        .check_carrier
-                        .replace(CheckCarrier::Terminal(test.terminal));
-                    let rendered = self.predicate_expression(test, false);
-                    self.check_carrier = previous;
-                    rendered?;
+                    self.predicate_expression(test, false)?;
                     self.out.put(")")?;
                     self.out.span(
                         a,
