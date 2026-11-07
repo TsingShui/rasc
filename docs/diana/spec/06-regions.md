@@ -176,6 +176,16 @@ both original links of every test and MUST require each later test to select the
 same `S` with one of its own original links; the other link continues into the
 next test's original block run or reaches the remaining result arm.
 
+Those ordered tests select between two result arms. The arm their selected
+original links reach is the shared arm the region owns. The arm a link from the
+tests' own side also merges inside is the second result arm, and only that
+merge is the region's normal exit: when such a merge exists P6 MUST derive it
+from the predicate's original links inside the enclosing completion boundary and
+no other node, so the ordered tests keep one exit instead of leaving at an
+unrelated established follow. When the tests' other links only leave at the
+established follow, or at the last test's other original link, the region keeps
+that exit and owns the arm it reaches as before.
+
 The region owns the test runs, the shared arm and the optional other arm in that
 order. A test run is the original block's parts from the run entry to its
 terminal predicate; P6 MUST NOT move an operation out of its block or reorder

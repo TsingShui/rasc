@@ -1,11 +1,14 @@
-//! Recognizes one ordered predicate region whose tests select a single shared
-//! result arm.
+//! Recognizes one ordered predicate region whose tests select between two result
+//! arms.
 //!
 //! Both original arms are compared inside the enclosing completion boundary.
 //! One is a proper subset of the other, every later test selects the same shared
-//! head, and intervening operations stay in their original block runs. Original
-//! abrupt terminals need no concrete common postdominator. Entrance, exceptional
-//! child closure and owning-part checks remain independent admission constraints.
+//! head, and intervening operations stay in their original block runs. The arm
+//! the tests' selected links reach is owned by the region; the arm their other
+//! links reach is the region's normal exit, either the established follow or,
+//! when those links merge inside the shared arm, that merge. Original abrupt
+//! terminals need no concrete common postdominator. Entrance, exceptional child
+//! closure and owning-part checks remain independent admission constraints.
 
 use super::super::build::*;
 use super::super::graph::Graph;
@@ -16,6 +19,21 @@ use crate::p5::StorageMethod;
 
 fn subset(a: &[bool], b: &[bool]) -> bool {
     a.iter().zip(b).all(|(a, b)| !*a || *b)
+}
+
+/// The two sides of the first predicate, oriented as `(shared, rest, yes)`.
+/// `shared` is the proper subset side the tests' selected links reach, `rest`
+/// also carries the remaining tests, and `yes` says which original link selects
+/// the shared arm. A real if/else has two distinct arms and overlapping but
+/// non-nested reach sets, so it never orients here.
+fn sides<'a>(first: &'a [bool], second: &'a [bool]) -> Option<(&'a [bool], &'a [bool], bool)> {
+    if subset(first, second) && !subset(second, first) {
+        Some((first, second, true))
+    } else if subset(second, first) && !subset(first, second) {
+        Some((second, first, false))
+    } else {
+        None
+    }
 }
 
 /// The part run of `entry`'s original block, from `entry` to its terminal. Only
@@ -189,6 +207,57 @@ fn exceptional_interfaces(
     Ok(true)
 }
 
+/// The second result arm the ordered tests select against. The tests' selected
+/// links reach the shared arm; when a link from the tests' own side also merges
+/// inside that arm, the merged arm is a result of its own rather than part of
+/// the shared arm. It becomes this condition's normal exit, so the shared arm
+/// keeps one head and one owner and the merge is not split between them.
+/// `None` means the other links only leave at the established follow.
+fn second_arm(
+    f: &RegionFacts,
+    g: &Graph,
+    boundary: &[bool],
+    first: &[bool],
+    second: &[bool],
+) -> Result<Option<NodeId>, RegionError> {
+    let Some((shared, rest, _)) = sides(first, second) else {
+        return Ok(None);
+    };
+    let Some(entry) = head(f, shared) else {
+        return Ok(None);
+    };
+    let mut arm = None;
+    for link in &f.links {
+        let (from, to) = (link.from(), link.to());
+        if !shared[to.0 as usize]
+            || shared[from.0 as usize]
+            || !rest[from.0 as usize]
+            || to == entry
+        {
+            continue;
+        }
+        if arm.is_some_and(|old| old != to) {
+            return Ok(None);
+        }
+        arm = Some(to);
+    }
+    let Some(arm) = arm else {
+        return Ok(None);
+    };
+    // The second arm is one closed interface: it is entered exactly at that
+    // merge, never again inside itself, and no ordered part is entered in its
+    // middle. A second entrance keeps the previous owners.
+    let reached = super::completion::reachable(f, g, &[arm], boundary, None)?;
+    let mut inside = filled(f.nodes.len(), false)?;
+    for (index, &reach) in reached.iter().enumerate() {
+        inside[index] = reach && shared[index];
+    }
+    if head(f, &inside) != Some(arm) {
+        return Ok(None);
+    }
+    Ok(Some(arm))
+}
+
 pub(super) fn candidate(
     storage: &StorageMethod<'_>,
     f: &mut RegionFacts,
@@ -203,27 +272,35 @@ pub(super) fn candidate(
     let Some([yes, no]) = conditional(f, g, predicate) else {
         return Ok(None);
     };
+    // The ordered tests select between two result arms. The arm their selected
+    // links reach is the shared arm; the arm a link from the tests' own side also
+    // merges inside is a result of its own and becomes this region's normal exit.
+    // Both reaches then stop there, so the shared arm keeps one head and one
+    // owner. Without such a merge the region leaves at the established follow.
+    let mut arm = None;
+    if Some(target(f, yes)) == follow || Some(target(f, no)) == follow {
+        let open_first = super::completion::reachable(f, g, &[target(f, yes)], boundary, None)?;
+        let open_second = super::completion::reachable(f, g, &[target(f, no)], boundary, None)?;
+        arm = second_arm(f, g, boundary, &open_first, &open_second)?;
+    }
+    let follow = arm.or(follow);
     let first = super::completion::reachable(f, g, &[target(f, yes)], boundary, follow)?;
     let second = super::completion::reachable(f, g, &[target(f, no)], boundary, follow)?;
-    // The shared arm is the smaller side; the other side carries the remaining
-    // tests and the other result arm. A real if/else has two distinct arms and
-    // overlapping but non-nested reach sets, so it never selects here.
     if !first.iter().any(|&x| x) {
         return Ok(None);
     }
-    let (shared, rest, select, other) = if subset(&first, &second) && !subset(&second, &first) {
-        (first, second, yes, no)
-    } else if subset(&second, &first) && !subset(&first, &second) {
-        (second, first, no, yes)
-    } else {
+    // The shared arm is the subset side; the other side carries the remaining
+    // tests and the second result arm.
+    let Some((shared, rest, select_is_yes)) = sides(&first, &second) else {
         return Ok(None);
     };
-    let Some(shared_entry) = head(f, &shared) else {
+    let (select, other) = if select_is_yes { (yes, no) } else { (no, yes) };
+    let Some(shared_entry) = head(f, shared) else {
         return Ok(None);
     };
     if shared[predicate.0 as usize]
         || target(f, select) != shared_entry
-        || !closed_arm(storage, f, g, shared_entry, &shared, follow, boundary)?
+        || !closed_arm(storage, f, g, shared_entry, shared, follow, boundary)?
     {
         return Ok(None);
     }
@@ -348,10 +425,10 @@ pub(super) fn candidate(
     for test in &tests {
         push(&mut selects, test.select)?;
     }
-    if !entered_by(f, &shared, &selects) || !completion_exits(f, &shared, follow, boundary) {
+    if !entered_by(f, shared, &selects) || !completion_exits(f, shared, follow, boundary) {
         return Ok(None);
     }
-    let shared_nodes = list(&shared)?;
+    let shared_nodes = list(shared)?;
     for &n in &shared_nodes {
         members[n.0 as usize] = true;
     }
@@ -400,6 +477,34 @@ pub(super) fn candidate(
     }
     if !exceptional_interfaces(storage, f, g, &parts, &members, start)? {
         return Ok(None);
+    }
+    // The second result arm is a result, not a handler, and a protection plan
+    // keeps one owner: the two-arm interface never covers part of a try without
+    // its handlers and never receives an executable exceptional arrival. Only the
+    // established impossible-release proof removes an arrival.
+    if let Some(arm) = arm {
+        for plan in &f.tries {
+            let inside = plan
+                .members
+                .iter()
+                .filter(|node| members[node.0 as usize])
+                .count();
+            if inside != 0 && inside != plan.members.len() {
+                return Ok(None);
+            }
+        }
+        for (from, edges) in g.exceptions.iter().enumerate() {
+            if !members[from] {
+                continue;
+            }
+            for &edge in edges {
+                if Graph::exception_possible(f, edge)
+                    && Graph::exception_target(f, storage, edge) == Some(arm)
+                {
+                    return Ok(None);
+                }
+            }
+        }
     }
     let id = ConditionId(id(f.conditions.len())?);
     push(
