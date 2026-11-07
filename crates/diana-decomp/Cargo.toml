@@ -22,3 +22,6 @@ unicode-general-category = "1"
 
 [features]
 perf = ["dep:fastrace", "fastrace/enable"]
+# Prints one line per display pass that changed something for a method. Off by
+# default: an ordinary build logs nothing and writes nothing to stderr.
+trace-passes = []

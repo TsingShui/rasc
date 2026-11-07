@@ -11,7 +11,7 @@ use crate::p4::{Family, Initialization, Interpretation};
 use crate::p5::{LocalId, LocalKind, Materialization, StorageRead, StorageType};
 
 pub(super) fn construct(code: &mut MethodCode) -> Result<(), ExpressionError> {
-    let Some((reads, protected)) = super::local_access(code)? else {
+    let Some((reads, protected)) = super::access::local_access(code)? else {
         return Ok(());
     };
 
@@ -631,7 +631,7 @@ fn leaf(code: &MethodCode, id: ExprId) -> bool {
 /// can be stated as the condition operand. A test whose prelude cannot keep its
 /// facts prints the established explicit schedule instead.
 pub(super) fn conditions(code: &mut MethodCode) -> Result<(), ExpressionError> {
-    let access = super::local_access(code)?;
+    let access = super::access::local_access(code)?;
     let mut layouts = Vec::new();
     for index in 0..code.emission.controls.len() {
         if matches!(
