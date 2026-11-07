@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["apps/diana", "crates/diana-decomp"]
+members = ["apps/diana", "apps/diana-gui", "crates/diana-decomp"]
 default-members = ["apps/diana", "crates/diana-decomp"]
 
 [profile.release]

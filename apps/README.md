@@ -6,13 +6,13 @@
 | Directory | Target | Current state |
 |---|---|---|
 | [diana/](diana/README.md) | Native CLI | Class/method retrieval delivers Engine/P9 text and JSON; input/query/extraction commands remain native. |
-| [diana-gui/](diana-gui/README.md) | Future GUI | Documentation placeholder only |
+| [diana-gui/](diana-gui/README.md) | Native GUI | GPUI Kit UI demo; authored content, no Engine integration |
 | [diana-web-ui/](diana-web-ui/README.md) | Future web interface (WASM-based or otherwise undecided) | Documentation placeholder only |
 
-The GUI and web-UI directories have no manifest, source, dependency, build target
-or CI job. They are not Cargo workspace members. No GUI framework, browser frontend,
-WASM binding or engine portability contract is selected by creating them.
-Implement nothing there until explicitly requested and separately designed.
+The GUI is a Cargo workspace member selected explicitly with `-p diana-gui`.
+The web-UI directory remains a README-only placeholder, outside the workspace;
+its browser framework, WASM bindings and Engine portability are not selected.
+Do not initialize the web target without a separate user request.
 
 These directory reservations do not mark any capability complete. The archived
 rasc implementation was removed from the tree at commit 5cb156c and stays outside

@@ -13,7 +13,7 @@ Build and lint checks do not establish real-application coverage.
 
 ```text
 apps/diana/             # Diana CLI/application package
-apps/diana-gui/         # Future GUI: documentation placeholder only
+apps/diana-gui/         # Native GPUI Kit UI demo; no Engine integration
 apps/diana-web-ui/      # Future web interface: documentation placeholder only
 crates/diana-decomp/    # Independent native engine library
 docs/diana/            # Core design, algorithms and contribution rules
@@ -25,10 +25,10 @@ rasc implementation and its crates/tests/release tooling remain in an independen
 archived reference tree removed at commit 5cb156c; it is not a production dependency
 and are not built, tested or released by this branch’s CI or root Cargo commands.
 
-[Application targets](apps/README.md) share the `apps/` layout. GUI and web UI
-are reserved directories only, with no manifests, implementation, dependencies
-or CI jobs; they are not workspace members and no framework or WASM strategy
-has been selected.
+[Application targets](apps/README.md) share the `apps/` layout. The native GUI
+is a GPUI Kit UI demo with authored display content; run it with
+`cargo run -p diana-gui --locked`. It is a workspace member but not a default
+member. The web UI remains a documentation placeholder with no selected framework.
 
 ## Development
 
