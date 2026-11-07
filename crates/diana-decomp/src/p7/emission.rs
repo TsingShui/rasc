@@ -193,6 +193,10 @@ pub enum EmissionLayout {
         no: ConditionElse,
         fall: TransferId,
     },
+    /// A P6-owned alternative over the original pure integer tests.
+    When {
+        bodies: Vec<ControlId>,
+    },
     Loop {
         body: ControlId,
         placement: LoopPlacement,
@@ -881,6 +885,16 @@ pub(super) fn construct(code: &mut MethodCode) -> Result<(), ExpressionError> {
                     .ok_or(bug("synchronized acquire lost its original operation"))?,
             },
             ControlKind::Graph { .. } => EmissionLayout::Graph,
+        };
+        let layout = if let Some(decision) = &c.decision {
+            let mut bodies = Vec::new();
+            for arm in &decision.arms {
+                push(&mut bodies, arm.body)?;
+            }
+            push(&mut bodies, decision.default)?;
+            EmissionLayout::When { bodies }
+        } else {
+            layout
         };
         push(
             &mut plan.controls,

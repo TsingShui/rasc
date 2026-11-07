@@ -6,6 +6,7 @@
 //! reads the delivered plan.
 
 mod control;
+mod decision;
 mod header;
 mod statement;
 mod terminal;
@@ -228,6 +229,7 @@ impl Expressions<'_, '_> {
                                 }
                             }
                         }
+                        EmissionLayout::When { .. } => self.decision(id, &mut work)?,
                         EmissionLayout::Switch {
                             header,
                             bodies,
@@ -329,6 +331,7 @@ impl Expressions<'_, '_> {
                     }
                 }
                 Event::Close => self.out.close()?,
+                Event::DecisionArm(control, index) => self.decision_arm(control, index)?,
                 Event::Condition { control, chained } => {
                     let (count, yes, no, fall) =
                         match &self.code.emission().controls()[control.0 as usize].layout {
@@ -764,6 +767,7 @@ enum Event {
     ChainedControl(ControlId),
     End(ControlId, TextOffset),
     Close,
+    DecisionArm(ControlId, usize),
     If {
         test: PredicateEmission,
         chained: bool,

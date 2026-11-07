@@ -32,6 +32,7 @@ pub(super) fn printed_entry_is(code: &MethodCode, mut current: ControlId, target
             EmissionLayout::Block(_)
             | EmissionLayout::Labelled
             | EmissionLayout::Graph
+            | EmissionLayout::When { .. }
             | EmissionLayout::Loop { .. }
             | EmissionLayout::Try { .. }
             | EmissionLayout::Synchronized { .. } => return false,
@@ -69,6 +70,7 @@ pub(super) fn printed_parts<'a>(
             }
             return &buffer[..2];
         }
+        EmissionLayout::When { bodies } => bodies,
         EmissionLayout::Loop { body, .. } => std::slice::from_ref(body),
         EmissionLayout::Switch { header, bodies, .. } => {
             buffer[0] = *header;

@@ -74,6 +74,7 @@ pub(super) fn add(
     push(
         &mut f.regions,
         Region {
+            decision: None,
             id: region,
             kind,
             entry,

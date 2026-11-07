@@ -273,8 +273,28 @@ pub struct ConditionCompletion {
     pub child: ControlId,
     pub continuation: Continuation,
 }
+/// P6's selected integer decision chain, retaining the original If tree.
+#[derive(Debug, Serialize)]
+pub struct Decision {
+    pub arms: Vec<DecisionArm>,
+    pub default: ControlId,
+}
+#[derive(Clone, Copy, Debug, Serialize)]
+pub struct DecisionArm {
+    pub source: ControlId,
+    pub header: ControlId,
+    pub terminal: crate::p2::BlockId,
+    pub predicate: p6::NodeId,
+    pub selector: ExprId,
+    pub key_expression: Option<ExprId>,
+    pub key: i32,
+    pub selected: TransferId,
+    pub remaining: TransferId,
+    pub body: ControlId,
+}
 #[derive(Debug, Serialize)]
 pub struct Control {
+    pub decision: Option<Decision>,
     pub id: ControlId,
     pub kind: ControlKind,
     pub children: Vec<ControlId>,
@@ -804,12 +824,58 @@ pub(super) fn construct(c: &mut Context<'_, '_>) -> Result<(), ExpressionError> 
                 }
             }
         };
+        let decision = if let Some(plan) = r.decision() {
+            let mut arms = Vec::new();
+            for test in plan.tests() {
+                let block = terminal(c, test.predicate());
+                let terminal = &c.code.terminals[block.0 as usize];
+                let (selector, key_expression) = match terminal.kind {
+                    TerminalKind::If {
+                        condition: Condition::Zero { value, .. },
+                        ..
+                    } => (value, None),
+                    TerminalKind::If {
+                        condition: Condition::Pair { left, right, .. },
+                        ..
+                    } => {
+                        if test.argument() == 0 {
+                            (left, Some(right))
+                        } else {
+                            (right, Some(left))
+                        }
+                    }
+                    _ => return Err(bug("decision test lost its original branch operands")),
+                };
+                push(
+                    &mut arms,
+                    DecisionArm {
+                        source: ControlId(test.region().0),
+                        header: ControlId(test.header().0),
+                        terminal: block,
+                        predicate: test.predicate(),
+                        selector,
+                        key_expression,
+                        key: test.key(),
+                        selected: TransferId(test.selected().0),
+                        remaining: TransferId(test.remaining().0),
+                        body: ControlId(test.body().0),
+                    },
+                )?;
+            }
+            Some(Decision {
+                arms,
+                default: ControlId(plan.default().0),
+            })
+        } else {
+            None
+        };
         let continuation = continuation(c, r.continuation())?;
         let entry = r.entry().map(|n| label(c, n)).transpose()?;
         let follow = r.follow().map(|n| label(c, n)).transpose()?;
         push(
             &mut c.code.controls,
             Control {
+                decision,
                 id: ControlId(r.id().0),
                 kind,
                 children: ids(r.children(), |r| ControlId(r.0))?,

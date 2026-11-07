@@ -314,6 +314,12 @@ construction prints at the original constructor call; correlated members that
 only alias the object or define literals remain suppressed. These are
 placements of existing plans, not region identification or a new dispatcher.
 
+P6's optional integer `DecisionPlan` lowers into owned `Decision` records and
+`EmissionLayout::When`. The original If controls remain the source ancestry.
+The alternative's bodies define printed succession; a case is not the next case's
+fallthrough. P7 adds no selector evaluation, state local or dispatch edge.
+Each selected-edge copy list executes only at its case or default entry.
+
 ## Composition before publication
 
 `p7/compose` consumes the lowered P7 operations, P5 materializations and the

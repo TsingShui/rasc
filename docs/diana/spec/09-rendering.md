@@ -28,7 +28,8 @@ as an execution representation. The notation identifier is
 
 ## Expression and control notation
 
-The output is Java-like code with explicit forms for existing DEX operations and
+The output combines Java-like expressions with selected Kotlin control forms and
+explicit forms for existing DEX operations and
 phase boundaries. These forms do not introduce runtime helpers or a dispatcher.
 Ordinary values use P7's locals, literal views and materializations. P9 renders
 nested composed expressions with a fallibly allocated work stack, preserving each
@@ -102,6 +103,16 @@ loops; the original false edge retains its copies at the displayed body's start.
 An empty If retains its header and original terminal facts, with a zero-length
 terminal anchor for a suppressed explicit test. A chained If owns its own braces
 and arm emission.
+
+A delivered integer decision prints Kotlin `when (selector) { key -> { body }
+else -> { default } }`. P9 evaluates the delivered first selector expression
+once and retains later omitted read occurrences as zero-width Expression
+anchors. Case keys retain their original literal-expression and Terminal spans.
+Each selected original edge prints its own copies before its body; intermediate
+failed-test links retain zero-width anchors, and the final failed-test edge owns
+the default copies. The original header labels and controls remain mapped,
+including a referenced first header before the `when`. A case body does not
+execute the following case.
 
 An ordered condition prints one `if (test0 || test1 ...)`. Each test keeps its
 own terminal span around its predicate text and both original test-edge transfer

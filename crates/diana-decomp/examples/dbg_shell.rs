@@ -1763,7 +1763,7 @@ fn region_json(method: diana_decomp::p7::MethodInspection<'_, '_>, details: bool
     if details {
         result["nodes"]=json!(f.nodes().iter().map(|n|json!({"id":n.id().0,"block":n.block().0,"operations":[n.operations().start,n.operations().end],"terminal":n.has_terminal(),"reachable":n.reachable()})).collect::<Vec<_>>());
         result["blocks"]=json!(f.blocks().iter().map(|b|json!({"id":b.block().0,"parts":b.parts().iter().map(|n|n.0).collect::<Vec<_>>()})).collect::<Vec<_>>());
-        result["regions"]=json!(f.regions().iter().map(|r|json!({"id":r.id().0,"kind":format!("{:?}",r.kind()),"entry":r.entry().map(|n|n.0),"follow":r.follow().map(|n|n.0),"continuation":format!("{:?}",r.continuation()),"parent":f.parent(r.id()).map(|r|r.0),"children":r.children().iter().map(|r|r.0).collect::<Vec<_>>(),"nodes":r.nodes().iter().map(|n|n.0).collect::<Vec<_>>()})).collect::<Vec<_>>());
+        result["regions"]=json!(f.regions().iter().map(|r|json!({"id":r.id().0,"kind":format!("{:?}",r.kind()),"decision":r.decision(),"entry":r.entry().map(|n|n.0),"follow":r.follow().map(|n|n.0),"continuation":format!("{:?}",r.continuation()),"parent":f.parent(r.id()).map(|r|r.0),"children":r.children().iter().map(|r|r.0).collect::<Vec<_>>(),"nodes":r.nodes().iter().map(|n|n.0).collect::<Vec<_>>()})).collect::<Vec<_>>());
         result["conditions"] = json!(f.conditions().iter().map(|p| json!({
             "id": p.id().0,
             "tests": p.tests().iter().map(|t| json!({"predicate":t.predicate().0,"select":t.select().0,"other":t.other().0})).collect::<Vec<_>>(),

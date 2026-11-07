@@ -516,8 +516,60 @@ pub enum RegionKind {
 }
 /// Children are positional: If=(header,true,false), Loop=(body),
 /// Switch=(header,body), Try=(body,handlers...), Sync=(enter,body,cleanup...).
+/// A display alternative over selected If regions. The source tree stays intact.
+#[derive(Debug, serde::Serialize)]
+pub struct DecisionPlan {
+    pub(super) tests: Vec<DecisionTest>,
+    pub(super) default: RegionId,
+}
+#[derive(Clone, Copy, Debug, serde::Serialize)]
+pub struct DecisionTest {
+    pub(super) region: RegionId,
+    pub(super) header: RegionId,
+    pub(super) predicate: NodeId,
+    pub(super) argument: u32,
+    pub(super) key: i32,
+    pub(super) selected: LinkId,
+    pub(super) remaining: LinkId,
+    pub(super) body: RegionId,
+}
+impl DecisionPlan {
+    pub fn tests(&self) -> &[DecisionTest] {
+        &self.tests
+    }
+    pub fn default(&self) -> RegionId {
+        self.default
+    }
+}
+impl DecisionTest {
+    pub fn region(&self) -> RegionId {
+        self.region
+    }
+    pub fn header(&self) -> RegionId {
+        self.header
+    }
+    pub fn predicate(&self) -> NodeId {
+        self.predicate
+    }
+    pub fn argument(&self) -> u32 {
+        self.argument
+    }
+    pub fn key(&self) -> i32 {
+        self.key
+    }
+    pub fn selected(&self) -> LinkId {
+        self.selected
+    }
+    pub fn remaining(&self) -> LinkId {
+        self.remaining
+    }
+    pub fn body(&self) -> RegionId {
+        self.body
+    }
+}
 #[derive(Debug)]
 pub struct Region {
+    pub(super) decision: Option<DecisionPlan>,
     pub(super) id: RegionId,
     pub(super) kind: RegionKind,
     pub(super) entry: Option<NodeId>,
@@ -527,6 +579,9 @@ pub struct Region {
     pub(super) continuation: Continuation,
 }
 impl Region {
+    pub fn decision(&self) -> Option<&DecisionPlan> {
+        self.decision.as_ref()
+    }
     pub fn continuation(&self) -> Continuation {
         self.continuation
     }

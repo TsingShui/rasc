@@ -2,6 +2,7 @@
 mod build;
 mod compose;
 mod condition_layout;
+mod decision_layout;
 mod dominance;
 mod graph;
 mod locks;

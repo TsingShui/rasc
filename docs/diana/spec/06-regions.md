@@ -261,6 +261,29 @@ owners, re-derive the tests or discover the explicit alternative's order by
 walking descendant controls. P7 lowers the selected order into `EmissionPlan`;
 the retained control IDs, children and Condition roles remain unchanged.
 
+## Integer decision alternatives
+
+After the selected hierarchy and transfers are complete, P6 can attach a
+`DecisionPlan` to an existing If region. It describes Kotlin `when` over a
+chain of equality/inequality tests of the same available integral
+local/value/state. Tests have distinct integer keys, empty operation headers,
+no terminal exception or copy phase, and a common original follow. Every later
+header has only the preceding failed-test entrance and no executable exceptional
+arrival. Intermediate failed-test links have no copy bundles.
+
+The plan references each original test region, header, predicate, operand
+position, selected/remaining link and body, plus the final default body. It
+neither changes the source region tree nor constructs another execution graph.
+Arms retain their abrupt exits and selected-edge copies; a nested normal
+completion can be omitted only when it already completes the same source follow.
+Rejection keeps the existing If layout. Resource errors retain RegionError.
+
+P7 lowers this complete alternative without comparing selector text or
+discovering cases. P9 prints its cases and default; both true and false original
+link identities, test terminals, operands, controls and labels remain mapped.
+The rule is not evidence that a method is a coroutine or permission to remove
+state stores, suspended-marker returns or resume-error paths.
+
 ## Loops, switches and continuations
 
 `LoopForm` is `While(LoopCondition)`, `DoWhile(LoopCondition)` or `Infinite`.
