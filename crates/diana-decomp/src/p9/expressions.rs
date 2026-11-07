@@ -1282,10 +1282,20 @@ pub(super) fn literal(
         (Some(Family::Double), _) if f64::from_bits(bits.value).is_finite() => {
             out.fmt(format_args!("{:?}d", f64::from_bits(bits.value)))
         }
-        _ => out.fmt(format_args!(
-            "bits<{:?}; 0x{:x}; {view:?}>",
-            bits.width, bits.value
-        )),
+        // The bits are exact but no Java literal states them: a non-finite
+        // float or a value whose interpretation the input never established.
+        // Print the original bits with the fact that qualifies them, instead of
+        // naming an external constant or inventing a conversion.
+        _ => {
+            out.fmt(format_args!("0x{:x}", bits.value))?;
+            match family {
+                Some(family) => out.fmt(format_args!(" /* {family:?}, width {:?} */", bits.width)),
+                None => out.fmt(format_args!(
+                    " /* width {:?}, unestablished interpretation */",
+                    bits.width
+                )),
+            }
+        }
     }
 }
 /// One payload element as its exact Java literal. The original bits are never
