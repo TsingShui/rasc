@@ -72,6 +72,31 @@ pub(super) fn branch_proposal(
         successor_boundary: None,
     }))
 }
+/// The continuation a branch candidate may name. The postdominator and the
+/// enclosing scope's follow are structural facts. When neither exists, the
+/// arms still frequently rejoin at one first shared original target after
+/// their own abrupt exits, and naming that target keeps the shared node outside
+/// both arms instead of swallowing it into one. A branch whose arms share no
+/// such target keeps an absent follow, so an all-abrupt arm pair still prints as
+/// one branch rather than an invented continuation.
+fn branch_follow(
+    f: &RegionFacts,
+    g: &Graph,
+    s: &Structure,
+    scope: &Part,
+    entry: NodeId,
+    starts: &[NodeId],
+    boundary: &[bool],
+) -> Result<Option<NodeId>, RegionError> {
+    if let Some(follow) = s.follow(entry).filter(|node| scope.nodes.contains(node)) {
+        return Ok(Some(follow));
+    }
+    if let Some(follow) = scope.follow {
+        return Ok(Some(follow));
+    }
+    super::completion::shared_target(f, g, starts, boundary)
+}
+
 pub(super) fn candidates(
     storage: &StorageMethod<'_>,
     f: &mut RegionFacts,
@@ -236,15 +261,7 @@ pub(super) fn candidates(
         if f.loops.iter().any(|l| l.condition() == Some(n)) {
             continue;
         }
-        let follow = s
-            .follow(n)
-            .filter(|node| scope.nodes.contains(node))
-            .or(scope.follow);
         if matches!(terminal, Some(Terminal::Branch { .. })) {
-            if let Some(proposal) = conditions::candidate(storage, f, g, follow, boundary, n)? {
-                push(&mut out, proposal)?;
-                continue;
-            }
             let mut yes = None;
             let mut no = None;
             for &l in &g.outgoing[n.0 as usize] {
@@ -259,6 +276,19 @@ pub(super) fn candidates(
             let (Some(yes), Some(no)) = (yes, no) else {
                 return Err(bug("conditional terminal lost its original arms"));
             };
+            let follow = branch_follow(
+                f,
+                g,
+                s,
+                scope,
+                n,
+                &[f.links[yes.0 as usize].to, f.links[no.0 as usize].to],
+                boundary,
+            )?;
+            if let Some(proposal) = conditions::candidate(storage, f, g, follow, boundary, n)? {
+                push(&mut out, proposal)?;
+                continue;
+            }
             if let Some(proposal) = branch_proposal(f, g, n, yes, no, follow, boundary)? {
                 let set = mask(f.nodes.len(), &proposal.members)?;
                 if protection::closed_entry(storage, f, g, &set, n) {
