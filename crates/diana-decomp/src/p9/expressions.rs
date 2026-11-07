@@ -122,6 +122,9 @@ enum ExprEvent {
     Text(&'static str),
     Reference(ReferenceId),
     Member(ReferenceId, Option<ExprId>, bool),
+    /// `invoke-super` names its target through `super`, so the receiver is the
+    /// implicit `this` and is not printed again; its read keeps an anchor.
+    SuperMember(ReferenceId, ExprId),
     MemberEnd(ReferenceId, bool, bool, super::TextOffset),
     InvocationPrototype(ReferenceId),
     CallEnd(ReferenceId, bool),
@@ -488,6 +491,23 @@ impl<S: ExpressionSource> Expressions<'_, '_, S> {
                 ExprEvent::MemberEnd(reference, receiver, signature, start) => {
                     self.member_end(reference, receiver, signature, start)?;
                 }
+                ExprEvent::SuperMember(reference, receiver) => {
+                    let start = self.out.position();
+                    self.out.put("super")?;
+                    // The original receiver read is the implicit `this`; keep its
+                    // provenance at the text that replaces it.
+                    self.out.span(
+                        start,
+                        Origin::Expression {
+                            method: self.method,
+                            expression: receiver,
+                        },
+                    )?;
+                    self.out.put(".")?;
+                    // `super` already names the dispatch, so only the member name
+                    // prints; the owner would repeat what `super` selects.
+                    self.super_member_end(reference, start)?;
+                }
                 ExprEvent::InvocationPrototype(reference) => {
                     self.out.put(" [invocation prototype: ")?;
                     self.reference(reference)?;
@@ -780,7 +800,12 @@ impl<S: ExpressionSource> Expressions<'_, '_, S> {
                 if let Some(proto) = call.invocation_prototype {
                     push_event(work, ExprEvent::InvocationPrototype(proto))?;
                 }
-                push_event(work, ExprEvent::Member(call.target, call.receiver, false))?;
+                match (call.kind, call.receiver) {
+                    (crate::p2::InvokeKind::Super, Some(receiver)) => {
+                        push_event(work, ExprEvent::SuperMember(call.target, receiver))?
+                    }
+                    _ => push_event(work, ExprEvent::Member(call.target, call.receiver, false))?,
+                }
             }
             ExprKind::New {
                 reference,
@@ -925,6 +950,30 @@ impl<S: ExpressionSource> Expressions<'_, '_, S> {
             self.out.put(".")?;
         }
         self.member_end(r, receiver.is_some(), signature, start)
+    }
+
+    /// The member name alone, for a call whose receiver text already names the
+    /// dispatch target (`super`).
+    fn super_member_end(
+        &mut self,
+        r: ReferenceId,
+        start: super::TextOffset,
+    ) -> Result<(), RenderError> {
+        let reference = &self.code.references()[r.0 as usize];
+        let Ok(ReferenceDeclaration::Member(m)) = &reference.declaration else {
+            return self.member_end(r, true, false, start);
+        };
+        let name = match m {
+            MemberDeclaration::Field { name, .. } | MemberDeclaration::Method { name, .. } => name,
+        };
+        self.out.name(&name.units, name.form)?;
+        self.out.span(
+            start,
+            Origin::Reference {
+                method: self.method,
+                reference: r,
+            },
+        )
     }
 
     fn member_end(
