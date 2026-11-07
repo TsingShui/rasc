@@ -140,6 +140,9 @@ pub enum IfShape {
     Inverted,
     /// Only the header remains; evaluating the predicate has no displayed work.
     Empty,
+    /// The true arm always leaves the branch, so the false arm prints after the
+    /// closed `if` instead of behind a redundant `else`.
+    NoElse,
 }
 #[derive(Debug, Serialize)]
 pub enum EmissionLayout {

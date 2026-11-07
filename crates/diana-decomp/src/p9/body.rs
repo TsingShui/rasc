@@ -296,11 +296,12 @@ impl Expressions<'_, '_> {
         }
         Ok(())
     }
-    fn condition(&mut self, c: &Condition) -> Result<(), RenderError> {
+    fn condition(&mut self, c: &Condition, negate: bool) -> Result<(), RenderError> {
+        let op_of = |op: BranchOp| if negate { complement(op) } else { op };
         match c {
             Condition::Pair { op, left, right } => {
                 self.operand(*left)?;
-                self.out.put(branch(*op))?;
+                self.out.put(branch(op_of(*op)))?;
                 self.operand(*right)
             }
             Condition::Zero { op, value, meaning } => {
@@ -315,7 +316,7 @@ impl Expressions<'_, '_> {
                             "composed boolean lost its zero interpretation",
                         ));
                     }
-                    match op {
+                    match op_of(*op) {
                         BranchOp::Eqz => self.out.put("!")?,
                         BranchOp::Nez => {}
                         _ => {
@@ -327,7 +328,7 @@ impl Expressions<'_, '_> {
                     return self.operand(*value);
                 }
                 self.operand(*value)?;
-                self.out.put(branch(*op))?;
+                self.out.put(branch(op_of(*op)))?;
                 self.out.put(match meaning {
                     ZeroMeaning::Null => "null",
                     ZeroMeaning::IntegralZero => "0",
@@ -566,7 +567,7 @@ impl Expressions<'_, '_> {
                 when_false,
             } => {
                 self.out.put("if (")?;
-                self.condition(condition)?;
+                self.condition(condition, false)?;
                 self.phases(&p.snapshots, "after_operands_before_effect")?;
                 self.out.put(")")?;
                 self.out.open()?;
@@ -676,14 +677,10 @@ impl Expressions<'_, '_> {
             }
             _ => None,
         };
-        let wrap = test.negate && positive_boolean.is_none();
-        if wrap {
-            self.out.put("!(")?;
-        }
         if let Some(value) = positive_boolean {
             self.operand(value)?;
         } else {
-            self.condition(condition)?;
+            self.condition(condition, test.negate)?;
         }
         self.phases(&p.snapshots, "after_operands_before_effect")?;
         // Copies belong to one selected original edge. Naming the looping role
@@ -709,9 +706,6 @@ impl Expressions<'_, '_> {
                     self.out.put("]")?;
                 }
             }
-        }
-        if wrap {
-            self.out.put(")")?;
         }
         Ok(())
     }
@@ -925,6 +919,21 @@ impl Expressions<'_, '_> {
                                 IfShape::Inverted => {
                                     push(&mut work, Event::Close)?;
                                     push(&mut work, Event::Control(*no))?;
+                                    push(
+                                        &mut work,
+                                        Event::If {
+                                            test: *test,
+                                            chained,
+                                            omitted_false: false,
+                                        },
+                                    )?;
+                                }
+                                IfShape::NoElse => {
+                                    // The true arm never falls out of the branch,
+                                    // so the false arm prints after the closed if.
+                                    push(&mut work, Event::Control(*no))?;
+                                    push(&mut work, Event::Close)?;
+                                    push(&mut work, Event::Control(*yes))?;
                                     push(
                                         &mut work,
                                         Event::If {
@@ -1683,6 +1692,25 @@ impl Expressions<'_, '_> {
             }
         }
         Ok(())
+    }
+}
+/// The exact complement of a delivered branch operator. A negation is printed by
+/// naming the opposite test instead of wrapping the whole condition, which keeps
+/// the same integer comparison and the same selected edge.
+fn complement(op: BranchOp) -> BranchOp {
+    match op {
+        BranchOp::Eq => BranchOp::Ne,
+        BranchOp::Ne => BranchOp::Eq,
+        BranchOp::Lt => BranchOp::Ge,
+        BranchOp::Ge => BranchOp::Lt,
+        BranchOp::Gt => BranchOp::Le,
+        BranchOp::Le => BranchOp::Gt,
+        BranchOp::Eqz => BranchOp::Nez,
+        BranchOp::Nez => BranchOp::Eqz,
+        BranchOp::Ltz => BranchOp::Gez,
+        BranchOp::Gez => BranchOp::Ltz,
+        BranchOp::Gtz => BranchOp::Lez,
+        BranchOp::Lez => BranchOp::Gtz,
     }
 }
 fn branch(op: BranchOp) -> &'static str {
