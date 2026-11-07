@@ -75,6 +75,13 @@ pub(super) fn compose(
     } else {
         order = roots;
         let reason=if f.issues.iter().any(|issue|matches!(issue,PlanningIssue::Graph{entry,reason:RecoveryReason::Irreducible}if set[entry.0 as usize])){RecoveryReason::Irreducible}else if exported.len()>1{RecoveryReason::MultipleEntry}else{RecoveryReason::Unstructured};
+        super::trace::graph(
+            part.entry,
+            &reason,
+            part.nodes.len(),
+            exported.len(),
+            order.len(),
+        );
         if let Some(entry) = part.entry {
             push(&mut f.issues, PlanningIssue::Graph { entry, reason })?;
         }

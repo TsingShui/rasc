@@ -19,6 +19,7 @@ mod loop_exits;
 pub(super) mod parts;
 mod stack;
 mod switch;
+pub(super) mod trace;
 
 use parts::{Part, PartCompletion, add};
 
