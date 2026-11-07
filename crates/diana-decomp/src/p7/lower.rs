@@ -15,20 +15,26 @@ fn qualification(
     target: ReferenceId,
     kind: InvokeKind,
     args: &Arguments,
+    receiver: Option<ExprId>,
 ) -> Qualification {
-    if matches!(kind, InvokeKind::Custom | InvokeKind::Polymorphic) {
-        return Qualification::FullSignature;
-    }
     let Ok(ReferenceDeclaration::Member(MemberDeclaration::Method {
         owner,
         name,
         prototype,
     })) = &c.code.references[target.0 as usize].declaration
     else {
-        return Qualification::FullSignature;
+        return Qualification::FullSignature { owner: false };
     };
+    let owner_units = &c.code.types[owner.0 as usize].units;
+    let disclose_owner = receiver.is_some();
+    let full = Qualification::FullSignature {
+        owner: disclose_owner,
+    };
+    if matches!(kind, InvokeKind::Custom | InvokeKind::Polymorphic) {
+        return full;
+    }
     let Arguments::Known(args) = args else {
-        return Qualification::FullSignature;
+        return full;
     };
     // A constructor name is never a Java identifier; its owner already names the
     // created or delegated type, so only a competing delivered overload makes the
@@ -36,15 +42,16 @@ fn qualification(
     let initializer = name.units.iter().copied().eq("<init>".encode_utf16());
     if (name.form == NameForm::Original && !initializer) || args.len() != prototype.parameters.len()
     {
-        return Qualification::FullSignature;
+        return full;
     }
-    let owner_units = &c.code.types[owner.0 as usize].units;
     let parameters: Vec<&[u16]> = prototype
         .parameters
         .iter()
         .map(|t| c.code.types[t.0 as usize].units.as_slice())
         .collect();
     let returns = &c.code.types[prototype.returns.0 as usize].units;
+    let mut competing = false;
+    let mut same_parameters_different_return = false;
     for other in &c.code.references {
         if other.position.reference == c.code.references[target.0 as usize].position.reference {
             continue;
@@ -70,14 +77,19 @@ fn qualification(
             .all(|(a, b)| c.code.types[a.0 as usize].units == **b);
         let other_returns = &c.code.types[other_prototype.returns.0 as usize].units;
         if !same_parameters || other_returns != returns {
-            return if arguments_select_target(c, target, args) {
-                Qualification::Natural
-            } else {
-                Qualification::FullSignature
-            };
+            competing = true;
+            same_parameters_different_return |= same_parameters;
         }
     }
-    Qualification::Natural
+    if !competing || arguments_select_target(c, target, args) {
+        Qualification::Natural
+    } else if same_parameters_different_return {
+        full
+    } else {
+        Qualification::Parameters {
+            owner: disclose_owner,
+        }
+    }
 }
 
 /// Only the competing-overload verdict can be relaxed here; the caller has
@@ -170,7 +182,7 @@ fn call(
         },
     };
     let target = c.first_reference(op)?;
-    let qualification = qualification(c, target, kind, &arguments);
+    let qualification = qualification(c, target, kind, &arguments, receiver);
     Ok(Call {
         kind,
         target,
@@ -374,7 +386,7 @@ fn semantic(
                     && pending
                     // A competing constructor overload would make `this(...)` /
                     // `super(...)` name no target; the explicit form keeps the
-                    // original owner and prints the binding.
+                    // original reference and prints its signature.
                     && natural_binding
                 {
                     match relation {

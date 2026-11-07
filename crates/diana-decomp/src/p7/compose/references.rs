@@ -113,3 +113,41 @@ pub(super) fn site_annotations(code: &MethodCode) -> Result<Vec<bool>, Expressio
     }
     Ok(required)
 }
+
+/// Owner omission depends on the receiver that still prints after composition.
+pub(super) fn call_owners(code: &mut MethodCode) -> Result<(), ExpressionError> {
+    for index in 0..code.expressions.len() {
+        let ExprKind::Call(call) = &code.expressions[index].kind else {
+            continue;
+        };
+        if matches!(call.qualification, Qualification::Natural) {
+            continue;
+        }
+        let owner = match &code.references[call.target.0 as usize].declaration {
+            Ok(ReferenceDeclaration::Member(MemberDeclaration::Method { owner, .. })) => *owner,
+            _ => continue,
+        };
+        let disclose = call.receiver.is_some_and(|receiver| {
+            if code.emission.composed_use(receiver).is_some()
+                || code.emission.inline_checks.iter().any(|check| check.occurrence == receiver)
+            {
+                return true;
+            }
+            let ExprKind::Read { storage, .. } = code.expressions[receiver.0 as usize].kind else {
+                return true;
+            };
+            !matches!(code.emission.local_types[storage.0 as usize],
+                LocalSpelling::Named(ty) if code.types[ty.0 as usize].units == code.types[owner.0 as usize].units)
+        });
+        let ExprKind::Call(call) = &mut code.expressions[index].kind else {
+            return Err(super::bug("owner selection lost its call"));
+        };
+        match &mut call.qualification {
+            Qualification::Natural => {}
+            Qualification::Parameters { owner } | Qualification::FullSignature { owner } => {
+                *owner = disclose
+            }
+        }
+    }
+    Ok(())
+}

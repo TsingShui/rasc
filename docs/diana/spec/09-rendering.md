@@ -42,9 +42,10 @@ right operands with P7's selected relation. Predicate negation complements that
 relation; P9 does not infer a comparison from numeric syntax or fold floating
 NaN behavior. Both the comparison expression and its consumed read retain spans,
 as do its original statement, operation and source control.
-Calls retain original target IDs, dispatch and separate invocation prototypes. A selected
-full signature is printed in the call's binding suffix; this is part of the
-Java-like call notation, not a conversion, generic invocation or mere comment.
+Calls retain original target IDs, dispatch and separate invocation prototypes.
+P9 prints P7's selected signature directly after the method name, using P8's
+existing type spellings. The qualification is part of the Java-like call notation,
+not a conversion, generic invocation or comment.
 
 The following forms have fixed execution meanings:
 
@@ -84,11 +85,23 @@ its children remain in the product. A named scope whose only child is another
 unnamed printed control prints that child directly; P7 marks it transparent and
 P9 omits the scope's own brace pair.
 
-A selected `FullSignature` call prints its original target as a trailing
-`[binding ...]` suffix; a natural call prints only the receiver, member and
-arguments. The owned reference still carries the original target identity,
-dispatch kind and prototype, and the printed member keeps its source span. A jump
-whose target prints next is sequencing, not an emitted `goto`, including planned
+A natural call prints `receiver.method(arguments)`. A selected `Parameters` call
+prints `receiver.method<(ParameterTypes)>(arguments)`. A selected `FullSignature`
+call prints `receiver.method<(ParameterTypes) -> ReturnType>(arguments)`.
+The parameter parentheses distinguish a signature from generic type arguments;
+an empty parameter list prints `<()>` or `<() -> ReturnType>`.
+
+When P7 selects owner disclosure, an instance receiver prints as
+`(receiver via Owner)`. For example,
+`(v1 via StringBuilder).append<(Object)>(value)` names the original reference's
+owner and parameter list. `via` introduces no conversion, check, extra evaluation
+or choice of runtime implementation. The original dispatch remains unchanged.
+A qualified super call retains `super`, including `(super via Owner)` when P7
+selected owner disclosure. Static calls already name the owner before the member.
+The owned reference still carries the original target identity, dispatch kind
+and complete prototype, and the printed member keeps its source span.
+
+A jump whose target prints next is sequencing, not an emitted `goto`, including planned
 continuations and the last printed If branch. P7 selects this omission and marks
 an emptied, label-free, copy-free `else` as omitted; P9 MUST print neither its
 `else` header nor its control. The omitted false edge retains a zero-width
@@ -251,11 +264,15 @@ nothing (argument definitions that become their uses' values do not count). The
 original code offset is not the test. Otherwise the delegation prints its original
 relation, `super(...)` or `this(...)`, or `receiver.<init>(...)` when the receiver
 is an allocated object rather than the class under construction. An ambiguous
-target still prints its `[binding ...]`.
+target prints its selected signature immediately after `this` or `super`.
+An explicit initialization of an allocated object keeps `receiver.<init>` and
+prints its selected signature after `<init>`, with `via` on the receiver when
+selected.
 
 A constructor reference prints the type it constructs, never a wrapper around the
 `<init>` name: `new ArrayList()` names the object and its constructor, and a
-`[binding ...]` carries the same spelling with the original prototype. An
+qualified constructor reference carries the same spelling followed by its
+original prototype. An
 annotation record for a constructor names that type too. The delivered `<init>`
 identity remains in the owned reference and declaration facts.
 
