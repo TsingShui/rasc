@@ -227,6 +227,12 @@ enum Command {
         #[arg(long)]
         /// Workers for independent DEX images (default: min(8, CPUs))
         jobs: Option<usize>,
+        #[arg(long)]
+        /// Follow callers upstream for this many levels (``method`` kind only)
+        transitive: Option<u32>,
+        #[arg(long)]
+        /// Rows printed per transitive level; 0 prints every row
+        limit: Option<usize>,
         #[arg(long, value_enum, default_value_t = Format::Text)]
         /// Presentation of the same result
         format: Format,
@@ -317,6 +323,8 @@ pub fn run() -> std::process::ExitCode {
             target,
             class,
             jobs,
+            transitive,
+            limit,
             format,
             output,
         } => xref::run(
@@ -324,6 +332,8 @@ pub fn run() -> std::process::ExitCode {
             &kind,
             &target,
             class.as_deref(),
+            transitive.unwrap_or(0),
+            limit.unwrap_or(10),
             match jobs {
                 Some(0) => {
                     return std::process::ExitCode::from(2);

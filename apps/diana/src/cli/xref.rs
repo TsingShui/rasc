@@ -16,6 +16,8 @@ pub fn run(
     kind: &str,
     target: &str,
     class: Option<&str>,
+    transitive: u32,
+    limit: usize,
     jobs: usize,
     format: Format,
     output: Option<&Path>,
@@ -34,26 +36,92 @@ pub fn run(
     };
     let scope =
         RequestScope::open(input, &InputOptions { allowed_root: None }).map_err(Failure::input)?;
-    let xref = Xref::new(
+    let first = Xref::new(
         &scope,
         XrefPlan {
-            target,
-            class,
-
+            targets: vec![target.clone()],
+            class: class.clone(),
+            depth: 1,
             jobs,
         },
     )
     .map_err(|error| Failure::query(error, 1))?;
-    let images = xref.images().to_vec();
+    let images = first.images().to_vec();
 
     let mut rows = Vec::new();
-    xref.run(&mut |row| {
-        rows.push(row);
-        Ok(())
-    })
-    .map_err(|error| Failure::query(error, 1))?;
+    first
+        .run(&mut |row| {
+            rows.push(row);
+            Ok(())
+        })
+        .map_err(|error| Failure::query(error, 1))?;
+    drop(first);
+
+    // A transitive level repeats the same scan for every method reached by the
+    // previous level. The class filter applies to the queried references only:
+    // a caller's caller is matched wherever it lives.
+    if transitive > 0 {
+        let mut frontier = Vec::new();
+        for row in &rows {
+            // The edge is "caller invokes the scanned target", so the next level
+            // asks who invokes this caller: its own method identity.
+            frontier.push((
+                row.class_descriptor.clone(),
+                row.method_name.clone(),
+                row.method_prototype.clone(),
+            ));
+        }
+        frontier.sort_unstable();
+        frontier.dedup();
+        for depth in 2..=transitive.max(1) {
+            if frontier.is_empty() {
+                break;
+            }
+            let targets: Vec<Target> = frontier
+                .iter()
+                .map(|(owner, name, prototype)| Target::Method {
+                    owner: owner.clone(),
+                    name: name.clone(),
+                    prototype: prototype.clone(),
+                })
+                .collect();
+            let scan = Xref::new(
+                &scope,
+                XrefPlan {
+                    targets,
+                    class: None,
+                    depth,
+                    jobs,
+                },
+            )
+            .map_err(|error| Failure::query(error, 1))?;
+            let mut found = Vec::new();
+            scan.run(&mut |row| {
+                found.push(row);
+                Ok(())
+            })
+            .map_err(|error| Failure::query(error, 1))?;
+            frontier.clear();
+            for row in &found {
+                frontier.push((
+                    row.class_descriptor.clone(),
+                    row.method_name.clone(),
+                    row.method_prototype.clone(),
+                ));
+            }
+            rows.extend(found);
+        }
+    }
     let mut output_rows = Vec::new();
+    let mut printed = std::collections::HashMap::new();
     for row in &rows {
+        if matches!(format, Format::Text) && limit > 0 {
+            let seen = printed.entry(row.depth).or_insert(0usize);
+            if *seen >= limit {
+                continue;
+            }
+            *seen += 1;
+        }
         let image = &images[row.image.0];
         let context = format!(
             "{}@cu:{:#06x}",
@@ -72,7 +140,7 @@ pub fn run(
             image.label.clone(),
             context,
             matched_text(&row.matched),
-            row.use_.to_owned(),
+            format!("{} depth {}", row.use_, row.depth),
         ]);
     }
     publish_rows(

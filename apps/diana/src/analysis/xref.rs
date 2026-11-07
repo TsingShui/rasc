@@ -59,6 +59,8 @@ pub struct XrefRow {
     pub method: MethodId,
     pub method_name: Vec<u16>,
     pub method_prototype: Vec<u16>,
+    /// One for the queried target, two for a caller of a caller.
+    pub depth: u32,
     pub code_unit: u32,
     pub use_: &'static str,
     pub matched: Matched,
@@ -66,9 +68,13 @@ pub struct XrefRow {
 
 #[derive(Clone, Debug)]
 pub struct XrefPlan {
-    pub target: Target,
+    /// Every target the scan looks for. One target keeps the single query; a
+    /// transitive level asks for all callers of the previous level at once.
+    pub targets: Vec<Target>,
     /// Exact class descriptor restricting the referencing definition.
     pub class: Option<Vec<u16>>,
+    /// Which transitive level this scan answers.
+    pub depth: u32,
     pub jobs: usize,
 }
 
@@ -196,7 +202,7 @@ fn scan_logical(
                 }
                 for (code_unit, mnemonic, reference) in sites {
                     let facts = index.reference_facts(reference)?;
-                    let found = match matched(facts, &plan.target) {
+                    let found = match matched(facts, &plan.targets) {
                         Ok(found) => found,
                         Err(error) => {
                             *failure.borrow_mut() = Some(error);
@@ -215,6 +221,7 @@ fn scan_logical(
                             method: method.method_idx,
                             method_name,
                             method_prototype,
+                            depth: plan.depth,
                             code_unit: code_unit.0,
                             use_: mnemonic,
                             matched,
@@ -248,64 +255,75 @@ fn copy(units: &[u16]) -> Result<Vec<u16>, QueryError> {
     Ok(owned)
 }
 
-fn matched(facts: ReferenceFacts<'_, '_>, target: &Target) -> Result<Option<Matched>, QueryError> {
-    Ok(match (facts, target) {
-        (ReferenceFacts::String(name), Target::String(units)) => {
-            name.matches(units)?.then(|| Matched::String(units.clone()))
-        }
-        (ReferenceFacts::Type(name), Target::Type(units)) => {
-            name.matches(units)?.then(|| Matched::Type(units.clone()))
-        }
-        (
-            ReferenceFacts::Method {
-                owner,
-                name,
-                prototype,
-            },
-            Target::Method {
-                owner: owner_units,
-                name: name_units,
-                prototype: prototype_units,
-            },
-        ) => {
-            if !owner.matches(owner_units)?
-                || !name.matches(name_units)?
-                || !prototype.matches(prototype_units)?
-            {
-                return Ok(None);
+fn matched(
+    facts: ReferenceFacts<'_, '_>,
+    targets: &[Target],
+) -> Result<Option<Matched>, QueryError> {
+    // Only a method query carries more than one target; the string, type and
+    // field kinds always carry exactly one, so the loop runs once.
+    for target in targets {
+        let found = match (&facts, target) {
+            (ReferenceFacts::String(name), Target::String(units)) => {
+                name.matches(units)?.then(|| Matched::String(units.clone()))
             }
-            Some(Matched::Method {
-                owner: owner.units()?,
-                name: name.units()?,
-                prototype: prototype_units.clone(),
-            })
-        }
-        (
-            ReferenceFacts::Field {
-                owner,
-                name,
-                field_type,
-            },
-            Target::Field {
-                owner: owner_units,
-                name: name_units,
-                field_type: field_units,
-            },
-        ) => {
-            if !owner.matches(owner_units)?
-                || !name.matches(name_units)?
-                || !field_type.matches(field_units)?
-            {
-                return Ok(None);
+            (ReferenceFacts::Type(name), Target::Type(units)) => {
+                name.matches(units)?.then(|| Matched::Type(units.clone()))
             }
-            Some(Matched::Field {
-                owner: owner.units()?,
-                name: name.units()?,
-                field_type: field_type.units()?,
-            })
+            (
+                ReferenceFacts::Method {
+                    owner,
+                    name,
+                    prototype,
+                },
+                Target::Method {
+                    owner: owner_units,
+                    name: name_units,
+                    prototype: prototype_units,
+                },
+            ) => {
+                if !owner.matches(owner_units)?
+                    || !name.matches(name_units)?
+                    || !prototype.matches(prototype_units)?
+                {
+                    continue;
+                }
+                Some(Matched::Method {
+                    owner: owner.units()?,
+                    name: name.units()?,
+                    prototype: prototype_units.clone(),
+                })
+            }
+            (
+                ReferenceFacts::Field {
+                    owner,
+                    name,
+                    field_type,
+                },
+                Target::Field {
+                    owner: owner_units,
+                    name: name_units,
+                    field_type: field_units,
+                },
+            ) => {
+                if !owner.matches(owner_units)?
+                    || !name.matches(name_units)?
+                    || !field_type.matches(field_units)?
+                {
+                    continue;
+                }
+                Some(Matched::Field {
+                    owner: owner.units()?,
+                    name: name.units()?,
+                    field_type: field_type.units()?,
+                })
+            }
+            _ => None,
+        };
+        if found.is_some() {
+            return Ok(found);
         }
-        _ => None,
-    })
+    }
+    Ok(None)
 }
 
 /// Convenience for a `type` target expressed as a descriptor or dotted name.
