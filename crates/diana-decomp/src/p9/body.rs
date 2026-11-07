@@ -1007,12 +1007,33 @@ impl Expressions<'_, '_> {
                     }
                 }
                 Event::End(id, start) => {
-                    if let Some(label) = self.code.emission().controls()[id.0 as usize].continuation
+                    if let Some(completion) =
+                        self.code.emission().controls()[id.0 as usize].continuation
                     {
                         self.out.indent()?;
-                        self.out.put("goto ")?;
-                        self.label_name(label)?;
-                        self.out.put("; // planned continuation\n")?;
+                        match completion {
+                            ControlCompletion::Goto(label) => {
+                                self.out.put("goto ")?;
+                                self.label_name(label)?;
+                                self.out.put("; // planned continuation\n")?;
+                            }
+                            ControlCompletion::Break(scope)
+                            | ControlCompletion::Continue(scope) => {
+                                self.out.put(
+                                    if matches!(completion, ControlCompletion::Break(_)) {
+                                        "break "
+                                    } else {
+                                        "continue "
+                                    },
+                                )?;
+                                self.out.put(
+                                    &self.code.emission().controls()[scope.0 as usize].label,
+                                )?;
+                                self.out.put(";\n")?;
+                            }
+                            ControlCompletion::BreakHere(_) => self.out.put("break;\n")?,
+                            ControlCompletion::ContinueHere(_) => self.out.put("continue;\n")?,
+                        }
                     }
                     if self.code.emission().deferred_control(id) {
                         let slot = self

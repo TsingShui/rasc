@@ -80,6 +80,8 @@ pub enum Continuation {
     Parent,
     Next(NodeId),
     Goto(LabelId),
+    Break(RegionId),
+    Continue(LoopId),
 }
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum SiteProtection {
@@ -206,7 +208,7 @@ impl LoopPlan {
     pub fn lexical_members(&self) -> &[NodeId] {
         &self.lexical_members
     }
-    /// Original exits whose single-entry abrupt corridors are lexical body content.
+    /// Original exits whose closed private corridors are lexical body content.
     pub fn private_exits(&self) -> &[LinkId] {
         &self.private_exits
     }

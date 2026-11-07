@@ -1,16 +1,13 @@
 //! Recognizes one ordered predicate region whose tests select a single shared
 //! result arm.
 //!
-//! The shape is read from established flow facts only: the two original links of
-//! the first conditional terminal reach the same follow, one of their arms is a
-//! proper subset of the other, every further test keeps its two original links
-//! and selects the same shared head, and the operations between tests stay in
-//! their original blocks. The result is one ordinary candidate: the shared
-//! acceptance checks still decide whether it may become a region, and a rejected
-//! proposal keeps its previous owners.
+//! Both original arms are compared inside the enclosing completion boundary.
+//! One is a proper subset of the other, every later test selects the same shared
+//! head, and intervening operations stay in their original block runs. Original
+//! abrupt terminals need no concrete common postdominator. Entrance, exceptional
+//! child closure and owning-part checks remain independent admission constraints.
 
 use super::super::build::*;
-use super::super::dominance::Structure;
 use super::super::graph::Graph;
 use super::super::protection;
 use super::super::*;
@@ -78,6 +75,20 @@ fn exits_to(f: &RegionFacts, set: &[bool], exits: &[NodeId]) -> bool {
     })
 }
 
+fn completion_exits(
+    f: &RegionFacts,
+    set: &[bool],
+    follow: Option<NodeId>,
+    boundary: &[bool],
+) -> bool {
+    f.links.iter().all(|link| {
+        !set[link.from.0 as usize]
+            || set[link.to.0 as usize]
+            || Some(link.to) == follow
+            || boundary[link.to.0 as usize]
+    })
+}
+
 /// The two original conditional links of `node`.
 fn conditional(f: &RegionFacts, g: &Graph, node: NodeId) -> Option<[LinkId; 2]> {
     let [a, b] = g.outgoing.get(node.0 as usize)?.as_slice() else {
@@ -128,13 +139,17 @@ fn closed_arm(
     g: &Graph,
     root: NodeId,
     set: &[bool],
-    follow: NodeId,
+    follow: Option<NodeId>,
+    boundary: &[bool],
 ) -> Result<bool, RegionError> {
     let mut excluded = filled(set.len(), false)?;
     for (i, &inside) in set.iter().enumerate() {
         excluded[i] = !inside;
     }
-    let reached = protection::reachable(storage, f, g, &[root], Some(follow), &excluded, false)?;
+    for (index, &stop) in boundary.iter().enumerate() {
+        excluded[index] |= stop;
+    }
+    let reached = protection::reachable(storage, f, g, &[root], follow, &excluded, false)?;
     Ok(reached.iter().zip(set).all(|(a, b)| a == b))
 }
 
@@ -178,30 +193,18 @@ pub(super) fn candidate(
     storage: &StorageMethod<'_>,
     f: &mut RegionFacts,
     g: &Graph,
-    s: &Structure,
+    follow: Option<NodeId>,
+    boundary: &[bool],
     predicate: NodeId,
 ) -> Result<Option<Candidate>, RegionError> {
-    let Some(follow) = s.follow(predicate) else {
-        return Ok(None);
-    };
-    if follow == predicate {
+    if follow == Some(predicate) {
         return Ok(None);
     }
     let Some([yes, no]) = conditional(f, g, predicate) else {
         return Ok(None);
     };
-    let empty = filled(f.nodes.len(), false)?;
-    let first = protection::reachable(
-        storage,
-        f,
-        g,
-        &[target(f, yes)],
-        Some(follow),
-        &empty,
-        false,
-    )?;
-    let second =
-        protection::reachable(storage, f, g, &[target(f, no)], Some(follow), &empty, false)?;
+    let first = super::completion::reachable(f, g, &[target(f, yes)], boundary, follow)?;
+    let second = super::completion::reachable(f, g, &[target(f, no)], boundary, follow)?;
     // The shared arm is the smaller side; the other side carries the remaining
     // tests and the other result arm. A real if/else has two distinct arms and
     // overlapping but non-nested reach sets, so it never selects here.
@@ -220,7 +223,7 @@ pub(super) fn candidate(
     };
     if shared[predicate.0 as usize]
         || target(f, select) != shared_entry
-        || !closed_arm(storage, f, g, shared_entry, &shared, follow)?
+        || !closed_arm(storage, f, g, shared_entry, &shared, follow, boundary)?
     {
         return Ok(None);
     }
@@ -270,7 +273,7 @@ pub(super) fn candidate(
     )?;
     let mut cursor = target(f, other);
     loop {
-        if Some(cursor) == Some(follow) {
+        if Some(cursor) == follow || boundary[cursor.0 as usize] {
             break;
         }
         if shared[cursor.0 as usize] || seen[cursor.0 as usize] {
@@ -345,7 +348,7 @@ pub(super) fn candidate(
     for test in &tests {
         push(&mut selects, test.select)?;
     }
-    if !entered_by(f, &shared, &selects) || !exits_to(f, &shared, &[follow]) {
+    if !entered_by(f, &shared, &selects) || !completion_exits(f, &shared, follow, boundary) {
         return Ok(None);
     }
     let shared_nodes = list(&shared)?;
@@ -358,10 +361,10 @@ pub(super) fn candidate(
             completion: PartCompletion::Ordinary,
             nodes: shared_nodes,
             entry: Some(shared_entry),
-            follow: Some(follow),
+            follow,
         },
     )?;
-    if Some(cursor) == Some(follow) {
+    if Some(cursor) == follow || boundary[cursor.0 as usize] {
         if !remaining.is_empty() {
             return Ok(None);
         }
@@ -377,8 +380,8 @@ pub(super) fn candidate(
                 &set,
                 &[tests.last().ok_or(bug("condition has no test"))?.other],
             )
-            || !exits_to(f, &set, &[follow])
-            || !closed_arm(storage, f, g, cursor, &set, follow)?
+            || !completion_exits(f, &set, follow, boundary)
+            || !closed_arm(storage, f, g, cursor, &set, follow, boundary)?
         {
             return Ok(None);
         }
@@ -391,7 +394,7 @@ pub(super) fn candidate(
                 completion: PartCompletion::Ordinary,
                 nodes: remaining,
                 entry: Some(cursor),
-                follow: Some(follow),
+                follow,
             },
         )?;
     }
@@ -405,14 +408,14 @@ pub(super) fn candidate(
             id,
             tests,
             shared: shared_entry,
-            else_arm: Some(cursor) != Some(follow),
+            else_arm: Some(cursor) != follow && !boundary[cursor.0 as usize],
             explicit: None,
         },
     )?;
     Ok(Some(Candidate {
         kind: RegionKind::Condition(id),
         entry: start,
-        follow: Some(follow),
+        follow,
         members: list(&members)?,
         parts,
         successor_boundary: None,

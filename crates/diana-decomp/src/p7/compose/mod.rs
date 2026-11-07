@@ -91,8 +91,14 @@ pub(super) fn construct(
         }
     }
     for control in &code.emission.controls {
-        if let Some(label) = control.continuation {
-            mark_label(&mut labels, label)?;
+        match control.continuation {
+            Some(ControlCompletion::Goto(label)) => mark_label(&mut labels, label)?,
+            Some(ControlCompletion::Break(scope) | ControlCompletion::Continue(scope)) => {
+                *controls
+                    .get_mut(scope.0 as usize)
+                    .ok_or(bug("completion names an unknown scope"))? = true;
+            }
+            _ => {}
         }
     }
     for block in &code.emission.blocks {
@@ -520,32 +526,60 @@ fn unlabel_inner_scopes(code: &mut MethodCode) -> Result<(), ExpressionError> {
         let Some(start) = owner.get(from.0 as usize).copied().flatten() else {
             continue;
         };
-        let mut current = start;
-        for _ in 0..=code.controls.len() {
-            if current == target {
-                code.emission.transfers[transfer].spelling = spelling;
-                break;
+        if innermost_scope(code, &parent, start, target, looping) {
+            code.emission.transfers[transfer].spelling = spelling;
+        }
+    }
+    for index in 0..code.emission.controls.len() {
+        let (target, looping, spelling) = match code.emission.controls[index].continuation {
+            Some(ControlCompletion::Break(target)) => {
+                (target, false, ControlCompletion::BreakHere(target))
             }
-            let Some(next) = parent.get(current.0 as usize).copied().flatten() else {
-                break;
-            };
-            // Only the innermost breakable/continuing scope may take the short form.
-            if matches!(
-                code.controls.get(current.0 as usize).map(|c| &c.kind),
-                Some(ControlKind::Loop { .. })
-            ) || (!looping
-                && matches!(
-                    code.controls.get(current.0 as usize).map(|c| &c.kind),
-                    Some(ControlKind::Switch { .. })
-                ))
-            {
-                break;
+            Some(ControlCompletion::Continue(target)) => {
+                (target, true, ControlCompletion::ContinueHere(target))
             }
-            current = next;
+            _ => continue,
+        };
+        // Completion executes after this control, in its parent's scope.
+        let Some(start) = parent[index] else {
+            continue;
+        };
+        if innermost_scope(code, &parent, start, target, looping) {
+            code.emission.controls[index].continuation = Some(spelling);
         }
     }
     Ok(())
 }
+fn innermost_scope(
+    code: &MethodCode,
+    parent: &[Option<ControlId>],
+    mut current: ControlId,
+    target: ControlId,
+    looping: bool,
+) -> bool {
+    for _ in 0..=code.controls.len() {
+        if current == target {
+            return true;
+        }
+        if matches!(
+            code.controls[current.0 as usize].kind,
+            ControlKind::Loop { .. }
+        ) || (!looping
+            && matches!(
+                code.controls[current.0 as usize].kind,
+                ControlKind::Switch { .. }
+            ))
+        {
+            return false;
+        }
+        let Some(next) = parent[current.0 as usize] else {
+            return false;
+        };
+        current = next;
+    }
+    false
+}
+
 /// A continue that ends the loop body means the same as reaching the body end:
 /// the predicate runs next. Copies attached to the transfer keep it explicit.
 fn drop_trailing_continues(code: &mut MethodCode) -> Result<(), ExpressionError> {
@@ -649,7 +683,9 @@ fn drop_duplicate_continuation(code: &mut MethodCode) -> Result<(), ExpressionEr
         }
     }
     for control in 0..code.emission.controls.len() {
-        let Some(continuation) = code.emission.controls[control].continuation else {
+        let Some(ControlCompletion::Goto(continuation)) =
+            code.emission.controls[control].continuation
+        else {
             continue;
         };
         for (node, jump) in jumps.iter().enumerate() {
@@ -701,7 +737,8 @@ fn collapse_planned_continuations(code: &mut MethodCode) -> Result<(), Expressio
         }
     }
     for index in 0..code.emission.controls.len() {
-        let Some(label) = code.emission.controls[index].continuation else {
+        let Some(ControlCompletion::Goto(label)) = code.emission.controls[index].continuation
+        else {
             continue;
         };
         let control = ControlId(super::build::id(index)?);

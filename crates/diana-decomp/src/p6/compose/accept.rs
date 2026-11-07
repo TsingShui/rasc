@@ -6,7 +6,6 @@
 
 use super::super::build::*;
 use super::super::graph::Graph;
-use super::super::protection;
 use super::super::*;
 use super::parts::*;
 use crate::p5::StorageMethod;
@@ -17,6 +16,7 @@ pub(super) fn accept(
     g: &Graph,
     owners: &[RegionId],
     c: &Candidate,
+    interface: &super::completion::CompletionInterface,
 ) -> Result<Result<(), RecoveryReason>, RegionError> {
     let set = mask(f.nodes.len(), &c.members)?;
     if f.synchronized.iter().any(|scope| {
@@ -26,7 +26,16 @@ pub(super) fn accept(
     }) {
         return Ok(Err(RecoveryReason::LockBoundary));
     }
-    if !protection::closed_entry(storage, f, g, &set, c.entry) {
+    if (set[0] && c.entry != NodeId(0))
+        || interface
+            .entrances
+            .iter()
+            .any(|link| f.links[link.0 as usize].to != c.entry)
+        || interface
+            .exceptional_entrances
+            .iter()
+            .any(|&edge| Graph::exception_target(f, storage, edge) != Some(c.entry))
+    {
         return Ok(Err(RecoveryReason::MultipleEntry));
     }
     for group in storage.facts().construction_groups() {
@@ -46,6 +55,56 @@ pub(super) fn accept(
                 return Err(bug("region candidate has duplicate or foreign content"));
             }
             partition[n.0 as usize] = i;
+        }
+    }
+    for group in storage.facts().construction_groups() {
+        let mut part = None;
+        for op in group.members() {
+            let node = g.op_node[op.0 as usize];
+            if !set[node.0 as usize] {
+                continue;
+            }
+            let current = partition[node.0 as usize];
+            if part.is_some_and(|old| old != current) {
+                return Ok(Err(RecoveryReason::ConstructionSplit));
+            }
+            part = Some(current);
+        }
+    }
+    // Enclosing interfaces are selected before child owners exist. Preserve
+    // the same whole-loop/lock obligation at that earlier selection point.
+    for plan in &f.loops {
+        if matches!(c.kind, RegionKind::Loop(id) if id == plan.id) {
+            continue;
+        }
+        if plan.lexical_members.iter().all(|n| set[n.0 as usize])
+            && let Some(first) = plan.lexical_members.first()
+            && plan
+                .lexical_members
+                .iter()
+                .any(|n| partition[n.0 as usize] != partition[first.0 as usize])
+        {
+            return Ok(Err(RecoveryReason::Overlap));
+        }
+    }
+    for scope in &f.synchronized {
+        if scope.separation.is_some()
+            || matches!(c.kind, RegionKind::Synchronized(id) if id == scope.id)
+        {
+            continue;
+        }
+        let inside = scope.members.iter().filter(|n| set[n.0 as usize]).count();
+        if inside == scope.members.len() {
+            if let Some(first) = scope.members.first()
+                && scope
+                    .members
+                    .iter()
+                    .any(|n| partition[n.0 as usize] != partition[first.0 as usize])
+            {
+                return Ok(Err(RecoveryReason::LockBoundary));
+            }
+        } else if inside != 0 && !c.members.iter().all(|n| scope.body.contains(n)) {
+            return Ok(Err(RecoveryReason::LockBoundary));
         }
     }
     for &n in &c.members {
@@ -185,7 +244,8 @@ pub(super) fn match_successor_boundary(
     }
     let follow = c.follow.ok_or(bug("successor boundary has no follow"))?;
     let mut arm = mask(f.nodes.len(), &c.members)?;
-    if arm[follow.0 as usize] || c.parts[1..].iter().any(|p| p.nodes.contains(&c.entry)) {
+    // The exact header/arm partition was established before child construction.
+    if arm[follow.0 as usize] {
         return Ok(Err(RecoveryReason::Unstructured));
     }
     if arm[0] && c.entry != NodeId(0) {

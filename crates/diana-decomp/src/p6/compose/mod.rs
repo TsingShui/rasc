@@ -1,12 +1,10 @@
 //! Composes the established flow facts into regions, transfers, protection
 //! deliveries and lock scopes.
 //!
-//! Construction is one fixed pass order: block regions, then every proposal in
-//! its acceptance order, then the root, then protection, lock contexts,
-//! ownership and transfers. A proposal names original nodes and parts; a part
-//! becomes a region through `stack`, which either keeps one contiguous owner or
-//! assembles a sequence. Only an unstructured part becomes an explicit graph,
-//! and only a graph keeps a labelled block.
+//! Original-target interfaces select enclosing candidates before children are
+//! constructed; commitment unwinds that one bounded hierarchy. `stack` assembles
+//! each selected part as a Sequence or explicit Graph. Protection, scope contexts,
+//! ownership, transfers and complete condition alternatives then finalize once.
 //!
 //! Only shape planning lives here. The flow graph, dominance, loop, lock,
 //! protection and delivery facts stay in their own modules and are consumed, not
@@ -14,14 +12,15 @@
 
 mod accept;
 mod candidates;
+mod completion;
 mod conditions;
+mod hierarchy;
 mod loop_exits;
 pub(super) mod parts;
 mod stack;
 mod switch;
 
-use parts::{Part, PartCompletion, add, copy};
-use stack::compose;
+use parts::{Part, PartCompletion, add};
 
 use super::build::*;
 use super::dominance::Structure;
@@ -59,63 +58,15 @@ pub(super) fn construct(
         f.labels[n].owner = region;
         push(&mut owners, region)?;
     }
-    for mut c in candidates::candidates(storage, f, g, s)? {
-        let acceptance = match accept::accept(storage, f, g, &owners, &c)? {
-            Ok(()) => match accept::match_branch_loops(f, &c)? {
-                Ok(()) => accept::match_successor_boundary(f, &owners, &c)?,
-                Err(reason) => Err(reason),
-            },
-            Err(reason) => Err(reason),
-        };
-        if let Err(reason) = acceptance {
-            push(
-                &mut f.issues,
-                PlanningIssue::Graph {
-                    entry: c.entry,
-                    reason,
-                },
-            )?;
-            continue;
-        }
-        if let Some(parts) = switch::private_switch_parts(storage, f, g, &owners, &c)? {
-            let old = std::mem::replace(&mut c.parts, parts);
-            if accept::accept(storage, f, g, &owners, &c)?.is_ok() {
-                if let RegionKind::Switch { private_cases, .. } = &mut c.kind {
-                    *private_cases = true;
-                }
-            } else {
-                c.parts = old;
-            }
-        }
-        let mut children = Vec::new();
-        for (i, mut p) in c.parts.into_iter().enumerate() {
-            if i == 0
-                && let RegionKind::Loop(id) = c.kind
-            {
-                p.completion = PartCompletion::LoopBody(id);
-            }
-            push(&mut children, compose(storage, f, g, &mut owners, p)?)?;
-        }
-        let region = add(
-            f,
-            c.kind,
-            Some(c.entry),
-            c.follow,
-            children,
-            copy(&c.members)?,
-        )?;
-        for n in c.members {
-            owners[n.0 as usize] = region;
-        }
-    }
     let mut all = Vec::new();
     for n in 0..f.nodes.len() {
         push(&mut all, NodeId(id(n)?))?;
     }
-    f.root = Some(compose(
+    f.root = Some(hierarchy::construct(
         storage,
         f,
         g,
+        s,
         &mut owners,
         Part {
             completion: PartCompletion::Ordinary,

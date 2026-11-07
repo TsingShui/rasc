@@ -30,7 +30,7 @@ pub(super) fn construct(
             }
         }
         // The predicate's own exit remains the real normal continuation. Only
-        // other exits can contribute private abrupt corridors to the body.
+        // other exits can contribute closed private corridors to the body.
         if let LoopForm::While(condition) | LoopForm::DoWhile(condition) = plan.form {
             for &exit in &plan.exits {
                 if exit == condition.exit {
@@ -64,8 +64,10 @@ fn corridor(
     let mut nodes = Vec::new();
     let mut at = f.links[exit.0 as usize].to;
     loop {
+        if plan.follow == Some(at) {
+            break;
+        }
         if plan.members.contains(&at)
-            || plan.follow == Some(at)
             || nodes.contains(&at)
             || f.loops.iter().any(|other| other.members.contains(&at))
             || f.tries.iter().any(|scope| scope.members.contains(&at))

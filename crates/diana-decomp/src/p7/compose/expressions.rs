@@ -195,6 +195,10 @@ fn producer(
                 && call.receiver.is_none_or(|receiver| leaf(code, receiver))
                 && matches!(&call.arguments, Arguments::Known(args) if args.iter().all(|&arg| leaf(code, arg))) =>
         {
+            // Boolean shorthand still requires complete, nonempty `Z` sources;
+            // an `I` call keeps its numeric comparison, and any other family
+            // keeps its own interpretation. The ordered condition producer
+            // decides whether that numeric value may compose as a test operand.
             boolean_type(code, declared, family)
         }
         _ => return None,
@@ -964,7 +968,9 @@ fn explicit(code: &mut MethodCode, index: usize) -> Result<(), ExpressionError> 
     for completion in &explicit.completions {
         code.emission.controls[completion.child.0 as usize].continuation =
             match &completion.continuation {
-                Continuation::Goto(label) => Some(*label),
+                Continuation::Goto(label) => Some(ControlCompletion::Goto(*label)),
+                Continuation::Break(scope) => Some(ControlCompletion::Break(*scope)),
+                Continuation::Continue(scope) => Some(ControlCompletion::Continue(*scope)),
                 Continuation::None | Continuation::Parent | Continuation::Next(_) => None,
             };
     }

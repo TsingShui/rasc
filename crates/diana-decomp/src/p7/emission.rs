@@ -185,6 +185,15 @@ pub enum EmissionLayout {
     },
     Graph,
 }
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+pub enum ControlCompletion {
+    Goto(LabelId),
+    Break(ControlId),
+    Continue(ControlId),
+    BreakHere(ControlId),
+    ContinueHere(ControlId),
+}
+
 #[derive(Debug, Serialize)]
 pub struct EmissionControl {
     pub label: String,
@@ -196,7 +205,7 @@ pub struct EmissionControl {
     /// child. P9 prints that child directly; the control, its labels and its
     /// transfers stay in the product.
     pub transparent: bool,
-    pub continuation: Option<LabelId>,
+    pub continuation: Option<ControlCompletion>,
     /// Selected P6 explicit order; the retained control still owns its original
     /// tests/shared/other roles. Other layouts use the source child list.
     pub explicit_children: Option<Vec<ControlId>>,
@@ -810,7 +819,9 @@ pub(super) fn construct(code: &mut MethodCode) -> Result<(), ExpressionError> {
                 transparent: false,
                 explicit_children: None,
                 continuation: match c.continuation {
-                    Continuation::Goto(label) => Some(label),
+                    Continuation::Goto(label) => Some(ControlCompletion::Goto(label)),
+                    Continuation::Break(scope) => Some(ControlCompletion::Break(scope)),
+                    Continuation::Continue(scope) => Some(ControlCompletion::Continue(scope)),
                     _ => None,
                 },
                 layout,

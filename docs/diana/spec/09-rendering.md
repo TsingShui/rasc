@@ -104,7 +104,13 @@ route prints no words keeps both its Transfer and Terminal anchors, including
 zero-step copy bundles, and leaves no indentation in the text.
 
 P7 fixes condition/header ownership, loop repetition, child roles and necessary
-continuations. P9 prints those choices. An explicit Condition uses the selected
+continuations. P9 prints those choices. A delivered control completion prints
+its selected goto/break/continue after that control's normal body; an original
+abrupt terminal leaves before it. A private switch default can have no body
+operations while retaining its selected-edge Copy/Transfer anchors followed by
+the delivered break. Successful case returns retain their own terminal/operand
+origins, and the shared continuation prints once outside the switch. P9 does not
+infer scope completion or shared targets from adjacency. An explicit Condition uses the selected
 P6-derived order and child completions in the emission controls, not the retained
 source control's tests/shared/other order or source continuation evidence. In particular, predicate-exit copies do
 not appear in a loop's common continuation, where an independent break could
