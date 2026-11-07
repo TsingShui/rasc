@@ -271,6 +271,10 @@ pub struct EmissionPlan {
     /// By the statement whose check prints nothing because P4 established it
     /// cannot add behavior at that position.
     pub(super) omitted_checks: Vec<Option<OmittedCheck>>,
+    /// By the statement whose value prints only where it is used: every output
+    /// materializes as a literal, so the statement itself states nothing. Its
+    /// operation, PC, result commit and expression keep zero-length anchors.
+    pub(super) omitted_literals: Vec<bool>,
     /// By the statement that allocates an object without constructing it yet.
     /// It prints the allocated type and its local where that allocation happens.
     pub(super) allocation_declarations: Vec<bool>,
@@ -309,6 +313,7 @@ impl EmissionPlan {
             composed_operations: Vec::new(),
             array_literals: Vec::new(),
             omitted_checks: Vec::new(),
+            omitted_literals: Vec::new(),
             allocation_declarations: Vec::new(),
             allocation_locals: Vec::new(),
             hidden_locals: Vec::new(),
@@ -397,6 +402,12 @@ impl EmissionPlan {
     }
     /// The original check this statement's own display omits, if P4 established
     /// it cannot add behavior at this position.
+    pub fn omitted_literal(&self, id: StatementId) -> bool {
+        self.omitted_literals
+            .get(id.0 as usize)
+            .copied()
+            .unwrap_or(false)
+    }
     pub fn omitted_check(&self, id: StatementId) -> Option<&OmittedCheck> {
         self.omitted_checks.get(id.0 as usize)?.as_ref()
     }
@@ -542,6 +553,7 @@ pub(super) fn construct(code: &mut MethodCode) -> Result<(), ExpressionError> {
     plan.composed_operations = filled(code.operations.len(), false)?;
     plan.array_literals = filled(code.statements.len(), None)?;
     plan.omitted_checks = filled(code.statements.len(), None)?;
+    plan.omitted_literals = filled(code.statements.len(), false)?;
     plan.allocation_declarations = filled(code.statements.len(), false)?;
     plan.allocation_locals = filled(code.locals.len(), false)?;
     plan.hidden_locals = filled(code.locals.len(), false)?;

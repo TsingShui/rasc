@@ -37,6 +37,48 @@ impl Expressions<'_, '_> {
         ))?;
         let s = &self.code.statements()[id.0 as usize];
         let phases = &self.code.emission().operations()[op.0 as usize];
+        if release.is_none() && self.code.emission().omitted_literal(id) {
+            // Every use prints the literal itself, so this statement states
+            // nothing; its original facts keep zero-length anchors here.
+            let position = self.out.position();
+            if let StatementKind::Move { expression, .. } | StatementKind::Evaluate { expression } =
+                s.kind
+            {
+                self.out.span(
+                    position,
+                    Origin::Expression {
+                        method: self.method,
+                        expression,
+                    },
+                )?;
+            }
+            self.out.span(
+                position,
+                Origin::Statement {
+                    method: self.method,
+                    statement: id,
+                },
+            )?;
+            self.out.span(
+                position,
+                Origin::Operation {
+                    method: self.method,
+                    operation: op,
+                    pc: original.pc,
+                },
+            )?;
+            if let Some(pc) = original.result_pc {
+                self.out.span(
+                    position,
+                    Origin::ResultCommit {
+                        method: self.method,
+                        operation: op,
+                        pc,
+                    },
+                )?;
+            }
+            return Ok(());
+        }
         if release.is_none()
             && let Some(omitted) = self.code.emission().omitted_check(id)
         {
