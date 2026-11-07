@@ -253,7 +253,12 @@ All original switch roles, duplicate-target links and selected-edge copies survi
 P7 consumes P6's `private_cases` child layout without finding regions again. Its
 switch emission lists the supplied bodies in arm order. Each original arm prints
 its case/default label and selected-edge copies before its unique body, without
-a dispatch goto. The selector terminal and arm transfer identities remain owned.
+a dispatch goto. An empty default body still executes its original selected-edge
+copies and the delivered switch completion. Case-body normal completion can be a
+selected Break; a successful original Return/Throw bypasses it. P7 lowers P6's
+scope completion without discovering another target, and chooses an unlabelled
+break/continue only for the supplied innermost selected scope. The selector
+terminal and arm transfer identities remain owned.
 Other switches retain the single-body dispatch layout. P9 follows these placements;
 it does not split graphs or infer private membership from printed text.
 Explicit graph transfers use the same statements and storage as natural regions.
@@ -287,7 +292,8 @@ execution route alongside the final emission plan.
 `EmissionPlan` is P9's sole execution layout. It binds the supplied P5 copy
 locations to operation, terminal and selected-edge phases without rescheduling
 steps. It fixes child roles, condition polarity, method-local control names and
-scope continuations. Syntax-owned header/predicate continuations are deferred to
+scope continuations. Control completion distinguishes goto, break and continue
+without inventing another edge copy. Syntax-owned header/predicate continuations are deferred to
 their owner, so a header cannot jump past its own test or monitor acquisition.
 Loop-condition edge copies stay inside that test's selected-edge clauses; they
 are not appended after a loop. `LoopPlacement` distinguishes infinite, head-test
@@ -329,9 +335,11 @@ exception propagates without a local handler or snapshot, and the same adjacency
 and storage requirements hold. Its check and possible exception still occur once
 before branch selection. No cast or new SSA definition is invented.
 
-A call can use the same adjacent boolean branch path only when its delivered
-storage family is integral and its complete, nonempty recovered type sources all
-name primitive boolean (`Z`). Its receiver and arguments remain leaf reads or
+A call uses the shared producer when its delivered storage family is integral
+and its complete, nonempty recovered type sources uniformly name primitive
+boolean (`Z`) or primitive int (`I`). Mixed or unknown sources refuse composition.
+Only `Z` acquires boolean shorthand; `I` retains its numeric comparison and uses
+the ordered Condition producer path. Its receiver and arguments remain leaf reads or
 literals, and its exception route propagates without snapshots. The call is the
 last original operation before the empty, single-entry branch header; no copies,
 phases or intervening evaluation move across it. The same eligibility and installation
@@ -340,7 +348,7 @@ children of the delivered evaluation Sequence. P7 does not find another loop or
 exit corridor. The producer still executes initially and on every original head
 continue, or stays at its original tail position. Call results retain their
 `AfterResult` commit and move-result PC origin; other candidates still require
-`AtOperation`. Non-boolean calls, calls with other uses and calls with printed
+`AtOperation`. Other primitive families, calls with other uses and calls with printed
 exception routes remain statements.
 
 A delivered ordered condition composes a test's prelude only as an ordered

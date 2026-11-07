@@ -3,8 +3,6 @@
 use super::build::*;
 use super::graph::Graph;
 use super::*;
-use crate::p2::Terminal;
-use crate::p5::StorageMethod;
 
 pub(super) struct Dominance {
     pub parent: Vec<Option<usize>>,
@@ -182,60 +180,24 @@ pub(super) struct Structure {
     pub cyclic: Vec<bool>,
     pub virtual_node: usize,
 }
-/// Chooses the vertex each node contributes to post-dominance. A void `return`
-/// prints the same statement wherever it stands, so every path that ends in one
-/// ends in the same place: one shared `return;` block can serve as the follow of
-/// the branches that reach it instead of making their arms overlap at it. A
-/// return that carries a value keeps its own vertex, because that value is
-/// original register state this stage does not compare, and a `throw` keeps its
-/// own vertex for the same reason.
-fn exit_vertices(storage: &StorageMethod<'_>, f: &RegionFacts) -> Result<Vec<usize>, RegionError> {
-    let mut vertices = Vec::new();
-    for node in 0..f.nodes.len() {
-        push(&mut vertices, node)?;
-    }
-    let mut shared = None;
-    for (index, node) in f.nodes.iter().enumerate() {
-        if !node.terminal || !node.operations.is_empty() {
-            continue;
-        }
-        let terminal = storage.execution().blocks()[node.block.0 as usize].terminal();
-        if !matches!(terminal, Some(Terminal::Return { width: None, .. })) {
-            continue;
-        }
-        match shared {
-            None => shared = Some(index),
-            Some(first) => vertices[index] = first,
-        }
-    }
-    Ok(vertices)
-}
 impl Structure {
-    pub fn construct(
-        storage: &StorageMethod<'_>,
-        f: &RegionFacts,
-        g: &Graph,
-    ) -> Result<Self, RegionError> {
+    pub fn construct(f: &RegionFacts, g: &Graph) -> Result<Self, RegionError> {
         let n = f.nodes.len();
         let size = n
             .checked_add(1)
             .ok_or(crate::RequestError::PlatformCapacity)?;
-        let exits = exit_vertices(storage, f)?;
         let mut out = lists(size)?;
         let mut reverse = lists(size)?;
         for l in &f.links {
             push(&mut out[l.from.0 as usize], l.to.0 as usize)?;
-            push(
-                &mut reverse[exits[l.to.0 as usize]],
-                exits[l.from.0 as usize],
-            )?;
+            push(&mut reverse[l.to.0 as usize], l.from.0 as usize)?;
         }
         for &root in &g.roots {
             push(&mut out[n], root.0 as usize)?;
         }
-        for (node, &exit) in exits.iter().enumerate() {
+        for node in 0..n {
             if g.outgoing[node].is_empty() {
-                push(&mut reverse[n], exit)?;
+                push(&mut reverse[n], node)?;
             }
         }
         let dom = Dominance::construct(&out, n)?;

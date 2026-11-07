@@ -250,6 +250,8 @@ pub enum Continuation {
     Parent,
     Next(LabelId),
     Goto(LabelId),
+    Break(ControlId),
+    Continue(ControlId),
 }
 /// One delivered predicate of a short-circuit condition. `select` is the
 /// original edge to the shared arm, so it also fixes the printed polarity.
@@ -322,6 +324,8 @@ fn continuation(
         p6::Continuation::Parent => Continuation::Parent,
         p6::Continuation::Next(n) => Continuation::Next(label(c, n)?),
         p6::Continuation::Goto(l) => Continuation::Goto(LabelId(l.0)),
+        p6::Continuation::Break(scope) => Continuation::Break(ControlId(scope.0)),
+        p6::Continuation::Continue(id) => Continuation::Continue(control(c.loops[id.0 as usize])?),
     })
 }
 

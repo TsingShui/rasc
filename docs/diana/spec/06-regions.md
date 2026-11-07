@@ -72,14 +72,25 @@ header-dominated backedges establish natural loops. An SCC alone does not
 establish a natural loop.
 
 The region arena contains `Block`, `Sequence`, `If`, `Loop`, original `Switch`,
-`LabelledBlock`, `Try`, `Synchronized` and explicit `Graph` nodes. Containment-sized
-candidates combine previously owned content. External entrances, disjoint child
+`LabelledBlock`, `Try`, `Synchronized` and explicit `Graph` nodes. Enclosing
+completion interfaces constrain child construction before ownership commitment. External entrances, disjoint child
 ownership, protection boundaries and P5 construction-group membership constrain
 composition. Crossing candidates remain explicit rather than duplicating their
 shared content. Empty branch arms contain no fabricated instruction.
 
-Private parts carry entry, continuation and membership constraints. Parent paths
-supply nested loop and scope context when P6 chooses transfers. All graph walks,
+Private `CompletionInterface` records retain exact node coverage, original normal entrance
+and outlet LinkIds, executable exceptional entrance EdgeIds, and original abrupt
+terminal NodeIds. An outlet references its actual target and unchanged P5 copies;
+a terminal references its original operands, completion, phases and site through
+its node. Return/throw categories do not compare values or merge terminals.
+Storage availability is not a topology predicate: original accesses and CopyPlans
+retain their local gaps, and dependent P7 composition still requires availability.
+
+Private parts carry entry, continuation and membership constraints. Their common
+boundary consists of actual outlet targets plus their declared normal follow.
+If, Condition, Loop and Switch proposals use this boundary without classifying
+an outlet as break or continue. Parent paths supply only selected scope context
+when P6 later chooses transfers. All graph walks,
 ownership composition and context walks use explicit stacks or finite queues.
 Candidate frontiers are derived from the input; a mismatch does not restart method
 analysis or launch an unbounded template search. Scratch and result allocation are
@@ -87,8 +98,9 @@ fallible and checked, without a configured numeric quota.
 
 ## Ordinary branch boundaries
 
-An ordinary branch first proposes its normal postdominator follow, with the
-original true/false links and their normal reach sets up to that follow. The
+An ordinary branch first proposes its normal postdominator follow when it lies
+in the enclosing part, otherwise that part's established follow. Both original
+arm reach sets stop at the same enclosing completion boundary. The
 primary boundary is admissible when neither arm reaches the predicate, the arms
 are disjoint, and their union with the predicate satisfies
 `protection::closed_entry`. P6 MUST enqueue only that primary proposal when it is
@@ -112,7 +124,7 @@ Before committing a successor-boundary candidate, P6 MUST establish:
 - The unchanged `closed_entry` predicate accepts all normal and executable
   exceptional arrivals. If the candidate contains method entry node 0, its
   predicate is node 0.
-- Every original normal link leaving the candidate targets F. Original
+- Every original normal link leaving a successor-boundary candidate targets F. Original
   return/throw terminals and contained divergent loops retain their behavior;
   exceptional outlets retain their site-specific facts. Reachability is not
   clipped to a guessed enclosing scope or abrupt outlet.
@@ -126,7 +138,7 @@ P6 MUST require laminar membership with every established LoopPlan's lexical
 candidate membership: the branch is disjoint, wholly contained, or contains that
 membership in full. P6 MUST reject a partial branch that owns the loop's continue
 target. A contained branch can own a latch source only when it owns a proved private
-abrupt exit and its boundary is the original continue target. Its arms then complete
+exit corridor and its boundary is the original continue target. Its arms then complete
 that loop-body execution rather than taking ownership of the evaluation entry.
 Other partial latch ownership is rejected. These constraints apply before Loop region selection, alongside unchanged
 entrance, arm-reachability, whole-owner and construction checks. Rejection retains
@@ -136,18 +148,28 @@ P6 MUST preserve predicate evaluation, original arm roles, effect order and all
 selected-edge copy, exception, lock and construction obligations. F has one outer
 owner, not an execution copy in either arm.
 
-The single commitment pass orders candidates by membership size, kind priority
-`Loop < Synchronized < Try < If < other`, full catch-frontier preference and entry.
-Its remaining key orders primary before true-successor before false-successor,
-then follow NodeId, boundary LinkId and owning plan identity. Identical successor
-proposals are deduplicated before commitment. Owner partitioning decides crossing
-candidates; P6 MUST NOT evaluate one predicate through two accepted If owners or
-retry alternatives after a late rejection.
+One explicit-stack construction selects disjoint enclosing proposals by decreasing
+membership size, then Loop/Synchronized/Try/Condition/ordinary priority, full catch
+frontier, entry and original successor-boundary identity. It constructs each
+selected proposal's exact parts within that interface before committing the
+parent once. Every syntax-owned predicate is excluded from its descendant
+proposals. A child cannot acquire an incompatible follow before its enclosing
+interface is selected. Whole construction groups, contained loop plans and
+natural lock scopes cannot be split across parts; the same whole-current-owner
+check applies when an owner already exists.
+
+Successor-arm acyclicity is decided once after child selection, contracting only
+wholly contained selected Loop owners. A refusal assembles those same original
+parts explicitly, without another boundary, solver or reconstruction attempt.
+The ordinary part assembler remains the sole Sequence/Graph constructor. There
+is no Graph-first retry, alternative method chain or owner reopening. Reverse LT
+uses each original exit vertex; void returns do not acquire a canonical runtime
+return node.
 
 ## Ordered shared-result conditions
 
-A conditional terminal whose normal postdominator F is known can own one
-`Condition` region when its two original arms are nested rather than disjoint:
+A conditional terminal can own one `Condition` region when its two original
+arms, within their common completion boundary, are nested rather than disjoint:
 one arm is a proper subset of the other, and that shared subgraph has a single
 entry `S` reached by one original link of the first predicate. P6 MUST retain
 both original links of every test and MUST require each later test to select the
@@ -161,8 +183,8 @@ tests. A run that does not end in another conditional starts the other arm. When
 the last other link leaves the region directly, the region owns no other arm and
 MUST keep that original link and its copies.
 
-The candidate enters the ordinary single commitment pass and MUST satisfy the
-same `closed_entry`, disjoint/exact part, whole-current-owner, construction,
+The candidate enters the shared enclosing-interface construction and MUST satisfy the
+same original normal/exceptional entrance, disjoint/exact part, whole-current-owner, construction,
 lock and loop-laminarity checks. The established loop checks apply to a
 `Condition` candidate exactly as to an `If`, using established lexical membership
 and the narrow proved-private-exit/continue-boundary latch rule from
@@ -170,9 +192,9 @@ and the narrow proved-private-exit/continue-boundary latch rule from
 partial ownership of the continue target reject the composition. P6 MUST require each result
 arm to be a closed interface: the shared arm is reachable only from its entry
 inside the shared set and every link entering it is one of the tests' selected
-original normal links, every normal link leaving it reaches the common follow,
+original normal links, every normal link leaving it reaches the common follow or an enclosing actual outlet,
 the other arm is entered normally only by the last test's other original link
-and leaves normally only at the common follow, and no test run is entered in its
+and leaves normally only at that same completion boundary, and no test run is entered in its
 middle. P6 MUST also inspect executable exceptional arrivals for each child,
 including arrivals from another child of the same candidate. An exceptional
 arrival from outside a child rejects composition unless it enters the first run
@@ -183,6 +205,7 @@ proof excludes an exceptional edge from this check. A shared body therefore
 has one owner and no execution copy, and the other result arm cannot jump into
 the natural shared arm. Rejection retains the previous owners and the explicit
 Graph schedule; P6 MUST NOT retry another boundary or build a Graph first.
+An original abrupt result arm needs no common concrete global postdominator.
 Condition predicates are syntax-owned by their region. Predicate nodes, links,
 copy placements and source origins are delivered unchanged.
 
@@ -269,7 +292,7 @@ or infer loop completion from `follow == entry` in an Ordinary part. Exported
 entries, one successor per child, no repeated remaining child, complete root
 coverage, whole-owner membership and Graph selection retain their existing checks.
 A selected loop child contributes every exit outside its lexical membership to
-its parent's sibling relation. Proved private abrupt content inside that membership
+its parent's sibling relation. Proved private corridor content inside that membership
 is not an independent sibling successor.
 
 A conditional loop's normal continuation is the actual destination of its exiting
@@ -279,17 +302,21 @@ synthetic exit to make postdomination convenient. `LoopPlan::members()` retains
 the original backedge core, latches and exits. `lexical_members()` separately records
 the proposed lexical content, including closed synchronized scopes and their
 release/break corridors. `private_exits()` identifies original exits with admitted
-private abrupt corridors. The predicate's actual exiting link and destination remain
+private corridors. The predicate's actual exiting link and destination remain
 the loop follow; lexical ownership does not skip exit-side work.
 
-Before candidate enumeration, P6 can add a private abrupt corridor from another
+Before candidate enumeration, P6 can add a private corridor from another
 original loop exit. Admission requires a finite single-normal-successor path ending
-at its original return or throw, with that exit as its only normal entrance and no
-executable exceptional entrance. The path cannot reach the core or predicate follow,
+at its original return/throw or at the predicate's actual normal follow. The follow
+remains outside lexical membership. The corridor has that exit as its only normal
+entrance and no executable exceptional entrance. The path cannot reach the core,
 intersect another loop core or an established try/synchronized plan, contain a
 monitor, or throw to a local handler. Construction groups stay whole in the enlarged
-loop; candidate partitioning also keeps them whole in each child. Shared outlets,
-cycles, branching corridors and unknown abrupt completion retain explicit control.
+loop; candidate partitioning also keeps them whole in each child. Shared corridor work, cycles, branching corridors and unknown completion retain
+explicit control. The selected body interface retains private operations and the
+original outgoing copies before its selected break; predicate-exhaustion copies
+remain on their distinct original edge. A candidate loop supplies no break scope
+until that Loop region is selected.
 P6 does not compare returned values, merge terminals or manufacture an edge for a
 throw. The enlarged candidate still passes normal/exceptional entry closure,
 whole-current-owner, scope and partition checks before commitment. Rejection affects
@@ -297,26 +324,36 @@ only that composition; resource or construction-invariant failure keeps its exis
 classified RegionStop behavior.
 
 Original switch case keys, default, roles and duplicate-target edges remain distinct.
-Before transfer planning, P6 can give a switch one private child per original arm
-instead of one multi-entry body. `private_cases` identifies this child layout:
+A switch with no concrete postdominator can use one unique first shared actual
+normal target as its external continuation. Reach counts identify sharing of
+original targets, not equality of returned values. Multiple first shared targets
+remain unresolved and explicit.
+
+Before child construction, P6 can give a switch one private child per original
+arm instead of one multi-entry body. `private_cases` identifies this child layout:
 selector first, then bodies in original arm order. Admission requires distinct
-arm targets matching exactly the body's exported entries, disjoint normal reach
-sets up to the common follow, no other normal or executable exceptional arrivals,
-whole existing owners and P5 construction groups, and complete body coverage.
-Each arm must compose as a single chain of existing owners, have no normal cycle,
-and terminate by return/throw or links to the switch follow. Selected nested owners
-remain whole. No extra graph or labelled scope is created for a private arm.
-The shared follow stays outside the switch with one execution owner; case exits
-are planned against the switch or their unchanged nested scope, not a removed
-body wrapper. Original link destinations, copies and exception facts do not change.
+arm targets, disjoint normal reach sets inside the common completion boundary,
+only the selector's original normal entrances, no executable exceptional arrivals,
+whole construction groups/scopes and complete body coverage. Each arm has no
+normal cycle and completes by original return/throw or an established outlet.
+A default targeting the follow has an empty child, not missing selected-edge
+copies. Shared follow work has one external owner. Normal completion of a case
+body becomes Break only against the selected Switch; successful abrupt terminals
+retain their identities. No shared tail is duplicated or arm disjointness relaxed.
 
 A rejected private-case composition retains the existing single body, including
 its local graph with multiple case entrances and fallthrough. Duplicate-target
 arms retain that layout. The selector has one execution owner; recovery does not
 introduce a state variable, generated dispatcher or repeated selector evaluation.
 
-`Continuation` records whether a completed region finishes its parent, reaches a
-confirmed next position, or needs an explicit label transfer. P7 MUST consume this
+`Continuation` records whether a completed region finishes its source parent,
+reaches a confirmed next position, or needs an explicit goto/break/continue.
+Only selected ancestors resolve the latter scope completions. A region with no
+normal completion toward its follow receives no fabricated onward continuation;
+an original break/continue that already leaves that region does not execute a
+second planned jump. Completion emerging from a contained scope still proceeds
+through the enclosing child's completion, including the explicit Condition
+alternative. P7 MUST consume this
 choice rather than infer fallthrough from source layout. Public follow content has
 one owner, not a separate copy in each arm.
 

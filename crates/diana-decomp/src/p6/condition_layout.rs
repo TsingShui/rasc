@@ -76,7 +76,7 @@ pub(super) fn construct(f: &mut RegionFacts, g: &Graph) -> Result<(), RegionErro
                 Continuation::None => None,
                 Continuation::Parent => source.follow,
                 Continuation::Next(node) => Some(node),
-                Continuation::Goto(_) => None,
+                Continuation::Goto(_) | Continuation::Break(_) | Continuation::Continue(_) => None,
             };
             for &node in &r.nodes {
                 for &link in &g.outgoing[node.0 as usize] {

@@ -182,6 +182,64 @@ pub(super) fn transfers(f: &mut RegionFacts, g: &Graph) -> Result<(), RegionErro
                 _ => {}
             }
         }
+        if let Some(follow) = r.follow {
+            let mut normal = r.nodes.is_empty();
+            for link in &f.links {
+                if !r.nodes.contains(&link.from) || link.to != follow {
+                    continue;
+                }
+                let consumed = match f.link_plans[link.id.0 as usize].action {
+                    TransferAction::Break(scope) => !f.regions[scope.0 as usize]
+                        .nodes
+                        .iter()
+                        .all(|n| r.nodes.contains(n)),
+                    TransferAction::Continue(loop_id) => !f.loops[loop_id.0 as usize]
+                        .lexical_members
+                        .iter()
+                        .all(|n| r.nodes.contains(n)),
+                    _ => false,
+                };
+                normal |= !consumed;
+            }
+            if !normal {
+                continuation = Continuation::None;
+            } else {
+                let mut at = f.parents[i];
+                while let Some(scope) = at {
+                    let parent = &f.regions[scope.0 as usize];
+                    match parent.kind {
+                        RegionKind::Switch {
+                            private_cases: true,
+                            ..
+                        } if parent.follow == Some(follow) => {
+                            continuation = Continuation::Break(scope);
+                            break;
+                        }
+                        RegionKind::Loop(loop_id)
+                            if matches!(continuation, Continuation::Goto(_)) =>
+                        {
+                            let plan = &f.loops[loop_id.0 as usize];
+                            if plan.follow == Some(follow) {
+                                continuation = Continuation::Break(scope);
+                                break;
+                            }
+                            if plan.continue_target() == follow {
+                                continuation = Continuation::Continue(loop_id);
+                                break;
+                            }
+                        }
+                        _ => {}
+                    }
+                    // An implicit child completion belongs to its source parent.
+                    // Only the case body's boundary, not every descendant, owns
+                    // the switch completion after that parent's normal work.
+                    if matches!(continuation, Continuation::Parent | Continuation::Next(_)) {
+                        break;
+                    }
+                    at = f.parents[scope.0 as usize];
+                }
+            }
+        }
         f.regions[i].continuation = continuation;
     }
     Ok(())

@@ -1,7 +1,8 @@
 //! Enumerates region proposals from established facts: established loops, try
 //! plans, lock scopes, and one proposal per conditional or switch terminal. A
-//! proposal states its parts and its follow; whether it may be selected is
-//! decided by `accept`.
+//! proposal states its parts and a convenient concrete follow inside the
+//! enclosing completion boundary. `hierarchy` selects interfaces before children;
+//! `accept` retains the original entrance, construction and scope constraints.
 
 use super::super::build::*;
 use super::super::dominance::Structure;
@@ -14,19 +15,18 @@ use crate::p2::{EdgeRole, NormalEdge, Terminal};
 use crate::p5::StorageMethod;
 
 pub(super) fn branch_proposal(
-    storage: &StorageMethod<'_>,
     f: &RegionFacts,
     g: &Graph,
     entry: NodeId,
     true_link: LinkId,
     false_link: LinkId,
     follow: Option<NodeId>,
+    boundary: &[bool],
 ) -> Result<Option<Candidate>, RegionError> {
-    let empty = filled(f.nodes.len(), false)?;
     let t = f.links[true_link.0 as usize].to;
     let e = f.links[false_link.0 as usize].to;
-    let a = protection::reachable(storage, f, g, &[t], follow, &empty, false)?;
-    let b = protection::reachable(storage, f, g, &[e], follow, &empty, false)?;
+    let a = super::completion::reachable(f, g, &[t], boundary, follow)?;
+    let b = super::completion::reachable(f, g, &[e], boundary, follow)?;
     if a[entry.0 as usize] || b[entry.0 as usize] || a.iter().zip(&b).any(|(a, b)| *a && *b) {
         return Ok(None);
     }
@@ -51,7 +51,7 @@ pub(super) fn branch_proposal(
             Part {
                 completion: PartCompletion::Ordinary,
                 nodes: list(arm)?,
-                entry: if Some(target) == follow {
+                entry: if Some(target) == follow || boundary[target.0 as usize] {
                     None
                 } else {
                     Some(target)
@@ -77,9 +77,14 @@ pub(super) fn candidates(
     f: &mut RegionFacts,
     g: &Graph,
     s: &Structure,
+    scope: &Part,
+    boundary: &[bool],
 ) -> Result<Vec<Candidate>, RegionError> {
     let mut out = Vec::new();
     for l in &f.loops {
+        if !l.lexical_members.iter().all(|n| scope.nodes.contains(n)) {
+            continue;
+        }
         let members = copy(&l.lexical_members)?;
         let mut parts = Vec::new();
         let mut body = Vec::new();
@@ -132,6 +137,9 @@ pub(super) fn candidates(
         )?;
     }
     for p in &f.tries {
+        if !p.members.iter().all(|n| scope.nodes.contains(n)) {
+            continue;
+        }
         let mut parts = Vec::new();
         push(
             &mut parts,
@@ -166,6 +174,9 @@ pub(super) fn candidates(
         )?;
     }
     for p in &f.synchronized {
+        if !p.members.iter().all(|n| scope.nodes.contains(n)) {
+            continue;
+        }
         if p.separation.is_some() {
             continue;
         }
@@ -203,7 +214,7 @@ pub(super) fn candidates(
         )?;
     }
     for index in 0..f.nodes.len() {
-        if !f.nodes[index].terminal {
+        if !scope.nodes.contains(&NodeId(id(index)?)) || !f.nodes[index].terminal {
             continue;
         }
         let n = f.nodes[index].id();
@@ -225,9 +236,12 @@ pub(super) fn candidates(
         if f.loops.iter().any(|l| l.condition() == Some(n)) {
             continue;
         }
-        let follow = s.follow(n);
+        let follow = s
+            .follow(n)
+            .filter(|node| scope.nodes.contains(node))
+            .or(scope.follow);
         if matches!(terminal, Some(Terminal::Branch { .. })) {
-            if let Some(proposal) = conditions::candidate(storage, f, g, s, n)? {
+            if let Some(proposal) = conditions::candidate(storage, f, g, follow, boundary, n)? {
                 push(&mut out, proposal)?;
                 continue;
             }
@@ -245,7 +259,7 @@ pub(super) fn candidates(
             let (Some(yes), Some(no)) = (yes, no) else {
                 return Err(bug("conditional terminal lost its original arms"));
             };
-            if let Some(proposal) = branch_proposal(storage, f, g, n, yes, no, follow)? {
+            if let Some(proposal) = branch_proposal(f, g, n, yes, no, follow, boundary)? {
                 let set = mask(f.nodes.len(), &proposal.members)?;
                 if protection::closed_entry(storage, f, g, &set, n) {
                     push(&mut out, proposal)?;
@@ -255,21 +269,20 @@ pub(super) fn candidates(
             let t = f.links[yes.0 as usize].to;
             let e = f.links[no.0 as usize].to;
             if t != e {
-                for (boundary, link) in [
+                for (successor, link) in [
                     (SuccessorBoundary::True(yes), yes),
                     (SuccessorBoundary::False(no), no),
                 ] {
                     let follow = Some(f.links[link.0 as usize].to);
-                    if let Some(mut proposal) = branch_proposal(storage, f, g, n, yes, no, follow)?
+                    if let Some(mut proposal) = branch_proposal(f, g, n, yes, no, follow, boundary)?
                     {
-                        proposal.successor_boundary = Some(boundary);
+                        proposal.successor_boundary = Some(successor);
                         push(&mut out, proposal)?;
                     }
                 }
             }
             continue;
         }
-        let empty = filled(f.nodes.len(), false)?;
         let mut parts = Vec::new();
         push(
             &mut parts,
@@ -285,7 +298,11 @@ pub(super) fn candidates(
         for &l in &arms {
             push(&mut starts, f.links[l.0 as usize].to)?;
         }
-        let body = protection::reachable(storage, f, g, &starts, follow, &empty, false)?;
+        let follow = match s.follow(n).filter(|node| scope.nodes.contains(node)) {
+            Some(follow) => Some(follow),
+            None => super::completion::shared_target(f, g, &starts, boundary)?.or(scope.follow),
+        };
+        let body = super::completion::reachable(f, g, &starts, boundary, follow)?;
         if body[n.0 as usize] {
             continue;
         }
@@ -317,40 +334,5 @@ pub(super) fn candidates(
             },
         )?;
     }
-    out.sort_unstable_by_key(|c| {
-        (
-            c.members.len(),
-            match c.kind {
-                RegionKind::Loop(_) => 0,
-                RegionKind::Synchronized(_) => 1,
-                RegionKind::Try(_) => 2,
-                RegionKind::If { .. } => 3,
-                _ => 4,
-            },
-            match c.kind {
-                RegionKind::Try(id) => usize::MAX - f.tries[id.0 as usize].handlers.len(),
-                _ => 0,
-            },
-            c.entry.0,
-            match c.successor_boundary {
-                None => (0, c.follow.map(|n| n.0), 0),
-                Some(SuccessorBoundary::True(link)) => (1, c.follow.map(|n| n.0), link.0),
-                Some(SuccessorBoundary::False(link)) => (2, c.follow.map(|n| n.0), link.0),
-            },
-            match c.kind {
-                RegionKind::Loop(id) => id.0,
-                RegionKind::Synchronized(id) => id.0,
-                RegionKind::Try(id) => id.0,
-                _ => 0,
-            },
-        )
-    });
-    // One original predicate and boundary determine the same reach sets/parts.
-    out.dedup_by(|a, b| {
-        a.successor_boundary.is_some()
-            && b.successor_boundary.is_some()
-            && a.entry == b.entry
-            && a.follow == b.follow
-    });
     Ok(out)
 }

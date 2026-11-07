@@ -48,7 +48,7 @@ fn construct(
 ) -> Result<(), RegionError> {
     let graph = super::graph::construct(storage, f)?;
     super::protection::collect(storage, f, &graph)?;
-    let structure = super::dominance::Structure::construct(storage, f, &graph)?;
+    let structure = super::dominance::Structure::construct(f, &graph)?;
     super::loops::construct(storage, f, &graph, &structure)?;
     super::locks::construct(storage, f, &graph)?;
     super::protection::plan(storage, f, &graph, &structure)?;

@@ -155,13 +155,19 @@ fn producer(
                 && family == Family::Integral
                 && !declared.type_source_unknown
                 && !declared.declared_types.is_empty()
-                && declared.declared_types.iter().all(|id| {
-                    code.types
-                        .get(id.0 as usize)
-                        .is_some_and(|ty| ty.units == [u16::from(b'Z')])
+                && b"ZI".iter().copied().any(|primitive| {
+                    declared.declared_types.iter().all(|id| {
+                        code.types
+                            .get(id.0 as usize)
+                            .is_some_and(|ty| ty.units == [u16::from(primitive)])
+                    })
                 }) =>
         {
-            true
+            declared.declared_types.iter().all(|id| {
+                code.types
+                    .get(id.0 as usize)
+                    .is_some_and(|ty| ty.units == [u16::from(b'Z')])
+            })
         }
         _ => return None,
     };
@@ -875,7 +881,9 @@ fn explicit(code: &mut MethodCode, index: usize) -> Result<(), ExpressionError> 
     for completion in &explicit.completions {
         code.emission.controls[completion.child.0 as usize].continuation =
             match &completion.continuation {
-                Continuation::Goto(label) => Some(*label),
+                Continuation::Goto(label) => Some(ControlCompletion::Goto(*label)),
+                Continuation::Break(scope) => Some(ControlCompletion::Break(*scope)),
+                Continuation::Continue(scope) => Some(ControlCompletion::Continue(*scope)),
                 Continuation::None | Continuation::Parent | Continuation::Next(_) => None,
             };
     }
