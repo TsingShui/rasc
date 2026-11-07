@@ -8,6 +8,25 @@
 /// Whether the `trace-passes` feature is compiled in.
 pub const ENABLED: bool = cfg!(feature = "trace-passes");
 
+/// One candidate that admission refused.
+pub(super) fn rejected(
+    entry: crate::p6::NodeId,
+    reason: &crate::p6::RecoveryReason,
+    members: usize,
+    follow: Option<crate::p6::NodeId>,
+    boundary: bool,
+) {
+    if !ENABLED {
+        return;
+    }
+    eprintln!(
+        "[p6] reject entry={} reason={:?} members={members} follow={} boundary={boundary}",
+        entry.0,
+        reason,
+        follow.map_or(-1, |node| node.0 as i64)
+    );
+}
+
 /// One part assembled as an explicit graph instead of a sequence.
 pub(super) fn graph(
     entry: Option<crate::p6::NodeId>,

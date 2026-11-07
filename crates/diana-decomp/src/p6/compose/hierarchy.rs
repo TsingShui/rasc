@@ -125,6 +125,13 @@ pub(super) fn construct(
                         Err(reason) => Err(reason),
                     };
                     if let Err(reason) = accepted {
+                        super::trace::rejected(
+                            candidate.entry,
+                            &reason,
+                            candidate.members.len(),
+                            candidate.follow,
+                            candidate.successor_boundary.is_some(),
+                        );
                         push(
                             &mut f.issues,
                             PlanningIssue::Graph {
@@ -173,6 +180,13 @@ pub(super) fn construct(
                 results.truncate(start);
                 if let Err(reason) = super::accept::match_successor_boundary(f, owners, &candidate)?
                 {
+                    super::trace::rejected(
+                        candidate.entry,
+                        &reason,
+                        candidate.members.len(),
+                        candidate.follow,
+                        candidate.successor_boundary.is_some(),
+                    );
                     push(
                         &mut f.issues,
                         PlanningIssue::Graph {
