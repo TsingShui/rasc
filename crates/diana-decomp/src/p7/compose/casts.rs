@@ -32,16 +32,28 @@ use crate::p2::OpId;
 use crate::p4::CheckDisposition;
 use crate::p5::{CopyLocation, Materialization, TransferSite};
 
+/// The first reason this statement could not print at a read. The first refusal
+/// is the one that decides; later paths would only repeat a symptom.
+fn why_at(slots: &mut [Option<&'static str>], statement: StatementId, why: &'static str) {
+    if let Some(slot) = slots.get_mut(statement.0 as usize)
+        && slot.is_none()
+    {
+        *slot = Some(why);
+    }
+}
+
 pub(super) fn construct(
     code: &mut MethodCode,
     types: &crate::p4::TypeFacts,
     key: crate::MethodKey,
 ) -> Result<(), ExpressionError> {
-    let omitted = redundant(code, types, key)?;
+    let omitted = redundant(code, types)?;
+    let mut why_slots: Vec<Option<&'static str>> =
+        super::super::build::filled(code.statements.len(), None)?;
     let mut found: Vec<(StatementId, InlineCheck)> = Vec::new();
-    statement_uses(code, &mut found, key)?;
-    copy_uses(code, &mut found, key)?;
-    terminal_uses(code, &mut found, key)?;
+    statement_uses(code, &mut found, &mut why_slots)?;
+    copy_uses(code, &mut found, &mut why_slots)?;
+    terminal_uses(code, &mut found, &mut why_slots)?;
     // A redundant check has no text to carry, so its value's read keeps its own
     // spelling and the check's statement only contributes its origins.
     found.retain(|(statement, _)| {
@@ -79,6 +91,20 @@ pub(super) fn construct(
             });
         }
     }
+    // One line per check that keeps its own statement, with the first condition
+    // that stopped it. A check fused by any carrier is not reported.
+    if super::trace::ENABLED {
+        for (index, why) in why_slots.iter().enumerate() {
+            let Some(why) = why else { continue };
+            let statement = StatementId(u32::try_from(index).unwrap_or(u32::MAX));
+            if found.iter().any(|(check, _)| *check == statement)
+                || omitted.get(index).is_some_and(Option::is_some)
+            {
+                continue;
+            }
+            super::trace::cast_refused(key, statement, why);
+        }
+    }
     code.emission.omitted_checks = omitted;
     Ok(())
 }
@@ -90,7 +116,6 @@ pub(super) fn construct(
 fn redundant(
     code: &MethodCode,
     types: &crate::p4::TypeFacts,
-    key: crate::MethodKey,
 ) -> Result<Vec<Option<OmittedCheck>>, ExpressionError> {
     let mut omitted: Vec<Option<OmittedCheck>> =
         super::super::build::filled(code.statements.len(), None)?;
@@ -104,7 +129,7 @@ fn redundant(
         let Some(statement) = operation.statement else {
             continue;
         };
-        let Some((value, reference)) = eligible_check(code, check.operation(), statement, key)
+        let Some((value, reference)) = eligible_check(code, check.operation(), statement, None)
         else {
             continue;
         };
@@ -130,9 +155,14 @@ fn eligible_check(
     code: &MethodCode,
     operation: OpId,
     statement: StatementId,
-    key: crate::MethodKey,
+    why_slots: Option<&mut [Option<&'static str>]>,
 ) -> Option<(StorageId, ReferenceId)> {
-    let refuse = |why: &'static str| super::trace::cast_refused(key, statement, why);
+    let mut why_slots = why_slots;
+    let mut refuse = |why: &'static str| {
+        if let Some(slots) = why_slots.as_deref_mut() {
+            why_at(slots, statement, why);
+        }
+    };
     let s = code.statements.get(statement.0 as usize)?;
     // Only a real check-cast can be refused; every other statement simply has no
     // carrier question, so it is silent.
@@ -208,7 +238,7 @@ fn unclaimed_occurrence(found: &[(StatementId, InlineCheck)], check: &InlineChec
 fn statement_uses(
     code: &MethodCode,
     found: &mut Vec<(StatementId, InlineCheck)>,
-    key: crate::MethodKey,
+    why_slots: &mut [Option<&'static str>],
 ) -> Result<(), ExpressionError> {
     for node in 0..code.emission.blocks.len() {
         let actions = &code.emission.blocks[node].actions;
@@ -220,10 +250,11 @@ fn statement_uses(
             else {
                 continue;
             };
-            let Some((storage, reference)) = eligible_check(code, operation, statement, key) else {
+            let Some((storage, reference)) = eligible_check(code, operation, statement, None)
+            else {
                 continue;
             };
-            let refuse = |why: &'static str| super::trace::cast_refused(key, statement, why);
+            let mut refuse = |why: &'static str| why_at(why_slots, statement, why);
             let BodyAction::Statement {
                 statement: next, ..
             } = actions[index + 1]
@@ -277,7 +308,7 @@ fn statement_uses(
 fn copy_uses(
     code: &MethodCode,
     found: &mut Vec<(StatementId, InlineCheck)>,
-    key: crate::MethodKey,
+    why_slots: &mut [Option<&'static str>],
 ) -> Result<(), ExpressionError> {
     for node in 0..code.emission.blocks.len() {
         let block = &code.emission.blocks[node];
@@ -291,10 +322,10 @@ fn copy_uses(
         else {
             continue;
         };
-        let Some((storage, reference)) = eligible_check(code, operation, statement, key) else {
+        let Some((storage, reference)) = eligible_check(code, operation, statement, None) else {
             continue;
         };
-        let refuse = |why: &'static str| super::trace::cast_refused(key, statement, why);
+        let mut refuse = |why: &'static str| why_at(why_slots, statement, why);
         let BlockEnd::Transfers(transfers) = &block.end else {
             // A terminal evaluates its own operands and selects between its
             // original edges, so the check still precedes both outcomes.
@@ -383,7 +414,7 @@ fn copy_uses(
 fn terminal_uses(
     code: &MethodCode,
     found: &mut Vec<(StatementId, InlineCheck)>,
-    key: crate::MethodKey,
+    why_slots: &mut [Option<&'static str>],
 ) -> Result<(), ExpressionError> {
     for node in 0..code.emission.blocks.len() {
         let block = &code.emission.blocks[node];
@@ -397,13 +428,13 @@ fn terminal_uses(
         else {
             continue;
         };
-        let Some((storage, reference)) = eligible_check(code, operation, statement, key) else {
+        let Some((storage, reference)) = eligible_check(code, operation, statement, None) else {
             continue;
         };
         // The terminal may sit in a following portion of the same original
         // block: a plain within-block link with no copy prints nothing between
         // the check and the terminal operand.
-        let refuse = |why: &'static str| super::trace::cast_refused(key, statement, why);
+        let mut refuse = |why: &'static str| why_at(why_slots, statement, why);
         let Some(terminal) = terminal_after(code, node)? else {
             refuse("no_terminal_follows");
             continue;
