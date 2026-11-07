@@ -107,7 +107,7 @@ pub(super) fn site_annotations(code: &MethodCode) -> Result<Vec<bool>, Expressio
         else {
             continue;
         };
-        if super::labels::contains(&parent, start, target) {
+        if super::sequence::contains(&parent, start, target) {
             required[site.id.0 as usize] = false;
         }
     }

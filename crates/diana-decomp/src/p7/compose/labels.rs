@@ -4,20 +4,6 @@ use super::super::*;
 use super::*;
 use crate::p2::BlockId;
 
-pub(super) fn contains(parent: &[Option<ControlId>], start: ControlId, target: ControlId) -> bool {
-    let mut current = start;
-    for _ in 0..=parent.len() {
-        if current == target {
-            return true;
-        }
-        match parent.get(current.0 as usize).copied().flatten() {
-            Some(next) => current = next,
-            None => return false,
-        }
-    }
-    false
-}
-
 pub(super) fn mark_label(labels: &mut [bool], label: LabelId) -> Result<(), ExpressionError> {
     *labels
         .get_mut(label.0 as usize)

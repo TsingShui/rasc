@@ -8,14 +8,18 @@ mod allocation;
 mod arrays;
 mod branches;
 mod casts;
+mod continuations;
+mod continues;
 mod expressions;
+mod fallthrough;
 mod labels;
-mod layout;
 mod literals;
 mod loops;
 mod references;
 mod returns;
+mod scope_labels;
 mod scopes;
+mod sequence;
 mod stores;
 pub(super) mod trace;
 
@@ -48,20 +52,23 @@ pub(super) fn construct(
     // longer keeps a display label alive.
     traced!(
         "collapse_fallthrough_gotos",
-        layout::collapse_fallthrough_gotos(code)
+        fallthrough::collapse_fallthrough_gotos(code)
     );
-    traced!("unlabel_inner_scopes", layout::unlabel_inner_scopes(code));
+    traced!(
+        "unlabel_inner_scopes",
+        scope_labels::unlabel_inner_scopes(code)
+    );
     traced!(
         "drop_trailing_continues",
-        layout::drop_trailing_continues(code)
+        continues::drop_trailing_continues(code)
     );
     traced!(
         "drop_duplicate_continuation",
-        layout::drop_duplicate_continuation(code)
+        continuations::drop_duplicate_continuation(code)
     );
     traced!(
         "collapse_planned_continuations",
-        layout::collapse_planned_continuations(code)
+        continuations::collapse_planned_continuations(code)
     );
     traced!("loops", loops::construct(code));
     let mut labels = filled(code.labels.len(), false)?;
