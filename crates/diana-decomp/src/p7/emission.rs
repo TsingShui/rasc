@@ -259,6 +259,11 @@ pub struct EmissionPlan {
     /// By the statement whose check prints nothing because P4 established it
     /// cannot add behavior at that position.
     pub(super) omitted_checks: Vec<Option<OmittedCheck>>,
+    /// By the statement that allocates an object without constructing it yet.
+    /// It prints the allocated type and its local where that allocation happens.
+    pub(super) allocation_declarations: Vec<bool>,
+    /// By the local whose declaration is that allocation statement.
+    pub(super) allocation_locals: Vec<bool>,
     pub(super) hidden_locals: Vec<bool>,
     pub(super) deferred_controls: Vec<bool>,
     pub(super) operations: Vec<EvaluationPhases>,
@@ -292,6 +297,8 @@ impl EmissionPlan {
             composed_operations: Vec::new(),
             array_literals: Vec::new(),
             omitted_checks: Vec::new(),
+            allocation_declarations: Vec::new(),
+            allocation_locals: Vec::new(),
             hidden_locals: Vec::new(),
             deferred_controls: Vec::new(),
             operations: Vec::new(),
@@ -383,6 +390,18 @@ impl EmissionPlan {
     }
     pub fn hidden_local(&self, id: StorageId) -> bool {
         self.hidden_locals
+            .get(id.0 as usize)
+            .copied()
+            .unwrap_or(false)
+    }
+    pub fn allocation_declaration(&self, id: StatementId) -> bool {
+        self.allocation_declarations
+            .get(id.0 as usize)
+            .copied()
+            .unwrap_or(false)
+    }
+    pub fn allocation_local(&self, id: StorageId) -> bool {
+        self.allocation_locals
             .get(id.0 as usize)
             .copied()
             .unwrap_or(false)
@@ -511,6 +530,8 @@ pub(super) fn construct(code: &mut MethodCode) -> Result<(), ExpressionError> {
     plan.composed_operations = filled(code.operations.len(), false)?;
     plan.array_literals = filled(code.statements.len(), None)?;
     plan.omitted_checks = filled(code.statements.len(), None)?;
+    plan.allocation_declarations = filled(code.statements.len(), false)?;
+    plan.allocation_locals = filled(code.locals.len(), false)?;
     plan.hidden_locals = filled(code.locals.len(), false)?;
     plan.deferred_controls = filled(code.controls.len(), false)?;
     for l in &code.locals {

@@ -195,6 +195,71 @@ fn without_success(
     }
     Ok(seen)
 }
+/// Whether the allocated object can reach `at` while carrying `value`, on a path
+/// that skipped the constructor's normal completion. A merged Phi imports the
+/// allocation through particular incomings only, so each such incoming is
+/// decided at its own transfer instead of treating the whole Phi as one early
+/// observation. The removed `omitted` transfer cannot carry the object, so it is
+/// not an unconstructed arrival. The walk is bounded by this method's Phi values.
+fn arrives_unconstructed(
+    typed: &TypedMethod<'_>,
+    allocation: crate::p2::OpId,
+    unsafe_reach: &[bool],
+    omitted: TransferId,
+    at: PointId,
+    observed: crate::p3::ValueId,
+    visited: &mut [bool],
+) -> Result<bool, StorageError> {
+    let s = typed.ssa_facts();
+    if !unsafe_reach.get(at.0 as usize).copied().unwrap_or(false)
+        || !typed
+            .facts()
+            .value(observed)
+            .is_some_and(|v| v.allocations().contains(&allocation))
+    {
+        return Ok(false);
+    }
+    let Some(phi) = s.phis().iter().find(|p| p.value() == observed) else {
+        return Ok(true);
+    };
+    let slot = visited
+        .get_mut(phi.id().0 as usize)
+        .ok_or(StorageError::InternalInvariant(
+            "construction observed an unknown Phi",
+        ))?;
+    if *slot {
+        return Ok(true);
+    }
+    *slot = true;
+    for incoming in phi.incoming() {
+        if incoming.transfer() == omitted {
+            continue;
+        }
+        let Some(from) = s
+            .transfers()
+            .get(incoming.transfer().0 as usize)
+            .map(|t| t.from())
+        else {
+            continue;
+        };
+        let Some(source) = value(s, incoming.state()) else {
+            return Ok(true);
+        };
+        if arrives_unconstructed(
+            typed,
+            allocation,
+            unsafe_reach,
+            omitted,
+            from,
+            source,
+            visited,
+        )? {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
 /// Whether this operation only copies the object allocated at `allocation`.
 fn aliases_allocation(
     typed: &TypedMethod<'_>,
@@ -273,8 +338,18 @@ fn candidate(
         }
     }
     for &operation in &members {
-        if f.operation_emission[operation.0 as usize] != OperationEmission::Ordinary {
-            return Ok(Err(Separation::SharedAllocation));
+        match f.operation_emission[operation.0 as usize] {
+            OperationEmission::Ordinary => {}
+            OperationEmission::Construction { group, .. } => {
+                // A nested natural construction may prepare an argument: its own
+                // statements print in their original order and it completes before
+                // this constructor runs. A group that reaches outside this corridor
+                // is not argument preparation.
+                let nested = &f.construction_groups()[group.0 as usize];
+                if nested.members().iter().any(|m| !members.contains(m)) {
+                    return Ok(Err(Separation::SharedAllocation));
+                }
+            }
         }
         if operation == allocation || operation == init || aliases_object(operation) {
             continue;
@@ -326,6 +401,7 @@ fn candidate(
         .count()
         == 1;
     let mut unsafe_reach = None;
+    let mut visited = filled(s.phis().len(), false)?;
     for usage in s.uses() {
         let Some(value) = value(s, usage.state()) else {
             continue;
@@ -343,10 +419,20 @@ fn candidate(
             if unsafe_reach.is_none() {
                 unsafe_reach = Some(without_success(typed, success)?);
             }
-            if !unsafe_reach
-                .as_ref()
-                .is_some_and(|r| r[usage.point().0 as usize])
-            {
+            visited.fill(false);
+            if !arrives_unconstructed(
+                typed,
+                allocation,
+                unsafe_reach
+                    .as_ref()
+                    .ok_or(StorageError::InternalInvariant(
+                        "construction lost its unsafe reachability",
+                    ))?,
+                success,
+                usage.point(),
+                value,
+                &mut visited,
+            )? {
                 continue;
             }
             let origin = typed
@@ -503,6 +589,14 @@ pub(super) fn construct(typed: &TypedMethod<'_>, f: &mut StorageFacts) -> Result
             Ok(group) => {
                 let id = group.id;
                 for &op in &group.members {
+                    // An argument's own natural construction keeps its group: it
+                    // prints, and completes, before this constructor call runs.
+                    if matches!(
+                        f.operation_emission[op.0 as usize],
+                        OperationEmission::Construction { group: nested, .. } if nested != id
+                    ) {
+                        continue;
+                    }
                     let role = if op == group.allocation {
                         ConstructionRole::Allocation
                     } else if op == group.initialization {

@@ -284,6 +284,12 @@ P7 MUST NOT move unlocked work into the held body or infer outlets from a common
 follow. These outlet records retain source ownership; they are not another
 execution route alongside the final emission plan.
 
+A `new-instance` statement that publishes its own storage keeps the original
+allocation point: P7 marks it so P9 prints the allocated type and local where the
+allocation runs, and the header omits that local's declaration. The constructor
+call stays at its own statement, so neither the allocation nor its publication
+moves.
+
 `EmissionPlan` is P9's sole execution layout. It binds the supplied P5 copy
 locations to operation, terminal and selected-edge phases without rescheduling
 steps. It fixes child roles, condition polarity, method-local control names and
