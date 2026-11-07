@@ -221,7 +221,9 @@ explicit prefix marker when the traversal stopped early. These are encoded value
 not executed assignments, so they are not folded into the field declaration.
 
 P9 prints the supplied member list, including no-code, synthetic/bridge and
-stopped members. It does not infer nesting from `$` or create declarations for an
+stopped members. A no-code method declaration ends with a semicolon; its original
+no-code state remains in the delivered source product. P9 does not infer nesting
+from `$` or create declarations for an
 unlocated directory suffix. Static preparation follows P8's original ordinal
 plan before the original class initializer. Implicit defaults are not encoded
 assignments or guessed zero values.
@@ -242,13 +244,13 @@ leaf declarations. Counts, reference identities and local gaps remain visible.
 Neither path parses encoded input again; generic display syntax comes only
 from P8's interpreted signature plan.
 
-A `@Signature` record whose declaration P8 already interpreted prints that
-interpreted signature instead of its raw descriptor fragments: one type for a
-field or parameter, optional type parameters followed by `(parameters) -> return`
-for a method, and optional type parameters followed by `extends`/`implements`
-clauses for a class. A record P8 did not
-interpret keeps its original value tokens, so an uninterpreted signature never
-silently changes shape. The delivered annotation text remains in the product.
+A method's system `@Signature` record is omitted when P8 marks that exact record
+fully represented and the complete method declaration is printed. Its annotation
+origin retains a zero-length span. A stopped or unavailable method keeps the
+record. A method record with additional or unrepresented information keeps its
+original value tokens. Other interpreted `@Signature` records print the
+interpreted signature; an uninterpreted record keeps its original value tokens.
+The delivered annotation and original text remain in the source product.
 
 A constructor prints as `OwnerName(parameters)` with no return type, using the
 class declaration's name rather than a reference spelling that an unrelated field

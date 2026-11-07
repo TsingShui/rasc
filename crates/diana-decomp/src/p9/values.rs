@@ -96,6 +96,8 @@ pub(super) struct Attachments<'a> {
     /// Ascending identities of the printed members with the parameter list each
     /// one prints.
     methods: Vec<(crate::MethodId, u32)>,
+    /// Methods whose complete delivered headers can show interpreted signatures.
+    complete_methods: Vec<crate::MethodId>,
     /// Whether this publication prints a class header.
     class_header: bool,
 }
@@ -141,12 +143,14 @@ impl<'a> Attachments<'a> {
             owners: Owners::default(),
             fields: Vec::new(),
             methods: Vec::new(),
+            complete_methods: Vec::new(),
             class_header,
         }
     }
     fn finish(mut self) -> Result<Self, RenderError> {
         self.fields.sort_unstable();
         self.methods.sort_unstable_by_key(|(id, _)| *id);
+        self.complete_methods.sort_unstable();
         Ok(self)
     }
     fn member(
@@ -156,6 +160,15 @@ impl<'a> Attachments<'a> {
         class_name: Option<&'a p8::ValueName>,
     ) -> Result<(), RenderError> {
         let printed = printed_header(member);
+        if let Ok(p8::MethodDelivery::Expressed(result) | p8::MethodDelivery::Declared(result)) =
+            &member.delivery
+            && !matches!(
+                result.header().kind,
+                crate::p7::MethodKind::ClassInitializer
+            )
+        {
+            push(&mut self.complete_methods, member.id)?;
+        }
         // A residual prefix keeps today's owner spelling, which names only a
         // member whose delivered result carries its declaration.
         if let Ok(delivery) = &member.delivery
@@ -233,8 +246,43 @@ impl<'a> Attachments<'a> {
             if self.slot(a.location) != slot {
                 continue;
             }
+            if let Slot::Method(method) = slot
+                && self.complete_methods.binary_search(&method).is_ok()
+                && lookup
+                    .method_signature_record(method)
+                    .is_some_and(|(record, complete)| record == a.id && complete)
+            {
+                out.span(out.position(), Origin::Annotation(a.id))?;
+                continue;
+            }
             out.indent()?;
             record(out, lookup, self.plan, a)?;
+            out.put("\n")?;
+        }
+        Ok(())
+    }
+    /// Restore a signature record when its planned method header could not be
+    /// printed. The record was not emitted by `declarations` in that case.
+    pub fn print_unrepresented_method_signature(
+        &self,
+        out: &mut Buffer,
+        lookup: &Lookup<'_>,
+        method: crate::MethodId,
+    ) -> Result<(), RenderError> {
+        if self.complete_methods.binary_search(&method).is_err() {
+            return Ok(());
+        }
+        let Some((record_id, true)) = lookup.method_signature_record(method) else {
+            return Ok(());
+        };
+        if let Some(annotation) = self
+            .plan
+            .annotations()
+            .iter()
+            .find(|a| a.id == record_id && self.slot(a.location) == Slot::Method(method))
+        {
+            out.indent()?;
+            record(out, lookup, self.plan, annotation)?;
             out.put("\n")?;
         }
         Ok(())
@@ -524,6 +572,12 @@ fn interpreted_signature(
             Ok(true)
         }
         crate::AnnotationLocation::Method(method) => {
+            if lookup
+                .method_signature_record(method)
+                .is_none_or(|(record, complete)| record != a.id || !complete)
+            {
+                return Ok(false);
+            }
             let Some(returns) = lookup.signature(SignatureOwner::Return(method)) else {
                 return Ok(false);
             };

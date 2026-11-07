@@ -117,6 +117,17 @@ impl SignaturePlan {
             .find(|p| p.method == method)
             .map(|p| p.parameters.as_slice())
     }
+    /// The original method signature record and whether the declaration can
+    /// represent the record without omitting additional signature information.
+    pub fn method_signature_record(
+        &self,
+        method: MethodId,
+    ) -> Option<(super::names::AnnotationId, bool)> {
+        self.method_parameters
+            .iter()
+            .find(|p| p.method == method)
+            .map(|p| (p.record, p.fully_represented))
+    }
 }
 #[derive(Serialize)]
 pub struct TypeParameter {
@@ -127,6 +138,8 @@ pub struct TypeParameter {
 pub(super) struct MethodTypeParameters {
     #[serde(serialize_with = "debug")]
     pub method: MethodId,
+    pub record: super::names::AnnotationId,
+    pub fully_represented: bool,
     pub parameters: Vec<TypeParameter>,
 }
 #[derive(Serialize)]

@@ -25,6 +25,12 @@ impl<'a> Lookup<'a> {
     pub fn method_parameters(&self, method: crate::MethodId) -> Option<&[p8::TypeParameter]> {
         self.signatures?.method_parameters(method)
     }
+    pub fn method_signature_record(
+        &self,
+        method: crate::MethodId,
+    ) -> Option<(p8::AnnotationId, bool)> {
+        self.signatures?.method_signature_record(method)
+    }
     /// The delivered name of one type use, without array dimensions.
     pub fn target_name(&self, id: p8::TypeUseId) -> Option<&'a [u16]> {
         let use_ = self.uses.get(id.0 as usize)?;

@@ -144,6 +144,13 @@ order. P8 delivers parameter names, optional bound roots and superclass/interfac
 roots in the signature plan. An omitted or plain Object bound has no display root;
 the original annotation retains that distinction.
 
+For an interpreted method signature, P8 identifies the original record used by
+the interpretation. It marks that record fully represented only when its system
+annotation is a complete `value` array of strings and its signature contains no
+throws entries or explicit Object bounds, which the method declaration does not
+currently display. Other records, visibilities and incomplete or additional
+information remain visible.
+
 The reader accepts primitives, classes, arrays, wildcards, nested arguments and
 variables declared in the explicit class/method scope. A variable erases to its
 single established bound, or Object when unbounded. Method parameters shadow
